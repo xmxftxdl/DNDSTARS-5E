@@ -1,3 +1,5 @@
+import type { Dnd5ePluginContentCategory as SharedDnd5ePluginContentCategory } from '../../../../shared/plugin-content-category.mjs'
+
 export const DND5E_RULES_PLUGIN_API_VERSION = 2 as const
 export const DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS = [1, 2] as const
 export const DND5E_RULES_PLUGIN_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
@@ -11,16 +13,7 @@ export type Dnd5ePluginDistributionPolicy =
   | 'account-entitled'
   | 'local-only'
 export type Dnd5ePluginKind = 'content-package' | 'automation-plugin'
-export type Dnd5ePluginContentCategory =
-  | 'rules'
-  | 'classes'
-  | 'subclasses'
-  | 'feats'
-  | 'spells'
-  | 'items'
-  | 'monsters'
-  | 'adventure'
-  | 'mixed'
+export type Dnd5ePluginContentCategory = SharedDnd5ePluginContentCategory
 export type Dnd5ePluginDeclaredCapability =
   | 'damage'
   | 'healing'

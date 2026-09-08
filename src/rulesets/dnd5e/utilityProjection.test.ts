@@ -32,6 +32,22 @@ const definition: DeclarativeSubclassDefinitionV1 = {
   summary: 'Synthetic utility projection protocol fixture.',
   abilities: [{
     schemaVersion: 1,
+    id: 'persistent-mirror',
+    name: 'Persistent Mirror',
+    description: 'Creates a passive combat projection.',
+    level: 3,
+    trigger: { kind: 'active-use' },
+    targeting: { kind: 'self' },
+    mechanic: {
+      kind: 'persistent-projection', projectionId: 'mirror', label: 'Mirror',
+      placementRangeFeet: 30, durationRounds: 10, concentration: true,
+      movement: { economy: 'bonus-action', maximumFeet: 30, maximumDistanceFromSourceFeet: 120 },
+      attackAdvantageWithinFeet: 5,
+    },
+    effects: [],
+    automation: 'full',
+  }, {
+    schemaVersion: 1,
     id: 'projection-control',
     name: 'Projection Control',
     description: 'Moves a utility projection with a different turn resource.',
@@ -252,6 +268,15 @@ describe('generic utility projection protocol', () => {
       characters: [actor],
       initiativeOrder: fixture.initiativeOrder,
     })
+    expect({
+      features: snapshot.state.combatants[fixture.actorToken.id].pluginFeatureIds,
+      projectionDistances: snapshot.state.utilityProjectionDistanceFeetByPair,
+      distances: snapshot.state.distanceFeetByCombatantPair,
+    }).toMatchObject({
+      features: expect.arrayContaining([`${SUBCLASS_ID}.persistent-mirror`]),
+      projectionDistances: expect.any(Object),
+      distances: expect.any(Object),
+    })
     expect(snapshot.state.utilityProjectionDistanceFeetByPair?.[
       dnd5eUtilityProjectionDistanceKey(
         fixture.actorToken.id,
@@ -265,6 +290,24 @@ describe('generic utility projection protocol', () => {
       map: fixture.map,
       targetToken: fixture.targetToken,
     })).toBe(5)
+  })
+
+  it('grants passive advantage when both owner and a feature projection are adjacent', () => {
+    const fixture = mapWithProjection()
+    fixture.targetToken.x = 35
+    fixture.map.dnd5ePluginAreas = [{
+      ...fixture.map.dnd5ePluginAreas![0],
+      sourceKind: 'plugin-feature', coreSpellId: undefined, utilityProjectionId: 'mirror',
+    }]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'persistent-projection-advantage', map: fixture.map,
+      characters: [character()], initiativeOrder: fixture.initiativeOrder,
+    })
+    expect(dnd5eUtilityProjectionAttackAdvantageApplies(
+      snapshot.state,
+      snapshot.state.combatants[fixture.actorToken.id],
+      snapshot.state.combatants[fixture.targetToken.id],
+    )).toBe(true)
   })
 
   it('uses a bonus action to move the projection for an eligible owner', () => {

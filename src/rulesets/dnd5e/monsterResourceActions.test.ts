@@ -115,6 +115,98 @@ describe('D&D 5e monster resource actions', () => {
     })
   })
 
+  it('lets the Host adjudicate Sphinx teleport and spell legendary actions', () => {
+    const hero = combatant('hero', 20, {
+      controller: 'player',
+      currentHp: 30,
+      maxHp: 30,
+    })
+    const sphinx = combatant('sphinx', 10, {
+      statBlockId: 'srd-5.1:gynosphinx',
+      classState: {
+        monsterLegendaryActionPoints: 3,
+        monsterSpellSlots: { '1': { current: 4, max: 4 } },
+      },
+    })
+    const teleport = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('sphinx-teleport-adjudication', [hero, sphinx]),
+      {
+        type: 'monster-adjudicated-action',
+        actorId: 'sphinx',
+        actionId: 'teleport-costs-2-actions',
+        legendary: true,
+        dmApproved: true,
+        effects: [],
+      },
+    )
+    expect(teleport.ok, teleport.ok ? undefined : teleport.reason).toBe(true)
+    expect(teleport.state.combatants.sphinx.classState.monsterLegendaryActionPoints).toBe(1)
+    expect(teleport.events).toContainEqual(expect.objectContaining({
+      type: 'monster-legendary-action-used',
+      actionId: 'teleport-costs-2-actions',
+      cost: 2,
+      remaining: 1,
+    }))
+
+    const spell = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('sphinx-spell-adjudication', [hero, sphinx]),
+      {
+        type: 'monster-adjudicated-action',
+        actorId: 'sphinx',
+        actionId: 'cast-a-spell-costs-3-actions',
+        legendary: true,
+        dmApproved: true,
+        monsterSpellCast: { spellId: 'shield', slotLevel: 1 },
+        effects: [],
+      },
+    )
+    expect(spell.ok, spell.ok ? undefined : spell.reason).toBe(true)
+    expect(spell.state.combatants.sphinx.classState.monsterLegendaryActionPoints).toBe(0)
+    expect(spell.state.combatants.sphinx.classState.monsterSpellSlots?.['1']?.current).toBe(3)
+    expect(spell.events).toContainEqual(expect.objectContaining({
+      type: 'monster-spell-cast',
+      actorId: 'sphinx',
+      spellId: 'shield',
+      slotLevel: 1,
+      remainingSlots: 3,
+    }))
+  })
+
+  it('resolves a Sphinx legendary teleport from a structured destination without adjudication', () => {
+    const hero = combatant('hero', 20, {
+      controller: 'player',
+      position: { x: 0, y: 0 },
+    })
+    const sphinx = combatant('sphinx', 10, {
+      statBlockId: 'srd-5.1:gynosphinx',
+      position: { x: 5, y: 0 },
+      classState: { monsterLegendaryActionPoints: 3 },
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('sphinx-structured-teleport', [hero, sphinx]),
+      {
+        type: 'monster-legendary-special-action',
+        actorId: sphinx.id,
+        actionId: 'teleport-costs-2-actions',
+        teleportDestination: {
+          to: { x: 25, y: 0 },
+          distanceFeet: 20,
+          toElevationFeet: 0,
+          toGroundElevationFeet: 0,
+        },
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.sphinx.position).toEqual({ x: 25, y: 0 })
+    expect(result.state.combatants.sphinx.classState.monsterLegendaryActionPoints).toBe(1)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'teleported',
+      actorId: sphinx.id,
+      distanceFeet: 20,
+    }))
+  })
+
   it('resolves the Lich legendary Paralyzing Touch through its base on-hit rule', () => {
     const hero = combatant('hero', 20, {
       controller: 'player',
@@ -154,6 +246,104 @@ describe('D&D 5e monster resource actions', () => {
       actionId: 'paralyzing-touch-costs-2-actions',
       cost: 2,
     }))
+  })
+
+  it('resolves the Lich Cantrip legendary action without spending its ordinary action', () => {
+    const hero = combatant('hero', 20, {
+      controller: 'player',
+      armorClass: 10,
+      position: { x: 30, y: 0 },
+    })
+    const lich = combatant('lich', 10, {
+      statBlockId: 'srd-5.1:lich',
+      position: { x: 0, y: 0 },
+      classState: { monsterLegendaryActionPoints: 3 },
+    })
+    const state = startDnd5eHeadlessCombat('lich-legendary-cantrip', [hero, lich])
+    state.distanceFeetByCombatantPair = { ['hero\u0000lich']: 30 }
+    const result = resolveDnd5eHeadlessAction(
+      state,
+      {
+        type: 'monster-core-spell',
+        actorId: 'lich',
+        spellId: 'ray-of-frost',
+        slotLevel: 0,
+        legendaryActionId: 'cantrip',
+        resolution: {
+          schemaVersion: 1,
+          targetIds: ['hero'],
+          d20: 10,
+          effectRolls: [[1, 1, 1, 1]],
+        },
+      },
+    )
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.hero.currentHp).toBe(96)
+    expect(result.state.combatants.lich.classState.monsterLegendaryActionPoints).toBe(2)
+    expect(result.state.combatants.lich.turn.actionAvailable).toBe(true)
+    expect(result.events).toContainEqual({
+      type: 'monster-legendary-action-used',
+      actorId: 'lich',
+      actionId: 'cantrip',
+      cost: 1,
+      remaining: 2,
+    })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-core-spell-resolved',
+      actorId: 'lich',
+      spellId: 'ray-of-frost',
+      slotLevel: 0,
+    }))
+  })
+
+  it('rejects non-cantrips and own-turn use through the Lich Cantrip action atomically', () => {
+    const hero = combatant('hero', 20, {
+      controller: 'player',
+      position: { x: 30, y: 0 },
+    })
+    const lich = combatant('lich', 10, {
+      statBlockId: 'srd-5.1:lich',
+      classState: { monsterLegendaryActionPoints: 3 },
+    })
+    const state = startDnd5eHeadlessCombat('lich-invalid-legendary-cantrip', [hero, lich])
+    const nonCantrip = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'lich',
+      spellId: 'magic-missile',
+      slotLevel: 1,
+      legendaryActionId: 'cantrip',
+      resolution: { schemaVersion: 1, targetIds: ['hero'], effectRolls: [] },
+    })
+    expect(nonCantrip).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+    expect(nonCantrip.state.combatants.lich.classState.monsterLegendaryActionPoints).toBe(3)
+    expect(nonCantrip.state.combatants.hero.currentHp).toBe(100)
+
+    const ownTurn = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('lich-own-turn-cantrip', [
+        combatant('lich', 20, {
+          statBlockId: 'srd-5.1:lich',
+          classState: { monsterLegendaryActionPoints: 3 },
+        }),
+        combatant('hero', 10, { controller: 'player', position: { x: 30, y: 0 } }),
+      ]),
+      {
+        type: 'monster-core-spell',
+        actorId: 'lich',
+        spellId: 'ray-of-frost',
+        slotLevel: 0,
+        legendaryActionId: 'cantrip',
+        resolution: {
+          schemaVersion: 1,
+          targetIds: ['hero'],
+          d20: 10,
+          effectRolls: [[1, 1, 1, 1]],
+        },
+      },
+    )
+    expect(ownTurn).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+    expect(ownTurn.state.combatants.lich.classState.monsterLegendaryActionPoints).toBe(3)
   })
 
   it('resolves the vampire legendary Bite through the base eligibility and life-drain rules', () => {
@@ -206,7 +396,7 @@ describe('D&D 5e monster resource actions', () => {
     }))
   })
 
-  it('declares every SRD 5.1 aboleth action as Headless and keeps Tail Swipe linked to Tail', () => {
+  it('publishes every mechanically structured aboleth combat action as Headless', () => {
     const aboleth = getDnd5eSrdMonster('srd-5.1:aboleth')!
     expect([
       ...aboleth.actions,
@@ -225,6 +415,74 @@ describe('D&D 5e monster resource actions', () => {
       .toMatchObject({ referencedActionId: 'tail', legendaryCost: 1 })
     expect(aboleth.actions.find((action) => action.id === 'enslave'))
       .toMatchObject({ usage: { kind: 'per-day', max: 3 } })
+  })
+
+  it('resolves all three aboleth Tentacle attacks and their disease saves independently', () => {
+    const aboleth = combatant('aboleth', 20, {
+      statBlockId: 'srd-5.1:aboleth',
+      position: { x: 0, y: 0 },
+    })
+    const failed = combatant('failed', 12, {
+      controller: 'player', position: { x: 5, y: 0 },
+    })
+    const saved = combatant('saved', 11, {
+      controller: 'player', position: { x: 5, y: 0 },
+    })
+    const immune = combatant('immune', 10, {
+      controller: 'player', position: { x: 5, y: 0 }, conditionImmunities: ['disease'],
+    })
+    const state = startDnd5eHeadlessCombat('aboleth-multiattack', [aboleth, failed, saved, immune])
+    state.distanceFeetByCombatantPair = {
+      ['aboleth\u0000failed']: 5,
+      ['aboleth\u0000saved']: 5,
+      ['aboleth\u0000immune']: 5,
+    }
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: 'aboleth',
+      actionId: 'multiattack',
+      rolls: [
+        {
+          targetId: 'failed', d20: 10, damageRolls: [[1, 1]],
+          onHitEffectRolls: [{ effectId: 'tentacle-disease', d20: 2 }],
+        },
+        {
+          targetId: 'saved', d20: 10, damageRolls: [[1, 1]],
+          onHitEffectRolls: [{ effectId: 'tentacle-disease', d20: 20 }],
+        },
+        {
+          targetId: 'immune', d20: 10, damageRolls: [[1, 1]],
+          onHitEffectRolls: [{ effectId: 'tentacle-disease' }],
+        },
+      ],
+    })
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.aboleth.turn.actionAvailable).toBe(false)
+    for (const targetId of ['failed', 'saved', 'immune']) {
+      expect(result.state.combatants[targetId].currentHp).toBe(93)
+    }
+    expect(result.events.filter((event) => event.type === 'saving-throw-resolved')).toEqual([
+      expect.objectContaining({ targetId: 'failed', ability: 'con', dc: 14, success: false }),
+      expect.objectContaining({ targetId: 'saved', ability: 'con', dc: 14, success: true }),
+    ])
+    expect(result.state.combatants.failed.conditions).toContain('disease')
+    expect(result.state.combatants.failed.classState.activeEffects).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        definitionId: 'srd-5.1:monster:aboleth:tentacle-disease',
+        source: expect.objectContaining({ actorId: 'aboleth' }),
+        tags: ['disease'],
+      }),
+    ]))
+    expect(result.state.combatants.saved.conditions).not.toContain('disease')
+    expect(result.state.combatants.immune.conditions).not.toContain('disease')
+    expect(result.events.filter((event) => event.type === 'damage-applied')).toEqual([
+      expect.objectContaining({ targetId: 'failed', amount: 7, damageTypes: ['bludgeoning'] }),
+      expect.objectContaining({ targetId: 'saved', amount: 7, damageTypes: ['bludgeoning'] }),
+      expect.objectContaining({ targetId: 'immune', amount: 7, damageTypes: ['bludgeoning'] }),
+    ])
   })
 
   it('resolves aboleth Enslave with its source-bound damage repeat save and reaction lock', () => {
@@ -764,6 +1022,49 @@ describe('D&D 5e monster resource actions', () => {
     expect(result.events.some((event) => event.type === 'monster-core-spell-resolved')).toBe(false)
   })
 
+  it('uses the selected lower Counterspell slot and ability check against a higher-level monster spell', () => {
+    const target = combatant('target', 10, { controller: 'player', currentHp: 30, maxHp: 30 })
+    const archmage = combatant('archmage', 20, {
+      statBlockId: 'srd-5.1:archmage',
+      classState: { monsterSpellSlots: { 4: { current: 3, max: 3 } } },
+    })
+    const wizard = combatant('wizard', 15, {
+      controller: 'player',
+      abilities: { ...abilities, int: 18 },
+      classId: 'wizard',
+      classLevels: { wizard: 9 },
+      level: 9,
+      classSelections: { 'spell-prepared': ['counterspell'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['counterspell'] } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const state = startDnd5eHeadlessCombat('monster-banishment-counterspell', [archmage, wizard, target])
+    state.distanceFeetByCombatantPair = {
+      ['archmage\u0000target']: 5,
+      ['archmage\u0000wizard']: 30,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'archmage',
+      spellId: 'banishment',
+      slotLevel: 4,
+      counterspellReaction: { actorId: 'wizard', slotLevel: 3, abilityCheckTotal: 14 },
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['target'],
+        targetSavingThrows: [{ targetId: 'target', d20: 1 }],
+        effectRolls: [],
+      },
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.archmage.classState.monsterSpellSlots?.['4'].current).toBe(2)
+    expect(result.state.combatants.wizard.classResources['dnd5e-spell-slot-3'].current).toBe(0)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'counterspell-resolved', actorId: 'wizard', slotLevel: 3, dc: 14, success: true,
+    }))
+  })
+
   it('lets a monster spend its own slot to Counterspell a player spell', () => {
     const wizard = combatant('wizard', 20, {
       controller: 'player',
@@ -895,6 +1196,7 @@ describe('D&D 5e monster resource actions', () => {
     const dragon = combatant('dragon', 10, {
       statBlockId: 'srd-5.1:adult-black-dragon',
       classState: { monsterLegendaryActionPoints: 3 },
+      movementSpeeds: { walk: 40, fly: 80, swim: 40 },
       position: { x: 0, y: 0 },
     })
     const detect = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('legendary-detect', [hero, dragon]), {
@@ -948,7 +1250,11 @@ describe('D&D 5e monster resource actions', () => {
       type: 'saving-throw-resolved',
       targetId: 'dragon-ally',
     }))
-    expect(wing.state.combatants.dragon.turn.movementRemaining).toBe(70)
+    expect(wing.state.combatants.dragon.turn.movementRemaining)
+      .toBe(wingState.combatants.dragon.turn.movementRemaining)
+    expect(wing.state.combatants.dragon.classState.monsterLegendaryMovement).toMatchObject({
+      maximumFeet: 40, traversalMode: 'fly', provokesOpportunityAttacks: true,
+    })
   })
 
   it('resolves the adult black dragon acid breath as a physical area action', () => {

@@ -16,11 +16,13 @@ import {
   type SceneInteractionPoint,
   type ScenePendingRun,
   type SceneRegion,
+  type SceneAudioPreset,
   type SceneTrigger,
   type SceneTriggerEvent,
   type SceneTriggerTokenSnapshot,
   type SharedSceneOrchestrationState,
 } from '../lib/sceneOrchestration'
+import { DEFAULT_SCENE_WEATHER } from '../lib/sceneWeather'
 
 const sharedWriteWatermark = createSharedWriteWatermark()
 
@@ -29,9 +31,10 @@ export interface SceneOrchestrationStore {
   loadShared: () => Promise<void>
   saveSharedNow: () => Promise<void>
   ensureScene: (mapId: string, mapName: string, center?: { x: number; y: number }) => string
+  updateGlobalAudio: (patch: Partial<SceneAudioPreset>) => void
   updateScene: (sceneId: string, patch: Partial<Pick<OrchestratedScene,
-    'name' | 'description' | 'environmentLabel' | 'backgroundCue' | 'backgroundAudioId' | 'backgroundAudioLoop' |
-    'backgroundAudioVolume' | 'boundHandoutIds' | 'boundJournalEntryIds'
+    'name' | 'description' | 'environmentLabel' | 'weather' | 'backgroundCue' | 'backgroundAudioMode' | 'backgroundAudioId' |
+    'backgroundAudioLoop' | 'backgroundAudioVolume' | 'backgroundAudioAutoPlay' | 'boundHandoutIds' | 'boundJournalEntryIds'
   >>) => void
   removeScene: (sceneId: string) => void
   removeAudioReferences: (assetId: string) => void
@@ -73,6 +76,7 @@ export interface SceneOrchestrationStore {
 function emptyShared(): SharedSceneOrchestrationState {
   return {
     schemaVersion: SCENE_ORCHESTRATION_SCHEMA_VERSION,
+    globalAudio: { loop: true, volume: 0.7, autoPlay: false },
     scenes: [],
     runtime: { paused: false, pendingRuns: [], receipts: [], history: [] },
     updatedAt: 0,
@@ -134,9 +138,12 @@ export const useSceneOrchestrationStore = create<SceneOrchestrationStore>()(
           name: mapName || '未命名场景',
           description: '',
           environmentLabel: '',
+          weather: { ...DEFAULT_SCENE_WEATHER },
           backgroundCue: 'none',
+          backgroundAudioMode: 'inherit',
           backgroundAudioLoop: true,
           backgroundAudioVolume: 0.7,
+          backgroundAudioAutoPlay: true,
           boundHandoutIds: [],
           boundJournalEntryIds: [],
           interactionPoints: [],
@@ -156,6 +163,10 @@ export const useSceneOrchestrationStore = create<SceneOrchestrationStore>()(
         mutate((shared) => ({ ...shared, scenes: [...shared.scenes, scene] }))
         return sceneId
       },
+      updateGlobalAudio: (patch) => mutate((shared) => ({
+        ...shared,
+        globalAudio: { ...shared.globalAudio, ...patch },
+      })),
       updateScene: (sceneId, patch) => mutate((shared) => ({
         ...shared,
         scenes: shared.scenes.map((scene) => scene.id === sceneId ? { ...scene, ...patch, id: scene.id, mapId: scene.mapId, updatedAt: Date.now() } : scene),
@@ -171,9 +182,14 @@ export const useSceneOrchestrationStore = create<SceneOrchestrationStore>()(
       })),
       removeAudioReferences: (assetId) => mutate((shared) => ({
         ...shared,
+        globalAudio: shared.globalAudio.assetId === assetId
+          ? { ...shared.globalAudio, assetId: undefined, autoPlay: false }
+          : shared.globalAudio,
         scenes: shared.scenes.map((scene) => ({
           ...scene,
-          ...(scene.backgroundAudioId === assetId ? { backgroundAudioId: undefined } : {}),
+          ...(scene.backgroundAudioId === assetId
+            ? { backgroundAudioId: undefined, backgroundAudioMode: 'inherit' as const }
+            : {}),
           triggers: scene.triggers.map((trigger) => ({
             ...trigger,
             actions: trigger.actions.filter((action) => action.kind !== 'audio' || action.assetId !== assetId),

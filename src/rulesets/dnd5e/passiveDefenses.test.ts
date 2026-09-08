@@ -9,6 +9,7 @@ import {
   dnd5eReactionsPrevented,
   dnd5eSavingThrowMode,
   dnd5eSavingThrowModeExplanation,
+  dnd5eTargetAttackAdvantageReasons,
   dnd5eTargetGrantsAttackAdvantage,
   dnd5eUnseenTargetImposesDisadvantage,
   type Dnd5eDefensiveCreature,
@@ -31,6 +32,49 @@ describe('SRD 5.1 passive class defenses', () => {
       .toBe('normal')
   })
 
+  it('applies a projected spell-save aura only to matching spell damage types', () => {
+    const exposed = creature({
+      spellSavingThrowDisadvantageDamageTypes: ['fire', 'radiant'],
+      spellSavingThrowDisadvantageCastingClassIds: ['paladin'],
+    })
+    expect(dnd5eSavingThrowMode(exposed, 'dex', {
+      sourceIsSpell: true,
+      damageType: 'fire',
+    })).toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(exposed, 'con', {
+      sourceIsSpell: true,
+      damageType: 'cold',
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(exposed, 'wis', {
+      sourceIsSpell: true,
+      sourceSpellcastingClassId: 'paladin',
+    })).toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(exposed, 'wis', {
+      sourceIsSpell: true,
+      sourceSpellcastingClassId: 'wizard',
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(exposed, 'dex', {
+      sourceIsSpell: false,
+      damageType: 'fire',
+    })).toBe('normal')
+  })
+
+  it('applies nearby spell-save advantage only within the declared source distance', () => {
+    const mageHunter = creature({ spellSavingThrowAdvantageWithinFeet: 5 })
+    expect(dnd5eSavingThrowMode(mageHunter, 'dex', {
+      sourceIsSpell: true,
+      sourceDistanceFeet: 5,
+    })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(mageHunter, 'dex', {
+      sourceIsSpell: true,
+      sourceDistanceFeet: 10,
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(mageHunter, 'dex', {
+      sourceIsSpell: false,
+      sourceDistanceFeet: 5,
+    })).toBe('normal')
+  })
+
   it('applies imported racial saving-throw advantages only to declared contexts', () => {
     const ancestry = creature({
       racialSavingThrowAdvantages: {
@@ -44,6 +88,67 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode(ancestry, 'int', { sourceIsMagical: true })).toBe('advantage')
     expect(dnd5eSavingThrowMode(ancestry, 'str', { sourceIsMagical: true })).toBe('normal')
     expect(dnd5eSavingThrowMode(ancestry, 'wis', { condition: 'frightened' })).toBe('normal')
+  })
+
+  it('keeps source-typed condition immunity narrow and accepts canonical aliases', () => {
+    const protection = createDnd5eMechanicalEffect({
+      definitionId: 'activity:protection-from-evil-and-good',
+      label: 'Protection from Evil and Good',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'protection-from-evil-and-good', magical: true },
+      targetId: 'target',
+      modifiers: {
+        conditionImmunitiesBySourceCreatureType: [{
+          conditions: ['charmed', 'frightened', 'possessed'],
+          sourceCreatureTypes: ['aberration', 'celestial', 'elemental', 'fey', 'fiend', 'undead'],
+        }],
+      },
+    })
+    const target = creature({ classState: { activeEffects: [protection] } })
+    expect(dnd5eConditionImmuneFromSource(target, 'charmed', creature({ creatureType: '邪魔' }))).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(target, 'possessed', creature({ creatureType: 'undead' }))).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(target, 'frightened', creature({ creatureType: 'humanoid' }))).toBe(false)
+    expect(dnd5eConditionImmuneFromSource(target, 'poisoned', creature({ creatureType: 'fiend' }))).toBe(false)
+  })
+
+  it('grants repeat-save advantage only for matching condition and source creature type', () => {
+    const protection = createDnd5eMechanicalEffect({
+      definitionId: 'activity:protection-from-evil-and-good',
+      label: 'Protection from Evil and Good',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'protection-from-evil-and-good', magical: true },
+      targetId: 'target',
+      modifiers: {
+        savingThrowAdvantagesBySourceCreatureType: [{
+          conditions: ['charmed', 'frightened', 'possessed'],
+          sourceCreatureTypes: ['aberration', 'celestial', 'elemental', 'fey', 'fiend', 'undead'],
+        }],
+      },
+    })
+    const target = creature({ classState: { activeEffects: [protection] } })
+    expect(dnd5eSavingThrowMode(target, 'wis', {
+      condition: 'charmed', sourceCreatureType: '邪魔',
+    })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(target, 'wis', {
+      condition: 'charmed', sourceCreatureType: 'humanoid',
+    })).toBe('normal')
+    expect(dnd5eSavingThrowMode(target, 'con', {
+      condition: 'poisoned', sourceCreatureType: 'undead',
+    })).toBe('normal')
+  })
+
+  it('qualifies condition immunity by magical provenance', () => {
+    const freedom = createDnd5eMechanicalEffect({
+      definitionId: 'activity:freedom-of-movement', label: 'Freedom of Movement',
+      source: { kind: 'spell', actorId: 'cleric', magical: true }, targetId: 'target',
+      modifiers: {
+        conditionImmunitiesBySourceMagic: [{
+          conditions: ['paralyzed', 'restrained'], sourceMagical: true,
+        }],
+      },
+    })
+    const target = creature({ classState: { activeEffects: [freedom] } })
+    expect(dnd5eConditionImmuneFromSource(target, 'restrained', undefined, { sourceMagical: true })).toBe(true)
+    expect(dnd5eConditionImmuneFromSource(target, 'restrained', undefined, { sourceMagical: false })).toBe(false)
+    expect(dnd5eConditionImmuneFromSource(target, 'grappled', undefined, { sourceMagical: true })).toBe(false)
   })
 
   it('exposes the rule sources behind a saving throw roll mode', () => {
@@ -163,6 +268,15 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eTargetGrantsAttackAdvantage(creature({
       classId: 'rogue', level: 18, conditions: ['blinded'],
     }))).toBe(false)
+  })
+
+  it('exposes the exact target condition behind attack advantage', () => {
+    expect(dnd5eTargetAttackAdvantageReasons(creature({
+      conditions: ['unconscious', 'restrained'],
+    }))).toEqual([
+      '目标处于昏迷状态',
+      '目标处于束缚状态',
+    ])
   })
 
   it('only lets a nearby hostile threaten ranged attacks when it can see and act', () => {

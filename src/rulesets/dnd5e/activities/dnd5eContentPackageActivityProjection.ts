@@ -1,5 +1,6 @@
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import type { Dnd5eContentPackageV2 } from '../contentPackageV2'
+import { declarativeSubclassCompatibilityReportV1 } from '../declarativeSubclassAbility'
 import { dnd5eActivityFromCustomHeadlessAction } from './legacyCustomHeadlessActivityAdapter'
 import {
   dnd5eActivitiesFromMonster,
@@ -10,6 +11,7 @@ import {
 } from './legacyContentActivityAdapters'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
+import { dnd5eActivityAutomationAnalysisV1 } from '../plugins/pluginMechanicsRegistry'
 
 export type Dnd5eActivityProjectionSourceKind =
   | 'headless-action'
@@ -104,6 +106,7 @@ export function dnd5eContentPackageActivityProjectionV1(
     if (fallbackIssues.length) {
       throw new Error(`Activity migration fallback is invalid for ${sourceKind}:${sourceId}: ${fallbackIssues.join('; ')}`)
     }
+    const actualAutomation = dnd5eActivityAutomationAnalysisV1(activity).capability
     activities.push(activity)
     entries.push({
       sourceKind,
@@ -111,9 +114,9 @@ export function dnd5eContentPackageActivityProjectionV1(
       activityId: activity.id,
       mode: issues.length > 0
         ? 'legacy-fallback'
-        : activity.automation.level === 'display-only'
+        : actualAutomation.level === 'display-only'
           ? 'display-only'
-          : activity.automation.level === 'full'
+          : actualAutomation.level === 'full'
             ? 'adapted'
             : 'dm-adjudication',
       issues,
@@ -152,9 +155,15 @@ export function dnd5eContentPackageActivityProjectionV1(
     if (activity) add('item', item.id, activity)
   }
   for (const subclass of value.content.subclasses) {
+    const compatibilityByAbilityId = new Map(
+      declarativeSubclassCompatibilityReportV1([subclass]).abilities.map((entry) => [entry.abilityId, entry]),
+    )
     for (const ability of subclass.abilities) {
       if (explicitSources.has(`subclass-ability:${subclass.id}:${ability.id}`) || explicitSources.has(`subclass-ability:${ability.id}`)) continue
-      add('subclass-ability', `${subclass.id}:${ability.id}`, dnd5eActivityFromDeclarativeSubclassAbility(ability))
+      add('subclass-ability', `${subclass.id}:${ability.id}`, dnd5eActivityFromDeclarativeSubclassAbility(ability, {
+        subclassId: subclass.id,
+        compatibility: compatibilityByAbilityId.get(ability.id),
+      }))
     }
   }
   for (const monster of value.content.monsters) {

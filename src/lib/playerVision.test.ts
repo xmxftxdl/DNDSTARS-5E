@@ -42,4 +42,19 @@ describe('player vision sources', () => {
     expect(resolvePlayerVisionSourceTokenIds({ tokens, sharePartyVision: false, controlledCharacterIds: [] }))
       .toEqual([])
   })
+
+  it('includes a controlled character shared spell sensor as a vision source', () => {
+    const withSensor = [
+      ...tokens,
+      {
+        id: 'arcane-eye', type: 'obstacle', viewerControlled: true,
+        dnd5eSpellEffect: { sourceCharacterId: 'character-b', shareVisionWithSource: true as const },
+      },
+    ]
+    expect(resolvePlayerVisionSourceTokenIds({
+      tokens: withSensor,
+      sharePartyVision: false,
+      controlledCharacterIds: ['character-b'],
+    })).toEqual(['player-b-token', 'arcane-eye'])
+  })
 })

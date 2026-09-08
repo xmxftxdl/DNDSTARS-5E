@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   createDnd5eTurnEconomyCounts,
+  grantDnd5eMovement,
   grantDnd5eActionSurge,
+  normalizeDnd5eTurnEconomyCounts,
+  projectDnd5eHeadlessTurnEconomy,
   refreshDnd5eReactiveReactionEconomies,
   spendDnd5eMovement,
   spendDnd5eTurnResource,
@@ -28,6 +31,20 @@ describe('D&D 5e counted turn economy', () => {
     expect(spendDnd5eMovement(spent.economy, 20).ok).toBe(false)
   })
 
+  it('preserves movement already spent when an effect changes speed mid-turn', () => {
+    const spent = spendDnd5eMovement(createDnd5eTurnEconomyCounts('turn', 30), 10)
+    expect(spent.ok).toBe(true)
+    expect(normalizeDnd5eTurnEconomyCounts(spent.economy, 40).movement).toEqual({ current: 30, max: 40, spent: 10 })
+    expect(normalizeDnd5eTurnEconomyCounts(spent.economy, 20).movement).toEqual({ current: 10, max: 20, spent: 10 })
+  })
+
+  it('preserves temporary Dash movement without redefining walking speed', () => {
+    const dashed = grantDnd5eMovement(createDnd5eTurnEconomyCounts('turn', 40), 40)
+    expect(dashed.movement).toEqual({ current: 80, max: 40 })
+    expect(normalizeDnd5eTurnEconomyCounts(dashed, 40).movement).toEqual({ current: 80, max: 40 })
+    expect(normalizeDnd5eTurnEconomyCounts(dashed, 50).movement).toEqual({ current: 90, max: 50 })
+  })
+
   it('spends each resource independently and rejects a second spend', () => {
     const initial = createDnd5eTurnEconomyCounts('turn')
     const spent = spendDnd5eTurnResource(initial, 'bonusAction')
@@ -38,6 +55,61 @@ describe('D&D 5e counted turn economy', () => {
       reaction: { current: 1 },
     })
     expect(spendDnd5eTurnResource(spent.economy, 'bonusAction').ok).toBe(false)
+  })
+
+  it('projects Slow action-or-bonus consumption into the shared UI economy', () => {
+    const afterAction = spendDnd5eTurnResource(
+      createDnd5eTurnEconomyCounts('slow-turn', 15),
+      'action',
+    ).economy
+    expect(projectDnd5eHeadlessTurnEconomy(afterAction, {
+      actionAvailable: false,
+      bonusActionAvailable: false,
+      reactionAvailable: false,
+      objectInteractionAvailable: true,
+      movementRemaining: 15,
+    })).toMatchObject({
+      action: { current: 0 },
+      bonusAction: { current: 0 },
+      reaction: { current: 0 },
+      movement: { current: 15, max: 15 },
+    })
+  })
+
+  it('projects an Activity movement cost into the shared UI economy without spending an action', () => {
+    expect(projectDnd5eHeadlessTurnEconomy(
+      createDnd5eTurnEconomyCounts('tree-stride-turn', 30),
+      {
+        actionAvailable: true,
+        bonusActionAvailable: true,
+        reactionAvailable: true,
+        objectInteractionAvailable: true,
+        movementRemaining: 20,
+      },
+    )).toMatchObject({
+      action: { current: 1 },
+      bonusAction: { current: 1 },
+      reaction: { current: 1 },
+      movement: { current: 20, max: 30 },
+    })
+  })
+
+  it('projects a mid-turn speed increase into both remaining and maximum movement', () => {
+    const spent = spendDnd5eMovement(createDnd5eTurnEconomyCounts('longstrider-turn', 30), 10)
+    expect(spent.ok).toBe(true)
+    expect(projectDnd5eHeadlessTurnEconomy(
+      spent.economy,
+      {
+        actionAvailable: false,
+        bonusActionAvailable: true,
+        reactionAvailable: true,
+        objectInteractionAvailable: true,
+        movementRemaining: 30,
+      },
+      40,
+    )).toMatchObject({
+      movement: { current: 30, max: 40 },
+    })
   })
 
   it('spends one free object interaction independently from the action', () => {

@@ -1,11 +1,14 @@
 import { automationCapabilityFromLegacyStatus, type AutomationCapability } from '../../../domain/automation/automationCapability'
 import type { SkillAoeTargeting } from '../../../lib/skillTargeting'
-import type {
-  DeclarativeDiceFormulaV1,
-  DeclarativeSubclassAbilityV1,
-  DeclarativeSubclassDurationV1,
-  DeclarativeSubclassTargetingV1,
-  DeclarativeValueFormulaV1,
+import type { Dnd5eDamageType } from '../damageTypes'
+import {
+  declarativeAbilityCompatibilityV1,
+  type DeclarativeAbilityCompatibilityEntryV1,
+  type DeclarativeDiceFormulaV1,
+  type DeclarativeSubclassAbilityV1,
+  type DeclarativeSubclassDurationV1,
+  type DeclarativeSubclassTargetingV1,
+  type DeclarativeValueFormulaV1,
 } from '../declarativeSubclassAbility'
 import type {
   Dnd5eMonsterAction,
@@ -32,6 +35,7 @@ import type {
   Dnd5eActivityDefinitionV1,
   Dnd5eActivityOperationV1,
   Dnd5eActivityOutcomeV1,
+  Dnd5eActivityOutcomeWhenV1,
   Dnd5eActivityScalingV1,
   Dnd5eActivityTargetV1,
 } from './dnd5eActivityContracts'
@@ -49,6 +53,44 @@ export type Dnd5eLegacyMonsterActionCollection =
   | 'reactions'
   | 'legendaryActions'
   | 'lairActions'
+
+export interface Dnd5eDeclarativeSubclassActivityProjectionOptions {
+  subclassId: string
+  compatibility?: Pick<DeclarativeAbilityCompatibilityEntryV1, 'effective' | 'reasons'>
+}
+
+const HEADLESS_EVENT_MECHANIC_KINDS = new Set<NonNullable<DeclarativeSubclassAbilityV1['mechanic']>['kind']>([
+  'martial-spell-synergy',
+  'rage-feature',
+  'opening-attack',
+  'hidden-spell-save-disadvantage',
+  'utility-projection-control',
+  'post-spell-random-table',
+  'post-spell-random-table-choice',
+  'spell-damage-max-die-bonus',
+  'attacks-per-action',
+  'weapon-damage-rider',
+  'spell-damage-ability-modifier',
+  'spell-ability-check-bonus',
+  'spell-interception',
+  'spell-target-expansion',
+  'damage-roll-maximization',
+  'passive-defense',
+  'reaction-weapon-attack',
+  'death-prevention',
+  'spell-defeat-healing',
+  'summoned-creature-bonus',
+  'companion-profile-upgrade',
+  'creature-space-traversal',
+  'environmental-movement',
+  'persistent-projection-upgrade',
+  'alternate-resource-spellcasting',
+  'granted-die-combat-options',
+  'attack-retarget-interrupt',
+  'creature-form-eligibility',
+  'creature-form-control',
+  'bonus-weapon-attack',
+])
 
 const constant = (value: number): Dnd5eFormulaV1 => ({ kind: 'constant', value })
 const reference = (kind: Extract<Dnd5eFormulaV1, { kind: 'reference' }>['reference']['kind']): Dnd5eFormulaV1 =>
@@ -138,6 +180,10 @@ function pluginTarget(targeting: Dnd5ePluginTargeting): Dnd5eActivityTargetV1 {
   if (targeting.kind === 'self') return { kind: 'self' }
   if (targeting.kind === 'single-creature') return {
     kind: 'creature', relation: targeting.relation ?? 'any', count: 1,
+    rangeFeet: targeting.rangeFeet, includeSelf: targeting.includeSelf ?? false,
+  }
+  if (targeting.kind === 'multiple-creatures') return {
+    kind: 'creature', relation: targeting.relation ?? 'any', count: targeting.maximumTargets,
     rangeFeet: targeting.rangeFeet, includeSelf: targeting.includeSelf ?? false,
   }
   return aoeTarget(
@@ -530,7 +576,7 @@ export function dnd5eActivityFromPluginItem(
     consumption,
     outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations }],
     automation: capability(manual ? 'manual' : 'full', limitations),
-    legacySource: { kind: 'item', id: item.id },
+    legacySource: { kind: 'item', id: item.id, magical: item.magicItem != null },
   }
 }
 
@@ -547,6 +593,15 @@ function declarativeValueFormula(value: DeclarativeValueFormulaV1): Dnd5eFormula
   return value.minimum == null ? formula : { kind: 'maximum', values: [formula, constant(value.minimum)] }
 }
 
+function declarativeSavingThrowDcFormula(value: DeclarativeValueFormulaV1): Dnd5eFormulaV1 {
+  if (value.kind !== 'ability-modifier') return declarativeValueFormula(value)
+  return add([
+    constant(8),
+    reference('actor-proficiency-bonus'),
+    declarativeValueFormula(value),
+  ])
+}
+
 function declarativeDiceFormula(id: string, value: DeclarativeDiceFormulaV1): Dnd5eFormulaV1 {
   return add([
     { kind: 'dice', rollId: id, count: value.count, sides: value.sides },
@@ -560,7 +615,10 @@ function declarativeDuration(duration: DeclarativeSubclassDurationV1): Dnd5eEffe
   if (duration.kind === 'concentration') return { kind: 'concentration', maximumRounds: duration.rounds }
   if (duration.kind === 'fixed-rounds' && duration.repeatSave) return {
     kind: 'save-ends', maximumRounds: duration.rounds, timing: 'target-turn-end', ability: duration.repeatSave.ability,
-    dc: constant(duration.repeatSave.dc),
+    ...(duration.repeatSave.abilityOptions ? { abilityOptions: [...duration.repeatSave.abilityOptions] } : {}),
+    dc: typeof duration.repeatSave.dc === 'number'
+      ? constant(duration.repeatSave.dc)
+      : declarativeSavingThrowDcFormula(duration.repeatSave.dc),
   }
   if (duration.kind === 'fixed-rounds') return { kind: 'rounds', rounds: duration.rounds, expiresAt: 'target-turn-end' }
   if (duration.kind === 'until-source-turn-start') return { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-start' }
@@ -591,12 +649,15 @@ function declarativeTarget(targeting: DeclarativeSubclassTargetingV1): Dnd5eActi
 }
 
 function declarativeTriggerEvent(trigger: DeclarativeSubclassAbilityV1['trigger']): Dnd5eTriggerEventV1 | undefined {
-  if (trigger.kind === 'active-use') return undefined
-  const events: Record<Exclude<DeclarativeSubclassAbilityV1['trigger']['kind'], 'active-use'>, Dnd5eTriggerEventV1> = {
+  if (trigger.kind === 'active-use' || trigger.kind === 'before-spell-effect') return undefined
+  const events: Record<Exclude<DeclarativeSubclassAbilityV1['trigger']['kind'], 'active-use' | 'before-spell-effect'>, Dnd5eTriggerEventV1> = {
     'before-attack-roll': 'before-attack-roll', 'after-attack-roll': 'after-attack-roll',
     'after-attack-hit': 'attack-hit', 'after-attack-miss': 'attack-missed', 'after-d20-roll': 'd20-roll-resolved',
     'before-damage-taken': 'before-damage', 'after-damage-taken': 'after-damage',
-    'after-spell-cast': 'spell-resolved', 'turn-start': 'turn-start', 'turn-end': 'turn-end',
+    'before-drop-to-zero': 'before-drop-to-zero',
+    'after-spell-cast': 'spell-resolved', 'after-condition-attempted': 'on-condition-attempted',
+    'after-condition-applied': 'on-condition-applied',
+    'turn-start': 'turn-start', 'turn-end': 'turn-end',
     'short-rest-complete': 'short-rest-complete', 'long-rest-complete': 'long-rest-complete',
   }
   return events[trigger.kind]
@@ -605,8 +666,31 @@ function declarativeTriggerEvent(trigger: DeclarativeSubclassAbilityV1['trigger'
 /** Converts the previous subclass DSL into the common Activity/Trigger vocabulary. */
 export function dnd5eActivityFromDeclarativeSubclassAbility(
   ability: DeclarativeSubclassAbilityV1,
+  options: Dnd5eDeclarativeSubclassActivityProjectionOptions,
 ): Dnd5eActivityDefinitionV1 {
+  const activityId = `subclass-ability:${options.subclassId}:${ability.id}`
+  const sourceId = `${options.subclassId}:${ability.id}`
+  const compatibility = options.compatibility ?? declarativeAbilityCompatibilityV1(ability)
+  const effectiveAutomation = compatibility.effective
+  const projectedPersistentProjection = ability.mechanic?.kind === 'persistent-projection'
+    ? ability.mechanic
+    : undefined
+  const authorityBinding = ability.mechanic && !projectedPersistentProjection && effectiveAutomation !== 'manual'
+    ? {
+        kind: 'declarative-subclass-mechanic' as const,
+        subclassId: options.subclassId,
+        abilityId: ability.id,
+        mechanicKind: ability.mechanic.kind,
+        execution: ability.trigger.kind === 'active-use' && !HEADLESS_EVENT_MECHANIC_KINDS.has(ability.mechanic.kind)
+          ? 'plugin-headless-action' as const
+          : 'headless-event-engine' as const,
+        ...(ability.trigger.kind === 'active-use' && !HEADLESS_EVENT_MECHANIC_KINDS.has(ability.mechanic.kind)
+          ? { actionId: `decl.${options.subclassId}.${ability.id}` }
+          : {}),
+      }
+    : undefined
   const requirements: Dnd5ePredicateV1[] = []
+  requirements.push(...(ability.requirements?.map((requirement) => structuredClone(requirement)) ?? []))
   const predicates = ability.predicates
   if (predicates?.minimumLevel) requirements.push({ kind: 'minimum-level', level: predicates.minimumLevel })
   if (predicates?.classId) requirements.push({ kind: 'class-level', classId: predicates.classId, minimum: predicates.minimumLevel ?? ability.level })
@@ -614,9 +698,33 @@ export function dnd5eActivityFromDeclarativeSubclassAbility(
   predicates?.actorLacksConditions?.forEach((condition) => requirements.push({ kind: 'condition', subject: 'actor', condition, present: false }))
   predicates?.targetHasConditions?.forEach((condition) => requirements.push({ kind: 'condition', subject: 'target', condition, present: true }))
   predicates?.targetLacksConditions?.forEach((condition) => requirements.push({ kind: 'condition', subject: 'target', condition, present: false }))
+  if (predicates?.actorIllumination?.length) requirements.push({
+    kind: 'illumination', subject: 'actor', values: [...predicates.actorIllumination],
+  })
+  if (predicates?.targetIllumination?.length) requirements.push({
+    kind: 'illumination', subject: 'target', values: [...predicates.targetIllumination],
+  })
+  if (predicates?.parentDamageTypes?.length) requirements.push({ kind: 'damage-type', damageTypes: predicates.parentDamageTypes })
+  if (
+    predicates?.parentSpellSchools?.length || predicates?.minimumParentSpellLevel != null ||
+    predicates?.maximumParentSpellLevel != null
+  ) requirements.push({
+    kind: 'spell-used',
+    ...(predicates.parentSpellSchools?.length ? { schools: [...predicates.parentSpellSchools] } : {}),
+    ...(predicates.minimumParentSpellLevel != null ? { minimumLevel: predicates.minimumParentSpellLevel } : {}),
+    ...(predicates.maximumParentSpellLevel != null ? { maximumLevel: predicates.maximumParentSpellLevel } : {}),
+  })
+  if (predicates?.targetMaximumSizeRank != null) requirements.push({
+    kind: 'size-rank', subject: 'target', maximum: predicates.targetMaximumSizeRank,
+  })
+  if (predicates?.targetCreatureTypes?.length) requirements.push({
+    kind: 'creature-type', subject: 'target', types: [...predicates.targetCreatureTypes],
+  })
   predicates?.resources?.forEach((resource) => requirements.push({ kind: 'resource', resourceId: resource.resourceId, minimum: constant(resource.minimum) }))
-  predicates?.subclassChoices?.forEach((choice) => requirements.push({ kind: 'choice', choiceId: choice.groupId, optionId: choice.optionId }))
-  if (predicates?.oncePerTurn) requirements.push({ kind: 'once-per-turn', key: ability.id })
+  // Persisted subclass selections gate feature ownership before a combatant is
+  // projected. They are not invocation-time choices and must not be requested
+  // again from the player as an Activity command choice.
+  if (predicates?.oncePerTurn) requirements.push({ kind: 'once-per-turn', key: sourceId })
   if (predicates?.minimumDistanceFeet != null || predicates?.maximumDistanceFeet != null) requirements.push({
     kind: 'distance', minimumFeet: predicates.minimumDistanceFeet, maximumFeet: predicates.maximumDistanceFeet,
   })
@@ -633,9 +741,15 @@ export function dnd5eActivityFromDeclarativeSubclassAbility(
   if (ability.cost?.movementFeet) consumption.push({ kind: 'movement', amount: constant(ability.cost.movementFeet), consumeOn: 'resolve' })
 
   const rollFormulas = new Map<string, Dnd5eFormulaV1>()
+  const rollDamageTypes = new Map<string, Dnd5eDamageType | 'inherit-primary'>()
   const checks: Dnd5eActivityCheckV1[] = []
   for (const roll of ability.rolls ?? []) {
-    if (roll.kind === 'damage' || roll.kind === 'healing') rollFormulas.set(roll.id, declarativeDiceFormula(roll.id, roll.dice))
+    if (roll.kind === 'damage' || roll.kind === 'healing') {
+      rollFormulas.set(roll.id, declarativeDiceFormula(roll.id, roll.dice))
+      if (roll.kind === 'damage') {
+        rollDamageTypes.set(roll.id, roll.damageType === 'parent-weapon' ? 'inherit-primary' : roll.damageType)
+      }
+    }
     else if (roll.kind === 'attack') checks.push({
       id: roll.id, kind: 'attack-roll', rollId: `${roll.id}-d20`,
       attackBonus: add([
@@ -646,50 +760,144 @@ export function dnd5eActivityFromDeclarativeSubclassAbility(
     })
     else checks.push({
       id: roll.id, kind: 'saving-throw', rollId: `${roll.id}-d20`, ability: roll.ability,
-      dc: declarativeValueFormula(roll.dc), rollMode: 'host-derived', scope: 'per-target',
+      ...(roll.abilityOptions ? { abilityOptions: [...roll.abilityOptions] } : {}),
+      dc: declarativeSavingThrowDcFormula(roll.dc), rollMode: roll.rollMode ?? 'normal',
+      ...(roll.rollModeByCreatureType ? {
+        rollModeByCreatureType: {
+          creatureTypes: [...roll.rollModeByCreatureType.creatureTypes],
+          mode: roll.rollModeByCreatureType.mode,
+        },
+      } : {}),
+      scope: 'per-target',
     })
   }
-  const operations: Dnd5eActivityOperationV1[] = []
+  const projectedOperations: Dnd5eActivityOperationV1[] = []
+  const effectBranchByOperationId = new Map<string, Pick<DeclarativeSubclassAbilityV1['effects'][number], 'when' | 'whenChoice'>>(
+    ability.effects.map((effect, index) => [`effect-${index}`, { when: effect.when, whenChoice: effect.whenChoice }] as const),
+  )
   for (const [index, effect] of ability.effects.entries()) {
     const id = `effect-${index}`
     if (effect.kind === 'damage' || effect.kind === 'healing') {
       const amount = rollFormulas.get(effect.rollId)
-      if (amount && effect.kind === 'damage') operations.push({
-        id, kind: 'damage', target: effect.target, amount, damageType: 'inherit-primary',
+      if (amount && effect.kind === 'damage') projectedOperations.push({
+        id, kind: 'damage', target: effect.target, amount,
+        damageType: rollDamageTypes.get(effect.rollId) ?? 'inherit-primary',
       })
-      else if (amount) operations.push({ id, kind: 'healing', target: effect.target, amount })
+      else if (amount) projectedOperations.push({ id, kind: 'healing', target: effect.target, amount })
     } else if (effect.kind === 'temporary-hit-points') {
       const amount = effect.rollId ? rollFormulas.get(effect.rollId) : effect.amount ? declarativeValueFormula(effect.amount) : undefined
-      if (amount) operations.push({ id, kind: 'temporary-hit-points', target: effect.target, amount })
+      if (amount) projectedOperations.push({ id, kind: 'temporary-hit-points', target: effect.target, amount })
     } else if (effect.kind === 'standard-condition') {
-      operations.push({ id, kind: 'apply-standard-condition', target: effect.target, condition: effect.condition, duration: declarativeDuration(effect.duration) })
+      projectedOperations.push({ id, kind: 'apply-standard-condition', target: effect.target, condition: effect.condition, duration: declarativeDuration(effect.duration) })
+    } else if (effect.kind === 'activity-effect') {
+      projectedOperations.push({ id, kind: 'apply-effect', target: effect.target, effectId: effect.effectId })
     } else if (effect.kind === 'move') {
-      operations.push({ id, kind: 'move', target: effect.target, mode: effect.mode ?? 'push', distanceFeet: constant(effect.distanceFeet) })
+      projectedOperations.push({
+        id, kind: 'move', target: effect.target, mode: effect.mode ?? 'push',
+        distanceFeet: constant(effect.distanceFeet),
+        originIllumination: effect.originIllumination,
+        destinationIllumination: effect.destinationIllumination,
+        requiresLineOfSight: effect.requiresLineOfSight,
+        ignoresOpportunityAttacks: effect.ignoresOpportunityAttacks,
+      })
+    } else if (effect.kind === 'dispel-area') {
+      projectedOperations.push({
+        id, kind: 'dispel-area', target: 'actor', areaKind: effect.areaKind,
+        radiusFeet: constant(effect.radiusFeet), maximumSpellLevel: declarativeValueFormula(effect.maximumSpellLevel),
+      })
+    } else if (effect.kind === 'command-owned-companion') {
+      projectedOperations.push({ id, kind: 'command-owned-companion', target: 'target', command: effect.command })
     } else {
-      operations.push({ id, kind: 'resource', subject: 'actor', resourceId: effect.resourceId,
+      projectedOperations.push({ id, kind: 'resource', subject: 'actor', resourceId: effect.resourceId,
         mode: effect.kind === 'spend-resource' ? 'spend' : 'restore', amount: declarativeValueFormula(effect.amount) })
     }
   }
-  const limitations: string[] = []
-  if (ability.mechanic) {
-    limitations.push(`旧版特殊 mechanic ${ability.mechanic.kind} 仍由兼容执行器处理。`)
-    operations.push(manualOperation('legacy-mechanic', '此能力包含特殊规则，请在兼容执行器或 DM 裁定后继续。', limitations[0]!))
-  }
-  if (operations.length === 0) {
+  const limitations = [...compatibility.reasons]
+  const operations: Dnd5eActivityOperationV1[] = authorityBinding ? [] : [
+    ...projectedOperations,
+    ...(projectedPersistentProjection ? [{
+      id: 'persistent-projection',
+      kind: 'create-persistent-area' as const,
+      label: projectedPersistentProjection.label,
+      instanceCount: projectedPersistentProjection.instanceCount,
+      durationRounds: projectedPersistentProjection.durationRounds,
+      concentration: projectedPersistentProjection.concentration,
+      color: projectedPersistentProjection.color,
+      utilityProjectionId: projectedPersistentProjection.projectionId,
+      movement: projectedPersistentProjection.movement
+        ? { ...projectedPersistentProjection.movement }
+        : undefined,
+    }] : []),
+  ]
+  if (effectiveAutomation === 'manual') {
+    const reason = limitations.join(' ') || '作者将该能力标记为仅供 DM 手动裁定。'
+    operations.splice(0, operations.length, manualOperation('ability-manual', '请由 DM 结算此能力。', reason))
+  } else if (operations.length === 0 && !authorityBinding) {
     limitations.push('能力没有可投影的通用效果。')
     operations.push(manualOperation('ability-manual', '请由 DM 结算此能力。', limitations[0]!))
   }
   const check = checks[0]
   if (checks.length > 1) limitations.push('能力包含多个检查，旧兼容执行器仍负责其组合顺序。')
-  const outcome: Dnd5eActivityOutcomeV1 = {
-    id: 'resolve',
-    when: check ? { kind: 'check', checkId: check.id, result: check.kind === 'saving-throw' ? 'failure' : 'success' } : { kind: 'always' },
-    operations,
+  const checkScopedOperations = check?.kind === 'saving-throw'
+    ? operations.map((operation) => 'target' in operation && operation.target === 'all-targets'
+      ? { ...operation, target: 'target' as const }
+      : operation)
+    : operations
+  const savingThrow = ability.rolls?.find((roll) => roll.kind === 'saving-throw')
+  const outcomeBuckets = new Map<string, { when: Dnd5eActivityOutcomeWhenV1; operations: Dnd5eActivityOperationV1[] }>()
+  const branchWhen = (
+    branch: Pick<DeclarativeSubclassAbilityV1['effects'][number], 'when' | 'whenChoice'> | undefined,
+    forcedSaveResult?: 'success' | 'failure',
+  ): Dnd5eActivityOutcomeWhenV1 => {
+    const conditions: Extract<Dnd5eActivityOutcomeWhenV1, { kind: 'all' }>['conditions'][number][] = []
+    if (check?.kind === 'saving-throw' && branch?.when !== 'always') {
+      conditions.push({
+        kind: 'check', checkId: check.id,
+        result: forcedSaveResult ?? (branch?.when === 'save-success' ? 'success' : 'failure'),
+      })
+    } else if (check && check.kind !== 'saving-throw') {
+      conditions.push({ kind: 'check', checkId: check.id, result: 'success' })
+    }
+    if (branch?.whenChoice) conditions.push({ kind: 'choice', ...branch.whenChoice })
+    if (conditions.length === 0) return { kind: 'always' }
+    if (conditions.length === 1) return conditions[0]!
+    return { kind: 'all', conditions }
   }
+  const addOutcomeOperation = (operation: Dnd5eActivityOperationV1, when: Dnd5eActivityOutcomeWhenV1): void => {
+    const key = JSON.stringify(when)
+    const existing = outcomeBuckets.get(key)
+    if (existing) existing.operations.push(operation)
+    else outcomeBuckets.set(key, { when, operations: [operation] })
+  }
+  for (const operation of checkScopedOperations) {
+    const branch = effectBranchByOperationId.get(operation.id)
+    addOutcomeOperation(operation, branchWhen(branch))
+    if (
+      check?.kind === 'saving-throw' && savingThrow?.onSuccess === 'half' &&
+      operation.kind === 'damage' && branch?.when == null
+    ) addOutcomeOperation({
+      ...operation, id: `${operation.id}-half`, amount: multiply(operation.amount, 0.5),
+    }, branchWhen(branch, 'success'))
+  }
+  const projectedOutcomes: Dnd5eActivityOutcomeV1[] = [...outcomeBuckets.values()].map((bucket, index) => ({
+    id: `outcome-${index + 1}`,
+    when: bucket.when,
+    operations: bucket.operations,
+  }))
+  if (projectedOutcomes.length === 0 && authorityBinding) projectedOutcomes.push({
+    id: 'resolve', when: { kind: 'always' }, operations: [],
+  })
   const triggerEvent = declarativeTriggerEvent(ability.trigger)
+  const automaticResourceRecovery = triggerEvent != null && !ability.choices?.length &&
+    ability.effects.length > 0 && ability.effects.every((effect) => effect.kind === 'restore-resource')
+  const automaticTurnStartResolution = ability.trigger.kind === 'turn-start' &&
+    (ability.cost?.economy ?? 'none') === 'none' && !ability.choices?.length
+  const triggerDecision = effectiveAutomation !== 'full'
+    ? 'dm-approval' as const
+    : automaticResourceRecovery || automaticTurnStartResolution ? 'automatic' as const : 'actor-choice' as const
   return {
     schemaVersion: 1,
-    id: `subclass-ability:${ability.id}`,
+    id: activityId,
     name: ability.name,
     description: ability.description,
     activation: ability.trigger.kind === 'active-use'
@@ -698,22 +906,32 @@ export function dnd5eActivityFromDeclarativeSubclassAbility(
     invocation: triggerEvent
       ? {
           kind: 'triggered', event: triggerEvent,
-          confirmation: ability.automation === 'full' ? 'actor-choice' : 'dm-approval',
+          confirmation: triggerDecision,
           retention: 'single-event',
         }
-      : { kind: 'active', confirmation: ability.automation === 'full' ? 'actor-choice' : 'dm-approval' },
-    target: declarativeTarget(ability.targeting),
+      : { kind: 'active', confirmation: effectiveAutomation === 'full' ? 'actor-choice' : 'dm-approval' },
+    target: projectedPersistentProjection
+      ? {
+          kind: 'area', relation: 'any', origin: 'point', shape: 'rect',
+          lengthFeet: 5, widthFeet: 5, heightFeet: 5,
+          placeRangeFeet: projectedPersistentProjection.placementRangeFeet,
+          maximumTargets: 256, includeSelf: false, rotatable: false,
+        }
+      : declarativeTarget(ability.targeting),
     requirements,
     consumption,
     checks,
-    outcomes: [outcome],
+    choices: ability.choices?.map((choice) => structuredClone(choice)),
+    outcomes: projectedOutcomes,
+    effects: ability.activityEffects?.map((effect) => structuredClone(effect)),
     triggers: triggerEvent ? [{
-      id: `trigger:${ability.id}`, event: triggerEvent, activityId: `subclass-ability:${ability.id}`,
-      decision: ability.automation === 'full' ? 'actor-choice' : 'dm-approval',
+      id: `trigger:${options.subclassId}:${ability.id}`, event: triggerEvent, activityId,
+      decision: triggerDecision,
       ...(ability.limits?.oncePerTurn ? { limit: { uses: 1, reset: 'turn' as const } } : {}),
     }] : undefined,
-    automation: capability(ability.automation, limitations),
-    legacySource: { kind: 'subclass-ability', id: ability.id },
+    automation: capability(effectiveAutomation, limitations),
+    authorityBinding,
+    legacySource: { kind: 'subclass-ability', id: sourceId },
   }
 }
 

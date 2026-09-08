@@ -1,0 +1,122 @@
+{
+  "id": "srd-5.1:invisible-stalker",
+  "slug": "invisible-stalker",
+  "name": "隐形追猎者",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "slam",
+      "name": "猛击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 174,
+      "slug": "invisible-stalker",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:46:49.612Z",
+      "name": "隐形追猎者",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-invisible-stalker-slam-1788562009727",
+      "combatId": "verify-ui-invisible-stalker-slam-1788562009727:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "隐形追猎者 使用猛击攻击 验证目标：猛击 → 验证目标 13+6=19 命中；共造成 13 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:47 PM\n结算\n\n隐形追猎者 使用猛击攻击 验证目标：猛击 → 验证目标 13+6=19 命中；共造成 13 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：猛击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +6。\n结果 · 19 vs AC 10：命中。\n伤害骰 · 猛击（基础伤害·钝击）｜2d6 骰面：6 + 4 = 10｜固定加值 +3｜小计 13\n隐形追猎者｜消耗动作\n验证目标｜受到 13 点伤害｜HP 320 → 307",
+      "playerLog": "隐形追猎者 使用猛击攻击 验证目标：猛击 → 验证目标 13+6=19 命中；共造成 13 点伤害。",
+      "afterHp": 307,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:47:16.011Z",
+      "evidenceFile": "ui-cases/monsters/174-invisible-stalker.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "隐形",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "无误追踪",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 4,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

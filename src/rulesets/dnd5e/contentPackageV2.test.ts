@@ -24,11 +24,13 @@ import {
   registeredDnd5ePluginFeats,
   registeredDnd5ePluginItems,
   registeredDnd5ePluginRaces,
+  dnd5ePluginFeatureRuntimeSourceV1,
 } from './pluginApi'
 import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { listRegisteredDnd5eActivityPackages } from './activities/dnd5eActivityRegistry'
 import { listRegisteredContentDefinitionPackages } from '../../domain/content/contentDefinitionRegistry'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -86,6 +88,15 @@ function packageValue(): Dnd5eContentPackageV2 {
           initiativeBonus: 2,
           speedBonusFeet: 5,
           savingThrowBonus: 1,
+          passivePerceptionBonus: 5,
+          cannotBeSurprisedWhileConscious: true,
+          unseenAttackersDoNotGainAdvantage: true,
+          ignoreLongRangeRangedWeaponDisadvantage: true,
+          ignoreNearbyHostileRangedAttackDisadvantage: true,
+          ignoreRangedWeaponCoverBonus: true,
+          preventOpportunityAttacksFromMeleeAttackTargets: true,
+          spellAttackRangeMultiplier: 2,
+          ignoreSpellAttackCoverBonus: true,
           damageImmunities: ['poison'],
         },
         passiveEffects: [{
@@ -408,6 +419,98 @@ describe('D&D 5e content package V2', () => {
     }))
   })
 
+  it('uses permanent unified Effects as the runtime authority for race and feat passives', () => {
+    const base = packageValue()
+    const source = {
+      ...base,
+      content: {
+        ...base.content,
+        races: base.content.races.map((race, index) => index === 0 ? {
+          ...race,
+          hitPointsPerLevelBonus: 1,
+          naturalOneReroll: true,
+          savingThrowAdvantages: { damageTypes: ['poison'] as const, magicAbilities: ['int', 'wis', 'cha'] as const },
+        } : race),
+        feats: base.content.feats.map((feat, index) => index === 0 ? {
+          ...feat,
+          passiveEffects: [{
+            ...feat.passiveEffects![0]!,
+            deliveries: ['weapon-attack'] as const,
+            magical: false,
+            requiresHeavyArmor: true,
+          }],
+        } : feat),
+      },
+    }
+    const definitions = dnd5eContentDefinitionsFromPackageV2(source)
+    const race = definitions.find((definition) => definition.kind === 'race')
+    expect(race?.effects?.flatMap((effect) => (effect as { modifiers?: readonly unknown[] }).modifiers ?? [])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'character-capability', capability: 'hitPointsPerLevelBonus', value: 1 }),
+        expect.objectContaining({ kind: 'character-capability', capability: 'naturalOneReroll', value: true }),
+        expect.objectContaining({ kind: 'racial-saving-throw-advantage', damageTypes: ['poison'] }),
+      ]),
+    )
+
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(source))
+    try {
+      expect(dnd5ePluginFeatureRuntimeSourceV1('com.example.content-v2:feat-steady')).toBe('unified-content')
+      expect(registeredDnd5ePluginRaces()[0]).toMatchObject({
+        hitPointsPerLevelBonus: 1,
+        naturalOneReroll: true,
+        savingThrowAdvantages: { damageTypes: ['poison'], magicAbilities: ['int', 'wis', 'cha'] },
+      })
+      expect(registeredDnd5ePluginFeats()[0]?.passiveEffects?.[0]).toMatchObject({
+        deliveries: ['weapon-attack'],
+        magical: false,
+        requiresHeavyArmor: true,
+      })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('registers each monster action Activity exactly once', () => {
+    const source = packageValue()
+    source.content.monsters = [buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())]
+
+    const definitions = dnd5eContentDefinitionsFromPackageV2(source)
+    const monster = definitions.find((definition) => definition.kind === 'monster')
+    const monsterActions = definitions.filter((definition) => definition.kind === 'monster-action')
+    const actionIds = definitions.flatMap((definition) => definition.activities ?? [])
+      .flatMap((activity) => activity && typeof activity === 'object' && 'id' in activity &&
+        typeof activity.id === 'string' ? [activity.id] : [])
+
+    expect(monster?.activities ?? []).toEqual([])
+    expect(monsterActions.length).toBeGreaterThan(0)
+    expect(new Set(actionIds).size).toBe(actionIds.length)
+
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(source))
+    dispose()
+  })
+
+  it('reports backgrounds as partially automated because narrative and choice fields need confirmation', () => {
+    const source = packageValue()
+    source.content.backgrounds = [{
+      id: 'field-scholar',
+      name: 'Field Scholar',
+      description: 'Synthetic background.',
+      skillProficiencies: ['history', 'nature'],
+      toolProficiencies: ['cartographer-tools'],
+      languages: 1,
+      feature: { name: 'Research Contact', description: 'Synthetic narrative feature.' },
+    }]
+
+    expect(dnd5eContentPackageAutomationCoverageV2(source).entries).toContainEqual(
+      expect.objectContaining({
+        category: 'background',
+        id: 'field-scholar',
+        status: 'partial',
+        capability: expect.objectContaining({ level: 'assisted' }),
+      }),
+    )
+  })
+
   it('uses the migrated Activity capability instead of trusting a stale full declaration', () => {
     const source = packageValue()
     source.content.features = [{
@@ -495,7 +598,16 @@ describe('D&D 5e content package V2', () => {
         armorClass: 13,
         speed: 35,
         initiative: 13,
+        passivePerception: 15,
         darkvisionRangeFeet: 60,
+        cannotBeSurprisedWhileConscious: true,
+        unseenAttackersDoNotGainAdvantage: true,
+        ignoreLongRangeRangedWeaponDisadvantage: true,
+        ignoreNearbyHostileRangedAttackDisadvantage: true,
+        ignoreRangedWeaponCoverBonus: true,
+        preventOpportunityAttacksFromMeleeAttackTargets: true,
+        spellAttackRangeMultiplier: 2,
+        ignoreSpellAttackCoverBonus: true,
       })
       expect(combatant.skillProficiencies).toContain('perception')
       expect(combatant.damageResistances).toContain('fire')

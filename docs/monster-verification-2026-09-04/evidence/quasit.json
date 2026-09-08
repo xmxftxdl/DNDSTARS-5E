@@ -1,0 +1,179 @@
+{
+  "id": "srd-5.1:quasit",
+  "slug": "quasit",
+  "name": "夸塞魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw-bite-in-beast-form",
+      "name": "爪击（野兽形态为啃咬）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "scare",
+      "name": "惊吓",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.durationRounds",
+        "rule.repeatSaveAtEndOfTargetTurn",
+        "rule.repeatSaveDisadvantageWhenSourceVisible"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "invisibility",
+      "name": "隐形",
+      "automation": "headless",
+      "rule": "invisibility",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.target",
+        "rule.concentration",
+        "rule.breakOn[]",
+        "rule.breakOnMonsterAbilityIds[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 209,
+      "slug": "quasit",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:51:45.898Z",
+      "name": "夸塞魔",
+      "actionId": "claw-bite-in-beast-form",
+      "actionName": "爪击（野兽形态为啃咬）",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1",
+      "total": 334,
+      "mapId": "verify-ui-quasit-claw-bite-in-beast-form-1788569505945",
+      "combatId": "verify-ui-quasit-claw-bite-in-beast-form-1788569505945:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "夸塞魔 使用爪击（野兽形态为啃咬）攻击 验证目标：爪击（野兽形态为啃咬） → 验证目标 8+4=12 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:52 PM\n结算\n\n夸塞魔 使用爪击（野兽形态为啃咬）攻击 验证目标：爪击（野兽形态为啃咬） → 验证目标 8+4=12 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：爪击（野兽形态为啃咬）｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 8；最终采用 8；调整值 +4。\n结果 · 12 vs AC 10：命中。\n伤害骰 · 爪击（野兽形态为啃咬）（基础伤害·穿刺）｜1d4 骰面：1 = 1｜固定加值 +3｜小计 4\n夸塞魔｜消耗动作\n验证目标｜体质豁免 d20 5 +10 = 15 vs DC 10｜成功\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "playerLog": "夸塞魔 使用爪击（野兽形态为啃咬）攻击 验证目标：爪击（野兽形态为啃咬） → 验证目标 8+4=12 命中；共造成 4 点伤害。",
+      "afterHp": 316,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:52:18.533Z",
+      "evidenceFile": "ui-cases/monsters/209-quasit.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 12,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

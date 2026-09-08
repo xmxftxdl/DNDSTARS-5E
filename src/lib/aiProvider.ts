@@ -11,6 +11,8 @@ import {
   type AiStructuredGenerationRequestV1,
   type JsonSchemaV1,
 } from '../../shared/ai-provider.mjs'
+import { fixedBridgeModelIdForTask } from '../../shared/ai-model-policy.mjs'
+import type { AiBillingRecordV1 } from '../../shared/ai-model-policy.mjs'
 
 export type { AiDocumentChunkV1, AiStructuredGenerationRequestV1, JsonSchemaV1 }
 
@@ -26,6 +28,7 @@ export interface AiStructuredGenerationResultV1 {
   modelId?: string
   output: unknown
   usage?: AiProviderUsageV1
+  billing?: AiBillingRecordV1
 }
 
 export interface AiProviderRuntimeV1 {
@@ -58,6 +61,7 @@ export type AiProviderExecutionResult<T> =
       model?: AiModelDescriptorV1
       estimatedCredits: number
       usage?: AiProviderUsageV1
+      billing?: AiBillingRecordV1
       fallback: boolean
     }
   | { ok: false; error: AiProviderExecutionError; detail?: string }
@@ -156,8 +160,9 @@ export async function executeStructuredAiTask<T>(input: {
       output: result.output,
       provider: route.provider,
       ...(route.model ? { model: route.model } : {}),
-      estimatedCredits: route.estimatedCredits,
+      estimatedCredits: result.billing?.estimatedCredits ?? route.estimatedCredits,
       ...(result.usage ? { usage: result.usage } : {}),
+      ...(result.billing ? { billing: result.billing } : {}),
       fallback: route.fallback,
     }
   } catch (error) {
@@ -226,6 +231,7 @@ export const BUILTIN_AI_PROVIDER_CATALOG: readonly AiProviderDescriptorV1[] = [
 export const DEFAULT_AI_PROVIDER_SELECTION: AiProviderSelectionV1 = {
   schemaVersion: 1,
   providerId: 'external-account',
+  modelId: fixedBridgeModelIdForTask('resource-structuring'),
   allowPaidFallback: false,
   maxCreditsPerTask: 0,
 }

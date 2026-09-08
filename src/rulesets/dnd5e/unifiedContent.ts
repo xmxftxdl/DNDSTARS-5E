@@ -4,7 +4,6 @@ import {
   type ContentDefinitionEnvelope,
   type ContentDefinitionKind,
 } from '../../domain/content/contentDefinition'
-import { registerContentDefinitionPackage } from '../../domain/content/contentDefinitionRegistry'
 import type { DeclarativeClassDefinitionV1 } from './declarativeClass'
 import type { DeclarativeSubclassDefinitionV1 } from './declarativeSubclassAbility'
 import {
@@ -31,7 +30,7 @@ import {
   type Dnd5ePluginImageAssetDefinition,
 } from './pluginAssets'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
-import { registerDnd5eActivityPackage } from './activities/dnd5eActivityRegistry'
+import { registerDnd5eUnifiedContentPackageV1 } from './activities/dnd5eUnifiedContentRegistry'
 import {
   validateDnd5eActivityDefinitionV1,
   validateDnd5eEffectDefinitionV1,
@@ -160,7 +159,7 @@ function legacyFeaturePayload(
   definition: Dnd5eUnifiedContentDefinitionV1<'feature'>,
 ): Dnd5eAuthorableFeatureDefinitionV1 {
   const payload = structuredClone(definition.payload)
-  if (definition.activities?.length && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
+  if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
   }
@@ -171,7 +170,7 @@ function legacyFeatPayload(
   definition: Dnd5eUnifiedContentDefinitionV1<'feat'>,
 ): Dnd5eAuthorableFeatDefinitionV1 {
   const payload = structuredClone(definition.payload)
-  if (definition.activities?.length && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
+  if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
   }
@@ -389,13 +388,7 @@ export function dnd5eRulesPluginFromUnifiedContentBundleV1(
     setup(api) {
       const disposers: Array<() => void> = []
       try {
-        const activities = bundle.definitions.flatMap((definition) => definition.activities ?? [])
-        disposers.push(registerDnd5eActivityPackage({
-          packageId: bundle.manifest.id,
-          packageVersion: bundle.manifest.version,
-          activities,
-        }).dispose)
-        disposers.push(registerContentDefinitionPackage({
+        disposers.push(registerDnd5eUnifiedContentPackageV1({
           packageId: bundle.manifest.id,
           packageVersion: bundle.manifest.version,
           definitions: bundle.definitions,

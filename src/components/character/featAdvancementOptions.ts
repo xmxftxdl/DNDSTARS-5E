@@ -2,9 +2,11 @@ import { ABILITIES, type AbilityKey } from '../../lib/dnd'
 import {
   DND5E_SRD_FEATS,
   dnd5ePluginFeatAvailableForCharacter,
+  dnd5ePluginFeatPrerequisiteFailure,
   dnd5eSrdFeatAvailableForCharacter,
   registeredDnd5ePluginFeats,
   type Dnd5eSrdFeatDefinition,
+  type Dnd5eAdvancementDefinitionV1,
   type RegisteredDnd5ePluginFeat,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
@@ -18,6 +20,7 @@ export interface Dnd5eAdvancementFeatOption {
   sourceLabel: string
   eligible: boolean
   disabledReason?: string
+  advancements?: readonly Dnd5eAdvancementDefinitionV1[]
 }
 
 type FeatPrerequisite = {
@@ -90,7 +93,8 @@ function pluginFeatOption(
       ? '已经拥有'
       : eligible
         ? undefined
-        : prerequisiteFailure(feat.prerequisite, character) ?? '不满足规则包前提',
+        : dnd5ePluginFeatPrerequisiteFailure(feat, character) ?? '不满足规则包前提',
+    advancements: feat.advancements?.map((advancement) => structuredClone(advancement)),
   }
 }
 

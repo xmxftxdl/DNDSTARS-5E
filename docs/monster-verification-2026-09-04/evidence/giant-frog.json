@@ -1,0 +1,169 @@
+{
+  "id": "srd-5.1:giant-frog",
+  "slug": "giant-frog",
+  "name": "巨蛙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "swallow",
+      "name": "吞咽",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.targetMaxSizeRank",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].sourceDeathEscape.movementCostFeet",
+        "attack.onHitEffects[].sourceDeathEscape.applyProne",
+        "attack.onHitEffects[].removeSourceRelationSlotGroupOnApply"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 123,
+      "slug": "giant-frog",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:16:50.945Z",
+      "name": "巨蛙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-frog-bite-1788560211007",
+      "combatId": "verify-ui-giant-frog-bite-1788560211007:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨蛙 使用啃咬攻击 验证目标：啃咬 → 验证目标 19+3=22 命中；共造成 7 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:17 PM\n结算\n\n巨蛙 使用啃咬攻击 验证目标：啃咬 → 验证目标 19+3=22 命中；共造成 7 点伤害。\n\n查看 Headless 结算依据（13）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +3。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：6 = 6｜固定加值 +1｜小计 7\n巨蛙｜消耗动作\n验证目标｜受到 7 点伤害｜HP 320 → 313\n验证目标｜获得状态：擒抱｜来源：巨蛙\n验证目标｜效果生效：擒抱\n巨蛙｜monster:srd-5.1:giant-frog:bite:bite-grapple生效｜目标 验证目标\n验证目标｜获得状态：束缚｜来源：巨蛙\n验证目标｜效果生效：束缚",
+      "playerLog": "巨蛙 使用啃咬攻击 验证目标：啃咬 → 验证目标 19+3=22 命中；共造成 7 点伤害。",
+      "afterHp": 313,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled",
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:17:17.550Z",
+      "evidenceFile": "ui-cases/monsters/123-giant-frog.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "立定跳跃",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

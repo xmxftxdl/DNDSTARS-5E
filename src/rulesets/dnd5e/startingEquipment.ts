@@ -3,6 +3,7 @@ import { DND5E_INVENTORY_SCHEMA_VERSION, type Dnd5eInventory, type Dnd5eInventor
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { dnd5eInventoryItemTemplate } from './items'
 import { declarativeClassStartingEquipmentV1 } from './declarativeClass'
+import { dnd5ePluginRegistryStore } from './plugins/pluginRegistryStore'
 
 export interface Dnd5eStartingEquipmentGrant {
   templateId: string
@@ -10,13 +11,14 @@ export interface Dnd5eStartingEquipmentGrant {
   equipSlot?: EquipmentSlot
 }
 
-export interface Dnd5eStartingEquipmentPicker {
+export type Dnd5eStartingEquipmentPicker = {
   id: string
   label: string
-  equipmentIds: readonly string[]
-  defaultEquipmentId: string
   equipSlot?: EquipmentSlot
-}
+} & (
+  | { equipmentIds: readonly string[]; defaultEquipmentId: string }
+  | { templateIds: readonly string[]; defaultTemplateId: string }
+)
 
 export interface Dnd5eStartingEquipmentOption {
   id: string
@@ -318,8 +320,7 @@ function classPlan(charClass: string): Pick<Dnd5eStartingEquipmentPlan, 'fixedGr
 }
 
 function backgroundPlan(background: string): Pick<Dnd5eStartingEquipmentPlan, 'fixedGrants' | 'groups'> {
-  if (background !== '侍僧') return { fixedGrants: [], groups: [] }
-  return {
+  if (background === '侍僧') return {
     fixedGrants: [
       grant(item('holy-symbol')), grant(item('incense-block'), 5), grant(item('vestments')),
       grant(item('common-clothes')), grant(item('coin-pouch-15gp')),
@@ -328,6 +329,27 @@ function backgroundPlan(background: string): Pick<Dnd5eStartingEquipmentPlan, 'f
       option('prayer-book', '祈祷书', [grant(item('prayer-book'))]),
       option('prayer-wheel', '经轮', [grant(item('prayer-wheel'))]),
     ], 'background')],
+  }
+  const definition = dnd5ePluginRegistryStore.backgrounds.get(background) ??
+    [...dnd5ePluginRegistryStore.backgrounds.values()].find((candidate) => candidate.name === background)
+  if (!definition?.startingEquipment) return { fixedGrants: [], groups: [] }
+  return {
+    fixedGrants: (definition.startingEquipment.fixedGrants ?? []).map((entry) => ({ ...entry })),
+    groups: (definition.startingEquipment.groups ?? []).map((entry) => ({
+      id: `${definition.id}:${entry.id}`,
+      label: entry.label,
+      source: 'background' as const,
+      options: entry.options.map((candidate) => ({
+        ...candidate,
+        grants: candidate.grants.map((grantEntry) => ({ ...grantEntry })),
+        pickers: candidate.pickers?.map((choice) => ({
+          ...choice,
+          ...('equipmentIds' in choice
+            ? { equipmentIds: [...choice.equipmentIds] }
+            : { templateIds: [...choice.templateIds] }),
+        })),
+      })),
+    })),
   }
 }
 
@@ -352,7 +374,11 @@ export function defaultDnd5eStartingEquipmentSelection(plan: Dnd5eStartingEquipm
     const selected = group.options[0]
     if (!selected) continue
     optionIds[group.id] = selected.id
-    for (const choice of selected.pickers ?? []) equipmentIds[pickerKey(group.id, choice.id)] = choice.defaultEquipmentId
+    for (const choice of selected.pickers ?? []) {
+      equipmentIds[pickerKey(group.id, choice.id)] = 'equipmentIds' in choice
+        ? choice.defaultEquipmentId
+        : choice.defaultTemplateId
+    }
   }
   return { optionIds, equipmentIds }
 }
@@ -371,7 +397,9 @@ export function normalizeDnd5eStartingEquipmentSelection(
     for (const choice of selected.pickers ?? []) {
       const key = pickerKey(group.id, choice.id)
       const requested = selection.equipmentIds[key]
-      equipmentIds[key] = choice.equipmentIds.includes(requested) ? requested : defaults.equipmentIds[key] ?? choice.defaultEquipmentId
+      const allowed = 'equipmentIds' in choice ? choice.equipmentIds : choice.templateIds
+      const fallback = 'equipmentIds' in choice ? choice.defaultEquipmentId : choice.defaultTemplateId
+      equipmentIds[key] = allowed.includes(requested) ? requested : defaults.equipmentIds[key] ?? fallback
     }
   }
   return { optionIds, equipmentIds }
@@ -389,7 +417,8 @@ export function resolveDnd5eStartingEquipment(
     if (!selected) continue
     grants.push(...selected.grants.map((entry) => ({ ...entry })))
     for (const choice of selected.pickers ?? []) {
-      grants.push(grant(eq(normalized.equipmentIds[pickerKey(group.id, choice.id)]), 1, choice.equipSlot))
+      const selectedId = normalized.equipmentIds[pickerKey(group.id, choice.id)]
+      grants.push(grant('equipmentIds' in choice ? eq(selectedId) : selectedId, 1, choice.equipSlot))
     }
   }
   const equipment: CharacterEquipment = {}
@@ -432,9 +461,15 @@ export function resolveDnd5eStartingEquipment(
   }
 }
 
-export function dnd5eStartingEquipmentPickerItems(choice: Dnd5eStartingEquipmentPicker): EquipmentItem[] {
-  const allowed = new Set(choice.equipmentIds)
-  return DND5E_SRD_EQUIPMENT_CATALOG.filter((entry) => allowed.has(entry.id))
+export function dnd5eStartingEquipmentPickerItems(choice: Dnd5eStartingEquipmentPicker): Array<Pick<EquipmentItem, 'id' | 'name'>> {
+  if ('equipmentIds' in choice) {
+    const allowed = new Set(choice.equipmentIds)
+    return DND5E_SRD_EQUIPMENT_CATALOG.filter((entry) => allowed.has(entry.id))
+  }
+  return choice.templateIds.flatMap((templateId) => {
+    const template = dnd5eInventoryItemTemplate(templateId)
+    return template ? [{ id: template.id, name: template.name }] : []
+  })
 }
 
 export function dnd5eStartingEquipmentSummary(
@@ -446,8 +481,10 @@ export function dnd5eStartingEquipmentSummary(
     const selected = group.options.find((candidate) => candidate.id === normalized.optionIds[group.id])
     if (!selected) return []
     const picked = (selected.pickers ?? []).map((choice) => {
-      const equipmentId = normalized.equipmentIds[pickerKey(group.id, choice.id)]
-      return DND5E_SRD_EQUIPMENT_CATALOG.find((entry) => entry.id === equipmentId)?.name ?? equipmentId
+      const selectedId = normalized.equipmentIds[pickerKey(group.id, choice.id)]
+      return ('equipmentIds' in choice
+        ? DND5E_SRD_EQUIPMENT_CATALOG.find((entry) => entry.id === selectedId)?.name
+        : dnd5eInventoryItemTemplate(selectedId)?.name) ?? selectedId
     })
     return [`${group.label}：${selected.label}${picked.length ? `（${picked.join('、')}）` : ''}`]
   })

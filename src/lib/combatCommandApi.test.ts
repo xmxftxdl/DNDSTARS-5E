@@ -4,6 +4,7 @@ import {
   CombatCommandCoordinator,
   CombatCommandProtocolError,
   CombatCommandTimeoutError,
+  combatCommandIsWaitingForAuthority,
   combatCommandFromPlayerAction,
   createCombatCommandHttpTransport,
   fingerprintCombatCommand,
@@ -66,6 +67,18 @@ function rawPending(command = moveCommand()) {
 function pending(command = moveCommand()): CombatCommandReceiptV1 {
   return parseCombatCommandReceipt(rawPending(command))
 }
+
+describe('combat command authority wait classification', () => {
+  it('treats an accepted pending receipt as an ordinary interactive wait', () => {
+    expect(combatCommandIsWaitingForAuthority(
+      new CombatCommandTimeoutError('player:move:001', pending()),
+    )).toBe(true)
+    expect(combatCommandIsWaitingForAuthority(
+      new CombatCommandTimeoutError('player:move:001'),
+    )).toBe(false)
+    expect(combatCommandIsWaitingForAuthority(new Error('network down'))).toBe(false)
+  })
+})
 
 function rawCommitted(command = moveCommand()) {
   return {

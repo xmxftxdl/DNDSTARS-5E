@@ -3,6 +3,7 @@ import {
   releaseTokenVisualNodesAtPosition,
   setTokenVisualNodesPositionLocked,
   syncTokenVisualNodes,
+  syncTokenVisualPositionFrame,
   tokenVisualNodesDisplayPosition,
   type TokenVisualNodeLike,
 } from './tokenVisualPosition'
@@ -53,6 +54,43 @@ describe('Token visual position coordinator', () => {
       'lock:0:false',
       'lock:1:false',
     ])
+  })
+
+  it('updates body, perimeter and status layers from one movement frame', () => {
+    const firstLayer = { batchDraw: vi.fn() }
+    const secondLayer = { batchDraw: vi.fn() }
+    const cancelPositionAnimation = vi.fn()
+    const writes: string[] = []
+    const nodes: TokenVisualNodeLike[] = [
+      {
+        cancelPositionAnimation,
+        position: ({ x, y }) => writes.push(`body:${x},${y}`),
+        getLayer: () => firstLayer,
+      },
+      {
+        cancelPositionAnimation,
+        position: ({ x, y }) => writes.push(`ring:${x},${y}`),
+        getLayer: () => secondLayer,
+      },
+      {
+        cancelPositionAnimation,
+        position: ({ x, y }) => writes.push(`status:${x},${y}`),
+        getLayer: () => secondLayer,
+      },
+    ]
+
+    expect(syncTokenVisualPositionFrame([{
+      nodes,
+      point: { x: 210, y: 145 },
+    }])).toBe(3)
+    expect(writes).toEqual([
+      'body:210,145',
+      'ring:210,145',
+      'status:210,145',
+    ])
+    expect(cancelPositionAnimation).not.toHaveBeenCalled()
+    expect(firstLayer.batchDraw).toHaveBeenCalledOnce()
+    expect(secondLayer.batchDraw).toHaveBeenCalledOnce()
   })
 
   it('exposes the current rendered coordinate for attached DOM overlays', () => {

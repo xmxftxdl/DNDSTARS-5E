@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
@@ -21,6 +21,21 @@ async function getState<T>(request: APIRequestContext, name: string): Promise<T>
     await new Promise((resolve) => setTimeout(resolve, 80 * 2 ** attempt))
   }
   throw lastError instanceof Error ? lastError : new Error(`${name} could not be loaded`)
+}
+
+async function clickMapPoint(page: Page, point: { x: number; y: number }) {
+  const canvas = page.getByTestId('map-canvas')
+  const box = await canvas.boundingBox()
+  expect(box).not.toBeNull()
+  const viewport = await canvas.evaluate((element) => ({
+    x: Number(element.getAttribute('data-viewport-x')),
+    y: Number(element.getAttribute('data-viewport-y')),
+    scale: Number(element.getAttribute('data-viewport-scale')),
+  }))
+  await page.mouse.click(
+    box!.x + viewport.x + point.x * viewport.scale,
+    box!.y + viewport.y + point.y * viewport.scale,
+  )
 }
 
 async function seedManualCombat(request: APIRequestContext, mapId: string) {
@@ -115,12 +130,19 @@ async function seedManualCombat(request: APIRequestContext, mapId: string) {
       { tokenId: 'manual-goblin', label: '手动哥布林', emoji: '👺', color: '#f87171', roll: 20 },
       { tokenId: 'manual-player', label: '手动结算战士', emoji: '⚔️', color: '#34d399', roll: 10 },
     ],
-    settlementMode: 'manual',
+    settlementMode: 'automatic',
+    monsterControl: {
+      schemaVersion: 1,
+      mode: 'manual',
+      pauseRequested: false,
+      controlledTokenId: 'manual-goblin',
+      updatedAt: now,
+    },
     updatedAt: now,
   })
 }
 
-test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并可手动应用 HP', async ({ browser, request }) => {
+test('怪物回合永久由 DM 操作，Headless 仍结算规则，明骰公开且暗骰保密', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const mapId = `settlement-${Date.now()}`
   await seedManualCombat(request, mapId)
@@ -133,32 +155,36 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
 
-  await expect(dm.getByTestId('combat-settlement-mode')).toHaveValue('manual', { timeout: 20_000 })
-  await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('手动结算', { timeout: 20_000 })
-  await expect(dm.getByTestId('combat-settlement-panel')).toBeVisible()
+  await expect(dm.getByTestId('combat-settlement-mode')).toHaveCount(0)
+  await expect(player.getByTestId('combat-settlement-mode-label')).toHaveCount(0)
+  await expect(dm.getByTestId('combat-settlement-panel')).toHaveCount(0)
   await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
   await player.getByTestId('map-dice-roller-toggle').click()
   const playerDice = player.getByRole('dialog', { name: '自由掷骰' })
   await expect(playerDice).toBeVisible()
 
-  // 怪物先攻时，全手动模式不会启动 Headless 怪物 AI。
+  // 怪物先攻时不会启动战术规划、移动、攻击或自动结束回合。
   await expect.poll(async () => (await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(0)
   await player.waitForTimeout(1_200)
   expect((await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(0)
 
-  const beforeDamage = await getState<{ characters: Array<{ id: string; currentHp: number }> }>(request, 'characters')
-  const beforeDamageHp = beforeDamage.characters.find((character) => character.id === 'manual-hero')?.currentHp
-  expect(beforeDamageHp).toBeGreaterThanOrEqual(7)
-  await dm.getByLabel('手动结算目标').selectOption('manual-player')
-  await dm.getByLabel('手动结算数值').fill('7')
-  await dm.getByTestId('manual-settle-damage').click()
+  const beforeAdjustment = await getState<{ characters: Array<{ id: string; tempHp?: number }> }>(request, 'characters')
+  const beforeTemporaryHp = beforeAdjustment.characters.find((character) => character.id === 'manual-hero')?.tempHp ?? 0
+  await dm.getByTestId('initiative-token-manual-player').click()
+  const characterDetail = dm.getByTestId('character-detail-panel')
+  await expect(characterDetail.getByTestId('dm-hit-point-adjustment-controls')).toBeVisible()
+  await expect(characterDetail.getByTestId('dm-hp-damage')).toHaveCount(0)
+  await expect(characterDetail.getByTestId('dm-hp-healing')).toHaveCount(0)
+  await characterDetail.getByRole('spinbutton', { name: '临时生命调整数值', exact: true }).fill('7')
+  await characterDetail.getByTestId('dm-temp-hp-increase').click()
   await expect.poll(async () => {
-    const state = await getState<{ characters: Array<{ id: string; currentHp: number }> }>(request, 'characters')
-    return state.characters.find((character) => character.id === 'manual-hero')?.currentHp
-  }).toBe((beforeDamageHp ?? 7) - 7)
+    const state = await getState<{ characters: Array<{ id: string; tempHp?: number }> }>(request, 'characters')
+    return state.characters.find((character) => character.id === 'manual-hero')?.tempHp
+  }).toBe(beforeTemporaryHp + 7)
+  await characterDetail.getByTestId('close-character-detail').click()
   await dm.getByRole('button', { name: /^Log/ }).click()
   await dm.getByText(/查看 Headless 结算依据/).click()
-  await expect(dm.getByText(new RegExp(`HP ${beforeDamageHp} → ${(beforeDamageHp ?? 7) - 7}（上限 \\d+）`))).toBeVisible()
+  await expect(dm.getByText(`临时 HP ${beforeTemporaryHp} → ${beforeTemporaryHp + 7}`)).toBeVisible()
   await expect(dm.getByText('结算来源：DM 手动调整')).toBeVisible()
   await expect.poll(async () => {
     const state = await getState<{ entries: Array<{ details?: string[] }> }>(request, 'combat-log')
@@ -174,15 +200,41 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
     return state.events.some((event) => event.sourceMode === 'player' && event.visibility === 'public' && event.roll?.label.includes('玩家公开检定'))
   }).toBe(true)
 
-  // 当前怪物回合可从结构化数据块选择攻击；怪物 AI 仍不会自行执行。
+  // 当前怪物回合只能由 DM 从结构化数据块选择行动。
   await dm.getByTestId('initiative-token-manual-goblin').click()
   const enemyDetail = dm.getByTestId('enemy-detail-panel')
+  await expect(enemyDetail.getByTestId('dm-hit-point-adjustment-controls')).toBeVisible()
+  await enemyDetail.getByRole('spinbutton', { name: '临时生命调整数值', exact: true }).fill('4')
+  await enemyDetail.getByTestId('dm-temp-hp-increase').click()
+  await expect.poll(async () => {
+    const state = await getState<{ maps: Array<{ id: string; tokens: Array<{
+      id: string
+      dnd5eCombatState?: { temporaryHp?: number }
+    }> }> }>(request, 'maps')
+    return state.maps.find((map) => map.id === mapId)?.tokens
+      .find((token) => token.id === 'manual-goblin')?.dnd5eCombatState?.temporaryHp
+  }).toBe(4)
   await expect(enemyDetail.getByRole('button', { name: /选择目标/ }).first()).toBeVisible()
   await enemyDetail.getByRole('button', { name: '关闭' }).click()
 
   await dm.getByTestId('dm-next-turn').click()
   await expect.poll(async () => (await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(1)
   await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 15_000 })
+
+  // DM 手动操作怪物不应关闭玩家自己的地图移动和 Headless 事务。
+  // 地图 Token 只用于移动；人物卡只能从左侧角色头像打开。
+  await clickMapPoint(player, { x: 245, y: 245 })
+  await expect(player.getByTestId('quick-character-sheet')).toHaveCount(0)
+  await expect(player.getByText(/选择移动落点/)).toBeVisible()
+  await player.getByTestId('character-rail-manual-hero').click()
+  await expect(player.getByTestId('quick-character-sheet')).toBeVisible({ timeout: 10_000 })
+  await player.getByRole('button', { name: '关闭快捷人物卡' }).click()
+  await clickMapPoint(player, { x: 245, y: 315 })
+  await expect.poll(async () => {
+    const state = await getState<{ maps: Array<{ id: string; tokens: Array<{ id: string; x: number; y: number }> }> }>(request, 'maps')
+    const token = state.maps.find((map) => map.id === mapId)?.tokens.find((candidate) => candidate.id === 'manual-player')
+    return token ? { x: token.x, y: token.y } : null
+  }, { timeout: 20_000 }).toEqual({ x: 245, y: 315 })
 
   const publicDiceCount = (await getState<{ events: unknown[] }>(request, 'dice-events')).events.length
   await dm.getByTestId('map-dice-roller-toggle').click()
@@ -202,14 +254,12 @@ test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并�
     ]))
   await expect(player.getByText('DM 秘密检定')).toHaveCount(0)
 
-  await dm.getByTestId('combat-settlement-mode').selectOption('automatic')
-  await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('自动结算')
   await expect(dm.getByTestId('combat-settlement-panel')).toHaveCount(0)
   await expect(dm.getByTestId('map-dice-roller-toggle')).toBeEnabled()
   await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
 
-  // 结算模式与回合推进会在共享 combat 资源中排队写入。一次结束点击必须
-  // 等待这些旧快照并以 inactive 终态收尾，不能被迟到的 active 快照重新激活。
+  // 回合推进会在共享 combat 资源中排队写入。一次结束点击必须以 inactive
+  // 终态收尾，不能被迟到的 active 快照重新激活。
   await expect(dm.getByTestId('dm-end-combat')).toBeVisible()
   await dm.getByTestId('dm-end-combat').click()
   await expect(dm.getByTestId('dm-start-combat')).toBeVisible({ timeout: 20_000 })

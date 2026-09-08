@@ -26,6 +26,8 @@ import {
   stablePdfIdentityHash,
 } from './pdfKnowledgeIdentity'
 import { verifyPdfEvidenceCandidate } from './pdfSourceEvidence'
+import { canonicalizePdfPersonRelationships, mergePdfPersonRecords } from './pdfPersonDeduplication'
+import { mergePdfEncounterRecords, mergePdfSceneRecords } from './pdfCampaignEventDeduplication'
 
 function legacySha(document: ExtractedPdfDocumentV1): string {
   const part = stablePdfIdentityHash(`${document.id}|${document.name}|${document.pageCount}`)
@@ -187,10 +189,12 @@ export async function finalizePdfCampaignAnalysisV2(input: {
   documents: readonly ExtractedPdfDocumentV1[]
 }): Promise<PdfCampaignAnalysisV2> {
   const collector = createEvidenceCollector(input.documents)
-  const people = disambiguatePdfEntityIds(await Promise.all(input.analysis.people.map((entry) => finalizeNamed(entry, 'person', collector))))
+  const sourcePeople = mergePdfPersonRecords(input.analysis.people)
+  const sourceRelationships = canonicalizePdfPersonRelationships(input.analysis.relationships, sourcePeople)
+  const people = disambiguatePdfEntityIds(await Promise.all(sourcePeople.map((entry) => finalizeNamed(entry, 'person', collector))))
   const locations = disambiguatePdfEntityIds(await Promise.all(input.analysis.locations.map((entry) => finalizeNamed(entry, 'location', collector))))
   const factions = disambiguatePdfEntityIds(await Promise.all(input.analysis.factions.map((entry) => finalizeNamed(entry, 'faction', collector))))
-  const relationships = disambiguatePdfRelationshipIds(await Promise.all(input.analysis.relationships.map((entry) => finalizeRelationship(entry, collector))))
+  const relationships = disambiguatePdfRelationshipIds(await Promise.all(sourceRelationships.map((entry) => finalizeRelationship(entry, collector))))
   const resolvedRelationships = resolvePdfRelationshipEndpoints({ people, locations, factions, relationships })
   const result: PdfCampaignAnalysisV2 = {
     schemaVersion: 2,
@@ -202,8 +206,9 @@ export async function finalizePdfCampaignAnalysisV2(input: {
     locations,
     factions,
     clues: disambiguatePdfEntityIds(await Promise.all(input.analysis.clues.map((entry) => finalizeNamed(entry, 'clue', collector)))),
-    scenes: disambiguatePdfEntityIds(await Promise.all(input.analysis.scenes.map((entry) => finalizeNamed(entry, 'scene', collector)))),
-    encounters: disambiguatePdfEntityIds(await Promise.all(input.analysis.encounters.map((entry) => finalizeNamed(entry, 'encounter', collector)))),
+    timelineEvents: disambiguatePdfEntityIds(await Promise.all((input.analysis.timelineEvents ?? []).map((entry) => finalizeNamed(entry, 'scene', collector)))),
+    scenes: disambiguatePdfEntityIds(await Promise.all(mergePdfSceneRecords(input.analysis.scenes).map((entry) => finalizeNamed(entry, 'scene', collector)))),
+    encounters: disambiguatePdfEntityIds(await Promise.all(mergePdfEncounterRecords(input.analysis.encounters).map((entry) => finalizeNamed(entry, 'encounter', collector)))),
     importCandidates: disambiguatePdfEntityIds(await Promise.all(input.analysis.importCandidates.map((entry) => finalizeNamed(entry, 'import-candidate', collector)))),
     prepTips: disambiguatePdfEntityIds(await Promise.all(input.analysis.prepTips.map((entry) => finalizePrepTip(entry, collector)))),
     warnings: [...input.analysis.warnings],

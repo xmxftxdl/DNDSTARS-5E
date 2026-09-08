@@ -1,27 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
-import { Crown, Download, Upload, User, UserPlus, Users } from 'lucide-react'
+import { Crown, Download, FileSpreadsheet, LoaderCircle, Trash2, Upload, User, UserPlus, Users } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import CharacterSheet from '../components/character/CharacterSheet'
 import CharacterSetupDialog, { type CharacterSetupResult } from '../components/character/CharacterSetupDialog'
 import CharacterCreationAdvancementFlow from '../components/character/CharacterCreationAdvancementFlow'
+import CharacterExcelImportDialog from '../components/character/CharacterExcelImportDialog'
 import DMRoster from '../components/character/DMRoster'
 import AccountCharacterVaultPanel from '../components/character/AccountCharacterVaultPanel'
 import { useCharacterStore } from '../store/characters'
+import { useMapStore } from '../store/maps'
 import { modeFromPort, playerSlotLabel } from '../lib/appMode'
 import {
   currentPlayerSlot,
   getAssignedPlayerCharacterId,
+  getRoomCharacterAssignment,
   playerViewCharacters,
+  playerCharacterPageActiveId,
   PLAYER_ASSIGNMENT_EVENT,
   setAssignedPlayerCharacterId,
 } from '../lib/playerView'
+import { getRoomSession } from '../lib/roomSession'
 import { characterExportFileName, makeCharacterExport, parseCharacterExport } from '../lib/characterTransfer'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { declarativeClassContentBindingV1 } from '../rulesets/dnd5e/declarativeClass'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
 import { dnd5eStartingEquipmentPlan, resolveDnd5eStartingEquipment } from '../rulesets/dnd5e/startingEquipment'
-import { showAppAlert } from '../lib/appDialog'
+import { showAppAlert, showAppConfirm } from '../lib/appDialog'
+import { createCharacterPortraitDataUrl } from '../lib/characterPortrait'
+import {
+  buildCharacterExcelImportDraft,
+  characterExcelImageFile,
+  parseCharacterExcelFile,
+  type CharacterExcelImportDraft,
+  type CharacterExcelWorkbook,
+} from '../lib/characterExcelImport'
 
 type Mode = 'player' | 'dm'
 
@@ -35,6 +48,13 @@ export default function CharactersPage() {
     targetLevel: number
   } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
+  const excelImportFileRef = useRef<HTMLInputElement>(null)
+  const [excelImportBusy, setExcelImportBusy] = useState(false)
+  const [excelImportPreview, setExcelImportPreview] = useState<{
+    workbook: CharacterExcelWorkbook
+    draft: CharacterExcelImportDraft
+    portraitDataUrl?: string
+  } | null>(null)
   const characters = useCharacterStore((s) => s.characters)
   const selectedId = useCharacterStore((s) => s.selectedId)
   const select = useCharacterStore((s) => s.select)
@@ -44,6 +64,7 @@ export default function CharactersPage() {
   const importCharacter = useCharacterStore((s) => s.importCharacter)
   const [assignmentTick, setAssignmentTick] = useState(0)
   const isDM = mode === 'dm'
+  const roomSession = getRoomSession()
   const playerSlot = currentPlayerSlot()
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
 
@@ -81,6 +102,9 @@ export default function CharactersPage() {
       background: setup.background,
       dnd5eBackgroundId: setup.dnd5eBackgroundId,
       dnd5eBackgroundSkillProficiencies: setup.backgroundSkillProficiencies,
+      dnd5eBackgroundToolProficiencies: setup.backgroundToolProficiencies,
+      dnd5eBackgroundLanguages: setup.backgroundLanguages,
+      dnd5eBackgroundVariantId: setup.backgroundVariantId,
       level: 1,
       ...(definition ? { dnd5eClassLevels: { [definition.id]: 1 } } : {}),
       ...(classContentBinding ? { dnd5eClassContentBindings: { [classContentBinding.classId]: classContentBinding } } : {}),
@@ -122,14 +146,18 @@ export default function CharactersPage() {
   }
 
   void assignmentTick
+  const roomCharacterAssignment = isDM ? null : getRoomCharacterAssignment()
   const playerVisibleList = playerViewCharacters(characters, {
     slot: playerSlot,
     assignedCharacterId,
   })
   const visibleList = playerVisibleList
   const assignableList = playerVisibleList
-  const activeId =
-    selectedId && visibleList.some((c) => c.id === selectedId) ? selectedId : visibleList[0]?.id ?? null
+  const activeId = playerCharacterPageActiveId(visibleList, {
+    isDM,
+    assignedCharacterId,
+    selectedCharacterId: selectedId,
+  })
   const activeCharacter = activeId ? visibleList.find((c) => c.id === activeId) ?? null : null
   const unfinishedCreation = !isDM && !showCreate
     ? visibleList.find((character) =>
@@ -188,6 +216,90 @@ export default function CharactersPage() {
     }
   }
 
+  const deleteActiveCharacter = async () => {
+    if (!activeCharacter) return
+    if (
+      roomCharacterAssignment?.enforced === true &&
+      roomCharacterAssignment.characterId === activeCharacter.id
+    ) {
+      await showAppAlert({
+        title: '角色由 DM 锁定',
+        message: '这个角色当前由 DM 指定给你。请先让 DM 解除分配或由 DM 删除。',
+        tone: 'danger',
+      })
+      return
+    }
+    const linkedTokens = useMapStore.getState().maps.flatMap((map) =>
+      map.tokens.filter((token) => token.characterId === activeCharacter.id).map((token) => ({
+        mapName: map.name,
+        tokenName: token.label,
+      })))
+    if (linkedTokens.length > 0) {
+      await showAppAlert({
+        title: '角色仍在地图上',
+        message: `该角色仍关联 ${linkedTokens.length} 个地图 Token。请让 DM 从角色名册删除，系统会同时清理这些 Token。`,
+        tone: 'danger',
+      })
+      return
+    }
+    const confirmed = await showAppConfirm({
+      title: '删除角色',
+      message: `确定从当前房间删除“${activeCharacter.name}”吗？角色的账号角色库备份仍会保留，可稍后重新带入房间。`,
+      confirmLabel: '确认删除',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    if (assignedCharacterId === activeCharacter.id) {
+      setAssignedPlayerCharacterId(null, playerSlot)
+    }
+    remove(activeCharacter.id)
+  }
+
+  const importCharacterExcelFile = async (file: File) => {
+    if (excelImportBusy) return
+    setExcelImportBusy(true)
+    try {
+      const workbook = await parseCharacterExcelFile(file)
+      const draft = buildCharacterExcelImportDraft(workbook)
+      let portraitDataUrl: string | undefined
+      const portraitCandidate = workbook.images[0]
+      if (portraitCandidate) {
+        try {
+          portraitDataUrl = await createCharacterPortraitDataUrl(characterExcelImageFile(portraitCandidate))
+        } catch (error) {
+          console.warn('[character-excel-portrait-skipped]', error)
+          draft.warnings = [...draft.warnings, '读取到内嵌图片，但无法将其转换为角色立绘。']
+        }
+      }
+      setExcelImportPreview({ workbook, draft, ...(portraitDataUrl ? { portraitDataUrl } : {}) })
+    } catch (error) {
+      console.error('[character-excel-import-failed]', error)
+      await showAppAlert({
+        title: '无法读取人物卡 Excel',
+        message: error instanceof Error ? error.message : '请确认文件是有效的 .xlsx 或 .xlsm 人物卡。',
+        tone: 'danger',
+      })
+    } finally {
+      setExcelImportBusy(false)
+    }
+  }
+
+  const confirmExcelImport = (character: Parameters<typeof importCharacter>[0]) => {
+    const id = importCharacter(isDM && roomSession?.role === 'dm'
+      ? {
+          ...character,
+          roomId: roomSession.roomId,
+          roomMemberId: undefined,
+          ownerAccountId: undefined,
+          player: 'DM 待分配',
+          visibleToPlayers: true,
+        }
+      : character)
+    if (!isDM) setAssignedPlayerCharacterId(id, playerSlot)
+    select(id)
+    setExcelImportPreview(null)
+  }
+
   useEffect(() => {
     if (!isDM && selectedId && !visibleList.some((c) => c.id === selectedId)) {
       select(visibleList[0]?.id ?? null)
@@ -195,7 +307,7 @@ export default function CharactersPage() {
   }, [isDM, selectedId, select, visibleList])
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="角色"
         description={isDM ? '查看本房间玩家与他们创建的角色。' : '创建、导入并编辑你自己的角色卡。'}
@@ -237,16 +349,28 @@ export default function CharactersPage() {
                     e.currentTarget.value = ''
                   }}
                 />
+                <input
+                  ref={excelImportFileRef}
+                  type="file"
+                  accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,.xlsx,.xlsm"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    if (file) void importCharacterExcelFile(file)
+                    event.currentTarget.value = ''
+                  }}
+                />
                 <label className="glass flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-300">
                   <span className="text-xs font-semibold text-slate-500">{playerSlotLabel(playerSlot)}</span>
                   <select
                     value={assignedCharacterId ?? ''}
+                    disabled={roomCharacterAssignment?.enforced === true}
                     onChange={(e) => {
                       setAssignedPlayerCharacterId(e.target.value || null, playerSlot)
                       if (e.target.value) select(e.target.value)
                     }}
                     className="min-w-36 rounded-lg border border-white/10 bg-void-900/70 px-2 py-1 text-sm text-slate-100 outline-none focus:border-arcane-500"
-                    title="选择当前控制的角色"
+                    title={roomCharacterAssignment?.enforced ? '该角色由 DM 指定' : '选择当前控制的角色'}
                   >
                     <option value="">未选择角色</option>
                     {assignableList.map((c) => (
@@ -264,6 +388,14 @@ export default function CharactersPage() {
                   载入角色
                 </button>
                 <button
+                  onClick={() => excelImportFileRef.current?.click()}
+                  disabled={excelImportBusy}
+                  className="glass flex items-center gap-2 rounded-xl border-violet-400/20 px-4 py-2.5 text-sm font-semibold text-violet-100 transition-colors hover:border-violet-400/60 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                >
+                  {excelImportBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                  {excelImportBusy ? '解析人物卡…' : 'Excel / AI 填卡'}
+                </button>
+                <button
                   onClick={exportCharacter}
                   disabled={!activeCharacter}
                   className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 transition-colors hover:border-arcane-400/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
@@ -272,11 +404,43 @@ export default function CharactersPage() {
                   导出角色
                 </button>
                 <button
+                  type="button"
+                  onClick={() => void deleteActiveCharacter()}
+                  disabled={!activeCharacter}
+                  className="glass flex items-center gap-2 rounded-xl border-red-400/20 px-4 py-2.5 text-sm font-semibold text-red-200 transition-colors hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除角色
+                </button>
+                <button
                   onClick={openCreateDialog}
                   className="glow-arcane flex items-center gap-2 rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600 px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:scale-[1.02]"
                 >
                   <UserPlus className="h-4 w-4" />
                   新建角色
+                </button>
+              </>
+            )}
+            {isDM && (
+              <>
+                <input
+                  ref={excelImportFileRef}
+                  type="file"
+                  accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,.xlsx,.xlsm"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    if (file) void importCharacterExcelFile(file)
+                    event.currentTarget.value = ''
+                  }}
+                />
+                <button
+                  onClick={() => excelImportFileRef.current?.click()}
+                  disabled={excelImportBusy}
+                  className="glass flex items-center gap-2 rounded-xl border-violet-400/20 px-4 py-2.5 text-sm font-semibold text-violet-100 transition-colors hover:border-violet-400/60 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                >
+                  {excelImportBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+                  {excelImportBusy ? '解析人物卡…' : 'Excel / AI 填卡并待分配'}
                 </button>
               </>
             )}
@@ -311,6 +475,17 @@ export default function CharactersPage() {
           targetLevel={effectivePendingCreation.targetLevel}
           onComplete={finishPendingCreation}
           onAbandon={abandonPendingCreation}
+        />
+      )}
+      {excelImportPreview && (
+        <CharacterExcelImportDialog
+          workbook={excelImportPreview.workbook}
+          initialDraft={excelImportPreview.draft}
+          portraitDataUrl={excelImportPreview.portraitDataUrl}
+          existingNames={characters.map((character) => character.name)}
+          usePlayerAi={!isDM}
+          onCancel={() => setExcelImportPreview(null)}
+          onImport={confirmExcelImport}
         />
       )}
     </div>

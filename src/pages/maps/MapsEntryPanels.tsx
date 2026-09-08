@@ -88,17 +88,19 @@ export function MapsEmptyMapPanel(props: {
           <EmptyState
             icon={MapIcon}
             title="还没有地图"
-            description="上传一张图片作为战斗地图，之后可以叠加网格、放置 token、开始战斗。"
-            hint="支持 PNG / JPG · 图片本地存储，刷新不丢失"
+            description="上传地图图片或 UVTT 地图包；UVTT 会自动恢复底图、网格、墙体、门和光源。"
+            hint="支持 PNG / JPG / WebP / UVTT / DD2VTT · 文件本地存储，刷新不丢失"
             action={props.isDm ? (
-              <button
-                type="button"
-                onClick={props.onUpload}
-                className="flex items-center gap-2 rounded-xl bg-arcane-500/20 px-4 py-2 text-sm font-semibold text-arcane-200 transition-colors hover:bg-arcane-500/30"
-              >
-                <Upload className="h-4 w-4" />
-                选择图片上传
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={props.onUpload}
+                  className="flex items-center gap-2 rounded-xl bg-arcane-500/20 px-4 py-2 text-sm font-semibold text-arcane-200 transition-colors hover:bg-arcane-500/30"
+                >
+                  <Upload className="h-4 w-4" />
+                  选择地图 / UVTT
+                </button>
+              </div>
             ) : undefined}
           />
         </div>

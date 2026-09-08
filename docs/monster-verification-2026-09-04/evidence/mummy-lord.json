@@ -1,0 +1,624 @@
+{
+  "id": "srd-5.1:mummy-lord",
+  "slug": "mummy-lord",
+  "name": "木乃伊领主",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：命中特效声明的每 24 小时降低生命值上限原先被运行状态丢弃，时钟也未执行。现已覆盖状态持久化、时间边界、重复同步去重、连续两次恶化、重施不推迟原时钟、治愈后的上限恢复，以及木乃伊诅咒将上限降至零时的遗体毁灭。",
+    "已修复：沙旋风现在以 Headless 传奇移动窗口结算，固定授予 60 尺可选移动并扣除 2 点；移动窗口内免疫所有伤害及擒抱、石化、倒地、束缚、震慑，移动完成或先攻边界改变时立即清除。7073/7074 双端真实 UI 已验证点数、落点、状态和日志同步。",
+    "已修复运行时与入口：传奇移动使用当前窗口内的一次可选额度，不再累加到普通移动池；翼击限定飞行。已覆盖超距、模式错误、重复和过期请求；真实 UI 专项已覆盖取消移动与完成移动。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "rotting-fist",
+      "name": "腐烂拳击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].magical",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].savingThrow.magical",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].modifiers.preventHealing",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.intervalHours",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.average",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.count",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.sides",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.bonus",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.execution",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.recovery",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.onMaximumZero",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "rotting-fist-mummy-rot:apply",
+        "rotting-fist-mummy-rot:save",
+        "calendar-boundary-replay-and-cure"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "dreadful-glare",
+      "name": "恐怖凝视",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource",
+        "rule.durationRounds",
+        "rule.expiresAtSourceTurnEnd",
+        "rule.additionalConditionsOnFailedSave[].condition",
+        "rule.additionalConditionsOnFailedSave[].durationRounds",
+        "rule.additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "rule.additionalConditionsOnFailedSave[].expiresAtSourceTurnEnd",
+        "rule.additionalConditionsOnFailedSave[].minimumFailureMargin",
+        "rule.additionalConditionsOnFailedSave[].dependsOnCondition",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.actionKey",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.grantedActionKeys[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-rotting-fist-only",
+      "name": "多重攻击: 腐烂拳击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "attack-rotting-fist",
+      "name": "攻击",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "attack-dreadful-glare",
+      "name": "攻击",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource",
+        "rule.durationRounds",
+        "rule.expiresAtSourceTurnEnd",
+        "rule.additionalConditionsOnFailedSave[].condition",
+        "rule.additionalConditionsOnFailedSave[].durationRounds",
+        "rule.additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "rule.additionalConditionsOnFailedSave[].expiresAtSourceTurnEnd",
+        "rule.additionalConditionsOnFailedSave[].minimumFailureMargin",
+        "rule.additionalConditionsOnFailedSave[].dependsOnCondition",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.actionKey",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.grantedActionKeys[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "blinding-dust",
+      "name": "致盲尘土",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "blasphemous-word-costs-2-actions",
+      "name": "渎神真言（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.targetCreatureTypeExclusions[]",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.requiresTargetCanHearSource",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.conditionOnFailedSave.expiresAtSourceTurnEnd"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "channel-negative-energy-costs-2-actions",
+      "name": "引导负能量（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "automatic-area-active-effect",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.radiusFeet",
+        "rule.target",
+        "rule.ignoresLineOfEffect",
+        "rule.duration",
+        "rule.magical",
+        "rule.modifiers.preventHealing"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "whirlwind-of-sand-costs-2-actions",
+      "name": "沙旋风（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "grant-movement",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.maximumDistanceFeet",
+        "rule.provokesOpportunityAttacks",
+        "rule.temporaryDamageImmunity",
+        "rule.temporaryConditionImmunities[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "no-points",
+        "move",
+        "move-too-far",
+        "window-expired"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 27,
+      "slug": "mummy-lord",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:00:05.142Z",
+      "name": "木乃伊领主",
+      "actionId": "rotting-fist",
+      "actionName": "腐烂拳击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "15",
+      "total": 334,
+      "mapId": "verify-ui-mummy-lord-rotting-fist-1788566405207",
+      "combatId": "verify-ui-mummy-lord-rotting-fist-1788566405207:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "木乃伊领主 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 4+9=13 命中；共造成 26 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:00 PM\n结算\n\n木乃伊领主 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 4+9=13 命中；共造成 26 点伤害。\n\n查看 Headless 结算依据（11）\n怪物动作：腐烂拳击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 4；最终采用 4；调整值 +9。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 腐烂拳击（基础伤害 1·钝击）｜3d6 骰面：3 + 3 + 4 = 10｜固定加值 +4｜小计 14\n伤害骰 · 腐烂拳击（基础伤害 2·黯蚀）｜6d6 骰面：1 + 1 + 5 + 1 + 3 + 1 = 12｜固定加值 +0｜小计 12\n木乃伊领主｜消耗动作\n验证目标｜体质豁免 d20 1 +10 = 11 vs DC 16｜失败\n验证目标｜受到 26 点伤害｜HP 320 → 294\n验证目标｜效果生效：srd-5.1:monster:mummy:mummy-rot",
+      "playerLog": "木乃伊领主 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 4+9=13 命中；共造成 26 点伤害。",
+      "afterHp": 294,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "curse"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:00:35.882Z",
+      "evidenceFile": "ui-cases/monsters/027-mummy-lord.json"
+    },
+    {
+      "index": 202,
+      "slug": "mummy-lord",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:00:54.215Z",
+      "name": "木乃伊领主",
+      "actionId": "rotting-fist",
+      "actionName": "腐烂拳击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-mummy-lord-rotting-fist-1788562854269",
+      "combatId": "verify-ui-mummy-lord-rotting-fist-1788562854269:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "木乃伊领主 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 5+9=14 命中；共造成 33 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:01 PM\n结算\n\n木乃伊领主 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 5+9=14 命中；共造成 33 点伤害。\n\n查看 Headless 结算依据（10）\n怪物动作：腐烂拳击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 5；最终采用 5；调整值 +9。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 腐烂拳击（基础伤害 1·钝击）｜3d6 骰面：4 + 1 + 4 = 9｜固定加值 +4｜小计 13\n伤害骰 · 腐烂拳击（基础伤害 2·黯蚀）｜6d6 骰面：5 + 3 + 3 + 2 + 3 + 4 = 20｜固定加值 +0｜小计 20\n木乃伊领主｜消耗动作\n验证目标｜体质豁免 d20 8 +10 = 18 vs DC 16｜成功\n验证目标｜受到 33 点伤害｜HP 320 → 287",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/木乃伊领主 使用腐烂拳击攻击 验证目标：/)\nExpected: \u001b[32m\"木乃伊领主 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 5+9=14 命中；共造成 33 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/木乃伊领主 使用腐烂拳击攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T23:01:34.098Z",
+      "evidenceFile": "ui-cases/monsters/202-mummy-lord.json"
+    },
+    {
+      "mapId": "mummy-sand-ui-1788602880808",
+      "combatId": "mummy-sand-ui-1788602880808:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "startedAt": "2026-09-05T10:08:01.862Z",
+      "before": {
+        "actorPosition": {
+          "x": 175,
+          "y": 245
+        },
+        "legendaryPoints": 3
+      },
+      "legendaryWindow": "传奇动作时机\n\n沙旋风验证目标 的回合即将结束。使用一次传奇动作，或跳过后继续推进先攻。\n\n传奇动作点\n\n3 / 3\n\n攻击\n消耗 1 点\n\n木乃伊领主以腐烂拳发动一次攻击，或使用恐怖凝视。\n\n攻击\n消耗 1 点\n\n木乃伊领主以腐烂拳发动一次攻击，或使用恐怖凝视。\n\n需要 DM 裁定；选择后可填写最终效果，批准时才扣除传奇动作点。\n\n致盲尘土\n消耗 1 点\n\n令人目盲的尘土和沙砾以魔法在木乃伊领主周围旋舞。木乃伊领主 5 尺内的每个生物都必须通过一次 DC 16 的体质豁免，否则会目盲至该生物下一回合结束。\n\n渎神真言（消耗 2 动作）\n消耗 2 点\n\n木乃伊领主吐出亵渎之言。木乃伊领主 10 尺内每个能听见这句魔法话语的非亡灵生物都必须通过一次 DC 16 的体质豁免，否则会震慑至木乃伊领主下一回合结束。\n\n引导负能量（消耗 2 动作）\n消耗 2 点\n\n木乃伊领主以魔法释放负能量。木乃伊领主 60 尺内的生物无法恢复生命值，包括位于屏障后或拐角另一侧的生物。该效果持续到木乃伊领主下一回合结束。\n\n需要 DM 裁定；选择后可填写最终效果，批准时才扣除传奇动作点。\n\n沙旋风（消耗 2 动作）\n消耗 2 点\n\n木乃伊领主以魔法变成一股沙旋风，移动至多 60 尺，然后恢复正常形态。在旋风形态下，木乃伊领主免疫所有伤害，并且无法被擒抱、石化、击倒、束缚或震慑。木乃伊领主穿戴或携带的装备仍归它持有。\n\n攻击目标\n沙旋风验证目标\n跳过并继续\n使用传奇动作",
+      "movementPrompt": "为“沙旋风（消耗 2 动作） · 可选移动 60 尺（取消则留在原地）”选择移动终点（0/1）。\n取消本次 Activity",
+      "afterPurchase": {
+        "id": "actor",
+        "label": "木乃伊领主",
+        "x": 175,
+        "y": 245,
+        "color": "#a16207",
+        "emoji": "M",
+        "size": 1,
+        "creatureSize": "中型",
+        "type": "enemy",
+        "poolId": "srd-5.1:mummy-lord",
+        "hp": 97,
+        "maxHp": 97,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "monsterLegendaryActionPoints": 1,
+          "monsterLegendaryMovement": {
+            "schemaVersion": 1,
+            "actionId": "whirlwind-of-sand-costs-2-actions",
+            "boundaryKey": "mummy-sand-ui-1788602880808:combat:1:target",
+            "maximumFeet": 60,
+            "traversalMode": "any",
+            "provokesOpportunityAttacks": true,
+            "temporaryDamageImmunity": "all",
+            "temporaryConditionImmunities": [
+              "grappled",
+              "petrified",
+              "prone",
+              "restrained",
+              "stunned"
+            ]
+          },
+          "monsterActionUsesByActionId": {},
+          "monsterSpellSlots": {
+            "1": {
+              "current": 4,
+              "max": 4
+            },
+            "2": {
+              "current": 3,
+              "max": 3
+            },
+            "3": {
+              "current": 3,
+              "max": 3
+            },
+            "4": {
+              "current": 3,
+              "max": 3
+            },
+            "5": {
+              "current": 2,
+              "max": 2
+            },
+            "6": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "monsterSpellUsesBySpellId": {}
+        },
+        "dnd5eWorldTimeAppliedMinute": 480
+      },
+      "afterMove": {
+        "id": "actor",
+        "label": "木乃伊领主",
+        "x": 175,
+        "y": 175,
+        "color": "#a16207",
+        "emoji": "M",
+        "size": 1,
+        "creatureSize": "中型",
+        "type": "enemy",
+        "poolId": "srd-5.1:mummy-lord",
+        "hp": 97,
+        "maxHp": 97,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "turnStartResolvedTurnKey": "mummy-sand-ui-1788602880808:combat:1:actor",
+          "monsterMechanicMovementTurnKey": "mummy-sand-ui-1788602880808:combat:1:target",
+          "monsterMechanicMovementFeet": 5,
+          "monsterMechanicMovementOrigin": {
+            "x": 175,
+            "y": 245
+          },
+          "monsterMechanicMovementLast": {
+            "x": 175,
+            "y": 175
+          },
+          "monsterMechanicMovementStraight": true,
+          "monsterLegendaryActionPoints": 3,
+          "monsterActionUsesByActionId": {},
+          "monsterSpellSlots": {
+            "1": {
+              "current": 4,
+              "max": 4
+            },
+            "2": {
+              "current": 3,
+              "max": 3
+            },
+            "3": {
+              "current": 3,
+              "max": 3
+            },
+            "4": {
+              "current": 3,
+              "max": 3
+            },
+            "5": {
+              "current": 2,
+              "max": 2
+            },
+            "6": {
+              "current": 1,
+              "max": 1
+            }
+          },
+          "monsterSpellUsesBySpellId": {}
+        },
+        "dnd5eWorldTimeAppliedMinute": 480,
+        "movementAnimation": {
+          "id": "monster-move:mummy-sand-ui-1788602880808:combat:1:actor:1788602904753",
+          "points": [
+            {
+              "x": 175,
+              "y": 245
+            },
+            {
+              "x": 175,
+              "y": 175
+            }
+          ],
+          "durationMs": 245,
+          "issuedAt": 1788602904853
+        }
+      },
+      "dmLog": "木乃伊领主使用传奇动作沙旋风（消耗 2 动作）。",
+      "playerLog": "木乃伊领主使用传奇动作沙旋风（消耗 2 动作）。",
+      "status": "passed",
+      "finishedAt": "2026-09-05T10:08:27.957Z",
+      "mode": "protected-legendary-movement-special",
+      "actionId": "whirlwind-of-sand-costs-2-actions"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "复苏",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 43,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

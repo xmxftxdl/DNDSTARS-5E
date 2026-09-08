@@ -1,17 +1,26 @@
 import type { CombatSettlementMode } from './combatSettlementMode'
 
-export type Dnd5eMonsterControlMode = 'automatic' | 'manual'
+export type Dnd5eMonsterControlMode = 'manual'
 
 /**
  * DM-authoritative monster control state shared with every room client.
  *
- * A requested takeover deliberately remains in automatic mode until the
- * current Headless action reaches a settlement boundary. This prevents an
- * already-hit attack from losing its damage roll when the DM presses pause.
+ * `automatic` remains readable only for schema-v1 snapshots written by older
+ * clients. Every newly created or normalized state is permanently manual;
+ * live combat no longer exposes or schedules monster AI turns.
  */
 export interface Dnd5eMonsterControlStateV1 {
   schemaVersion: 1
-  mode: Dnd5eMonsterControlMode
+  mode: 'manual'
+  pauseRequested: false
+  controlledTokenId?: string
+  updatedAt: number
+}
+
+/** Wire-only shape accepted while old room snapshots are being migrated. */
+export interface Dnd5eMonsterControlWireStateV1 {
+  schemaVersion: 1
+  mode: 'automatic' | 'manual'
   pauseRequested: boolean
   controlledTokenId?: string
   requestedAt?: number
@@ -23,12 +32,12 @@ function finiteTimestamp(value: unknown, fallback: number): number {
 }
 
 export function createDnd5eMonsterControlState(
-  settlementMode: CombatSettlementMode,
+  _settlementMode: CombatSettlementMode,
   now: number,
 ): Dnd5eMonsterControlStateV1 {
   return {
     schemaVersion: 1,
-    mode: settlementMode === 'manual' ? 'manual' : 'automatic',
+    mode: 'manual',
     pauseRequested: false,
     updatedAt: finiteTimestamp(now, 0),
   }
@@ -37,6 +46,13 @@ export function createDnd5eMonsterControlState(
 export function isDnd5eMonsterControlStateV1(
   value: unknown,
 ): value is Dnd5eMonsterControlStateV1 {
+  return isDnd5eMonsterControlWireStateV1(value) &&
+    value.mode === 'manual' && value.pauseRequested === false
+}
+
+export function isDnd5eMonsterControlWireStateV1(
+  value: unknown,
+): value is Dnd5eMonsterControlWireStateV1 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const state = value as Record<string, unknown>
   if (state.schemaVersion !== 1) return false
@@ -71,85 +87,16 @@ export function normalizeDnd5eMonsterControlState(
   settlementMode: CombatSettlementMode,
   now: number,
 ): Dnd5eMonsterControlStateV1 {
-  if (!isDnd5eMonsterControlStateV1(value)) {
+  if (!isDnd5eMonsterControlWireStateV1(value)) {
     return createDnd5eMonsterControlState(settlementMode, now)
   }
-  if (settlementMode === 'manual') {
-    return {
-      schemaVersion: 1,
-      mode: 'manual',
-      pauseRequested: false,
-      controlledTokenId: value.controlledTokenId,
-      updatedAt: value.updatedAt,
-    }
-  }
-  return {
-    ...value,
-    controlledTokenId: value.controlledTokenId?.trim(),
-  }
-}
-
-export function requestDnd5eMonsterTakeover(
-  state: Dnd5eMonsterControlStateV1,
-  input: {
-    currentTokenId?: string
-    eventInFlight: boolean
-    now: number
-  },
-): Dnd5eMonsterControlStateV1 {
-  const updatedAt = finiteTimestamp(input.now, state.updatedAt)
-  if (!input.eventInFlight) {
-    return {
-      schemaVersion: 1,
-      mode: 'manual',
-      pauseRequested: false,
-      controlledTokenId: input.currentTokenId,
-      updatedAt,
-    }
-  }
-  return {
-    schemaVersion: 1,
-    mode: 'automatic',
-    pauseRequested: true,
-    controlledTokenId: input.currentTokenId,
-    requestedAt: updatedAt,
-    updatedAt,
-  }
-}
-
-export function completeDnd5eMonsterTakeoverAtSafePoint(
-  state: Dnd5eMonsterControlStateV1,
-  currentTokenId: string,
-  now: number,
-): Dnd5eMonsterControlStateV1 {
-  if (!state.pauseRequested) return state
-  if (state.controlledTokenId && state.controlledTokenId !== currentTokenId) return state
   return {
     schemaVersion: 1,
     mode: 'manual',
     pauseRequested: false,
-    controlledTokenId: currentTokenId,
-    updatedAt: finiteTimestamp(now, state.updatedAt),
+    controlledTokenId: value.controlledTokenId?.trim(),
+    updatedAt: value.updatedAt,
   }
-}
-
-export function resumeDnd5eMonsterAutomation(
-  state: Dnd5eMonsterControlStateV1,
-  now: number,
-): Dnd5eMonsterControlStateV1 {
-  return {
-    schemaVersion: 1,
-    mode: 'automatic',
-    pauseRequested: false,
-    updatedAt: finiteTimestamp(now, state.updatedAt),
-  }
-}
-
-export function dnd5eMonsterAutomationEnabled(
-  state: Dnd5eMonsterControlStateV1,
-  settlementMode: CombatSettlementMode,
-): boolean {
-  return settlementMode === 'automatic' && state.mode === 'automatic'
 }
 
 export function dnd5eMonsterManualControlEnabled(
@@ -161,7 +108,7 @@ export function dnd5eMonsterManualControlEnabled(
 /**
  * Returns whether a dropped Token must use the current monster's authoritative
  * Headless movement transaction. Keep this check independent from React's
- * rendered/selected Token: takeover and initiative snapshots can settle in
+ * rendered/selected Token: selection and initiative snapshots can settle in
  * different frames, while the initiative refs remain the movement authority.
  */
 export function dnd5eMonsterManualMovementEnabled(

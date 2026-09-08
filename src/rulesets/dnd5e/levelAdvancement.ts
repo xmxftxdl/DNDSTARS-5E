@@ -57,6 +57,12 @@ import {
   declarativeClassAdvancementResolutionV1,
   declarativeClassContentBindingV1,
 } from './declarativeClass'
+import {
+  applyDnd5eContentBuildChoicesV1,
+  dnd5eBuildChoiceRequirementsV1,
+  type Dnd5eBuildChoiceRequirementV1,
+} from './buildChoices'
+import type { Dnd5eAdvancementDefinitionV1 } from './activities/dnd5eAdvancementContracts'
 
 const ABILITY_KEYS: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
 
@@ -88,6 +94,13 @@ export interface Dnd5eLevelAdvancementPlan {
   subclassRequired: boolean
   subclassOptions: readonly { id: string; name: string; summary: string }[]
   choiceRequirements: readonly Dnd5eAdvancementChoiceRequirement[]
+  /** Content-neutral subclass grants resolved atomically with this class level. */
+  contentAdvancements: readonly {
+    contentId: string
+    label: string
+    advancements: readonly Dnd5eAdvancementDefinitionV1[]
+    requirements: readonly Dnd5eBuildChoiceRequirementV1[]
+  }[]
   spellAdvancement?: Dnd5eSpellAdvancementPlan
   multiclass: boolean
   rolledHitPointsAllowed: boolean
@@ -113,6 +126,8 @@ export type Dnd5eLevelAdvancementFailure =
   | 'missing-asi-choice'
   | 'invalid-asi-choice'
   | 'invalid-feat'
+  | 'missing-content-choice'
+  | 'invalid-content-choice'
   | 'missing-class-choice'
   | 'invalid-class-choice'
   | 'missing-spell-choice'
@@ -137,8 +152,12 @@ function advancementSnapshot(character: Character): Dnd5eLevelAdvancementSnapsho
       : undefined,
     abilities: { ...character.abilities },
     skills: [...character.skills],
+    savingThrows: [...character.savingThrows],
     dnd5eClassChoices: character.dnd5eClassChoices ? structuredClone(character.dnd5eClassChoices) : undefined,
     dnd5eFeatIds: character.dnd5eFeatIds ? [...character.dnd5eFeatIds] : undefined,
+    dnd5eContentChoices: character.dnd5eContentChoices
+      ? structuredClone(character.dnd5eContentChoices)
+      : undefined,
     hitPointMaximumMode: character.hitPointMaximumMode,
     hitPointRolls: character.hitPointRolls ? [...character.hitPointRolls] : undefined,
     hitPointDice: character.hitPointDice?.map((pool) => ({ ...pool })),
@@ -154,7 +173,26 @@ function restoreAdvancementSnapshot(
   return {
     ...character,
     ...cloneSnapshot(snapshot),
+    savingThrows: snapshot.savingThrows ? [...snapshot.savingThrows] : [...character.savingThrows],
   }
+}
+
+function subclassContentAdvancements(
+  subclassId: string | undefined,
+  classLevel: number,
+): Dnd5eLevelAdvancementPlan['contentAdvancements'] {
+  if (!subclassId) return []
+  const subclass = dnd5ePluginSubclassDefinition(subclassId)
+  if (!subclass) return []
+  const advancements = subclass.advancements?.filter((advancement) => advancement.level === classLevel) ?? []
+  if (advancements.length === 0) return []
+  const contentId = `${subclass.id}:level-${classLevel}`
+  return [{
+    contentId,
+    label: `${subclass.name} · ${classLevel}级构筑`,
+    advancements: advancements.map((advancement) => structuredClone(advancement)),
+    requirements: dnd5eBuildChoiceRequirementsV1(advancements),
+  }]
 }
 
 function progressionFeatures(classId: Dnd5eClassId, fromClassLevel: number, toClassLevel: number) {
@@ -420,6 +458,9 @@ export function buildDnd5eLevelAdvancementPlan(
     choiceRequirements: subclassRequired
       ? []
       : choiceRequirements(character, classId, fromClassLevel, toClassLevel, subclassId),
+    contentAdvancements: subclassRequired
+      ? []
+      : subclassContentAdvancements(subclassId, toClassLevel),
     spellAdvancement: buildDnd5eSpellAdvancementPlan(
       character,
       classId,
@@ -445,13 +486,22 @@ function applyAsiChoices(
   character: Character,
   plan: Dnd5eLevelAdvancementPlan,
   decision: Dnd5eLevelAdvancementDecisionV1,
-): { ok: true; abilities: Character['abilities']; featIds: string[] } | {
+): { ok: true; character: Character } | {
   ok: false
   reason: Dnd5eLevelAdvancementFailure
 } {
   const byLevel = new Map(decision.asiChoices.map((entry) => [entry.classLevel, entry.choice]))
-  const abilities = { ...character.abilities }
-  const featIds = [...new Set(character.dnd5eFeatIds ?? [])]
+  let working: Character = {
+    ...character,
+    abilities: { ...character.abilities },
+    skills: [...character.skills],
+    savingThrows: [...character.savingThrows],
+    dnd5eContentChoices: character.dnd5eContentChoices
+      ? structuredClone(character.dnd5eContentChoices)
+      : undefined,
+  }
+  const featIds = [...new Set(working.dnd5eFeatIds ?? [])]
+  const selectedFeatIds = new Set<string>()
   for (const classLevel of plan.asiLevels) {
     const choice = byLevel.get(classLevel)
     if (!choice) return { ok: false, reason: 'missing-asi-choice' }
@@ -461,12 +511,12 @@ function applyAsiChoices(
       if (
         total !== 2 ||
         entries.some(([key, increase]) =>
-          !ABILITY_KEYS.includes(key) || ![1, 2].includes(increase) || abilities[key] + increase > 20)
+          !ABILITY_KEYS.includes(key) || ![1, 2].includes(increase) || working.abilities[key] + increase > 20)
       ) return { ok: false, reason: 'invalid-asi-choice' }
-      for (const [key, increase] of entries) abilities[key] += increase
+      for (const [key, increase] of entries) working.abilities[key] += increase
       continue
     }
-    const candidate = { ...character, level: plan.toLevel, abilities }
+    const candidate = { ...working, level: plan.toLevel }
     const pluginFeat = registeredDnd5ePluginFeats().find((entry) => entry.id === choice.featId)
     const srdFeat = dnd5eSrdFeatDefinition(choice.featId)
     const available = pluginFeat
@@ -477,10 +527,36 @@ function applyAsiChoices(
     if (!available || featIds.includes(choice.featId)) {
       return { ok: false, reason: 'invalid-feat' }
     }
+    const selected = decision.contentChoiceSelections?.[choice.featId]
+    if (pluginFeat?.advancements?.length) {
+      const built = applyDnd5eContentBuildChoicesV1({
+        character: candidate,
+        contentId: choice.featId,
+        advancements: pluginFeat.advancements,
+        selections: selected,
+      })
+      if (!built.ok) return {
+        ok: false,
+        reason: built.reason === 'missing-choice' ? 'missing-content-choice' : 'invalid-content-choice',
+      }
+      working = built.character
+    } else if (selected && Object.keys(selected).length > 0) {
+      return { ok: false, reason: 'invalid-content-choice' }
+    }
     featIds.push(choice.featId)
+    selectedFeatIds.add(choice.featId)
+    working.dnd5eFeatIds = [...featIds]
   }
   if (byLevel.size !== plan.asiLevels.length) return { ok: false, reason: 'invalid-asi-choice' }
-  return { ok: true, abilities, featIds }
+  const allowedContentIds = new Set([
+    ...selectedFeatIds,
+    ...plan.contentAdvancements.map((entry) => entry.contentId),
+  ])
+  if (Object.keys(decision.contentChoiceSelections ?? {}).some((contentId) => !allowedContentIds.has(contentId))) {
+    return { ok: false, reason: 'invalid-content-choice' }
+  }
+  working.dnd5eFeatIds = [...featIds]
+  return { ok: true, character: working }
 }
 
 function applyGenericChoices(
@@ -725,8 +801,7 @@ export function applyDnd5eLevelAdvancement(
   }
   const asi = applyAsiChoices(provisional, plan, decision)
   if (!asi.ok) return asi
-  provisional.abilities = asi.abilities
-  provisional.dnd5eFeatIds = asi.featIds
+  Object.assign(provisional, asi.character)
 
   const spells = applyDnd5eSpellAdvancement(
     provisional,
@@ -743,6 +818,20 @@ export function applyDnd5eLevelAdvancement(
   Object.assign(provisional, spells.character)
   provisional.dnd5eClassChoices = choices.choices
   if ('skills' in choices && Array.isArray(choices.skills)) provisional.skills = choices.skills
+
+  for (const content of plan.contentAdvancements) {
+    const built = applyDnd5eContentBuildChoicesV1({
+      character: provisional,
+      contentId: content.contentId,
+      advancements: content.advancements,
+      selections: decision.contentChoiceSelections?.[content.contentId],
+    })
+    if (!built.ok) return {
+      ok: false,
+      reason: built.reason === 'missing-choice' ? 'missing-content-choice' : 'invalid-content-choice',
+    }
+    Object.assign(provisional, built.character)
+  }
 
   if (decision.hitPointMethod === 'rolled') {
     provisional.hitPointMaximumMode = 'manual'

@@ -24,6 +24,8 @@ export interface RectAoeTargeting {
   origin: 'point'
   widthFeet: number
   heightFeet: number
+  /** Grid-snapped cubes occupy their declared number of whole cells exactly. */
+  gridAligned?: boolean
   /** Optional casting-time lower bounds; the declared dimensions remain the maxima. */
   minimumWidthFeet?: number
   minimumHeightFeet?: number
@@ -63,7 +65,8 @@ export interface SkillAoeDimensionSelection {
 function selectedDimension(value: number | undefined, minimum: number | undefined, maximum: number): number | null {
   if (value == null) return maximum
   const lower = minimum ?? maximum
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value % DND_FEET_PER_CELL !== 0) return null
+  const stepFeet = minimum != null && minimum % DND_FEET_PER_CELL !== 0 ? DND_FEET_PER_CELL / 2 : DND_FEET_PER_CELL
+  if (!Number.isFinite(value) || value % stepFeet !== 0) return null
   if (value < lower || value > maximum) return null
   return value
 }
@@ -134,6 +137,12 @@ function intervalsOverlap(a: { min: number; max: number }, b: { min: number; max
   return a.min <= b.max && b.min <= a.max
 }
 
+/** Positive projected overlap; sharing only an edge or corner is not area coverage. */
+function intervalsOverlapArea(a: { min: number; max: number }, b: { min: number; max: number }): boolean {
+  const epsilon = 1e-9
+  return a.min < b.max - epsilon && b.min < a.max - epsilon
+}
+
 function cellCorners(cell: GridCell): { x: number; y: number }[] {
   const minX = cell.col - 0.5
   const maxX = cell.col + 0.5
@@ -168,6 +177,10 @@ function polygonsTouch(a: { x: number; y: number }[], b: { x: number; y: number 
   return axes.every((axis) => intervalsOverlap(project(a, axis), project(b, axis)))
 }
 
+function polygonsOverlapArea(a: { x: number; y: number }[], b: { x: number; y: number }[], axes: { x: number; y: number }[]): boolean {
+  return axes.every((axis) => intervalsOverlapArea(project(a, axis), project(b, axis)))
+}
+
 function polygonAxes(points: { x: number; y: number }[]): { x: number; y: number }[] {
   return points.map((point, index) => {
     const next = points[(index + 1) % points.length]
@@ -185,7 +198,13 @@ function cellTouchesCircle(cell: GridCell, center: GridCell, radiusCells: number
   const maxY = cell.row + 0.5
   const closestX = Math.max(minX, Math.min(center.col, maxX))
   const closestY = Math.max(minY, Math.min(center.row, maxY))
-  return Math.hypot(closestX - center.col, closestY - center.row) <= radiusCells
+  const distance = Math.hypot(closestX - center.col, closestY - center.row)
+  // A positive half-cell radius describes a circle wholly contained by its
+  // anchor square (Gate's minimum five-foot-diameter portal). Merely touching
+  // an adjacent square at one boundary point must not expand it to a 15x15
+  // five-cell cross. Keep zero-radius point entities on their anchor cell.
+  if (radiusCells > 0 && radiusCells <= 0.5) return distance < radiusCells
+  return distance <= radiusCells
 }
 
 function cellTouchesOrientedRect(
@@ -199,6 +218,24 @@ function cellTouchesOrientedRect(
   const square = cellCorners(cell)
   const perp = { x: -dir.y, y: dir.x }
   return polygonsTouch(rect, square, [
+    { x: 1, y: 0 },
+    { x: 0, y: 1 },
+    dir,
+    perp,
+  ])
+}
+
+function cellOverlapsOrientedRect(
+  cell: GridCell,
+  center: { x: number; y: number },
+  dir: { x: number; y: number },
+  widthCells: number,
+  heightCells: number,
+): boolean {
+  const rect = orientedRectCorners(center, dir, widthCells, heightCells)
+  const square = cellCorners(cell)
+  const perp = { x: -dir.y, y: dir.x }
+  return polygonsOverlapArea(rect, square, [
     { x: 1, y: 0 },
     { x: 0, y: 1 },
     dir,
@@ -232,28 +269,66 @@ export function cellsInCircleRadius(center: GridCell, radiusFeet: number): GridC
   return cells
 }
 
+export interface LineAoeGeometry {
+  direction: { x: number; y: number }
+  start: { x: number; y: number }
+  end: { x: number; y: number }
+  center: { x: number; y: number }
+}
+
 /**
- * 直线路径：从 origin 沿瞄准方向延伸 lengthFeet，宽度 widthFeet 覆盖所有方格。
+ * 连续线形模板从施法者方格的支撑边界起步，并保持鼠标给出的任意角度。
+ * 这让区域只与施法者格相切，同时避免把施法者自身空间算入模板。
  */
+export function lineAoeGeometry(
+  origin: GridCell,
+  aim: GridCell,
+  lengthFeet: number,
+  widthFeet = DND_FEET_PER_CELL,
+): LineAoeGeometry {
+  const direction = aimVector(origin, aim)
+  const lengthCells = lengthFeet / DND_FEET_PER_CELL
+  const widthCells = widthFeet / DND_FEET_PER_CELL
+  const sourceBoundaryOffset = (Math.abs(direction.x) + Math.abs(direction.y)) / 2
+  // An even whole-cell width has to be centred on a grid boundary; centring
+  // it on the caster cell centre would make a 10-foot cardinal line overlap
+  // three columns. Choose the consistent left-hand half-cell so 10 feet is
+  // exactly two cells wide while odd widths remain centred on the source.
+  const lateralOffset = Number.isInteger(widthCells) && widthCells % 2 === 0 ? 0.5 : 0
+  const perpendicular = { x: -direction.y, y: direction.x }
+  const start = {
+    x: origin.col + direction.x * sourceBoundaryOffset + perpendicular.x * lateralOffset,
+    y: origin.row + direction.y * sourceBoundaryOffset + perpendicular.y * lateralOffset,
+  }
+  const end = {
+    x: start.x + direction.x * lengthCells,
+    y: start.y + direction.y * lengthCells,
+  }
+  return {
+    direction,
+    start,
+    end,
+    center: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
+  }
+}
+
+/** 直线路径：从施法者边界沿瞄准方向延伸，只有实际面积重叠的方格才进入范围。 */
 export function cellsInLine(
   origin: GridCell,
   aim: GridCell,
   widthFeet: number,
   lengthFeet: number,
 ): GridCell[] {
-  const dir = aimVector(origin, aim)
+  const geometry = lineAoeGeometry(origin, aim, lengthFeet, widthFeet)
+  const dir = geometry.direction
   const lengthCells = lengthFeet / DND_FEET_PER_CELL
   const widthCells = widthFeet / DND_FEET_PER_CELL
   const scan = Math.ceil(lengthCells + widthCells + 1)
-  const center = {
-    x: origin.col + dir.x * lengthCells / 2,
-    y: origin.row + dir.y * lengthCells / 2,
-  }
 
   const cells: GridCell[] = []
   for (let row = origin.row - scan; row <= origin.row + scan; row++) {
     for (let col = origin.col - scan; col <= origin.col + scan; col++) {
-      if (cellTouchesOrientedRect({ col, row }, center, dir, widthCells, lengthCells)) {
+      if (cellOverlapsOrientedRect({ col, row }, geometry.center, dir, widthCells, lengthCells)) {
         cells.push({ col, row })
       }
     }
@@ -331,6 +406,16 @@ export function cellsForAoe(
     case 'cone':
       return cellsInCone(casterCell, anchorCell, aoe.lengthFeet)
     case 'rect':
+      if (aoe.gridAligned) {
+        const widthCells = feetToDimensionCells(aoe.widthFeet)
+        const heightCells = feetToDimensionCells(aoe.heightFeet)
+        const firstCol = anchorCell.col - Math.floor((widthCells - 1) / 2)
+        const firstRow = anchorCell.row - Math.floor((heightCells - 1) / 2)
+        return Array.from({ length: widthCells * heightCells }, (_, index) => ({
+          col: firstCol + (index % widthCells),
+          row: firstRow + Math.floor(index / widthCells),
+        }))
+      }
       return cellsInRect(anchorCell, casterCell, aoe.widthFeet, aoe.heightFeet)
   }
 }
@@ -366,7 +451,10 @@ export function canPlaceAoe(
 ): boolean {
   switch (aoe.shape) {
     case 'circle':
-      if (aoe.origin === 'self') return true
+      // A self-origin circle is centered on the caster. It is not a freely
+      // placeable point template; allowing any anchor made UI pointer drags
+      // relocate effects such as Tiny Hut away from their source.
+      if (aoe.origin === 'self') return cellDistance(casterCell, anchorCell) <= 1e-6
       if (aoe.placeRangeFeet == null) return true
       return cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.placeRangeFeet)
     case 'line':
@@ -395,6 +483,28 @@ export function tokensInCells(map: BattleMap, tokens: Token[], cells: GridCell[]
   return tokens.filter((token) =>
     tokenOccupiedCellsAt(token, map, token).some((cell) => set.has(cellKey(cell))),
   )
+}
+
+/**
+ * Resolves token coverage without materialising every square for large circles.
+ * A 500-foot self aura contains more than thirty thousand five-foot cells; the
+ * token count is tiny by comparison, so testing each occupied token cell keeps
+ * the exact same edge-intersection rule at a fraction of the allocation cost.
+ */
+export function tokensInAoe(
+  map: BattleMap,
+  tokens: Token[],
+  aoe: SkillAoeTargeting,
+  casterCell: GridCell,
+  anchorCell: GridCell,
+): Token[] {
+  if (aoe.shape !== 'circle') {
+    return tokensInCells(map, tokens, cellsForAoe(aoe, casterCell, anchorCell))
+  }
+  const center = aoe.origin === 'self' ? casterCell : anchorCell
+  const radiusCells = Math.max(0, aoe.radiusFeet / DND_FEET_PER_CELL)
+  return tokens.filter((token) => tokenOccupiedCellsAt(token, map, token)
+    .some((cell) => cellTouchesCircle(cell, center, radiusCells)))
 }
 
 export function formatAoeHint(aoe: SkillAoeTargeting): string {

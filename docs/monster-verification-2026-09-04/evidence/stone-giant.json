@@ -1,0 +1,168 @@
+{
+  "id": "srd-5.1:stone-giant",
+  "slug": "stone-giant",
+  "name": "石巨人",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：接岩石只对“岩石或类似物体”的投掷命中触发，随后还要消耗反应并通过 DC 10 敏捷豁免才能完全免除钝击伤害。当前通用攻击载荷没有可信的投射物类别字段，不能把所有远程攻击误判成岩石。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greatclub",
+      "name": "巨棒",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "rock",
+      "name": "投石",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.onHit",
+        "attack.onHitRule.kind",
+        "attack.onHitRule.ability",
+        "attack.onHitRule.dc",
+        "attack.onHitRule.condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "rock-catching",
+      "name": "接石",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 78,
+      "slug": "stone-giant",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:20:47.368Z",
+      "name": "石巨人",
+      "actionId": "greatclub",
+      "actionName": "巨棒",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "7",
+      "total": 334,
+      "mapId": "verify-ui-stone-giant-greatclub-1788567647421",
+      "combatId": "verify-ui-stone-giant-greatclub-1788567647421:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "石巨人 使用巨棒攻击 验证目标：巨棒 → 验证目标 14+9=23 命中；共造成 22 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:21 PM\n结算\n\n石巨人 使用巨棒攻击 验证目标：巨棒 → 验证目标 14+9=23 命中；共造成 22 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：巨棒｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 15 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 14；最终采用 14；调整值 +9。\n结果 · 23 vs AC 10：命中。\n伤害骰 · 巨棒（基础伤害·钝击）｜3d8 骰面：8 + 4 + 4 = 16｜固定加值 +6｜小计 22\n石巨人｜消耗动作\n验证目标｜受到 22 点伤害｜HP 320 → 298",
+      "playerLog": "石巨人 使用巨棒攻击 验证目标：巨棒 → 验证目标 14+9=23 命中；共造成 22 点伤害。",
+      "afterHp": 298,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:21:11.887Z",
+      "evidenceFile": "ui-cases/monsters/078-stone-giant.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "岩石伪装",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

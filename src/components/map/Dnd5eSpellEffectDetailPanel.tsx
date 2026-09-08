@@ -1,4 +1,4 @@
-import { Flame, Trash2, X } from 'lucide-react'
+import { Flame, Sparkles, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import type { Token } from '../../store/maps'
 import { showAppConfirm } from '../../lib/appDialog'
@@ -20,6 +20,8 @@ export default function Dnd5eSpellEffectDetailPanel({
   const [error, setError] = useState<string>()
   const effect = token.dnd5eSpellEffect
   if (!effect) return null
+  const isMirrorImageDecoy = effect.spellId === 'mirror-image' &&
+    effect.projectionKind === 'attack-decoy'
 
   const remove = async () => {
     if (deleting) return
@@ -47,7 +49,7 @@ export default function Dnd5eSpellEffectDetailPanel({
     >
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-orange-300/35 bg-orange-500/15 text-orange-200">
-          <Flame className="h-5 w-5" />
+          {isMirrorImageDecoy ? <Sparkles className="h-5 w-5" /> : <Flame className="h-5 w-5" />}
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-bold text-slate-100">{token.label || '法术实体'}</h2>
@@ -66,18 +68,24 @@ export default function Dnd5eSpellEffectDetailPanel({
       </div>
       <div className="px-4 py-3">
         <p className="text-xs leading-relaxed text-slate-400">
-          删除会同时移除该实体关联的范围区域；若施法者仍在专注于炽焰法球，也会安全结束该专注。
+          {isMirrorImageDecoy
+            ? `镜影术分身 ${effect.projectionIndex ?? ''}。这是攻击诱饵的地图标识，不占据格子；DM 可以单独拖动，剩余数量由攻击结算自动同步。`
+            : effect.concentrationId
+            ? '删除会同时移除该实体关联的范围区域，并结束该实体对应的专注效果。'
+            : '删除会同时移除该实体关联的范围区域。该法术实体不需要专注，删除不会影响施法者正在维持的其他法术。'}
         </p>
         {error ? <p className="mt-2 text-xs text-rose-300">{error}</p> : null}
-        <button
-          type="button"
-          disabled={deleting}
-          onClick={() => void remove()}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:cursor-wait disabled:opacity-50"
-        >
-          <Trash2 className="h-4 w-4" />
-          {deleting ? '删除中…' : '删除法术实体'}
-        </button>
+        {!isMirrorImageDecoy && (
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => void remove()}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25 disabled:cursor-wait disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {deleting ? '删除中…' : '删除法术实体'}
+          </button>
+        )}
       </div>
     </div>
   )

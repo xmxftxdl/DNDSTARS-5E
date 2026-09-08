@@ -47,4 +47,44 @@ describe('SRD 5.1 monster stat-block adapter', () => {
       ).toEqual(monster.actions.map((action) => action.name))
     }
   })
+
+  it('projects legendary point maximums and per-action costs for the map UI', () => {
+    expect(getEnemyStatBlock('srd-5.1:aboleth')).toMatchObject({
+      legendaryActionPoints: 3,
+      legendaryActions: expect.arrayContaining([
+        expect.objectContaining({ id: 'tail-swipe', legendaryCost: 1 }),
+        expect.objectContaining({ id: 'psychic-drain-costs-2-actions', legendaryCost: 2 }),
+      ]),
+    })
+  })
+  it('projects self-only planar toggles as executable UI actions', () => {
+    for (const slug of ['ghost', 'succubus-incubus']) {
+      expect(getEnemyStatBlock(`srd-5.1:${slug}`)?.actions
+        .find((action) => action.id === 'etherealness')).toMatchObject({
+        automation: 'headless',
+        kind: 'self-special',
+      })
+    }
+  })
+  it('projects ordinary self teleports as executable UI actions', () => {
+    for (const [slug, actionId] of [
+      ['balor', 'teleport'],
+      ['marilith', 'teleport'],
+      ['nalfeshnee', 'teleport'],
+      ['blink-dog', 'teleport-only'],
+    ] as const) {
+      expect(getEnemyStatBlock(`srd-5.1:${slug}`)?.actions
+        .find((action) => action.id === actionId)).toMatchObject({
+        automation: 'headless',
+        kind: 'self-special',
+      })
+    }
+  })
+  it('projects Draining Kiss as a targeted Headless UI action', () => {
+    expect(getEnemyStatBlock('srd-5.1:succubus-incubus')?.actions
+      .find((action) => action.id === 'draining-kiss')).toMatchObject({
+      automation: 'headless',
+      kind: 'targeted-special',
+    })
+  })
 })

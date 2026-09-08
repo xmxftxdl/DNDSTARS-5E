@@ -26,13 +26,19 @@ function nonNegativeInteger(value: number, label: string): number {
   return value
 }
 
+function nonNegativeNumber(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) throw new RangeError(`${label} must be a non-negative finite number`)
+  return value
+}
+
 function requiredD20Count(mode: D20RollResult['mode']): number {
   return mode === 'normal' ? 1 : 2
 }
 
 function turnFailure(turn: TurnEconomy, cost: TurnResourceCost): TurnValidationResult['reason'] | undefined {
   const amount = cost.amount ?? 1
-  nonNegativeInteger(amount, 'turn resource amount')
+  if (cost.resource === 'movement') nonNegativeNumber(amount, 'turn resource amount')
+  else nonNegativeInteger(amount, 'turn resource amount')
   if (cost.resource === 'action' && (!turn.actionAvailable || amount !== 1)) return 'action-unavailable'
   if (cost.resource === 'bonusAction' && (!turn.bonusActionAvailable || amount !== 1)) return 'bonus-action-unavailable'
   if (cost.resource === 'reaction' && (!turn.reactionAvailable || amount !== 1)) return 'reaction-unavailable'
@@ -92,7 +98,11 @@ export const dnd5e2014Adapter: RulesetAdapter = {
     if (cost.resource === 'bonusAction') return { ...turn, bonusActionAvailable: false }
     if (cost.resource === 'reaction') return { ...turn, reactionAvailable: false }
     if (cost.resource === 'objectInteraction') return { ...turn, objectInteractionAvailable: false }
-    return { ...turn, movementRemaining: turn.movementRemaining - amount }
+    return {
+      ...turn,
+      movementRemaining: turn.movementRemaining - amount,
+      movementSpent: Math.max(0, turn.movementSpent ?? 0) + amount,
+    }
   },
 
   resolveD20(input: D20RollInput): D20RollResult {

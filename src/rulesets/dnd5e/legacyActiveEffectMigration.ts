@@ -32,9 +32,18 @@ export function migrateLegacyDnd5eConditions(input: {
   activeEffects?: unknown
 }): Dnd5eActiveEffectInstance[] {
   const effects = normalizeDnd5eActiveEffects(input.activeEffects)
-  const represented = new Set(effects.map((effect) => effect.standardCondition
-    ? `standard:${effect.standardCondition}`
-    : effect.legacyCondition ? `extension:${effect.legacyCondition}` : effect.definitionId))
+  const represented = new Set(effects.flatMap((effect) => {
+    const keys = [effect.standardCondition
+      ? `standard:${effect.standardCondition}`
+      : effect.legacyCondition ? `extension:${effect.legacyCondition}` : effect.definitionId]
+    // A structured standard condition may deliberately preserve a domain
+    // label as its compatibility projection (for example Sequester's
+    // invisible suspended-animation effect). Treat that alias as represented
+    // too, otherwise normalization creates a second legacy effect for the
+    // same projected string and the shared-state validator rejects the pair.
+    if (effect.legacyCondition) keys.push(`extension:${effect.legacyCondition}`)
+    return keys
+  }))
   for (const raw of input.conditions ?? []) {
     const condition = dnd5eStandardConditionId(raw)
     const key = condition ? `standard:${condition}` : `extension:${raw}`

@@ -120,7 +120,6 @@ export function MapGeometryLayer({
   tool,
   selectedEntityId,
   inv,
-  terrainEditingLocked,
   onSelect,
   onDelete,
   onPointsChange,
@@ -133,7 +132,6 @@ export function MapGeometryLayer({
   tool: MapGeometryTool
   selectedEntityId: string | null
   inv: number
-  terrainEditingLocked: boolean
   onSelect?: (entityId: string | null) => void
   onDelete?: (entityId: string) => void
   onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
@@ -144,7 +142,7 @@ export function MapGeometryLayer({
     ...(geometry?.doors ?? []),
     ...(geometry?.windows ?? []),
     ...(geometry?.obstacles ?? []),
-    ...(geometry?.lights ?? []),
+    ...(editMode ? geometry?.lights ?? [] : []),
     ...(draft ? [draft] : []),
   ]
   const entities = doorInteractionMode && !editMode
@@ -182,9 +180,6 @@ export function MapGeometryLayer({
         const selectEntity = (event: Konva.KonvaEventObject<MouseEvent>) => {
           event.cancelBubble = true
           if (editMode && tool === 'delete') {
-            if (terrainEditingLocked && entity.kind === 'obstacle' && (
-              entity.terrainRegion || (entity.terrainElevationFeet ?? 0) !== 0
-            )) return
             onDelete?.(entity.id)
           }
           else onSelect?.(entity.id)
@@ -198,10 +193,11 @@ export function MapGeometryLayer({
           const lightEditListening = !isDraft && (
             entityEditListening || (editMode && tool === 'light')
           )
+          const showRadius = isDraft || selected || tool === 'light'
           return (
-            <Group key={entity.id} listening={lightEditListening} onMouseDown={selectEntity}>
-              <Circle x={point.x} y={point.y} radius={Math.max(outerRadius, 8 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.45 : 0.3} dash={[6 * inv, 4 * inv]} />
-              <Circle x={point.x} y={point.y} radius={Math.max(brightRadius, 5 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.6 : 0.5} />
+            <Group key={entity.id} listening={lightEditListening}>
+              {showRadius && <Circle listening={false} x={point.x} y={point.y} radius={Math.max(outerRadius, 8 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.45 : 0.3} dash={[6 * inv, 4 * inv]} />}
+              {showRadius && <Circle listening={false} x={point.x} y={point.y} radius={Math.max(brightRadius, 5 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.6 : 0.5} />}
               <Circle
                 x={point.x}
                 y={point.y}
@@ -211,6 +207,7 @@ export function MapGeometryLayer({
                 strokeWidth={2 * inv}
                 draggable={editMode && (tool === 'select' || tool === 'light') && selected && !isDraft}
                 hitStrokeWidth={14 * inv}
+                onMouseDown={selectEntity}
                 onDragStart={(event) => { event.cancelBubble = true }}
                 onDragEnd={(event) => {
                   event.cancelBubble = true

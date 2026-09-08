@@ -1,0 +1,190 @@
+{
+  "id": "srd-5.1:planetar",
+  "slug": "planetar",
+  "name": "行星神使",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greatsword",
+      "name": "巨剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "healing-touch",
+      "name": "治疗之触",
+      "automation": "headless",
+      "rule": "healing-touch",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.max",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.healing.count",
+        "rule.healing.sides",
+        "rule.healing.bonus",
+        "rule.removes[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 24,
+      "slug": "planetar",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:58:41.192Z",
+      "name": "行星神使",
+      "actionId": "greatsword",
+      "actionName": "巨剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "16",
+      "total": 334,
+      "mapId": "verify-ui-planetar-greatsword-1788566321238",
+      "combatId": "verify-ui-planetar-greatsword-1788566321238:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "行星神使 使用巨剑攻击 验证目标：巨剑 → 验证目标 10+12=22 命中；共造成 46 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:59 PM\n结算\n\n行星神使 使用巨剑攻击 验证目标：巨剑 → 验证目标 10+12=22 命中；共造成 46 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：巨剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +12。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 巨剑（基础伤害 1·挥砍）｜4d6 骰面：6 + 5 + 3 + 3 = 17｜固定加值 +7｜小计 24\n伤害骰 · 巨剑（基础伤害 2·光耀）｜5d8 骰面：3 + 5 + 5 + 7 + 2 = 22｜固定加值 +0｜小计 22\n行星神使｜消耗动作\n验证目标｜受到 46 点伤害｜HP 320 → 274",
+      "playerLog": "行星神使 使用巨剑攻击 验证目标：巨剑 → 验证目标 10+12=22 命中；共造成 46 点伤害。",
+      "afterHp": 274,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:59:07.773Z",
+      "evidenceFile": "ui-cases/monsters/024-planetar.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "天使武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "神圣感知",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 12,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -17,33 +17,70 @@ export interface SpellTargetingSubmissionInput {
 export interface DefaultSculptedSpellTargetsInput {
   enabled: boolean
   affectedTargetIds: readonly string[]
-  alliedTargetIds: readonly string[]
   currentTargetIds: readonly string[]
   maximumTargets: number
 }
 
 /**
- * Keeps still-valid manual choices and, when Sculpt Spells was armed, fills the
- * remaining allowance with affected allies. The player can still remove an
- * automatic choice or replace it with any other affected creature before the
- * cast is submitted.
+ * Parses the numbered creature picker used by persistent-area spells. An empty
+ * value or `0` explicitly clears the selection; malformed/out-of-range input is
+ * rejected so the player never submits a different creature by accident.
+ */
+export function parseAreaExemptionSelection(
+  value: string,
+  candidateIds: readonly string[],
+): string[] | undefined {
+  const normalized = value.trim()
+  if (normalized === '' || normalized === '0') return []
+  const parts = normalized.split(/[\s,，]+/).filter(Boolean)
+  const selected: string[] = []
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return undefined
+    const index = Number(part) - 1
+    const candidateId = candidateIds[index]
+    if (!candidateId) return undefined
+    if (!selected.includes(candidateId)) selected.push(candidateId)
+  }
+  return selected
+}
+
+/**
+ * Multi-origin spells must remain in targeting mode after their first legal
+ * point. Their minimum count only enables the explicit confirm button; it must
+ * never be interpreted as permission to submit immediately.
+ */
+export function shouldAutoSubmitSpellAreaSelection(
+  targeting: Pick<
+    Dnd5eSpellTargetingSession,
+    'autoSubmitOnAreaSelection' | 'areaTargetCount' | 'minimumAreaTargetCount' | 'areaExemptionMode'
+  >,
+  selectedAreaCount: number,
+): boolean {
+  const maximum = Math.max(1, Math.floor(targeting.areaTargetCount ?? 1))
+  const minimum = Math.max(
+    1,
+    Math.min(maximum, Math.floor(targeting.minimumAreaTargetCount ?? maximum)),
+  )
+  return targeting.autoSubmitOnAreaSelection === true &&
+    targeting.areaExemptionMode == null &&
+    maximum === 1 &&
+    selectedAreaCount >= minimum
+}
+
+/**
+ * Keeps only still-valid manual Sculpt Spells choices. Arming the feature must
+ * never choose creatures on the player's behalf: after placing the area, the
+ * player explicitly chooses up to the allowance from creatures they can see.
  */
 export function defaultSculptedSpellTargetIds(
   input: DefaultSculptedSpellTargetsInput,
 ): string[] {
   const maximumTargets = Math.max(0, Math.floor(input.maximumTargets))
-  if (maximumTargets === 0) return []
+  if (!input.enabled || maximumTargets === 0) return []
   const affected = new Set(input.affectedTargetIds)
-  const selected = [...new Set(input.currentTargetIds)]
+  return [...new Set(input.currentTargetIds)]
     .filter((targetId) => affected.has(targetId))
     .slice(0, maximumTargets)
-  if (!input.enabled || selected.length >= maximumTargets) return selected
-  for (const targetId of input.alliedTargetIds) {
-    if (!affected.has(targetId) || selected.includes(targetId)) continue
-    selected.push(targetId)
-    if (selected.length >= maximumTargets) break
-  }
-  return selected
 }
 
 /**
@@ -56,23 +93,50 @@ export function buildSpellTargetingSubmission(
 ): Dnd5eSpellCastPayload {
   const targeting = input.targeting
   const targetTokenIds = [...new Set(input.selectedTargetIds)]
+  const usesAreaTargeting = targeting.area != null
   return {
     spellId: targeting.spellId,
+    spellOriginAreaId: targeting.spellOriginAreaId,
+    focusItemInstanceId: targeting.focusItemInstanceId,
     itemInstanceId: targeting.itemInstanceId,
     itemUseActionId: targeting.itemUseActionId,
     castingClassId: targeting.castingClassId,
+    ritual: targeting.ritual,
     racialInnate: targeting.racialInnate,
+    alternateResourceSpell: targeting.alternateResourceSpell,
     slotLevel: targeting.slotLevel,
+    activityChoices: targeting.activityChoices
+      ? { ...targeting.activityChoices }
+      : undefined,
+    secretPhrase: targeting.secretPhrase,
+    magicMouth: targeting.magicMouth
+      ? { ...targeting.magicMouth }
+      : undefined,
+    communicationText: targeting.communicationText,
+    minorIllusion: targeting.minorIllusion
+      ? { ...targeting.minorIllusion }
+      : undefined,
+    tinyHut: targeting.tinyHut
+      ? { ...targeting.tinyHut }
+      : undefined,
+    antipathySympathy: targeting.antipathySympathy
+      ? { ...targeting.antipathySympathy }
+      : undefined,
     targetTokenId: targetTokenIds[0] ?? input.currentTokenId ?? '',
     targetTokenIds,
-    areaTargetCell: input.areaTargetCell,
-    areaTargetCells: input.areaTargetCells?.map((cell) => ({ ...cell })),
-    areaTargetOrientation: input.areaTargetOrientation,
-    areaTargetAngleDegrees: input.areaTargetAngleDegrees,
-    areaTargetRadiusFeet: targeting.areaTargetRadiusFeet,
-    areaTargetWidthFeet: targeting.areaTargetWidthFeet,
-    areaTargetHeightFeet: targeting.areaTargetHeightFeet,
-    areaTargetLengthFeet: targeting.areaTargetLengthFeet,
+    areaTargetCell: usesAreaTargeting ? input.areaTargetCell : undefined,
+    areaTargetCells: usesAreaTargeting && input.areaTargetCells?.length
+      ? input.areaTargetCells.map((cell) => ({ ...cell }))
+      : undefined,
+    dancingLightsForm: targeting.spellId === 'dancing-lights'
+      ? targeting.dancingLightsForm ?? 'lights'
+      : undefined,
+    areaTargetOrientation: usesAreaTargeting ? input.areaTargetOrientation : undefined,
+    areaTargetAngleDegrees: usesAreaTargeting ? input.areaTargetAngleDegrees : undefined,
+    areaTargetRadiusFeet: usesAreaTargeting ? targeting.areaTargetRadiusFeet : undefined,
+    areaTargetWidthFeet: usesAreaTargeting ? targeting.areaTargetWidthFeet : undefined,
+    areaTargetHeightFeet: usesAreaTargeting ? targeting.areaTargetHeightFeet : undefined,
+    areaTargetLengthFeet: usesAreaTargeting ? targeting.areaTargetLengthFeet : undefined,
     ...input.spellSpecificPayload,
     higherSlotDamageType: targeting.higherSlotDamageType,
     conditionChoice: targeting.conditionChoice,
@@ -86,6 +150,7 @@ export function buildSpellTargetingSubmission(
       ? [...targeting.targetTokenIds]
       : undefined,
     overchannel: targeting.overchannel || undefined,
+    damageMaximizationFeatureId: targeting.damageMaximizationFeatureId,
     empowered: targeting.empowered || undefined,
     draconicResistance: targeting.draconicResistance || undefined,
     repellingBlast: targeting.repellingBlast || undefined,
@@ -119,7 +184,7 @@ export function selectSpellModifierMode(
   targeting: Dnd5eSpellTargetingSession,
   mode: 'sculpt' | 'careful' | 'heightened',
 ): Dnd5eSpellTargetingSession {
-  if (mode === 'sculpt' && !targeting.canSculpt) return targeting
+  if (mode === 'sculpt' && (!targeting.canSculpt || targeting.autoSculpt !== true)) return targeting
   if (mode === 'careful' && targeting.metamagic?.kind !== 'careful') return targeting
   if (mode === 'heightened' && targeting.metamagic?.kind !== 'heightened') return targeting
   return {

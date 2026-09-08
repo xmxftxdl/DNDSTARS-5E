@@ -50,6 +50,7 @@ describe('DmActionTransactionCoordinator', () => {
 
   it('preserves the completed transaction when a delivered action is later ignored as a replay', async () => {
     const coordinator = new DmActionTransactionCoordinator()
+    let executions = 0
     const input = {
       id: 'action-1',
       mapId: 'map-1',
@@ -60,11 +61,47 @@ describe('DmActionTransactionCoordinator', () => {
       now: 1,
     }
 
-    await coordinator.enqueueCombatTransaction(input, async () => ({ status: 'accepted' }), async () => undefined)
+    await coordinator.enqueueCombatTransaction(input, async () => {
+      executions += 1
+      return { status: 'accepted' }
+    }, async () => undefined)
     const committed = coordinator.transaction('action-1')
-    await coordinator.enqueueCombatTransaction(input, async () => ({ status: 'ignored' }), async () => undefined)
+    await coordinator.enqueueCombatTransaction(input, async () => {
+      executions += 1
+      return { status: 'ignored' }
+    }, async () => undefined)
 
+    expect(executions).toBe(1)
     expect(committed?.status).toBe('committed')
     expect(coordinator.transaction('action-1')).toBe(committed)
+  })
+
+  it('does not reopen a rolled-back action when the durable queue replays it', async () => {
+    const coordinator = new DmActionTransactionCoordinator()
+    const input = {
+      id: 'action-2',
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      actorId: 'hero-1',
+      actionId: 'action-2',
+      actionKind: 'dnd5e-spell-cast',
+      now: 1,
+    }
+    let executions = 0
+
+    await coordinator.enqueueCombatTransaction(input, async () => {
+      executions += 1
+      return { status: 'rejected', reason: 'dm-creature-choice-cancelled' }
+    }, async () => undefined)
+    await coordinator.enqueueCombatTransaction(input, async () => {
+      executions += 1
+      return { status: 'accepted' }
+    }, async () => undefined)
+
+    expect(executions).toBe(1)
+    expect(coordinator.transaction('action-2')).toMatchObject({
+      status: 'rolled-back',
+      rollbackReason: 'dm-creature-choice-cancelled',
+    })
   })
 })

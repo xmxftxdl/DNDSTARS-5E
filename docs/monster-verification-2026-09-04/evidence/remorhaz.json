@@ -1,0 +1,165 @@
+{
+  "id": "srd-5.1:remorhaz",
+  "slug": "remorhaz",
+  "name": "寒炎虫",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "swallow",
+      "name": "吞咽",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.targetMaxSizeRank",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].sourceDeathEscape.movementCostFeet",
+        "attack.onHitEffects[].sourceDeathEscape.applyProne",
+        "attack.onHitEffects[].regurgitation.damageThreshold",
+        "attack.onHitEffects[].regurgitation.ability",
+        "attack.onHitEffects[].regurgitation.dc",
+        "attack.onHitEffects[].regurgitation.ejects",
+        "attack.onHitEffects[].regurgitation.applyProne",
+        "attack.onHitEffects[].regurgitation.placementWithinFeet",
+        "attack.onHitEffects[].removeSourceRelationSlotGroupOnApply"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 44,
+      "slug": "remorhaz",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:07:14.427Z",
+      "name": "寒炎虫",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "11",
+      "total": 334,
+      "mapId": "verify-ui-remorhaz-bite-1788566834478",
+      "combatId": "verify-ui-remorhaz-bite-1788566834478:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "寒炎虫 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+11=28 命中；共造成 54 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:07 PM\n结算\n\n寒炎虫 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+11=28 命中；共造成 54 点伤害。\n\n查看 Headless 结算依据（14）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 17；最终采用 17；调整值 +11。\n结果 · 28 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜6d10 骰面：4 + 6 + 7 + 9 + 2 + 4 = 32｜固定加值 +7｜小计 39\n伤害骰 · 啃咬（基础伤害 2·火焰）｜3d6 骰面：4 + 6 + 5 = 15｜固定加值 +0｜小计 15\n寒炎虫｜消耗动作\n验证目标｜受到 54 点伤害｜HP 320 → 266\n验证目标｜获得状态：擒抱｜来源：寒炎虫\n验证目标｜效果生效：擒抱\n寒炎虫｜monster:srd-5.1:remorhaz:bite:bite-grapple生效｜目标 验证目标\n验证目标｜获得状态：束缚｜来源：寒炎虫\n验证目标｜效果生效：束缚",
+      "playerLog": "寒炎虫 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+11=28 命中；共造成 54 点伤害。",
+      "afterHp": 266,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled",
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:07:42.150Z",
+      "evidenceFile": "ui-cases/monsters/044-remorhaz.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "灼热躯体",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

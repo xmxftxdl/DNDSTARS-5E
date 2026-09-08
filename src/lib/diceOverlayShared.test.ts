@@ -9,6 +9,13 @@ import {
 } from './diceOverlayShared'
 
 describe('diceOverlayShared timing contract (T12/F2)', () => {
+  it('keeps a readable settled frame before a secret confirmation opens', () => {
+    expect(DICE_TIMING.SECRET_SETTLED_HOLD_MS).toBeGreaterThanOrEqual(500)
+    expect(DICE_TIMING.D20_FAILSAFE_MS).toBeGreaterThan(
+      DICE_TIMING.D20_MIN_VISIBLE_MS,
+    )
+  })
+
   it('RESOLUTION_MS is the max of overlay windows and HUD', () => {
     expect(RESOLUTION_MS).toBe(
       Math.max(

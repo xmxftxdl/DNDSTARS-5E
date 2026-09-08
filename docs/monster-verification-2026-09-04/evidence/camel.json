@@ -1,0 +1,77 @@
+{
+  "id": "srd-5.1:camel",
+  "slug": "camel",
+  "name": "骆驼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 57,
+      "slug": "camel",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:35:29.502Z",
+      "name": "骆驼",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-camel-bite-1788557729612",
+      "combatId": "verify-ui-camel-bite-1788557729612:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "骆驼 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+5=8 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:36 PM\n攻击\n\n骆驼 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+5=8 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 3；最终采用 3；调整值 +5。\n结果 · 8 vs AC 10：未命中。\n骆驼｜消耗动作",
+      "playerLog": "骆驼 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+5=8 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:36:06.615Z",
+      "evidenceFile": "ui-cases/monsters/057-camel.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

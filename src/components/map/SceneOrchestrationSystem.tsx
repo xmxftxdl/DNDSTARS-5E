@@ -12,6 +12,7 @@ import { browserSharedRoomService } from '../../composition/browserSharedRoomSer
 import { playSceneAudioCue } from '../../lib/sceneAudio'
 import {
   SCENE_PRESENTATION_CHANNEL,
+  resolveSceneAudioPreset,
   sceneActionSummary,
   scenePointInsideRegion,
   sceneTriggerAcceptsToken,
@@ -41,6 +42,8 @@ export interface SceneOrchestrationSystemProps {
   map: BattleMap
   isDm: boolean
   combatActive: boolean
+  editorOpen: boolean
+  focusedInteractionPointId?: string | null
   drawing?: SceneDrawTarget | null
   onBeginDraw: (target: SceneDrawTarget) => void
   onCancelDraw: () => void
@@ -67,6 +70,8 @@ export default function SceneOrchestrationSystem({
   map,
   isDm,
   combatActive,
+  editorOpen,
+  focusedInteractionPointId,
   drawing,
   onBeginDraw,
   onCancelDraw,
@@ -75,12 +80,18 @@ export default function SceneOrchestrationSystem({
 }: SceneOrchestrationSystemProps) {
   const shared = useSceneOrchestrationStore((state) => state.shared)
   const [notice, setNotice] = useState('')
-  const [editorOpen, setEditorOpen] = useState(false)
   const previousInsideRef = useRef(new Map<string, boolean>())
   const seededMapsRef = useRef(new Set<string>())
   const executingRef = useRef(false)
+  const automaticAudioKeyRef = useRef('')
+  const automaticAudioAssetIdRef = useRef<string | undefined>(undefined)
+  const editorVisibilityChangeRef = useRef(onEditorVisibilityChange)
 
-  useEffect(() => () => onEditorVisibilityChange?.(false), [onEditorVisibilityChange])
+  useEffect(() => {
+    editorVisibilityChangeRef.current = onEditorVisibilityChange
+  }, [onEditorVisibilityChange])
+
+  useEffect(() => () => editorVisibilityChangeRef.current?.(false), [])
 
   useEffect(() => browserSharedRoomService.subscribeSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, (event) => {
     if (event.kind === 'sound' && event.cue) playSceneAudioCue(event.cue)
@@ -261,6 +272,62 @@ export default function SceneOrchestrationSystem({
 
   useEffect(() => {
     if (!isDm) return
+    const preset = resolveSceneAudioPreset(shared, map.id)
+    const key = [
+      preset.source,
+      preset.source === 'map' ? preset.sceneId : '',
+      preset.assetId ?? '',
+      preset.loop ? 'loop' : 'once',
+      preset.volume.toFixed(3),
+      preset.autoPlay ? 'auto' : 'manual',
+    ].join(':')
+    if (automaticAudioKeyRef.current === key) return
+    automaticAudioKeyRef.current = key
+    const reconcile = async () => {
+      const audio = useSceneAudioStore.getState()
+      const previousAutomaticAssetId = automaticAudioAssetIdRef.current
+      if (!preset.assetId || !preset.autoPlay) {
+        automaticAudioAssetIdRef.current = undefined
+        if (previousAutomaticAssetId && audio.playback.assetId === previousAutomaticAssetId) {
+          await audio.control({ operation: 'stop' })
+        }
+        return
+      }
+      automaticAudioAssetIdRef.current = preset.assetId
+      if (
+        audio.playback.assetId === preset.assetId &&
+        audio.playback.status === 'playing' &&
+        audio.playback.loop === preset.loop
+      ) {
+        if (Math.abs(audio.playback.volume - preset.volume) > 0.001) {
+          await audio.control({ operation: 'set-volume', volume: preset.volume })
+        }
+        return
+      }
+      await audio.control({
+        operation: 'play',
+        assetId: preset.assetId,
+        loop: preset.loop,
+        volume: preset.volume,
+        fadeMs: 600,
+      })
+    }
+    void reconcile().catch((error) => {
+      automaticAudioKeyRef.current = ''
+      console.error('Failed to apply the configured scene audio preset', error)
+    })
+  }, [isDm, map.id, shared])
+
+  useEffect(() => {
+    if (!isDm || !editorOpen) return
+    // Authoring a Region changes the Region/token relationship without Token
+    // movement. Treat the next runtime pass as a fresh baseline so dragging an
+    // entrance over a Token never emits a false enter/leave event.
+    seededMapsRef.current.delete(map.id)
+  }, [editorOpen, isDm, map.id])
+
+  useEffect(() => {
+    if (!isDm || editorOpen) return
     const scenes = shared.scenes.filter((scene) => scene.mapId === map.id)
     const keys = new Set<string>()
     const seeded = seededMapsRef.current.has(map.id)
@@ -291,7 +358,7 @@ export default function SceneOrchestrationSystem({
       }
     }
     seededMapsRef.current.add(map.id)
-  }, [isDm, map, shared.scenes])
+  }, [editorOpen, isDm, map, shared.scenes])
 
   const undoLast = useCallback(() => {
     const store = useSceneOrchestrationStore.getState()
@@ -314,17 +381,18 @@ export default function SceneOrchestrationSystem({
 
   const playBackgroundCue = useCallback(async () => {
     const scene = useSceneOrchestrationStore.getState().shared.scenes.find((candidate) => candidate.mapId === map.id)
-    if (!scene) return
-    if (scene.backgroundAudioId) {
+    const preset = resolveSceneAudioPreset(useSceneOrchestrationStore.getState().shared, map.id)
+    if (preset.assetId) {
       await useSceneAudioStore.getState().control({
         operation: 'play',
-        assetId: scene.backgroundAudioId,
-        loop: scene.backgroundAudioLoop,
-        volume: scene.backgroundAudioVolume,
+        assetId: preset.assetId,
+        loop: preset.loop,
+        volume: preset.volume,
+        fadeMs: 600,
       })
       return
     }
-    if (scene.backgroundCue === 'none') return
+    if (!scene || scene.backgroundCue === 'none') return
     await browserSharedRoomService.publishSharedEvent<ScenePresentationEvent>(SCENE_PRESENTATION_CHANNEL, {
       id: crypto.randomUUID(), kind: 'sound', cue: scene.backgroundCue, text: `场景氛围：${scene.name}`, createdAt: Date.now(),
     })
@@ -336,8 +404,8 @@ export default function SceneOrchestrationSystem({
         map={map}
         combatActive={combatActive}
         open={editorOpen}
+        focusedInteractionPointId={focusedInteractionPointId}
         onOpenChange={(visible) => {
-          setEditorOpen(visible)
           onEditorVisibilityChange?.(visible)
           if (!visible) onCancelDraw()
         }}

@@ -7,6 +7,7 @@ import {
   type Dnd5eCombatant,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import {
   getDnd5eSrdMonster,
   setDnd5eRoomMonsterCatalog,
@@ -75,9 +76,9 @@ function weaponDamageRolls(
 function twoStrikeHobgoblin(): Dnd5eMonsterStatBlock {
   const hobgoblin = getDnd5eSrdMonster('srd-5.1:hobgoblin')
   if (!hobgoblin) throw new Error('missing SRD Hobgoblin')
-  const longsword = hobgoblin.actions.find((action) => action.id === 'longsword')
-  if (!longsword?.attack || longsword.automation !== 'headless') {
-    throw new Error('Hobgoblin longsword is not Headless')
+  const longbow = hobgoblin.actions.find((action) => action.id === 'longbow')
+  if (!longbow?.attack || longbow.automation !== 'headless') {
+    throw new Error('Hobgoblin longbow is not Headless')
   }
   return {
     ...hobgoblin,
@@ -86,9 +87,9 @@ function twoStrikeHobgoblin(): Dnd5eMonsterStatBlock {
     actions: [{
       id: 'test-multiattack',
       name: 'Test Multiattack',
-      description: 'The hobgoblin makes two longsword attacks.',
+      description: 'The hobgoblin makes two longbow attacks to test once-per-turn Martial Advantage.',
       kind: 'multiattack',
-      sequence: ['longsword', 'longsword'],
+      sequence: ['longbow', 'longbow'],
       automation: 'headless',
     }, ...hobgoblin.actions],
   }
@@ -118,11 +119,414 @@ describe('SRD precision attack traits in the Headless runtime', () => {
   afterEach(() => setDnd5eRoomMonsterCatalog([]))
 
   it.each([
+    ['boar', 20, 'tusk'],
+    ['centaur', 30, 'pike'],
+    ['elk', 20, 'ram'],
+    ['giant-boar', 20, 'tusk'],
+    ['giant-elk', 20, 'ram'],
+    ['giant-goat', 20, 'ram'],
+    ['giant-sea-horse', 20, 'ram'],
+    ['goat', 20, 'ram'],
+    ['rhinoceros', 20, 'gore'],
+    ['unicorn', 20, 'horn'],
+    ['minotaur', 10, 'gore'],
+    ['minotaur-skeleton', 10, 'gore'],
+  ] as const)(
+    'projects %s Charge as a Headless move-then-hit trait',
+    (slug, minimumStraightMovementFeet, actionId) => {
+      const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+      expect(monster.traits).toContainEqual(expect.objectContaining({
+        automation: 'headless',
+        rule: expect.objectContaining({
+          kind: 'charge-damage',
+          minimumStraightMovementFeet,
+          actionId,
+        }),
+      }))
+    },
+  )
+
+  it.each(['minotaur', 'minotaur-skeleton'])(
+    'resolves %s Charge damage, push and prone through one authoritative hit',
+    (slug) => {
+      const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+      const actor = monsterCombatant(monster, {
+        speed: 40,
+        position: { x: 0, y: 0 },
+      })
+      const target = combatant('target', 'player', 10, {
+        position: { x: 15, y: 0 },
+      })
+      const state = startDnd5eHeadlessCombat(`${slug}-charge-runtime`, [actor, target])
+      const moved = resolveDnd5eHeadlessAction(state, {
+        type: 'move', actorId: actor.id, to: { x: 10, y: 0 }, distance: 10,
+      })
+      expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+      if (!moved.ok) return
+      setDistance(moved.state, actor.id, target.id, 5)
+
+      const hit = resolveDnd5eHeadlessAction(moved.state, {
+        type: 'monster-action',
+        actorId: actor.id,
+        actionId: 'gore',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: weaponDamageRolls(monster, 'gore'),
+          traitDamageRolls: [{ traitId: 'charge-damage', rolls: [4, 5] }],
+          onHitEffectRolls: [{
+            effectId: 'charge:gore:forced-movement',
+            d20: 1,
+            forcedMovement: {
+              targetId: target.id,
+              to: { x: 25, y: 0 },
+              distanceFeet: 10,
+            },
+          }],
+        }],
+      })
+
+      expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+      if (!hit.ok) return
+      expect(hit.events).toContainEqual(expect.objectContaining({
+        type: 'monster-attack-trait-damage-applied',
+        actorId: actor.id,
+        targetId: target.id,
+        traitId: 'charge-damage',
+        amount: 9,
+      }))
+      expect(hit.events).toContainEqual(expect.objectContaining({
+        type: 'saving-throw-resolved', targetId: target.id, ability: 'str',
+        dc: 14, success: false,
+      }))
+      expect(hit.state.combatants[target.id].position).toEqual({ x: 25, y: 0 })
+      expect(hit.state.combatants[target.id].conditions).toContain('prone')
+    },
+  )
+
+  it('lets Feather Fall safely settle a Minotaur Charge forced fall without fall-damage dice', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:minotaur')!
+    const actor = monsterCombatant(monster, {
+      speed: 40,
+      position: { x: 550, y: 450 },
+      elevationFeet: 40,
+      groundElevationFeet: 40,
+    })
+    const target = combatant('target', 'player', 10, {
+      position: { x: 337.5, y: 437.5 },
+      elevationFeet: 40,
+      groundElevationFeet: 40,
+    })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:srd-5.1:spell:feather-fall:modifiers:0',
+      label: '羽落术',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'feather-fall', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        safeFallFeet: 600,
+        controlledDescent: {
+          maximumFeetPerRound: 60,
+          safeLanding: true,
+          endsOnLanding: true,
+        },
+      },
+    })]
+    const state = startDnd5eHeadlessCombat('minotaur-charge-feather-fall', [actor, target])
+    state.gridDistance = {
+      cellUnits: 25,
+      feetPerCell: 5,
+      offsetX: 0,
+      offsetY: 0,
+      footprintCellsByCombatantId: { [actor.id]: 2, [target.id]: 1 },
+    }
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: actor.id, to: { x: 375, y: 450 }, distance: 35,
+    })
+    expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+    if (!moved.ok) return
+    setDistance(moved.state, actor.id, target.id, 5)
+
+    const hit = resolveDnd5eHeadlessAction(moved.state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: 'gore',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(monster, 'gore'),
+        traitDamageRolls: [{ traitId: 'charge-damage', rolls: [4, 5] }],
+        onHitEffectRolls: [{
+          effectId: 'charge:gore:forced-movement',
+          d20: 1,
+          forcedMovement: {
+            targetId: target.id,
+            to: { x: 287.5, y: 437.5 },
+            distanceFeet: 10,
+            toElevationFeet: 0,
+            toGroundElevationFeet: 0,
+            fallingDamageRolls: [],
+          },
+        }],
+      }],
+    })
+
+    expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+    if (!hit.ok) return
+    expect(hit.state.combatants[target.id].elevationFeet).toBe(0)
+    expect(hit.state.combatants[target.id].airborne).toBe(false)
+    expect(hit.state.combatants[target.id].conditions).toContain('prone')
+    expect(hit.events).toContainEqual(expect.objectContaining({
+      type: 'falling-damage-resolved', actorId: target.id, damage: 0, landedProne: false,
+    }))
+  })
+
+  it.each([
+    ['lion', 20, 'claw', 13, 'pounce-bite-bonus-action', 'bite'],
+    ['panther', 20, 'claw', 12, 'pounce-bite-bonus-action', 'bite'],
+    ['saber-toothed-tiger', 20, 'claw', 14, 'pounce-bite-bonus-action', 'bite'],
+    ['tiger', 20, 'claw', 13, 'pounce-bite-bonus-action', 'bite'],
+    ['weretiger-hybrid', 15, 'claw', 14, 'pounce-bite-bonus-action', 'bite'],
+    ['weretiger-tiger', 15, 'claw', 14, 'pounce-bite-bonus-action', 'bite'],
+    ['elephant', 20, 'gore', 12, 'trampling-stomp-bonus-action', 'stomp'],
+    ['gorgon', 20, 'gore', 16, 'trampling-hooves-bonus-action', 'hooves'],
+    ['mammoth', 20, 'gore', 18, 'trampling-stomp-bonus-action', 'stomp'],
+    ['triceratops', 20, 'gore', 13, 'trampling-stomp-bonus-action', 'stomp'],
+    ['warhorse', 20, 'hooves', 14, 'trampling-hooves-bonus-action', 'hooves'],
+  ] as const)(
+    'projects %s move-hit-prone and its bound bonus attack',
+    (slug, minimum, attackId, dc, bonusActionId, referencedActionId) => {
+      const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+      expect(monster.traits).toContainEqual(expect.objectContaining({
+        automation: 'headless',
+        rule: expect.objectContaining({
+          kind: 'charge-damage',
+          minimumStraightMovementFeet: minimum,
+          actionId: attackId,
+          savingThrowOnHit: expect.objectContaining({ dc }),
+          bonusActionFollowUp: {
+            actionId: bonusActionId,
+            referencedActionId,
+            requiredTargetCondition: 'prone',
+          },
+        }),
+      }))
+      expect(monster.bonusActions).toContainEqual(expect.objectContaining({
+        id: bonusActionId,
+        referencedActionId,
+        economy: 'bonus-action',
+        automation: 'headless',
+      }))
+    },
+  )
+
+  it('binds Lion Pounce bonus Bite to the same prone target and consumes the credential once', () => {
+    const lion = getDnd5eSrdMonster('srd-5.1:lion')!
+    const actor = monsterCombatant(lion, {
+      speed: 50,
+      position: { x: 0, y: 0 },
+    })
+    const target = combatant('target', 'player', 10, {
+      position: { x: 25, y: 0 },
+    })
+    const other = combatant('other', 'player', 5, {
+      position: { x: 25, y: 5 },
+      conditions: ['prone'],
+    })
+    const state = startDnd5eHeadlessCombat('lion-pounce-runtime', [actor, target, other])
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: actor.id, to: { x: 20, y: 0 }, distance: 20,
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) return
+    setDistance(moved.state, actor.id, target.id, 5)
+    setDistance(moved.state, actor.id, other.id, 5)
+
+    const claw = resolveDnd5eHeadlessAction(moved.state, {
+      type: 'monster-action', actorId: actor.id, actionId: 'claw',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(lion, 'claw'),
+      }],
+    })
+    expect(claw.ok, claw.ok ? undefined : claw.reason).toBe(true)
+    if (!claw.ok) return
+    expect(claw.state.combatants[target.id].classState.monsterOnHitSavePending)
+      .toMatchObject({
+        sourceId: actor.id,
+        actionId: 'claw',
+        chargeFollowUp: {
+          actionId: 'pounce-bite-bonus-action',
+          referencedActionId: 'bite',
+          requiredTargetCondition: 'prone',
+        },
+      })
+
+    const saved = resolveDnd5eHeadlessAction(claw.state, {
+      type: 'monster-on-hit-save', actorId: target.id,
+      sourceId: actor.id, actionId: 'claw', d20: 1,
+    })
+    expect(saved.ok, saved.ok ? undefined : saved.reason).toBe(true)
+    if (!saved.ok) return
+    expect(saved.state.combatants[actor.id].classState.monsterTriggeredBonusAction)
+      .toMatchObject({
+        actionId: 'pounce-bite-bonus-action',
+        referencedActionId: 'bite',
+        targetId: target.id,
+      })
+
+    const wrongTarget = resolveDnd5eHeadlessAction(saved.state, {
+      type: 'monster-bonus-action', actorId: actor.id,
+      actionId: 'pounce-bite-bonus-action',
+      rolls: [{
+        targetId: other.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(lion, 'bite'),
+      }],
+    })
+    expect(wrongTarget).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+
+    const bite = resolveDnd5eHeadlessAction(saved.state, {
+      type: 'monster-bonus-action', actorId: actor.id,
+      actionId: 'pounce-bite-bonus-action',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(lion, 'bite'),
+      }],
+    })
+    expect(bite.ok, bite.ok ? undefined : bite.reason).toBe(true)
+    if (!bite.ok) return
+    expect(bite.state.combatants[actor.id].turn.bonusActionAvailable).toBe(false)
+    expect(bite.state.combatants[actor.id].classState.monsterTriggeredBonusAction)
+      .toBeUndefined()
+  })
+
+  it('derives Boar Charge from committed straight movement and resolves its failed-save rider', () => {
+    const boar = getDnd5eSrdMonster('srd-5.1:boar')!
+    const actor = monsterCombatant(boar, {
+      speed: 40,
+      position: { x: 0, y: 0 },
+    })
+    const target = combatant('target', 'player', 10, {
+      position: { x: 25, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('boar-charge-runtime', [actor, target])
+
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move',
+      actorId: actor.id,
+      to: { x: 20, y: 0 },
+      distance: 20,
+    })
+    expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+    if (!moved.ok) return
+    expect(moved.state.combatants[actor.id].classState).toMatchObject({
+      monsterMechanicMovementFeet: 20,
+      monsterMechanicMovementOrigin: { x: 0, y: 0 },
+      monsterMechanicMovementLast: { x: 20, y: 0 },
+      monsterMechanicMovementStraight: true,
+    })
+    setDistance(moved.state, actor.id, target.id, 5)
+
+    const hit = resolveDnd5eHeadlessAction(moved.state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: 'tusk',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(boar, 'tusk'),
+        traitDamageRolls: [{ traitId: 'charge-damage', rolls: [3] }],
+      }],
+    })
+    expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+    if (!hit.ok) return
+    expect(hit.events).toContainEqual({
+      type: 'monster-attack-trait-damage-applied',
+      actorId: actor.id,
+      targetId: target.id,
+      traitId: 'charge-damage',
+      traitName: '冲锋',
+      amount: 3,
+    })
+    expect(hit.events).toContainEqual({
+      type: 'monster-on-hit-save-required',
+      targetId: target.id,
+      sourceId: actor.id,
+      actionId: 'tusk',
+      ability: 'str',
+      dc: 11,
+      condition: 'prone',
+    })
+
+    const failedSave = resolveDnd5eHeadlessAction(hit.state, {
+      type: 'monster-on-hit-save',
+      actorId: target.id,
+      sourceId: actor.id,
+      actionId: 'tusk',
+      d20: 1,
+    })
+    expect(failedSave.ok, failedSave.ok ? undefined : failedSave.reason).toBe(true)
+    if (!failedSave.ok) return
+    expect(failedSave.state.combatants[target.id].conditions).toContain('prone')
+  })
+
+  it('does not activate Charge after the actor changes movement direction', () => {
+    const boar = getDnd5eSrdMonster('srd-5.1:boar')!
+    const actor = monsterCombatant(boar, {
+      speed: 40,
+      position: { x: 0, y: 0 },
+    })
+    const target = combatant('target', 'player', 10, {
+      position: { x: 15, y: 10 },
+    })
+    const state = startDnd5eHeadlessCombat('boar-turned-charge', [actor, target])
+    const firstMove = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: actor.id, to: { x: 0, y: 10 }, distance: 10,
+    })
+    expect(firstMove.ok).toBe(true)
+    if (!firstMove.ok) return
+    const secondMove = resolveDnd5eHeadlessAction(firstMove.state, {
+      type: 'move', actorId: actor.id, to: { x: 10, y: 10 }, distance: 10,
+    })
+    expect(secondMove.ok).toBe(true)
+    if (!secondMove.ok) return
+    expect(secondMove.state.combatants[actor.id].classState).toMatchObject({
+      monsterMechanicMovementFeet: 20,
+      monsterMechanicMovementStraight: false,
+    })
+    setDistance(secondMove.state, actor.id, target.id, 5)
+
+    const hit = resolveDnd5eHeadlessAction(secondMove.state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: 'tusk',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(boar, 'tusk'),
+      }],
+    })
+    expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+    if (!hit.ok) return
+    expect(hit.events).not.toContainEqual(expect.objectContaining({
+      type: 'monster-attack-trait-damage-applied',
+      traitId: 'charge-damage',
+    }))
+    expect(hit.events).not.toContainEqual(expect.objectContaining({
+      type: 'monster-on-hit-save-required',
+      actionId: 'tusk',
+    }))
+  })
+
+  it.each([
     {
       label: 'Hobgoblin Martial Advantage',
       slug: 'hobgoblin',
       traitId: 'martial-advantage',
-      childActionId: 'longsword',
+      childActionId: 'longbow',
       multiattackActionId: 'test-multiattack',
     },
     {
@@ -141,14 +545,15 @@ describe('SRD precision attack traits in the Headless runtime', () => {
       if (slug === 'hobgoblin') setDnd5eRoomMonsterCatalog([monster])
       const combatId = `${slug}-trait-runtime`
       const actor = monsterCombatant(monster)
+      const distance = slug === 'hobgoblin' ? 30 : 5
       const target = combatant('target', 'player', 10, {
-        position: { x: 5, y: 0 },
+        position: { x: distance, y: 0 },
       })
       const ally = combatant('ally', 'dm', 5, {
-        position: { x: 10, y: 0 },
+        position: { x: distance + 5, y: 0 },
       })
       const state = startDnd5eHeadlessCombat(combatId, [actor, target, ally])
-      setDistance(state, actor.id, target.id, 5)
+      setDistance(state, actor.id, target.id, distance)
       setDistance(state, ally.id, target.id, 5)
 
       const first = resolveDnd5eHeadlessAction(state, {

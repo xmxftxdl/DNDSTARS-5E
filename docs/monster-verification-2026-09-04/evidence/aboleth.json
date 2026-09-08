@@ -1,0 +1,386 @@
+{
+  "id": "srd-5.1:aboleth",
+  "slug": "aboleth",
+  "name": "底栖魔鱼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：旧语义安全名单会把已结构化的触手重新降级，并连带禁用多重攻击。触手现使用逐次命中的持久疾病效果；三次触手各自结算体质豁免，疾病免疫会跳过豁免，多重攻击只消耗一次动作。7073/7074 双端真实 UI 已验证三次命中、疾病状态、HP 与日志同步。",
+    "保留边界：疾病最初 1 分钟后的“离水时不能恢复生命值”、每 10 分钟 1d12 强酸伤害、浸湿皮肤豁免，以及治疗术／6 环以上治病法术的解除限制，依赖战役时间、环境和施法来源；当前会保留来源绑定疾病记录，由 DM 处理这些跨场景分支。",
+    "已修复入口：传奇侦测不再错误要求 DM 手工裁定；检定骰、修正值与传奇动作点走 Headless。真实 UI 专项已验证按钮、窗口、点数消耗及双端日志。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence",
+        "three targets: failed save / successful save / disease immunity"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tentacle",
+      "name": "触手",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "tentacle-disease:apply",
+        "tentacle-disease:save",
+        "persistent disease: failed save / successful save / disease immunity"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "enslave",
+      "name": "奴役",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.max",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.preventReactions",
+        "rule.repeatSaveOnDamage.mode",
+        "rule.repeatSaveOnDamage.sourceFilter"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "detect",
+      "name": "侦测",
+      "automation": "headless",
+      "rule": "ability-check",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.ability",
+        "rule.skillKey"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "tail-swipe",
+      "name": "扫尾",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "referencedActionId",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "psychic-drain-costs-2-actions",
+      "name": "心灵汲取（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "conditioned-damage-and-healing",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.requiredCondition",
+        "rule.requireSameSource",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "missing-condition",
+        "wrong-condition-source"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 0,
+      "slug": "aboleth",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:02:08.094Z",
+      "name": "底栖魔鱼",
+      "actionId": "tail",
+      "actionName": "尾击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-aboleth-tail-1788555728179",
+      "combatId": "verify-ui-aboleth-tail-1788555728179:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "底栖魔鱼 使用尾击攻击 验证目标：尾击 → 验证目标 19+9=28 命中；共造成 16 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:02 PM\n结算\n\n底栖魔鱼 使用尾击攻击 验证目标：尾击 → 验证目标 19+9=28 命中；共造成 16 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：尾击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +9。\n结果 · 28 vs AC 10：命中。\n伤害骰 · 尾击（基础伤害·钝击）｜3d6 骰面：3 + 2 + 6 = 11｜固定加值 +5｜小计 16\n底栖魔鱼｜消耗动作\n验证目标｜受到 16 点伤害｜HP 320 → 304",
+      "playerLog": "底栖魔鱼 使用尾击攻击 验证目标：尾击 → 验证目标 19+9=28 命中；共造成 16 点伤害。",
+      "afterHp": 304,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:02:32.377Z",
+      "evidenceFile": "ui-cases/monsters/000-aboleth.json"
+    },
+    {
+      "index": 49,
+      "slug": "aboleth",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:09:25.901Z",
+      "name": "底栖魔鱼",
+      "actionId": "tail",
+      "actionName": "尾击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "10",
+      "total": 334,
+      "mapId": "verify-ui-aboleth-tail-1788566965944",
+      "combatId": "verify-ui-aboleth-tail-1788566965944:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "底栖魔鱼 使用尾击攻击 验证目标：尾击 → 验证目标 18+9=27 命中；共造成 17 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:09 PM\n结算\n\n底栖魔鱼 使用尾击攻击 验证目标：尾击 → 验证目标 18+9=27 命中；共造成 17 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：尾击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +9。\n结果 · 27 vs AC 10：命中。\n伤害骰 · 尾击（基础伤害·钝击）｜3d6 骰面：1 + 6 + 5 = 12｜固定加值 +5｜小计 17\n底栖魔鱼｜消耗动作\n验证目标｜受到 17 点伤害｜HP 320 → 303",
+      "playerLog": "底栖魔鱼 使用尾击攻击 验证目标：尾击 → 验证目标 18+9=27 命中；共造成 17 点伤害。",
+      "afterHp": 303,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:09:48.291Z",
+      "evidenceFile": "ui-cases/monsters/049-aboleth.json"
+    },
+    {
+      "mapId": "aboleth-multiattack-ui-1788592442638",
+      "combatId": "aboleth-multiattack-ui-1788592442638:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "startedAt": "2026-09-05T07:14:03.209Z",
+      "beforeHp": 120,
+      "afterHp": 87,
+      "conditions": [
+        "disease"
+      ],
+      "activeEffects": [
+        {
+          "schemaVersion": 1,
+          "id": "monster-persistent:actor:tentacle:tentacle-disease:target",
+          "definitionId": "srd-5.1:monster:aboleth:tentacle-disease",
+          "label": "Aboleth Tentacle Disease",
+          "tags": [
+            "disease"
+          ],
+          "kind": "debuff",
+          "source": {
+            "kind": "monster",
+            "actorId": "actor",
+            "actorName": "底栖魔鱼",
+            "rulesId": "monster:srd-5.1:aboleth:tentacle:tentacle-disease"
+          },
+          "appliedAt": 0,
+          "duration": {
+            "type": "permanent"
+          },
+          "stackingKey": "monster-persistent:actor:tentacle:tentacle-disease:target",
+          "stackingPolicy": "refresh-duration",
+          "visibility": "public",
+          "legacyCondition": "disease"
+        }
+      ],
+      "dmLog": "底栖魔鱼 使用多重攻击攻击 验证目标：触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；共造成 33 点伤害。",
+      "playerLog": "底栖魔鱼 使用多重攻击攻击 验证目标：触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；共造成 33 点伤害。",
+      "status": "passed",
+      "finishedAt": "2026-09-05T07:14:46.848Z",
+      "mode": "multiattack-special",
+      "actionId": "multiattack"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "黏液云",
+      "automation": "headless",
+      "rule": "mucous-cloud",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.saveDc",
+        "rule.condition",
+        "rule.maximumTriggerDistanceFeet"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster actions in the D&D 5e Headless engine resolves the aboleth mucous cloud only after a nearby melee hit underwater"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "探查心灵感应",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 27,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

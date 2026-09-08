@@ -1,0 +1,139 @@
+{
+  "id": "srd-5.1:giant-elk",
+  "slug": "giant-elk",
+  "name": "巨鹿",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "ram",
+      "name": "冲撞",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "hooves",
+      "name": "蹄击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation",
+        "targetEligibility.kind",
+        "targetEligibility.predicates[].kind",
+        "targetEligibility.predicates[].condition"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 121,
+      "slug": "giant-elk",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:16:02.554Z",
+      "name": "巨鹿",
+      "actionId": "ram",
+      "actionName": "冲撞",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-elk-ram-1788560162607",
+      "combatId": "verify-ui-giant-elk-ram-1788560162607:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨鹿 使用冲撞攻击 验证目标：冲撞 → 验证目标 19+6=25 命中；共造成 9 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:16 PM\n结算\n\n巨鹿 使用冲撞攻击 验证目标：冲撞 → 验证目标 19+6=25 命中；共造成 9 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：冲撞｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +6。\n结果 · 25 vs AC 10：命中。\n伤害骰 · 冲撞（基础伤害·钝击）｜2d6 骰面：4 + 1 = 5｜固定加值 +4｜小计 9\n巨鹿｜消耗动作\n验证目标｜受到 9 点伤害｜HP 320 → 311",
+      "playerLog": "巨鹿 使用冲撞攻击 验证目标：冲撞 → 验证目标 19+6=25 命中；共造成 9 点伤害。",
+      "afterHp": 311,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:16:27.225Z",
+      "evidenceFile": "ui-cases/monsters/121-giant-elk.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "冲锋",
+      "automation": "headless",
+      "rule": "charge-damage",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.minimumStraightMovementFeet",
+        "rule.actionId",
+        "rule.extraDamage.average",
+        "rule.extraDamage.count",
+        "rule.extraDamage.sides",
+        "rule.extraDamage.bonus",
+        "rule.extraDamage.type",
+        "rule.savingThrowOnHit.ability",
+        "rule.savingThrowOnHit.dc",
+        "rule.savingThrowOnHit.conditionOnFailedSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "no-movement",
+        "below-threshold",
+        "at-threshold"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 9,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

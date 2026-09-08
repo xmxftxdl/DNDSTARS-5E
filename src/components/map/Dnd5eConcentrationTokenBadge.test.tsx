@@ -12,9 +12,21 @@ function elementProps(node: ReactNode): Record<string, unknown> {
   return node.props
 }
 
+const concentrationInstance = {
+  id: 'concentration:wizard-token:flaming-sphere',
+  tokenId: 'wizard-token',
+  kind: 'concentration' as const,
+  title: '专注：炽焰法球',
+  description: '维持专注。',
+  statusId: 'flaming-sphere',
+  sourceLabel: '法师',
+  authority: 'headless' as const,
+}
+
 describe('Dnd5eConcentrationTokenBadge', () => {
   it('renders the non-interactive raster concentration asset', () => {
     const mark: ConcentrationTokenMark = {
+      instance: concentrationInstance,
       tokenId: 'wizard-token',
       spellId: 'flaming-sphere',
       backgroundHighlightColor: '#3b82f6',
@@ -67,6 +79,7 @@ describe('Dnd5eConcentrationTokenBadge', () => {
       y: 0,
       size: 24,
       mark: {
+        instance: concentrationInstance,
         tokenId: 'wizard-token',
         spellId: 'flaming-sphere',
         backgroundHighlightColor: '#3b82f6',
@@ -85,6 +98,7 @@ describe('Dnd5eConcentrationTokenBadge', () => {
       size: 24,
       image: {} as HTMLImageElement,
       mark: {
+        instance: concentrationInstance,
         tokenId: 'wizard-token',
         spellId: 'flaming-sphere',
         backgroundHighlightColor: '#3b82f6',
@@ -105,5 +119,47 @@ describe('Dnd5eConcentrationTokenBadge', () => {
     expect(onTooltipChange).toHaveBeenNthCalledWith(1, { clientX: 120, clientY: 80 })
     expect(onTooltipChange).toHaveBeenNthCalledWith(2, { clientX: 120, clientY: 80 })
     expect(onTooltipChange).toHaveBeenNthCalledWith(3)
+  })
+
+  it('only captures badge clicks when status inspection is available', () => {
+    const mark: ConcentrationTokenMark = {
+      instance: concentrationInstance,
+      tokenId: 'wizard-token',
+      spellId: 'flaming-sphere',
+      backgroundHighlightColor: '#3b82f6',
+      backgroundColor: '#172554',
+      borderColor: '#93c5fd',
+      glowColor: '#60a5fa',
+    }
+    const passiveBadge = Dnd5eConcentrationTokenBadge({
+      x: 0,
+      y: 0,
+      size: 24,
+      image: {} as HTMLImageElement,
+      mark,
+      onTooltipChange: vi.fn(),
+    })
+    const passiveEvent = { cancelBubble: false }
+
+    ;(elementProps(passiveBadge).onClick as (event: typeof passiveEvent) => void)(passiveEvent)
+
+    expect(passiveEvent.cancelBubble).toBe(false)
+
+    const onClick = vi.fn()
+    const inspectableBadge = Dnd5eConcentrationTokenBadge({
+      x: 0,
+      y: 0,
+      size: 24,
+      image: {} as HTMLImageElement,
+      mark,
+      onClick,
+      onTooltipChange: vi.fn(),
+    })
+    const inspectableEvent = { cancelBubble: false }
+
+    ;(elementProps(inspectableBadge).onClick as (event: typeof inspectableEvent) => void)(inspectableEvent)
+
+    expect(inspectableEvent.cancelBubble).toBe(true)
+    expect(onClick).toHaveBeenCalledOnce()
   })
 })

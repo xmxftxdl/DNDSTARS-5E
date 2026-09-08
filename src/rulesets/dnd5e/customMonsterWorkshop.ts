@@ -1,4 +1,4 @@
-import type { AbilityKey } from '../../lib/dnd'
+import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   DND5E_DAMAGE_TYPES,
   type Dnd5eDamageType,
@@ -14,11 +14,27 @@ import {
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterTargetPriority,
   type Dnd5eMonsterTrait,
+  dnd5eMonsterProficiencyBonus,
 } from './monsters'
+import {
+  evaluateDnd5eWorkshopDamageFormula,
+  type Dnd5eWorkshopDamageFormulaV1,
+} from './workshopDamageFormula'
 import { DND5E_STANDARD_CONDITIONS, type Dnd5eStandardConditionId } from './conditions'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
+import type { Dnd5eTokenStatusMarkerGrantDeclaration } from './tokenStatusMarkers'
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
+const DND5E_SKILL_LABEL_BY_KEY = new Map(SKILLS.map((skill) => [skill.key, skill.label]))
+const ROOM_MONSTER_ID_PATTERN = /^room-monster:[a-z0-9][a-z0-9-]{0,95}$/
+
+function normalizedCustomMonsterSlug(value: string): string {
+  const normalized = value.toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96)
+  return normalized || `custom-${uid()}`
+}
 
 export interface Dnd5eMonsterWorkshopTemplateSource {
   templateId: string
@@ -40,6 +56,10 @@ export interface Dnd5eCustomMonsterTraitDraft {
     | 'keen-sense'
     | 'ambusher'
     | 'charge-damage'
+    | 'relentless'
+    | 'sneak-attack'
+    | 'surprise-attack'
+    | 'stench'
     | 'magic-resistance'
     | 'limited-magic-immunity'
     | 'magic-weapons'
@@ -59,6 +79,15 @@ export interface Dnd5eCustomMonsterTraitDraft {
   chargeActionId: string
   chargeDamageDice: string
   chargeDamageType: Dnd5eDamageType
+  chargeSaveEnabled: boolean
+  chargeSaveAbility: AbilityKey
+  chargeSaveDc: number
+  chargeSaveCondition: Dnd5eStandardConditionId
+  relentlessMaximumDamage: number
+  sneakAttackDamageDice: string
+  surpriseAttackDamageDice: string
+  stenchRangeFeet: number
+  stenchSaveDc: number
   limitedMagicImmunityMaximumSpellLevel: number
   limitedMagicImmunityAdvantageAboveMaximum: boolean
   limitedMagicImmunityAllowsWilling: boolean
@@ -82,8 +111,9 @@ export interface Dnd5eCustomMonsterActionDraft {
   rangeNormal: number
   rangeLong: number
   damageDice: string
+  damageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   damageType: Dnd5eDamageType
-  additionalDamage: Array<{ id: string; dice: string; damageType: Dnd5eDamageType }>
+  additionalDamage: Array<{ id: string; dice: string; damageType: Dnd5eDamageType; modifierFormula?: Dnd5eWorkshopDamageFormulaV1 }>
   criticalThreshold: number
   criticalExtraDamage: Array<{ id: string; dice: string; damageType: Dnd5eDamageType }>
   onHitSaveEnabled: boolean
@@ -104,8 +134,11 @@ export interface Dnd5eCustomMonsterActionDraft {
   areaSizeFeet: number
   areaWidthFeet: number
   areaSaveAbility: AbilityKey
+  /** Empty/omitted keeps a fixed save; 2+ entries let each target choose. */
+  areaSaveAbilityChoices?: AbilityKey[]
   areaSaveDc: number
   areaDamageDice: string
+  areaDamageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   /** 空字符串表示 AI／原文没有提供，必须由 DM 明确补齐。 */
   areaDamageType: Dnd5eDamageType | ''
   areaDamageOnSuccessfulSave: 'none' | 'half'
@@ -164,6 +197,10 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   triggerRadiusFeet: number
   movementComparison: 'at-least' | 'at-most'
   movementFeet: number
+  triggerAttackMode: 'any' | 'melee' | 'ranged' | 'spell' | 'unarmed'
+  triggerDamageTypes: Dnd5eDamageType[]
+  savingThrowTiming: 'before' | 'after'
+  savingThrowOutcome: 'any' | 'success' | 'failure'
   hpPercentageAtOrBelow?: number
   hpPercentageAtOrAbove?: number
   hpBelow?: number
@@ -175,16 +212,21 @@ export interface Dnd5eCustomMonsterMechanicDraft {
     | 'healing'
     | 'temporary-hit-points'
     | 'damage'
+    | 'damage-replacement'
     | 'standard-condition'
+    | 'tactical-status'
     | 'remove-standard-condition'
     | 'summon'
     | 'area-attack'
     | 'roll-modifier'
     | 'attack'
+    | 'action-grant'
+    | 'equipment-modifier'
   effectTarget: Dnd5eMonsterMechanicEffectTargetV2
   healingDice: string
   damageType: Dnd5eDamageType | 'inherit-trigger'
   condition: Dnd5eStandardConditionId
+  statusMarkerId: Dnd5eTokenStatusMarkerGrantDeclaration['statusId']
   durationKind: 'permanent' | 'until-target-turn-start' | 'until-source-turn-start' | 'rounds'
   durationRounds: number
   summonMonsterId: string
@@ -201,6 +243,13 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   attackEconomy: 'none' | 'reaction'
   attackDamageMode: 'dice' | 'fixed'
   attackFixedDamage: number
+  damageReplacementOperation: 'negate' | 'halve' | 'reduce-by' | 'set-to' | 'convert-to-healing'
+  damageReplacementAmount: number
+  actionGrantResource: 'action' | 'bonus-action' | 'reaction'
+  equipmentModifierEquipment: 'armor' | 'main-weapon'
+  equipmentModifierOperation: 'armor-class-bonus' | 'magic-weapon-bonus'
+  equipmentModifierBonus: number
+  equipmentModifierEquipmentId: string
   limit: Dnd5eMonsterMechanicTrigger['limit']
   automation: 'full' | 'partial' | 'manual'
   /** 表单编辑首个效果；高级 JSON 中的其余效果必须无损保留。 */
@@ -244,6 +293,7 @@ export interface Dnd5eCustomMonsterDraft {
   /** Canonical defense clauses that still require DM adjudication. */
   unparsedDamageDefenses?: NonNullable<Dnd5eMonsterStatBlock['unparsedDamageDefenses']>
   conditionImmunities: Dnd5eStandardConditionId[]
+  tokenStatusMarkerGrants: Dnd5eTokenStatusMarkerGrantDeclaration[]
   passivePerception: number
   languages: string
   challengeRating: string
@@ -297,6 +347,15 @@ export function createDnd5eCustomMonsterTraitDraft(): Dnd5eCustomMonsterTraitDra
     chargeActionId: '',
     chargeDamageDice: '2d10',
     chargeDamageType: 'piercing',
+    chargeSaveEnabled: false,
+    chargeSaveAbility: 'str',
+    chargeSaveDc: 13,
+    chargeSaveCondition: 'prone',
+    relentlessMaximumDamage: 10,
+    sneakAttackDamageDice: '2d6',
+    surpriseAttackDamageDice: '2d6',
+    stenchRangeFeet: 10,
+    stenchSaveDc: 13,
     limitedMagicImmunityMaximumSpellLevel: 6,
     limitedMagicImmunityAdvantageAboveMaximum: true,
     limitedMagicImmunityAllowsWilling: true,
@@ -341,6 +400,7 @@ export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionD
     areaSizeFeet: 15,
     areaWidthFeet: 5,
     areaSaveAbility: 'dex',
+    areaSaveAbilityChoices: [],
     areaSaveDc: 12,
     areaDamageDice: '2d6',
     areaDamageType: '',
@@ -368,6 +428,10 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     triggerRadiusFeet: 30,
     movementComparison: 'at-least',
     movementFeet: 20,
+    triggerAttackMode: 'any',
+    triggerDamageTypes: [],
+    savingThrowTiming: 'before',
+    savingThrowOutcome: 'any',
     hpPercentageAtOrBelow: 50,
     hpPercentageAtOrAbove: undefined,
     hpBelow: undefined,
@@ -380,6 +444,7 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     healingDice: '2d6',
     damageType: 'necrotic',
     condition: 'frightened',
+    statusMarkerId: 'marked',
     durationKind: 'rounds',
     durationRounds: 1,
     summonMonsterId: 'srd-5.1:wolf',
@@ -396,6 +461,13 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     attackEconomy: 'reaction',
     attackDamageMode: 'dice',
     attackFixedDamage: 8,
+    damageReplacementOperation: 'negate',
+    damageReplacementAmount: 0,
+    actionGrantResource: 'action',
+    equipmentModifierEquipment: 'armor',
+    equipmentModifierOperation: 'armor-class-bonus',
+    equipmentModifierBonus: 1,
+    equipmentModifierEquipmentId: '',
     limit: 'once-per-combat',
     automation: 'full',
   }
@@ -426,6 +498,7 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
     damageResistances: [],
     damageImmunities: [],
     conditionImmunities: [],
+    tokenStatusMarkerGrants: [],
     passivePerception: 10,
     languages: '',
     challengeRating: '1/4',
@@ -451,6 +524,92 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
     headlessMechanics: [],
     traits: [],
     actions: [createDnd5eCustomMonsterActionDraft()],
+  }
+}
+
+/**
+ * Local workshop drafts predate several structured combat fields. Treat local
+ * storage as untrusted versioned input and hydrate every collection before a
+ * component or compiler is allowed to call array helpers on it.
+ */
+export function restoreDnd5eCustomMonsterDraft(
+  value: Partial<Dnd5eCustomMonsterDraft> | null | undefined,
+): Dnd5eCustomMonsterDraft {
+  const fallback = createDnd5eCustomMonsterDraft()
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    ...fallback,
+    ...source,
+    abilities: source.abilities && typeof source.abilities === 'object'
+      ? { ...fallback.abilities, ...source.abilities }
+      : fallback.abilities,
+    savingThrows: source.savingThrows && typeof source.savingThrows === 'object'
+      ? { ...source.savingThrows }
+      : {},
+    skills: Array.isArray(source.skills) ? source.skills.map((entry) => ({ ...entry })) : [],
+    senses: Array.isArray(source.senses) ? source.senses.map((entry) => ({ ...entry })) : [],
+    damageVulnerabilities: Array.isArray(source.damageVulnerabilities)
+      ? [...source.damageVulnerabilities]
+      : [],
+    damageResistances: Array.isArray(source.damageResistances)
+      ? [...source.damageResistances]
+      : [],
+    damageImmunities: Array.isArray(source.damageImmunities)
+      ? [...source.damageImmunities]
+      : [],
+    conditionImmunities: Array.isArray(source.conditionImmunities)
+      ? [...source.conditionImmunities]
+      : [],
+    tokenStatusMarkerGrants: Array.isArray(source.tokenStatusMarkerGrants)
+      ? source.tokenStatusMarkerGrants.map((entry) => ({
+          ...entry,
+          application: entry.application ?? 'marker',
+        }))
+      : [],
+    equipment: Array.isArray(source.equipment)
+      ? source.equipment.map((entry) => ({ ...entry }))
+      : [],
+    spellSlots: source.spellSlots && typeof source.spellSlots === 'object'
+      ? { ...source.spellSlots }
+      : {},
+    spells: Array.isArray(source.spells) ? source.spells.map((entry) => ({ ...entry })) : [],
+    headlessMechanics: Array.isArray(source.headlessMechanics)
+      ? source.headlessMechanics.map((entry) => ({
+          ...createDnd5eCustomMonsterMechanicDraft(),
+          ...entry,
+          triggerDamageTypes: Array.isArray(entry.triggerDamageTypes)
+            ? [...entry.triggerDamageTypes]
+            : [],
+          preservedEffects: Array.isArray(entry.preservedEffects)
+            ? entry.preservedEffects.map((effect) => ({ ...effect }))
+            : undefined,
+        }))
+      : [],
+    traits: Array.isArray(source.traits)
+      ? source.traits.map((entry) => ({
+          ...createDnd5eCustomMonsterTraitDraft(),
+          ...entry,
+          damageTypes: Array.isArray(entry.damageTypes) ? [...entry.damageTypes] : [],
+          targetBonusConditions: Array.isArray(entry.targetBonusConditions)
+            ? [...entry.targetBonusConditions]
+            : [],
+        }))
+      : [],
+    actions: Array.isArray(source.actions)
+      ? source.actions.map((entry) => ({
+          ...createDnd5eCustomMonsterActionDraft(),
+          ...entry,
+          additionalDamage: Array.isArray(entry.additionalDamage)
+            ? entry.additionalDamage.map((damage) => ({ ...damage }))
+            : [],
+          criticalExtraDamage: Array.isArray(entry.criticalExtraDamage)
+            ? entry.criticalExtraDamage.map((damage) => ({ ...damage }))
+            : [],
+          areaSaveAbilityChoices: Array.isArray(entry.areaSaveAbilityChoices)
+            ? [...entry.areaSaveAbilityChoices]
+            : [],
+        }))
+      : [createDnd5eCustomMonsterActionDraft()],
   }
 }
 
@@ -509,6 +668,14 @@ export function validateDnd5eCustomMonsterAreaActionDraft(
     issues.push('请选择伤害类型')
   }
   if (!ABILITY_KEYS.includes(action.areaSaveAbility)) issues.push('请选择豁免属性')
+  const abilityChoices = action.areaSaveAbilityChoices ?? []
+  if (abilityChoices.length > 0 && (
+    abilityChoices.length < 2 ||
+    abilityChoices.length > ABILITY_KEYS.length ||
+    new Set(abilityChoices).size !== abilityChoices.length ||
+    abilityChoices.some((ability) => !ABILITY_KEYS.includes(ability)) ||
+    !abilityChoices.includes(action.areaSaveAbility)
+  )) issues.push('目标自选豁免必须包含至少两个不重复属性，并包含默认属性')
   if (!Number.isInteger(action.areaSaveDc) || action.areaSaveDc < 1 || action.areaSaveDc > 100) {
     issues.push('豁免 DC 必须是 1–100 的整数')
   }
@@ -616,6 +783,7 @@ export function createDnd5eCustomMonsterAreaActionDraftFromTrait(
     areaSizeFeet: distance ? Number(distance[1]) : 15,
     areaWidthFeet: 5,
     areaSaveAbility: saveAbility,
+    areaSaveAbilityChoices: [],
     areaSaveDc: dc ? Number(dc[1]) : 12,
     areaDamageDice: dice
       ? `${dice[1]}d${dice[2]}${dice[3] ? `${dice[3]}${dice[4]}` : ''}`
@@ -640,7 +808,7 @@ function actionDescription(action: Dnd5eCustomMonsterActionDraft, dice: ReturnTy
   return `${mode}武器攻击：命中 ${action.toHit >= 0 ? '+' : ''}${action.toHit}，${range}，单一目标。命中：${Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)}（${dice.count}d${dice.sides}${bonus}）点伤害。`
 }
 
-function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAction {
+function normalizedAction(action: Dnd5eCustomMonsterActionDraft, monster: Dnd5eCustomMonsterDraft): Dnd5eMonsterAction {
   if (!action.name.trim()) throw new Error('动作名称不能为空')
   const usage = action.usageKind === 'per-day'
     ? { kind: 'per-day' as const, max: Math.max(1, Math.min(99, Math.trunc(action.usageMax))) }
@@ -659,12 +827,21 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
       ? { reactionTrigger: { kind: 'after-action' as const, actionId: action.reactionTriggerActionId.trim() } }
       : {}),
   }
+  const rating = monster.challengeRating.includes('/')
+    ? Number(monster.challengeRating.split('/')[0]) / Number(monster.challengeRating.split('/')[1])
+    : Number(monster.challengeRating)
+  const actorSnapshot = {
+    level: Number.isFinite(rating) ? Math.max(1, Math.ceil(rating)) : 1,
+    proficiencyBonus: dnd5eMonsterProficiencyBonus(monster.challengeRating),
+    abilities: monster.abilities,
+  }
   if (action.kind === 'area-saving-throw') {
     const issues = validateDnd5eCustomMonsterAreaActionDraft(action)
     if (issues.length > 0) {
       throw new Error(`动作“${action.name || action.id}”无法接入 Headless：${issues.join('；')}`)
     }
     const dice = parseDice(action.areaDamageDice)
+    const dynamicModifier = evaluateDnd5eWorkshopDamageFormula(action.areaDamageModifierFormula, actorSnapshot)
     const area = action.areaShape === 'circle'
       ? { shape: 'circle' as const, origin: 'self' as const, radiusFeet: Math.trunc(action.areaSizeFeet) }
       : action.areaShape === 'line'
@@ -692,11 +869,19 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
         area,
         target: action.areaTarget,
         ability: action.areaSaveAbility,
+        ...((action.areaSaveAbilityChoices?.length ?? 0) >= 2
+          ? { targetAbilityChoices: [...new Set(action.areaSaveAbilityChoices)] }
+          : {}),
         dc: Math.trunc(action.areaSaveDc),
         ...(action.areaMagical ? { magical: true } : {}),
         damage: {
-          average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+          average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus + dynamicModifier)),
           ...dice,
+          bonus: dice.bonus + dynamicModifier,
+          ...(action.areaDamageModifierFormula ? {
+            modifierFormula: action.areaDamageModifierFormula,
+            workshopFixedBonus: dice.bonus,
+          } : {}),
           type: action.areaDamageType as Dnd5eDamageType,
         },
         damageOnSuccessfulSave: action.areaDamageOnSuccessfulSave,
@@ -759,11 +944,16 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
     }
   }
   const parsed = parseDice(action.damageDice)
+  const mainDynamicModifier = evaluateDnd5eWorkshopDamageFormula(action.damageModifierFormula, actorSnapshot)
   const additionalDamage = action.additionalDamage.map((component) => {
     const dice = parseDice(component.dice)
+    const dynamicModifier = evaluateDnd5eWorkshopDamageFormula(component.modifierFormula, actorSnapshot)
     return {
-      average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+      average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus + dynamicModifier)),
       ...dice,
+      bonus: dice.bonus + dynamicModifier,
+      ...(component.modifierFormula ? { modifierFormula: component.modifierFormula } : {}),
+      ...(component.modifierFormula ? { workshopFixedBonus: dice.bonus } : {}),
       type: component.damageType,
     }
   })
@@ -787,8 +977,11 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
     } : {}),
     target: '单一目标',
     damage: [{
-      average: Math.max(0, Math.floor(parsed.count * (parsed.sides + 1) / 2 + parsed.bonus)),
+      average: Math.max(0, Math.floor(parsed.count * (parsed.sides + 1) / 2 + parsed.bonus + mainDynamicModifier)),
       ...parsed,
+      bonus: parsed.bonus + mainDynamicModifier,
+      ...(action.damageModifierFormula ? { modifierFormula: action.damageModifierFormula } : {}),
+      ...(action.damageModifierFormula ? { workshopFixedBonus: parsed.bonus } : {}),
       type: action.damageType,
     }, ...additionalDamage],
     ...(action.criticalThreshold < 20 ? {
@@ -819,10 +1012,14 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
 }
 
 export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMonsterStatBlock {
-  const slug = draft.slug ?? `custom-${uid()}`
+  const slug = normalizedCustomMonsterSlug(draft.slug ?? `custom-${uid()}`)
+  const requestedId = draft.id?.trim()
+  const id = requestedId && ROOM_MONSTER_ID_PATTERN.test(requestedId)
+    ? requestedId
+    : `room-monster:${slug}`
   const preserved = draft.preservedStatBlock
   const normalizedDraftActions = draft.actions.map((draftAction) => {
-    const normalized = normalizedAction(draftAction)
+    const normalized = normalizedAction(draftAction, draft)
     const previous = draftAction.preservedAction ?? [
       ...(preserved?.actions ?? []),
       ...(preserved?.bonusActions ?? []),
@@ -931,10 +1128,69 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                           ...dice,
                           type: trait.chargeDamageType,
                         },
+                        ...(trait.chargeSaveEnabled ? {
+                          savingThrowOnHit: {
+                            ability: trait.chargeSaveAbility,
+                            dc: Math.max(1, Math.min(100, Math.trunc(trait.chargeSaveDc))),
+                            conditionOnFailedSave: trait.chargeSaveCondition,
+                          },
+                        } : {}),
                       }
                     })()
                   : trait.ruleKind === 'magic-resistance'
                     ? { kind: 'magic-resistance' as const, savingThrowAdvantageAgainstMagic: true as const }
+                    : trait.ruleKind === 'relentless'
+                      ? {
+                          kind: 'relentless' as const,
+                          maximumDamage: Math.max(1, Math.min(
+                            1_000_000,
+                            Math.trunc(trait.relentlessMaximumDamage),
+                          )),
+                        }
+                      : trait.ruleKind === 'sneak-attack'
+                        ? (() => {
+                            const dice = parseDice(trait.sneakAttackDamageDice)
+                            return {
+                              kind: 'sneak-attack' as const,
+                              oncePerTurn: true as const,
+                              allyDistanceFeet: 5,
+                              requireNoDisadvantage: true as const,
+                              advantageOrAdjacentAlly: true as const,
+                              extraDamage: {
+                                average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+                                ...dice,
+                                type: 'inherit-primary' as const,
+                              },
+                            }
+                          })()
+                        : trait.ruleKind === 'surprise-attack'
+                          ? (() => {
+                              const dice = parseDice(trait.surpriseAttackDamageDice)
+                              return {
+                                kind: 'surprise-attack' as const,
+                                requiredRound: 1 as const,
+                                targetState: 'currently-surprised' as const,
+                                applyOn: 'each-qualifying-hit' as const,
+                                extraDamage: {
+                                  average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+                                  ...dice,
+                                  type: 'inherit-primary' as const,
+                                },
+                              }
+                            })()
+                          : trait.ruleKind === 'stench'
+                            ? {
+                                kind: 'turn-start-saving-throw-aura' as const,
+                                ruleId: 'stench',
+                                rangeFeet: Math.max(5, Math.min(1_000, Math.trunc(trait.stenchRangeFeet))),
+                                relation: 'any' as const,
+                                ability: 'con' as const,
+                                dc: Math.max(1, Math.min(100, Math.trunc(trait.stenchSaveDc))),
+                                magical: false,
+                                condition: 'poisoned' as const,
+                                duration: 'until-target-next-turn-start' as const,
+                                successfulSaveImmunityRounds: 14_400,
+                              }
                     : trait.ruleKind === 'limited-magic-immunity'
                       ? {
                           kind: 'limited-magic-immunity' as const,
@@ -968,6 +1224,11 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       rule?.kind === 'magic-resistance' ||
       rule?.kind === 'limited-magic-immunity' ||
       rule?.kind === 'magic-weapons' ||
+      rule?.kind === 'charge-damage' ||
+      rule?.kind === 'relentless' ||
+      rule?.kind === 'sneak-attack' ||
+      rule?.kind === 'surprise-attack' ||
+      rule?.kind === 'turn-start-saving-throw-aura' ||
       rule?.kind === 'conditional-target-bonus'
     const normalizedTrait: Dnd5eMonsterTrait = {
       name: trait.name.trim(),
@@ -1010,6 +1271,18 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       ? { id: 'effect-0', kind: mechanic.effectKind, target: 'self' as const, dice: dice! }
       : mechanic.effectKind === 'damage'
         ? { id: 'effect-0', kind: 'damage' as const, target: mechanic.effectTarget, dice: dice!, damageType: mechanic.damageType }
+        : mechanic.effectKind === 'damage-replacement'
+          ? {
+              id: 'effect-0', kind: 'damage-replacement' as const,
+              target: mechanic.effectTarget,
+              operation: mechanic.damageReplacementOperation,
+              ...(
+                mechanic.damageReplacementOperation === 'reduce-by' ||
+                mechanic.damageReplacementOperation === 'set-to'
+                  ? { amount: Math.max(0, Math.trunc(mechanic.damageReplacementAmount)) }
+                  : {}
+              ),
+            }
         : mechanic.effectKind === 'standard-condition'
           ? {
               id: 'effect-0', kind: 'standard-condition' as const, target: mechanic.effectTarget,
@@ -1018,6 +1291,14 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                 ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
                 : { kind: mechanic.durationKind },
             }
+          : mechanic.effectKind === 'tactical-status'
+            ? {
+                id: 'effect-0', kind: 'tactical-status' as const, target: mechanic.effectTarget,
+                statusId: mechanic.statusMarkerId,
+                duration: mechanic.durationKind === 'rounds'
+                  ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
+                  : { kind: mechanic.durationKind },
+              }
           : mechanic.effectKind === 'remove-standard-condition'
             ? {
                 id: 'effect-0', kind: 'remove-standard-condition' as const,
@@ -1056,6 +1337,26 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                           type: fixedDamageType,
                         },
                   }
+                : mechanic.effectKind === 'action-grant'
+                  ? {
+                      id: 'effect-0', kind: 'action-grant' as const,
+                      target: mechanic.effectTarget,
+                      resource: mechanic.actionGrantResource,
+                    }
+                  : mechanic.effectKind === 'equipment-modifier'
+                    ? {
+                        id: 'effect-0', kind: 'equipment-modifier' as const,
+                        target: mechanic.effectTarget,
+                        equipment: mechanic.equipmentModifierEquipment,
+                        operation: mechanic.equipmentModifierOperation,
+                        bonus: Math.trunc(mechanic.equipmentModifierBonus),
+                        ...(mechanic.equipmentModifierEquipmentId.trim()
+                          ? { equipmentId: mechanic.equipmentModifierEquipmentId.trim() }
+                          : {}),
+                        duration: mechanic.durationKind === 'rounds'
+                          ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
+                          : { kind: mechanic.durationKind },
+                      }
                 : {
                 id: 'effect-0', kind: 'area-attack' as const, shape: mechanic.areaShape,
                 rangeFeet: Math.max(0, Math.trunc(mechanic.areaRangeFeet)),
@@ -1072,7 +1373,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
         ...(mechanic.triggerSubject !== 'self'
           ? { radiusFeet: Math.max(5, Math.trunc(mechanic.triggerRadiusFeet)) }
           : {}),
-        ...(mechanic.trigger === 'movement'
+        ...((mechanic.trigger === 'movement' || mechanic.trigger === 'after-move-hit')
           ? {
               movement: {
                 comparison: mechanic.movementComparison,
@@ -1080,6 +1381,28 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
               },
             }
           : {}),
+        ...(
+          ['after-hit', 'after-move-hit', 'after-miss', 'when-hit'].includes(mechanic.trigger) &&
+          mechanic.triggerAttackMode !== 'any'
+            ? { attackMode: mechanic.triggerAttackMode }
+            : {}
+        ),
+        ...(
+          ['before-damaged', 'after-damaged', 'after-dealt-damage'].includes(mechanic.trigger) &&
+          mechanic.triggerDamageTypes.length > 0
+            ? { damageTypes: [...new Set(mechanic.triggerDamageTypes)] }
+            : {}
+        ),
+        ...(
+          mechanic.trigger === 'saving-throw-magic' || mechanic.trigger === 'saving-throw-physical'
+            ? {
+                savingThrowTiming: mechanic.savingThrowTiming,
+                ...(mechanic.savingThrowTiming === 'after' && mechanic.savingThrowOutcome !== 'any'
+                  ? { savingThrowOutcome: mechanic.savingThrowOutcome }
+                  : {}),
+              }
+            : {}
+        ),
       },
       predicates: {
         ...(Number.isFinite(mechanic.hpPercentageAtOrBelow)
@@ -1109,7 +1432,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
   })
   const monster: Dnd5eMonsterStatBlock = {
     ...preserved,
-    id: draft.id ?? `room-monster:${slug}`,
+    id,
     slug,
     name: draft.name.trim(),
     englishName: draft.englishName.trim() || draft.name.trim(),
@@ -1133,11 +1456,19 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     savingThrows: Object.fromEntries(Object.entries(draft.savingThrows)
       .filter(([, value]) => Number.isFinite(value))
       .map(([key, value]) => [key, Math.trunc(value!)])),
-    skills: draft.skills.filter((skill) => skill.key.trim() && skill.name.trim()).map((skill) => ({
-      key: skill.key.trim(),
-      name: skill.name.trim(),
-      bonus: Math.trunc(skill.bonus),
-    })),
+    skills: draft.skills
+      .filter((skill, index, skills) => {
+        const key = skill.key.trim()
+        return !!key && skills.findIndex((candidate) => candidate.key.trim() === key) === index
+      })
+      .map((skill) => {
+      const key = skill.key.trim()
+      return {
+        key,
+        name: (DND5E_SKILL_LABEL_BY_KEY.get(key) ?? skill.name.trim()) || key,
+        bonus: Math.trunc(skill.bonus),
+      }
+      }),
     senses: [
       ...draft.senses.filter((sense) => sense.name.trim()).map((sense) => ({
         name: sense.name.trim(),
@@ -1166,6 +1497,13 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
         }
       : {}),
     conditionImmunities: [...new Set(draft.conditionImmunities)],
+    tokenStatusMarkerGrants: (draft.tokenStatusMarkerGrants ?? []).map((grant) => ({
+      ...grant,
+      application: grant.application ?? 'marker',
+    })).filter((grant, index, grants) =>
+      grants.findIndex((candidate) =>
+        candidate.statusId === grant.statusId && candidate.target === grant.target &&
+        candidate.application === grant.application) === index),
     passivePerception: Math.trunc(draft.passivePerception),
     languages: draft.languages.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean),
     challenge: { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
@@ -1306,12 +1644,14 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         reachFeet: action.attack?.reachFeet ?? 5,
         rangeNormal: action.attack?.rangeFeet?.normal ?? 30,
         rangeLong: action.attack?.rangeFeet?.long ?? 120,
-        damageDice: damage ? `${damage.count}d${damage.sides}${damage.bonus === 0 ? '' : damage.bonus > 0 ? `+${damage.bonus}` : damage.bonus}` : '1d4',
+        damageDice: damage ? `${damage.count}d${damage.sides}${(damage.workshopFixedBonus ?? damage.bonus) === 0 ? '' : (damage.workshopFixedBonus ?? damage.bonus) > 0 ? `+${damage.workshopFixedBonus ?? damage.bonus}` : damage.workshopFixedBonus ?? damage.bonus}` : '1d4',
+        damageModifierFormula: damage?.modifierFormula,
         damageType: damage?.type ?? 'bludgeoning',
         additionalDamage: (action.attack?.damage.slice(1) ?? []).map((component) => ({
           id: `damage-${uid().slice(0, 8)}`,
-          dice: `${component.count}d${component.sides}${component.bonus === 0 ? '' : component.bonus > 0 ? `+${component.bonus}` : component.bonus}`,
+          dice: `${component.count}d${component.sides}${(component.workshopFixedBonus ?? component.bonus) === 0 ? '' : (component.workshopFixedBonus ?? component.bonus) > 0 ? `+${component.workshopFixedBonus ?? component.bonus}` : component.workshopFixedBonus ?? component.bonus}`,
           damageType: component.type,
+          modifierFormula: component.modifierFormula,
         })),
         criticalThreshold: action.attack?.criticalThreshold ?? 20,
         criticalExtraDamage: (action.attack?.criticalExtraDamage ?? []).map((component) => ({
@@ -1347,10 +1687,14 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
             : 15,
         areaWidthFeet: areaRule?.area.shape === 'line' ? areaRule.area.widthFeet : 5,
         areaSaveAbility: areaRule?.ability ?? 'dex',
+        areaSaveAbilityChoices: areaRule?.targetAbilityChoices
+          ? [...areaRule.targetAbilityChoices]
+          : [],
         areaSaveDc: areaRule?.dc ?? 12,
         areaDamageDice: areaDamage
-          ? `${areaDamage.count}d${areaDamage.sides}${areaDamage.bonus === 0 ? '' : areaDamage.bonus > 0 ? `+${areaDamage.bonus}` : areaDamage.bonus}`
+          ? `${areaDamage.count}d${areaDamage.sides}${(areaDamage.workshopFixedBonus ?? areaDamage.bonus) === 0 ? '' : (areaDamage.workshopFixedBonus ?? areaDamage.bonus) > 0 ? `+${areaDamage.workshopFixedBonus ?? areaDamage.bonus}` : areaDamage.workshopFixedBonus ?? areaDamage.bonus}`
           : '2d6',
+        areaDamageModifierFormula: areaDamage?.modifierFormula,
         areaDamageType: areaDamage?.type ?? '',
         areaDamageOnSuccessfulSave: areaRule?.damageOnSuccessfulSave ?? 'none',
         areaTarget: areaRule?.target ?? 'all-creatures-except-self',
@@ -1395,7 +1739,13 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     hover: monster.speed.hover ?? false,
     abilities: { ...monster.abilities },
     savingThrows: { ...(monster.savingThrows ?? {}) },
-    skills: (monster.skills ?? []).map((skill) => ({ id: `skill-${uid().slice(0, 8)}`, ...skill })),
+    skills: (monster.skills ?? [])
+      .filter((skill, index, skills) => skills.findIndex((candidate) => candidate.key === skill.key) === index)
+      .map((skill) => ({
+        id: `skill-${uid().slice(0, 8)}`,
+        ...skill,
+        name: DND5E_SKILL_LABEL_BY_KEY.get(skill.key) ?? skill.name,
+      })),
     senses: monster.senses
       .filter((sense) => !monster.traits.some((trait) =>
         trait.rule?.kind === 'keen-sense' &&
@@ -1412,6 +1762,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     conditionImmunities: (monster.conditionImmunities ?? [])
       .filter((condition): condition is Dnd5eStandardConditionId =>
         Object.values(DND5E_STANDARD_CONDITIONS).some((definition) => definition.id === condition)),
+    tokenStatusMarkerGrants: (monster.tokenStatusMarkerGrants ?? []).map((grant) => ({ ...grant })),
     passivePerception: monster.passivePerception,
     languages: monster.languages.join('、'),
     challengeRating: monster.challenge.rating,
@@ -1453,13 +1804,23 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         : effect && 'dice' in effect
           ? effect.dice
           : { count: 2, sides: 6, bonus: 0 }
-      const duration = effect?.kind === 'standard-condition' ? effect.duration : { kind: 'rounds' as const, rounds: 1 }
+      const duration = effect?.kind === 'standard-condition' || effect?.kind === 'tactical-status' || effect?.kind === 'equipment-modifier'
+        ? effect.duration
+        : { kind: 'rounds' as const, rounds: 1 }
       return {
         id: mechanic.id,
         name: mechanic.name,
         trigger: mechanic.schemaVersion === 1 ? mechanic.event : mechanic.trigger.event,
         triggerSubject: mechanic.schemaVersion === 2 ? mechanic.trigger.subject ?? 'self' : 'self',
         triggerRadiusFeet: mechanic.schemaVersion === 2 ? mechanic.trigger.radiusFeet ?? 30 : 30,
+        triggerAttackMode: mechanic.schemaVersion === 2 ? mechanic.trigger.attackMode ?? 'any' : 'any',
+        triggerDamageTypes: mechanic.schemaVersion === 2 ? [...(mechanic.trigger.damageTypes ?? [])] : [],
+        savingThrowTiming: mechanic.schemaVersion === 2
+          ? mechanic.trigger.savingThrowTiming ?? (
+              effect?.kind === 'roll-modifier' && effect.roll === 'saving-throw' ? 'before' : 'after'
+            )
+          : 'before',
+        savingThrowOutcome: mechanic.schemaVersion === 2 ? mechanic.trigger.savingThrowOutcome ?? 'any' : 'any',
         movementComparison: mechanic.schemaVersion === 2
           ? mechanic.trigger.movement?.comparison ?? 'at-least'
           : 'at-least',
@@ -1482,6 +1843,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         condition: effect?.kind === 'standard-condition' || effect?.kind === 'remove-standard-condition'
           ? effect.condition
           : 'frightened',
+        statusMarkerId: effect?.kind === 'tactical-status' ? effect.statusId : 'marked',
         durationKind: duration.kind,
         durationRounds: duration.kind === 'rounds' ? duration.rounds : 1,
         summonMonsterId: effect?.kind === 'summon' ? effect.monsterId : 'srd-5.1:wolf',
@@ -1493,11 +1855,18 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         modifierRoll: effect?.kind === 'roll-modifier' ? effect.roll : 'attack',
         modifierMode: effect?.kind === 'roll-modifier' ? effect.mode : 'bonus',
         modifierBonus: effect?.kind === 'roll-modifier' ? effect.bonus ?? 0 : 2,
+        damageReplacementOperation: effect?.kind === 'damage-replacement' ? effect.operation : 'halve',
+        damageReplacementAmount: effect?.kind === 'damage-replacement' ? effect.amount ?? 0 : 0,
         attackMode: effect?.kind === 'attack' ? effect.attackMode ?? 'melee' : 'melee',
         attackToHit: effect?.kind === 'attack' ? effect.toHit : 5,
         attackEconomy: effect?.kind === 'attack' ? effect.economy ?? 'none' : 'reaction',
         attackDamageMode: effect?.kind === 'attack' && effect.damage.count === 0 ? 'fixed' : 'dice',
         attackFixedDamage: effect?.kind === 'attack' ? effect.damage.average : 8,
+        actionGrantResource: effect?.kind === 'action-grant' ? effect.resource : 'action',
+        equipmentModifierEquipment: effect?.kind === 'equipment-modifier' ? effect.equipment : 'armor',
+        equipmentModifierOperation: effect?.kind === 'equipment-modifier' ? effect.operation : 'armor-class-bonus',
+        equipmentModifierBonus: effect?.kind === 'equipment-modifier' ? effect.bonus : 1,
+        equipmentModifierEquipmentId: effect?.kind === 'equipment-modifier' ? effect.equipmentId ?? '' : '',
         limit: mechanic.limit,
         automation: mechanic.schemaVersion === 1 ? 'full' : mechanic.automation,
         preservedEffects: mechanic.schemaVersion === 1
@@ -1513,6 +1882,9 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       preservedTrait: structuredClone(trait),
       ruleKind: (() => {
         const kind = trait.rule?.kind
+        if (kind === 'turn-start-saving-throw-aura') {
+          return trait.rule?.ruleId === 'stench' ? 'stench' : 'none'
+        }
         return kind === 'undead-fortitude' ||
           kind === 'regeneration' ||
           kind === 'swarm' ||
@@ -1520,6 +1892,9 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
           kind === 'keen-sense' ||
           kind === 'ambusher' ||
           kind === 'charge-damage' ||
+          kind === 'relentless' ||
+          kind === 'sneak-attack' ||
+          kind === 'surprise-attack' ||
           kind === 'magic-resistance' ||
           kind === 'limited-magic-immunity' ||
           kind === 'magic-weapons' ||
@@ -1547,6 +1922,31 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         : 20,
       chargeActionId: trait.rule?.kind === 'charge-damage' ? trait.rule.actionId : '',
       chargeDamageDice: trait.rule?.kind === 'charge-damage'
+        ? `${trait.rule.extraDamage?.count ?? 2}d${trait.rule.extraDamage?.sides ?? 10}${
+            (trait.rule.extraDamage?.bonus ?? 0) === 0
+              ? ''
+              : (trait.rule.extraDamage?.bonus ?? 0) > 0
+                ? `+${trait.rule.extraDamage?.bonus ?? 0}`
+                : trait.rule.extraDamage?.bonus ?? 0
+          }`
+        : '2d10',
+      chargeDamageType: trait.rule?.kind === 'charge-damage'
+        ? trait.rule.extraDamage?.type ?? 'piercing'
+        : 'piercing',
+      chargeSaveEnabled: trait.rule?.kind === 'charge-damage' && trait.rule.savingThrowOnHit != null,
+      chargeSaveAbility: trait.rule?.kind === 'charge-damage'
+        ? trait.rule.savingThrowOnHit?.ability ?? 'str'
+        : 'str',
+      chargeSaveDc: trait.rule?.kind === 'charge-damage'
+        ? trait.rule.savingThrowOnHit?.dc ?? 13
+        : 13,
+      chargeSaveCondition: trait.rule?.kind === 'charge-damage'
+        ? trait.rule.savingThrowOnHit?.conditionOnFailedSave ?? 'prone'
+        : 'prone',
+      relentlessMaximumDamage: trait.rule?.kind === 'relentless'
+        ? trait.rule.maximumDamage
+        : 10,
+      sneakAttackDamageDice: trait.rule?.kind === 'sneak-attack'
         ? `${trait.rule.extraDamage.count}d${trait.rule.extraDamage.sides}${
             trait.rule.extraDamage.bonus === 0
               ? ''
@@ -1554,10 +1954,22 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
                 ? `+${trait.rule.extraDamage.bonus}`
                 : trait.rule.extraDamage.bonus
           }`
-        : '2d10',
-      chargeDamageType: trait.rule?.kind === 'charge-damage'
-        ? trait.rule.extraDamage.type
-        : 'piercing',
+        : '2d6',
+      surpriseAttackDamageDice: trait.rule?.kind === 'surprise-attack'
+        ? `${trait.rule.extraDamage.count}d${trait.rule.extraDamage.sides}${
+            trait.rule.extraDamage.bonus === 0
+              ? ''
+              : trait.rule.extraDamage.bonus > 0
+                ? `+${trait.rule.extraDamage.bonus}`
+                : trait.rule.extraDamage.bonus
+          }`
+        : '2d6',
+      stenchRangeFeet: trait.rule?.kind === 'turn-start-saving-throw-aura' && trait.rule.ruleId === 'stench'
+        ? trait.rule.rangeFeet
+        : 10,
+      stenchSaveDc: trait.rule?.kind === 'turn-start-saving-throw-aura' && trait.rule.ruleId === 'stench'
+        ? trait.rule.dc
+        : 13,
       limitedMagicImmunityMaximumSpellLevel: trait.rule?.kind === 'limited-magic-immunity'
         ? trait.rule.maximumSpellLevel
         : 6,

@@ -9,6 +9,7 @@ import {
   syncDnd5ePrimalChampion,
 } from './hitPoints'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -50,6 +51,27 @@ function fighter(patch: Partial<Character> = {}): Character {
     ...patch,
   }
 }
+
+it('preserves current HP above the base maximum while an Aid-style maximum bonus is active', () => {
+  const aid = createDnd5eMechanicalEffect({
+    definitionId: 'activity:aid:aid:modifiers:0',
+    label: '援助术',
+    targetId: 'fighter',
+    source: { kind: 'spell', actorId: 'cleric', rulesId: 'aid', spellLevel: 2 },
+    duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+    modifiers: { hitPointMaximumBonus: 5 },
+  })
+  const aided = syncDnd5eHitPoints(fighter({
+    currentHp: 15,
+    maxHp: 10,
+    dnd5eCombatState: { activeEffects: [aid] },
+  }))
+  expect(aided).toMatchObject({ currentHp: 15, maxHp: 10 })
+  expect(syncDnd5eHitPoints({
+    ...aided,
+    dnd5eCombatState: { ...aided.dnd5eCombatState, activeEffects: [] },
+  })).toMatchObject({ currentHp: 10, maxHp: 10 })
+})
 
 describe('D&D 5e 2014 character hit points', () => {
   it('repairs an impossible level-12 fighter 1/1 save with the fixed HP rule', () => {
@@ -202,6 +224,35 @@ describe('D&D 5e 2014 character hit points', () => {
     }
   })
 
+  it('applies a selected imported feat per-level HP bonus on every maximum-HP path', () => {
+    const pluginId = 'local.test.tough-feat'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Tough Feat Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'tough', name: 'Tough', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'full', staticModifiers: { hitPointsPerLevelBonus: 2 },
+        })
+      },
+    })
+    try {
+      const character = fighter({
+        level: 5,
+        dnd5eFeatIds: [`${pluginId}:tough`],
+        maxHp: 44,
+        currentHp: 44,
+        hitPointMaximumMode: 'fixed',
+      })
+      expect(dnd5eFixedMaxHp(character)).toBe(44)
+      expect(syncDnd5eHitPoints(character)).toMatchObject({ maxHp: 44, currentHp: 44 })
+    } finally {
+      dispose()
+    }
+  })
+
   it('applies Primal Champion once and reverses it when the Barbarian drops below level 20', () => {
     const level20 = syncDnd5ePrimalChampion(fighter({
       charClass: '野蛮人', level: 20,
@@ -249,6 +300,39 @@ describe('D&D 5e 2014 character hit points', () => {
       healingApplied: 21,
       character: { currentHp: 31, hitPointDice: [{ sides: 10, current: 2, max: 5 }] },
     })
+  })
+
+  it('applies an imported minimum Hit Die healing multiplier to every spent die', () => {
+    const pluginId = 'local.test.durable-feat'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Durable Feat Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'durable', name: 'Durable', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'partial',
+          automationReasons: ['Only the Hit Die minimum is automated.'],
+          staticModifiers: { minimumHitDieHealingConstitutionMultiplier: 2 },
+        })
+      },
+    })
+    try {
+      const result = resolveDnd5eShortRestHitDice({
+        character: fighter({
+          currentHp: 1,
+          maxHp: 30,
+          abilities: { str: 16, dex: 12, con: 16, int: 10, wis: 10, cha: 10 },
+          hitPointDice: [{ sides: 10, current: 2, max: 3 }],
+          dnd5eFeatIds: [`${pluginId}:durable`],
+        }),
+        spends: [{ poolIndex: 0, rolls: [1, 9] }],
+      })
+      expect(result).toMatchObject({ hitDiceHealing: 18, healingApplied: 18 })
+    } finally {
+      dispose()
+    }
   })
 
   it('caps short-rest healing at maximum HP and rejects forged dice', () => {

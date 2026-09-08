@@ -48,6 +48,21 @@ async function putRoomState(
   expect(response.ok(), `${name} should save in room`).toBeTruthy()
 }
 
+async function getRoomState<T>(
+  request: APIRequestContext,
+  room: RoomMembershipResponse,
+  name: string,
+): Promise<T> {
+  const response = await request.get(`${DM}/api/state/${name}?room=${room.roomId}`, {
+    headers: {
+      'X-Stars-Member': room.member.memberId,
+      'X-Stars-Room-Token': room.member.roomToken,
+    },
+  })
+  expect(response.ok(), `${name} should load in room`).toBeTruthy()
+  return response.json() as Promise<T>
+}
+
 async function enterRoom(page: import('@playwright/test').Page, origin: string, room: RoomMembershipResponse) {
   await page.addInitScript(
     ([key, value]) => localStorage.setItem(key, JSON.stringify(value)),
@@ -61,6 +76,89 @@ async function enterRoom(page: import('@playwright/test').Page, origin: string, 
   )
   await page.goto(`${origin}/maps`, { waitUntil: 'domcontentloaded' })
 }
+
+test('DM combat start atomically publishes the matching authority latch to the player', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const now = Date.now()
+  const mapId = `atomic-combat-start-${now}`
+  const tokenId = `${mapId}:hero-token`
+  const heroToken = {
+    id: tokenId,
+    label: '原子开战测试单位',
+    x: 280,
+    y: 280,
+    color: '#94a3b8',
+    emoji: 'H',
+    size: 1,
+    type: 'player',
+  }
+
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'characters', { characters: [], selectedId: null, updatedAt: now })
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: '原子开战 E2E',
+      width: 700,
+      height: 560,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [heroToken],
+    }],
+  })
+  await putState(request, 'combat', {
+    mapId,
+    combatId: `${mapId}:inactive`,
+    active: false,
+    round: 1,
+    initiativeIndex: 0,
+    initiativeOrder: [],
+    updatedAt: now,
+  })
+  await putState(request, 'dm-authority-ready', {
+    mapId,
+    combatId: `${mapId}:inactive`,
+    ready: false,
+    updatedAt: now,
+  })
+
+  const context = await browser.newContext()
+  const player = await context.newPage()
+  const dm = await context.newPage()
+  try {
+    await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+    await dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' })
+    await dm.getByTestId('dm-start-combat').click()
+    await dm.getByRole('button', { name: '确认并开始' }).click()
+
+    let activeCombatId = ''
+    await expect.poll(async () => {
+      const combat = await request.get(`${DM}/api/state/combat`).then((response) => response.json()) as {
+        active?: boolean
+        combatId?: string
+      }
+      activeCombatId = combat.combatId ?? ''
+      return combat.active === true && activeCombatId.length > 0
+    }, { timeout: 30_000 }).toBe(true)
+
+    await expect.poll(async () => {
+      const authority = await request.get(`${DM}/api/state/dm-authority-ready`).then((response) => response.json()) as {
+        mapId?: string
+        combatId?: string
+        ready?: boolean
+      }
+      return authority.mapId === mapId && authority.combatId === activeCombatId && authority.ready === true
+    }, { timeout: 10_000 }).toBe(true)
+    await expect(player.getByTestId('dm-authority-waiting')).toBeHidden({ timeout: 10_000 })
+  } finally {
+    await context.close()
+  }
+})
 
 test('client-side entry from the public landing page initializes the campaign rules host', async ({ browser, request }) => {
   test.setTimeout(60_000)
@@ -388,6 +486,18 @@ test('room-owned character regains control after its prior end-turn command and 
     await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 10_000 })
     await expect(player.locator('[data-combat-banner="turn"]')).toBeVisible({ timeout: 10_000 })
     await expect(player.getByTestId(`initiative-token-${heroTokenId}`)).toHaveAttribute('data-active-turn', 'true')
+    const combatLog = await getRoomState<{ entries?: Array<{ text?: string; details?: string[] }> }>(
+      request,
+      room,
+      'combat-log',
+    )
+    expect(combatLog.entries ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        details: expect.arrayContaining([
+          expect.stringMatching(/authority-commit-failed|combat-command-settlement-precondition-conflict/),
+        ]),
+      }),
+    ]))
   } finally {
     await Promise.all([dmContext.close(), playerContext.close()])
   }

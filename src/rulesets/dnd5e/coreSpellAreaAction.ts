@@ -3,9 +3,9 @@ import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/
 import type { MapGeometryState } from '../../lib/mapGeometry'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { moveDnd5eCoreSpellArea } from './coreSpellAreas'
-import { type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eMapCombatSnapshot, dnd5eRequestedInitiativeActorIndex, planDnd5eMapResultApplication, prepareDnd5eExplorationActor, type Dnd5eMapResultPlan } from './mapBridge'
+import { getDnd5eCoreSpellAreaDeclaration, moveDnd5eCoreSpellArea } from './coreSpellAreas'
+import { endDnd5eConcentration, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import {
   resolveDnd5eActionWithAirborneFallPreview,
   type Dnd5eAirborneFallDamageRolls,
@@ -21,7 +21,8 @@ export interface PreparedDnd5eCoreSpellAreaMove {
   characterIdByCombatantId: Record<string, string>
   areaId: string
   targetCell: { col: number; row: number }
-  economy: 'action' | 'bonusAction'
+  targetCells?: readonly { col: number; row: number }[]
+  economy: 'action' | 'bonusAction' | 'none'
   geometry?: MapGeometryState
   impactTargetId?: string
 }
@@ -31,7 +32,7 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
-  turnEconomy: Dnd5eTurnEconomyCounts
+  turnEconomy?: Dnd5eTurnEconomyCounts
   geometry?: MapGeometryState
 }): { ok: true; prepared: PreparedDnd5eCoreSpellAreaMove } | { ok: false; reason: string } {
   const payload = input.action.dnd5ePersistentAreaMove
@@ -43,10 +44,15 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     candidate.id === input.action.actorTokenId && candidate.characterId === actor?.id,
   )
   const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === payload.areaId)
+  const declaredMovement = area?.coreSpellId
+    ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
+    : undefined
+  const movement = area?.movement ?? declaredMovement
   if (
-    !actor || !actorToken || !area || area.sourceKind !== 'core-spell' ||
-    area.sourceCharacterId !== actor.id || area.sourceTokenId !== actorToken.id || !area.movement ||
-    !Number.isInteger(payload.targetCell.col) || !Number.isInteger(payload.targetCell.row)
+    !actor || !actorToken || !area ||
+    area.sourceCharacterId !== actor.id || area.sourceTokenId !== actorToken.id || !movement ||
+    !Number.isInteger(payload.targetCell.col) || !Number.isInteger(payload.targetCell.row) ||
+    (payload.targetCells?.some((cell) => !Number.isInteger(cell.col) || !Number.isInteger(cell.row)) ?? false)
   ) return { ok: false, reason: 'invalid-target' }
   if (
     area.concentrationId &&
@@ -55,11 +61,12 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     return { ok: false, reason: 'concentration-ended' }
   }
   const movementEconomy = area.coreSpellId
-    ? dnd5eUtilityProjectionMovementEconomy(actor, area.coreSpellId, area.movement.economy)
-    : area.movement.economy
+    ? dnd5eUtilityProjectionMovementEconomy(actor, area.coreSpellId, movement.economy)
+    : movement.economy
   const moved = moveDnd5eCoreSpellArea({
     map: input.map, geometry: input.geometry,
     areaId: area.id, sourceTokenId: actorToken.id, targetCell: payload.targetCell,
+    targetCells: payload.targetCells,
   })
   if (!moved.ok) return moved
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -70,15 +77,22 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
-  actorCombatant.turn = {
-    ...actorCombatant.turn,
-    actionAvailable: input.turnEconomy.action.current > 0,
-    bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
-    reactionAvailable: input.turnEconomy.reaction.current > 0,
-    movementRemaining: input.turnEconomy.movement.current,
+  if (!input.action.combatId?.trim()) prepareDnd5eExplorationActor(snapshot.state, actorToken.id)
+  if (input.turnEconomy) {
+    actorCombatant.turn = {
+      ...actorCombatant.turn,
+      actionAvailable: input.turnEconomy.action.current > 0,
+      bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
+      reactionAvailable: input.turnEconomy.reaction.current > 0,
+      movementRemaining: input.turnEconomy.movement.current,
+    }
   }
   return {
     ok: true,
@@ -90,7 +104,10 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       areaId: area.id,
       targetCell: { ...payload.targetCell },
-      economy: movementEconomy === 'action' ? 'action' : 'bonusAction',
+      targetCells: payload.targetCells?.map((cell) => ({ ...cell })),
+      economy: movementEconomy === 'none'
+        ? 'none'
+        : movementEconomy === 'action' ? 'action' : 'bonusAction',
       geometry: input.geometry,
       impactTargetId: moved.impactTargetId,
     },
@@ -112,15 +129,27 @@ export function resolvePreparedDnd5eCoreSpellAreaMove(input: {
     areaId: prepared.areaId,
     sourceTokenId: prepared.action.actorTokenId,
     targetCell: prepared.targetCell,
+    targetCells: prepared.targetCells,
   })
   if (!moved.ok) {
     return { result: { ok: false, state: prepared.state, events: [], reason: 'invalid-class-feature' } }
   }
-  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
+  let { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'move-persistent-area', actorId: prepared.action.actorTokenId,
     areaId: prepared.areaId, economy: prepared.economy,
   }, input.airborneFallDamageRollsByCombatantId)
   if (!result.ok) return { result, airborneFalls }
+  if (
+    moved.area.concentrationId &&
+    !moved.map.dnd5ePluginAreas?.some((area) => area.id === prepared.areaId)
+  ) {
+    const source = result.state.combatants[prepared.action.actorTokenId]
+    if (source?.classState.concentrationSpellId === moved.area.concentrationId) {
+      const events = [...result.events]
+      endDnd5eConcentration(result.state, source, events)
+      result = { ...result, events }
+    }
+  }
   return {
     result,
     airborneFalls,
@@ -129,6 +158,7 @@ export function resolvePreparedDnd5eCoreSpellAreaMove(input: {
       map: moved.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

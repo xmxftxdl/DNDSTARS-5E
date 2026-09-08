@@ -6,6 +6,7 @@ import type { Character } from '../../types/character'
 import {
   dnd5eCombatantClassLevel,
   dnd5eCombatantHasSubclass,
+  dnd5eAbilityCheckRollMode,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatEvent,
@@ -14,11 +15,9 @@ import {
   type Dnd5eOptionalBonusDieUse,
   type Dnd5ePostD20AdjustmentUse,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
+import { createDnd5eMapCombatSnapshot, dnd5eRequestedInitiativeActorIndex, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eRageFeatureForCombatant } from './rageFeature'
-import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 
 export type Dnd5eAbilityCheckRejectReason =
   | 'invalid-action'
@@ -52,6 +51,7 @@ export function prepareDnd5eAbilityCheck(input: {
   if (
     !Number.isInteger(payload.dc) || payload.dc < 0 || payload.dc > 100 ||
     (payload.skill && (!skill || skill.ability !== payload.ability)) ||
+    (payload.perceivedTargetId != null && payload.skill !== 'perception') ||
     (payload.context != null &&
       !(
         payload.context === 'push-pull-lift-break' &&
@@ -74,9 +74,17 @@ export function prepareDnd5eAbilityCheck(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
+  if (payload.perceivedTargetId != null && (
+    payload.perceivedTargetId === actorToken.id ||
+    snapshot.state.combatants[payload.perceivedTargetId] == null
+  )) return { ok: false, reason: 'invalid-action' }
   if (
     payload.context === 'interact-with-dragons' &&
     (
@@ -108,13 +116,13 @@ export function prepareDnd5eAbilityCheck(input: {
       actor,
       actorToken,
       rollMode: resolveDnd5eRollMode({
-        requestedMode: payload.mode ?? 'normal',
+        requestedMode: dnd5eAbilityCheckRollMode(actorCombatant, {
+          ability: payload.ability,
+          skill: payload.skill,
+          perceivedTargetId: payload.perceivedTargetId,
+          requestedMode: payload.mode ?? 'normal',
+        }),
         advantage: [
-          {
-            active: dnd5eCombatantClassLevel(actorCombatant, 'barbarian') >= 1 &&
-              actorCombatant.classState.raging === true && payload.ability === 'str',
-            reason: 'rage-strength-check',
-          },
           {
             active: payload.context === 'push-pull-lift-break' &&
               !!dnd5eRageFeatureForCombatant(
@@ -122,30 +130,6 @@ export function prepareDnd5eAbilityCheck(input: {
                 'object-strength-and-carrying',
               ),
             reason: 'rage-feature-carrying',
-          },
-          {
-            active: actorCombatant.classState.helpedAbilityCheckSourceId != null,
-            reason: 'help',
-          },
-          {
-            active: dnd5eNextD20AdvantageApplies(
-              actorCombatant,
-              'ability-check',
-            ),
-            reason: 'next-d20-advantage',
-          },
-        ],
-        disadvantage: [
-          { active: actorCombatant.exhaustionLevel >= 1, reason: 'exhaustion' },
-          { active: dnd5eConditionAbilityCheckDisadvantage(actorCombatant), reason: 'condition' },
-          {
-            active: actorCombatant.wearingUnproficientArmor &&
-              (payload.ability === 'str' || payload.ability === 'dex'),
-            reason: 'unproficient-armor',
-          },
-          {
-            active: actorCombatant.armorStealthDisadvantage && payload.skill === 'stealth',
-            reason: 'armor-stealth-disadvantage',
           },
         ],
       }).mode,
@@ -174,6 +158,7 @@ function headlessAbilityCheckAction(
     actorId: prepared.actorToken.id,
     ability: prepared.payload.ability,
     skill: prepared.payload.skill,
+    perceivedTargetId: prepared.payload.perceivedTargetId,
     context: prepared.payload.context,
     mode: prepared.payload.mode,
     dc: prepared.payload.dc,
@@ -220,6 +205,7 @@ export function resolvePreparedDnd5eAbilityCheck(input: {
       map: input.prepared.map,
       characters: input.prepared.characters,
       characterIdByCombatantId: input.prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

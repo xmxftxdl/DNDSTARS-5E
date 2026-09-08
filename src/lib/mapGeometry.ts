@@ -1,6 +1,14 @@
 import type { BattleMap, Token } from '../store/maps'
 import { campaignLightIsActive, type CampaignLightSourceKind } from './campaignTime'
-import type { Dnd5eMapEnvironment } from '../rulesets/dnd5e/environmentRules'
+import type {
+  Dnd5eMapEnvironment,
+  Dnd5eMapWeather,
+  Dnd5eOverheadSpace,
+} from '../rulesets/dnd5e/environmentRules'
+import {
+  normalizeDnd5eArcaneLockStateV1,
+  type Dnd5eArcaneLockStateV1,
+} from '../rulesets/dnd5e/mapObjectState'
 import {
   compileGeometryCached,
   doorLockState as kernelDoorLockState,
@@ -18,6 +26,8 @@ import {
   wallRenderSegments,
 } from '../../shared/map-geometry-kernel.mjs'
 import { compileDnd5eEffectiveVisionProfile } from '../../shared/dnd5e-vision-profile.mjs'
+import { tokenOccupiedCellsAt } from './gridCombat'
+import { dnd5eCombatTokenSide } from './opportunityAttacks'
 
 export const MAP_GEOMETRY_RESOURCE = 'map-geometry'
 export const MAP_GEOMETRY_SCHEMA_VERSION = 3
@@ -92,12 +102,31 @@ export interface MapGeometryDoor extends MapGeometryHeight, MapGeometryBlocking,
   lockState?: MapGeometryDoorLockState
   physicalState?: MapGeometryDoorPhysicalState
   secret: boolean
+  /** True when magic, rather than mundane construction alone, conceals this secret door. */
+  magicallyHidden?: boolean
   hinge?: MapGeometryDoorHinge
   swing?: MapGeometryDoorSwing
   interaction?: MapGeometryDoorInteraction
+  /** Smallest physical gap through the closed opening, used by form-specific traversal. */
+  passageGapInches?: number
   /** Room member ids that may receive this secret door in their geometry projection. */
   revealedToMemberIds?: string[]
+  /** Host-owned magical lock state. Ordinary editor lockState remains the physical lock. */
+  dnd5eArcaneLock?: Dnd5eArcaneLockStateV1
   createdAt: number
+}
+
+/**
+ * Legacy and imported doors predate explicit physical-gap metadata. Treat an
+ * unspecified ordinary door as having a narrow crack; DM-authored airtight
+ * barriers persist an explicit zero instead.
+ */
+export const MAP_GEOMETRY_DEFAULT_DOOR_PASSAGE_GAP_INCHES = 1
+
+export function mapGeometryDoorPassageGapInches(
+  door: Pick<MapGeometryDoor, 'passageGapInches'>,
+): number {
+  return door.passageGapInches ?? MAP_GEOMETRY_DEFAULT_DOOR_PASSAGE_GAP_INCHES
 }
 
 export type MapGeometryWindowType = 'glass' | 'bars' | 'shutters' | 'opening'
@@ -111,6 +140,8 @@ export interface MapGeometryWindow extends MapGeometryHeight, MapGeometryBlockin
   windowType: MapGeometryWindowType
   windowState?: MapGeometryWindowState
   cover?: MapGeometryCover
+  /** Smallest physical gap through bars/shutters/glass, used by form-specific traversal. */
+  passageGapInches?: number
   createdAt: number
 }
 
@@ -177,10 +208,13 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   lockState?: MapGeometryDoorLockState
   physicalState?: MapGeometryDoorPhysicalState
   secret?: boolean
+  magicallyHidden?: boolean
   hinge?: MapGeometryDoorHinge
   swing?: MapGeometryDoorSwing
   interaction?: MapGeometryDoorInteraction
+  passageGapInches?: number
   revealedToMemberIds?: string[]
+  dnd5eArcaneLock?: Dnd5eArcaneLockStateV1
   cover?: MapGeometryCover
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
@@ -217,6 +251,10 @@ export interface MapGeometryState {
   lights?: MapGeometryLight[]
   vision: MapGeometryVisionSettings
   environment?: Dnd5eMapEnvironment
+  /** Defaults to ordinary weather; storm powers Call Lightning's printed bonus die. */
+  weather?: Dnd5eMapWeather
+  /** Defaults to open/unmarked; confined means no visible volume can hold a Call Lightning cloud. */
+  overheadSpace?: Dnd5eOverheadSpace
   updatedAt: number
 }
 
@@ -413,8 +451,10 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       (raw.physicalState != null && !['intact', 'broken', 'destroyed'].includes(String(raw.physicalState))) ||
       raw.state == null && raw.openState == null ||
       typeof raw.secret !== 'boolean' ||
+      (raw.magicallyHidden != null && typeof raw.magicallyHidden !== 'boolean') ||
       (raw.hinge != null && !['start', 'end'].includes(String(raw.hinge))) ||
       (raw.swing != null && !['clockwise', 'counterclockwise'].includes(String(raw.swing)))
+      || (raw.passageGapInches != null && !finite(raw.passageGapInches, 0, 120))
     ) return undefined
     const interactionRaw = raw.interaction
     let interaction: MapGeometryDoorInteraction | undefined
@@ -439,6 +479,8 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       (!Array.isArray(raw.revealedToMemberIds) || raw.revealedToMemberIds.length > 64 ||
         raw.revealedToMemberIds.some((id) => typeof id !== 'string' || !id || id.length > 160))
     ) return undefined
+    const dnd5eArcaneLock = normalizeDnd5eArcaneLockStateV1(raw.dnd5eArcaneLock)
+    if (raw.dnd5eArcaneLock != null && !dnd5eArcaneLock) return undefined
     return {
       ...common,
       kind: 'door',
@@ -451,13 +493,16 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
         (raw.state === 'locked' ? 'locked' : 'unlocked'),
       physicalState: (raw.physicalState as MapGeometryDoorPhysicalState | undefined) ?? 'intact',
       secret: raw.secret,
+      ...(raw.magicallyHidden === true ? { magicallyHidden: true } : {}),
       hinge: (raw.hinge as MapGeometryDoorHinge | undefined) ?? 'start',
       swing: (raw.swing as MapGeometryDoorSwing | undefined) ?? 'clockwise',
       ...attachment,
       ...(interaction ? { interaction } : {}),
+      ...(raw.passageGapInches != null ? { passageGapInches: raw.passageGapInches as number } : {}),
       ...(Array.isArray(raw.revealedToMemberIds)
         ? { revealedToMemberIds: [...new Set(raw.revealedToMemberIds as string[])] }
         : {}),
+      ...(dnd5eArcaneLock ? { dnd5eArcaneLock } : {}),
     }
   }
   if (raw.kind === 'window') {
@@ -466,7 +511,8 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
     if (
       !points || !attachment || !['glass', 'bars', 'shutters', 'opening'].includes(String(raw.windowType)) ||
       (raw.windowState != null && !['closed', 'open', 'broken'].includes(String(raw.windowState))) ||
-      (raw.cover != null && !['none', 'half', 'three-quarters', 'total'].includes(String(raw.cover)))
+      (raw.cover != null && !['none', 'half', 'three-quarters', 'total'].includes(String(raw.cover))) ||
+      (raw.passageGapInches != null && !finite(raw.passageGapInches, 0, 120))
     ) return undefined
     return {
       ...common,
@@ -476,6 +522,7 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       windowType: raw.windowType as MapGeometryWindowType,
       windowState: (raw.windowState as MapGeometryWindowState | undefined) ?? 'closed',
       cover: (raw.cover as MapGeometryCover | undefined) ?? (raw.blocksLineOfEffect ? 'total' : 'half'),
+      ...(raw.passageGapInches != null ? { passageGapInches: raw.passageGapInches as number } : {}),
     }
   }
   if (raw.kind === 'obstacle') {
@@ -545,7 +592,11 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
       sharePartyVision: vision.sharePartyVision,
       ambientLight: (vision.ambientLight as MapGeometryVisionSettings['ambientLight'] | undefined) ?? 'bright',
     },
-    environment: raw.environment === 'underwater' ? 'underwater' : 'normal',
+    environment: ['normal', 'outdoors', 'indoors', 'underground', 'underwater'].includes(String(raw.environment))
+      ? raw.environment as Dnd5eMapEnvironment
+      : 'normal',
+    weather: raw.weather === 'storm' ? 'storm' : 'normal',
+    overheadSpace: raw.overheadSpace === 'confined' ? 'confined' : 'open',
     updatedAt: raw.updatedAt,
   })
 }
@@ -1099,6 +1150,475 @@ export function mapGeometryObstacleAffectsElevation(
   return Math.abs(elevationFeet - surfaceElevation) <= 1e-4
 }
 
+function persistentAreaOverlapsHeight(
+  geometry: MapGeometryState | undefined,
+  map: Pick<BattleMap, 'tokens'>,
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number],
+  elevationFeet: number,
+  entityHeightFeet: number,
+): boolean {
+  if (!area.vertical || area.vertical.mode === 'ground') return true
+  const anchorToken = area.anchorMode === 'source-token' || area.anchorMode === 'target-token' || area.anchorMode === 'effect-token'
+    ? map.tokens.find((token) => token.id === (area.anchorTokenId ?? area.sourceTokenId))
+    : undefined
+  const base = anchorToken && Number.isFinite(area.vertical.anchorOffsetFeet)
+    ? mapGeometryTokenElevation(geometry, anchorToken) + Number(area.vertical.anchorOffsetFeet)
+    : area.vertical.baseElevationFeet
+  return overlapsHeight(base, area.vertical.heightFeet, elevationFeet, entityHeightFeet)
+}
+
+function canonicalPersistentAreaCreatureType(value: string): string {
+  const type = value.trim().toLowerCase()
+  if (type === 'construct' || type.includes('构装')) return 'construct'
+  if (type === 'undead' || type.includes('亡灵') || type.includes('不死')) return 'undead'
+  if (type === 'aberration' || type.includes('异怪')) return 'aberration'
+  if (type === 'celestial' || type.includes('天界')) return 'celestial'
+  if (type === 'elemental' || type.includes('元素')) return 'elemental'
+  if (type === 'fey' || type.includes('精类') || type.includes('妖精')) return 'fey'
+  if (type === 'fiend' || type.includes('邪魔')) return 'fiend'
+  if (type === 'humanoid' || type.includes('类人生物')) return 'humanoid'
+  return type
+}
+
+function hallowAdditionalEffectAffectsToken(
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number],
+  token: Token,
+  map: BattleMap,
+): boolean {
+  const hallow = area.hallow
+  if (!hallow) return false
+  if (hallow.effectScope === 'all') return true
+  const source = map.tokens.find((candidate) => candidate.id === area.sourceTokenId)
+  if (!source) return false
+  if (hallow.effectScope === 'allies') {
+    return dnd5eCombatTokenSide(source) === dnd5eCombatTokenSide(token)
+  }
+  if (hallow.effectScope === 'enemies') {
+    const sourceSide = dnd5eCombatTokenSide(source)
+    const targetSide = dnd5eCombatTokenSide(token)
+    return !!sourceSide && !!targetSide && sourceSide !== targetSide
+  }
+  const tokenTypes = new Set([
+    ...(token.creatureTypes ?? []).map(canonicalPersistentAreaCreatureType),
+    ...(token.type === 'player' ? ['humanoid'] : []),
+  ])
+  return !!hallow.affectedCreatureType && tokenTypes.has(hallow.affectedCreatureType)
+}
+
+function persistentAreaEffectiveBlocking(
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number],
+) {
+  if (area.blocking) return area.blocking
+  // Wind Wall gained movement blocking after persistent spell areas had
+  // already shipped. Treat an older in-memory or saved area as the current
+  // declaration immediately instead of waiting for a later reconciliation
+  // pass to copy the new field onto the area.
+  if (area.sourceKind === 'core-spell' && area.coreSpellId === 'wind-wall') {
+    return { movement: true, movementMode: 'boundary' as const }
+  }
+  return undefined
+}
+
+function persistentAreaBlockingAffectsToken(
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number],
+  token: Token,
+  context?: {
+    geometry?: MapGeometryState
+    elevationFeet?: number
+  },
+): boolean {
+  const blocking = persistentAreaEffectiveBlocking(area)
+  if (!blocking || (blocking.excludeSourceToken && token.id === area.sourceTokenId)) return false
+  if (area.sourceKind === 'core-spell' && area.coreSpellId === 'wind-wall') {
+    const isGaseous = token.dnd5eCombatState?.activeEffects?.some((effect) =>
+      !(effect.suspendedBy?.length) &&
+      (
+        effect.source.rulesId === 'gaseous-form' ||
+        effect.definitionId === 'gaseous-form' ||
+        effect.definitionId.endsWith(':gaseous-form')
+      )) === true
+    const sizeRank = ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[
+      token.creatureSize ?? '中型'
+    ]
+    const elevationFeet = context?.elevationFeet ?? token.elevationFeet ?? 0
+    const groundElevationFeet = mapGeometryTerrainElevationAtPoint(context?.geometry, token)
+    const isSmallAirborne = sizeRank <= 1 && elevationFeet > groundElevationFeet + 1e-4
+    if (!isGaseous && !isSmallAirborne) return false
+  }
+  if (
+    blocking.entryPermission === 'occupants-at-creation' &&
+    blocking.authorizedTokenIds?.includes(token.id)
+  ) return false
+  const tokenTypes = new Set([
+    ...(token.creatureTypes ?? []).map((type) => canonicalPersistentAreaCreatureType(type)),
+    ...(token.type === 'player' ? ['humanoid'] : []),
+  ])
+  const included = blocking.includedCreatureTypes?.map(canonicalPersistentAreaCreatureType)
+  if (included?.length && !included.some((type) => tokenTypes.has(type))) return false
+  const excluded = blocking.excludedCreatureTypes?.map(canonicalPersistentAreaCreatureType)
+  if (excluded?.some((type) => tokenTypes.has(type))) return false
+  return true
+}
+
+function persistentAreaSuppressesMappedBarrierAt(input: {
+  geometry?: MapGeometryState
+  map: Pick<BattleMap, 'gridSize' | 'tokens'> &
+    Partial<Pick<BattleMap, 'gridOffsetX' | 'gridOffsetY' | 'dnd5ePluginAreas'>>
+  point: MapGeometryPoint
+  elevationFeet: number
+  entityHeightFeet: number
+}): boolean {
+  const gridSize = Math.max(1, input.map.gridSize)
+  const offsetX = input.map.gridOffsetX ?? 0
+  const offsetY = input.map.gridOffsetY ?? 0
+  const key = `${Math.floor((input.point.x - offsetX) / gridSize)}:${Math.floor((input.point.y - offsetY) / gridSize)}`
+  return (input.map.dnd5ePluginAreas ?? []).some((area) =>
+    area.blocking?.suppressesMappedBarriers === true &&
+    area.cells.some((cell) => `${cell.col}:${cell.row}` === key) &&
+    persistentAreaOverlapsHeight(
+      input.geometry, input.map, area, input.elevationFeet, input.entityHeightFeet,
+    ))
+}
+
+function tokenOverlapsPersistentAreaCellsAt(input: {
+  map: BattleMap
+  token: Token
+  at: MapGeometryPoint
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number]
+}): boolean {
+  const cells = new Set(input.area.cells.map((cell) => `${cell.col}:${cell.row}`))
+  return tokenOccupiedCellsAt(input.token, input.map, input.at)
+    .some((cell) => cells.has(`${cell.col}:${cell.row}`))
+}
+
+function tokenOverlapsPersistentAreaAnchorTokenAt(input: {
+  map: BattleMap
+  token: Token
+  at: MapGeometryPoint
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number]
+}): boolean {
+  if (!input.area.anchorTokenId) return false
+  const anchor = input.map.tokens.find((candidate) => candidate.id === input.area.anchorTokenId)
+  if (!anchor) return false
+  const anchorCells = new Set(tokenOccupiedCellsAt(anchor, input.map, anchor)
+    .map((cell) => `${cell.col}:${cell.row}`))
+  return tokenOccupiedCellsAt(input.token, input.map, input.at)
+    .some((cell) => anchorCells.has(`${cell.col}:${cell.row}`))
+}
+
+function persistentAreaBlocksTokenAt(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  token: Token
+  at: MapGeometryPoint
+  elevationFeet: number
+}): string | undefined {
+  const creatureHeight = Math.max(5, Math.max(1, input.token.size) * 5)
+  const occupied = tokenOccupiedCellsAt(input.token, input.map, input.at)
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (
+      area.interposition?.mode === 'blocked' &&
+      area.interposition.targetTokenId === input.token.id &&
+      tokenOverlapsPersistentAreaAnchorTokenAt({
+        map: input.map, token: input.token, at: input.at, area,
+      }) &&
+      persistentAreaOverlapsHeight(input.geometry, input.map, area, input.elevationFeet, creatureHeight)
+    ) return area.id
+    const blocking = persistentAreaEffectiveBlocking(area)
+    if (blocking?.movement !== true ||
+      (blocking.movementMode ?? 'occupancy') !== 'occupancy' ||
+      !persistentAreaBlockingAffectsToken(area, input.token, {
+        geometry: input.geometry, elevationFeet: input.elevationFeet,
+      }) ||
+      !persistentAreaOverlapsHeight(input.geometry, input.map, area, input.elevationFeet, creatureHeight)) continue
+    const cells = new Set(area.cells.map((cell) => `${cell.col}:${cell.row}`))
+    if (occupied.some((cell) => cells.has(`${cell.col}:${cell.row}`))) return area.id
+  }
+  return undefined
+}
+
+function persistentAreaDirectionalMovementBlocker(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  token: Token
+  from: MapGeometryPoint
+  to: MapGeometryPoint
+  fromElevationFeet: number
+  toElevationFeet: number
+}): string | undefined {
+  const creatureHeight = Math.max(5, Math.max(1, input.token.size) * 5)
+  const gridSize = Math.max(1, input.map.gridSize)
+  const distance = Math.hypot(input.to.x - input.from.x, input.to.y - input.from.y)
+  const steps = Math.max(2, Math.ceil(distance / Math.max(1, gridSize / 4)))
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    const blocking = persistentAreaEffectiveBlocking(area)
+    const mode = blocking?.movementMode ?? 'occupancy'
+    if (
+      blocking?.movement !== true || mode === 'occupancy' ||
+      !persistentAreaBlockingAffectsToken(area, input.token, {
+        geometry: input.geometry, elevationFeet: input.fromElevationFeet,
+      })
+    ) continue
+    const fromInside = tokenOverlapsPersistentAreaCellsAt({
+      map: input.map, token: input.token, at: input.from, area,
+    }) && persistentAreaOverlapsHeight(
+      input.geometry, input.map, area, input.fromElevationFeet, creatureHeight,
+    )
+    const toInside = tokenOverlapsPersistentAreaCellsAt({
+      map: input.map, token: input.token, at: input.to, area,
+    }) && persistentAreaOverlapsHeight(
+      input.geometry, input.map, area, input.toElevationFeet, creatureHeight,
+    )
+    let crossesInterior = false
+    if (!fromInside && !toInside && (mode === 'enter' || mode === 'boundary')) {
+      for (let index = 1; index < steps; index += 1) {
+        const ratio = index / steps
+        const at = {
+          x: input.from.x + (input.to.x - input.from.x) * ratio,
+          y: input.from.y + (input.to.y - input.from.y) * ratio,
+        }
+        const elevation = input.fromElevationFeet +
+          (input.toElevationFeet - input.fromElevationFeet) * ratio
+        if (
+          tokenOverlapsPersistentAreaCellsAt({ map: input.map, token: input.token, at, area }) &&
+          persistentAreaOverlapsHeight(input.geometry, input.map, area, elevation, creatureHeight)
+        ) {
+          crossesInterior = true
+          break
+        }
+      }
+    }
+    if (
+      (mode === 'enter' && !fromInside && (toInside || crossesInterior)) ||
+      (mode === 'exit' && fromInside && !toInside) ||
+      (mode === 'boundary' && (fromInside !== toInside || crossesInterior))
+    ) return area.id
+  }
+  return undefined
+}
+
+/**
+ * Resolves teleport wards from authoritative origin/destination geometry.
+ * Teleportation has no traversed path: only crossing from outside to inside or
+ * inside to outside is relevant.
+ */
+export interface Dnd5ePersistentAreaTeleportationBoundary {
+  areaId: string
+  areaLabel: string
+  savingThrow?: { ability: import('./dnd').AbilityKey; dc: number }
+}
+
+export function dnd5ePersistentAreaTeleportationBoundary(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  token: Token
+  from: MapGeometryPoint
+  to: MapGeometryPoint
+  fromElevationFeet?: number
+  toElevationFeet?: number
+}): Dnd5ePersistentAreaTeleportationBoundary | undefined {
+  const creatureHeight = Math.max(5, Math.max(1, input.token.size) * 5)
+  const fromElevationFeet = input.fromElevationFeet ?? mapGeometryTokenElevation(input.geometry, input.token)
+  const toElevationFeet = input.toElevationFeet ?? fromElevationFeet
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    const blocking = area.blocking
+    const hallowInterference = area.hallow?.additionalEffect === 'extradimensional-interference' &&
+      hallowAdditionalEffectAffectsToken(area, input.token, input.map)
+    if (
+      (!blocking && !hallowInterference) ||
+      (blocking?.blocksTeleportationEntry !== true && blocking?.blocksTeleportationExit !== true &&
+        !hallowInterference) ||
+      (blocking != null && !hallowInterference && !persistentAreaBlockingAffectsToken(area, input.token, {
+        geometry: input.geometry, elevationFeet: fromElevationFeet,
+      }))
+    ) continue
+    const fromInside = tokenOverlapsPersistentAreaCellsAt({
+      map: input.map, token: input.token, at: input.from, area,
+    }) && persistentAreaOverlapsHeight(
+      input.geometry, input.map, area, fromElevationFeet, creatureHeight,
+    )
+    const toInside = tokenOverlapsPersistentAreaCellsAt({
+      map: input.map, token: input.token, at: input.to, area,
+    }) && persistentAreaOverlapsHeight(
+      input.geometry, input.map, area, toElevationFeet, creatureHeight,
+    )
+    if ((blocking?.blocksTeleportationEntry === true || hallowInterference) && !fromInside && toInside) {
+      return { areaId: area.id, areaLabel: area.label }
+    }
+    if ((blocking?.blocksTeleportationExit === true || hallowInterference) && fromInside && !toInside) {
+      return {
+        areaId: area.id,
+        areaLabel: area.label,
+        savingThrow: blocking?.teleportationExitSavingThrow
+          ? { ...blocking.teleportationExitSavingThrow }
+          : undefined,
+      }
+    }
+  }
+  return undefined
+}
+
+export function dnd5ePersistentAreaTeleportationBlocker(
+  input: Parameters<typeof dnd5ePersistentAreaTeleportationBoundary>[0],
+): string | undefined {
+  return dnd5ePersistentAreaTeleportationBoundary(input)?.areaId
+}
+
+function persistentAreaVisionSegments(
+  map: BattleMap,
+  geometry?: MapGeometryState,
+  viewer?: Token,
+): MapGeometrySegment[] {
+  const gridSize = Math.max(1, map.gridSize)
+  const offsetX = map.gridOffsetX ?? 0
+  const offsetY = map.gridOffsetY ?? 0
+  return (map.dnd5ePluginAreas ?? []).flatMap((area) => {
+    const blocksByObscuration = area.obscuration?.kind === 'heavy' &&
+      !(area.obscuration.sourceCanSeeThrough && area.sourceTokenId === viewer?.id)
+    if (area.blocking?.vision !== true && !blocksByObscuration) return []
+    const cells = new Set(area.cells.map((cell) => `${cell.col}:${cell.row}`))
+    const anchorToken = area.anchorMode === 'source-token' || area.anchorMode === 'target-token' || area.anchorMode === 'effect-token'
+      ? map.tokens.find((token) => token.id === (area.anchorTokenId ?? area.sourceTokenId))
+      : undefined
+    const baseHeightFeet = area.vertical?.mode === 'volume'
+      ? anchorToken && Number.isFinite(area.vertical.anchorOffsetFeet)
+        ? mapGeometryTokenElevation(geometry, anchorToken) + Number(area.vertical.anchorOffsetFeet)
+        : area.vertical.baseElevationFeet
+      : -1_000
+    const heightFeet = area.vertical?.mode === 'volume' ? area.vertical.heightFeet : 11_000
+    const directions = [
+      { dc: 0, dr: -1, a: [0, 0], b: [1, 0] },
+      { dc: 1, dr: 0, a: [1, 0], b: [1, 1] },
+      { dc: 0, dr: 1, a: [1, 1], b: [0, 1] },
+      { dc: -1, dr: 0, a: [0, 1], b: [0, 0] },
+    ] as const
+    return area.cells.flatMap((cell) => directions.flatMap((direction, edgeIndex) => {
+      if (cells.has(`${cell.col + direction.dc}:${cell.row + direction.dr}`)) return []
+      return [{
+        entityId: `${area.id}:vision-edge:${cell.col}:${cell.row}:${edgeIndex}`,
+        entityKind: 'wall' as const,
+        a: {
+          x: offsetX + (cell.col + direction.a[0]) * gridSize,
+          y: offsetY + (cell.row + direction.a[1]) * gridSize,
+        },
+        b: {
+          x: offsetX + (cell.col + direction.b[0]) * gridSize,
+          y: offsetY + (cell.row + direction.b[1]) * gridSize,
+        },
+        blocksVision: true,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+        baseHeightFeet,
+        heightFeet,
+      }]
+    }))
+  })
+}
+
+type PersistentAreaRayMap = Pick<BattleMap, 'gridSize' | 'tokens'> &
+  Partial<Pick<BattleMap, 'gridOffsetX' | 'gridOffsetY' | 'dnd5ePluginAreas'>>
+
+function persistentAreaBlocksRay(input: {
+  geometry?: MapGeometryState
+  map: PersistentAreaRayMap
+  from: MapGeometryPoint
+  to: MapGeometryPoint
+  fromElevationFeet: number
+  toElevationFeet: number
+  fromEyeHeightFeet: number
+  toEyeHeightFeet: number
+  purpose: 'vision' | 'line-of-effect' | 'movement' | 'ordinary-projectile'
+}): string | undefined {
+  const areas = input.map.dnd5ePluginAreas ?? []
+  if (areas.length === 0) return undefined
+  const gridSize = Math.max(1, input.map.gridSize)
+  const offsetX = input.map.gridOffsetX ?? 0
+  const offsetY = input.map.gridOffsetY ?? 0
+  const distance = Math.hypot(input.to.x - input.from.x, input.to.y - input.from.y)
+  const steps = Math.max(2, Math.ceil(distance / Math.max(1, gridSize / 4)))
+  for (const area of areas) {
+    const blocks = input.purpose === 'vision'
+      ? area.blocking?.vision
+      : input.purpose === 'movement'
+        ? (area.blocking?.movementMode ?? 'occupancy') === 'occupancy'
+          ? area.blocking?.movement
+          : false
+        : input.purpose === 'ordinary-projectile'
+          ? area.sourceKind === 'core-spell' && area.coreSpellId === 'wind-wall'
+          : area.blocking?.lineOfEffect
+    if (blocks !== true) continue
+    const cells = new Set(area.cells.map((cell) => `${cell.col}:${cell.row}`))
+    const pointInside = (
+      point: MapGeometryPoint,
+      elevationFeet: number,
+      eyeHeightFeet: number,
+    ) => {
+      const key = `${Math.floor((point.x - offsetX) / gridSize)}:${Math.floor((point.y - offsetY) / gridSize)}`
+      return cells.has(key) && persistentAreaOverlapsHeight(
+        input.geometry,
+        input.map,
+        area,
+        elevationFeet + eyeHeightFeet,
+        0.1,
+      )
+    }
+    const fromInside = pointInside(input.from, input.fromElevationFeet, input.fromEyeHeightFeet)
+    const toInside = pointInside(input.to, input.toElevationFeet, input.toEyeHeightFeet)
+    if (input.purpose === 'line-of-effect' && area.blocking?.lineOfEffectMode === 'boundary') {
+      if (fromInside && toInside) continue
+      if (fromInside !== toInside) return area.id
+    }
+    if (input.purpose === 'vision' && area.blocking?.visionMode === 'outside-in') {
+      if (fromInside) continue
+      if (toInside) return area.id
+    }
+    for (let index = 1; index < steps; index += 1) {
+      const ratio = index / steps
+      const point = {
+        x: input.from.x + (input.to.x - input.from.x) * ratio,
+        y: input.from.y + (input.to.y - input.from.y) * ratio,
+      }
+      const key = `${Math.floor((point.x - offsetX) / gridSize)}:${Math.floor((point.y - offsetY) / gridSize)}`
+      if (!cells.has(key)) continue
+      const rayHeight = input.fromElevationFeet + input.fromEyeHeightFeet +
+        ((input.toElevationFeet + input.toEyeHeightFeet) -
+          (input.fromElevationFeet + input.fromEyeHeightFeet)) * ratio
+      if (persistentAreaOverlapsHeight(input.geometry, input.map, area, rayHeight, 0.1)) return area.id
+    }
+  }
+  return undefined
+}
+
+/** True when an ordinary arrow, bolt, sling stone, or similar projectile crosses a live Wind Wall. */
+export function mapGeometryOrdinaryProjectileBlocked(input: {
+  geometry?: MapGeometryState
+  map: PersistentAreaRayMap
+  from: Token
+  to: Token
+  fromHeightFeet?: number
+  toHeightFeet?: number
+}): boolean {
+  const fromHeightFeet = Math.max(
+    0.1,
+    input.fromHeightFeet ?? mapGeometryEntityBodyHeightFeet(input.from) ?? 5,
+  )
+  const toHeightFeet = Math.max(
+    0.1,
+    input.toHeightFeet ?? mapGeometryEntityBodyHeightFeet(input.to) ?? 5,
+  )
+  return persistentAreaBlocksRay({
+    geometry: input.geometry,
+    map: input.map,
+    from: input.from,
+    to: input.to,
+    fromElevationFeet: mapGeometryTokenElevation(input.geometry, input.from),
+    toElevationFeet: mapGeometryTokenElevation(input.geometry, input.to),
+    fromEyeHeightFeet: fromHeightFeet / 2,
+    toEyeHeightFeet: toHeightFeet / 2,
+    purpose: 'ordinary-projectile',
+  }) != null
+}
+
 export function mapGeometryMovementBlocked(input: {
   geometry?: MapGeometryState
   map: BattleMap
@@ -1106,21 +1626,56 @@ export function mapGeometryMovementBlocked(input: {
   to: MapGeometryPoint
   fromElevationFeet?: number
   toElevationFeet?: number
+  /** Creature can traverse a door/window only when its declared physical gap meets this size. */
+  minimumPassageGapInches?: number
 }): { blocked: boolean; entityId?: string } {
   const { geometry, token, to } = input
-  if (!geometry) return { blocked: false }
   const from = { x: token.x, y: token.y }
+  const fromElevation = input.fromElevationFeet ?? mapGeometryTokenElevation(geometry, token)
+  const toElevation = input.toElevationFeet ?? fromElevation
+  const directionalAreaBlocker = persistentAreaDirectionalMovementBlocker({
+    geometry,
+    map: input.map,
+    token,
+    from,
+    to,
+    fromElevationFeet: fromElevation,
+    toElevationFeet: toElevation,
+  })
+  if (directionalAreaBlocker) return { blocked: true, entityId: directionalAreaBlocker }
+  const areaPlacementBlocker = persistentAreaBlocksTokenAt({
+    geometry,
+    map: input.map,
+    token,
+    at: to,
+    elevationFeet: toElevation,
+  })
+  if (areaPlacementBlocker) return { blocked: true, entityId: areaPlacementBlocker }
+  const areaCrossingBlocker = persistentAreaBlocksRay({
+    geometry,
+    map: input.map,
+    from,
+    to,
+    fromElevationFeet: fromElevation,
+    toElevationFeet: toElevation,
+    fromEyeHeightFeet: 0.1,
+    toEyeHeightFeet: 0.1,
+    purpose: 'movement',
+  })
+  if (areaCrossingBlocker) return { blocked: true, entityId: areaCrossingBlocker }
+  if (!geometry) return { blocked: false }
   const radius = Math.max(0, input.map.gridSize * Math.max(1, token.size) * 0.42)
   const offsets = radius > 0
     ? [{ x: 0, y: 0 }, { x: radius, y: 0 }, { x: -radius, y: 0 }, { x: 0, y: radius }, { x: 0, y: -radius }]
     : [{ x: 0, y: 0 }]
-  const fromElevation = input.fromElevationFeet ?? mapGeometryTokenElevation(geometry, token)
-  const toElevation = input.toElevationFeet ?? fromElevation
   const creatureHeight = Math.max(5, Math.max(1, token.size) * 5)
   for (const obstacle of geometry.obstacles) {
     if (
       obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, toElevation, creatureHeight) &&
-      mapGeometryPointInPolygon(to, obstacle.points)
+      mapGeometryPointInPolygon(to, obstacle.points) &&
+      !persistentAreaSuppressesMappedBarrierAt({
+        geometry, map: input.map, point: to, elevationFeet: toElevation, entityHeightFeet: creatureHeight,
+      })
     ) return { blocked: true, entityId: obstacle.id }
   }
   const compiled = runtimeCompiledGeometry(geometry)
@@ -1135,6 +1690,19 @@ export function mapGeometryMovementBlocked(input: {
     }) as MapGeometrySegment[]
     for (const segment of candidates) {
       if (!segment.blocksMovement) continue
+      const passageGapInches = segment.entityKind === 'door'
+        ? (() => {
+            const door = geometry.doors.find((candidate) => candidate.id === segment.entityId)
+            return door ? mapGeometryDoorPassageGapInches(door) : undefined
+          })()
+        : segment.entityKind === 'window'
+          ? (geometry.windows ?? []).find((window) => window.id === segment.entityId)?.passageGapInches
+          : undefined
+      if (
+        input.minimumPassageGapInches != null &&
+        passageGapInches != null &&
+        passageGapInches >= input.minimumPassageGapInches
+      ) continue
       const t = intersectionParameter(
         rayFrom,
         rayTo,
@@ -1143,6 +1711,14 @@ export function mapGeometryMovementBlocked(input: {
       )
       if (t == null || t <= 1e-5) continue
       const elevation = fromElevation + (toElevation - fromElevation) * t
+      const intersection = {
+        x: rayFrom.x + (rayTo.x - rayFrom.x) * t,
+        y: rayFrom.y + (rayTo.y - rayFrom.y) * t,
+      }
+      if (persistentAreaSuppressesMappedBarrierAt({
+        geometry, map: input.map, point: intersection,
+        elevationFeet: elevation, entityHeightFeet: creatureHeight,
+      })) continue
       if (overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation, creatureHeight)) {
         return { blocked: true, entityId: segment.entityId }
       }
@@ -1167,11 +1743,21 @@ export function mapGeometryPlacementBlocked(input: {
   token: Token
   at: MapGeometryPoint
   elevationFeet?: number
+  /** Creature can overlap a door/window only when its declared physical gap meets this size. */
+  minimumPassageGapInches?: number
 }): { blocked: boolean; entityId?: string } {
   const { geometry, token, at } = input
+  const elevation = input.elevationFeet ?? mapGeometryTokenElevation(geometry, token)
+  const areaBlocker = persistentAreaBlocksTokenAt({
+    geometry,
+    map: input.map,
+    token,
+    at,
+    elevationFeet: elevation,
+  })
+  if (areaBlocker) return { blocked: true, entityId: areaBlocker }
   if (!geometry) return { blocked: false }
   const radius = Math.max(1, input.map.gridSize * Math.max(1, token.size) * 0.42)
-  const elevation = input.elevationFeet ?? mapGeometryTokenElevation(geometry, token)
   const creatureHeight = Math.max(5, Math.max(1, token.size) * 5)
   const candidates = querySegmentSpatialIndexBounds(runtimeCompiledGeometry(geometry).index, {
     minX: at.x - radius,
@@ -1180,15 +1766,34 @@ export function mapGeometryPlacementBlocked(input: {
     maxY: at.y + radius,
   }) as MapGeometrySegment[]
   for (const segment of candidates) {
+    const passageGapInches = segment.entityKind === 'door'
+      ? (() => {
+          const door = geometry.doors.find((candidate) => candidate.id === segment.entityId)
+          return door ? mapGeometryDoorPassageGapInches(door) : undefined
+        })()
+      : segment.entityKind === 'window'
+        ? (geometry.windows ?? []).find((window) => window.id === segment.entityId)?.passageGapInches
+        : undefined
+    if (
+      input.minimumPassageGapInches != null &&
+      passageGapInches != null &&
+      passageGapInches >= input.minimumPassageGapInches
+    ) continue
     if (
       segment.blocksMovement && overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation, creatureHeight) &&
-      pointToSegmentDistance(at, segment.a, segment.b) <= radius
+      pointToSegmentDistance(at, segment.a, segment.b) <= radius &&
+      !persistentAreaSuppressesMappedBarrierAt({
+        geometry, map: input.map, point: at, elevationFeet: elevation, entityHeightFeet: creatureHeight,
+      })
     ) return { blocked: true, entityId: segment.entityId }
   }
   for (const obstacle of geometry.obstacles) {
     if (
       obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, elevation, creatureHeight) &&
-      mapGeometryPointInPolygon(at, obstacle.points)
+      mapGeometryPointInPolygon(at, obstacle.points) &&
+      !persistentAreaSuppressesMappedBarrierAt({
+        geometry, map: input.map, point: at, elevationFeet: elevation, entityHeightFeet: creatureHeight,
+      })
     ) return { blocked: true, entityId: obstacle.id }
   }
   return { blocked: false }
@@ -1196,6 +1801,7 @@ export function mapGeometryPlacementBlocked(input: {
 
 function rayBlocked(input: {
   geometry?: MapGeometryState
+  map?: PersistentAreaRayMap
   from: MapGeometryPoint
   to: MapGeometryPoint
   elevationFeet?: number
@@ -1217,6 +1823,19 @@ function rayBlocked(input: {
     toEyeHeightFeet: input.toEyeHeightFeet ?? 2.5,
     purpose: input.purpose,
     ignoreStart: true,
+    ignoreSegment: input.map
+      ? (_segment, t, height) =>
+          persistentAreaSuppressesMappedBarrierAt({
+            geometry: input.geometry,
+            map: input.map!,
+            point: {
+              x: input.from.x + (input.to.x - input.from.x) * t,
+              y: input.from.y + (input.to.y - input.from.y) * t,
+            },
+            elevationFeet: height,
+            entityHeightFeet: 0.1,
+          })
+      : undefined,
   })?.segment.entityId
 }
 
@@ -1229,6 +1848,7 @@ function mapGeometryEntityBodyHeightFeet(entity: MapGeometryPoint): number | und
 
 export function mapGeometryCoverFromPoint(input: {
   geometry?: MapGeometryState
+  map?: PersistentAreaRayMap
   from: MapGeometryPoint
   to: MapGeometryPoint
   elevationFeet?: number
@@ -1246,6 +1866,7 @@ export function mapGeometryCoverFromPoint(input: {
   const toEyeHeight = input.toEyeHeightFeet ?? 2.5
   const lineBlocker = rayBlocked({
     geometry, from, to, fromElevationFeet: fromElevation, toElevationFeet: toElevation,
+    map: input.map,
     fromEyeHeightFeet: fromEyeHeight, toEyeHeightFeet: toEyeHeight,
     purpose: 'line-of-effect',
   })
@@ -1300,7 +1921,7 @@ export function mapGeometryCoverBetween(
   geometry: MapGeometryState | undefined,
   attacker: Token,
   target: Token,
-  map?: Pick<BattleMap, 'gridSize' | 'tokens'>,
+  map?: PersistentAreaRayMap,
   entityHeights?: {
     attackerHeightFeet?: number
     targetHeightFeet?: number
@@ -1325,6 +1946,7 @@ export function mapGeometryCoverBetween(
   ].map((to) => {
     const geometryCover = mapGeometryCoverFromPoint({
       geometry,
+      map,
       from: attacker,
       to,
       fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -1333,6 +1955,25 @@ export function mapGeometryCoverBetween(
       toEyeHeightFeet: targetEyeHeightFeet,
     })
     if (geometryCover.cover !== 'none') return geometryCover
+    const areaBlocker = map && persistentAreaBlocksRay({
+      geometry,
+      map,
+      from: attacker,
+      to,
+      fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
+      toElevationFeet: mapGeometryTokenElevation(geometry, target),
+      fromEyeHeightFeet: attackerEyeHeightFeet,
+      toEyeHeightFeet: targetEyeHeightFeet,
+      purpose: 'line-of-effect',
+    })
+    if (areaBlocker) {
+      return {
+        cover: 'total' as const,
+        armorClassBonus: 0 as const,
+        blocksLineOfEffect: true,
+        sourceEntityId: areaBlocker,
+      }
+    }
     const creature = map?.tokens.find((candidate) =>
       candidate.id !== attacker.id && candidate.id !== target.id && candidate.type !== 'obstacle' &&
       creatureIntersectsCoverRay(
@@ -1408,18 +2049,31 @@ function creatureIntersectsCoverRay(
 
 export function mapGeometryLineOfEffectBlocked(input: {
   geometry?: MapGeometryState
+  map?: PersistentAreaRayMap
   from: MapGeometryPoint
   to: MapGeometryPoint
   elevationFeet?: number
   fromElevationFeet?: number
   toElevationFeet?: number
 }): boolean {
-  return mapGeometryCoverFromPoint(input).blocksLineOfEffect
+  if (mapGeometryCoverFromPoint(input).blocksLineOfEffect) return true
+  return input.map ? persistentAreaBlocksRay({
+    geometry: input.geometry,
+    map: input.map,
+    from: input.from,
+    to: input.to,
+    fromElevationFeet: input.fromElevationFeet ?? input.elevationFeet ?? 0,
+    toElevationFeet: input.toElevationFeet ?? input.elevationFeet ?? input.fromElevationFeet ?? 0,
+    fromEyeHeightFeet: 2.5,
+    toEyeHeightFeet: 2.5,
+    purpose: 'line-of-effect',
+  }) != null : false
 }
 
 /** Geometry-only line-of-sight check. Unlike dynamic vision, this always respects vision-blocking walls and doors. */
 export function mapGeometryLineOfSightBlocked(input: {
   geometry?: MapGeometryState
+  map?: PersistentAreaRayMap
   from: MapGeometryPoint
   to: MapGeometryPoint
   elevationFeet?: number
@@ -1434,12 +2088,97 @@ export function mapGeometryLineOfSightBlocked(input: {
     (inferredFromHeightFeet == null ? undefined : inferredFromHeightFeet / 2)
   const toEyeHeightFeet = input.toEyeHeightFeet ??
     (inferredToHeightFeet == null ? undefined : inferredToHeightFeet / 2)
-  return rayBlocked({
+  if (rayBlocked({
     ...input,
     fromEyeHeightFeet,
     toEyeHeightFeet,
     purpose: 'vision',
-  }) != null
+  }) != null) return true
+  return input.map ? persistentAreaBlocksRay({
+    geometry: input.geometry,
+    map: input.map,
+    from: input.from,
+    to: input.to,
+    fromElevationFeet: input.fromElevationFeet ?? input.elevationFeet ?? 0,
+    toElevationFeet: input.toElevationFeet ?? input.elevationFeet ?? input.fromElevationFeet ?? 0,
+    fromEyeHeightFeet: fromEyeHeightFeet ?? 2.5,
+    toEyeHeightFeet: toEyeHeightFeet ?? 2.5,
+    purpose: 'vision',
+  }) != null : false
+}
+
+/**
+ * Dynamic vision always traces ordinary line of sight to the map boundary.
+ * Illumination and special-sense checks decide what can actually be seen along
+ * those rays; darkness must not impose an arbitrary maximum distance on a
+ * distant light source.
+ */
+function mapGeometryAmbientSightRangeFeet(
+  map: Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'feetPerCell'>,
+  geometry?: MapGeometryState,
+): number {
+  if (geometry?.vision.enabled !== true) return 0
+  const gridSize = Math.max(1, map.gridSize)
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  return Math.hypot(Math.max(1, map.width), Math.max(1, map.height)) / gridSize * feetPerCell
+}
+
+function tokenIntersectsPersistentArea(
+  map: BattleMap,
+  geometry: MapGeometryState | undefined,
+  token: Token,
+  area: NonNullable<BattleMap['dnd5ePluginAreas']>[number],
+): boolean {
+  const col = Math.floor((token.x - map.gridOffsetX) / Math.max(1, map.gridSize))
+  const row = Math.floor((token.y - map.gridOffsetY) / Math.max(1, map.gridSize))
+  if (!area.cells.some((cell) => cell.col === col && cell.row === row)) return false
+  if (area.vertical?.mode !== 'volume') return true
+  const tokenBase = mapGeometryTokenElevation(geometry, token)
+  const tokenTop = tokenBase + Math.max(0.1, mapGeometryEntityBodyHeightFeet(token) ?? 5)
+  const areaBase = area.vertical.baseElevationFeet
+  const areaTop = areaBase + area.vertical.heightFeet
+  return tokenTop > areaBase + 1e-4 && tokenBase < areaTop - 1e-4
+}
+
+function persistentHeavyObscurationBlocksSight(input: {
+  map: BattleMap
+  geometry?: MapGeometryState
+  viewer: Token
+  target: Token
+  distanceFeet: number
+  blindsightRangeFeet: number
+}): boolean {
+  if (input.distanceFeet <= input.blindsightRangeFeet) return false
+  const gridSize = Math.max(1, input.map.gridSize)
+  const offsetX = input.map.gridOffsetX ?? 0
+  const offsetY = input.map.gridOffsetY ?? 0
+  const viewerElevation = mapGeometryTokenElevation(input.geometry, input.viewer)
+  const targetElevation = mapGeometryTokenElevation(input.geometry, input.target)
+  const viewerEyeHeight = (mapGeometryEntityBodyHeightFeet(input.viewer) ?? 5) / 2
+  const targetEyeHeight = (mapGeometryEntityBodyHeightFeet(input.target) ?? 5) / 2
+  const distance = Math.hypot(input.target.x - input.viewer.x, input.target.y - input.viewer.y)
+  const steps = Math.max(2, Math.ceil(distance / Math.max(1, gridSize / 4)))
+  return (input.map.dnd5ePluginAreas ?? []).some((area) => {
+    if (area.obscuration?.kind !== 'heavy') return false
+    if (area.obscuration.sourceCanSeeThrough && area.sourceTokenId === input.viewer.id) return false
+    const endpointInside = tokenIntersectsPersistentArea(input.map, input.geometry, input.viewer, area) ||
+      tokenIntersectsPersistentArea(input.map, input.geometry, input.target, area)
+    if (endpointInside) return true
+    const cells = new Set(area.cells.map((cell) => `${cell.col}:${cell.row}`))
+    for (let index = 1; index < steps; index += 1) {
+      const ratio = index / steps
+      const point = {
+        x: input.viewer.x + (input.target.x - input.viewer.x) * ratio,
+        y: input.viewer.y + (input.target.y - input.viewer.y) * ratio,
+      }
+      const key = `${Math.floor((point.x - offsetX) / gridSize)}:${Math.floor((point.y - offsetY) / gridSize)}`
+      if (!cells.has(key)) continue
+      const rayHeight = viewerElevation + viewerEyeHeight +
+        ((targetElevation + targetEyeHeight) - (viewerElevation + viewerEyeHeight)) * ratio
+      if (persistentAreaOverlapsHeight(input.geometry, input.map, area, rayHeight, 0.1)) return true
+    }
+    return false
+  })
 }
 
 export function mapGeometryCanSeeToken(input: {
@@ -1466,6 +2205,7 @@ export function mapGeometryCanSeeToken(input: {
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
   const rangeFeet = Math.max(
+    mapGeometryAmbientSightRangeFeet(input.map, geometry),
     profile.normalRangeFeet,
     profile.darkvisionRangeFeet,
     profile.darknessSightRangeFeet,
@@ -1491,6 +2231,14 @@ export function mapGeometryCanSeeToken(input: {
     worldMinute: input.worldMinute,
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
+  if (persistentHeavyObscurationBlocksSight({
+    map: input.map,
+    geometry,
+    viewer: input.viewer,
+    target: input.target,
+    distanceFeet,
+    blindsightRangeFeet: profile.blindsightRangeFeet,
+  })) return false
   if (illumination === 'magical-darkness') {
     if (distanceFeet > Math.max(
       profile.magicalDarknessSightRangeFeet,
@@ -1518,16 +2266,32 @@ export function mapGeometryCanSeeToken(input: {
     0.1,
     input.targetHeightFeet ?? mapGeometryEntityBodyHeightFeet(input.target) ?? 5,
   )
-  return targetSamples.some((sample) => !rayBlocked({
-    geometry,
-    from: input.viewer,
-    to: sample,
-    fromElevationFeet: mapGeometryTokenElevation(geometry, input.viewer),
-    toElevationFeet: mapGeometryTokenElevation(geometry, input.target),
-    fromEyeHeightFeet: viewerHeightFeet / 2,
-    toEyeHeightFeet: targetHeightFeet / 2,
-    purpose: 'vision',
-  }))
+  return targetSamples.some((sample) => {
+    const fromElevationFeet = mapGeometryTokenElevation(geometry, input.viewer)
+    const toElevationFeet = mapGeometryTokenElevation(geometry, input.target)
+    if (rayBlocked({
+      geometry,
+      map: input.map,
+      from: input.viewer,
+      to: sample,
+      fromElevationFeet,
+      toElevationFeet,
+      fromEyeHeightFeet: viewerHeightFeet / 2,
+      toEyeHeightFeet: targetHeightFeet / 2,
+      purpose: 'vision',
+    })) return false
+    return !persistentAreaBlocksRay({
+      geometry,
+      map: input.map,
+      from: input.viewer,
+      to: sample,
+      fromElevationFeet,
+      toElevationFeet,
+      fromEyeHeightFeet: viewerHeightFeet / 2,
+      toEyeHeightFeet: targetHeightFeet / 2,
+      purpose: 'vision',
+    })
+  })
 }
 
 export function mapGeometryVisibleTargets(input: {
@@ -1716,9 +2480,20 @@ export function mapGeometryIlluminationAtPoint(input: {
     source.kind === 'magical-darkness' &&
       spellLightingAffectsPoint(source, input.point, input.map, pointElevation),
   )) return 'magical-darkness'
+  const gridSize = Math.max(1, input.map.gridSize)
+  const areaCell = {
+    col: Math.floor((input.point.x - input.map.gridOffsetX) / gridSize),
+    row: Math.floor((input.point.y - input.map.gridOffsetY) / gridSize),
+  }
+  const illuminationOverrides = (input.map.dnd5ePluginAreas ?? [])
+    .filter((area) => area.illuminationOverride &&
+      area.cells.some((cell) => cell.col === areaCell.col && cell.row === areaCell.row) &&
+      persistentAreaOverlapsHeight(input.geometry, input.map, area, pointElevation, 0.1))
+    .map((area) => area.illuminationOverride!)
+  if (illuminationOverrides.includes('darkness')) return 'darkness'
+  if (illuminationOverrides.includes('dim')) return 'dim'
   if (ambient === 'bright') return 'bright'
   let result: MapGeometryIllumination = ambient
-  const gridSize = Math.max(1, input.map.gridSize)
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   for (const source of input.tokens ?? input.map.tokens) {
     const light = source.lightSource
@@ -1729,6 +2504,7 @@ export function mapGeometryIlluminationAtPoint(input: {
     if (distanceFeet > dimRadius) continue
     if (rayBlocked({
       geometry: input.geometry,
+      map: input.map,
       from: source,
       to: input.point,
       fromElevationFeet: mapGeometryTokenElevation(input.geometry, source),
@@ -1746,6 +2522,7 @@ export function mapGeometryIlluminationAtPoint(input: {
     if (distanceFeet > dimRadius) continue
     if (rayBlocked({
       geometry: input.geometry,
+      map: input.map,
       from: point,
       to: input.point,
       fromElevationFeet: mapGeometryAbsoluteElevationAtPoint(input.geometry, point, source.elevationFeet),
@@ -1764,6 +2541,7 @@ export function mapGeometryIlluminationAtPoint(input: {
       gridSize * feetPerCell
     if (rayBlocked({
       geometry: input.geometry,
+      map: input.map,
       from: source.point,
       to: input.point,
       fromElevationFeet: source.elevationFeet,
@@ -1865,11 +2643,13 @@ export function mapGeometryVisibilityPolygon(input: {
   const lightRangeFeet = campaignLightIsActive(input.viewer.lightSource, input.worldMinute ?? 0)
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
-  // 地形遮罩使用正常视距；暗光、黑暗和场景光源在 LightingLayer 内表现。
+  // 明亮或微光环境中的普通视野延伸到地图边界；黑暗、特殊感官和场景
+  // 光源仍由 LightingLayer 与服务端可见性投影共同约束。
   // 服务端仍会单独过滤未被照亮的生物，因此不会因地形可见而泄露隐藏 Token。
   const rangeFeet = Number.isFinite(input.rangeOverrideFeet)
     ? Math.max(0, input.rangeOverrideFeet!)
     : Math.max(
+        mapGeometryAmbientSightRangeFeet(input.map, geometry),
         profile.normalRangeFeet,
         profile.darkvisionRangeFeet,
         profile.darknessSightRangeFeet,
@@ -1881,7 +2661,10 @@ export function mapGeometryVisibilityPolygon(input: {
   if (rangeFeet <= 0) return []
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = mapGeometryTokenElevation(geometry, input.viewer)
-  const blockers = (geometry ? mapGeometrySegments(geometry) : []).filter((segment) => segment.blocksVision)
+  const blockers = [
+    ...(geometry ? mapGeometrySegments(geometry) : []).filter((segment) => segment.blocksVision),
+    ...persistentAreaVisionSegments(input.map, geometry, input.viewer),
+  ]
   const bounds: MapGeometrySegment[] = [
     [{ x: 0, y: 0 }, { x: input.map.width, y: 0 }],
     [{ x: input.map.width, y: 0 }, { x: input.map.width, y: input.map.height }],

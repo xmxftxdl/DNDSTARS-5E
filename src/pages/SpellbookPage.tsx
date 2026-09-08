@@ -147,6 +147,7 @@ export default function SpellbookPage() {
   const headlessCount = entries.filter((entry) => entry.headless).length
   const fullAutomationCount = entries.filter((entry) => entry.automationLevel === 'full').length
   const partialAutomationCount = entries.filter((entry) => entry.automationLevel === 'partial').length
+  const manualAutomationCount = entries.filter((entry) => entry.automationLevel === 'manual').length
   const adjudicationCount = entries.length - headlessCount
   const reviewedTranslationCount = entries.filter((entry) => entry.translationStatus === 'context-reviewed').length
   const filtered = useMemo(() => {
@@ -183,7 +184,7 @@ export default function SpellbookPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="法术书"
         description="D&D 5e 2014 · SRD 5.1 法术目录、角色选法术资料与房间自定义法术。"
@@ -209,13 +210,13 @@ export default function SpellbookPage() {
       <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Summary icon={BookOpen} label="SRD 5.1 法术目录" value="319" />
         <Summary icon={Bot} label="完全自动化" value={`${fullAutomationCount}`} />
-        <Summary icon={ShieldCheck} label="半自动／DM 裁定" value={`${partialAutomationCount} / ${adjudicationCount}`} />
+        <Summary icon={ShieldCheck} label="DM 裁定" value={`${adjudicationCount}`} />
         <Summary icon={FileJson} label="已完成语境审校" value={`${reviewedTranslationCount} / 319`} />
       </div>
 
       <div className="mb-4 rounded-2xl border border-sky-400/20 bg-sky-500/[0.06] px-4 py-3 text-sm leading-6 text-sky-100">
         <div className="flex items-start gap-2"><ShieldCheck className="mt-1 h-4 w-4 shrink-0" /><p>
-          SRD 5.1 核心目录共 319 个法术；其中 {reviewedTranslationCount} 个已按英文 SRD 5.1 完成语境翻译与逐条复核，其余条目只保留目录信息。{DND5E_SRD_5_1_TRANSLATION_NOTICE}规则正文完整不代表已自动结算：完全自动化会处理已声明的全部战斗效果；半自动化会明确列出仍需 DM 裁定的边界；其余法术由 DM 依据英文 SRD 裁定。
+          SRD 5.1 核心目录共 319 个法术；其中 {reviewedTranslationCount} 个已按英文 SRD 5.1 完成语境翻译与逐条复核，其余条目只保留目录信息。{DND5E_SRD_5_1_TRANSLATION_NOTICE}只有逐条审计为完整的法术才会进入 Headless；任何规则缺口都会把整个法术标为 DM 裁定。玩家提交这类法术后，系统会自动消费可确定的施法动作与对应法术位，其余结果由 DM 决定。
         </p></div>
       </div>
       {notice ? <p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-4 py-3 text-sm text-emerald-200">{notice}</p> : null}
@@ -242,8 +243,8 @@ export default function SpellbookPage() {
         <FilterSelect value={automation} onChange={(value) => setAutomation(value as AutomationFilter)} label="自动化状态" options={[
           { value: 'all', label: `全部状态（${entries.length}）` },
           { value: 'full', label: `完全自动化（${fullAutomationCount}）` },
-          { value: 'partial', label: `半自动化（${partialAutomationCount}）` },
-          { value: 'manual', label: `需要 DM 裁定（${adjudicationCount}）` },
+          { value: 'partial', label: `DM 裁定 · 存在自动化缺口（${partialAutomationCount}）` },
+          { value: 'manual', label: `DM 裁定 · 尚无执行定义（${manualAutomationCount}）` },
         ]} />
       </section>
 
@@ -314,8 +315,8 @@ function SpellDetails({ entry, isDM, busy, onRemove }: { entry?: Dnd5eSpellbookE
     {(imported?.higherLevels ?? reference?.higherLevels) ? <RuleBlock title="升环效果" text={imported?.higherLevels ?? reference?.higherLevels ?? ''} /> : null}
     {imported && mechanicsLabel(imported) ? <RuleBlock title="结构化机械模板（不授予自动执行权限）" text={mechanicsLabel(imported) ?? ''} /> : null}
     {combat ? <RuleBlock title="Headless 结算说明" text={combat.description} /> : null}
-    {entry.automationReason ? <RuleBlock title="半自动化边界" text={entry.automationReason} /> : null}
-    {imported ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">来源：{imported.source.title} · 发布者：{imported.source.publisher} · 许可证：{imported.source.license}<br />ID：{imported.id}</div> : reference ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">规则目录：<a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_SOURCE_URL} target="_blank" rel="noreferrer">英文 SRD 5.1</a> · <a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer">CC BY 4.0</a><br />中文条目：{entry.name}（{entry.englishName}）· SRD ID：{entry.id}<br />中文正文：已按英文 SRD 5.1 完成语境审校 · 自动结算：{entry.headless ? '已接入 Headless' : '尚未接入，由 DM 裁定'}</div> : <div className="mt-5 rounded-xl border border-amber-400/15 bg-amber-500/5 p-3 text-xs leading-5 text-amber-100/80">该法术属于 SRD 5.1 目录，但中文规则正文尚未完成人工审校，因此核心包不显示未审校旧正文。请由 DM 依据英文 SRD 5.1 裁定。<br />ID：{entry.id}</div>}
+    {entry.automationReason ? <RuleBlock title="转入 DM 裁定的自动化缺口" text={entry.automationReason} /> : null}
+    {imported ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">来源：{imported.source.title} · 发布者：{imported.source.publisher} · 许可证：{imported.source.license}<br />ID：{imported.id}</div> : reference ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">规则目录：<a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_SOURCE_URL} target="_blank" rel="noreferrer">英文 SRD 5.1</a> · <a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer">CC BY 4.0</a><br />中文条目：{entry.name}（{entry.englishName}）· SRD ID：{entry.id}<br />中文正文：已按英文 SRD 5.1 完成语境审校 · 自动结算：{entry.automationLevel === 'full' ? '已接入 Headless' : entry.automationLevel === 'partial' ? '部分已接入，其余由 DM 裁定' : '尚未接入，由 DM 裁定'}</div> : <div className="mt-5 rounded-xl border border-amber-400/15 bg-amber-500/5 p-3 text-xs leading-5 text-amber-100/80">该法术属于 SRD 5.1 目录，但中文规则正文尚未完成人工审校，因此核心包不显示未审校旧正文。请由 DM 依据英文 SRD 5.1 裁定。<br />ID：{entry.id}</div>}
   </section>
 }
 
@@ -326,12 +327,12 @@ function Summary({ icon: Icon, label, value }: { icon: typeof BookOpen; label: s
 function AutomationBadge({ level, compact = false }: { level: Dnd5eSpellbookEntry['automationLevel']; compact?: boolean }) {
   const full = level === 'full'
   const partial = level === 'partial'
-  const label = full ? (compact ? 'HEADLESS' : '完全自动化') : partial ? '半自动' : 'DM 裁定'
+  const label = full ? (compact ? 'HEADLESS' : '完全自动化') : 'DM 裁定'
   return <span
-    title={full ? '该法术的已声明战斗效果由 Headless 完整结算' : partial ? '核心战斗效果已接入，但仍有规则需要 DM 裁定' : '该法术尚未接入自动结算，需要 DM 按规则正文裁定'}
-    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border font-bold tracking-wide ${compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1 text-[11px]'} ${full ? 'border-emerald-300/25 bg-emerald-500/15 text-emerald-100' : partial ? 'border-sky-300/25 bg-sky-500/15 text-sky-100' : 'border-amber-300/20 bg-amber-500/10 text-amber-100'}`}
+    title={full ? '该法术的已声明战斗效果由 Headless 完整结算' : partial ? '该法术存在自动化缺口，因此整体交由 DM 裁定' : '该法术尚未接入自动结算，需要 DM 按规则正文裁定'}
+    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border font-bold tracking-wide ${compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1 text-[11px]'} ${full ? 'border-emerald-300/25 bg-emerald-500/15 text-emerald-100' : 'border-amber-300/20 bg-amber-500/10 text-amber-100'}`}
   >
-    <span className={`h-1.5 w-1.5 rounded-full ${full ? 'bg-emerald-300' : partial ? 'bg-sky-300' : 'bg-amber-300'}`} />
+    <span className={`h-1.5 w-1.5 rounded-full ${full ? 'bg-emerald-300' : 'bg-amber-300'}`} />
     {label}
   </span>
 }

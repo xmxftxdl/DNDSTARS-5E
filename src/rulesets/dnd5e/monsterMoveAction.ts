@@ -11,22 +11,129 @@ import {
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import {
   dnd5eEffectiveFlySpeed,
+  dnd5eEffectiveMovementPoolSpeed,
+  dnd5eEffectiveOptionalMovementSpeed,
   dnd5eEffectiveSpeed,
+  dnd5eEffectiveWalkSpeed,
   dnd5eGrappleDragExtraMovementFeet,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatEvent,
+  type Dnd5eHeadlessCombatState,
+  type Dnd5eOpeningAttackSavingThrowRoll,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster } from './monsters'
+import {
+  dnd5eActiveEnvironmentalCapabilities,
+  dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveMovementBoundarySaves,
+  dnd5eActiveMovementRepeatSaves,
+  dnd5eSwallowedCorpseEscapePlan,
+  effectiveDnd5eActiveEffects,
+} from './activeEffects'
 import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './persistentAreaGeometry'
-import { dnd5eTraversalMovementCost } from './traversal'
+import {
+  dnd5eRunningJumpSegments,
+  dnd5eTraversalModeRemainingMovementFeet,
+  dnd5eTraversalMovementCost,
+  type Dnd5eTraversalMode,
+} from './traversal'
+import { dnd5eTurnMovementSpent } from './turnEconomy'
+import { dnd5eSavingThrowMode } from './passiveDefenses'
+import type { PreparedDnd5eOpeningAttackSavingThrow } from './spellAction'
 
 export interface Dnd5eMonsterMapMovementTrace {
   tokenId: string
   to: { x: number; y: number }
   path: Array<{ x: number; y: number }>
   pathElevationsFeet: number[]
+}
+
+export interface PreparedDnd5eMonsterMovementSavingThrows {
+  actorToken: BattleMap['tokens'][number]
+  characters: readonly Character[]
+  state: Dnd5eHeadlessCombatState
+  boundarySavingThrows: readonly {
+    effectId: string
+    sourceActorId: string
+    sourceName: string
+    requirement: PreparedDnd5eOpeningAttackSavingThrow
+  }[]
+  movementRepeatSavingThrows: readonly {
+    effectId: string
+    sourceActorId: string
+    sourceName: string
+    requirement: PreparedDnd5eOpeningAttackSavingThrow
+  }[]
+}
+
+export function prepareDnd5eMonsterMovementSavingThrows(input: {
+  combatId: string
+  round?: number
+  map: BattleMap
+  characters: readonly Character[]
+  initiativeOrder: readonly InitiativeEntry[]
+  actorTokenId: string
+  to: { x: number; y: number }
+}): PreparedDnd5eMonsterMovementSavingThrows | null {
+  const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type === 'enemy')
+  if (!actorToken) return null
+  const snapshot = createDnd5eMapCombatSnapshot({
+    combatId: input.combatId,
+    round: input.round,
+    map: input.map,
+    characters: input.characters,
+    initiativeOrder: input.initiativeOrder,
+  })
+  const actorCombatant = snapshot.state.combatants[actorToken.id]
+  if (!actorCombatant) return null
+  const activeEffects = effectiveDnd5eActiveEffects(actorCombatant.classState.activeEffects)
+  const requirementFor = (effectId: string, ability: Parameters<typeof dnd5eSavingThrowMode>[1], dc: number) => ({
+    featureId: effectId,
+    ability,
+    dc,
+    modifier: actorCombatant.savingThrowBonuses[ability] ??
+      Math.floor((actorCombatant.abilities[ability] - 10) / 2),
+    mode: dnd5eSavingThrowMode(actorCombatant, ability),
+    blessed: activeEffects.some((effect) => effect.source.rulesId === 'bless'),
+    baned: activeEffects.some((effect) => effect.source.rulesId === 'bane'),
+    failureDamageMultiplier: 1,
+  })
+  const boundarySavingThrows = dnd5eActiveMovementBoundarySaves(actorCombatant.classState.activeEffects)
+    .flatMap((boundary) => {
+      const source = snapshot.state.combatants[boundary.sourceActorId]
+      if (!source) return []
+      const destinationDistance = Math.hypot(input.to.x - source.position.x, input.to.y - source.position.y)
+      if (destinationDistance <= boundary.maximumDistanceFeet + 1e-6) return []
+      return [{
+        effectId: boundary.effectId,
+        sourceActorId: source.id,
+        sourceName: source.name,
+        requirement: requirementFor(boundary.effectId, boundary.ability, boundary.dc),
+      }]
+    })
+  const moved = Math.hypot(input.to.x - actorToken.x, input.to.y - actorToken.y) > 1e-6
+  const movementRepeatSavingThrows = moved
+    ? dnd5eActiveMovementRepeatSaves(actorCombatant.classState.activeEffects)
+      .flatMap((repeat) => {
+        const source = snapshot.state.combatants[repeat.sourceActorId]
+        if (!source) return []
+        return [{
+          effectId: repeat.effectId,
+          sourceActorId: source.id,
+          sourceName: source.name,
+          requirement: requirementFor(repeat.effectId, repeat.ability, repeat.dc),
+        }]
+      })
+    : []
+  return {
+    actorToken,
+    characters: input.characters,
+    state: snapshot.state,
+    boundarySavingThrows,
+    movementRepeatSavingThrows,
+  }
 }
 
 export function resolveDnd5eMonsterMapMove(input: {
@@ -38,11 +145,17 @@ export function resolveDnd5eMonsterMapMove(input: {
   actorTokenId: string
   to: { x: number; y: number }
   targetElevationFeet?: number
+  traversalMode?: Dnd5eTraversalMode
   dash?: boolean
+  disengage?: boolean
   nimbleEscape?: 'disengage'
+  /** Off-turn movement purchased by the immediately preceding legendary action. */
+  legendaryMovement?: { currentInitiativeIndex: number }
   turnEconomy?: Dnd5eTurnEconomyCounts
+  boundarySavingThrows?: readonly (Dnd5eOpeningAttackSavingThrowRoll & { effectId: string })[]
+  movementRepeatSavingThrows?: readonly (Dnd5eOpeningAttackSavingThrowRoll & { effectId: string })[]
   fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
-}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[]; traversalMode?: 'walk' | 'fly'; movementTraces?: readonly Dnd5eMonsterMapMovementTrace[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-locked' | 'movement-blocked' | 'object-interaction-unavailable' } {
+}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[]; traversalMode?: Dnd5eTraversalMode; movementTraces?: readonly Dnd5eMonsterMapMovementTrace[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-locked' | 'movement-blocked' | 'object-interaction-unavailable' | 'jump-too-far' | 'jump-too-high' | 'cannot-fly' } {
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type === 'enemy')
   const monster = actorToken?.poolId ? getDnd5eSrdMonster(actorToken.poolId) : undefined
   if (!actorToken || !monster) return { ok: false, reason: 'invalid-actor' }
@@ -57,6 +170,9 @@ export function resolveDnd5eMonsterMapMove(input: {
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
   if (isMovementLocked(actorCombatant.conditions)) return { ok: false, reason: 'movement-locked' }
+  const swallowedCorpseEscapePlan = dnd5eSwallowedCorpseEscapePlan(
+    actorCombatant.classState.activeEffects,
+  )
   const draggedTargetTokens = input.map.tokens.filter((candidate) => {
     const targetCombatant = snapshot.state.combatants[candidate.id]
     return targetCombatant?.classState.activeEffects?.some((effect) =>
@@ -67,7 +183,25 @@ export function resolveDnd5eMonsterMapMove(input: {
       effect.relation.sourceActorId === actorToken.id &&
       effect.source.actorId === actorToken.id)
   })
-  const movingIds = new Set([actorToken.id, ...draggedTargetTokens.map((target) => target.id)])
+  const carriedTargetTokens = input.map.tokens.filter((candidate) => {
+    const targetCombatant = snapshot.state.combatants[candidate.id]
+    const characterEffects = candidate.characterId
+      ? input.characters.find((character) => character.id === candidate.characterId)
+          ?.dnd5eCombatState?.activeEffects
+      : undefined
+    const savedEffects = characterEffects ?? candidate.dnd5eCombatState?.activeEffects ??
+      targetCombatant?.classState.activeEffects
+    return savedEffects?.some((effect) =>
+      !effect.dependsOnEffectId &&
+      effect.relation?.movement === 'carry-target' &&
+      effect.relation.sourceActorId === actorToken.id &&
+      effect.source.actorId === actorToken.id)
+  })
+  const movingIds = new Set([
+    actorToken.id,
+    ...draggedTargetTokens.map((target) => target.id),
+    ...carriedTargetTokens.map((target) => target.id),
+  ])
   const pathfindingMap = {
     ...input.map,
     tokens: input.map.tokens.filter((candidate) => !movingIds.has(candidate.id)),
@@ -83,24 +217,41 @@ export function resolveDnd5eMonsterMapMove(input: {
       : targetGroundElevationFeet
   const effectiveFlySpeed = dnd5eEffectiveFlySpeed(actorCombatant)
   const actorCanFly = (effectiveFlySpeed ?? 0) > 0
-  const usesFlight = actorCanFly && (
+  const automaticallyUsesFlight = actorCanFly && (
     actorElevationFeet > actorGroundElevationFeet ||
     targetElevationFeet > targetGroundElevationFeet
   )
-  const traversalMode = usesFlight ? 'fly' as const : 'walk' as const
+  const traversalMode = input.traversalMode ?? (automaticallyUsesFlight ? 'fly' : 'walk')
+  const usesFlight = traversalMode === 'fly'
+  const usesLongJump = traversalMode === 'long-jump-running' || traversalMode === 'long-jump-standing'
+  const environmentalCapabilities = dnd5eActiveEnvironmentalCapabilities(
+    actorCombatant.classState.activeEffects,
+  )
   const path = findMapGeometryPath({
     geometry, map: pathfindingMap, token: actorToken, to: input.to,
     allowOpenUnlockedDoors: true,
-    canClimb: (monster.speed.climb ?? 0) > 0,
-    canSwim: (monster.speed.swim ?? 0) > 0,
+    canClimb: traversalMode === 'climb' || (monster.speed.climb ?? 0) > 0,
+    canSwim: traversalMode === 'swim' || (monster.speed.swim ?? 0) > 0 ||
+      environmentalCapabilities.treatsLiquidSurfacesAsSolidGround,
     canFly: usesFlight,
     targetElevationFeet,
-    additionalDifficultTerrainMultiplier: (token, position) =>
-      dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+    maximumTerrainStepFeet: usesLongJump ? 10_000 : 10,
+    passThroughTokenIds: environmentalCapabilities.canOccupyCreatureSpaces
+      ? input.map.tokens.filter((token) => token.id !== actorToken.id).map((token) => token.id)
+      : undefined,
+    allowOccupiedDestination: environmentalCapabilities.canOccupyCreatureSpaces,
+    minimumPassageGapInches: environmentalCapabilities.minimumPassageGapInches,
+    ignoreDifficultTerrain: usesLongJump || environmentalCapabilities.ignoresDifficultTerrain,
+    additionalDifficultTerrainMultiplier: (token, position) => usesLongJump
+      ? 1
+      : dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>
       dnd5ePersistentAreaSpeedCostMultiplierAt({ map: input.map, token, position }),
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
+  if (input.legendaryMovement && (input.dash || input.disengage || input.nimbleEscape || path.doorsToOpen.length > 0)) {
+    return { ok: false, reason: 'movement-blocked' }
+  }
   if (path.doorsToOpen.length > 1) return { ok: false, reason: 'movement-blocked' }
   if (input.turnEconomy) {
     actorCombatant.turn = {
@@ -109,6 +260,7 @@ export function resolveDnd5eMonsterMapMove(input: {
       reactionAvailable: input.turnEconomy.reaction.current > 0,
       objectInteractionAvailable: (input.turnEconomy.objectInteraction?.current ?? 1) > 0,
       movementRemaining: input.turnEconomy.movement.current,
+      movementSpent: dnd5eTurnMovementSpent(input.turnEconomy),
     }
   }
   const finalElevationFeet = path.elevationsFeet.at(-1) ?? actorElevationFeet
@@ -177,7 +329,21 @@ export function resolveDnd5eMonsterMapMove(input: {
       })
     }
   }
-  let actionState = { ...snapshot.state, initiativeIndex: actorIndex }
+  const carriedMovementTraces: Dnd5eMonsterMapMovementTrace[] =
+    carriedTargetTokens.map((target) => ({
+      tokenId: target.id,
+      to: {
+        x: target.x + input.to.x - actorToken.x,
+        y: target.y + input.to.y - actorToken.y,
+      },
+      path: path.points.map((point) => ({
+        x: target.x + point.x - actorToken.x,
+        y: target.y + point.y - actorToken.y,
+      })),
+      pathElevationsFeet: path.elevationsFeet.map((elevation) =>
+        mapGeometryTokenElevation(geometry, target) + elevation - actorElevationFeet),
+    }))
+  let actionState = { ...snapshot.state, initiativeIndex: input.legendaryMovement?.currentInitiativeIndex ?? actorIndex }
   const priorEvents: Dnd5eCombatEvent[] = []
   if (path.doorsToOpen.length === 1) {
     if (input.turnEconomy && (input.turnEconomy.objectInteraction?.current ?? 1) < 1) {
@@ -193,6 +359,21 @@ export function resolveDnd5eMonsterMapMove(input: {
     }
     actionState = interacted.state
     priorEvents.push(...interacted.events)
+  }
+  if (input.disengage) {
+    const disengaged = resolveDnd5eHeadlessAction(actionState, {
+      type: 'disengage',
+      actorId: actorToken.id,
+    })
+    if (!disengaged.ok) return {
+      ok: true,
+      result: disengaged,
+      distanceFeet,
+      path: path.points,
+      doorsToOpen: path.doorsToOpen,
+    }
+    actionState = disengaged.state
+    priorEvents.push(...disengaged.events)
   }
   if (input.nimbleEscape === 'disengage') {
     const escaped = resolveDnd5eHeadlessAction(actionState, {
@@ -229,45 +410,97 @@ export function resolveDnd5eMonsterMapMove(input: {
   // Monsters with a faster fly speed expose that speed as their combat turn
   // movement; using only their walk speed here would underquote flight cost and
   // make an otherwise legal move roll back as invalid-class-feature.
-  const walkSpeed = Math.max(1, dnd5eEffectiveSpeed(actorCombatant))
+  const movementPoolSpeed = dnd5eEffectiveMovementPoolSpeed(actorCombatant)
+  const walkSpeed = dnd5eEffectiveWalkSpeed(actorCombatant)
+  const runningJump = traversalMode === 'long-jump-running'
+    ? dnd5eRunningJumpSegments({
+        distanceFeet: path.distanceFeet,
+        approachFeetAlready: actorCombatant.classState.runningJumpApproachFeet,
+        minimumApproachFeet: actorCombatant.runningJumpMinimumApproachFeet,
+      })
+    : undefined
+  if (runningJump && !runningJump.hasRunningStart) return { ok: false, reason: 'jump-too-far' }
+  const traversalProfile = {
+    strengthScore: actorCombatant.abilities.str,
+    strengthModifier: Math.floor((actorCombatant.abilities.str - 10) / 2),
+    movementPoolSpeed,
+    walkSpeed,
+    climbSpeed: dnd5eEffectiveOptionalMovementSpeed(actorCombatant, 'climb'),
+    swimSpeed: dnd5eEffectiveOptionalMovementSpeed(actorCombatant, 'swim'),
+    flySpeed: effectiveFlySpeed,
+    jumpDistanceMultiplier: dnd5eActiveJumpDistanceMultiplier(
+      actorCombatant.classState.activeEffects,
+    ),
+  }
   const traversal = dnd5eTraversalMovementCost({
-    distanceFeet: path.distanceFeet,
+    distanceFeet: runningJump?.jumpDistanceFeet ?? path.distanceFeet,
     baseMovementCostFeet: path.movementCostFeet,
     elevationGainFeet: usesFlight
       ? Math.abs(finalElevationFeet - actorElevationFeet)
       : Math.max(0, finalElevationFeet - actorElevationFeet),
     mode: traversalMode,
-    profile: {
-      strengthScore: actorCombatant.abilities.str,
-      strengthModifier: Math.floor((actorCombatant.abilities.str - 10) / 2),
-      walkSpeed,
-      climbSpeed: monster.speed.climb,
-      swimSpeed: monster.speed.swim,
-      flySpeed: effectiveFlySpeed,
-    },
+    profile: traversalProfile,
   })
-  if (!traversal.ok) return { ok: false, reason: 'movement-blocked' }
+  if (!traversal.ok) return { ok: false, reason: traversal.reason }
   const locomotionCostFeet = traversal.movementCostFeet +
     (isProne && !standFromProne ? path.distanceFeet : 0)
   const movementCostFeet = locomotionCostFeet +
     (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0) +
-    dnd5eGrappleDragExtraMovementFeet(actionState, actorToken.id, locomotionCostFeet)
+    dnd5eGrappleDragExtraMovementFeet(actionState, actorToken.id, locomotionCostFeet) +
+    (swallowedCorpseEscapePlan?.movementCostFeet ?? 0)
+  const movementActor = actionState.combatants[actorToken.id] ?? actorCombatant
+  const modeMovementRemainingFeet = dnd5eTraversalModeRemainingMovementFeet({
+    movementRemainingFeet: movementActor.turn.movementRemaining,
+    movementSpentFeet: movementActor.turn.movementSpent ?? 0,
+    mode: traversalMode,
+    profile: traversalProfile,
+  })
+  if (movementCostFeet > modeMovementRemainingFeet) {
+    return { ok: false, reason: 'movement-blocked' }
+  }
   const result = resolveDnd5eHeadlessAction(
     actionState,
     {
       type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet,
+      monsterLegendaryMovement: input.legendaryMovement ? true : undefined,
+      jumpDistance: runningJump?.jumpDistanceFeet,
       movementCost: movementCostFeet, movementCostIncludesDrag: true,
       traversalMode,
       toElevationFeet: finalElevationFeet,
       toGroundElevationFeet: mapGeometryTerrainElevationAtPoint(geometry, input.to),
+      boundarySavingThrows: input.boundarySavingThrows,
+      movementRepeatSavingThrows: input.movementRepeatSavingThrows,
       standFromProne,
       fallingDamageRollsByCombatantId: input.fallingDamageRollsByCombatantId,
     },
   )
   if (!result.ok) return { ok: true, result, distanceFeet, path: path.points, doorsToOpen: path.doorsToOpen }
+  // The map adapter has already validated these relations against the same
+  // snapshot used by Headless. Keep the coupled map projection authoritative
+  // even when a legacy saved effect is accepted by the schema but omitted by
+  // active-effect reconciliation. This also makes old engulf saves migrate
+  // forward without leaving the carried token behind visually.
+  const carriedMovementEvents: Dnd5eCombatEvent[] = []
+  for (const movement of carriedMovementTraces) {
+    const carried = result.state.combatants[movement.tokenId]
+    if (!carried) continue
+    const from = { ...carried.position }
+    if (from.x === movement.to.x && from.y === movement.to.y) continue
+    carried.position = { ...movement.to }
+    carried.elevationFeet = movement.pathElevationsFeet.at(-1) ?? carried.elevationFeet
+    carried.groundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, movement.to)
+    carried.airborne = (carried.elevationFeet ?? 0) > (carried.groundElevationFeet ?? 0) + 1e-4
+    carriedMovementEvents.push({
+      type: 'moved',
+      actorId: carried.id,
+      from,
+      to: carried.position,
+      distance: path.distanceFeet,
+    })
+  }
   const transactionResult: Dnd5eActionResult = {
     ...result,
-    events: [...priorEvents, ...result.events],
+    events: [...priorEvents, ...result.events, ...carriedMovementEvents],
   }
   return {
     ok: true,
@@ -284,6 +517,7 @@ export function resolveDnd5eMonsterMapMove(input: {
         pathElevationsFeet: path.elevationsFeet,
       },
       ...draggedMovementTraces,
+      ...carriedMovementTraces,
     ],
     application: planDnd5eMapResultApplication({
       state: transactionResult.state,

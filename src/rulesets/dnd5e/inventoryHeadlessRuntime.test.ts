@@ -78,6 +78,38 @@ describe('inventory Headless runtime V1', () => {
     })).toEqual([])
   })
 
+  it('adds shared proficiency and ability modifiers to item bonus damage on the Host', () => {
+    const effect = snapshot({
+      schemaVersion: 1,
+      id: 'formula-hit',
+      kind: 'on-hit-bonus-damage',
+      trigger: 'after-attack-hit',
+      appliesTo: 'weapon-attacks',
+      damage: {
+        count: 1,
+        sides: 6,
+        bonus: 1,
+        modifierFormula: {
+          schemaVersion: 1,
+          terms: [{ kind: 'proficiency-bonus' }, { kind: 'ability-modifier', ability: 'str' }],
+        },
+      },
+      damageType: 'force',
+    })
+    const actor = combatant([effect])
+    const [requirement] = dnd5eOnHitBonusDamageRequirements({
+      combatant: actor, critical: false, turnKey: 'combat:1:hero',
+    })
+    expect(requirement).toMatchObject({ count: 1, sides: 6, bonus: 6 })
+    expect(resolveDnd5eOnHitBonusDamage({
+      combatant: actor,
+      inheritedDamageType: 'slashing',
+      critical: false,
+      turnKey: 'combat:1:hero',
+      rolls: { [requirement.key]: [4] },
+    })).toMatchObject({ ok: true, components: [{ total: 10, type: 'force' }] })
+  })
+
   it('applies damage reduction once per turn and fails closed on a depleted charge', () => {
     const actor = combatant([snapshot({
       schemaVersion: 1,

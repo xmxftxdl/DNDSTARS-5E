@@ -1,0 +1,216 @@
+{
+  "id": "srd-5.1:ettercap",
+  "slug": "ettercap",
+  "name": "蜘蛛人",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "bite-poisoned:apply",
+        "bite-poisoned:save",
+        "bite-poisoned:condition-immune"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws",
+      "name": "双爪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "web",
+      "name": "蛛网",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "attack.mode",
+        "attack.toHit",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.targetMaxSizeRank",
+        "attack.target",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].standardCondition",
+        "attack.onHitEffects[].escapeCheck.ability",
+        "attack.onHitEffects[].escapeCheck.dc",
+        "attack.onHitEffects[].escapeCheck.economy",
+        "attack.onHitEffects[].stacking"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "web-restraint:apply"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 98,
+      "slug": "ettercap",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:04:08.300Z",
+      "name": "蜘蛛人",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-ettercap-bite-1788559448398",
+      "combatId": "verify-ui-ettercap-bite-1788559448398:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "蜘蛛人 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+4=21 命中；共造成 12 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:04 PM\n结算\n\n蜘蛛人 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+4=21 命中；共造成 12 点伤害。\n\n查看 Headless 结算依据（10）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 17；最终采用 17；调整值 +4。\n结果 · 21 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜1d8 骰面：2 = 2｜固定加值 +2｜小计 4\n伤害骰 · 啃咬（基础伤害 2·毒素）｜1d8 骰面：8 = 8｜固定加值 +0｜小计 8\n蜘蛛人｜消耗动作\n验证目标｜体质豁免 d20 14 +10 = 24 vs DC 11｜成功\n验证目标｜受到 12 点伤害｜HP 320 → 308",
+      "playerLog": "蜘蛛人 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+4=21 命中；共造成 12 点伤害。",
+      "afterHp": 308,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:04:55.860Z",
+      "evidenceFile": "ui-cases/monsters/098-ettercap.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛛网感知",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛛网行者",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 14,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

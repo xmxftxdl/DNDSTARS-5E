@@ -33,6 +33,7 @@ import {
 } from '../../lib/mapPathfinding'
 import {
   dnd5eMonsterAreaSavingThrowVariants,
+  dnd5eMonsterActionUsageId,
   dnd5eMonsterRequiredAreaSavingThrowVariantId,
   dnd5eMonsterMapSpeed,
   dnd5eMonsterProficiencyBonus,
@@ -46,7 +47,7 @@ import {
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eAttacksPerAttackAction } from './classes'
+import { dnd5eEffectiveAttacksPerAttackAction } from './pluginApi'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import { dnd5eAvailableMonsterSpellSlotLevels } from './monsterCoreSpellAction'
 import {
@@ -1136,7 +1137,7 @@ function offensiveMonsterSpellExpectedValue(input: {
   const cover = mapGeometryCoverBetween(geometry, attacker, target, map)
   if (cover.blocksLineOfEffect || cover.cover === 'total') return undefined
   if (mapGeometryLineOfSightBlocked({
-    geometry,
+    geometry, map,
     from: attacker,
     to: target,
     fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -1552,7 +1553,7 @@ function allocateMonsterActionTargets(input: {
         cover.blocksLineOfEffect ||
         cover.cover === 'total' ||
         mapGeometryLineOfSightBlocked({
-          geometry,
+          geometry, map: input.map,
           from: input.attacker,
           to: target,
           fromElevationFeet: mapGeometryTokenElevation(
@@ -1731,7 +1732,7 @@ function actionExpectedValue(input: {
   let controlValue = 0
   let probabilityTotal = 0
   const traitRemainingMissProbability =
-    new Map<'sneak-attack' | 'martial-advantage', number>()
+    new Map<'sneak-attack' | 'martial-advantage' | 'charge-damage', number>()
   let firstAttack: Dnd5eMonsterWeaponAttack | undefined
   const prospectiveLinkedTargetsBySlotGroup = new Map<string, Set<string>>()
   const weaponDamageSource: PlannerDamageSourceDetails = {
@@ -1751,7 +1752,7 @@ function actionExpectedValue(input: {
     const cover = mapGeometryCoverBetween(geometry, attacker, target, map)
     if (cover.blocksLineOfEffect || cover.cover === 'total') return undefined
     if (mapGeometryLineOfSightBlocked({
-      geometry,
+      geometry, map,
       from: attacker,
       to: target,
       fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -1785,7 +1786,33 @@ function actionExpectedValue(input: {
       }),
       turnKey: plannerTurnKey,
       usedTurnKeys: attackerState?.declarativeUsedTurnKeys,
-      actorRecklessActive: attackerState?.recklessAttackTurnKey != null,
+      actorRecklessActive: attackerState?.recklessAttackTurnKey === plannerTurnKey,
+      ...(() => {
+        const movementState = attacker.dnd5eCombatState
+        if (movementState?.monsterMechanicMovementTurnKey !== plannerTurnKey) {
+          return { actionId: child.id }
+        }
+        const origin = movementState.monsterMechanicMovementOrigin
+        const latest = movementState.monsterMechanicMovementLast ?? {
+          x: attacker.x,
+          y: attacker.y,
+        }
+        if (!origin) return { actionId: child.id }
+        const movementX = latest.x - origin.x
+        const movementY = latest.y - origin.y
+        const targetX = target.x - origin.x
+        const targetY = target.y - origin.y
+        return {
+          actionId: child.id,
+          movementDistanceFeet: movementState.monsterMechanicMovementFeet,
+          movementWasStraight:
+            movementState.monsterMechanicMovementStraight === true,
+          movementTowardTarget:
+            movementX * targetX + movementY * targetY > 0 &&
+            Math.hypot(target.x - latest.x, target.y - latest.y) + 1e-6 <
+              Math.hypot(target.x - origin.x, target.y - origin.y),
+        }
+      })(),
     }
     const packTacticsAdvantage = monsterPackTacticsAdvantage({
       map,
@@ -2110,7 +2137,7 @@ function actionExpectedValue(input: {
             )
         const fall = dnd5eForcedMovementFall({
           geometry,
-          target,
+          target, targetCombatant: plannerTokenCombatant(target, characters),
           to: destination.to,
         })
         const fallingDamage =
@@ -2456,7 +2483,7 @@ function plannerTargetAttackCount(
   characters: readonly Character[],
 ): number {
   const character = plannerTargetCharacter(target, characters)
-  if (character) return dnd5eAttacksPerAttackAction(character)
+  if (character) return dnd5eEffectiveAttacksPerAttackAction(character)
   const monster = plannerTargetMonster(target)
   if (!monster) return 1
   return Math.max(1, ...monster.actions.map((action) =>
@@ -2497,7 +2524,7 @@ function plannerTargetStrengthDependency(
   const character = plannerTargetCharacter(target, characters)
   if (character) {
     let value = character.abilities.str >= character.abilities.dex
-      ? Math.min(2, dnd5eAttacksPerAttackAction(character) * 0.6)
+      ? Math.min(2, dnd5eEffectiveAttacksPerAttackAction(character) * 0.6)
       : 0
     if (character.savingThrows.includes('str')) value += 0.3
     if (character.skills.includes('athletics')) value += 0.3
@@ -2543,7 +2570,7 @@ function monsterAreaFailedSaveOutcomeValue(input: {
     if (push.distanceFeet > 0) {
       const fall = dnd5eForcedMovementFall({
         geometry: mapGeometryRuntimeForMap(input.map.id),
-        target: input.target,
+        target: input.target, targetCombatant: plannerTokenCombatant(input.target, input.characters),
         to: push.to,
       })
       expectedAdditionalDamage +=
@@ -2704,7 +2731,7 @@ function bestMonsterAreaPlacement(input: {
     if (
       area.origin === 'point' &&
       mapGeometryLineOfEffectBlocked({
-        geometry,
+        geometry, map,
         from: attacker,
         to: effectOrigin,
         fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
@@ -2728,7 +2755,7 @@ function bestMonsterAreaPlacement(input: {
         effectAimElevationFeet: anchor.elevationFeet,
       }) &&
       !mapGeometryLineOfEffectBlocked({
-        geometry,
+        geometry, map,
         from: effectOrigin,
         to: token,
         fromElevationFeet: effectOriginElevation,
@@ -3174,10 +3201,14 @@ function createTacticalCandidates(input: {
     .filter(({ action }) => dnd5eMonsterActionAutomation(action) === 'headless')
     .filter(({ action }) =>
       action.usage?.kind !== 'recharge' ||
-      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[action.id] !== false)
+      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ] !== false)
     .filter(({ action }) =>
       action.usage?.kind !== 'per-day' ||
-      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ?? action.usage.max) > 0)
+      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ]?.current ?? action.usage.max) > 0)
     .filter(({ action }) => {
       const resources = {
         rechargeReadyByActionId:
@@ -3358,6 +3389,9 @@ function createTacticalCandidates(input: {
       })
     }
     for (const { action, index, rule } of legalAreaActions) {
+      const totalAreaAverageDamage =
+        (rule.damage?.average ?? 0) +
+        (rule.additionalDamage ?? []).reduce((total, component) => total + component.average, 0)
       const outcomeValueByTargetId = new Map<string, {
         expectedAdditionalDamage: number
         controlValue: number
@@ -3380,7 +3414,7 @@ function createTacticalCandidates(input: {
         attacker: at,
         focusTarget: target,
         area: rule.area,
-        averageDamage: rule.damage?.average ?? 0,
+        averageDamage: totalAreaAverageDamage,
         savingThrow: true,
         targetMode: rule.target,
         minimumHostiles: 1,
@@ -3401,14 +3435,15 @@ function createTacticalCandidates(input: {
             magical: false,
             sourceMoralAlignment: plannerMoralAlignment(monster.alignment),
           }
-          const baseDamage = rule.damage
-            ? resolvePlannerDamage(
-                candidate,
-                rule.damage.average,
-                rule.damage.type,
-                source,
-              )
-            : 0
+          const baseDamage = [
+            ...(rule.damage ? [rule.damage] : []),
+            ...(rule.additionalDamage ?? []),
+          ].reduce((total, component) => total + resolvePlannerDamage(
+            candidate,
+            component.average,
+            component.type,
+            source,
+          ), 0)
           const fallingDamage = resolvePlannerDamage(
             candidate,
             outcomeValueForTarget(candidate).expectedAdditionalDamage,
@@ -3421,6 +3456,29 @@ function createTacticalCandidates(input: {
           outcomeValueForTarget(candidate).controlValue,
       })
       if (!areaPlacement) continue
+      const areaTargetTokenIds = rule.actorLanding
+        ? tokensInCells(
+            map,
+            map.tokens,
+            tokenOccupiedCellsAt(
+              at,
+              map,
+              tokenCenterForAnchorCell(areaPlacement.targetCell, at, map),
+            ),
+          )
+            .filter((candidate) =>
+              candidate.id !== at.id &&
+              candidate.type !== 'obstacle' &&
+              plannerMonsterAreaRuleAllowsTarget({
+                map,
+                attacker: at,
+                target: candidate,
+                characters,
+                rule,
+              }))
+            .map((candidate) => candidate.id)
+        : areaPlacement.targetTokenIds
+      if (areaTargetTokenIds.length === 0) continue
       const usesNimbleEscape = hasNimbleEscape && opportunityRiskAt > 0
       const plan: Dnd5eMonsterTurnPlan = {
         moved,
@@ -3436,11 +3494,12 @@ function createTacticalCandidates(input: {
           actionId: action.id,
           variantId: rule.id === 'default' ? undefined : rule.id,
           actionName: rule.id === 'default' ? action.name : `${action.name}：${rule.name}`,
-          targetTokenIds: areaPlacement.targetTokenIds,
+          targetTokenIds: areaTargetTokenIds,
           area: rule.area,
           areaTargetCell: areaPlacement.targetCell,
           areaTargetElevationFeet: areaPlacement.targetElevationFeet,
           saveAbility: rule.ability,
+          saveAbilityChoices: rule.targetAbilityChoices,
           saveDc: rule.dc,
           damage: rule.damage ? {
             diceCount: rule.damage.count,

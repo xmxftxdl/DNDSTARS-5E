@@ -227,9 +227,21 @@ test('DM 可随时调整双方生命值、状态与位置，并通过 SSE 同步
   ])
 
   const dmInitiative = dm.getByTestId(`initiative-token-${tokenId}`)
+  const playerInitiative = player.getByTestId(`initiative-token-${tokenId}`)
   const playerHealth = player.getByTestId(`initiative-health-${tokenId}`)
   await expect(dmInitiative).toBeVisible({ timeout: 20_000 })
+  await expect(playerInitiative).toBeVisible({ timeout: 20_000 })
   await expect(playerHealth).toHaveAttribute('title', 'HP 94/94', { timeout: 20_000 })
+
+  const playerCanvas = player.getByTestId('map-canvas')
+  await playerCanvas.evaluate((element) => {
+    element.setAttribute('data-e2e-mounted-instance', 'preserved')
+  })
+  await playerInitiative.click()
+  await expect(player.getByTestId('quick-character-sheet')).toBeVisible()
+  await expect(playerCanvas).toHaveAttribute('data-e2e-mounted-instance', 'preserved')
+  await expect(player.getByText('正在加载地图工具…')).toHaveCount(0)
+  await player.getByRole('button', { name: '关闭快捷人物卡' }).click()
 
   await dmInitiative.click()
   const panel = dm.getByTestId('character-detail-panel')

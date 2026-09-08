@@ -10,6 +10,9 @@ import {
   type Dnd5eTriggerEventV1,
 } from './dnd5eEffectContracts'
 import { isDnd5eTrackableDefinitionIdV1 } from './dnd5eActivityIdentity'
+import { DND5E_DAMAGE_TYPES } from '../damageTypes'
+import type { Dnd5eSpellbookSchoolId } from '../spellbook'
+import { dnd5eActivityAutomationAnalysisV1 } from '../plugins/pluginMechanicsRegistry'
 
 export type Dnd5eActivityConfirmedByV1 = 'actor' | 'target' | 'dm' | 'system'
 
@@ -23,6 +26,11 @@ export type Dnd5eActivityInvocationMatchV1 =
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,255}$/
 const TRIGGER_EVENTS = new Set<string>(DND5E_TRIGGER_EVENT_IDS_V1)
+const DAMAGE_TYPES = new Set<string>(DND5E_DAMAGE_TYPES)
+const SPELL_SCHOOLS = new Set<Dnd5eSpellbookSchoolId>([
+  'abjuration', 'conjuration', 'divination', 'enchantment',
+  'evocation', 'illusion', 'necromancy', 'transmutation',
+])
 
 /** Old event names remain readable, while all new adapters emit canonical names. */
 export function canonicalDnd5eTriggerEventV1(event: Dnd5eTriggerEventV1): Dnd5eTriggerEventV1 {
@@ -60,7 +68,9 @@ export function resolveDnd5eActivityInvocationV1(
   }
   return {
     kind: 'active',
-    confirmation: activity.automation.level === 'dm-adjudication' ? 'dm-approval' : 'actor-choice',
+    confirmation: ['dm-adjudication', 'unsupported'].includes(
+      dnd5eActivityAutomationAnalysisV1(activity).capability.level,
+    ) ? 'dm-approval' : 'actor-choice',
   }
 }
 
@@ -100,11 +110,32 @@ export function validateDnd5eActivityTriggerContextV1(
   if (context.source.kind === 'spell' && (!Number.isInteger(context.source.level) || context.source.level < 0 || context.source.level > 9)) {
     errors.push('trigger context spell level is invalid')
   }
+  if (context.source.kind === 'spell' && context.source.school != null && !SPELL_SCHOOLS.has(context.source.school)) {
+    errors.push('trigger context spell school is invalid')
+  }
   if (context.source.kind === 'movement' && (!Number.isFinite(context.source.distanceFeet) || context.source.distanceFeet < 0)) {
     errors.push('trigger context movement distance is invalid')
   }
   if (context.source.kind === 'attack' && context.source.weaponProperties?.some((property) => !ID_PATTERN.test(property))) {
     errors.push('trigger context weapon properties are invalid')
+  }
+  if (context.source.kind === 'attack' && context.source.proficient != null && typeof context.source.proficient !== 'boolean') {
+    errors.push('trigger context attack proficiency is invalid')
+  }
+  if (context.source.kind === 'attack' && context.source.targetDroppedToZero != null && typeof context.source.targetDroppedToZero !== 'boolean') {
+    errors.push('trigger context attack outcome is invalid')
+  }
+  if (context.source.kind === 'attack' && context.source.damageType != null && !DAMAGE_TYPES.has(context.source.damageType)) {
+    errors.push('trigger context damage type is invalid')
+  }
+  if ('damage' in context.source && context.source.damage != null) {
+    const damage = context.source.damage
+    if (
+      !Number.isFinite(damage.amount) || damage.amount < 0 ||
+      !Number.isFinite(damage.temporaryHitPointsBefore) || damage.temporaryHitPointsBefore < 0 ||
+      !Number.isFinite(damage.temporaryHitPointsAfter) || damage.temporaryHitPointsAfter < 0 ||
+      damage.damageTypes?.some((type) => !DAMAGE_TYPES.has(type))
+    ) errors.push('trigger context damage facts are invalid')
   }
   return errors
 }
@@ -125,16 +156,62 @@ export function dnd5eContextPredicateSatisfiedV1(
     if (!context || context.source.kind !== 'attack') return false
     return context.source.weaponProperties?.includes(predicate.property) === predicate.present
   }
-  if (predicate.kind === 'attack-mode') return context?.source.kind === 'attack' && context.source.mode === predicate.mode
+  if (predicate.kind === 'attack-mode') {
+    const modes = predicate.modes ?? (predicate.mode ? [predicate.mode] : [])
+    return context?.source.kind === 'attack' && context.source.mode != null && modes.includes(context.source.mode)
+  }
+  if (predicate.kind === 'attack-proficiency') {
+    return context?.source.kind === 'attack' && context.source.proficient === predicate.proficient
+  }
+  if (predicate.kind === 'attack-weapon') {
+    return context?.source.kind === 'attack' && context.source.weaponId != null &&
+      predicate.weaponIds.includes(context.source.weaponId)
+  }
+  if (predicate.kind === 'attack-origin') {
+    return context?.source.kind === 'attack' && context.source.origin != null &&
+      predicate.origins.includes(context.source.origin)
+  }
+  if (predicate.kind === 'attack-hands') {
+    return context?.source.kind === 'attack' && context.source.handsUsed === predicate.hands
+  }
   if (predicate.kind === 'attack-result') return context?.source.kind === 'attack' && context.source.result === predicate.result
+  if (predicate.kind === 'attack-outcome') {
+    if (context?.source.kind !== 'attack') return false
+    const source = context.source
+    const results = predicate.outcomes.map((outcome) => outcome === 'critical-hit'
+      ? source.result === 'critical-hit'
+      : source.targetDroppedToZero === true)
+    return (predicate.match ?? 'any') === 'all' ? results.every(Boolean) : results.some(Boolean)
+  }
+  if (predicate.kind === 'damage-type') {
+    if (!context) return false
+    const damageTypes = 'damage' in context.source ? context.source.damage?.damageTypes : undefined
+    return (context.source.kind === 'attack' && context.source.damageType != null &&
+      predicate.damageTypes.includes(context.source.damageType)) ||
+      damageTypes?.some((type) => predicate.damageTypes.includes(type)) === true
+  }
+  if (predicate.kind === 'damage-event') {
+    if (!context || !('damage' in context.source) || !context.source.damage) return false
+    const damage = context.source.damage
+    return damage.amount >= (predicate.minimumAmount ?? 0) &&
+      damage.amount <= (predicate.maximumAmount ?? Number.POSITIVE_INFINITY) &&
+      damage.temporaryHitPointsBefore >= (predicate.minimumTemporaryHitPointsBefore ?? 0) &&
+      damage.temporaryHitPointsAfter <= (predicate.maximumTemporaryHitPointsAfter ?? Number.POSITIVE_INFINITY)
+  }
   if (predicate.kind === 'movement-distance') {
     if (!context || context.source.kind !== 'movement') return false
     return context.source.distanceFeet >= (predicate.minimumFeet ?? 0) &&
       context.source.distanceFeet <= (predicate.maximumFeet ?? Number.POSITIVE_INFINITY)
   }
+  if (predicate.kind === 'movement-property') {
+    if (!context || context.source.kind !== 'movement') return false
+    return (predicate.straightLine == null || context.source.straightLine === predicate.straightLine) &&
+      (predicate.dashedThisTurn == null || context.source.dashedThisTurn === predicate.dashedThisTurn)
+  }
   if (predicate.kind === 'spell-used') {
     if (!context || context.source.kind !== 'spell') return false
     return (predicate.spellId == null || context.source.id === predicate.spellId) &&
+      (predicate.schools == null || (context.source.school != null && predicate.schools.includes(context.source.school))) &&
       context.source.level >= (predicate.minimumLevel ?? 0) &&
       context.source.level <= (predicate.maximumLevel ?? 9)
   }

@@ -10,8 +10,11 @@ describe('ActiveEffect authoritative write boundary', () => {
   it('forbids runtime condition mutation outside the projection commit', () => {
     const allowedProjectionAssignments = new Set([
       'endTurnAction.ts:actorCombatant.conditions = dnd5eConditionsFromActiveEffects(actorCombatant.classState.activeEffects)',
+      'playerMoveAction.ts:actorCombatant.conditions = dnd5eConditionsFromActiveEffects(actorCombatant.classState.activeEffects)',
+      'webAreaRules.ts:nextState.conditions = projectedConditions.length ? projectedConditions : undefined',
       'headlessCombatEngine.ts:target.conditions = dnd5eConditionsFromActiveEffects(effects)',
       'headlessCombatEngine.ts:target.conditions = dnd5eConditionsFromActiveEffects(normalized)',
+      'headlessCombatEngine.ts:actor.conditions = dnd5eConditionsFromActiveEffects(actor.classState.activeEffects)',
     ])
     for (const name of runtimeFiles) {
       const source = readFileSync(new URL(name, rulesRoot), 'utf8')

@@ -21,6 +21,18 @@ import {
   type RoomSession,
 } from './roomSession'
 
+const ROOM_REQUEST_TIMEOUT_MS = 5_000
+
+async function fetchRoomCandidate(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), ROOM_REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    globalThis.clearTimeout(timeout)
+  }
+}
+
 interface RoomMemberResponse {
   memberId: string
   roomToken?: string
@@ -29,6 +41,7 @@ interface RoomMemberResponse {
   role: RoomRole
   slot?: RoomPlayerSlot
   displayName: string
+  characterAssignment?: RoomCharacterAssignment
 }
 
 interface RoomResponse {
@@ -80,9 +93,17 @@ export interface RoomRosterMember {
   status: 'online' | 'temporarily-offline' | 'left' | 'removed'
   activeCharacterId: string | null
   activeCharacterName: string | null
+  characterAssignment: RoomCharacterAssignment
   ready: boolean
   missing: RoomPluginRequirement[]
   mismatched: RoomPluginRequirement[]
+}
+
+export interface RoomCharacterAssignment {
+  revision: number
+  enforced: boolean
+  characterId: string | null
+  characterName: string | null
 }
 
 export interface RoomRoster {
@@ -116,6 +137,24 @@ function normalizedRosterRequirement(value: unknown): RoomPluginRequirement | nu
     stateSchemaVersion: Number.isInteger(requirement.stateSchemaVersion)
       ? Math.max(1, Number(requirement.stateSchemaVersion))
       : 1,
+  }
+}
+
+export function normalizeRoomCharacterAssignment(value: unknown): RoomCharacterAssignment {
+  const assignment = value && typeof value === 'object'
+    ? value as Partial<RoomCharacterAssignment>
+    : {}
+  const characterId = typeof assignment.characterId === 'string' && assignment.characterId.trim()
+    ? assignment.characterId.trim().slice(0, 128)
+    : null
+  const enforced = assignment.enforced === true && characterId !== null
+  return {
+    revision: Number.isSafeInteger(assignment.revision) ? Math.max(0, Number(assignment.revision)) : 0,
+    enforced,
+    characterId: enforced ? characterId : null,
+    characterName: enforced && typeof assignment.characterName === 'string' && assignment.characterName.trim()
+      ? assignment.characterName.trim().slice(0, 80)
+      : null,
   }
 }
 
@@ -157,6 +196,7 @@ export function normalizeRoomRosterPayload(value: unknown, expectedRoomId: strin
         : player.online === true ? 'online' : 'temporarily-offline',
       activeCharacterId: typeof player.activeCharacterId === 'string' ? player.activeCharacterId : null,
       activeCharacterName: typeof player.activeCharacterName === 'string' ? player.activeCharacterName : null,
+      characterAssignment: normalizeRoomCharacterAssignment(player.characterAssignment),
       ready: typeof player.ready === 'boolean' ? player.ready : missing.length === 0 && mismatched.length === 0,
       missing,
       mismatched,
@@ -205,7 +245,7 @@ async function roomRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let reachedServer = false
   for (const api of sharedLobbyApiCandidates()) {
     try {
-      const response = await fetch(`${api}${path}`, {
+      const response = await fetchRoomCandidate(`${api}${path}`, {
         ...init,
         headers: {
           'Content-Type': 'application/json',
@@ -254,7 +294,7 @@ async function roomBinaryRequest(path: string, init?: RequestInit): Promise<Resp
   let reachedServer = false
   for (const api of sharedLobbyApiCandidates()) {
     try {
-      const response = await fetch(`${api}${path}`, {
+      const response = await fetchRoomCandidate(`${api}${path}`, {
         ...init,
         headers: {
           ...(account ? { 'X-Stars-Account-Token': account.sessionToken } : {}),
@@ -419,6 +459,14 @@ export async function heartbeatRoom(
   activePlugins: readonly { id: string; version: string; integrity?: string; stateSchemaVersion?: number }[] = [],
   presence?: { activeCharacterId?: string | null; activeCharacterName?: string | null },
 ): Promise<RoomRulesSnapshot> {
+  return (await heartbeatRoomState(session, activePlugins, presence)).rules
+}
+
+export async function heartbeatRoomState(
+  session: RoomSession,
+  activePlugins: readonly { id: string; version: string; integrity?: string; stateSchemaVersion?: number }[] = [],
+  presence?: { activeCharacterId?: string | null; activeCharacterName?: string | null },
+): Promise<{ rules: RoomRulesSnapshot; characterAssignment: RoomCharacterAssignment }> {
   const response = await roomRequest<RoomResponse>(`/rooms/${encodeURIComponent(session.roomId)}/heartbeat`, {
     method: 'POST',
     body: JSON.stringify({
@@ -435,7 +483,10 @@ export async function heartbeatRoom(
   if (response.member.role !== session.role || response.member.slot !== session.slot) {
     saveRoomSession(responseToSession(response))
   }
-  return response.rules
+  return {
+    rules: response.rules,
+    characterAssignment: normalizeRoomCharacterAssignment(response.member.characterAssignment),
+  }
 }
 
 async function updateRoomAdmin(
@@ -460,6 +511,18 @@ export async function setRoomCapacity(session: RoomSession, maxPlayers: number):
 
 export async function setRoomPassword(session: RoomSession, password: string): Promise<void> {
   await updateRoomAdmin(session, { operation: 'set-password', password })
+}
+
+export async function assignRoomPlayerCharacter(
+  session: RoomSession,
+  targetMemberId: string,
+  character?: { id: string; name: string } | null,
+): Promise<void> {
+  await updateRoomAdmin(session, {
+    operation: 'assign-character',
+    targetMemberId,
+    characterId: character?.id ?? null,
+  })
 }
 
 export async function kickRoomPlayer(session: RoomSession, targetMemberId: string): Promise<void> {
@@ -708,6 +771,9 @@ export function roomApiErrorMessage(error: unknown): string {
     'invalid-room-password': '房间密码不正确，或超过 64 个字符。',
     'invalid-room-capacity': '房间人数必须为 1～8，且不能少于当前玩家数。',
     'target-plugins-not-ready': '该玩家的规则包尚未就绪，不能接管 DM。',
+    'invalid-character-assignment': '角色卡分配参数无效。',
+    'character-assignment-conflict': '角色卡尚未同步给该玩家，或已被其他玩家占用。请刷新后重试。',
+    'characters-unavailable': '角色卡数据暂时不可用，请稍后重试。',
     'invalid-room-operation': '房间管理操作无效。',
     'invalid-ruleset': '该规则目前不可用。',
     'invalid-plugin-manifest': '规则包清单无效；房间只接受带版本和 SHA-256 的规则包。',

@@ -6,6 +6,13 @@ import type {
 } from './dnd5eActivityContracts'
 import { matchDnd5eActivityInvocationV1, resolveDnd5eActivityInvocationV1 } from './dnd5eActivityInvocation'
 import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
+import {
+  getRegisteredContentActivity,
+  listRegisteredContentActivities,
+  listRegisteredContentDefinitionPackages,
+  type RegisteredContentDefinition,
+} from '../../../domain/content/contentDefinitionRegistry'
+import { registerDnd5eUnifiedContentPackageV1 } from './dnd5eUnifiedContentRegistry'
 
 export interface RegisteredDnd5eActivityPackage {
   packageId: string
@@ -25,7 +32,7 @@ export interface AvailableRegisteredDnd5eActivityV1 {
   retention: Dnd5eActivityTriggerRetentionV1
 }
 
-const packages = new Map<string, { token: symbol; value: RegisteredDnd5eActivityPackage }>()
+const legacyRegistrations = new Map<string, { token: symbol; dispose(): void }>()
 
 function clonePackage(value: RegisteredDnd5eActivityPackage): RegisteredDnd5eActivityPackage {
   return structuredClone(value)
@@ -46,12 +53,32 @@ export function registerDnd5eActivityPackage(
     if (ids.has(activity.id)) throw new Error(`Duplicate Activity id in package ${value.packageId}: ${activity.id}`)
     ids.add(activity.id)
   }
-  if (packages.has(value.packageId)) throw new Error(`Activity package is already registered: ${value.packageId}`)
+  if (legacyRegistrations.has(value.packageId)) throw new Error(`Activity package is already registered: ${value.packageId}`)
   const token = Symbol(value.packageId)
-  packages.set(value.packageId, { token, value: clonePackage(value) })
+  const definitions: RegisteredContentDefinition[] = value.activities.map((activity, index) => ({
+    schemaVersion: 1,
+    id: `legacy-activity.${activity.id.replace(/[^a-z0-9._-]+/g, '.').slice(0, 96)}.${index}`,
+    namespace: value.packageId,
+    version: value.packageVersion,
+    kind: 'feature',
+    name: activity.name,
+    source: { packageId: value.packageId, packageVersion: value.packageVersion },
+    payload: { legacyActivityAdapter: true },
+    activities: [structuredClone(activity)],
+    automation: structuredClone(activity.automation),
+  }))
+  const registration = registerDnd5eUnifiedContentPackageV1({
+    packageId: value.packageId,
+    packageVersion: value.packageVersion,
+    definitions,
+  })
+  legacyRegistrations.set(value.packageId, { token, dispose: registration.dispose })
   return {
     dispose() {
-      if (packages.get(value.packageId)?.token === token) packages.delete(value.packageId)
+      const current = legacyRegistrations.get(value.packageId)
+      if (current?.token !== token) return
+      current.dispose()
+      legacyRegistrations.delete(value.packageId)
     },
   }
 }
@@ -60,12 +87,15 @@ export function getRegisteredDnd5eActivity(
   packageId: string,
   activityId: string,
 ): Dnd5eActivityDefinitionV1 | undefined {
-  const activity = packages.get(packageId)?.value.activities.find((candidate) => candidate.id === activityId)
-  return activity ? structuredClone(activity) : undefined
+  return getRegisteredContentActivity<Dnd5eActivityDefinitionV1>(packageId, activityId)
 }
 
 export function listRegisteredDnd5eActivityPackages(): readonly RegisteredDnd5eActivityPackage[] {
-  return [...packages.values()].map(({ value }) => clonePackage(value))
+  return listRegisteredContentDefinitionPackages().map((value) => clonePackage({
+    packageId: value.packageId,
+    packageVersion: value.packageVersion,
+    activities: listRegisteredContentActivities<Dnd5eActivityDefinitionV1>(value.packageId),
+  }))
 }
 
 /** Finds every registered Activity that the Host may offer for one event window. */
@@ -75,8 +105,12 @@ export function listAvailableRegisteredDnd5eActivitiesV1(input: {
   targetIds: readonly string[]
 }): readonly AvailableRegisteredDnd5eActivityV1[] {
   const available: AvailableRegisteredDnd5eActivityV1[] = []
-  for (const { value } of packages.values()) {
+  for (const value of listRegisteredDnd5eActivityPackages()) {
     for (const activity of value.activities) {
+      // These Activities are the unified catalog entry for mechanics already
+      // dispatched inside the authoritative attack/spell/turn transaction.
+      // Offering a second generic trigger window would settle them twice.
+      if (activity.authorityBinding?.execution === 'headless-event-engine') continue
       const invocation = resolveDnd5eActivityInvocationV1(activity)
       if (invocation.kind !== 'triggered') continue
       const confirmedBy = invocation.confirmation === 'automatic'
@@ -108,5 +142,6 @@ export function listAvailableRegisteredDnd5eActivitiesV1(input: {
 }
 
 export function clearDnd5eActivityRegistryForTests(): void {
-  packages.clear()
+  for (const registration of legacyRegistrations.values()) registration.dispose()
+  legacyRegistrations.clear()
 }

@@ -1,8 +1,17 @@
 import type { AiModelDescriptorV1, AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
+import {
+  AI_MODEL_POLICY,
+  creditCny,
+  fixedBridgeModelIdForTask,
+  reserveCredits,
+  textCredits,
+} from '../../shared/ai-model-policy.mjs'
 import type { AiDocumentChunkV1, AiProviderExecutionResult, JsonSchemaV1 } from './aiProvider'
 import { AiProviderRegistryV1, executeStructuredAiTask } from './aiProvider'
 import { createPdfDocumentChunks, type PdfDocumentChunkV2 } from './pdfDocumentChunker'
 import { pdfPageNeedsOcr, resolvePdfPageText } from './pdfOcrPipeline'
+import { canonicalizePdfPersonRelationships, mergePdfPersonRecords } from './pdfPersonDeduplication'
+import { mergePdfEncounterRecords, mergePdfSceneRecords } from './pdfCampaignEventDeduplication'
 import {
   createPdfDocumentIdentity,
   expandShortPdfEvidenceQuote,
@@ -58,10 +67,45 @@ export interface PdfClueRecordV1 extends PdfNamedRecordV1 {
   failForward: string
 }
 
+export type PdfTimelineKindV1 = 'history' | 'current' | 'deadline' | 'conditional'
+
+export interface PdfCausalBranchV1 {
+  /** Exact name of the immediate source event in this synthesized timeline. */
+  sourceEvent: string
+  /** Short text displayed beside the branch arrow. */
+  label: string
+  /** Explicit predicate for this one edge; empty only when unconditional. */
+  condition: string
+  /** Why this source event and predicate lead to the target event. */
+  explanation: string
+  /** Canonical person name when this edge depends on whether that person lives. */
+  branchPerson: string
+  branchPersonState: 'dead' | 'alive' | 'unspecified'
+}
+
 export interface PdfSceneRecordV1 extends PdfNamedRecordV1 {
   location: string
   npcs: string[]
   monsters: string[]
+  /** Exact temporal phrase from the source, such as “数年前” or “黑桦弯伏击后”. */
+  time?: string
+  /** Cross-document chronological order assigned during synthesis; lower values happen first. */
+  timelineOrder?: number
+  /** DM-authored authoritative campaign minute used to place this event against the room clock. */
+  gameTimeWorldMinute?: number
+  timelineKind?: PdfTimelineKindV1
+  tags?: string[]
+  /** Exact names of the immediate prerequisite/cause events in the synthesized timeline. */
+  causedBy?: string[]
+  /** Per-edge causal metadata. Prefer this over the legacy shared branch fields. */
+  causalBranches?: PdfCausalBranchV1[]
+  /** Short explanation of why the prerequisite leads to this event. */
+  causalExplanation?: string
+  /** Empty for an unconditional edge; otherwise the explicit branch predicate. */
+  branchCondition?: string
+  /** Full canonical person name when the branch depends on whether a person lives or dies. */
+  branchPerson?: string
+  branchPersonState?: 'dead' | 'alive' | 'unspecified'
 }
 
 export interface PdfEncounterRecordV1 extends PdfNamedRecordV1 {
@@ -74,6 +118,12 @@ export type PdfImportCandidateKindV1 = 'monster' | 'npc' | 'item' | 'spell' | 'm
 export interface PdfImportCandidateV1 extends PdfNamedRecordV1 {
   kind: PdfImportCandidateKindV1
   automation: 'full' | 'partial' | 'manual'
+  /**
+   * Verbatim, self-contained monster stat block captured from the source PDF.
+   * Kept as source text so the shared D&D 5e parser—not the model—owns the
+   * authoritative conversion into workshop traits, actions and spellcasting.
+   */
+  monsterStatBlockText?: string
 }
 
 export interface PdfPrepTipV1 {
@@ -91,6 +141,8 @@ export interface PdfCampaignChunkAnalysisV1 {
   locations: PdfNamedRecordV1[]
   factions: PdfNamedRecordV1[]
   clues: PdfClueRecordV1[]
+  /** Full-book, synthesis-only major events. Raw runnable scenes remain in `scenes`. */
+  timelineEvents?: PdfSceneRecordV1[]
   scenes: PdfSceneRecordV1[]
   encounters: PdfEncounterRecordV1[]
   importCandidates: PdfImportCandidateV1[]
@@ -160,6 +212,9 @@ export interface PdfAnalysisWorkloadEstimateV1 {
   estimatedPasses: number
   estimatedMinutesLow: number
   estimatedMinutesHigh: number
+  estimatedCredits: number
+  reservedCredits: number
+  estimatedCny: number
   recommendation: PdfAnalysisRecommendationV1
 }
 
@@ -204,8 +259,12 @@ export function selectPdfAnalysisModelRouting(
   if (extractionModels.length === 0 || synthesisModels.length === 0) return null
 
   if (selection.providerId === 'external-account') {
-    const configuredExtraction = extractionModels.find((model) => model.id.startsWith('external:extraction:'))
-    const configuredSynthesis = synthesisModels.find((model) => model.id.startsWith('external:synthesis:'))
+    const configuredExtraction = extractionModels.find((model) =>
+      model.id === fixedBridgeModelIdForTask('pdf-extraction', 'pdf-extraction')) ??
+      extractionModels.find((model) => model.id.startsWith('external:extraction:'))
+    const configuredSynthesis = synthesisModels.find((model) =>
+      model.id === fixedBridgeModelIdForTask('campaign-analysis', 'pdf-synthesis')) ??
+      synthesisModels.find((model) => model.id.startsWith('external:synthesis:'))
     const extraction = configuredExtraction ?? selectedExtraction ?? extractionModels[0]
     const synthesis = configuredSynthesis ?? selectedSynthesis ?? synthesisModels[0]
     return {
@@ -278,6 +337,27 @@ export function estimatePdfAnalysisWorkload(
       PDF_PASS_OUTPUT_TOKENS.adventure
     ) + PDF_PASS_OUTPUT_TOKENS.synthesis
     : estimatedChunks * PDF_PASS_OUTPUT_TOKENS.quick
+  const extractionOutputTokens = depth === 'deep'
+    ? estimatedChunks * (
+      PDF_PASS_OUTPUT_TOKENS.entities +
+      PDF_PASS_OUTPUT_TOKENS.relationships +
+      PDF_PASS_OUTPUT_TOKENS.adventure
+    )
+    : outputTokens
+  // 在真正读取文字层之前按每页 1,500 tokens 高估；深度分析会对同一页运行三种提取 pass。
+  const extractionInputTokens = safePages * 1_500 * (depth === 'deep' ? 3 : 1)
+  const synthesisInputTokens = depth === 'deep' ? extractionOutputTokens : 0
+  const synthesisOutputTokens = depth === 'deep' ? PDF_PASS_OUTPUT_TOKENS.synthesis : 0
+  const estimatedCredits = textCredits({
+    modelId: AI_MODEL_POLICY.pdfExtractionModelId,
+    inputTokens: extractionInputTokens,
+    outputTokens: extractionOutputTokens,
+  }) + (depth === 'deep' ? textCredits({
+    modelId: AI_MODEL_POLICY.pdfSynthesisModelId,
+    inputTokens: synthesisInputTokens,
+    outputTokens: synthesisOutputTokens,
+  }) : 0)
+  const reservedCredits = reserveCredits(estimatedCredits)
   // 本地 35B 模型常见约 6-14 输出 token/s；额外预留 15% 给提示词预填充、校验与阶段切换。
   const estimatedMinutesLow = Math.max(1, Math.ceil((outputTokens / 14 / 60) * 1.15))
   const estimatedMinutesHigh = Math.max(estimatedMinutesLow, Math.ceil((outputTokens / 6 / 60) * 1.15))
@@ -287,6 +367,9 @@ export function estimatePdfAnalysisWorkload(
     estimatedPasses,
     estimatedMinutesLow,
     estimatedMinutesHigh,
+    estimatedCredits,
+    reservedCredits,
+    estimatedCny: creditCny(estimatedCredits),
     recommendation: safePages > 30 ? 'prefer-cloud' : safePages > 10 ? 'prefer-quick' : 'local-ready',
   }
 }
@@ -395,6 +478,35 @@ function listIsValid(value: unknown, predicate: (entry: unknown) => boolean): va
   return Array.isArray(value) && value.length <= MAX_RESULT_ITEMS && value.every(predicate)
 }
 
+function sceneRecordIsValid(entry: unknown): entry is PdfSceneRecordV1 {
+  return namedRecordIsValid(entry) &&
+    typeof field(entry, 'location') === 'string' && String(field(entry, 'location')).length <= 2_000 &&
+    stringsAreValid(field(entry, 'npcs')) && stringsAreValid(field(entry, 'monsters')) &&
+    (field(entry, 'time') === undefined || (typeof field(entry, 'time') === 'string' && String(field(entry, 'time')).length <= 300)) &&
+    (field(entry, 'timelineOrder') === undefined || (Number.isSafeInteger(field(entry, 'timelineOrder')) && Number(field(entry, 'timelineOrder')) >= 0)) &&
+    (field(entry, 'gameTimeWorldMinute') === undefined || (Number.isSafeInteger(field(entry, 'gameTimeWorldMinute')) && Number(field(entry, 'gameTimeWorldMinute')) >= 0)) &&
+    (field(entry, 'timelineKind') === undefined || ['history', 'current', 'deadline', 'conditional'].includes(String(field(entry, 'timelineKind')))) &&
+    (field(entry, 'tags') === undefined || stringsAreValid(field(entry, 'tags'), 8)) &&
+    (field(entry, 'causedBy') === undefined || stringsAreValid(field(entry, 'causedBy'), 8)) &&
+    (field(entry, 'causalBranches') === undefined || (
+      Array.isArray(field(entry, 'causalBranches')) &&
+      (field(entry, 'causalBranches') as unknown[]).length <= 8 &&
+      (field(entry, 'causalBranches') as unknown[]).every((branch) => (
+        isPlainObject(branch) &&
+        boundedText(branch.sourceEvent, 120).length > 0 &&
+        typeof branch.label === 'string' && branch.label.length <= 180 &&
+        typeof branch.condition === 'string' && branch.condition.length <= 300 &&
+        typeof branch.explanation === 'string' && branch.explanation.length <= 300 &&
+        typeof branch.branchPerson === 'string' && branch.branchPerson.length <= 120 &&
+        ['dead', 'alive', 'unspecified'].includes(String(branch.branchPersonState))
+      ))
+    )) &&
+    (field(entry, 'causalExplanation') === undefined || (typeof field(entry, 'causalExplanation') === 'string' && String(field(entry, 'causalExplanation')).length <= 600)) &&
+    (field(entry, 'branchCondition') === undefined || (typeof field(entry, 'branchCondition') === 'string' && String(field(entry, 'branchCondition')).length <= 600)) &&
+    (field(entry, 'branchPerson') === undefined || (typeof field(entry, 'branchPerson') === 'string' && String(field(entry, 'branchPerson')).length <= 300)) &&
+    (field(entry, 'branchPersonState') === undefined || ['dead', 'alive', 'unspecified'].includes(String(field(entry, 'branchPersonState'))))
+}
+
 export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCampaignChunkAnalysisV1 {
   if (!isPlainObject(value) || value.schemaVersion !== 1 || typeof value.overview !== 'string' || value.overview.length > 12_000) return false
   if (!listIsValid(value.people, (entry) => (
@@ -421,11 +533,8 @@ export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCa
     typeof field(entry, 'discovery') === 'string' && String(field(entry, 'discovery')).length <= 4_000 &&
     typeof field(entry, 'failForward') === 'string' && String(field(entry, 'failForward')).length <= 4_000
   ))) return false
-  if (!listIsValid(value.scenes, (entry) => (
-    namedRecordIsValid(entry) &&
-    typeof field(entry, 'location') === 'string' && String(field(entry, 'location')).length <= 2_000 &&
-    stringsAreValid(field(entry, 'npcs')) && stringsAreValid(field(entry, 'monsters'))
-  ))) return false
+  if (!listIsValid(value.scenes, sceneRecordIsValid)) return false
+  if (value.timelineEvents !== undefined && !listIsValid(value.timelineEvents, sceneRecordIsValid)) return false
   if (!listIsValid(value.encounters, (entry) => (
     namedRecordIsValid(entry) && stringsAreValid(field(entry, 'creatures')) &&
     typeof field(entry, 'notes') === 'string' && String(field(entry, 'notes')).length <= 4_000
@@ -433,7 +542,11 @@ export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCa
   if (!listIsValid(value.importCandidates, (entry) => (
     namedRecordIsValid(entry) &&
     ['monster', 'npc', 'item', 'spell', 'map', 'handout', 'rule'].includes(String(field(entry, 'kind'))) &&
-    ['full', 'partial', 'manual'].includes(String(field(entry, 'automation')))
+    ['full', 'partial', 'manual'].includes(String(field(entry, 'automation'))) &&
+    typeof field(entry, 'monsterStatBlockText') === 'string' &&
+    String(field(entry, 'monsterStatBlockText')).length <= 24_000 &&
+    (field(entry, 'kind') === 'monster' || String(field(entry, 'monsterStatBlockText')).length === 0) &&
+    (field(entry, 'kind') !== 'monster' || field(entry, 'automation') !== 'full' || String(field(entry, 'monsterStatBlockText')).trim().length > 0)
   ))) return false
   if (!listIsValid(value.prepTips, (entry) => (
     isPlainObject(entry) &&
@@ -470,7 +583,7 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
   additionalProperties: false,
   required: [
     'schemaVersion', 'overview', 'people', 'relationships', 'locations', 'factions', 'clues',
-    'scenes', 'encounters', 'importCandidates', 'prepTips', 'warnings',
+    'timelineEvents', 'scenes', 'encounters', 'importCandidates', 'prepTips', 'warnings',
   ],
   properties: {
     schemaVersion: { type: 'integer', const: 1 },
@@ -546,6 +659,51 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
           location: { type: 'string', maxLength: 120 },
           npcs: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
           monsters: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
+          time: { type: 'string', maxLength: 120 },
+          timelineOrder: { type: 'integer', minimum: 0, maximum: 10_000 },
+          timelineKind: { type: 'string', enum: ['history', 'current', 'deadline', 'conditional'] },
+          tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 40 } },
+        },
+      },
+    },
+    timelineEvents: {
+      type: 'array',
+      maxItems: 36,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'description', 'aliases', 'location', 'npcs', 'monsters', 'time', 'timelineOrder', 'timelineKind', 'tags', 'causedBy', 'causalBranches', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState', 'citations'],
+        properties: {
+          ...NAMED_RECORD_PROPERTIES,
+          location: { type: 'string', maxLength: 120 },
+          npcs: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
+          monsters: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 120 } },
+          time: { type: 'string', maxLength: 120 },
+          timelineOrder: { type: 'integer', minimum: 0, maximum: 10_000 },
+          timelineKind: { type: 'string', enum: ['history', 'current', 'deadline', 'conditional'] },
+          tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 40 } },
+          causedBy: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 120 } },
+          causalBranches: {
+            type: 'array',
+            maxItems: 8,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['sourceEvent', 'label', 'condition', 'explanation', 'branchPerson', 'branchPersonState'],
+              properties: {
+                sourceEvent: { type: 'string', maxLength: 120 },
+                label: { type: 'string', maxLength: 180 },
+                condition: { type: 'string', maxLength: 300 },
+                explanation: { type: 'string', maxLength: 300 },
+                branchPerson: { type: 'string', maxLength: 120 },
+                branchPersonState: { type: 'string', enum: ['dead', 'alive', 'unspecified'] },
+              },
+            },
+          },
+          causalExplanation: { type: 'string', maxLength: 300 },
+          branchCondition: { type: 'string', maxLength: 300 },
+          branchPerson: { type: 'string', maxLength: 120 },
+          branchPersonState: { type: 'string', enum: ['dead', 'alive', 'unspecified'] },
         },
       },
     },
@@ -569,11 +727,12 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'name', 'description', 'aliases', 'automation', 'citations'],
+        required: ['kind', 'name', 'description', 'aliases', 'automation', 'monsterStatBlockText', 'citations'],
         properties: {
           ...NAMED_RECORD_PROPERTIES,
           kind: { type: 'string', enum: ['monster', 'npc', 'item', 'spell', 'map', 'handout', 'rule'] },
           automation: { type: 'string', enum: ['full', 'partial', 'manual'] },
+          monsterStatBlockText: { type: 'string', maxLength: 24_000 },
         },
       },
     },
@@ -625,35 +784,35 @@ function schemaForSource(input: {
 
 type PdfAnalysisSchemaModeV1 = PdfAnalysisPassV1 | 'synthesis'
 
-const PDF_PASS_ARRAY_LIMITS: Record<PdfAnalysisSchemaModeV1, Record<string, number>> = {
+const PDF_PASS_ARRAY_LIMITS: Record<PdfAnalysisSchemaModeV1, Record<string, number | null>> = {
   quick: {
     people: 10, relationships: 20, locations: 8, factions: 6, clues: 10,
-    scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 6,
+    timelineEvents: 0, scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 6,
   },
   entities: {
     people: 8, relationships: 0, locations: 6, factions: 4, clues: 0,
-    scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 3,
+    timelineEvents: 0, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 3,
   },
   relationships: {
     people: 0, relationships: 12, locations: 0, factions: 0, clues: 0,
-    scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 4,
+    timelineEvents: 0, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 0, warnings: 4,
   },
   adventure: {
     people: 0, relationships: 0, locations: 0, factions: 0, clues: 10,
-    scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 4,
+    timelineEvents: 0, scenes: 8, encounters: 6, importCandidates: 8, prepTips: 6, warnings: 4,
   },
   synthesis: {
     people: 0, relationships: 28, locations: 0, factions: 0, clues: 0,
-    scenes: 0, encounters: 0, importCandidates: 0, prepTips: 10, warnings: 6,
+    timelineEvents: 36, scenes: 0, encounters: 0, importCandidates: 0, prepTips: 10, warnings: 6,
   },
 }
 
 const PDF_PASS_OUTPUT_TOKENS: Record<PdfAnalysisSchemaModeV1, number> = {
-  quick: 2_200,
+  quick: 5_000,
   entities: 1_400,
   relationships: 1_200,
-  adventure: 1_600,
-  synthesis: 2_200,
+  adventure: 5_000,
+  synthesis: 12_000,
 }
 
 export function pdfAnalysisSchemaForPass(input: {
@@ -672,7 +831,12 @@ export function pdfAnalysisSchemaForPass(input: {
     : {}
   for (const [fieldName, maxItems] of Object.entries(PDF_PASS_ARRAY_LIMITS[input.pass])) {
     const property = properties[fieldName]
-    if (isPlainObject(property)) properties[fieldName] = { ...property, maxItems }
+    if (isPlainObject(property)) {
+      const nextProperty = { ...property }
+      if (maxItems == null) delete nextProperty.maxItems
+      else nextProperty.maxItems = maxItems
+      properties[fieldName] = nextProperty
+    }
   }
   if (isPlainObject(properties.overview)) {
     properties.overview = {
@@ -699,12 +863,14 @@ function compactPdfAnalysisRetrySchema(source: JsonSchemaV1): JsonSchemaV1 {
         : Math.max(1, Math.ceil(value.maxItems * 0.55))
     }
     if (value.type === 'string' && typeof value.maxLength === 'number') {
-      const compactMaximum = propertyName === 'quote'
-        ? 180
-        : propertyName === 'overview'
-          ? 480
-          : 240
-      value.maxLength = Math.min(value.maxLength, compactMaximum)
+      if (propertyName !== 'monsterStatBlockText') {
+        const compactMaximum = propertyName === 'quote'
+          ? 180
+          : propertyName === 'overview'
+            ? 480
+            : 240
+        value.maxLength = Math.min(value.maxLength, compactMaximum)
+      }
     }
     const properties = isPlainObject(value.properties)
       ? value.properties as Record<string, unknown>
@@ -721,8 +887,8 @@ function compactPdfAnalysisRetrySchema(source: JsonSchemaV1): JsonSchemaV1 {
 function analysisMatchesPass(value: PdfCampaignChunkAnalysisV1, pass: PdfAnalysisSchemaModeV1): boolean {
   const limits = PDF_PASS_ARRAY_LIMITS[pass]
   return Object.entries(limits).every(([fieldName, maximum]) => {
-    const fieldValue = value[fieldName as keyof PdfCampaignChunkAnalysisV1]
-    return Array.isArray(fieldValue) && fieldValue.length <= maximum
+    const fieldValue = value[fieldName as keyof PdfCampaignChunkAnalysisV1] ?? []
+    return Array.isArray(fieldValue) && (maximum == null || fieldValue.length <= maximum)
   })
 }
 
@@ -733,6 +899,7 @@ function analysisCitations(value: PdfCampaignChunkAnalysisV1): PdfSourceCitation
     ...value.locations.flatMap((entry) => entry.citations),
     ...value.factions.flatMap((entry) => entry.citations),
     ...value.clues.flatMap((entry) => entry.citations),
+    ...(value.timelineEvents ?? []).flatMap((entry) => entry.citations),
     ...value.scenes.flatMap((entry) => entry.citations),
     ...value.encounters.flatMap((entry) => entry.citations),
     ...value.importCandidates.flatMap((entry) => entry.citations),
@@ -743,7 +910,7 @@ function analysisCitations(value: PdfCampaignChunkAnalysisV1): PdfSourceCitation
 function repairShortPdfCitationQuotes(value: unknown, sourcePages: readonly PdfSourcePageV2[]): void {
   if (!isPlainObject(value) || sourcePages.length === 0) return
   const citationFields = [
-    'people', 'relationships', 'locations', 'factions', 'clues', 'scenes', 'encounters',
+    'people', 'relationships', 'locations', 'factions', 'clues', 'timelineEvents', 'scenes', 'encounters',
     'importCandidates', 'prepTips',
   ] as const
   for (const fieldName of citationFields) {
@@ -1041,8 +1208,12 @@ function mergeChunkAnalyses(
   documents: readonly ExtractedPdfDocumentV1[],
   analyses: readonly PdfCampaignChunkAnalysisV1[],
 ): PdfCampaignAnalysisV1 {
+  const people = mergePdfPersonRecords(analyses.flatMap((analysis) => analysis.people))
   const relationshipMap = new Map<string, PdfRelationshipRecordV1>()
-  for (const relationship of analyses.flatMap((analysis) => analysis.relationships)) {
+  for (const relationship of canonicalizePdfPersonRelationships(
+    analyses.flatMap((analysis) => analysis.relationships),
+    people,
+  )) {
     const key = `${relationship.from}|${relationship.to}|${relationship.type}`.toLocaleLowerCase()
     const current = relationshipMap.get(key)
     relationshipMap.set(key, current ? {
@@ -1063,13 +1234,14 @@ function mergeChunkAnalyses(
       scannedPages: document.scannedPages,
     })),
     analyzedChunks: analyses.length,
-    people: mergeNamedRecords(analyses.flatMap((analysis) => analysis.people)),
+    people,
     relationships: uniqueRelationships,
     locations: mergeNamedRecords(analyses.flatMap((analysis) => analysis.locations)),
     factions: mergeNamedRecords(analyses.flatMap((analysis) => analysis.factions)),
     clues: mergeNamedRecords(analyses.flatMap((analysis) => analysis.clues)),
-    scenes: mergeNamedRecords(analyses.flatMap((analysis) => analysis.scenes)),
-    encounters: mergeNamedRecords(analyses.flatMap((analysis) => analysis.encounters)),
+    timelineEvents: [],
+    scenes: mergePdfSceneRecords(analyses.flatMap((analysis) => analysis.scenes)),
+    encounters: mergePdfEncounterRecords(analyses.flatMap((analysis) => analysis.encounters)),
     importCandidates: mergeNamedRecords(analyses.flatMap((analysis) => analysis.importCandidates)),
     prepTips: mergeNamedRecords(analyses.flatMap((analysis) => analysis.prepTips.map((tip) => ({ ...tip, name: tip.title })))).map((tip) => ({
       title: tip.title,
@@ -1099,8 +1271,17 @@ const PDF_ANALYSIS_SYSTEM_PROMPT = [
   '所有引用必须使用输入提供的准确 documentId、文件名、chunkId 和页码；年份、纪年、等级、DC 和表格编号绝不是页码。',
   '可导入内容只是待 DM 审阅的草稿，不得声称已经接入 Headless。',
   '严格区分人物、势力和地点：组织、家族、派系与阵营不得放入 people；relationships 的端点必须使用实体在文档中的正式名称。',
+  '人物 name 必须使用当前页段能够确认的最完整正式姓名；简称、名、姓、头衔、代号和其他写法放入 aliases。同一人物不得因为“简称”和“全名”并存而输出成两个条目。',
+  '只有文本不能确认两个称呼属于同一人物时才保留为不同条目，并在 warnings 说明歧义；不得仅凭姓名相似强行合并。',
   '人物 appearance 只填写原文明确描述的年龄、种族、外貌、服装、神态或标志性物品；没有依据时填写空字符串。',
+  '人物 description 应概括背景、当前身份、经历和剧情作用；role 只写简洁身份，motivation 写其主动追求，personality 写可观察性格，避免把同一句泛化描述复制到多个字段。',
+  'scenes 是可运行场景，不是最终时间线。只有全书综合阶段可以填写 timelineEvents；其他阶段必须返回空数组。',
+  'timelineEvents 的 time 使用原文明确时间或相对锚点；timelineKind 区分 history、current、deadline、conditional；timelineOrder 表达全书剧情先后。不得把 PDF 页码当作剧情时间。',
+  '全书综合阶段必须直接推理完整剧情因果图：timelineEvents.causedBy 只列出会直接导致或允许当前事件发生的前置事件正式名称；causalBranches 为每个前因分别保存 sourceEvent、短标签、条件、解释及人物生死条件。',
+  '所有会改变后续事件、人物状态、证据链或结局的选择与成功/失败结果都必须成为可见分支；不得仅为了减少节点而把这些分支折叠进 description。',
+  '原文没有时间依据时 time 填“时间未注明”，不得自行发明日期；条件分支必须标记 conditional，不能当作已经发生的事实。',
   '严格区分 NPC 与怪物导入候选：社交、剧情或服务型非玩家角色归为 npc；出现体型＋生物类型＋阵营式数据、属性块、战斗动作、法术战斗能力或召唤战斗单位的生物归为 monster，即使它拥有专名。',
+  '每个 importCandidates 项都必须填写 monsterStatBlockText。kind 不是 monster 时填写空字符串。kind 是 monster 时，若当前页段出现属性块，必须把从怪物名称、体型/类型/阵营开始，到特质、施法、动作、附赠动作、反应、传奇动作和巢穴动作结束的完整原文保存在 monsterStatBlockText；不得改写、摘要或只保留 AC/HP 等基础数据。当前页段没有完整属性块时填写空字符串，并将 automation 标为 partial 或 manual。',
   '只有原文提供的结构化数据足以直接完成 Host 校验与权威结算时，automation 才能标记 full；缺少属性块、动作数值或规则细节时必须标记 partial 或 manual。',
   '使用自然、准确、适合中文跑团语境的表述，优先保留动机、因果、冲突和可运行信息，而不是泛泛复述。',
   '每个字段必须简洁；同一实体只能出现一次。只保留本页段有明确依据且对备团有价值的内容，不得为了填满数组而重复、拆分或扩写。',
@@ -1120,7 +1301,7 @@ function deepFocusPrompt(focus: DeepAnalysisFocus): string {
       '完整提取势力、家族、派系和地点；不要把群体、势力、家族或章节标题当成人物。',
       '本阶段不提取关系；relationships 必须返回空数组，关系由下一个独立事务处理。',
       '每个页段最多输出 8 个人物、6 个地点和 4 个势力；这些数字是严格上限而不是填充目标，原文没有的项目不得生成；超出时优先保留有姓名、动机、冲突或后续作用的实体。',
-      'people、locations、factions 可以填写；relationships、clues、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
+      'people、locations、factions 可以填写；relationships、clues、timelineEvents、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
       'overview 只总结本页段的人物冲突与势力结构；warnings 只记录确实存在的类型歧义或原文矛盾。',
     ].join('\n')
   }
@@ -1131,25 +1312,26 @@ function deepFocusPrompt(focus: DeepAnalysisFocus): string {
       '关系可以连接人物、势力和地点，但 from 与 to 必须使用原文出现的正式实体名称。',
       '仅在同一页出现不能自动视为关系，不得用常识或推测补齐缺失联系。',
       '每个页段最多输出 12 条关系；这是严格上限而不是填充目标，同义、重复或反向重复关系只保留一条。',
-      'relationships 可以填写；people、locations、factions、clues、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
+      'relationships 可以填写；people、locations、factions、clues、timelineEvents、scenes、encounters、importCandidates、prepTips 必须返回空数组。',
       'overview 只总结本页段的关系网；warnings 只记录端点名称或关系方向无法确认的情况。',
     ].join('\n')
   }
   return [
     '这是深度分析的“剧情与可运行内容”阶段。',
-    '提取真正能在桌面跑团中使用的关键线索、可运行场景、遭遇、明确资源和备团风险。',
+    '提取真正能在桌面跑团中使用的关键线索、可运行场景、遭遇、明确资源和备团风险。不要在页段阶段生成全书时间线。',
     '场景描述要说明触发条件、目标、参与者、关键选择和失败后如何继续；不得只复述章节标题。',
     '附录标题、朗读文本、时间表、家族立场、写作提示和剧情概念本身不是法术、怪物、NPC 或可导入资源。',
     '只有原文提供了可结构化数据、明确规则正文、具体地图/讲义或独立实体资料时，才能加入 importCandidates。',
     '“中型/大型等体型＋类人生物等类型＋阵营”、战斗单位、守卫、军兵、召唤生物及带动作/法术战斗能力的条目应作为 monster 候选；不要因为它有名字就标记为 npc。',
+    '对每个 monster 候选，monsterStatBlockText 必须逐行保留当前页段中的完整怪物属性块：名称、体型/类型/阵营、AC、HP、速度、六项属性、豁免、技能、抗性/免疫/易伤、感官、语言、CR、特质、施法、动作、附赠动作、反应、传奇动作和巢穴动作。不要把能力正文压缩进 description。只有零散提及而没有属性块时 monsterStatBlockText 填空字符串。非 monster 候选始终填空字符串。',
     '每个页段最多输出 10 条线索、8 个场景、6 个遭遇、8 个资源候选和 6 条备团提示；这些数字是严格上限而不是填充目标，原文没有的项目不得生成；合并同义或重复项目。',
-    'people、relationships、locations、factions 必须返回空数组；clues、scenes、encounters、importCandidates、prepTips 可以填写。',
+    'people、relationships、locations、factions、timelineEvents 必须返回空数组；clues、scenes、encounters、importCandidates、prepTips 可以填写。',
     'overview 只总结本页段的因果链、玩家选择和后果；warnings 记录资料缺口，不得把普通剧情建议写成高危警告。',
   ].join('\n')
 }
 
 function quickAnalysisPrompt(): string {
-  return '分析附带页段，提取人物、关系、地点、势力、关键线索、场景、遭遇、可导入资源与备团风险。关系应覆盖人物之间以及人物、势力、地点之间有直接文本依据的联系；不能仅凭同场推测。空缺字段使用空字符串或空数组。'
+  return '分析附带页段，提取人物、关系、地点、势力、关键线索、场景、遭遇、可导入资源与备团风险。关系应覆盖人物之间以及人物、势力、地点之间有直接文本依据的联系；不能仅凭同场推测。怪物候选的 monsterStatBlockText 必须保留当前页段所含完整属性块及全部特质、施法、动作、附赠动作、反应、传奇动作和巢穴动作原文，不能只摘要基础数据；非怪物或没有属性块时填空字符串。timelineEvents 必须返回空数组；快速分析不生成全书时间线。空缺字段使用空字符串或空数组。'
 }
 
 function compactCampaignDraft(value: PdfCampaignAnalysisV1): string {
@@ -1165,22 +1347,55 @@ function compactCampaignDraft(value: PdfCampaignAnalysisV1): string {
   }
   const lines = [
     `文档：${value.documents.map((document) => `${document.name}(${document.pageCount}页)`).join('；')}`,
+    ...value.scenes.slice(0, 48).map((entry) => `事件|${entry.name}|${entry.time || '时间未注明'}|${entry.timelineKind || 'current'}|${entry.location}|${entry.description.slice(0, 120)}|${citation(entry)}`),
     ...value.people.slice(0, 48).map((entry) => `人物|${entry.name}|${entry.role}|${entry.motivation.slice(0, 100)}|${citation(entry)}`),
     ...value.factions.slice(0, 32).map((entry) => `势力|${entry.name}|${entry.description.slice(0, 100)}|${citation(entry)}`),
     ...value.locations.slice(0, 32).map((entry) => `地点|${entry.name}|${entry.description.slice(0, 80)}|${citation(entry)}`),
     ...value.relationships.slice(0, 64).map((entry) => `关系|${entry.from}|${entry.type}|${entry.to}|${entry.description.slice(0, 90)}|${citation(entry)}`),
     ...value.clues.slice(0, 40).map((entry) => `线索|${entry.name}|${entry.discovery.slice(0, 100)}|${entry.failForward.slice(0, 80)}|${citation(entry)}`),
-    ...value.scenes.slice(0, 32).map((entry) => `场景|${entry.name}|${entry.location}|${entry.description.slice(0, 120)}|${citation(entry)}`),
     ...value.encounters.slice(0, 24).map((entry) => `遭遇|${entry.name}|${entry.description.slice(0, 100)}|${citation(entry)}`),
   ]
   const result: string[] = []
   let characters = 0
   for (const line of lines) {
-    if (characters + line.length > 7_000) break
+    if (characters + line.length > 28_000) break
     result.push(line)
     characters += line.length + 1
   }
   return result.join('\n')
+}
+
+function synthesisTimelineMetadataIsComplete(
+  synthesis: PdfCampaignChunkAnalysisV1,
+  mergedDraft: PdfCampaignAnalysisV1,
+): boolean {
+  const events = synthesis.timelineEvents ?? []
+  if (events.length === 0) return mergedDraft.scenes.length === 0
+  const timelineName = (value: string) => value.normalize('NFKC').trim().toLocaleLowerCase('zh-CN').replace(/[\s·•・—_:：，。、“”‘’（）()【】[\]-]+/g, '')
+  const eventNames = new Set(events.map((event) => timelineName(event.name)))
+  return events.every((scene) => (
+    typeof scene.time === 'string' && scene.time.trim().length > 0 &&
+    Number.isSafeInteger(scene.timelineOrder) &&
+    typeof scene.timelineKind === 'string' &&
+    Array.isArray(scene.tags) &&
+    Array.isArray(scene.causedBy) &&
+    scene.causedBy.every((name) => timelineName(name) !== timelineName(scene.name) && eventNames.has(timelineName(name))) &&
+    Array.isArray(scene.causalBranches) &&
+    scene.causalBranches.every((branch) => (
+      timelineName(branch.sourceEvent) !== timelineName(scene.name) &&
+      eventNames.has(timelineName(branch.sourceEvent)) &&
+      typeof branch.label === 'string' &&
+      typeof branch.condition === 'string' &&
+      typeof branch.explanation === 'string' &&
+      typeof branch.branchPerson === 'string' &&
+      ['dead', 'alive', 'unspecified'].includes(branch.branchPersonState)
+    )) &&
+    scene.causedBy.every((name) => scene.causalBranches!.some((branch) => timelineName(branch.sourceEvent) === timelineName(name))) &&
+    typeof scene.causalExplanation === 'string' &&
+    typeof scene.branchCondition === 'string' &&
+    typeof scene.branchPerson === 'string' &&
+    ['dead', 'alive', 'unspecified'].includes(scene.branchPersonState ?? '')
+  ))
 }
 
 async function executePdfAnalysisPass(input: {
@@ -1194,6 +1409,7 @@ async function executePdfAnalysisPass(input: {
   describeInvalidOutput?: (value: unknown) => string
   sourcePages?: readonly PdfSourcePageV2[]
   onRetry?: (maxOutputTokens: number, retryNumber: number, reason: 'truncated' | 'schema' | 'non-json') => void
+  executionId?: string
 }): Promise<PdfCampaignChunkAnalysisV1> {
   const baseOutputTokens = PDF_PASS_OUTPUT_TOKENS[input.pass]
   const provider = input.registry.descriptors().find(({ id }) => id === input.selection.providerId)
@@ -1203,7 +1419,11 @@ async function executePdfAnalysisPass(input: {
     // bounded repair/compaction attempt; never loop unboundedly on a paid provider.
     ? [16_384, 16_384]
     : provider?.transport === 'local-bridge'
-      ? [...new Set([baseOutputTokens, Math.min(baseOutputTokens * 2, 6_144), 6_144])]
+      ? [...new Set([
+        baseOutputTokens,
+        Math.min(baseOutputTokens * 2, input.pass === 'synthesis' ? 16_384 : 6_144),
+        input.pass === 'synthesis' ? 16_384 : 6_144,
+      ])]
       : [baseOutputTokens]
   const baseOutputSchema = pdfAnalysisSchemaForPass({
     pass: input.pass,
@@ -1227,12 +1447,18 @@ async function executePdfAnalysisPass(input: {
     const outputSchema: JsonSchemaV1 = attempt > 0 && retryReason === 'truncated'
       ? compactPdfAnalysisRetrySchema(baseOutputSchema)
       : baseOutputSchema
+    const requestIdentity = new TextEncoder().encode([
+      input.executionId ?? crypto.randomUUID(), input.pass, input.chunk.id, String(attempt),
+    ].join('\u0000'))
+    const requestDigest = await crypto.subtle.digest('SHA-256', requestIdentity)
+    const requestJobId = `pdf-analysis-${[...new Uint8Array(requestDigest)]
+      .map((byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 48)}`
     const result: AiProviderExecutionResult<PdfCampaignChunkAnalysisV1> = await executeStructuredAiTask<PdfCampaignChunkAnalysisV1>({
       registry: input.registry,
       selection: input.selection,
       request: {
         schemaVersion: 1,
-        jobId: `pdf-analysis-${crypto.randomUUID()}`,
+        jobId: requestJobId,
         task: input.task ?? 'pdf-extraction',
         systemPrompt: PDF_ANALYSIS_SYSTEM_PROMPT,
         userPrompt: attempt === 0
@@ -1243,7 +1469,7 @@ async function executePdfAnalysisPass(input: {
                 ? `上一轮 JSON 未通过 Host Schema 校验。失败项：${retryState.validationDetail || '未知字段约束'}。请重新生成完整对象，严格修复这些字段；不要省略必填数组或字符串，不要改写 documentId、documentName、chunkId 与页码范围。`
                 : retryReason === 'non-json'
                   ? '上一轮没有返回可解析的 JSON。请重新执行同一提取任务，只输出一个以 { 开始、以 } 结束的完整 JSON 对象；不要输出 Markdown 代码块、解释、思考过程、前言或结语。'
-                  : '上一次输出达到长度上限。必须进一步精简内容，优先返回完整、可解析且符合 Schema 的 JSON；不得扩写描述或为了填满数组增加项目。',
+                  : '上一次输出达到长度上限。必须进一步精简内容：减少项目数量与普通描述，优先返回完整、可解析且符合 Schema 的 JSON；不得扩写或为了填满数组增加项目。monsterStatBlockText 是怪物能力的唯一无损来源，不得裁切或摘要；如需缩减，减少候选数量并优先保留属性块完整的怪物。',
             ].join('\n'),
         outputSchema,
         maxOutputTokens,
@@ -1340,6 +1566,7 @@ export async function analyzeExtractedPdfDocuments(input: {
   cachedSynthesis?: PdfCampaignChunkAnalysisV1 | null
   onPassCompleted?: (key: string, analysis: PdfCampaignChunkAnalysisV1) => void | Promise<void>
   onSynthesisCompleted?: (analysis: PdfCampaignChunkAnalysisV1) => void | Promise<void>
+  executionId?: string
 }): Promise<PdfCampaignAnalysisV1> {
   const { documents } = input
   const depth = input.depth ?? 'quick'
@@ -1403,6 +1630,7 @@ export async function analyzeExtractedPdfDocuments(input: {
         selection: extractionSelection,
         chunk,
         pass,
+        executionId: input.executionId,
         sourcePages,
         userPrompt: pass === 'quick' ? quickAnalysisPrompt() : deepFocusPrompt(pass),
         validateOutput: (value): value is PdfCampaignChunkAnalysisV1 => (
@@ -1451,7 +1679,8 @@ export async function analyzeExtractedPdfDocuments(input: {
       const cachedSynthesis = input.cachedSynthesis
       const synthesis = cachedSynthesis && validatePdfCampaignChunkAnalysis(cachedSynthesis) &&
         analysisMatchesPass(cachedSynthesis, 'synthesis') &&
-        analysisCitationsMatchDocuments(cachedSynthesis, documents)
+        analysisCitationsMatchDocuments(cachedSynthesis, documents) &&
+        synthesisTimelineMetadataIsComplete(cachedSynthesis, result)
         ? cachedSynthesis
         : await executePdfAnalysisPass({
             registry: input.registry,
@@ -1459,21 +1688,43 @@ export async function analyzeExtractedPdfDocuments(input: {
             chunk: synthesisChunk,
             task: 'campaign-analysis',
             pass: 'synthesis',
+            executionId: input.executionId,
             sourcePages,
             userPrompt: [
               '这是已经通过第一阶段引用校验的全书提取草稿。',
               '请进行跨章节综合：说明核心冲突、反派计划、证据因果链、玩家选择如何改变结局，以及下一场真正需要准备的事项。',
               'relationships 应补齐跨章节关系网：人物之间，以及人物与势力、人物与地点、势力与地点之间，分别保留亲属、雇佣、同盟、敌对、控制、调查、知情、隶属和关键活动联系，不要只保留少数主线关系。',
+              'timelineEvents 应重建为完整但简明的全书剧情流程：短篇通常 12 至 20 个，复杂长篇可以达到 36 个。必须覆盖所有会改变后续事件、人物状态、证据链或结局的互斥结果；scenes 必须为空，原始可运行场景由 Host 作为节点附件另行保留。',
+              '不要把 timelineEvents 做成单一路径。请直接输出因果图数据：每个事件的 causedBy 只能引用本次 timelineEvents 中另一个事件的完整 name，而且只写直接原因、必要前提或真正开启该事件的选择；单纯先后相邻不算因果。没有前置原因的根事件使用空数组。',
+              'causalBranches 必须为 causedBy 中的每一个直接前因提供独立边数据：sourceEvent 精确等于前因 name；label 是流程图上的短标签；condition 是这条边独有的可判定条件；explanation 说明为什么会产生目标事件。causedBy 与 causalBranches.sourceEvent 必须一一对应。',
+              '玩家是否同行、追击或留下、一次救治是否成功、信件是否被伪造、是否取得关键证据、护送是否成功等，只要会造成不同的后续事件、人物状态或结局，都必须保留为分支。判断本身写在 causalBranches.condition，判断产生的持久结果分别建立 timelineEvents，不能压缩进同一个事件 description。',
+              'legacy 字段 causalExplanation、branchCondition、branchPerson、branchPersonState 只在目标事件恰好有一个前因时镜像该 causalBranches 项；多个前因时这些 legacy 字段使用空字符串与 unspecified。',
+              '如果条件是某个人物死亡或存活，branchPerson 使用人物目录中的完整正式姓名，branchPersonState 使用 dead 或 alive；其他条件使用 unspecified。无条件边的 branchCondition 和 branchPerson 使用空字符串。',
+              '普通战斗轮次、无持久后果的检定和纯气氛片段不必拆分；但不要为了节点少而合并具有不同后续连线的选择、成功/失败结果、证据取得路线或结局。',
+              '优先使用原文中的“真正发生了什么”“事件顺序”“时间表”“幕／章流程”等明确顺序；再使用直接因果关系补齐顺序。PDF 页码只能作为证据，绝不是剧情时间。',
+              'timelineOrder 从 10 开始按 10 递增；time 必须保留原文中最准确的时间或相对锚点，例如“数年前”“故事开始前”“当日”“伏击后”“三日后（若玩家选择）”。',
+              '只保留会改变剧情状态、触发下一阶段或形成明确期限的关键事件。人物档案、地点介绍、设施说明、线索条目、单次检定、规则建议、附录说明和可选日常片段不得成为事件。',
+              '同一事件跨页、换名或从不同视角重复描述时必须合并。互斥或尚未发生的玩家选择只保留少量关键分支，并标记 conditional，不能混入主线已发生事件。',
+              '每项 description 用一至三句说明发生了什么、核心参与者、原因和直接后果；不得拆成多个细碎步骤。',
               '每条关系都必须有草稿中的直接证据和引用；端点必须来自草稿中的人物、势力或地点，不能仅凭同场或常识推测关系。',
               'prepTips 应具体、可执行并与当前剧本内容直接相关；不要输出“注意玩家自由度”一类泛化建议。',
-              'overview、relationships、prepTips、warnings 可以填写；其他数组必须为空。所有结论继续逐字沿用草稿中的 documentId、原始文件名、真实页码、quote 与 chunkId，不得重写 quote。',
+              'overview、relationships、timelineEvents、prepTips、warnings 可以填写；其他数组必须为空。所有结论继续逐字沿用草稿中的 documentId、原始文件名、真实页码、quote 与 chunkId，不得重写 quote。',
             ].join('\n'),
             validateOutput: (value): value is PdfCampaignChunkAnalysisV1 => (
               validatePdfCampaignChunkAnalysis(value) &&
               analysisMatchesPass(value, 'synthesis') &&
-              analysisCitationsMatchDocuments(value, documents)
+              analysisCitationsMatchDocuments(value, documents) &&
+              synthesisTimelineMetadataIsComplete(value, result)
             ),
-            describeInvalidOutput: (value) => describeDocumentDomainValidation(value, documents),
+            describeInvalidOutput: (value) => {
+              if (
+                validatePdfCampaignChunkAnalysis(value) &&
+                analysisMatchesPass(value, 'synthesis') &&
+                analysisCitationsMatchDocuments(value, documents) &&
+                !synthesisTimelineMetadataIsComplete(value, result)
+              ) return '全书综合没有生成具备时间、类型与唯一顺序的关键事件'
+              return describeDocumentDomainValidation(value, documents)
+            },
             onRetry: (maxOutputTokens, retryNumber, reason) => input.onProgress?.({
               stage: 'analyzing',
               current: completedSteps + 1,
@@ -1494,12 +1745,14 @@ export async function analyzeExtractedPdfDocuments(input: {
           relationships: [...result.relationships, ...synthesis.relationships],
         }]).relationships,
         prepTips: synthesis.prepTips.length > 0 ? synthesis.prepTips : result.prepTips,
+        timelineEvents: mergeNamedRecords(synthesis.timelineEvents ?? []),
         warnings: [...new Set([...result.warnings, ...synthesis.warnings])].slice(0, 100),
       }
     } catch {
       result = {
         ...result,
-        warnings: [...new Set([...result.warnings, '全书级综合未通过 Host 校验；已安全保留经过页段引用校验的深度提取结果。'])],
+        timelineEvents: [],
+        warnings: [...new Set([...result.warnings, '全书级综合未通过 Host 校验；已保留场景资料，但不会把页段场景冒充全书时间线。'])],
       }
     }
   }

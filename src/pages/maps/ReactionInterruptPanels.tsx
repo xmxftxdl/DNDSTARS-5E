@@ -7,9 +7,10 @@ import type {
   SharedShieldSpellPromptView,
   SharedUncannyDodgePromptView,
 } from '../../lib/combatInterruptPrompts'
+import { useInterruptCountdownNow } from './useInterruptCountdownNow'
 
 interface ReactionInterruptPanelsProps {
-  now: number
+  now?: number
   savingThrowRerollPrompt: SharedSavingThrowRerollPromptView | null
   protectionPrompt: SharedProtectionPromptView | null
   shieldSpellPrompt: SharedShieldSpellPromptView | null
@@ -20,7 +21,7 @@ interface ReactionInterruptPanelsProps {
   onSavingThrowRerollChoice: (use: boolean) => void
   onProtectionChoice: (use: boolean) => void
   onShieldSpellChoice: (use: boolean) => void
-  onCounterspellChoice: (use: boolean) => void
+  onCounterspellChoice: (use: boolean, slotLevel?: number) => void
   onUncannyDodgeChoice: (use: boolean) => void
   onDeflectMissilesChoice: (use: boolean) => void
   onOpportunityAttackChoice: (use: boolean) => void
@@ -42,8 +43,18 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
     onUncannyDodgeChoice: handleSharedUncannyDodgeChoice,
     onDeflectMissilesChoice: handleSharedDeflectMissilesChoice,
     onOpportunityAttackChoice: handleSharedOpportunityAttackChoice,
-    now: sharedDodgeNow,
+    now: fixedNow,
   } = props
+  const expiresAt = Math.max(
+    sharedSavingThrowRerollPrompt?.expiresAt ?? 0,
+    sharedProtectionPrompt?.expiresAt ?? 0,
+    sharedShieldSpellPrompt?.expiresAt ?? 0,
+    sharedCounterspellPrompt?.expiresAt ?? 0,
+    sharedUncannyDodgePrompt?.expiresAt ?? 0,
+    sharedDeflectMissilesPrompt?.expiresAt ?? 0,
+    sharedOpportunityAttackPrompt?.expiresAt ?? 0,
+  ) || undefined
+  const sharedDodgeNow = useInterruptCountdownNow(expiresAt, fixedNow)
 
   return (
     <>
@@ -100,7 +111,7 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
               </div>
             )}
             <h3 id="shared-protection-prompt-title" className="text-lg font-semibold text-sky-100">
-              防护战斗风格
+              {sharedProtectionPrompt.featureName ?? '防护战斗风格'}
             </h3>
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
               {`${sharedProtectionPrompt.attackerName} 正以${sharedProtectionPrompt.attackName}攻击 ${sharedProtectionPrompt.targetName}。\n\n${sharedProtectionPrompt.protectorChar.name} 是否消耗反应，使这次攻击检定具有劣势？`}
@@ -120,7 +131,7 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
                 onClick={() => handleSharedProtectionChoice(true)}
                 className="rounded-lg bg-sky-500/25 px-4 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/35"
               >
-                使用防护
+                使用{sharedProtectionPrompt.featureName ?? '防护'}
               </button>
             </div>
           </div>
@@ -144,8 +155,8 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
             </h3>
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
               {sharedShieldSpellPrompt.magicMissile
-                ? `${sharedShieldSpellPrompt.attackerName} 的魔法飞弹指定了 ${sharedShieldSpellPrompt.targetChar.name}。\n\n是否消耗反应和当前最低可用法术位，使自己免疫这些飞弹并获得 +5 AC？`
-                : `${sharedShieldSpellPrompt.attackerName} 的${sharedShieldSpellPrompt.attackName}以 ${sharedShieldSpellPrompt.attackTotal ?? '—'} 命中 ${sharedShieldSpellPrompt.targetChar.name}（AC ${sharedShieldSpellPrompt.armorClass ?? '—'}）。\n\n是否消耗反应和当前最低可用法术位，使 AC 获得 +5？`}
+                ? `${sharedShieldSpellPrompt.attackerName} 的魔法飞弹指定了 ${sharedShieldSpellPrompt.targetChar.name}。\n\n是否消耗反应，使自己免疫这些飞弹并获得 +5 AC？Host 会优先消耗最低可用法术位；若由卷轴提供，则消耗 1 张护盾术卷轴。`
+                : `${sharedShieldSpellPrompt.attackerName} 的${sharedShieldSpellPrompt.attackName}以 ${sharedShieldSpellPrompt.attackTotal ?? '—'} 命中 ${sharedShieldSpellPrompt.targetChar.name}（AC ${sharedShieldSpellPrompt.armorClass ?? '—'}）。\n\n是否消耗反应，使 AC 获得 +5？Host 会优先消耗最低可用法术位；若由卷轴提供，则消耗 1 张护盾术卷轴。`}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -183,11 +194,25 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
             )}
             <h3 id="shared-counterspell-prompt-title" className="text-lg font-semibold text-violet-100">法术反制</h3>
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
-              {`${sharedCounterspellPrompt.casterName} 正在施放${sharedCounterspellPrompt.spellName}（${sharedCounterspellPrompt.spellLevel} 环）。\n\n${sharedCounterspellPrompt.reactorChar.name} 是否消耗反应和 ${sharedCounterspellPrompt.counterspellSlotLevel} 环法术位进行反制？${sharedCounterspellPrompt.abilityCheckDc ? `\n需要进行 DC ${sharedCounterspellPrompt.abilityCheckDc} 的施法属性检定。` : ''}`}
+              {`${sharedCounterspellPrompt.casterName} 正在施放${sharedCounterspellPrompt.spellName}（${sharedCounterspellPrompt.spellLevel} 环）。\n\n${sharedCounterspellPrompt.reactorChar.name} 可以选择一个可用法术位施放法术反制；低于目标法术环位时需要进行施法属性检定。`}
             </p>
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button type="button" onClick={() => handleSharedCounterspellChoice(false)} className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80">保留反应</button>
-              <button type="button" data-testid="shared-counterspell-use" onClick={() => handleSharedCounterspellChoice(true)} className="rounded-lg bg-violet-500/25 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/35">施放法术反制</button>
+              {sharedCounterspellPrompt.counterspellSlotLevels.map((slotLevel) => (
+                <button
+                  key={slotLevel}
+                  type="button"
+                  data-testid={slotLevel === sharedCounterspellPrompt.counterspellSlotLevel
+                    ? 'shared-counterspell-use'
+                    : `shared-counterspell-use-${slotLevel}`}
+                  onClick={() => handleSharedCounterspellChoice(true, slotLevel)}
+                  className="rounded-lg bg-violet-500/25 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/35"
+                >
+                  以 {slotLevel} 环施放{slotLevel < sharedCounterspellPrompt.spellLevel
+                    ? `（DC ${10 + sharedCounterspellPrompt.spellLevel}）`
+                    : '（自动反制）'}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -292,6 +317,8 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
                 ? '报复'
                 : sharedOpportunityAttackPrompt.trigger === 'hunter-giant-killer'
                   ? '巨人杀手'
+                  : sharedOpportunityAttackPrompt.trigger === 'declarative-reaction-weapon-attack'
+                    ? (sharedOpportunityAttackPrompt.featureName ?? '反应攻击')
                   : '借机攻击'}
             </h3>
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
@@ -299,6 +326,8 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
                 ? `${sharedOpportunityAttackPrompt.targetName} 在 5 尺内对 ${sharedOpportunityAttackPrompt.attackerChar.name} 造成了伤害。\n\n是否消耗反应，发动报复并进行一次近战武器攻击？`
                 : sharedOpportunityAttackPrompt.trigger === 'hunter-giant-killer'
                   ? `${sharedOpportunityAttackPrompt.targetName} 在 5 尺内对 ${sharedOpportunityAttackPrompt.attackerChar.name} 完成了一次攻击。\n\n是否消耗反应，发动巨人杀手并进行一次近战武器攻击？`
+                  : sharedOpportunityAttackPrompt.trigger === 'declarative-reaction-weapon-attack'
+                    ? `${sharedOpportunityAttackPrompt.targetName} 触发了 ${sharedOpportunityAttackPrompt.featureName ?? '反应攻击'}。\n\n是否消耗反应，进行一次近战武器攻击？`
                   : `${sharedOpportunityAttackPrompt.attackerChar.name} 对 ${sharedOpportunityAttackPrompt.targetName} 触发借机攻击。\n\n是否消耗反应，进行一次近战命中判定？`}
             </p>
             <div className="mt-5 flex justify-end gap-2">
@@ -320,6 +349,8 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
                   ? '发动报复'
                   : sharedOpportunityAttackPrompt.trigger === 'hunter-giant-killer'
                     ? '发动巨人杀手'
+                    : sharedOpportunityAttackPrompt.trigger === 'declarative-reaction-weapon-attack'
+                      ? `发动${sharedOpportunityAttackPrompt.featureName ?? '反应攻击'}`
                     : '发动借机'}
               </button>
             </div>
@@ -329,4 +360,3 @@ export default function ReactionInterruptPanels(props: ReactionInterruptPanelsPr
     </>
   )
 }
-

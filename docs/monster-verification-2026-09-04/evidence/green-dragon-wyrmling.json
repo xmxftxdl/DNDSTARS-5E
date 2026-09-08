@@ -1,0 +1,129 @@
+{
+  "id": "srd-5.1:green-dragon-wyrmling",
+  "slug": "green-dragon-wyrmling",
+  "name": "绿龙雏龙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "poison-breath",
+      "name": "毒气吐息",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.lengthFeet",
+        "rule.area.aimRangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 150,
+      "slug": "green-dragon-wyrmling",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:31:39.156Z",
+      "name": "绿龙雏龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-green-dragon-wyrmling-bite-1788561099221",
+      "combatId": "verify-ui-green-dragon-wyrmling-bite-1788561099221:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "绿龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 20+4=24 命中；共造成 13 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:32 PM\n结算\n\n绿龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 20+4=24 命中；共造成 13 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 20；最终采用 20；调整值 +4。\n结果 · 24 vs AC 10：重击。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜2d10 骰面：2 + 5 = 7｜固定加值 +2｜小计 9\n伤害骰 · 啃咬（基础伤害 2·毒素）｜2d6 骰面：2 + 2 = 4｜固定加值 +0｜小计 4\n绿龙雏龙｜消耗动作\n验证目标｜受到 13 点伤害｜HP 320 → 307",
+      "playerLog": "绿龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 20+4=24 命中；共造成 13 点伤害。",
+      "afterHp": 307,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:32:07.808Z",
+      "evidenceFile": "ui-cases/monsters/150-green-dragon-wyrmling.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

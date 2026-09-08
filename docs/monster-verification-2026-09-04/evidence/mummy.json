@@ -1,0 +1,187 @@
+{
+  "id": "srd-5.1:mummy",
+  "slug": "mummy",
+  "name": "木乃伊",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：命中特效声明的每 24 小时降低生命值上限原先被运行状态丢弃，时钟也未执行。现已覆盖状态持久化、时间边界、重复同步去重、连续两次恶化、重施不推迟原时钟、治愈后的上限恢复，以及木乃伊诅咒将上限降至零时的遗体毁灭。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "rotting-fist",
+      "name": "腐烂拳击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].magical",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].savingThrow.magical",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].modifiers.preventHealing",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.intervalHours",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.average",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.count",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.sides",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.bonus",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.execution",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.recovery",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.onMaximumZero",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "rotting-fist-mummy-rot:apply",
+        "rotting-fist-mummy-rot:save",
+        "calendar-boundary-replay-and-cure"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "dreadful-glare",
+      "name": "恐怖凝视",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource",
+        "rule.durationRounds",
+        "rule.expiresAtSourceTurnEnd",
+        "rule.additionalConditionsOnFailedSave[].condition",
+        "rule.additionalConditionsOnFailedSave[].durationRounds",
+        "rule.additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "rule.additionalConditionsOnFailedSave[].expiresAtSourceTurnEnd",
+        "rule.additionalConditionsOnFailedSave[].minimumFailureMargin",
+        "rule.additionalConditionsOnFailedSave[].dependsOnCondition",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.actionKey",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.grantedActionKeys[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-rotting-fist-only",
+      "name": "多重攻击: 腐烂拳击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 201,
+      "slug": "mummy",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:00:19.840Z",
+      "name": "木乃伊",
+      "actionId": "rotting-fist",
+      "actionName": "腐烂拳击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-mummy-rotting-fist-1788562819964",
+      "combatId": "verify-ui-mummy-rotting-fist-1788562819964:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "木乃伊 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 2+5=7 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:00 PM\n攻击\n\n木乃伊 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 2+5=7 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：腐烂拳击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 2；最终采用 2；调整值 +5。\n结果 · 7 vs AC 10：未命中。\n木乃伊｜消耗动作",
+      "playerLog": "木乃伊 使用腐烂拳击攻击 验证目标：腐烂拳击 → 验证目标 2+5=7 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:00:51.995Z",
+      "evidenceFile": "ui-cases/monsters/201-mummy.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 14,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

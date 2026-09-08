@@ -1,0 +1,19 @@
+{
+  "slug": "tribal-warrior",
+  "name": "部落战士",
+  "actionId": "spear-two-handed-melee",
+  "actionName": "长矛 (Two-Handed Melee)",
+  "mapId": "monster-ui-catchup-tribal-warrior-1788607351918",
+  "combatId": "monster-ui-catchup-tribal-warrior-1788607351918:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "beforeHp": 320,
+  "startedAt": "2026-09-05T11:22:32.405Z",
+  "dmLog": "部落战士 使用长矛 (Two-Handed Melee)攻击 验证目标：长矛 (Two-Handed Melee) → 验证目标 14+3=17 命中；共造成 6 点伤害。",
+  "playerLog": "部落战士 使用长矛 (Two-Handed Melee)攻击 验证目标：长矛 (Two-Handed Melee) → 验证目标 14+3=17 命中；共造成 6 点伤害。",
+  "afterHp": 314,
+  "conditions": [],
+  "actionAvailable": 0,
+  "status": "passed",
+  "finishedAt": "2026-09-05T11:22:47.257Z"
+}

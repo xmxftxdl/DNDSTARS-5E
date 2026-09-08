@@ -23,7 +23,13 @@ beforeAll(async () => {
     process.execPath,
     [serverScript, '--host', host, '--port', String(port), '--root', distRoot],
     {
-      env: { ...process.env, STARS_SHARED_ROOT: sharedRoot, STARS_SHARED_SECRET: '' },
+      env: {
+        ...process.env,
+        STARS_SHARED_ROOT: sharedRoot,
+        STARS_SHARED_SECRET: '',
+        ASTRALTRACE_LOCAL_AI_CONFIG_DIR: path.join(sharedRoot, 'local-ai-config'),
+        ASTRALTRACE_LOCAL_VOICE_CONFIG_DIR: path.join(sharedRoot, 'local-voice-config'),
+      },
       stdio: 'ignore',
     },
   )

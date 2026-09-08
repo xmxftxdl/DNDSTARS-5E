@@ -74,6 +74,17 @@ export class DmActionTransactionCoordinator {
     if (existing) return existing
 
     const previousTransaction = this.transactions.get(input.id)
+    // Durable action delivery is at-least-once. Once this Host process has
+    // reached a terminal result for an action id, a later queue replay must
+    // not enter the rules branch again. This matters most for long-running
+    // prompts and map placement: their execution can outlive the short
+    // transport dedupe window, and replaying them would reopen already
+    // answered DM choices after the spell had spent its slot and committed.
+    if (
+      previousTransaction?.status === 'committed' ||
+      previousTransaction?.status === 'rolled-back'
+    ) return Promise.resolve()
+
     const transaction = createCombatTransaction(input)
     this.transactions.set(input.id, transaction)
     return this.enqueueTransaction(

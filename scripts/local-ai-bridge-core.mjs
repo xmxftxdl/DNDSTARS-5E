@@ -1,6 +1,15 @@
 import { createServer } from 'node:http'
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
+import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { normalizeAiStructuredGenerationRequest } from '../shared/ai-provider.mjs'
+import {
+  AI_CREDIT_POLICY,
+  creditCny,
+  imageCredits,
+  reserveCredits,
+  textCredits,
+} from '../shared/ai-model-policy.mjs'
 
 export const LOCAL_AI_BRIDGE_SCHEMA_VERSION = 1
 export const LOCAL_AI_BRIDGE_DEFAULT_PORT = 47431
@@ -16,6 +25,161 @@ export const LOCAL_AI_BRIDGE_DEFAULT_ORIGINS = [
 
 function plainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * OpenAI strict structured outputs require every property on every object to
+ * be listed in `required`, including fields that the product schema treats as
+ * optional. Keep that provider constraint at the bridge boundary so local and
+ * DeepSeek-compatible providers can continue using the original schema.
+ */
+export function openAiStrictJsonSchema(schema) {
+  if (Array.isArray(schema)) return schema.map(openAiStrictJsonSchema)
+  if (!plainObject(schema)) return schema
+  const normalized = Object.fromEntries(
+    Object.entries(schema).map(([key, value]) => [key, openAiStrictJsonSchema(value)]),
+  )
+  if (plainObject(normalized.properties)) {
+    normalized.type = normalized.type ?? 'object'
+    normalized.additionalProperties = false
+    normalized.required = Object.keys(normalized.properties)
+  }
+  return normalized
+}
+
+export function safeAuditError(error) {
+  return (error instanceof Error ? error.message : String(error || 'ai-task-failed'))
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .slice(0, 240)
+}
+
+export function errorWithUsage(error, usage) {
+  const failure = error instanceof Error ? error : new Error(String(error || 'ai-task-failed'))
+  if (usage) failure.aiUsage = usage
+  return failure
+}
+
+export function estimatedStructuredInputTokens(request) {
+  const text = [
+    request?.systemPrompt,
+    request?.userPrompt,
+    ...(request?.documents ?? []).map((document) => document?.text),
+  ].filter((value) => typeof value === 'string').join('\n')
+  const textTokens = Math.ceil(text.length / 2)
+  const imageTokens = Array.isArray(request?.images) ? request.images.length * 4_000 : 0
+  return Math.max(1, textTokens + imageTokens)
+}
+
+export function createUsageAuditStore(file, policy = AI_CREDIT_POLICY) {
+  const target = typeof file === 'string' && file.trim() ? path.resolve(file) : ''
+  let writeChain = Promise.resolve()
+  const append = async (event) => {
+    if (!target) return
+    writeChain = writeChain.then(async () => {
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
+      await appendFile(target, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 })
+    })
+    await writeChain
+  }
+  const begin = async ({
+    task,
+    providerId,
+    modelId,
+    jobId,
+    estimatedInputTokens = 0,
+    estimatedOutputTokens = 0,
+    quality,
+    actorId,
+    roomId,
+  }) => {
+    const auditId = randomBytes(18).toString('base64url')
+    const startedAt = Date.now()
+    const estimatedCredits = task === 'image-generation'
+      ? imageCredits({ modelId, quality }, policy)
+      : textCredits({ modelId, inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens }, policy)
+    const reservedCredits = reserveCredits(estimatedCredits, policy)
+    const reservation = {
+      schemaVersion: 1,
+      phase: 'reserved',
+      auditId,
+      task,
+      providerId,
+      modelId,
+      ...(jobId ? { jobId: String(jobId).slice(0, 160) } : {}),
+      ...(actorId ? { actorId: String(actorId).slice(0, 160) } : {}),
+      ...(roomId ? { roomId: String(roomId).slice(0, 32) } : {}),
+      startedAt,
+      estimatedInputTokens,
+      estimatedOutputTokens,
+      estimatedCredits,
+      reservedCredits,
+      estimatedCny: creditCny(estimatedCredits, policy),
+      ...(quality ? { quality } : {}),
+    }
+    await append(reservation)
+    return reservation
+  }
+  const settle = async (reservation, { status, usage, errorCode }) => {
+    const completedAt = Date.now()
+    const inputTokens = Math.max(0, Number(usage?.inputTokens) || 0)
+    const outputTokens = Math.max(0, Number(usage?.outputTokens) || 0)
+    const hasUsage = inputTokens > 0 || outputTokens > 0
+    const actualCredits = reservation.task === 'image-generation'
+      ? (status === 'completed' || usage?.chargeable === true)
+        ? imageCredits({ modelId: reservation.modelId, quality: reservation.quality }, policy)
+        : 0
+      : hasUsage
+        ? textCredits({ modelId: reservation.modelId, inputTokens, outputTokens, conservative: false }, policy)
+        : status === 'completed' ? reservation.estimatedCredits : 0
+    const record = {
+      schemaVersion: 1,
+      phase: 'settled',
+      auditId: reservation.auditId,
+      task: reservation.task,
+      providerId: reservation.providerId,
+      modelId: reservation.modelId,
+      ...(reservation.jobId ? { jobId: reservation.jobId } : {}),
+      ...(reservation.actorId ? { actorId: reservation.actorId } : {}),
+      ...(reservation.roomId ? { roomId: reservation.roomId } : {}),
+      startedAt: reservation.startedAt,
+      completedAt,
+      durationMs: Math.max(0, completedAt - reservation.startedAt),
+      status,
+      inputTokens,
+      outputTokens,
+      estimatedCredits: reservation.estimatedCredits,
+      reservedCredits: reservation.reservedCredits,
+      actualCredits,
+      refundedCredits: Math.max(0, reservation.reservedCredits - actualCredits),
+      overageCredits: Math.max(0, actualCredits - reservation.reservedCredits),
+      estimatedCny: creditCny(reservation.estimatedCredits, policy),
+      actualCny: creditCny(actualCredits, policy),
+      ...(reservation.quality ? { quality: reservation.quality } : {}),
+      ...(errorCode ? { errorCode: safeAuditError(errorCode) } : {}),
+    }
+    await append(record)
+    return record
+  }
+  const recent = async (limit = 50) => {
+    if (!target) return []
+    try {
+      const lines = (await readFile(target, 'utf8')).split(/\r?\n/).filter(Boolean)
+      const settled = []
+      for (let index = lines.length - 1; index >= 0 && settled.length < limit; index -= 1) {
+        try {
+          const value = JSON.parse(lines[index])
+          if (value?.schemaVersion === 1 && value?.phase === 'settled') settled.push(value)
+        } catch {
+          // Ignore one damaged audit line; append-only history remains recoverable.
+        }
+      }
+      return settled
+    } catch (error) {
+      if (error?.code === 'ENOENT') return []
+      throw error
+    }
+  }
+  return { begin, settle, recent }
 }
 
 function jsonResponse(res, status, body, headers = {}) {
@@ -81,7 +245,7 @@ function loopbackUrl(value, fallback) {
   return url
 }
 
-function externalModelApiUrl(value) {
+export function externalModelApiUrl(value) {
   const url = new URL(value)
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
   const loopback = ['127.0.0.1', 'localhost', '::1'].includes(hostname)
@@ -95,7 +259,7 @@ function externalModelApiUrl(value) {
   return url
 }
 
-function appendApiPath(baseUrl, pathName) {
+export function appendApiPath(baseUrl, pathName) {
   const url = new URL(baseUrl)
   url.pathname = `${url.pathname.replace(/\/$/, '')}/${pathName.replace(/^\//, '')}`
   return url
@@ -129,7 +293,7 @@ async function readJsonBody(req, maximumBytes = 32 * 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
-async function fetchJson(url, init = {}, timeoutMs = 5_000, externalSignal = null) {
+export async function fetchJson(url, init = {}, timeoutMs = 5_000, externalSignal = null) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -301,7 +465,7 @@ function externalModelDescriptor(config) {
   const roleTasks = config.role === 'extraction'
     ? ['pdf-extraction']
     : config.role === 'synthesis'
-      ? ['campaign-analysis', 'resource-structuring', 'session-summary', 'prep-recommendations']
+      ? ['campaign-analysis']
       : supportedTasks(capabilities)
   return {
     schemaVersion: 1,
@@ -490,7 +654,7 @@ function parseStructuredMessage(message) {
   throw new Error('invalid-structured-output:non-json-response')
 }
 
-async function generateStructured({
+export async function generateStructured({
   baseUrl,
   engine,
   modelId,
@@ -595,7 +759,7 @@ async function generateStructured({
               json_schema: {
                 name: 'astral_trace_structured_output',
                 strict: true,
-                schema: request.outputSchema,
+                schema: openAiStrictJsonSchema(request.outputSchema),
               },
             },
       }),
@@ -617,9 +781,9 @@ async function generateStructured({
         : (() => { throw new Error('missing-structured-output') })()
   } catch (error) {
     if (engine === 'external' && body?.choices?.[0]?.finish_reason === 'length') {
-      throw new Error('structured-output-truncated')
+      throw errorWithUsage(new Error('structured-output-truncated'), usage)
     }
-    throw error
+    throw errorWithUsage(error, usage)
   }
   return {
     schemaVersion: 1,
@@ -628,6 +792,48 @@ async function generateStructured({
     modelId,
     output,
     ...(usage ? { usage } : {}),
+  }
+}
+
+export async function generateExternalImage({
+  baseUrl,
+  apiKey,
+  modelId,
+  prompt,
+  aspect = 'portrait-3:4',
+  background,
+  signal = null,
+}) {
+  const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : ''
+  const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : ''
+  if (normalizedPrompt.length < 20 || normalizedPrompt.length > 4_000) throw new Error('invalid-image-prompt')
+  if (!normalizedModelId || normalizedModelId.length > 160) throw new Error('invalid-model-id')
+  if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('external-image-model-config-incomplete')
+  const normalizedAspect = aspect === 'square' ? 'square' : 'portrait-3:4'
+  const normalizedBackground = ['opaque', 'transparent'].includes(background) ? background : undefined
+  const upstream = await fetchJson(appendApiPath(baseUrl, 'images/generations'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey.trim()}`,
+    },
+    body: JSON.stringify({
+      model: normalizedModelId,
+      prompt: normalizedPrompt,
+      n: 1,
+      size: normalizedAspect === 'square' ? '1024x1024' : '1024x1536',
+      quality: 'low',
+      ...(normalizedBackground ? { background: normalizedBackground } : {}),
+    }),
+  }, 300_000, signal)
+  const base64 = upstream?.data?.[0]?.b64_json
+  if (typeof base64 !== 'string' || base64.length < 100) throw new Error('missing-generated-image')
+  return {
+    schemaVersion: 1,
+    modelId: normalizedModelId,
+    quality: 'low',
+    mimeType: 'image/png',
+    dataUrl: `data:image/png;base64,${base64}`,
   }
 }
 
@@ -722,6 +928,32 @@ export async function startLocalAiBridge(options = {}) {
     if (externalModelsById.has(model.bridgeModelId)) throw new Error('duplicate-external-model-id')
     externalModelsById.set(model.bridgeModelId, model)
   }
+  const billingPolicy = options.billingPolicy ?? AI_CREDIT_POLICY
+  const usageAudit = createUsageAuditStore(options.usageAuditPath, billingPolicy)
+  const runAuditedGeneration = async (generationInput) => {
+    const request = generationInput.request
+    const reservation = await usageAudit.begin({
+      task: request.task,
+      providerId: generationInput.engine === 'external' ? 'external-account' : 'local-bridge',
+      modelId: generationInput.modelId,
+      jobId: request.jobId,
+      estimatedInputTokens: estimatedStructuredInputTokens(request),
+      estimatedOutputTokens: structuredOutputTokenBudget(request.task, request.maxOutputTokens, generationInput.engine),
+    })
+    try {
+      const result = await generateStructured(generationInput)
+      const billing = await usageAudit.settle(reservation, { status: 'completed', usage: result.usage })
+      return { ...result, billing }
+    } catch (error) {
+      const code = safeAuditError(error)
+      await usageAudit.settle(reservation, {
+        status: /cancel|disconnect|abort/i.test(code) ? 'cancelled' : 'failed',
+        usage: error?.aiUsage,
+        errorCode: code,
+      })
+      throw error
+    }
+  }
   const allowedOrigins = new Set(options.allowedOrigins ?? LOCAL_AI_BRIDGE_DEFAULT_ORIGINS)
   let activePairingCode = options.pairingCode ?? pairingCode()
   let accessToken = options.accessToken ?? ''
@@ -762,7 +994,7 @@ export async function startLocalAiBridge(options = {}) {
       abortController,
       updatedAt: Date.now(),
     })
-    void generateStructured({
+    void runAuditedGeneration({
       ...queued.generationInput,
       signal: abortController.signal,
     }).then((result) => {
@@ -859,6 +1091,7 @@ export async function startLocalAiBridge(options = {}) {
         return
       }
       activeOcr = true
+      let reservation = null
       try {
         const body = await readJsonBody(req, 36 * 1024 * 1024)
         const imageDataUrl = configuredText(body?.imageDataUrl)
@@ -880,6 +1113,12 @@ export async function startLocalAiBridge(options = {}) {
           jsonResponse(res, 400, { error: 'invalid-ocr-request' }, corsHeaders)
           return
         }
+        reservation = await usageAudit.begin({
+          task: 'ocr',
+          providerId: 'local-bridge',
+          modelId: ocrEngineId,
+          jobId: `${documentId}:page:${page}`,
+        })
         const upstream = await fetchJson(appendApiPath(ocrApiUrl, 'ocr'), {
           method: 'POST',
           headers: {
@@ -901,18 +1140,36 @@ export async function startLocalAiBridge(options = {}) {
           (upstream.confidence !== undefined && (!Number.isFinite(upstream.confidence) || upstream.confidence < 0 || upstream.confidence > 1)) ||
           (upstream.blocks !== undefined && (!Array.isArray(upstream.blocks) || upstream.blocks.length > 10_000))
         ) throw new Error('invalid-ocr-upstream-response')
+        const billing = await usageAudit.settle(reservation, { status: 'completed' })
+        reservation = null
         jsonResponse(res, 200, {
           schemaVersion: 1,
           engineId: configuredText(upstream.engineId) || ocrEngineId,
           text: upstream.text,
           ...(upstream.confidence !== undefined ? { confidence: upstream.confidence } : {}),
           ...(upstream.blocks !== undefined ? { blocks: upstream.blocks } : {}),
+          billing,
         }, corsHeaders)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'ocr-failed'
+        if (reservation) await usageAudit.settle(reservation, { status: 'failed', errorCode: message }).catch(() => undefined)
         if (!res.destroyed) jsonResponse(res, message === 'request-too-large' ? 413 : 502, { error: message }, corsHeaders)
       } finally {
         activeOcr = false
+      }
+      return
+    }
+    if (url.pathname === '/api/usage' && req.method === 'GET') {
+      const requestedLimit = Number(url.searchParams.get('limit'))
+      const limit = Number.isSafeInteger(requestedLimit) ? Math.max(1, Math.min(200, requestedLimit)) : 50
+      try {
+        jsonResponse(res, 200, {
+          schemaVersion: LOCAL_AI_BRIDGE_SCHEMA_VERSION,
+          creditsPerCny: billingPolicy.creditsPerCny,
+          records: await usageAudit.recent(limit),
+        }, corsHeaders)
+      } catch {
+        jsonResponse(res, 500, { error: 'usage-audit-read-failed' }, corsHeaders)
       }
       return
     }
@@ -926,42 +1183,46 @@ export async function startLocalAiBridge(options = {}) {
         return
       }
       activeImageGeneration = true
+      let reservation = null
+      let upstreamCharged = false
       try {
         const body = await readJsonBody(req, 16_384)
         const prompt = configuredText(body?.prompt)
         const aspect = body?.aspect === 'square' ? 'square' : 'portrait-3:4'
-        const quality = ['low', 'medium', 'high'].includes(body?.quality) ? body.quality : imageDefaultQuality
+        const quality = 'low'
         const background = ['opaque', 'transparent'].includes(body?.background) ? body.background : undefined
         if (prompt.length < 20 || prompt.length > 4_000) {
           jsonResponse(res, 400, { error: 'invalid-image-prompt' }, corsHeaders)
           return
         }
-        const upstream = await fetchJson(appendApiPath(imageModel.apiUrl, 'images/generations'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${imageModel.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: imageModel.modelId,
-            prompt,
-            n: 1,
-            size: aspect === 'square' ? '1024x1024' : '1024x1536',
-            quality,
-            ...(background ? { background } : {}),
-          }),
-        }, 300_000)
-        const base64 = upstream?.data?.[0]?.b64_json
-        if (typeof base64 !== 'string' || base64.length < 100) throw new Error('missing-generated-image')
-        jsonResponse(res, 200, {
-          schemaVersion: 1,
+        reservation = await usageAudit.begin({
+          task: 'image-generation',
+          providerId: 'external-account',
           modelId: imageModel.modelId,
           quality,
-          mimeType: 'image/png',
-          dataUrl: `data:image/png;base64,${base64}`,
+        })
+        const generated = await generateExternalImage({
+          baseUrl: imageModel.apiUrl,
+          apiKey: imageModel.apiKey,
+          modelId: imageModel.modelId,
+          prompt,
+          aspect,
+          background,
+        })
+        upstreamCharged = true
+        const billing = await usageAudit.settle(reservation, { status: 'completed' })
+        reservation = null
+        jsonResponse(res, 200, {
+          ...generated,
+          billing,
         }, corsHeaders)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'image-generation-failed'
+        if (reservation) await usageAudit.settle(reservation, {
+          status: 'failed',
+          usage: upstreamCharged ? { chargeable: true } : undefined,
+          errorCode: message,
+        }).catch(() => undefined)
         if (!res.destroyed) jsonResponse(res, message === 'request-too-large' ? 413 : 502, { error: message }, corsHeaders)
       } finally {
         activeImageGeneration = false
@@ -1069,12 +1330,7 @@ export async function startLocalAiBridge(options = {}) {
         const selectedExternalModel = engine === 'external' ? externalModelsById.get(modelId) : null
         const externalRoleMatchesTask = !selectedExternalModel || selectedExternalModel.role === 'general' ||
           (selectedExternalModel.role === 'extraction' && normalized.ok && normalized.value.task === 'pdf-extraction') ||
-          (selectedExternalModel.role === 'synthesis' && normalized.ok && [
-            'campaign-analysis',
-            'resource-structuring',
-            'session-summary',
-            'prep-recommendations',
-          ].includes(normalized.value.task))
+          (selectedExternalModel.role === 'synthesis' && normalized.ok && normalized.value.task === 'campaign-analysis')
         if (!engine || !modelId || !normalized.ok ||
           (engine === 'external' && (!selectedExternalModel || !externalRoleMatchesTask))) {
           jsonResponse(res, 400, { error: normalized.ok ? 'invalid-bridge-request' : normalized.error }, corsHeaders)
@@ -1137,7 +1393,7 @@ export async function startLocalAiBridge(options = {}) {
         activeGeneration = true
         ownsActiveGeneration = true
         responseStream = jsonHeartbeatResponse(res, corsHeaders)
-        const result = await generateStructured({
+        const result = await runAuditedGeneration({
           ...generationInput,
           signal: clientDisconnect.signal,
         })

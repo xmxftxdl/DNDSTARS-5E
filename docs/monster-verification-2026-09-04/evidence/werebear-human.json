@@ -1,0 +1,125 @@
+{
+  "id": "srd-5.1:werebear-human",
+  "slug": "werebear-human",
+  "name": "熊人（人类形态）",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greataxe",
+      "name": "巨斧",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 111,
+      "slug": "werebear-human",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:30:08.633Z",
+      "name": "熊人（人类形态）",
+      "actionId": "greataxe",
+      "actionName": "巨斧",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "5",
+      "total": 334,
+      "mapId": "verify-ui-werebear-human-greataxe-1788568208687",
+      "combatId": "verify-ui-werebear-human-greataxe-1788568208687:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "熊人（人类形态） 使用巨斧攻击 验证目标：巨斧 → 验证目标 9+7=16 命中；共造成 12 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:30 PM\n结算\n\n熊人（人类形态） 使用巨斧攻击 验证目标：巨斧 → 验证目标 9+7=16 命中；共造成 12 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：巨斧｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +7。\n结果 · 16 vs AC 10：命中。\n伤害骰 · 巨斧（基础伤害·挥砍）｜1d12 骰面：8 = 8｜固定加值 +4｜小计 12\n熊人（人类形态）｜消耗动作\n验证目标｜受到 12 点伤害｜HP 320 → 308",
+      "playerLog": "熊人（人类形态） 使用巨斧攻击 验证目标：巨斧 → 验证目标 9+7=16 命中；共造成 12 点伤害。",
+      "afterHp": 308,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:30:31.250Z",
+      "evidenceFile": "ui-cases/monsters/111-werebear-human.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "敏锐嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 4,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

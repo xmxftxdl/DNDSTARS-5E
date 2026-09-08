@@ -1,0 +1,253 @@
+{
+  "id": "srd-5.1:wight",
+  "slug": "wight",
+  "name": "尸鬼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "life-drain",
+      "name": "生命吸取",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].damageBasis.kind",
+        "attack.onHitEffects[].damageBasis.damageType",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].recovery",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longbow",
+      "name": "长弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword-two-handed",
+      "name": "长剑（双手）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-longsword",
+      "name": "多重攻击：长剑 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-life-drain-and-longsword",
+      "name": "多重攻击：生命吸取 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 147,
+      "slug": "wight",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:40:02.776Z",
+      "name": "尸鬼",
+      "actionId": "life-drain",
+      "actionName": "生命吸取",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "3",
+      "total": 334,
+      "mapId": "verify-ui-wight-life-drain-1788568802845",
+      "combatId": "verify-ui-wight-life-drain-1788568802845:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "尸鬼 使用生命吸取攻击 验证目标：生命吸取 → 验证目标 14+4=18 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:40 PM\n结算\n\n尸鬼 使用生命吸取攻击 验证目标：生命吸取 → 验证目标 14+4=18 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：生命吸取｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 14；最终采用 14；调整值 +4。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 生命吸取（基础伤害·黯蚀）｜1d6 骰面：4 = 4｜固定加值 +2｜小计 6\n尸鬼｜消耗动作\n验证目标｜体质豁免 d20 8 +10 = 18 vs DC 13｜成功\n验证目标｜受到 6 点伤害｜HP 320 → 314",
+      "playerLog": "尸鬼 使用生命吸取攻击 验证目标：生命吸取 → 验证目标 14+4=18 命中；共造成 6 点伤害。",
+      "afterHp": 314,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:40:31.355Z",
+      "evidenceFile": "ui-cases/monsters/147-wight.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "阳光敏感",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 15,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

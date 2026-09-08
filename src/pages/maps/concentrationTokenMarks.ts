@@ -1,4 +1,5 @@
 import type { ConcentrationTokenMark } from '../../components/map/Dnd5eConcentrationTokenBadge'
+import { concentrationTokenTooltip } from '../../components/map/tokenStatusTooltip'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eCharacterPresentationColors } from './combatLogPresentation'
@@ -31,12 +32,26 @@ export function buildDnd5eConcentrationTokenMarks(
       if (!character || !spellId) return []
 
       const colors = dnd5eCharacterPresentationColors(character)
+      const tooltip = concentrationTokenTooltip(spellId)
       return [{
+        instance: {
+          id: `concentration:${token.id}:${spellId}`,
+          tokenId: token.id,
+          kind: 'concentration',
+          title: tooltip.title,
+          description: tooltip.description,
+          statusId: spellId,
+          sourceActorId: token.id,
+          sourceLabel: character.name ?? token.label,
+          authority: 'headless',
+        },
         tokenId: token.id,
         spellId,
         backgroundHighlightColor: colors.statusBackgroundHighlightColor,
         backgroundColor: colors.statusBackgroundColor,
-        borderColor: colors.statusBorderColor,
+        // Match other source-attributed map badges: the visible perimeter uses
+        // the class banner's primary color, not the near-white status-frame slot.
+        borderColor: colors.accentColor,
         glowColor: colors.glowColor,
         classId: colors.classId,
       }]
@@ -46,7 +61,19 @@ export function buildDnd5eConcentrationTokenMarks(
     const spellId = nonEmptySpellId(token.dnd5eCombatState?.concentrationSpellId)
     if (!spellId) return []
     const accent = token.color.trim() || fallback.statusBorderColor
+    const tooltip = concentrationTokenTooltip(spellId)
     return [{
+      instance: {
+        id: `concentration:${token.id}:${spellId}`,
+        tokenId: token.id,
+        kind: 'concentration',
+        title: tooltip.title,
+        description: tooltip.description,
+        statusId: spellId,
+        sourceActorId: token.id,
+        sourceLabel: token.label,
+        authority: 'headless',
+      },
       tokenId: token.id,
       spellId,
       backgroundHighlightColor: accent,

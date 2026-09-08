@@ -14,14 +14,19 @@ import {
   type Dnd5eHeadlessCombatState,
   type Dnd5eUnsupportedAirborneFallPreview,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eAttacksPerAttackAction } from './classes'
-import { dnd5eEscapableGrapples } from './activeEffects'
+import { createDnd5eMapCombatSnapshot, dnd5eRequestedInitiativeActorIndex, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { dnd5eEffectiveAttacksPerAttackAction } from './pluginApi'
+import {
+  dnd5eAvailableRestrictedExtraActionKinds,
+  dnd5eEscapableGrapples,
+} from './activeEffects'
 import {
   cellKey,
+  DND_FEET_PER_CELL,
   mapCellExtent,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
+  tokenFootprintDistanceCells,
   tokenOccupiedCellsAt,
 } from '../../lib/gridCombat'
 import {
@@ -29,6 +34,12 @@ import {
   mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
 } from '../../lib/mapGeometry'
+import { dnd5eActivityBasicActionGrantMatchesV1 } from './activities/dnd5eActivityBasicActionGrant'
+import { dnd5eAnimateDeadControlledUndead, dnd5eCreateUndeadControlledUndead } from './animateDead'
+import { dnd5eAnimateObjectsControlledCreature } from './animateObjects'
+import { DND5E_FLAME_BLADE_RELEASED_SUSPENSION } from './sustainedSpellControls'
+
+const SAFE_ANIMATE_DEAD_COMMAND_TARGET_ID = /^[a-z0-9][a-z0-9._:-]{0,159}$/i
 
 export type Dnd5eBasicActionRejectReason =
   | 'invalid-action'
@@ -55,11 +66,19 @@ export interface PreparedDnd5eBasicAction {
   actorContestSkill?: 'athletics' | 'acrobatics'
   actorCheckAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
   escapeEffectId?: string
+  dismissEffectId?: string
   targetDefense?: 'athletics' | 'acrobatics'
   pushTo?: { x: number; y: number }
+  pushDistanceFeet?: number
+  activityBasicActionGrantId?: string
 }
 
-function planDnd5eShovePushDestination(map: BattleMap, actorTokenId: string, targetTokenId: string) {
+function planDnd5eShovePushDestination(
+  map: BattleMap,
+  actorTokenId: string,
+  targetTokenId: string,
+  distanceFeet = 5,
+) {
   const actor = map.tokens.find((token) => token.id === actorTokenId)
   const target = map.tokens.find((token) => token.id === targetTokenId)
   if (!actor || !target) return undefined
@@ -68,7 +87,8 @@ function planDnd5eShovePushDestination(map: BattleMap, actorTokenId: string, tar
   const dc = Math.sign(targetCell.col - actorCell.col)
   const dr = Math.sign(targetCell.row - actorCell.row)
   if (dc === 0 && dr === 0) return undefined
-  const destinationCell = { col: targetCell.col + dc, row: targetCell.row + dr }
+  const cellCount = Math.max(1, Math.floor(distanceFeet / 5))
+  const destinationCell = { col: targetCell.col + dc * cellCount, row: targetCell.row + dr * cellCount }
   const { cols, rows } = mapCellExtent(map)
   const to = tokenCenterForAnchorCell(destinationCell, target, map)
   const footprint = tokenOccupiedCellsAt(target, map, to)
@@ -77,11 +97,21 @@ function planDnd5eShovePushDestination(map: BattleMap, actorTokenId: string, tar
     .flatMap((token) => tokenOccupiedCellsAt(token, map, token))
     .map(cellKey))
   const geometry = mapGeometryRuntimeForMap(map.id)
+  const pathBlocked = Array.from({ length: cellCount }, (_, index) => ({
+    col: targetCell.col + dc * (index + 1),
+    row: targetCell.row + dr * (index + 1),
+  })).some((cell) => {
+    const step = tokenCenterForAnchorCell(cell, target, map)
+    return tokenOccupiedCellsAt(target, map, step).some((occupiedCell) => occupied.has(cellKey(occupiedCell))) ||
+      mapGeometryMovementBlocked({ geometry, map, token: target, to: step }).blocked ||
+      mapGeometryPlacementBlocked({ geometry, map, token: target, at: step }).blocked
+  })
   if (
     footprint.some((cell) => cell.col < 0 || cell.row < 0 || cell.col >= cols || cell.row >= rows) ||
     footprint.some((cell) => occupied.has(cellKey(cell))) ||
     mapGeometryMovementBlocked({ geometry, map, token: target, to }).blocked ||
-    mapGeometryPlacementBlocked({ geometry, map, token: target, at: to }).blocked
+    mapGeometryPlacementBlocked({ geometry, map, token: target, at: to }).blocked ||
+    pathBlocked
   ) return undefined
   return to
 }
@@ -134,6 +164,7 @@ export function triggerDnd5eReadiedAction(input: {
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }
@@ -163,16 +194,63 @@ export function prepareDnd5ePlayerBasicAction(input: {
   ) {
     return { ok: false, reason: 'invalid-action' }
   }
-  const replacesAttack = payload.kind === 'grapple' || payload.kind === 'shove'
-  const freeAction = payload.kind === 'release-grapple'
-  const spendsBonusAction = payload.kind === 'other-bonus-action'
-  const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
+  if ((payload.kind === 'dismiss-effect' || payload.kind === 'set-flame-blade-manifestation') &&
+    !/^[a-z0-9][a-z0-9:._-]{0,255}$/i.test(payload.effectId)) {
+    return { ok: false, reason: 'invalid-action' }
+  }
+  if (payload.kind === 'command-animate-dead' || payload.kind === 'command-animate-objects') {
+    const command = typeof payload.command === 'string' ? payload.command.normalize('NFKC').trim() : ''
+    if (
+      !command || command.length > 320 ||
+      !Array.isArray(payload.targetTokenIds) ||
+      payload.targetTokenIds.length < 1 || payload.targetTokenIds.length > 18 ||
+      payload.targetTokenIds.some((targetId) =>
+        typeof targetId !== 'string' || !SAFE_ANIMATE_DEAD_COMMAND_TARGET_ID.test(targetId)) ||
+      new Set(payload.targetTokenIds).size !== payload.targetTokenIds.length
+    ) return { ok: false, reason: 'invalid-action' }
+  }
+  const requestedBasicActionGrantId =
+    (payload.kind === 'grapple' || payload.kind === 'shove')
+      ? payload.activityBasicActionGrantId
+      : undefined
+  const basicActionGrant = requestedBasicActionGrantId
+    ? actor.dnd5eCombatState?.activityBasicActionGrants?.[requestedBasicActionGrantId]
+    : undefined
+  const basicActionGranted = requestedBasicActionGrantId != null &&
+    dnd5eActivityBasicActionGrantMatchesV1(
+      basicActionGrant,
+      input.turnEconomy.turnKey ?? '',
+      payload.kind as 'grapple' | 'shove',
+    )
+  if (requestedBasicActionGrantId != null && !basicActionGranted) {
+    return { ok: false, reason: 'action-unavailable' }
+  }
+  const replacesAttack = (payload.kind === 'grapple' || payload.kind === 'shove') && !basicActionGranted
+  const freeAction = payload.kind === 'release-grapple' ||
+    (payload.kind === 'set-flame-blade-manifestation' && !payload.manifested)
+  const spendsBonusAction = basicActionGranted ||
+    payload.kind === 'other-bonus-action' || payload.kind === 'command-animate-dead' || payload.kind === 'command-animate-objects' ||
+    (payload.kind === 'set-flame-blade-manifestation' && payload.manifested) ||
+    (payload.kind === 'dash' && payload.sourceSpellId === 'expeditious-retreat')
+  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(actor)
   const attacksAllowed = attacksPerAction * Math.max(1, input.turnEconomy.action.max)
   const attackNumber = replacesAttack ? input.turnEconomy.attacksUsed + 1 : undefined
   const spendsAction = !freeAction && !spendsBonusAction &&
     (!replacesAttack || input.turnEconomy.attacksUsed % attacksPerAction === 0)
+  const restrictedActionKind = payload.kind === 'dash' ? 'dash'
+    : payload.kind === 'hide' ? 'hide'
+      : payload.kind === 'use-object' ? 'use-object'
+        : undefined
+  const restrictedActionAvailable = restrictedActionKind != null &&
+    dnd5eAvailableRestrictedExtraActionKinds({
+      effects: actor.dnd5eCombatState?.activeEffects,
+      usesByEffect: actor.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
+      turnKey: input.turnEconomy.turnKey,
+    }).includes(restrictedActionKind)
   if (replacesAttack && input.turnEconomy.attacksUsed >= attacksAllowed) return { ok: false, reason: 'action-unavailable' }
-  if (spendsAction && input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
+  if (spendsAction && input.turnEconomy.action.current < 1 && !restrictedActionAvailable) {
+    return { ok: false, reason: 'action-unavailable' }
+  }
   if (spendsBonusAction && input.turnEconomy.bonusAction.current < 1) return { ok: false, reason: 'action-unavailable' }
   const targetTokenId = 'targetTokenId' in payload ? payload.targetTokenId : undefined
   if (targetTokenId && !input.map.tokens.some((candidate) => candidate.id === targetTokenId)) {
@@ -186,9 +264,43 @@ export function prepareDnd5ePlayerBasicAction(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(token.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    token.id,
+    input.action.initiativeIndex,
+  )
   const combatant = snapshot.state.combatants[token.id]
   if (actorIndex < 0 || !combatant) return { ok: false, reason: 'combatant-missing' }
+  if (payload.kind === 'command-animate-dead') {
+    const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    const targets = payload.targetTokenIds.map((targetId) =>
+      input.map.tokens.find((candidate) => candidate.id === targetId))
+    if (targets.some((target) =>
+      !target || target.dnd5eSummon?.controlEnded === true ||
+      !(dnd5eAnimateDeadControlledUndead(target, actor.id) ||
+        dnd5eCreateUndeadControlledUndead(target, actor.id)) ||
+      tokenFootprintDistanceCells(token, target, input.map) * feetPerCell >
+        (target?.dnd5eSummon?.featureId === 'spell:create-undead' ? 120 : 60)
+    )) return { ok: false, reason: 'invalid-target' }
+  }
+  if (payload.kind === 'command-animate-objects') {
+    const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+    const targets = payload.targetTokenIds.map((targetId) =>
+      input.map.tokens.find((candidate) => candidate.id === targetId))
+    if (targets.some((target) =>
+      !target || !dnd5eAnimateObjectsControlledCreature(target, actor.id) ||
+      tokenFootprintDistanceCells(token, target, input.map) * feetPerCell > 500
+    )) return { ok: false, reason: 'invalid-target' }
+  }
+  if (payload.kind === 'dash' && payload.sourceSpellId === 'expeditious-retreat' && (
+    actor.dnd5eCombatState?.concentrationSpellId !== 'expeditious-retreat' ||
+    !actor.dnd5eCombatState?.activeEffects?.some((effect) =>
+      effect.source.kind === 'spell' &&
+      effect.source.rulesId === 'expeditious-retreat' &&
+      effect.definitionId === 'srd-5.1:spell:expeditious-retreat' &&
+      effect.duration.type === 'concentration'
+    )
+  )) return { ok: false, reason: 'invalid-action' }
   const targetCombatant = targetTokenId ? snapshot.state.combatants[targetTokenId] : undefined
   const selectedGrapple = payload.kind === 'escape-grapple' && targetCombatant
     ? dnd5eEscapableGrapples(combatant.classState.activeEffects).find((grapple) =>
@@ -225,6 +337,44 @@ export function prepareDnd5ePlayerBasicAction(input: {
   if (payload.kind === 'escape-effect' && !escapeEffect) {
     return { ok: false, reason: 'invalid-target' }
   }
+  const dismissEffect = payload.kind === 'dismiss-effect'
+    ? combatant.classState.activeEffects?.find((effect) =>
+        effect.id === payload.effectId &&
+        effect.removal?.action?.economy === 'action' &&
+        effect.removal.action.maxDistanceFeet >= 0)
+    : undefined
+  if (payload.kind === 'dismiss-effect' && !dismissEffect) {
+    return { ok: false, reason: 'invalid-target' }
+  }
+  const flameBladeEffect = payload.kind === 'set-flame-blade-manifestation'
+    ? combatant.classState.activeEffects?.find((effect) =>
+        effect.id === payload.effectId &&
+        effect.source.kind === 'spell' &&
+        effect.source.rulesId === 'flame-blade' &&
+        effect.definitionId === 'srd-5.1:spell:flame-blade' &&
+        effect.duration.type === 'concentration' &&
+        combatant.classState.concentrationSpellId === 'flame-blade')
+    : undefined
+  const flameBladeSuspensions = flameBladeEffect?.suspendedBy ?? []
+  const validFlameBladeTransition = payload.kind !== 'set-flame-blade-manifestation' || (
+    flameBladeEffect != null && (
+      payload.manifested
+        ? flameBladeSuspensions.length === 1 &&
+          flameBladeSuspensions[0] === DND5E_FLAME_BLADE_RELEASED_SUSPENSION
+        : flameBladeSuspensions.length === 0
+    )
+  )
+  if (!validFlameBladeTransition) return { ok: false, reason: 'invalid-target' }
+  const dismissibleWardingBond = payload.kind === 'dismiss-warding-bond' &&
+    Object.values(snapshot.state.combatants).some((target) =>
+      target.classState.activeEffects?.some((effect) =>
+        effect.definitionId === 'srd-5.1:spell:warding-bond' &&
+        effect.source.actorId === combatant.id,
+      ),
+    )
+  if (payload.kind === 'dismiss-warding-bond' && !dismissibleWardingBond) {
+    return { ok: false, reason: 'invalid-target' }
+  }
   const escapingGrapple = payload.kind === 'escape-grapple' && !escapeEffect
   const escapeOption = escapeEffect?.escapeCheck
     ? dnd5eBestActiveEffectEscapeOption(combatant, escapeEffect.escapeCheck)
@@ -237,11 +387,17 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const targetDefense = escapingGrapple
     ? 'athletics'
     : targetCombatant && replacesAttack ? dnd5eBestGrappleDefense(targetCombatant).skill : undefined
+  const pushDistanceFeet = payload.kind === 'shove'
+    ? 5 + (basicActionGrant?.shovePushDistanceBonusFeet ?? 0)
+    : undefined
   const pushTo = payload.kind === 'shove' && payload.outcome === 'push' && targetTokenId
-    ? planDnd5eShovePushDestination(input.map, token.id, targetTokenId)
+    ? planDnd5eShovePushDestination(input.map, token.id, targetTokenId, pushDistanceFeet)
     : undefined
   if (payload.kind === 'shove' && payload.outcome === 'push' && !pushTo) return { ok: false, reason: 'invalid-target' }
-  const actorCheck = escapeOption
+  const dismissAbilityCheck = dismissEffect?.removal?.action?.abilityCheck
+  const actorCheck = dismissAbilityCheck
+    ? { ability: dismissAbilityCheck.ability, skill: dismissAbilityCheck.skill }
+    : escapeOption
     ? { ability: escapeOption.ability, skill: escapeOption.skill }
     : payload.kind === 'hide'
       ? { ability: 'dex' as const, skill: 'stealth' }
@@ -280,10 +436,13 @@ export function prepareDnd5ePlayerBasicAction(input: {
       actorRollMode,
       targetRollMode,
       actorContestSkill,
-      actorCheckAbility: escapeAbility,
+      actorCheckAbility: dismissAbilityCheck?.ability ?? escapeAbility,
       escapeEffectId: escapeEffect?.id,
+      dismissEffectId: dismissEffect?.id,
       targetDefense,
       pushTo,
+      pushDistanceFeet,
+      activityBasicActionGrantId: requestedBasicActionGrantId,
     },
   }
 }
@@ -299,6 +458,7 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   targetHalflingLuckyD20?: number
   targetHalflingLuckyD20Second?: number
   pushToElevationFeet?: number
+  pushToGroundElevationFeet?: number
   fallingDamageRolls?: readonly number[]
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
 }): {
@@ -310,7 +470,9 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   const payload = prepared.payload
   let action: Dnd5eAction
   switch (payload.kind) {
-    case 'dash': action = { type: 'dash', actorId: prepared.actorTokenId }; break
+    case 'dash': action = {
+      type: 'dash', actorId: prepared.actorTokenId, sourceSpellId: payload.sourceSpellId,
+    }; break
     case 'hide': action = {
       type: 'hide',
       actorId: prepared.actorTokenId,
@@ -331,6 +493,8 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense,
       spendAction: prepared.spendsAction,
+      spendBonusAction: prepared.spendsBonusAction,
+      activityBasicActionGrantId: prepared.activityBasicActionGrantId,
     }; break
     case 'shove': action = {
       type: 'shove', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
@@ -341,9 +505,13 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       targetHalflingLuckyD20Second: input.targetHalflingLuckyD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense, outcome: payload.outcome,
       pushTo: prepared.pushTo,
+      pushDistanceFeet: prepared.pushDistanceFeet,
       pushToElevationFeet: input.pushToElevationFeet,
+      pushToGroundElevationFeet: input.pushToGroundElevationFeet,
       fallingDamageRolls: input.fallingDamageRolls,
       spendAction: prepared.spendsAction,
+      spendBonusAction: prepared.spendsBonusAction,
+      activityBasicActionGrantId: prepared.activityBasicActionGrantId,
     }; break
     case 'release-grapple': action = {
       type: 'release-grapple',
@@ -382,9 +550,55 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       halflingLuckyD20: input.actorHalflingLuckyD20,
       halflingLuckyD20Second: input.actorHalflingLuckyD20Second,
     }; break
+    case 'dismiss-effect': action = {
+      type: 'remove-active-effect',
+      actorId: prepared.actorTokenId,
+      targetId: prepared.actorTokenId,
+      effectId: prepared.dismissEffectId ?? '',
+      d20: prepared.actorCheckAbility ? actorD20 : undefined,
+      d20Second: prepared.actorCheckAbility ? actorD20Second : undefined,
+      halflingLuckyD20: prepared.actorCheckAbility ? input.actorHalflingLuckyD20 : undefined,
+      halflingLuckyD20Second: prepared.actorCheckAbility ? input.actorHalflingLuckyD20Second : undefined,
+    }; break
+    case 'set-flame-blade-manifestation': action = {
+      type: 'set-flame-blade-manifestation',
+      actorId: prepared.actorTokenId,
+      effectId: payload.effectId,
+      manifested: payload.manifested,
+    }; break
+    case 'dismiss-warding-bond': action = {
+      type: 'dismiss-warding-bond',
+      actorId: prepared.actorTokenId,
+    }; break
     case 'wake': action = {
       type: 'wake-sleeping-creature', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
     }; break
+    case 'command-animate-dead': {
+      const targetNames = payload.targetTokenIds.map((targetId) =>
+        prepared.map.tokens.find((token) => token.id === targetId)?.label ?? targetId)
+      const command = payload.command.normalize('NFKC').trim()
+      const heading = `向 ${targetNames.length} 个受控亡灵（${targetNames.join('、')}）下达同一心灵命令：`
+      action = {
+        type: 'adjudicate-basic-action',
+        actorId: prepared.actorTokenId,
+        economy: 'bonusAction',
+        description: `${heading}${command}`.slice(0, 320),
+      }
+      break
+    }
+    case 'command-animate-objects': {
+      const targetNames = payload.targetTokenIds.map((targetId) =>
+        prepared.map.tokens.find((token) => token.id === targetId)?.label ?? targetId)
+      const command = payload.command.normalize('NFKC').trim()
+      const heading = `向 ${targetNames.length} 个活化物件（${targetNames.join('、')}）下达同一心灵命令：`
+      action = {
+        type: 'adjudicate-basic-action',
+        actorId: prepared.actorTokenId,
+        economy: 'bonusAction',
+        description: `${heading}${command}`.slice(0, 320),
+      }
+      break
+    }
     case 'other-action':
     case 'other-bonus-action': action = {
       type: 'adjudicate-basic-action',
@@ -412,6 +626,7 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

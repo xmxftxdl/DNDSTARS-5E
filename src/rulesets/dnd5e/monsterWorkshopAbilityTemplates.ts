@@ -1,11 +1,14 @@
 import {
+  createDnd5eCustomMonsterTraitDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
   type Dnd5eCustomMonsterActionDraft,
   type Dnd5eCustomMonsterDraft,
+  type Dnd5eCustomMonsterTraitDraft,
   type Dnd5eMonsterWorkshopTemplateSource,
 } from './customMonsterWorkshop'
 import {
   DND5E_SRD_MONSTERS,
+  dnd5eMonsterProficiencyBonus,
   type Dnd5eMonsterAction,
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterTrait,
@@ -22,8 +25,20 @@ export interface Dnd5eMonsterAbilityTemplate {
   sourceMonsterId: string
   sourceMonsterName: string
   sourceMonsterEnglishName: string
+  /** Number of identical SRD abilities collapsed into this reusable template. */
+  sourceCount: number
   ruleKind: string
+  mechanicTags: readonly string[]
   dependencyCount: number
+  /** Basic workshop editor that intentionally replaces source-specific parameters. */
+  parameterEditor?:
+    | 'charge'
+    | 'regeneration'
+    | 'magic-weapons'
+    | 'relentless'
+    | 'sneak-attack'
+    | 'surprise-attack'
+    | 'stench'
   searchText: string
   sourceIndex: number
 }
@@ -104,14 +119,180 @@ function actionRuleKind(action: Dnd5eMonsterAction): string {
   return action.kind
 }
 
+const TEMPLATE_SIGNATURE_OMITTED_KEYS = new Set([
+  'id',
+  'name',
+  'description',
+  'automation',
+])
+const ACTION_REFERENCE_SIGNATURE_CACHE = new WeakMap<Dnd5eMonsterStatBlock, ReadonlyMap<string, string>>()
+
+function normalizedTemplateName(value: string): string {
+  return value.normalize('NFKC').trim().toLocaleLowerCase('zh-CN').replace(/\s+/g, ' ')
+}
+
+function configurableTraitParameterEditor(input: {
+  section: Dnd5eMonsterAbilityTemplateSection
+  name: string
+  ruleKind: string
+  mechanic: unknown
+}): Dnd5eMonsterAbilityTemplate['parameterEditor'] {
+  if (input.section !== 'trait') return undefined
+  const name = input.name.trim()
+  if (input.ruleKind === 'charge-damage' && /^冲锋(?:\s*[（(].*[）)])?$/u.test(name)) return 'charge'
+  if (input.ruleKind === 'regeneration' && name === '再生') return 'regeneration'
+  if (input.ruleKind === 'magic-weapons') return 'magic-weapons'
+  if (input.ruleKind === 'relentless' && name === '坚韧不屈') return 'relentless'
+  if (input.ruleKind === 'sneak-attack') return 'sneak-attack'
+  if (input.ruleKind === 'surprise-attack') return 'surprise-attack'
+  if (
+    input.ruleKind === 'turn-start-saving-throw-aura' &&
+    input.mechanic != null &&
+    typeof input.mechanic === 'object' &&
+    (input.mechanic as { ruleId?: unknown }).ruleId === 'stench'
+  ) return 'stench'
+  return undefined
+}
+
+function configurableTraitName(
+  editor: Dnd5eMonsterAbilityTemplate['parameterEditor'],
+  fallback: string,
+): string {
+  if (editor === 'charge') return '冲锋'
+  if (editor === 'magic-weapons') return '魔法武器'
+  if (editor === 'sneak-attack') return '偷袭（每回合 1 次）'
+  if (editor === 'surprise-attack') return '突袭攻击'
+  if (editor === 'stench') return '恶臭'
+  return fallback
+}
+
+function configurableTraitDescription(
+  editor: NonNullable<Dnd5eMonsterAbilityTemplate['parameterEditor']>,
+): string {
+  if (editor === 'charge') return '如果【名称】在同一回合直线移动至少指定距离，并以指定攻击命中目标，目标会受到 DM 填写的额外伤害；DM 还可设置命中后的豁免与失败状态。'
+  if (editor === 'regeneration') return '【名称】在回合开始时恢复由 DM 设置的生命值；DM 可以设置压制再生的伤害类型及 0 HP 行为。'
+  if (editor === 'magic-weapons') return '【名称】的武器攻击视为魔法攻击。'
+  if (editor === 'relentless') return '当一次不超过 DM 设置阈值的伤害会使【名称】降至 0 HP 时，它改为降至 1 HP。'
+  if (editor === 'sneak-attack') return '每回合一次，【名称】以具有优势的武器攻击命中，或目标邻近其未失能盟友且攻击不具有劣势时，造成 DM 填写的额外伤害。'
+  if (editor === 'surprise-attack') return '【名称】在战斗第一轮命中仍处于受惊状态的目标时，造成 DM 填写的额外伤害。'
+  return '在一个生物于【名称】的灵光范围内开始回合时，它必须进行体质豁免，失败则中毒至其下一回合开始；成功后在 24 小时内免疫该来源。'
+}
+
+function normalizedMechanicValue(
+  value: unknown,
+  actionReferences: ReadonlyMap<string, string>,
+  parentKey = '',
+): unknown {
+  if (typeof value === 'string') {
+    if (ACTION_REFERENCE_KEYS.has(parentKey)) return actionReferences.get(value) ?? '@action-reference'
+    return value.normalize('NFKC').trim()
+  }
+  if (Array.isArray(value)) {
+    if (parentKey === 'sequence') {
+      return value.map((entry) => typeof entry === 'string'
+        ? actionReferences.get(entry) ?? '@action-reference'
+        : normalizedMechanicValue(entry, actionReferences))
+    }
+    return value.map((entry) => normalizedMechanicValue(entry, actionReferences))
+  }
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key, entry]) => !TEMPLATE_SIGNATURE_OMITTED_KEYS.has(key) && entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => [key, normalizedMechanicValue(entry, actionReferences, key)]))
+}
+
+function actionReferenceSignatures(monster: Dnd5eMonsterStatBlock): ReadonlyMap<string, string> {
+  const cached = ACTION_REFERENCE_SIGNATURE_CACHE.get(monster)
+  if (cached) return cached
+  const placeholderReferences = new Map<string, string>()
+  for (const entry of actionEntries(monster)) placeholderReferences.set(entry.action.id, '@action-reference')
+  const result = new Map(actionEntries(monster).map((entry) => [
+    entry.action.id,
+    JSON.stringify(normalizedMechanicValue(entry.action, placeholderReferences)),
+  ]))
+  ACTION_REFERENCE_SIGNATURE_CACHE.set(monster, result)
+  return result
+}
+
+function templateSemanticKey(input: {
+  monster: Dnd5eMonsterStatBlock
+  section: Dnd5eMonsterAbilityTemplateSection
+  name: string
+  ruleKind: string
+  mechanic: unknown
+}): string {
+  const parameterEditor = configurableTraitParameterEditor(input)
+  if (parameterEditor) {
+    return `trait|configurable-${parameterEditor}|${input.ruleKind}`
+  }
+  return [
+    input.section,
+    normalizedTemplateName(input.name),
+    JSON.stringify(normalizedMechanicValue(input.mechanic, actionReferenceSignatures(input.monster))),
+  ].join('|')
+}
+
+function escapedRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function genericTemplateDescription(
+  monster: Dnd5eMonsterStatBlock,
+  description: string,
+  ruleKind: string,
+): string {
+  if (ruleKind === 'magic-resistance') {
+    return '【名称】对抗法术和其他魔法效应时进行的豁免检定具有优势。'
+  }
+  let result = description.trim()
+  if (!result) return '【名称】拥有此能力。'
+  const names = [monster.name, monster.englishName]
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+  for (const name of names) result = result.replace(new RegExp(escapedRegExp(name), 'giu'), '【名称】')
+  result = result
+    .replace(/^(?:该|此|这名|这只)(?:生物|怪物|魔物|魔鬼|恶魔|邪魔|构装体|亡灵|龙|野兽|元素|异怪|天界生物)/u, '【名称】')
+    .replace(/^它(?=[在对可会能不具受免进发使获造拥])/u, '【名称】')
+    .replace(/^其(?=[武攻豁速移法动特生])/u, '【名称】的')
+  if (!result.includes('【名称】')) result = `【名称】：${result}`
+  return result
+}
+
+function instantiateTemplateDescription(description: string, monsterName: string): string {
+  return description.replace(/【名称】/gu, monsterName.trim() || '该怪物')
+}
+
+function ruleMechanicTags(ruleKind: string): readonly string[] {
+  if (ruleKind === 'source-linked-engulf') {
+    return ['共享空间', '吞没', '携带', '逃脱', '持续伤害']
+  }
+  if (ruleKind === 'source-linked-reel') return ['关系目标', '拖拽', '强制移动']
+  if (ruleKind === 'throw-linked-target') return ['关系目标', '投掷', '碰撞伤害', '强制移动']
+  if (ruleKind === 'area-saving-throw') return ['范围豁免', '范围伤害']
+  if (ruleKind === 'charge-damage') return ['移动后命中', '直线移动', '追加伤害']
+  if (ruleKind === 'regeneration') return ['回合开始', '恢复生命', '伤害压制']
+  if (ruleKind === 'magic-weapons') return ['魔法攻击']
+  if (ruleKind === 'relentless') return ['降至 0 HP', '保留 1 HP', '伤害阈值']
+  if (ruleKind === 'sneak-attack') return ['每回合一次', '优势', '相邻盟友', '追加伤害']
+  if (ruleKind === 'surprise-attack') return ['首轮', '受惊目标', '追加伤害']
+  if (ruleKind === 'turn-start-saving-throw-aura') return ['回合开始', '范围豁免', '状态效果']
+  if (ruleKind.startsWith('weapon:source-linked-condition')) {
+    return ['擒抱', '附着', '吞咽', '关系目标']
+  }
+  return []
+}
+
 function templateSearchText(
   monster: Dnd5eMonsterStatBlock,
   section: Dnd5eMonsterAbilityTemplateSection,
   name: string,
   description: string,
   ruleKind: string,
+  mechanicTags: readonly string[] = ruleMechanicTags(ruleKind),
 ): string {
-  return [name, description, ruleKind, section, monster.name, monster.englishName, monster.id]
+  return [name, description, ruleKind, ...mechanicTags, section, monster.name, monster.englishName, monster.id]
     .join(' ')
     .toLocaleLowerCase('zh-CN')
 }
@@ -119,21 +300,46 @@ function templateSearchText(
 export function buildDnd5eMonsterAbilityTemplateCatalog(
   monsters: readonly Dnd5eMonsterStatBlock[] = DND5E_SRD_MONSTERS,
 ): readonly Dnd5eMonsterAbilityTemplate[] {
-  const templates: Dnd5eMonsterAbilityTemplate[] = []
+  const templates = new Map<string, Dnd5eMonsterAbilityTemplate>()
+  const addTemplate = (key: string, template: Dnd5eMonsterAbilityTemplate) => {
+    const current = templates.get(key)
+    if (!current) {
+      templates.set(key, template)
+      return
+    }
+    templates.set(key, {
+      ...current,
+      sourceCount: current.sourceCount + 1,
+      searchText: `${current.searchText} ${template.searchText}`,
+    })
+  }
   for (const monster of monsters) {
     monster.traits.forEach((trait, sourceIndex) => {
       if (trait.automation !== 'headless' || !trait.rule) return
       const ruleKind = trait.rule.kind
-      templates.push({
-        id: `${monster.id}:trait:${sourceIndex}:${slugPart(trait.name)}`,
+      const mechanicTags = ruleMechanicTags(ruleKind)
+      const parameterEditor = configurableTraitParameterEditor({
         section: 'trait',
         name: trait.name,
-        description: trait.description,
+        ruleKind,
+        mechanic: trait.rule,
+      })
+      const templateName = configurableTraitName(parameterEditor, trait.name)
+      addTemplate(templateSemanticKey({ monster, section: 'trait', name: templateName, ruleKind, mechanic: trait.rule }), {
+        id: `${monster.id}:trait:${sourceIndex}:${slugPart(templateName)}`,
+        section: 'trait',
+        name: templateName,
+        description: parameterEditor
+          ? configurableTraitDescription(parameterEditor)
+          : genericTemplateDescription(monster, trait.description, ruleKind),
         sourceMonsterId: monster.id,
         sourceMonsterName: monster.name,
         sourceMonsterEnglishName: monster.englishName,
+        sourceCount: 1,
         ruleKind,
-        dependencyCount: dependencyClosure(monster, trait).length,
+        mechanicTags,
+        dependencyCount: parameterEditor ? 0 : dependencyClosure(monster, trait).length,
+        parameterEditor,
         searchText: templateSearchText(monster, 'trait', trait.name, trait.description, ruleKind),
         sourceIndex,
       })
@@ -141,28 +347,42 @@ export function buildDnd5eMonsterAbilityTemplateCatalog(
     for (const entry of actionEntries(monster)) {
       if (dnd5eMonsterActionAutomation(entry.action) !== 'headless') continue
       const ruleKind = actionRuleKind(entry.action)
-      templates.push({
+      const mechanicTags = ruleMechanicTags(ruleKind)
+      addTemplate(templateSemanticKey({ monster, section: entry.section, name: entry.action.name, ruleKind, mechanic: entry.action }), {
         id: `${monster.id}:${entry.section}:${entry.sourceIndex}:${slugPart(entry.action.id)}`,
         section: entry.section,
         name: entry.action.name,
-        description: entry.action.description,
+        description: genericTemplateDescription(monster, entry.action.description, ruleKind),
         sourceMonsterId: monster.id,
         sourceMonsterName: monster.name,
         sourceMonsterEnglishName: monster.englishName,
+        sourceCount: 1,
         ruleKind,
+        mechanicTags,
         dependencyCount: dependencyClosure(monster, entry.action).length,
         searchText: templateSearchText(monster, entry.section, entry.action.name, entry.action.description, ruleKind),
         sourceIndex: entry.sourceIndex,
       })
     }
   }
-  return templates.sort((left, right) =>
+  return [...templates.values()].sort((left, right) =>
     left.section.localeCompare(right.section) ||
     left.name.localeCompare(right.name, 'zh-CN') ||
     left.sourceMonsterName.localeCompare(right.sourceMonsterName, 'zh-CN'))
 }
 
 export const DND5E_MONSTER_ABILITY_TEMPLATES = buildDnd5eMonsterAbilityTemplateCatalog()
+
+export function dnd5eMonsterWorkshopDefaultSaveDc(
+  draft: Pick<Dnd5eCustomMonsterDraft, 'abilities' | 'challengeRating'>,
+  ability: keyof Dnd5eCustomMonsterDraft['abilities'],
+): number {
+  const abilityModifier = Math.floor((draft.abilities[ability] - 10) / 2)
+  return Math.max(1, Math.min(
+    100,
+    8 + dnd5eMonsterProficiencyBonus(draft.challengeRating) + abilityModifier,
+  ))
+}
 
 function uniqueActionId(original: string, used: Set<string>): string {
   if (!used.has(original)) {
@@ -280,8 +500,65 @@ export function applyDnd5eMonsterAbilityTemplate(
   const source: Dnd5eMonsterWorkshopTemplateSource = {
     templateId: template.id,
     monsterId: monster.id,
-    monsterName: monster.name,
+    monsterName: template.sourceCount > 1 ? `通用模板（${template.sourceCount} 个来源）` : monster.name,
     section: template.section,
+  }
+
+  if (template.section === 'trait' && template.parameterEditor) {
+    const traitIndex = draft.traits.length
+    const defaultAttack = draft.actions.find((action) =>
+      action.category === 'action' && action.kind === 'weapon-attack')
+    const configuredTrait: Dnd5eCustomMonsterTraitDraft = {
+      ...createDnd5eCustomMonsterTraitDraft(),
+      name: template.name,
+      description: instantiateTemplateDescription(template.description, draft.name),
+      automation: 'headless',
+      templateSource: source,
+    }
+    if (template.parameterEditor === 'charge') {
+      Object.assign(configuredTrait, {
+        ruleKind: 'charge-damage' as const,
+        chargeMinimumFeet: 20,
+        chargeActionId: defaultAttack?.id ?? '',
+        chargeDamageDice: '2d6',
+        chargeDamageType: defaultAttack?.damageType ?? 'bludgeoning',
+        chargeSaveEnabled: true,
+        chargeSaveAbility: 'str' as const,
+        chargeSaveDc: dnd5eMonsterWorkshopDefaultSaveDc(draft, 'str'),
+        chargeSaveCondition: 'prone' as const,
+      })
+    } else if (template.parameterEditor === 'regeneration') {
+      Object.assign(configuredTrait, {
+        ruleKind: 'regeneration' as const,
+        amount: 10,
+        requiresPositiveHp: true,
+        damageTypes: [],
+        diesAtZeroWhenSuppressed: false,
+      })
+    } else if (template.parameterEditor === 'magic-weapons') {
+      configuredTrait.ruleKind = 'magic-weapons'
+    } else if (template.parameterEditor === 'relentless') {
+      Object.assign(configuredTrait, { ruleKind: 'relentless' as const, relentlessMaximumDamage: 10 })
+    } else if (template.parameterEditor === 'sneak-attack') {
+      Object.assign(configuredTrait, { ruleKind: 'sneak-attack' as const, sneakAttackDamageDice: '2d6' })
+    } else if (template.parameterEditor === 'surprise-attack') {
+      Object.assign(configuredTrait, { ruleKind: 'surprise-attack' as const, surpriseAttackDamageDice: '2d6' })
+    } else {
+      Object.assign(configuredTrait, {
+        ruleKind: 'stench' as const,
+        stenchRangeFeet: 10,
+        stenchSaveDc: dnd5eMonsterWorkshopDefaultSaveDc(draft, 'con'),
+      })
+    }
+    return {
+      draft: {
+        ...draft,
+        traits: [...draft.traits, configuredTrait],
+      },
+      addedActionIds: [],
+      addedMultiattackIds: [],
+      addedTraitIndexes: [traitIndex],
+    }
   }
 
   if (template.section !== 'trait') {
@@ -292,7 +569,28 @@ export function applyDnd5eMonsterAbilityTemplate(
       [primary, ...dependencyClosure(monster, primary.action)],
       source,
     )
-    return { ...imported, addedTraitIndexes: [] }
+    const primaryId = imported.idMap.get(primary.action.id)
+    const description = instantiateTemplateDescription(template.description, draft.name)
+    return {
+      ...imported,
+      draft: {
+        ...imported.draft,
+        actions: imported.draft.actions.map((action) => action.id === primaryId
+          ? {
+              ...action,
+              name: template.name,
+              description,
+              preservedAction: action.preservedAction
+                ? { ...action.preservedAction, name: template.name, description }
+                : action.preservedAction,
+            }
+          : action),
+        preservedMultiattacks: imported.draft.preservedMultiattacks?.map((action) => action.id === primaryId
+          ? { ...action, name: template.name, description }
+          : action),
+      },
+      addedTraitIndexes: [],
+    }
   }
 
   const trait = monster.traits[template.sourceIndex]
@@ -305,6 +603,8 @@ export function applyDnd5eMonsterAbilityTemplate(
   const projection = sourceDraft.traits[template.sourceIndex]
   if (!projection) throw new Error(`模板“${template.name}”无法建立工坊编辑投影`)
   const rebasedTrait: Dnd5eMonsterTrait = rebaseActionReferences(structuredClone(trait), imported.idMap)
+  rebasedTrait.name = template.name
+  rebasedTrait.description = instantiateTemplateDescription(template.description, draft.name)
   const traitIndex = imported.draft.traits.length
   return {
     draft: {

@@ -6,7 +6,7 @@ export const ROOM_HANDOUT_LIMIT = 100
 export const ROOM_JOURNAL_ENTRY_LIMIT = 200
 export const ROOM_SHARED_NOTE_LIMIT = 200
 
-export type RoomChatChannel = 'ic' | 'ooc' | 'dm-private'
+export type RoomChatChannel = 'ic' | 'ooc' | 'dm-private' | 'telepathic-bond'
 
 export interface RoomChatRoll {
   expression: string
@@ -33,6 +33,11 @@ export interface RoomChatMessage {
   senderRole: 'dm' | 'player'
   senderDisplayName: string
   recipientMemberId?: string
+  /** Host-resolved source-linked network. Clients cannot choose its audience. */
+  telepathicNetworkKey?: string
+  telepathicParticipantCharacterIds?: string[]
+  telepathicParticipantNames?: string[]
+  audienceMemberIds?: string[]
   persona: RoomChatPersona
   text: string
   roll?: RoomChatRoll
@@ -49,6 +54,8 @@ export interface SendRoomChatInput {
   text: string
   recipientMemberId?: string
   npcTokenId?: string
+  telepathicNetworkKey?: string
+  telepathicSenderCharacterId?: string
 }
 
 /** `dm` 表示尚未发布的讲义草稿，可由场景或地图互动在之后分发。 */
@@ -183,7 +190,10 @@ function normalizeRoll(value: unknown): RoomChatRoll | undefined {
 
 function normalizeMessage(value: unknown): RoomChatMessage | null {
   if (!plainObject(value)) return null
-  if (value.channel !== 'ic' && value.channel !== 'ooc' && value.channel !== 'dm-private') return null
+  if (
+    value.channel !== 'ic' && value.channel !== 'ooc' && value.channel !== 'dm-private' &&
+    value.channel !== 'telepathic-bond'
+  ) return null
   if (value.senderRole !== 'dm' && value.senderRole !== 'player') return null
   if (!plainObject(value.persona)) return null
   const personaKind = value.persona.kind
@@ -193,7 +203,21 @@ function normalizeMessage(value: unknown): RoomChatMessage | null {
   const senderDisplayName = text(value.senderDisplayName, 80)
   const messageText = text(value.text, 1_000)
   const personaName = text(value.persona.name, 80)
+  const telepathicNetworkKey = text(value.telepathicNetworkKey, 320)
+  const telepathicParticipantCharacterIds = Array.isArray(value.telepathicParticipantCharacterIds)
+    ? [...new Set(value.telepathicParticipantCharacterIds.map((entry) => text(entry, 160)).filter(Boolean))].slice(0, 8)
+    : []
+  const telepathicParticipantNames = Array.isArray(value.telepathicParticipantNames)
+    ? [...new Set(value.telepathicParticipantNames.map((entry) => text(entry, 80)).filter(Boolean))].slice(0, 8)
+    : []
+  const audienceMemberIds = Array.isArray(value.audienceMemberIds)
+    ? [...new Set(value.audienceMemberIds.map((entry) => text(entry, 160)).filter(Boolean))].slice(0, 8)
+    : []
   if (!id || !senderMemberId || !senderDisplayName || (!messageText && !value.roll) || !personaName) return null
+  if (
+    value.channel === 'telepathic-bond' &&
+    (!telepathicNetworkKey || telepathicParticipantCharacterIds.length < 2 || audienceMemberIds.length < 1)
+  ) return null
   const roll = normalizeRoll(value.roll)
   if (value.roll != null && !roll) return null
   return {
@@ -204,6 +228,12 @@ function normalizeMessage(value: unknown): RoomChatMessage | null {
     senderRole: value.senderRole,
     senderDisplayName,
     recipientMemberId: text(value.recipientMemberId, 160) || undefined,
+    telepathicNetworkKey: telepathicNetworkKey || undefined,
+    telepathicParticipantCharacterIds: telepathicParticipantCharacterIds.length
+      ? telepathicParticipantCharacterIds
+      : undefined,
+    telepathicParticipantNames: telepathicParticipantNames.length ? telepathicParticipantNames : undefined,
+    audienceMemberIds: audienceMemberIds.length ? audienceMemberIds : undefined,
     persona: {
       kind: personaKind,
       name: personaName,

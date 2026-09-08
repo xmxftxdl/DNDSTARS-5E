@@ -121,15 +121,15 @@ describe('remaining structured monster weapon attacks', () => {
   })
 
   it.each([
-    ['azer', 'warhammer-two-handed'],
-    ['dryad', 'club-shillelagh'],
-    ['duergar', 'war-pick-enlarged'],
-    ['duergar', 'javelin-enlarged'],
-    ['mimic', 'pseudopod-adhesive-object-form'],
-  ] as const)('exposes %s/%s as a stable legal branch', (slug, actionId) => {
+    ['azer', 'warhammer-two-handed', 'headless'],
+    ['dryad', 'club-shillelagh', 'headless'],
+    ['duergar', 'war-pick-enlarged', 'headless'],
+    ['duergar', 'javelin-enlarged', 'headless'],
+    ['mimic', 'pseudopod-adhesive-object-form', 'headless'],
+  ] as const)('exposes %s/%s as a stable legal branch', (slug, actionId, automation) => {
     expect(catalogAction(slug, actionId)).toMatchObject({
       kind: 'weapon-attack',
-      automation: 'headless',
+      automation,
     })
   })
 

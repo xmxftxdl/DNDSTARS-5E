@@ -33,7 +33,7 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
     : '/simulation'
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="欢迎回来，地下城主"
         description="在这里管理你的战役、地图、角色与战斗。"

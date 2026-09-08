@@ -21,7 +21,9 @@ import { publishAccountPluginVersion } from '../lib/pluginCatalogApi'
 import { getRoomSession } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
 import { showAppConfirm } from '../lib/appDialog'
+import { consumeDmWorkshopMonsterHandoff } from '../lib/dmWorkshopMonsterHandoff'
 import {
+  compileDnd5eLocalContentCollection,
   dnd5eRoomRuntimeProjectionBytesV2,
   type Dnd5eContentAutomationCoverageReportV2,
 } from '../rulesets/dnd5e'
@@ -31,12 +33,18 @@ export default function DmWorkshopPage() {
   const [roomSession] = useState(() => getRoomSession())
   const accountSession = useSyncExternalStore(subscribeAccountSession, getAccountSession, () => null)
   const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [campaignMonsterWorkshopImport, setCampaignMonsterWorkshopImport] = useState(
+    () => consumeDmWorkshopMonsterHandoff(campaignId),
+  )
+  const [notice, setNotice] = useState<string | null>(() => campaignMonsterWorkshopImport
+    ? `已从战役资源库载入“${campaignMonsterWorkshopImport.monster.name}”，请在怪物工坊中补齐并核对战斗数据。`
+    : null)
   const [error, setError] = useState<string | null>(null)
   const [coverage, setCoverage] = useState<Dnd5eContentAutomationCoverageReportV2 | null>(null)
   const [contentWorkshopImport, setContentWorkshopImport] = useState<Dnd5eWorkshopContentEditRequest | null>(null)
   const [publicationPlugin, setPublicationPlugin] = useState<AccountPluginVersion | null>(null)
   const packageInputRef = useRef<HTMLInputElement>(null)
+  const collectionInputRef = useRef<HTMLInputElement>(null)
   const host = window.DNDSTARS_5E_RULES_PLUGINS
   const activeRulesPath = `/campaign/${encodeURIComponent(campaignId)}/extensions`
   const draftStorageScope = roomSession?.roomId ?? campaignId
@@ -181,6 +189,49 @@ export default function DmWorkshopPage() {
     }
   }
 
+  const importLocalCollection = async (files: readonly File[]) => {
+    if (!roomSession || roomSession.role !== 'dm') {
+      throw new Error('本地合集目录只能由 DM 导入当前房间。')
+    }
+    if (busy) throw new Error('另一个规则包正在处理，请稍后重试。')
+    setBusy(true)
+    setNotice(null)
+    setError(null)
+    try {
+      const compiled = await compileDnd5eLocalContentCollection(files)
+      if (!compiled.audit.complete) {
+        const accepted = await showAppConfirm({
+          title: '本地合集缺口审计未通过',
+          message: [
+            `条目：${compiled.audit.totals.entries}`,
+            `数量缺口：${compiled.audit.totals.countShortfall}`,
+            `缺失稳定 ID：${compiled.audit.totals.missingIds}`,
+            `缺失图片：${compiled.audit.totals.missingImages}`,
+            '仍要临时导入当前房间吗？',
+          ].join('\n'),
+          confirmLabel: '仍然导入',
+        })
+        if (!accepted) return
+      }
+      const file = new File(
+        [new Uint8Array(compiled.bytes)],
+        compiled.fileName,
+        { type: 'application/json' },
+      )
+      // Continue in the same guarded import transaction; saveAndActivate owns
+      // the Host inspection, room projection and activation phases.
+      await saveAndActivate(file, { skipConfirmation: true })
+      setNotice(
+        `已临时导入 ${compiled.package.manifest.id}；原始 JSON/CSV、提示词和规则正文未传输，关闭房间后需重新导入。`,
+      )
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      throw cause
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const publishWorkshopPlugin = async (
     plugin: AccountPluginVersion,
     input: MarketplacePublicationInput,
@@ -202,7 +253,7 @@ export default function DmWorkshopPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl" data-testid="dm-custom-workshop-page">
+    <div className="mx-auto w-full max-w-[1800px]" data-testid="dm-custom-workshop-page">
       {publicationPlugin && (
         <MarketplacePublicationDialog
           plugin={publicationPlugin}
@@ -227,6 +278,19 @@ export default function DmWorkshopPage() {
                 if (file) void saveAndActivate(file, { skipConfirmation: true }).catch(() => undefined)
               }}
             />
+            <input
+              ref={collectionInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              data-testid="local-content-collection-input"
+              {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+              onChange={(event) => {
+                const files = [...(event.currentTarget.files ?? [])]
+                event.currentTarget.value = ''
+                if (files.length > 0) void importLocalCollection(files).catch(() => undefined)
+              }}
+            />
             <button
               type="button"
               disabled={busy}
@@ -234,6 +298,14 @@ export default function DmWorkshopPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-4 py-2.5 text-sm font-semibold text-arcane-100 disabled:opacity-50"
             >
               <Upload className="h-4 w-4" />直接导入规则包
+            </button>
+            <button
+              type="button"
+              disabled={busy || roomSession?.role !== 'dm'}
+              onClick={() => collectionInputRef.current?.click()}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/8 px-4 py-2.5 text-sm font-semibold text-cyan-100 disabled:opacity-50"
+            >
+              <Upload className="h-4 w-4" />导入本地合集目录
             </button>
             <Link
               to={activeRulesPath}
@@ -303,6 +375,8 @@ export default function DmWorkshopPage() {
           ? '保存并启用到当前房间'
           : '保存并在当前设备启用'}
         alwaysExpanded
+        monsterWorkshopImport={campaignMonsterWorkshopImport}
+        onMonsterWorkshopImportClose={() => setCampaignMonsterWorkshopImport(null)}
         contentWorkshopImport={contentWorkshopImport}
         onContentWorkshopImportClose={() => setContentWorkshopImport(null)}
       />

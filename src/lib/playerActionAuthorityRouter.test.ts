@@ -3,6 +3,8 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import {
   canSubmitPlayerCombatAction,
+  canSubmitPlayerSpellAction,
+  canSubmitPlayerTriggeredReactionSpellAction,
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
   type PlayerActionAuthorityAction,
@@ -134,6 +136,69 @@ describe('player action authority router', () => {
     )).toEqual({ status: 'rejected', reason: 'stale-combat' })
   })
 
+  it.each(['dnd5e-ability-check', 'dnd5e-spell-cast', 'dnd5e-adjudicated-spell', 'dnd5e-persistent-area-move', 'dnd5e-class-feature', 'dnd5e-plugin-action', 'dnd5e-item-use'])(
+    'allows an owned %s request outside combat without weakening combat turns',
+    (type) => {
+      expect(preflightPlayerActionAuthority(
+        makeAction({ type, combatId: undefined }),
+        makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+      ).status).toBe('accepted')
+
+      expect(preflightPlayerActionAuthority(
+        makeAction({ type, combatId: 'ended-combat' }),
+        makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+      )).toEqual({ status: 'rejected', reason: 'stale-combat' })
+
+      expect(preflightPlayerActionAuthority(
+        makeAction({ type, actorTokenId: 'hero-token', characterId: 'hero', round: 2 }),
+        makeContext({ round: 1 }),
+      )).toEqual({ status: 'rejected', reason: 'stale-turn' })
+    },
+  )
+
+  it('rejects a map-position spell such as Dancing Lights outside its caster turn', () => {
+    const enemyToken = makeToken({
+      id: 'enemy-token',
+      type: 'enemy',
+      characterId: undefined,
+    })
+    const result = preflightPlayerActionAuthority(
+      makeAction({ type: 'dnd5e-spell-cast' }),
+      makeContext({
+        activeMap: makeMap([makeToken(), enemyToken]),
+        currentTokenId: enemyToken.id,
+      }),
+    )
+
+    expect(result).toEqual({ status: 'rejected', reason: 'stale-turn' })
+  })
+
+  it('accepts an owned out-of-turn actor only when the Host has validated that exact reaction Token', () => {
+    const enemyToken = makeToken({ id: 'enemy-token', type: 'enemy', characterId: undefined })
+    const action = makeAction({ type: 'dnd5e-spell-cast' })
+    const context = makeContext({
+      activeMap: makeMap([makeToken(), enemyToken]),
+      currentTokenId: enemyToken.id,
+      authorizedOutOfTurnActorTokenId: action.actorTokenId,
+    })
+    const result = preflightPlayerActionAuthority(action, context)
+    expect(result.status).toBe('accepted')
+    if (result.status === 'accepted') expect(result.currentToken.id).toBe(action.actorTokenId)
+  })
+
+  it('accepts an owned Message reply outside the target creature\'s initiative turn', () => {
+    const enemyToken = makeToken({ id: 'enemy-token', type: 'enemy', characterId: undefined })
+    const result = preflightPlayerActionAuthority(
+      makeAction({ type: 'dnd5e-spell-whisper-reply' }),
+      makeContext({
+        activeMap: makeMap([makeToken(), enemyToken]),
+        currentTokenId: enemyToken.id,
+      }),
+    )
+    expect(result.status).toBe('accepted')
+    if (result.status === 'accepted') expect(result.currentToken.id).toBe('hero-token')
+  })
+
   it('rejects actions that do not match the current initiative actor', () => {
     const result = preflightPlayerActionAuthority(
       makeAction({ round: 2 }),
@@ -261,5 +326,61 @@ describe('player action authority router', () => {
     expect(canSubmitPlayerCombatAction({ ...base, playerCharacter: makeCharacter({ id: 'other' }) })).toBe(false)
     expect(canSubmitPlayerCombatAction({ ...base, characters: [makeCharacter({ currentHp: 0 })] })).toBe(false)
     expect(canSubmitPlayerCombatAction({ ...base, currentInitiativeToken: makeToken({ type: 'enemy' }) })).toBe(false)
+  })
+
+  it('allows an alive owned caster outside combat and uses strict initiative authority in combat', () => {
+    const base = {
+      activeMap: makeMap(),
+      mode: 'player' as const,
+      playerCombatLocked: false,
+      combatActive: false,
+      combatActiveSnapshot: false,
+      turnCharacter: null,
+      currentInitiativeToken: undefined,
+      pendingAction: null,
+      playerCharacter: makeCharacter(),
+      characters: [makeCharacter()],
+    }
+
+    expect(canSubmitPlayerSpellAction(base)).toBe(true)
+    expect(canSubmitPlayerSpellAction({ ...base, playerCombatLocked: true })).toBe(true)
+    expect(canSubmitPlayerSpellAction({ ...base, combatActiveSnapshot: true })).toBe(false)
+    expect(canSubmitPlayerSpellAction({ ...base, pendingAction: { id: 'action-1' } })).toBe(false)
+    expect(canSubmitPlayerSpellAction({ ...base, characters: [makeCharacter({ currentHp: 0 })] })).toBe(false)
+    expect(canSubmitPlayerSpellAction({ ...base, playerCharacter: makeCharacter({ id: 'other' }) })).toBe(false)
+
+    expect(canSubmitPlayerSpellAction({
+      ...base,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      turnCharacter: makeCharacter(),
+      currentInitiativeToken: makeToken(),
+    })).toBe(true)
+    expect(canSubmitPlayerSpellAction({
+      ...base,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      turnCharacter: makeCharacter(),
+      currentInitiativeToken: makeToken({ type: 'enemy' }),
+    })).toBe(false)
+  })
+
+  it('allows only an alive assigned caster to answer a Host-opened spell reaction out of turn', () => {
+    const base = {
+      activeMap: makeMap(),
+      mode: 'player' as const,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      pendingAction: null,
+      playerCharacter: makeCharacter(),
+      characters: [makeCharacter()],
+    }
+    expect(canSubmitPlayerTriggeredReactionSpellAction(base)).toBe(true)
+    expect(canSubmitPlayerTriggeredReactionSpellAction({ ...base, combatActiveSnapshot: false })).toBe(false)
+    expect(canSubmitPlayerTriggeredReactionSpellAction({ ...base, pendingAction: { id: 'pending' } })).toBe(false)
+    expect(canSubmitPlayerTriggeredReactionSpellAction({
+      ...base,
+      characters: [makeCharacter({ currentHp: 0 })],
+    })).toBe(false)
   })
 })

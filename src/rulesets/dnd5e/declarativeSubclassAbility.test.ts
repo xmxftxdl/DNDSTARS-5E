@@ -178,7 +178,7 @@ describe('DeclarativeSubclassAbilityV1', () => {
     })).buffer)).toThrow('敌方 d20 修改声明无效')
   })
 
-  it('allows effect-free manual metadata but keeps executable declarations fail-closed', () => {
+  it('allows effect-free manual metadata and assisted DM boundaries but keeps full declarations fail-closed', () => {
     const manual = ability({
       rolls: undefined,
       effects: [],
@@ -203,8 +203,45 @@ describe('DeclarativeSubclassAbilityV1', () => {
     expect(() => parseDnd5eDeclarativeRulesPackageV1(packageFor(manual))).not.toThrow()
     expect(() => parseDnd5eDeclarativeRulesPackageV1(packageFor({
       ...manual,
+      automation: 'partial',
+    }))).not.toThrow()
+    expect(() => parseDnd5eDeclarativeRulesPackageV1(packageFor({
+      ...manual,
       automation: 'full',
     }))).toThrow('效果无效')
+  })
+
+  it('keeps shared source-turn-end effects and damage-maximization prearms fully automated', () => {
+    const sourceTurnEnd = ability({
+      rolls: undefined,
+      effects: [{
+        kind: 'standard-condition', target: 'target', condition: 'charmed',
+        duration: { kind: 'until-source-turn-end' },
+      }],
+    })
+    expect(declarativeAbilityCompatibilityV1(sourceTurnEnd)).toMatchObject({
+      effective: 'full', reasons: [],
+    })
+
+    const maximization = ability({
+      id: 'maximize-lightning',
+      trigger: { kind: 'after-spell-cast' },
+      rolls: undefined,
+      effects: [],
+      mechanic: {
+        kind: 'damage-roll-maximization',
+        damageTypes: ['lightning', 'thunder'],
+        deliveries: ['weapon-attack', 'spell', 'feature'],
+      },
+    })
+    expect(declarativeSubclassCompatibilityReportV1([{
+      ...subclass([maximization]),
+      combatHooks: [{
+        id: 'arm-maximization', timing: 'after-attack-hit',
+        abilityId: maximization.id, decision: 'actor-choice',
+        activation: 'prearm', retention: 'until-triggered',
+      }],
+    }]).abilities[0]).toMatchObject({ effective: 'full', reasons: [] })
   })
 
   it('accepts audited opening-attack declarations and rejects unsafe save multipliers', () => {
@@ -1041,6 +1078,49 @@ describe('DeclarativeSubclassAbilityV1', () => {
     } finally { dispose() }
   })
 
+  it('commits an effect-free assisted action and its resources only after DM approval', () => {
+    const pluginId = 'com.example.assisted-boundary'
+    const assisted = ability({
+      rolls: undefined,
+      effects: [],
+      automation: 'partial',
+      cost: { economy: 'action', resources: [{ resourceId: 'focus', amount: 1 }] },
+      targeting: { kind: 'self' },
+    })
+    const { dispose, featureId } = register(pluginId, subclass([assisted]))
+    const action = {
+      type: 'plugin' as const,
+      pluginId,
+      actionId: 'decl.arc-guard.arc-strike',
+      featureId,
+      transactionId: 'tx-assisted-boundary',
+      actorId: 'hero',
+      targetId: 'hero',
+      targetIds: ['hero'],
+      distanceFeet: 0,
+    }
+    try {
+      const source = stateFor(pluginId, {
+        resources: { [`${pluginId}:focus`]: { current: 2, max: 2 } },
+      })
+      expect(resolveDnd5eHeadlessAction(source, action)).toMatchObject({
+        ok: false,
+        reason: 'invalid-plugin-action',
+      })
+      expect(source.combatants.hero.classResources[`${pluginId}:focus`]).toMatchObject({ current: 2 })
+      expect(source.combatants.hero.turn.actionAvailable).toBe(true)
+
+      const approved = resolveDnd5eHeadlessAction(source, {
+        ...action,
+        transactionId: 'tx-assisted-boundary-approved',
+        interruptChoiceId: 'dm-apply',
+      })
+      expect(approved.ok, approved.ok ? undefined : approved.reason).toBe(true)
+      expect(approved.state.combatants.hero.classResources[`${pluginId}:focus`]).toMatchObject({ current: 1 })
+      expect(approved.state.combatants.hero.turn.actionAvailable).toBe(false)
+    } finally { dispose() }
+  })
+
   it('uses the Host distance snapshot instead of a client-reported distance', () => {
     const pluginId = 'com.example.distance'
     const { dispose, featureId } = register(pluginId)
@@ -1095,7 +1175,7 @@ describe('DeclarativeSubclassAbilityV1', () => {
       ability({ id: 'partial', effects: [{ kind: 'move', target: 'target', distanceFeet: 10 }], rolls: [], automation: 'full' }),
       ability({ id: 'manual', automation: 'manual' }),
     ])])
-    expect(report).toMatchObject({ full: 1, partial: 0, manual: 2 })
-    expect(report.abilities.find((entry) => entry.abilityId === 'partial')?.reasons).toContain('强制移动需要地图三维路径与碰撞事务')
+    expect(report).toMatchObject({ full: 2, partial: 0, manual: 1 })
+    expect(report.abilities.find((entry) => entry.abilityId === 'partial')?.effective).toBe('full')
   })
 })

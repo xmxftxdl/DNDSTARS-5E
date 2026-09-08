@@ -1,6 +1,7 @@
 import type { Character, CharacterResourceState } from '../types/character'
 import {
   classDefinitionForCharacter,
+  mergeClassResourceDefinitions,
   type ClassResourceDefinition,
   type ClassResourceReset,
 } from './classDefinitionRegistry'
@@ -53,20 +54,10 @@ function registeredResourceDefinitions(character: Character): ClassResourceDefin
 
   const withoutSharedSlots = definitions.filter((definition) =>
     !definition.key.startsWith('dnd5e-spell-slot-') && definition.key !== 'dnd5e-pact-slot')
-  const deduplicated = new Map<string, ClassResourceDefinition>()
-  for (const definition of withoutSharedSlots) {
-    const previous = deduplicated.get(definition.key)
-    if (!previous) {
-      deduplicated.set(definition.key, definition)
-      continue
-    }
-    deduplicated.set(definition.key, {
-      ...previous,
-      isAvailable: () => previous.isAvailable(character) || definition.isAvailable(character),
-      max: () => Math.max(previous.max(character), definition.max(character)),
-      unlimited: () => previous.unlimited?.(character) === true || definition.unlimited?.(character) === true,
-    })
-  }
+  const deduplicated = new Map(
+    mergeClassResourceDefinitions(character, withoutSharedSlots)
+      .map((definition) => [definition.key, definition]),
+  )
 
   const slots = dnd5eMulticlassSpellSlots(character)
   slots.forEach((maximum, index) => {
@@ -104,6 +95,47 @@ export function classResourceDefinition(character: Character, key: string): Clas
   return classResourceDefinitions(character).find((resource) => resource.key === key)
 }
 
+const DND5E_LEGACY_RESOURCE_LABELS: Readonly<Record<string, string>> = {
+  fighterSecondWind: '回气',
+  fighterActionSurge: '动作如潮',
+  fighterIndomitable: '不屈',
+  'dnd5e-rage': '狂暴',
+  'dnd5e-bardic-inspiration': '诗人激励',
+  'dnd5e-channel-divinity': '引导神力',
+  'dnd5e-divine-intervention': '神圣干预',
+  'dnd5e-wild-shape': '荒野形态',
+  'dnd5e-natural-recovery': '自然恢复',
+  'dnd5e-ki': '气',
+  'dnd5e-wholeness-of-body': '身心合一',
+  'dnd5e-divine-sense': '神圣感知',
+  'dnd5e-lay-on-hands': '圣疗池',
+  'dnd5e-cleansing-touch': '净化之触',
+  'dnd5e-holy-nimbus': '神圣光轮',
+  'dnd5e-stroke-of-luck': '幸运一击',
+  'dnd5e-sorcery-points': '术法点',
+  'dnd5e-dark-ones-own-luck': '黑暗赐福',
+  'dnd5e-hurl-through-hell': '坠入地狱',
+  'dnd5e-eldritch-master': '魔能宗师',
+  'dnd5e-arcane-recovery': '奥术回想',
+  'dnd5e-signature-spell-1': '招牌法术一',
+  'dnd5e-signature-spell-2': '招牌法术二',
+  'dnd5e-pact-slot': '契约法术位',
+}
+
+/**
+ * Present persisted resource keys as player-facing labels even when an older
+ * character contains resources from a class that is no longer active.
+ */
+export function classResourceDisplayLabel(character: Character, key: string): string {
+  const registered = classResourceDefinition(character, key)
+  if (registered) return registered.label
+  const spellSlot = /^dnd5e-spell-slot-([1-9])$/.exec(key)
+  if (spellSlot) return `${spellSlot[1]}环法术位`
+  const mysticArcanum = /^dnd5e-mystic-arcanum-([6-9])$/.exec(key)
+  if (mysticArcanum) return `秘法奥秘（${mysticArcanum[1]}环）`
+  return DND5E_LEGACY_RESOURCE_LABELS[key] ?? '自定义资源'
+}
+
 export function getClassResource(character: Character, key: string): CharacterResourceState | undefined {
   const definition = classResourceDefinition(character, key)
   if (!definition) return undefined
@@ -129,7 +161,10 @@ export function syncCharacterClassResources(character: Character): Character {
     registeredDefinitions.map((resource) => resource.key),
   )
   const resources = Object.fromEntries(
-    Object.entries(character.classResources ?? {}).filter(([key]) => !registeredKeys.has(key)),
+    Object.entries(character.classResources ?? {}).filter(([key]) =>
+      !registeredKeys.has(key) &&
+      !(key in DND5E_LEGACY_RESOURCE_LABELS) &&
+      !/^dnd5e-spell-slot-[1-9]$/.test(key)),
   )
   for (const definition of available) {
     const existing = character.classResources?.[definition.key]

@@ -16,6 +16,8 @@ import type { Character } from '../../types/character'
 
 export interface Dnd5eD20RollInterruptContext {
   rollKind: 'attack' | 'ability-check' | 'saving-throw'
+  /** Battlefield token that actually rolls the d20; controls public/secret routing. */
+  rollerTokenId?: string
   rollerCharacterId?: string
   targetCharacterId?: string
   skipChoiceReroll?: boolean
@@ -67,6 +69,8 @@ type SavingThrowMode = 'normal' | 'advantage' | 'disadvantage'
  * Ability-check companion to the saving-throw pipeline. The caller supplies a
  * Headless preview callback because skills, Reliable Talent and contextual
  * modifiers belong to the prepared check rather than this presentation layer.
+ * One-use spell dice such as Guidance are always offered because their rules
+ * leave the choice to the owner before or after seeing the d20 result.
  */
 export async function resolveDnd5eAbilityCheckInterrupts(input: {
   combatant: Dnd5eCombatant
@@ -109,6 +113,7 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
   const rollerCharacterId = input.target?.id
   const sharedContext: Dnd5eD20RollInterruptContext = {
     rollKind: 'ability-check',
+    rollerTokenId: input.combatant.id,
     rollerCharacterId,
     targetCharacterId: rollerCharacterId,
   }
@@ -159,7 +164,7 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
     : undefined
   runningTotal += bardicInspirationRoll ?? 0
 
-  const optionalBonusDieUse = runningTotal < input.dc && input.requestOptionalBonusDie
+  const optionalBonusDieUse = input.requestOptionalBonusDie
     ? await input.requestOptionalBonusDie({
         target: input.target,
         combatant: input.combatant,
@@ -221,11 +226,12 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
  * Runs every player-facing saving-throw interruption in one deterministic order.
  *
  * The initial d20 uses the shared roll-confirmation channel, so declarative
- * choice rerolls such as Lucky remain the single source of truth. Additive
- * bonuses are then offered only while they can still change a failure. The
- * returned dice are not trusted state: the caller must attach them to the same
- * Headless action, where eligibility, resource consumption and logging are
- * validated atomically.
+ * choice rerolls such as Lucky remain the single source of truth. One-use spell
+ * dice such as Resistance stay an explicit owner choice even after a success or
+ * an unrecoverable failure; other additive resources may still use the
+ * failure-changing optimization. Returned dice are not trusted state: the
+ * caller must attach them to the same Headless action, where eligibility,
+ * resource consumption and logging are validated atomically.
  */
 export async function resolveDnd5eSavingThrowInterrupts(input: {
   state: Dnd5eHeadlessCombatState
@@ -276,6 +282,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
   const rollerCharacterId = input.target?.id
   const sharedContext: Dnd5eD20RollInterruptContext = {
     rollKind: 'saving-throw',
+    rollerTokenId: input.combatant.id,
     rollerCharacterId,
     targetCharacterId: rollerCharacterId,
   }
@@ -339,7 +346,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
     : undefined
   runningTotal += bardicInspirationRoll ?? 0
 
-  const optionalBonusDieUse = runningTotal < input.dc && input.requestOptionalBonusDie
+  const optionalBonusDieUse = input.requestOptionalBonusDie
     ? await input.requestOptionalBonusDie({
         target: input.target,
         combatant: input.combatant,

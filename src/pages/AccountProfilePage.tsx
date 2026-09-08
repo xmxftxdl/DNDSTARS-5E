@@ -10,6 +10,7 @@ import {
 import { getAccountSession, saveAccountSession } from '../lib/accountSession'
 import { generatedImageDataUrlToFile } from '../lib/generatedImage'
 import AiImageGenerationButton from '../components/AiImageGenerationButton'
+import { getRoomSession } from '../lib/roomSession'
 
 async function resizeAvatar(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('请选择图片文件。')
@@ -133,6 +134,7 @@ export default function AccountProfilePage() {
             }}
           />
           <AiImageGenerationButton
+            {...(getRoomSession()?.role === 'player' ? { playerTask: 'character-portrait' as const } : {})}
             label="AI 生成头像"
             title="AI 生成账号头像"
             aspect="square"

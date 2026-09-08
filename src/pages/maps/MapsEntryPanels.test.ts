@@ -22,9 +22,16 @@ describe('地图入口面板', () => {
   })
 
   it('只有 DM 空地图面板显示上传入口', () => {
-    const dmHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, { isDm: true, onUpload: vi.fn() }))
-    const playerHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, { isDm: false, onUpload: vi.fn() }))
-    expect(dmHtml).toContain('选择图片上传')
-    expect(playerHtml).not.toContain('选择图片上传')
+    const dmHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, {
+      isDm: true,
+      onUpload: vi.fn(),
+    }))
+    const playerHtml = renderToStaticMarkup(createElement(MapsEmptyMapPanel, {
+      isDm: false,
+      onUpload: vi.fn(),
+    }))
+    expect(dmHtml).toContain('选择地图 / UVTT')
+    expect(dmHtml).toContain('UVTT 会自动恢复底图、网格、墙体、门和光源')
+    expect(playerHtml).not.toContain('选择地图 / UVTT')
   })
 })

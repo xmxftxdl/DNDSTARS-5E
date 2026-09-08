@@ -22,7 +22,6 @@ import {
   dnd5eSelfSavingThrowAuraBonus,
   dnd5eSkillCheckModifier,
   dnd5eSkillCheckProficiencyRank,
-  resolveDnd5eShortRestHitDice,
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginBackgrounds,
   registeredDnd5ePluginRaces,
@@ -32,6 +31,7 @@ import {
   dnd5eCharacterClassLevel,
   dnd5eAdvancementLockedChoiceKeys,
   dnd5eLevelAdvancementGrantedFeatures,
+  migrateCharacterToDnd5e,
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
@@ -45,6 +45,7 @@ import Dnd5eMulticlassPanel from './Dnd5eMulticlassPanel'
 import CharacterLevelUpDialog from './CharacterLevelUpDialog'
 import SpellSlotResourceEditor from './SpellSlotResourceEditor'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
+import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 
 interface CharacterSheetProps {
   id: string
@@ -66,7 +67,6 @@ export default function CharacterSheet({
   const [selectedTab, setSelectedTab] = useState<'sheet' | 'class' | 'inventory' | 'spellbook'>('sheet')
   const [shortRestHitDice, setShortRestHitDice] = useState<Record<number, number>>({})
   const [useSongOfRest, setUseSongOfRest] = useState(false)
-  const [shortRestResult, setShortRestResult] = useState('')
   const [selectedClassId, setSelectedClassId] = useState<Dnd5eClassId | undefined>()
   const [advancementRequest, setAdvancementRequest] = useState<{
     classId: Dnd5eClassId
@@ -76,6 +76,8 @@ export default function CharacterSheet({
   const characters = useCharacterStore((state) => state.characters)
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
+  const loadSharedCharacters = useCharacterStore((state) => state.loadShared)
+  const saveSharedNow = useCharacterStore((state) => state.saveSharedNow)
   const updateSheetHitPoints = useCharacterStore((state) => state.updateSheetHitPoints)
   useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -147,7 +149,9 @@ export default function CharacterSheet({
   const savingThrowAuraBonus = dnd5eSelfSavingThrowAuraBonus(c)
   const proficiency = rules.proficiencyBonus(clamp(c.level, 1, 20))
   const initiative = dnd5eStoredCharacterInitiativeModifier(c)
-  const passivePerception = 10 + dnd5eSkillCheckModifier(c, 'perception')
+  const projectedCharacter = migrateCharacterToDnd5e(c)
+  const passivePerception = projectedCharacter.passivePerception
+  const passiveInvestigation = projectedCharacter.passiveInvestigation
   const hitPointRule = dnd5eClassHitPointRule(c)
   const fixedMaxHp = dnd5eFixedMaxHp(c)
   const hitPointMaximumMode = c.hitPointMaximumMode ?? 'fixed'
@@ -158,43 +162,6 @@ export default function CharacterSheet({
     .map((candidate) => ({ character: candidate, dieSides: dnd5eBardSongOfRestDie(dnd5eCharacterClassLevel(candidate, 'bard')) }))
     .filter((entry) => entry.dieSides > 0)
     .sort((left, right) => right.dieSides - left.dieSides)[0]
-  const selectedHitDiceCount = hitDice.reduce((total, pool, index) =>
-    total + Math.min(pool.current, Math.max(0, Math.floor(shortRestHitDice[index] ?? 0))), 0)
-
-  const rollDie = (sides: number): number => {
-    if (globalThis.crypto?.getRandomValues) {
-      const value = new Uint32Array(1)
-      globalThis.crypto.getRandomValues(value)
-      return value[0] % sides + 1
-    }
-    return Math.floor(Math.random() * sides) + 1
-  }
-
-  const settleShortRestHitDice = () => {
-    const spends = hitDice.flatMap((pool, poolIndex) => {
-      const count = Math.min(pool.current, Math.max(0, Math.floor(shortRestHitDice[poolIndex] ?? 0)))
-      return count > 0 ? [{ poolIndex, rolls: Array.from({ length: count }, () => rollDie(pool.sides)) }] : []
-    })
-    if (spends.length === 0) return
-    const songOfRest = useSongOfRest && songOfRestBard
-      ? {
-          dieSides: songOfRestBard.dieSides as 6 | 8 | 10 | 12,
-          roll: rollDie(songOfRestBard.dieSides),
-        }
-      : undefined
-    const resolved = resolveDnd5eShortRestHitDice({ character: c, spends, songOfRest })
-    updateCharacterHitPoints({
-      currentHp: resolved.character.currentHp,
-      hitPointDice: resolved.character.hitPointDice,
-    })
-    setShortRestHitDice({})
-    setShortRestResult(
-      `花费 ${resolved.hitDiceSpent} 枚生命骰，生命骰恢复 ${resolved.hitDiceHealing} 点` +
-      (resolved.songOfRestHealing > 0 ? `，休憩曲额外恢复 ${resolved.songOfRestHealing} 点` : '') +
-      `；实际恢复 ${resolved.healingApplied} 点。`,
-    )
-  }
-
   const toggleSavingThrow = (key: AbilityKey) => {
     updateCharacter({
       savingThrows: c.savingThrows.includes(key)
@@ -231,6 +198,7 @@ export default function CharacterSheet({
             tokenPortrait={c.tokenPortrait}
             promptContext={`${c.race || '未知种族'} ${c.charClass || '未知职业'}`}
             editable={!readOnly}
+            usePlayerAi={!isDM}
             onChange={(portrait) => updateCharacter({ portrait })}
             onInitiativePortraitChange={(initiativePortrait) => updateCharacter({ initiativePortrait })}
             onTokenPortraitChange={(tokenPortrait) => updateCharacter({ tokenPortrait })}
@@ -287,6 +255,9 @@ export default function CharacterSheet({
                   background: value,
                   dnd5eBackgroundId: pluginBackground?.id,
                   dnd5eBackgroundSkillProficiencies: pluginBackground ? [...pluginBackground.skillProficiencies] : [],
+                  dnd5eBackgroundToolProficiencies: pluginBackground ? [...(pluginBackground.toolProficiencies ?? [])] : [],
+                  dnd5eBackgroundLanguages: [],
+                  dnd5eBackgroundVariantId: undefined,
                   skills: pluginBackground
                     ? [...new Set([...c.skills.filter((skill) => !previousBackgroundSkills.has(skill)), ...pluginBackground.skillProficiencies])]
                     : c.skills.filter((skill) => !previousBackgroundSkills.has(skill)),
@@ -398,6 +369,7 @@ export default function CharacterSheet({
         <Stat icon={Swords} label="先攻" value={formatMod(initiative)} />
         <Stat icon={Award} label="熟练加值" value={formatMod(proficiency)} />
         <Stat icon={Sparkles} label="被动察觉" value={`${passivePerception}`} />
+        <Stat icon={Sparkles} label="被动调查" value={`${passiveInvestigation}`} />
         <Stat icon={Dices} label="规则版本" value="5e 2014" />
       </section>
 
@@ -531,7 +503,23 @@ export default function CharacterSheet({
               <Counter label="失败" value={c.deathSaveFailures ?? 0} max={3} tone="rose" onChange={(value) => updateCharacter({ deathSaveFailures: value })} />
               <div className="grid grid-cols-2 gap-2">
                 <Toggle label="伤势稳定" active={!!c.deathSaveStable} onClick={() => updateCharacter({ deathSaveStable: !c.deathSaveStable })} />
-                <Toggle label="保持专注" active={!!c.concentrating} onClick={() => updateCharacter({ concentrating: !c.concentrating })} />
+                <Toggle
+                  label="保持专注"
+                  active={!!c.concentrating}
+                  onClick={() => {
+                    if (readOnly) return
+                    if (!c.concentrating) {
+                      update(id, { concentrating: true })
+                      return
+                    }
+                    void browserSharedRoomService.submitPlayerCharacterCommand({
+                      commandId: globalThis.crypto?.randomUUID?.()
+                        ?? `end-concentration:${id}:${Date.now()}`,
+                      type: 'end-concentration',
+                      characterId: id,
+                    }).then(() => loadSharedCharacters({ force: true }))
+                  }}
+                />
               </div>
             </div>
           </section>
@@ -582,15 +570,6 @@ export default function CharacterSheet({
                 />
                 <span><strong className="text-violet-200">使用休憩曲 d{songOfRestBard.dieSides}</strong><span className="mt-0.5 block text-slate-500">由 {songOfRestBard.character.name} 演奏；本次短休只额外掷一次。</span></span>
               </label> : null}
-              <button
-                type="button"
-                onClick={settleShortRestHitDice}
-                disabled={selectedHitDiceCount < 1 || c.currentHp >= c.maxHp}
-                className="w-full rounded-lg bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                结算短休生命骰{selectedHitDiceCount > 0 ? `（${selectedHitDiceCount} 枚）` : ''}
-              </button>
-              {shortRestResult ? <p className="text-xs leading-5 text-emerald-300">{shortRestResult}</p> : null}
             </div>
           </section>
 
@@ -657,6 +636,7 @@ export default function CharacterSheet({
         <Dnd5eSpellbookPanel
           character={c}
           lockedChoiceKeys={lockedAdvancementChoices}
+          isDM={isDM}
         />
       )}
       {advancementRequest && (
@@ -668,8 +648,11 @@ export default function CharacterSheet({
             ? advancementRecords.find((record) => record.id === advancementRequest.revisionRecordId)
             : undefined}
           onCancel={() => setAdvancementRequest(undefined)}
-          onConfirm={(nextCharacter) => {
-            if (!readOnly || allowAdvancementRevision) update(id, nextCharacter)
+          onConfirm={async (nextCharacter) => {
+            if (!readOnly || allowAdvancementRevision) {
+              update(id, nextCharacter)
+              await saveSharedNow()
+            }
             setAdvancementRequest(undefined)
           }}
         />

@@ -24,8 +24,6 @@ import {
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
-import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
-import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import ClassResourceSummary from './ClassResourceSummary'
 
 interface FighterProgressionPanelProps {
@@ -263,12 +261,7 @@ export default function FighterProgressionPanel({
                 </div>
                 <div className="mt-2 space-y-2">
                   {entry.features.map((feature) => (
-                    <div key={feature.id} className="flex items-start gap-3">
-                      <Dnd5eActionIcon
-                        spec={dnd5eClassFeatureActionIcon({ id: feature.id, name: feature.name, classId: 'fighter' })}
-                        className="h-12 w-12 shrink-0"
-                        level={entry.level}
-                      />
+                    <div key={feature.id} className="border-l border-white/[0.08] pl-3">
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-200">{feature.name}</div>
                         <p className="mt-0.5 text-xs leading-5 text-slate-500">{feature.description}</p>

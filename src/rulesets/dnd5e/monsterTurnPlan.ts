@@ -37,6 +37,8 @@ export interface Dnd5eMonsterTurnPlan {
     areaTargetOrientation?: 0 | 1 | 2 | 3
     areaTargetElevationFeet?: number
     conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+    /** Off-turn casting is paid by this legendary action, not turn economy. */
+    legendaryActionId?: string
   }
   specialAction?:
     | {
@@ -58,8 +60,16 @@ export interface Dnd5eMonsterTurnPlan {
         actionId: string
         actionName: string
       }
+    | {
+        kind: 'persistent-area'
+        actionId: string
+        actionName: string
+        destinationCell: GridCell
+        destinationElevationFeet: number
+      }
   areaAction?: {
     actionId: string
+    legendary?: boolean
     variantId?: string
     actionName: string
     targetTokenIds: readonly string[]
@@ -68,6 +78,8 @@ export interface Dnd5eMonsterTurnPlan {
     areaTargetOrientation?: 0 | 1 | 2 | 3
     areaTargetElevationFeet?: number
     saveAbility: AbilityKey
+    /** Each affected target chooses one; omitted for ordinary fixed saves. */
+    saveAbilityChoices?: readonly AbilityKey[]
     saveDc: number
     damage?: {
       diceCount: number

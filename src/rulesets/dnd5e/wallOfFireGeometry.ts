@@ -1,5 +1,4 @@
 import { cellKey, type GridCell } from '../../lib/gridCombat'
-import { cellsInRect } from '../../lib/skillTargeting'
 import type { BattleMap } from '../../store/maps'
 
 export type Dnd5eWallOfFireShape = 'line' | 'ring'
@@ -23,6 +22,19 @@ export function normalizeWallOfFireDimension(value: number | undefined, maximum:
 
 type WallMap = Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY'>
 
+const DND5E_THIN_WALL_SPELL_IDS = new Set([
+  'wall-of-fire',
+  'wind-wall',
+  'wall-of-force',
+  'wall-of-stone',
+  'wall-of-ice',
+  'wall-of-thorns',
+])
+
+export function dnd5eSpellUsesThinWallCells(spellId: string): boolean {
+  return DND5E_THIN_WALL_SPELL_IDS.has(spellId)
+}
+
 export function normalizeWallOfFireAngle(angleDegrees: number): number {
   return ((angleDegrees % 360) + 360) % 360
 }
@@ -42,6 +54,68 @@ function clipped(cells: readonly GridCell[], map: WallMap): GridCell[] {
     unique.set(cellKey(cell), cell)
   }
   return [...unique.values()]
+}
+
+/**
+ * Rasterizes a rules-thin wall as one connected grid lane.
+ *
+ * `cellsInRect` deliberately includes every cell whose closed polygon touches
+ * a template. That is useful for ordinary areas, but a 5-foot-wide rectangle
+ * then grows to three grid lanes because the neighboring cells touch its long
+ * edges. Walls need a center-line raster instead.
+ */
+export function dnd5eThinWallCells(input: {
+  anchor: GridCell
+  angleDegrees: number
+  lengthFeet: number | undefined
+  maximumLengthFeet: number
+  map: WallMap
+}): GridCell[] {
+  const normalizedAngle = normalizeWallOfFireAngle(input.angleDegrees)
+  // A wall is undirected: 0° and 180° (likewise 90° and 270°) must produce
+  // identical cells. Canonicalizing also keeps even-length anchor bias stable.
+  const angle = normalizedAngle >= 180 ? normalizedAngle - 180 : normalizedAngle
+  const lengthFeet = normalizeWallOfFireDimension(input.lengthFeet, input.maximumLengthFeet)
+  const lengthCells = Math.round(lengthFeet / 5)
+  const radians = angle * Math.PI / 180
+  const cellsBeforeAnchor = Math.floor(lengthCells / 2)
+  const cellsAfterAnchor = lengthCells - cellsBeforeAnchor - 1
+  const start = {
+    col: Math.round(input.anchor.col - Math.cos(radians) * cellsBeforeAnchor),
+    row: Math.round(input.anchor.row - Math.sin(radians) * cellsBeforeAnchor),
+  }
+  const end = {
+    col: Math.round(input.anchor.col + Math.cos(radians) * cellsAfterAnchor),
+    row: Math.round(input.anchor.row + Math.sin(radians) * cellsAfterAnchor),
+  }
+  const deltaCol = end.col - start.col
+  const deltaRow = end.row - start.row
+  const columns = Math.abs(deltaCol)
+  const rows = Math.abs(deltaRow)
+  const stepCol = Math.sign(deltaCol)
+  const stepRow = Math.sign(deltaRow)
+  let col = start.col
+  let row = start.row
+  let columnSteps = 0
+  let rowSteps = 0
+  const cells: GridCell[] = [{ col, row }]
+  while (columnSteps < columns || rowSteps < rows) {
+    const decision = (1 + 2 * columnSteps) * rows - (1 + 2 * rowSteps) * columns
+    if (decision === 0) {
+      col += stepCol
+      row += stepRow
+      columnSteps += 1
+      rowSteps += 1
+    } else if (decision < 0) {
+      col += stepCol
+      columnSteps += 1
+    } else {
+      row += stepRow
+      rowSteps += 1
+    }
+    cells.push({ col, row })
+  }
+  return clipped(cells, input.map)
 }
 
 /** Authoritative 5-foot-grid approximation of either a 60-foot line or 20-foot-diameter ring. */
@@ -65,32 +139,13 @@ export function dnd5eWallOfFireCells(input: {
     }
     return clipped(cells, input.map)
   }
-  const angle = normalizeWallOfFireAngle(input.angleDegrees)
-  const lengthFeet = normalizeWallOfFireDimension(input.lengthFeet, WALL_OF_FIRE_MAX_LENGTH_FEET)
-  const lengthCells = Math.round(lengthFeet / 5)
-  // A 1-foot-thick wall is represented by exactly one 5-foot grid lane. The
-  // generic polygon-touching helper includes cells that merely touch both
-  // long edges, which turns axis-aligned walls into a 15-by-60-foot strip.
-  if (angle === 0 || angle === 180) {
-    return clipped(Array.from({ length: lengthCells }, (_, index) => ({
-      col: input.anchor.col + index - Math.floor((lengthCells - 1) / 2),
-      row: input.anchor.row,
-    })), input.map)
-  }
-  if (angle === 90 || angle === 270) {
-    return clipped(Array.from({ length: lengthCells }, (_, index) => ({
-      col: input.anchor.col,
-      row: input.anchor.row + index - Math.floor((lengthCells - 1) / 2),
-    })), input.map)
-  }
-  const radians = angle * Math.PI / 180
-  // cellsInRect's direction is its short axis; the requested angle is the wall's long axis.
-  const normal = { x: -Math.sin(radians), y: Math.cos(radians) }
-  const orientFrom = {
-    col: input.anchor.col - normal.x * 10,
-    row: input.anchor.row - normal.y * 10,
-  }
-  return clipped(cellsInRect(input.anchor, orientFrom, lengthFeet, 5), input.map)
+  return dnd5eThinWallCells({
+    anchor: input.anchor,
+    angleDegrees: input.angleDegrees,
+    lengthFeet: input.lengthFeet,
+    maximumLengthFeet: WALL_OF_FIRE_MAX_LENGTH_FEET,
+    map: input.map,
+  })
 }
 
 /** Selected 10-foot damage band. Ring walls choose inside/outside; line walls choose left/right. */

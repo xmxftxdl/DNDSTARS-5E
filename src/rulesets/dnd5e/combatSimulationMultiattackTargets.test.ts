@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
 import type { Character } from '../../types/character'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
@@ -202,7 +203,7 @@ describe('D&D 5e simulation monster Multiattack occurrence targets', () => {
   })
 
   it('carries three Kraken Fling relation targets through an all-special Multiattack', () => {
-    const catalog = getDnd5eSrdMonster('srd-5.1:kraken')!
+    const catalog = monsterMechanicFixture('kraken', ['tentacle', 'fling', 'multiattack-flings'])
     const multiattack = catalog.actions.find((action) =>
       action.id === 'multiattack-flings')
     const fling = catalog.actions.find((action) => action.id === 'fling')
@@ -354,4 +355,11 @@ describe('D&D 5e simulation monster Multiattack occurrence targets', () => {
       expect(flings.some((step) => step.text.includes(hero.name))).toBe(true)
     }
   })
+})
+
+afterEach(() => setDnd5eRoomMonsterCatalog([]))
+vi.mock('./monsterMultiattackConstraints', async importOriginal => {
+  const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
+  const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
+  return monsterMechanicConstraints(original)
 })

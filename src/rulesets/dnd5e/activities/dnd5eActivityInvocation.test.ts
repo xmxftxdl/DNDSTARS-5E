@@ -129,4 +129,22 @@ describe('unified Activity invocation', () => {
       confirmedBy: 'actor',
     })).toMatchObject({ ok: false, reason: 'trigger-mismatch' })
   })
+
+  it('trusts attack proficiency only when it is present in the Host event envelope', () => {
+    const activity: Dnd5eActivityDefinitionV1 = {
+      ...followUp,
+      requirements: [{ kind: 'attack-proficiency', proficient: true }],
+    }
+    if (attackContext.source.kind !== 'attack') throw new Error('test attack context is invalid')
+    expect(matchDnd5eActivityInvocationV1({
+      activity, actorId: 'fighter', targetIds: ['goblin'],
+      triggerContext: { ...attackContext, source: { ...attackContext.source, proficient: false } },
+      confirmedBy: 'actor',
+    })).toMatchObject({ ok: false, reason: 'trigger-mismatch' })
+    expect(matchDnd5eActivityInvocationV1({
+      activity, actorId: 'fighter', targetIds: ['goblin'],
+      triggerContext: { ...attackContext, source: { ...attackContext.source, proficient: true } },
+      confirmedBy: 'actor',
+    })).toMatchObject({ ok: true })
+  })
 })

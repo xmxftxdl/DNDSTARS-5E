@@ -1,0 +1,152 @@
+{
+  "id": "srd-5.1:black-bear",
+  "slug": "black-bear",
+  "name": "黑熊",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws",
+      "name": "双爪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 44,
+      "slug": "black-bear",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:26:44.260Z",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  getByRole('status')\nExpected: \u001b[32m\"场景已就绪\"\u001b[39m\nReceived: \u001b[31m\"正在准备场景\"\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('status')\u001b[22m\n\u001b[2m    14 × locator resolved to <p id=\"status\" role=\"status\">正在准备场景</p>\u001b[22m\n\u001b[2m       - unexpected value \"正在准备场景\"\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:26:50.441Z",
+      "evidenceFile": "ui-cases/monsters/044-black-bear.json"
+    },
+    {
+      "index": 231,
+      "slug": "black-bear",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:57:15.317Z",
+      "name": "黑熊",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/2",
+      "total": 334,
+      "mapId": "verify-ui-black-bear-bite-1788569835376",
+      "combatId": "verify-ui-black-bear-bite-1788569835376:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "黑熊 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+3=4 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:57 PM\n攻击\n\n黑熊 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+3=4 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 1；最终采用 1；调整值 +3。\n结果 · 4 vs AC 10：未命中。\n黑熊｜消耗动作",
+      "playerLog": "黑熊 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+3=4 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:57:35.877Z",
+      "evidenceFile": "ui-cases/monsters/231-black-bear.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -923,10 +923,10 @@ describe('SRD 5.1 monster catalog', () => {
       expect(action?.attack?.onHitEffects).toHaveLength(1)
     }
 
-    for (const slug of ['purple-worm', 'wyvern'] as const) {
-      expect(getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
-        .find((action) => action.id === 'multiattack')?.automation).toBe('headless')
-    }
+    expect(getDnd5eSrdMonster('srd-5.1:purple-worm')?.actions
+      .find((action) => action.id === 'multiattack')?.automation).toBe('headless')
+    expect(getDnd5eSrdMonster('srd-5.1:wyvern')?.actions
+      .find((action) => action.id === 'multiattack')?.automation).toBe('headless')
   })
 
   it('structures the first source-linked grapple and restrained catalog actions', () => {
@@ -1737,7 +1737,7 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
     expect(result).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
   })
 
-  it('runs generated plain attacks and the structured aboleth tentacle rider', () => {
+  it('runs generated plain attacks and the aboleth Tentacle disease transaction', () => {
     const acolyte = startDnd5eHeadlessCombat('generated', [
       combatant('monster', 20, { statBlockId: 'srd-5.1:acolyte' }),
       combatant('hero', 10, { currentHp: 20, maxHp: 20 }),
@@ -1755,25 +1755,26 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
     aboleth.distanceFeetByCombatantPair = { ['monster\u0000hero']: 10 }
     const tentacle = resolveDnd5eHeadlessAction(aboleth, {
       type: 'monster-action', actorId: 'monster', actionId: 'tentacle',
-      rolls: [{ targetId: 'hero', d20: 12, damageRolls: [[3, 3]] }],
+      rolls: [{
+        targetId: 'hero', d20: 12, damageRolls: [[3, 3]],
+        onHitEffectRolls: [{ effectId: 'tentacle-disease', d20: 2 }],
+      }],
     })
     expect(tentacle.ok, tentacle.ok ? undefined : tentacle.reason).toBe(true)
-    expect(tentacle.state.combatants.hero.classState.monsterOnHitSavePending).toMatchObject({
-      sourceId: 'monster',
-      actionId: 'tentacle',
-      ability: 'con',
-      dc: 14,
-      condition: 'disease',
-    })
-    const disease = resolveDnd5eHeadlessAction(tentacle.state, {
-      type: 'monster-on-hit-save',
-      actorId: 'hero',
-      sourceId: 'monster',
-      actionId: 'tentacle',
-      d20: 1,
-    })
-    expect(disease.ok, disease.ok ? undefined : disease.reason).toBe(true)
-    expect(disease.state.combatants.hero.conditions).toContain('disease')
+    if (!tentacle.ok) return
+    expect(tentacle.state.combatants.hero.currentHp).toBe(29)
+    expect(tentacle.state.combatants.hero.conditions).toContain('disease')
+    expect(getDnd5eSrdMonster('srd-5.1:aboleth')?.actions
+      .find((action) => action.id === 'tentacle')).toMatchObject({
+        automation: 'headless',
+        attack: {
+          damage: [{ type: 'bludgeoning' }],
+          onHitEffects: [expect.objectContaining({
+            id: 'tentacle-disease',
+            kind: 'persistent-effect',
+          })],
+        },
+      })
   })
 
   it('resolves the aboleth mucous cloud only after a nearby melee hit underwater', () => {

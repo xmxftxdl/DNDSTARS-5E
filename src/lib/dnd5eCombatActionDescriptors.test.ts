@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { dnd5eSpellActionIcon } from './dnd5eActionIcons'
 import {
   buildDnd5eCombatActionDescriptors,
+  groupDnd5eCombatHotbarDescriptors,
   moveDnd5eCombatHotbarAction,
   reconcileDnd5eCombatHotbarPreference,
   resolveDnd5eCombatSpellSlotSelection,
@@ -80,12 +81,82 @@ describe('CombatActionDescriptorV1', () => {
     })
   })
 
+  it('玩家战斗法术栏固定按基础环位从低到高排列', () => {
+    const spells = [
+      { id: 'fireball', label: '火球术', level: 3 },
+      { id: 'mage-hand', label: '法师之手', level: 0 },
+      { id: 'shield', label: '护盾术', level: 1 },
+      { id: 'magic-missile', label: '魔法飞弹', level: 1 },
+      { id: 'misty-step', label: '迷踪步', level: 2 },
+    ].map((spell) => ({
+      ...spell,
+      description: `${spell.label}说明。`,
+      icon: dnd5eSpellActionIcon({ id: spell.id, name: spell.label }),
+      castingTime: 'action' as const,
+      targeting: 'creature' as const,
+      castingClassId: 'wizard',
+      defaultSlotLevel: spell.level,
+      availableSlotLevels: [spell.level],
+      available: true,
+    }))
+    const grouped = groupDnd5eCombatHotbarDescriptors(build({ spells }))
+
+    expect(grouped.spells.map((entry) => [entry.resource?.current, entry.label])).toEqual([
+      [0, '法师之手'],
+      [1, '护盾术'],
+      [1, '魔法飞弹'],
+      [2, '迷踪步'],
+      [3, '火球术'],
+    ])
+  })
+
+  it('持续法术后续动作复用已存在效果，不再次要求法术位', () => {
+    const sustained = build({
+      features: [{
+        id: 'sustained-spell:produce-flame:produce-flame',
+        label: '投掷燃火术',
+        description: '动作 · 使用现有燃火术效果，不消耗法术位',
+        icon: dnd5eSpellActionIcon({ id: 'produce-flame', name: '燃火术' }),
+        economy: 'action',
+        targeting: 'creature',
+        command: {
+          kind: 'cast-spell',
+          spellId: 'produce-flame',
+          castingClassId: 'druid',
+          slotLevel: 0,
+          sustainedEffectAttack: 'produce-flame',
+        },
+      }],
+    }).find((entry) => entry.id === 'feature:sustained-spell:produce-flame:produce-flame')!
+
+    expect(sustained.availableSlotLevels).toBeUndefined()
+    expect(resolveDnd5eCombatSpellSlotSelection(sustained)).toEqual({
+      ok: true,
+      slotLevel: 0,
+      explicitlyConfigured: false,
+    })
+  })
+
   it('根据行动经济和等待状态给出不可用原因', () => {
     const noAction = build({ actionRemaining: 0 })
     expect(noAction.find((entry) => entry.id === 'system:weapon-attack')).toMatchObject({ enabled: false, disabledReason: '本回合动作已用尽。' })
     const pending = build({ pending: true })
     expect(pending.every((entry) => !entry.enabled)).toBe(true)
     expect(pending[0].disabledReason).toContain('等待 DM')
+  })
+
+  it('普通动作耗尽后只开放加速术允许的受限额外动作', () => {
+    const descriptors = build({
+      actionRemaining: 0,
+      restrictedExtraActionKinds: ['weapon-attack', 'dash', 'disengage', 'hide'],
+    })
+    for (const id of ['system:weapon-attack', 'system:dash', 'system:disengage', 'system:hide']) {
+      expect(descriptors.find((entry) => entry.id === id)).toMatchObject({ enabled: true })
+    }
+    expect(descriptors.find((entry) => entry.id === 'system:dodge')).toMatchObject({
+      enabled: false,
+      disabledReason: '本回合动作已用尽。',
+    })
   })
 
   it('keeps multiple item spell actions distinct while sharing the same instance resource', () => {

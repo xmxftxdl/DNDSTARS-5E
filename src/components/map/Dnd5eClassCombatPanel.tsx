@@ -3,11 +3,17 @@ import { Clock3, Crosshair, Footprints, PackageOpen, RotateCcw, Shield, Sparkles
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
 import type { Dnd5eClassFeaturePayload, Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import {
+  dnd5eActiveActionRestriction,
+  dnd5eAvailableRestrictedExtraActionKinds,
   dnd5eArmorClass,
-  dnd5eAttacksPerAttackAction,
+  dnd5eEffectiveAttacksPerAttackAction,
   dnd5eClassDefinitionForCharacter,
   dnd5eEscapableGrapples,
   dnd5eKnownWildShapeForms,
+  dnd5ePluginCreatureFormBypassesKnownForCharacter,
+  dnd5ePluginCreatureFormEligibleForCharacter,
+  dnd5ePluginCreatureFormRuleForCharacter,
+  dnd5ePluginCreatureFormControlForCharacter,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eWalkingSpeed,
   dnd5eWeaponAttackProfile,
@@ -20,6 +26,7 @@ import {
 import type { Character } from '../../types/character'
 import Dnd5eBasicActionsPanel from './Dnd5eBasicActionsPanel'
 import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
+import { dnd5eCreatureFormEndControl } from './dnd5eCreatureFormEndControl'
 
 export interface Dnd5eFeatureTargetOption {
   tokenId: string
@@ -40,13 +47,14 @@ export interface Dnd5eFeatureTargetOption {
   }[]
 }
 
-export default function Dnd5eClassCombatPanel({ character: storedCharacter, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
+export default function Dnd5eClassCombatPanel({ character: storedCharacter, canAct, targeting, pending, turnEconomy, featureTargets, canDismissWardingBond, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
   featureTargets: readonly Dnd5eFeatureTargetOption[]
+  canDismissWardingBond?: boolean
   onAttack: (options?: Dnd5eWeaponAttackOptions) => void
   onDisengage: () => void
   onDodge: () => void
@@ -60,17 +68,28 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
   const character = selectedDefinition
     ? { ...storedCharacter, charClass: selectedDefinition.name, level: classLevels[selectedDefinition.id] ?? storedCharacter.level }
     : storedCharacter
+  const actionRestriction = dnd5eActiveActionRestriction(character.dnd5eCombatState?.activeEffects)
+  const ordinaryActionsRestricted = actionRestriction?.allowedBasicActions != null
+  const ordinaryActionCanAct = canAct && !ordinaryActionsRestricted
+  const restrictedExtraActionKinds = dnd5eAvailableRestrictedExtraActionKinds({
+    effects: character.dnd5eCombatState?.activeEffects,
+    usesByEffect: character.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
+    turnKey: turnEconomy.turnKey,
+  })
+  const restrictedWeaponAttackAvailable = restrictedExtraActionKinds.includes('weapon-attack')
+  const restrictedDisengageAvailable = restrictedExtraActionKinds.includes('disengage')
   const definition = dnd5eClassDefinitionForCharacter(character)
   const profile = dnd5eWeaponAttackProfile(storedCharacter)
   const offHandProfile = dnd5eOffHandWeaponAttackProfile(storedCharacter)
   const activeWildShape = character.dnd5eCombatState?.wildShapeFormId
     ? getDnd5eSrdMonster(character.dnd5eCombatState.wildShapeFormId)
     : undefined
-  const wildShapeAttackActions = activeWildShape?.actions.filter((action) => {
-    if (action.kind === 'multiattack') return true
-    if (action.kind !== 'weapon-attack') return false
-    return !activeWildShape.actions.some((candidate) => candidate.kind === 'multiattack' && candidate.sequence?.includes(action.id))
-  }) ?? []
+  // A creature can always choose one of its individual attacks instead of its
+  // Multiattack action. Keep every inherited attack visible; hiding attacks
+  // referenced by Multiattack made a transformed character appear to have no
+  // usable attack modes when the multiattack itself required adjudication.
+  const wildShapeAttackActions = activeWildShape?.actions.filter((action) =>
+    action.kind === 'multiattack' || action.kind === 'weapon-attack') ?? []
   const [divineSmiteSlotLevel, setDivineSmiteSlotLevel] = useState(0)
   const [recklessAttack, setRecklessAttack] = useState(false)
   const [stunningStrike, setStunningStrike] = useState(false)
@@ -109,10 +128,12 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
   const hunterMultiattackAvailable = !!profile && turnEconomy.action.current > 0 &&
     ((hunterMultiattack === 'volley' && profile.mode === 'ranged') ||
       (hunterMultiattack === 'whirlwind-attack' && profile.mode === 'melee'))
-  const attacksPerAction = dnd5eAttacksPerAttackAction(storedCharacter)
+  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(storedCharacter)
   const attackLimit = attacksPerAction * Math.max(1, turnEconomy.action.max)
   const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
-  const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (turnEconomy.action.current > 0 || canContinueAttackAction)
+  const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (
+    turnEconomy.action.current > 0 || canContinueAttackAction || restrictedWeaponAttackAvailable
+  )
   const offHandAttackAvailable = !!offHandProfile && turnEconomy.attacksUsed > 0 && turnEconomy.bonusAction.current > 0
   const resources = classResourceDefinitions(storedCharacter)
     .filter((resource) => !resource.key.startsWith('dnd5e-spell-slot-') && resource.key !== 'dnd5e-pact-slot')
@@ -134,12 +155,13 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><Clock3 className="h-4 w-4 text-arcane-300" />本回合可用行动</div>
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${canAct ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-500'}`}>{canAct ? '你的回合' : '回合外'}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
           <EconomyCard icon={Sword} label="主动动作" pool={turnEconomy.action} detail="攻击、施法等" />
           <EconomyCard icon={Sparkles} label="附赠动作" pool={turnEconomy.bonusAction} detail="职业特性等" />
           <EconomyCard icon={RotateCcw} label="反应" pool={turnEconomy.reaction} detail="借机攻击等" />
           <EconomyCard icon={Footprints} label="移动" pool={turnEconomy.movement} detail="独立于动作" suffix="尺" />
           <EconomyCard icon={PackageOpen} label="物件交互" pool={turnEconomy.objectInteraction ?? { current: 1, max: 1 }} detail="每回合一次免费" />
+          {restrictedExtraActionKinds.length > 0 ? <EconomyCard icon={Sparkles} label="加速动作" pool={{ current: 1, max: 1 }} detail="攻击、疾走、撤离或躲藏" /> : null}
         </div>
       </section>
 
@@ -157,7 +179,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
             <Stat label="武器" value={profile.weaponName} />
             <Stat label="命中" value={`${profile.attackModifier >= 0 ? '+' : ''}${profile.attackModifier}`} />
             <Stat label="伤害" value={`${profile.damage.count}d${profile.damage.sides}${profile.damage.bonus >= 0 ? '+' : ''}${profile.damage.bonus}`} />
-            <Stat label="攻击次数" value={`${dnd5eAttacksPerAttackAction(storedCharacter)} 次／动作`} />
+            <Stat label="攻击次数" value={`${dnd5eEffectiveAttacksPerAttackAction(storedCharacter)} 次／动作`} />
           </div>
         ) : <p className="mt-4 text-sm text-rose-300">没有装备可用的 5e 武器。</p>}
         {definition?.id === 'paladin' && character.level >= 2 && profile?.mode === 'melee' ? <label className="mt-4 block text-xs text-slate-400">
@@ -207,14 +229,14 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
           </select>
           <span className="mt-1 block text-[11px] text-slate-500">仅对已选宿敌生效，每回合一次；Headless 会验证目标类型。</span>
         </label> : null}
-        {!activeWildShape ? <button type="button" onClick={() => onAttack(hasRequestedAttackOptions ? requestedAttackOptions : undefined)} disabled={!canAct || !profile || pending || !weaponAttackAvailable} className={`${(definition?.id === 'paladin' && character.level >= 2 && profile?.mode === 'melee') || (definition?.id === 'barbarian' && character.level >= 2 && profile?.mode === 'melee' && profile.attackAbility === 'str') || (definition?.id === 'monk' && character.level >= 5 && profile?.mode === 'melee') ? 'mt-2' : 'mt-4'} flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold ${targeting ? 'bg-amber-500 text-void-950' : 'bg-arcane-500/25 text-arcane-100 hover:bg-arcane-500/40'} disabled:cursor-not-allowed disabled:opacity-40`}>
+        {!activeWildShape ? <button type="button" onClick={() => onAttack(hasRequestedAttackOptions ? requestedAttackOptions : undefined)} disabled={!ordinaryActionCanAct || !profile || pending || !weaponAttackAvailable} className={`${(definition?.id === 'paladin' && character.level >= 2 && profile?.mode === 'melee') || (definition?.id === 'barbarian' && character.level >= 2 && profile?.mode === 'melee' && profile.attackAbility === 'str') || (definition?.id === 'monk' && character.level >= 5 && profile?.mode === 'melee') ? 'mt-2' : 'mt-4'} flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold ${targeting ? 'bg-amber-500 text-void-950' : 'bg-arcane-500/25 text-arcane-100 hover:bg-arcane-500/40'} disabled:cursor-not-allowed disabled:opacity-40`}>
           <Crosshair className="h-4 w-4" />{pending ? '等待 DM 结算…' : targeting ? '请点击地图上的目标' : '选择目标并攻击'}
         </button> : <div className="mt-4 grid gap-2">
           {wildShapeAttackActions.map((shapeAction) => <button
             key={shapeAction.id}
             type="button"
             onClick={() => onAttack({ wildShapeActionIndex: activeWildShape.actions.indexOf(shapeAction) })}
-            disabled={!canAct || pending || turnEconomy.action.current < 1}
+            disabled={!ordinaryActionCanAct || pending || turnEconomy.action.current < 1}
             className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold ${targeting ? 'bg-amber-500 text-void-950' : 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/35'} disabled:cursor-not-allowed disabled:opacity-40`}
           >
             <Crosshair className="h-4 w-4" />{targeting ? '请点击地图上的目标' : `${activeWildShape.name}：${shapeAction.name}`}
@@ -224,7 +246,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
         {!activeWildShape && offHandProfile ? <button
           type="button"
           onClick={() => onAttack({ ...requestedAttackOptions, offHandAttack: true })}
-          disabled={!canAct || pending || !offHandAttackAvailable}
+          disabled={!ordinaryActionCanAct || pending || !offHandAttackAvailable}
           className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sword className="h-4 w-4" />副手附赠攻击（{offHandProfile.damage.count}d{offHandProfile.damage.sides}{offHandProfile.damage.bonus >= 0 ? '+' : ''}{offHandProfile.damage.bonus}）
@@ -232,7 +254,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
         {!activeWildShape && hunterMultiattack ? <button
           type="button"
           onClick={() => onAttack({ hunterMultiattack })}
-          disabled={!canAct || pending || !hunterMultiattackAvailable}
+          disabled={!ordinaryActionCanAct || pending || !hunterMultiattackAvailable}
           className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Crosshair className="h-4 w-4" />
@@ -243,7 +265,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
         {frenzyAttackAvailable ? <button
           type="button"
           onClick={() => onAttack({ ...requestedAttackOptions, frenzyAttack: true })}
-          disabled={!canAct || pending || turnEconomy.bonusAction.current < 1}
+          disabled={!ordinaryActionCanAct || pending || turnEconomy.bonusAction.current < 1}
           className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sword className="h-4 w-4" />狂乱附赠攻击
@@ -251,15 +273,15 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
         {hordeBreakerAttackAvailable ? <button
           type="button"
           onClick={() => onAttack({ ...requestedAttackOptions, hordeBreakerAttack: true })}
-          disabled={!canAct || pending}
+          disabled={!ordinaryActionCanAct || pending}
           className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sword className="h-4 w-4" />灭群者追加攻击（请选择原目标 5 尺内另一生物）
         </button> : null}
-        <button type="button" onClick={onDisengage} disabled={!canAct || pending || turnEconomy.action.current < 1} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+        <button type="button" onClick={onDisengage} disabled={!ordinaryActionCanAct || pending || (turnEconomy.action.current < 1 && !restrictedDisengageAvailable)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
           <Footprints className="h-4 w-4" />撤离（主动动作）
         </button>
-        <button type="button" onClick={onDodge} disabled={!canAct || pending || turnEconomy.action.current < 1} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+        <button type="button" onClick={onDodge} disabled={!ordinaryActionCanAct || pending || turnEconomy.action.current < 1} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40">
           <Shield className="h-4 w-4" />闪避（主动动作）
         </button>
       </section>
@@ -276,7 +298,7 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
 
       <ClassFeatureControls
         character={character}
-        canAct={canAct}
+        canAct={ordinaryActionCanAct}
         pending={pending}
         stunningStrike={stunningStrike}
         turnEconomy={turnEconomy}
@@ -285,13 +307,23 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
       />
 
       <Dnd5eBasicActionsPanel
-        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction)}
+        canAct={canAct}
+        actionAvailable={turnEconomy.action.current > 0 || canContinueAttackAction}
+        bonusActionAvailable={turnEconomy.bonusAction.current > 0}
         pending={pending}
         targets={featureTargets}
+        basicActionGrants={Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
+          .filter((grant) => grant.appliedTurnKey === turnEconomy.turnKey)}
         grappleEscapes={dnd5eEscapableGrapples(character.dnd5eCombatState?.activeEffects).map((grapple) => ({
           grapplerTokenId: grapple.grapplerId,
           dc: grapple.dc,
         }))}
+        dismissibleEffects={(character.dnd5eCombatState?.activeEffects ?? []).flatMap((effect) =>
+          effect.removal?.action?.economy === 'action' && effect.removal.action.maxDistanceFeet >= 0
+            ? [{ effectId: effect.id, label: effect.label, actionLabel: effect.removal.action.label }]
+            : [])}
+        canDismissWardingBond={canDismissWardingBond}
+        allowedBasicActions={actionRestriction?.allowedBasicActions}
         onAction={onBasicAction}
       />
 
@@ -327,6 +359,7 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
   const [draconicPresenceMode, setDraconicPresenceMode] = useState<'awe' | 'fear'>('fear')
   const [enterFrenzy, setEnterFrenzy] = useState(false)
   const [selectedWildShapeFormId, setSelectedWildShapeFormId] = useState('')
+  const [creatureFormHealingSlotLevel, setCreatureFormHealingSlotLevel] = useState(1)
   const [primevalAwarenessSlotLevel, setPrimevalAwarenessSlotLevel] = useState<0 | 1 | 2 | 3 | 4 | 5>(0)
   const [firstOpenHandTechnique, setFirstOpenHandTechnique] = useState<'none' | 'prone' | 'push' | 'no-reactions'>('none')
   const [secondOpenHandTechnique, setSecondOpenHandTechnique] = useState<'none' | 'prone' | 'push' | 'no-reactions'>('none')
@@ -348,6 +381,19 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
     : definition
       ? character.dnd5eClassChoices?.classes?.[definition.id]?.subclass
       : undefined
+
+  const creatureFormEndControl = dnd5eCreatureFormEndControl(character)
+  if (creatureFormEndControl && creatureFormEndControl.mode !== 'wild-shape') {
+    return <section className="rounded-xl border border-arcane-400/15 bg-arcane-500/[0.04] p-4 md:col-span-2">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-arcane-100"><Sparkles className="h-4 w-4" />法术形态控制</div>
+      <FeatureButton
+        label={creatureFormEndControl.label}
+        detail={creatureFormEndControl.detail}
+        disabled={pending || !creatureFormEndControl.available}
+        onClick={() => onFeature({ feature: 'druid-end-wild-shape' })}
+      />
+    </section>
+  }
 
   if (!definition || !['barbarian', 'bard', 'cleric', 'druid', 'monk', 'paladin', 'ranger', 'rogue', 'sorcerer', 'warlock'].includes(definition.id)) return null
 
@@ -561,11 +607,26 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
     </div>
   } else if (definition.id === 'druid') {
     const uses = resource('dnd5e-wild-shape')
-    const knownForms = dnd5eKnownWildShapeForms(character)
+    const knownForms = dnd5eKnownWildShapeForms(
+      character,
+      undefined,
+      (form) => dnd5ePluginCreatureFormEligibleForCharacter(character, form),
+      (form) => dnd5ePluginCreatureFormBypassesKnownForCharacter(character, form),
+    )
     const selectedForm = knownForms.find((form) => form.id === selectedWildShapeFormId) ?? knownForms[0]
+    const selectedFormRule = selectedForm ? dnd5ePluginCreatureFormRuleForCharacter(character, selectedForm) : undefined
+    const formControl = dnd5ePluginCreatureFormControlForCharacter(character)
+    const selectedFormEconomy = selectedFormRule?.activationEconomy ?? formControl?.activationEconomy ?? 'action'
+    const selectedFormResourceCost = selectedFormRule?.resourceCost ?? 1
     const activeForm = character.dnd5eCombatState?.wildShapeFormId
       ? getDnd5eSrdMonster(character.dnd5eCombatState.wildShapeFormId)
       : undefined
+    const inFormHealing = formControl?.inFormHealing
+    const healingSlotLevels = Array.from({ length: inFormHealing?.maximumResourceLevel ?? 9 }, (_, index) => index + 1)
+      .filter((level) => (getClassResource(character, `dnd5e-spell-slot-${level}`)?.current ?? 0) > 0)
+    const selectedHealingSlotLevel = healingSlotLevels.includes(creatureFormHealingSlotLevel)
+      ? creatureFormHealingSlotLevel
+      : healingSlotLevels[0]
     controls = activeForm ? <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
       <div className="rounded-lg border border-emerald-400/15 bg-emerald-500/[0.05] p-3 text-xs text-slate-300">
         <strong className="text-emerald-200">当前形态：{activeForm.name}</strong>
@@ -580,6 +641,29 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
         disabled={disabled || !bonusAvailable}
         onClick={() => onFeature({ feature: 'druid-end-wild-shape' })}
       />
+      {inFormHealing ? <div className="grid gap-2 rounded-lg border border-cyan-400/15 bg-cyan-500/[0.04] p-3 sm:col-span-2 sm:grid-cols-[1fr_auto]">
+        <label className="block text-[11px] text-slate-500">消耗法术位治疗形态
+          <select
+            value={selectedHealingSlotLevel ?? ''}
+            onChange={(event) => setCreatureFormHealingSlotLevel(Number(event.target.value))}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-200"
+          >
+            {healingSlotLevels.length === 0 ? <option value="">没有可用法术位</option> : null}
+            {healingSlotLevels.map((level) => <option key={level} value={level}>{level} 环 · {inFormHealing.dicePerResourceLevel.count * level}d{inFormHealing.dicePerResourceLevel.sides}</option>)}
+          </select>
+        </label>
+        <FeatureButton
+          compact
+          label="恢复形态生命"
+          detail={`${inFormHealing.economy === 'bonusAction' ? '附赠动作' : '动作'} · Host 掷治疗骰`}
+          disabled={disabled || !selectedHealingSlotLevel ||
+            (inFormHealing.economy === 'bonusAction' ? !bonusAvailable : !actionAvailable) ||
+            character.currentHp >= character.maxHp}
+          onClick={() => selectedHealingSlotLevel && onFeature({
+            feature: 'druid-creature-form-heal', slotLevel: selectedHealingSlotLevel,
+          })}
+        />
+      </div> : null}
     </div> : <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
       <label className="block text-[11px] text-slate-500">已知野兽形态
         <select
@@ -594,8 +678,8 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
       <FeatureButton
         compact
         label="荒野变形"
-        detail={character.level >= 20 ? '动作；大德鲁伊：不限次数' : `动作；剩余 ${uses?.current ?? 0}/${uses?.max ?? 2} 次`}
-        disabled={disabled || !actionAvailable || character.level < 2 || !selectedForm || (character.level < 20 && (uses?.current ?? 0) < 1)}
+        detail={`${selectedFormEconomy === 'bonusAction' ? '附赠动作' : '动作'}；${character.level >= 20 ? '大德鲁伊：不限次数' : `消耗 ${selectedFormResourceCost} 次，剩余 ${uses?.current ?? 0}/${uses?.max ?? 2} 次`}`}
+        disabled={disabled || (selectedFormEconomy === 'bonusAction' ? !bonusAvailable : !actionAvailable) || character.level < 2 || !selectedForm || (character.level < 20 && (uses?.current ?? 0) < selectedFormResourceCost)}
         onClick={() => selectedForm && onFeature({ feature: 'druid-wild-shape', formId: selectedForm.id })}
       />
     </div>

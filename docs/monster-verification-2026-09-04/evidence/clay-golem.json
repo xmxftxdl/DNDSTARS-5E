@@ -1,0 +1,267 @@
+{
+  "id": "srd-5.1:clay-golem",
+  "slug": "clay-golem",
+  "name": "黏土魔像",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "slam",
+      "name": "猛击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].damageBasis.kind",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].recovery",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "haste",
+      "name": "加速",
+      "automation": "headless",
+      "rule": "self-combat-buff",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.duration",
+        "rule.magical",
+        "rule.modifiers.armorClassBonus",
+        "rule.modifiers.savingThrowAdvantages[]",
+        "rule.bonusActionWeaponActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "bonusActions",
+      "sectionLabel": "附赠动作",
+      "id": "haste-slam-bonus-action",
+      "name": "猛击 (加速)",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "referencedActionId",
+        "requiredActiveEffectDefinitionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 58,
+      "slug": "clay-golem",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:13:29.992Z",
+      "name": "黏土魔像",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "9",
+      "total": 334,
+      "mapId": "verify-ui-clay-golem-slam-1788567210037",
+      "combatId": "verify-ui-clay-golem-slam-1788567210037:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "黏土魔像 使用猛击攻击 验证目标：猛击 → 验证目标 6+8=14 命中；共造成 19 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:13 PM\n结算\n\n黏土魔像 使用猛击攻击 验证目标：猛击 → 验证目标 6+8=14 命中；共造成 19 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：猛击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 6；最终采用 6；调整值 +8。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 猛击（基础伤害·钝击）｜2d10 骰面：7 + 7 = 14｜固定加值 +5｜小计 19\n黏土魔像｜消耗动作\n验证目标｜体质豁免 d20 3 +10 = 13 vs DC 15｜失败\n验证目标｜受到 19 点伤害｜HP 320 → 301",
+      "playerLog": "黏土魔像 使用猛击攻击 验证目标：猛击 → 验证目标 6+8=14 命中；共造成 19 点伤害。",
+      "afterHp": 301,
+      "afterMaximumHp": 301,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:13:56.589Z",
+      "evidenceFile": "ui-cases/monsters/058-clay-golem.json"
+    },
+    {
+      "index": 63,
+      "slug": "clay-golem",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:38:53.920Z",
+      "name": "黏土魔像",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-clay-golem-slam-1788557933963",
+      "combatId": "verify-ui-clay-golem-slam-1788557933963:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "黏土魔像 使用猛击攻击 验证目标：猛击 → 验证目标 4+8=12 命中；共造成 18 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:39 PM\n结算\n\n黏土魔像 使用猛击攻击 验证目标：猛击 → 验证目标 4+8=12 命中；共造成 18 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：猛击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 4；最终采用 4；调整值 +8。\n结果 · 12 vs AC 10：命中。\n伤害骰 · 猛击（基础伤害·钝击）｜2d10 骰面：7 + 6 = 13｜固定加值 +5｜小计 18\n黏土魔像｜消耗动作\n验证目标｜体质豁免 d20 17 +10 = 27 vs DC 15｜成功\n验证目标｜受到 18 点伤害｜HP 320 → 302",
+      "playerLog": "黏土魔像 使用猛击攻击 验证目标：猛击 → 验证目标 4+8=12 命中；共造成 18 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "failed",
+      "error": "Error: apiRequestContext.get: read ECONNRESET\nCall log:\n\u001b[2m  - → GET http://127.0.0.1:6973/api/state/maps\u001b[22m\n\u001b[2m    - user-agent: Playwright/1.61.1 (x64; windows 10.0) node/24.16\u001b[22m\n\u001b[2m    - accept: */*\u001b[22m\n\u001b[2m    - accept-encoding: gzip,deflate,br\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:39:56.834Z",
+      "evidenceFile": "ui-cases/monsters/063-clay-golem.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "强酸吸收",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "狂暴失控",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "不变形态",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 14,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

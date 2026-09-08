@@ -58,6 +58,162 @@ export interface AccountCampaignRoomSummary {
   status: 'online' | 'grace' | 'offline' | 'closed'
 }
 
+export interface AccountCampaignPrepChecklistItemV1 {
+  id: string
+  text: string
+  completed: boolean
+}
+
+export type AccountStoryEventStatusV1 = 'planned' | 'active' | 'completed' | 'skipped' | 'not-triggered'
+export type AccountStoryEventSourceV1 = 'analysis-timeline' | 'analysis-scene' | 'dm' | 'session-log'
+
+export interface AccountStoryEventGraphPositionV1 {
+  x: number
+  y: number
+}
+
+export type AccountStoryEventLinkConditionV1 =
+  | { kind: 'always' }
+  | { kind: 'person-state'; personId: string; state: 'dead' | 'alive' }
+  | { kind: 'event-status'; eventId: string; status: 'completed' | 'skipped' }
+  | { kind: 'manual'; expression: string }
+
+export interface AccountStoryEventLinkV1 {
+  id: string
+  fromEventId: string
+  toEventId: string
+  label: string
+  condition?: AccountStoryEventLinkConditionV1
+  /** DM runtime ruling for a branch. This overrides its inferred condition. */
+  resolution?: 'pending' | 'triggered' | 'not-triggered'
+  /** Optional DM-adjusted label position in unscaled story-graph coordinates. */
+  labelPosition?: AccountStoryEventGraphPositionV1
+}
+
+export interface AccountStoryTimelineMarkerV1 {
+  id: string
+  /** Vertical position in unscaled story-graph coordinates. */
+  y: number
+  label: string
+  gameTimeWorldMinute?: number
+  /** Analysis markers are synchronized by sourceKey; legacy/unspecified markers remain manual. */
+  source?: 'analysis' | 'manual'
+  sourceKey?: string
+  sourceEventIds?: string[]
+  relativeOffsetMinutes?: number
+  timelineKind?: 'history' | 'current' | 'deadline' | 'conditional'
+  /** Analysis refreshes preserve only marker fields explicitly adjusted by the DM. */
+  dmEditedFields?: Array<'y' | 'label' | 'gameTimeWorldMinute'>
+}
+
+export interface AccountStoryEventV1 {
+  id: string
+  /** Decision nodes are persisted, editable choice boxes rather than inferred decorations. */
+  nodeKind?: 'event' | 'decision'
+  title: string
+  summary: string
+  details: string
+  timeLabel: string
+  gameTimeWorldMinute?: number
+  status: AccountStoryEventStatusV1
+  /** Identifies a reversible status derived from branch reachability rather than a DM ruling. */
+  statusAutomation?: 'branch'
+  source: AccountStoryEventSourceV1
+  sourceEventIds: string[]
+  sceneIds: string[]
+  personIds: string[]
+  clueIds: string[]
+  tags: string[]
+  /** SOL-derived chronology metadata; DM graph placement remains independent. */
+  timelineOrder?: number
+  timelineKind?: 'history' | 'current' | 'deadline' | 'conditional'
+  /** Only fields explicitly edited in the story workspace survive a later AI refresh. */
+  dmEditedFields?: Array<'title' | 'summary' | 'details' | 'timeLabel' | 'personIds' | 'clueIds' | 'tags'>
+  graphPosition?: AccountStoryEventGraphPositionV1
+}
+
+export interface AccountCampaignPersonStateV1 {
+  personId: string
+  status: 'unknown' | 'active' | 'changed' | 'departed' | 'dead'
+  note: string
+  updatedBySessionId: string
+}
+
+export interface AccountCampaignClueStateV1 {
+  clueId: string
+  status: 'hidden' | 'discovered' | 'resolved' | 'lost'
+  note: string
+  updatedBySessionId: string
+}
+
+export interface AccountCampaignSessionReviewV1 {
+  summary: string
+  highlights: string[]
+  completedEventIds: string[]
+  personUpdates: Array<AccountCampaignPersonStateV1 & { accepted: boolean }>
+  clueUpdates: Array<AccountCampaignClueStateV1 & { accepted: boolean }>
+  nextChecklist: Array<{ id: string; text: string; accepted: boolean }>
+}
+
+export interface AccountCampaignActiveSessionV1 {
+  id: string
+  title: string
+  startedAt: number
+  endedAt?: number
+  baselineJournalEntryIds: string[]
+  journalEntryIds: string[]
+  review?: AccountCampaignSessionReviewV1
+}
+
+export interface AccountCampaignSessionRecapV1 {
+  id: string
+  title: string
+  startedAt: number
+  endedAt: number
+  summary: string
+  highlights: string[]
+  journalEntryIds: string[]
+  completedEventIds: string[]
+}
+
+export interface AccountCampaignStoryWorkspaceV1 {
+  schemaVersion: 1
+  mode: 'prep' | 'running' | 'review'
+  events: AccountStoryEventV1[]
+  graphLinks?: AccountStoryEventLinkV1[]
+  graphInitialized?: boolean
+  /** Distinguishes an intentionally edited/empty DM graph from an uninitialized projection. */
+  graphEditedByDm?: boolean
+  /** Only true when the DM explicitly used the clear-all-arrows command. */
+  graphLinksClearedByDm?: boolean
+  graphLayoutVersion?: 2 | 3 | 4
+  timelineMarkers?: AccountStoryTimelineMarkerV1[]
+  dismissedTimelineMarkerSourceKeys?: string[]
+  /** Absolute campaign minute used to bind relative clues such as “第一小时”. */
+  storyStartWorldMinute?: number
+  personStates: AccountCampaignPersonStateV1[]
+  clueStates: AccountCampaignClueStateV1[]
+  activeSession?: AccountCampaignActiveSessionV1
+  recaps: AccountCampaignSessionRecapV1[]
+}
+
+export interface AccountCampaignPrepPlanV1 {
+  schemaVersion: 1
+  revision: number
+  sessionTitle: string
+  objective: string
+  selectedStoryEventIds: string[]
+  selectedSceneIds: string[]
+  selectedPersonIds: string[]
+  selectedClueIds: string[]
+  checklist: AccountCampaignPrepChecklistItemV1[]
+  privateNotes: string
+  storyWorkspace?: AccountCampaignStoryWorkspaceV1
+  updatedAt: number
+}
+
+export type AccountCampaignPrepPlanDraftV1 = Omit<AccountCampaignPrepPlanV1, 'revision' | 'updatedAt'>
+
 export interface AccountCampaign {
   schemaVersion: 1
   campaignId: string
@@ -68,6 +224,7 @@ export interface AccountCampaign {
   roomCount: number
   createdAt: number
   updatedAt: number
+  prepPlan?: AccountCampaignPrepPlanV1
   latestRoom?: AccountCampaignRoomSummary
 }
 
@@ -305,7 +462,13 @@ export async function createAccountCampaign(input: {
 
 export async function updateAccountCampaign(
   campaignId: string,
-  patch: { name?: string; description?: string; archived?: boolean },
+  patch: {
+    name?: string
+    description?: string
+    archived?: boolean
+    prepPlan?: AccountCampaignPrepPlanDraftV1
+    expectedPrepPlanRevision?: number
+  },
 ): Promise<AccountCampaign> {
   return accountRequest<AccountCampaign>(
     `/accounts/me/campaigns/${encodeURIComponent(campaignId)}`,
@@ -521,6 +684,9 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-campaign-not-found': '账号中没有找到这个战役。',
     'account-campaign-limit': '账号保存的战役数量已达到上限。',
     'campaign-archived': '这个战役已归档，请先恢复后再开房。',
+    'invalid-campaign-prep-plan': '本次备团计划包含无效字段，未写入战役。',
+    'invalid-campaign-prep-plan-revision': '本次备团计划缺少有效的版本号。',
+    'campaign-prep-plan-revision-conflict': '本次备团计划已在其他设备更新，请刷新后再编辑。',
     'invalid-account-plugin': '插件清单或版本格式无效，未写入账号插件库。',
     'account-plugin-file-empty': '插件文件为空。',
     'account-plugin-not-found': '账号插件库中没有找到这个版本。',

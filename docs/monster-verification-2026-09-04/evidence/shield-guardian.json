@@ -1,0 +1,165 @@
+{
+  "id": "srd-5.1:shield-guardian",
+  "slug": "shield-guardian",
+  "name": "盾卫者",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：护盾反应必须先知道护符当前佩戴者，并验证守卫与佩戴者相距 5 尺；现有战斗状态没有护符所有权／佩戴关系，无法可靠选择被保护目标，因此继续由 DM 裁定。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "fist",
+      "name": "拳击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "shield",
+      "name": "盾牌",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 73,
+      "slug": "shield-guardian",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:19:05.007Z",
+      "name": "盾卫者",
+      "actionId": "fist",
+      "actionName": "拳击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "7",
+      "total": 334,
+      "mapId": "verify-ui-shield-guardian-fist-1788567545071",
+      "combatId": "verify-ui-shield-guardian-fist-1788567545071:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "盾卫者 使用拳击攻击 验证目标：拳击 → 验证目标 20+7=27 命中；共造成 16 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:19 PM\n结算\n\n盾卫者 使用拳击攻击 验证目标：拳击 → 验证目标 20+7=27 命中；共造成 16 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：拳击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 20；最终采用 20；调整值 +7。\n结果 · 27 vs AC 10：重击。\n伤害骰 · 拳击（基础伤害·钝击）｜4d6 骰面：5 + 1 + 1 + 5 = 12｜固定加值 +4｜小计 16\n盾卫者｜消耗动作\n验证目标｜受到 16 点伤害｜HP 320 → 304",
+      "playerLog": "盾卫者 使用拳击攻击 验证目标：拳击 → 验证目标 20+7=27 命中；共造成 16 点伤害。",
+      "afterHp": 304,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:19:29.542Z",
+      "evidenceFile": "ui-cases/monsters/073-shield-guardian.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "受缚",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "再生",
+      "automation": "headless",
+      "rule": "regeneration",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.amount",
+        "rule.requiresPositiveHp",
+        "rule.diesAtZeroWhenSuppressed"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "injured",
+        "full-hp",
+        "suppressed"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "储存法术",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

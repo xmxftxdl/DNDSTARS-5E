@@ -35,6 +35,8 @@ export interface PlayerActionAuthorityPreflightContext {
   round: number
   initiativeIndex: number
   currentTokenId?: string
+  /** Host-validated reaction caster allowed to act without becoming the current initiative Token. */
+  authorizedOutOfTurnActorTokenId?: string
   characters: readonly Pick<Character, 'id' | 'roomMemberId'>[]
   /**
    * Local table/dev mode has no room identity service. It may accept an action
@@ -65,9 +67,15 @@ export function preflightPlayerActionAuthority(
   }
 
   const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
+  const controllingTokenId = actorToken?.dnd5eCombatState?.spellControlledByActorId
+  const controllingToken = controllingTokenId
+    ? map.tokens.find((token) => token.id === controllingTokenId)
+    : undefined
+  const effectiveCharacterId = controllingToken?.characterId ?? actorToken?.characterId
   if (
-    !actorToken || actorToken.type !== 'player' || !actorToken.characterId ||
-    actorToken.characterId !== action.characterId
+    !actorToken || (!actorToken.characterId && !controllingToken?.characterId) ||
+    effectiveCharacterId !== action.characterId ||
+    (actorToken.type !== 'player' && !controllingToken)
   ) return { status: 'rejected', reason: 'stale-turn' }
 
   const actorCharacter = context.characters.find((character) => character.id === action.characterId)
@@ -86,6 +94,23 @@ export function preflightPlayerActionAuthority(
     return { status: 'rejected', reason: 'character-owner-mismatch' }
   }
 
+  if (action.type === 'dnd5e-spell-whisper-reply') {
+    // Message grants an immediate reply to the target, even when it is not that
+    // creature's initiative turn. The Host later validates the exact live,
+    // single-use route and original cast identity.
+    if (context.combatActive) {
+      if (!action.combatId || action.combatId !== context.combatId) {
+        return { status: 'rejected', reason: 'stale-combat' }
+      }
+    } else if (action.combatId) {
+      return { status: 'rejected', reason: 'stale-combat' }
+    }
+    if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
+      return { status: 'ignored' }
+    }
+    return { status: 'accepted', currentToken: actorToken }
+  }
+
   if (action.type === 'dnd5e-map-interaction') {
     if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
       return { status: 'ignored' }
@@ -100,6 +125,25 @@ export function preflightPlayerActionAuthority(
     // Exploration movement must be authored outside any combat snapshot. This
     // prevents a delayed packet from the previous initiative from moving a
     // Token after combat has ended.
+    if (action.combatId) return { status: 'rejected', reason: 'stale-combat' }
+    if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
+      return { status: 'ignored' }
+    }
+    return { status: 'accepted', currentToken: actorToken }
+  }
+
+  const explorationRulesAction =
+    action.type === 'dnd5e-ability-check' ||
+    action.type === 'dnd5e-spell-cast' ||
+    action.type === 'dnd5e-adjudicated-spell' ||
+    action.type === 'dnd5e-persistent-area-move' ||
+    action.type === 'dnd5e-class-feature' ||
+    action.type === 'dnd5e-plugin-action' ||
+    action.type === 'dnd5e-item-use'
+  if (explorationRulesAction && !context.combatActive) {
+    // Exploration rules requests must be authored without a combat identity.
+    // This prevents a delayed request from a previous initiative from being
+    // reinterpreted as an out-of-combat cast after that combat has ended.
     if (action.combatId) return { status: 'rejected', reason: 'stale-combat' }
     if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
       return { status: 'ignored' }
@@ -124,14 +168,21 @@ export function preflightPlayerActionAuthority(
     action.round === context.round &&
     action.initiativeIndex === context.initiativeIndex &&
     currentToken.id === action.actorTokenId &&
-    currentToken.type === 'player' &&
-    currentToken.characterId === action.characterId
+    (currentToken.type === 'player' || !!currentToken.dnd5eCombatState?.spellControlledByActorId) &&
+    (map.tokens.find((token) =>
+      token.id === currentToken.dnd5eCombatState?.spellControlledByActorId)?.characterId ??
+      currentToken.characterId) === action.characterId
 
-  if (!validTurn) {
+  const validHostAuthorizedReaction =
+    action.round === context.round &&
+    action.initiativeIndex === context.initiativeIndex &&
+    actorToken.id === context.authorizedOutOfTurnActorTokenId
+
+  if (!validTurn && !validHostAuthorizedReaction) {
     return { status: 'rejected', reason: 'stale-turn' }
   }
 
-  return { status: 'accepted', currentToken }
+  return { status: 'accepted', currentToken: validTurn ? currentToken : actorToken }
 }
 
 export function canSubmitPlayerCombatAction(input: {
@@ -155,6 +206,56 @@ export function canSubmitPlayerCombatAction(input: {
   if (input.currentInitiativeToken.characterId !== input.turnCharacter.id) return false
   if (input.turnCharacter.id !== input.playerCharacter?.id) return false
   return isTokenAlive(input.currentInitiativeToken, input.characters)
+}
+
+export function canSubmitPlayerSpellAction(input: {
+  activeMap?: BattleMap
+  mode?: 'dm' | 'player' | null
+  playerCombatLocked: boolean
+  combatActive: boolean
+  combatActiveSnapshot: boolean
+  turnCharacter?: Pick<Character, 'id'> | null
+  currentInitiativeToken?: Token
+  pendingAction?: PendingPlayerActionLock | null
+  playerCharacter?: Pick<Character, 'id'> | null
+  characters: Character[]
+}): boolean {
+  if (!input.activeMap || input.mode !== 'player') return false
+  if (input.pendingAction || !input.playerCharacter) return false
+  if (input.combatActive && input.playerCombatLocked) return false
+
+  // A transition where the rendered state and the authority snapshot disagree
+  // is deliberately fail-closed. Once combat is live, the existing strict
+  // initiative check is the only path that may authorize a spell.
+  if (input.combatActive !== input.combatActiveSnapshot) return false
+  if (input.combatActive) return canSubmitPlayerCombatAction(input)
+
+  const actorToken = input.activeMap.tokens.find((token) =>
+    token.type === 'player' && token.characterId === input.playerCharacter?.id,
+  )
+  return !!actorToken && isTokenAlive(actorToken, input.characters)
+}
+
+/**
+ * A Host-opened spell reaction belongs to the assigned character, not the
+ * current initiative actor. The trigger itself is rebuilt again by the DM
+ * before execution; this helper only keeps the player UI fail-closed.
+ */
+export function canSubmitPlayerTriggeredReactionSpellAction(input: {
+  activeMap?: BattleMap
+  mode?: 'dm' | 'player' | null
+  combatActive: boolean
+  combatActiveSnapshot: boolean
+  pendingAction?: PendingPlayerActionLock | null
+  playerCharacter?: Pick<Character, 'id'> | null
+  characters: Character[]
+}): boolean {
+  if (!input.activeMap || input.mode !== 'player' || !input.playerCharacter) return false
+  if (!input.combatActive || !input.combatActiveSnapshot || input.pendingAction) return false
+  const actorToken = input.activeMap.tokens.find((token) =>
+    token.type === 'player' && token.characterId === input.playerCharacter?.id,
+  )
+  return !!actorToken && isTokenAlive(actorToken, input.characters)
 }
 
 export function playerActionNeedsExecutionDedupe(action: Pick<PlayerActionAuthorityAction, 'type'>): boolean {

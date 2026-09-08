@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
-import { decideTurnAction, hasActionableActor, pruneInitiativeForToken, pruneRecovery } from './combatTokens'
+import {
+  decideTurnAction,
+  hasActionableActor,
+  pruneInitiativeForToken,
+  pruneInitiativeForValidTokens,
+  pruneRecovery,
+} from './combatTokens'
 
 function token(patch: Partial<Token>): Token {
   return {
@@ -66,5 +72,36 @@ describe('initiative recovery', () => {
     const pruned = pruneInitiativeForToken([entry('a'), entry('b'), entry('c')], 2, 'c')
     expect(pruned.order.map((item) => item.tokenId)).toEqual(['a', 'b'])
     expect(pruned.index).toBe(1)
+    expect(pruned.wrappedToStart).toBe(true)
+  })
+
+  it('keeps the same active slot when an earlier token is removed', () => {
+    const pruned = pruneInitiativeForToken([entry('a'), entry('b'), entry('c')], 2, 'b')
+    expect(pruned.order.map((item) => item.tokenId)).toEqual(['a', 'c'])
+    expect(pruned.order[pruned.index]?.tokenId).toBe('c')
+    expect(pruned.activeEntryRemoved).toBe(false)
+  })
+
+  it('removes every extra turn slot and selects the next surviving actor', () => {
+    const order = [
+      { ...entry('a'), slotId: 'a-1' },
+      { ...entry('b'), slotId: 'b-1' },
+      { ...entry('b'), slotId: 'b-2' },
+      { ...entry('c'), slotId: 'c-1' },
+    ]
+    const pruned = pruneInitiativeForToken(order, 1, 'b')
+    expect(pruned.order.map((item) => item.tokenId)).toEqual(['a', 'c'])
+    expect(pruned.order[pruned.index]?.tokenId).toBe('c')
+    expect(pruned.activeEntryRemoved).toBe(true)
+  })
+
+  it('wraps full roster reconciliation to the first surviving actor', () => {
+    const pruned = pruneInitiativeForValidTokens(
+      [entry('a'), entry('b'), entry('deleted')],
+      2,
+      new Set(['a', 'b']),
+    )
+    expect(pruned.index).toBe(0)
+    expect(pruned.wrappedToStart).toBe(true)
   })
 })

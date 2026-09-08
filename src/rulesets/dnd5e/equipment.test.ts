@@ -21,6 +21,7 @@ import {
   dnd5eArmorProficiencies,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eShillelaghAttackChoice,
+  dnd5eVirtualWeaponDamageSource,
   dnd5eWeaponDamageSource,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponProficient,
@@ -93,6 +94,18 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(normalized?.offHand).toEqual(focus)
     expect(normalized?.offHand?.dnd5e).toBeUndefined()
     expect(normalized?.offHand?.effects).toBeUndefined()
+  })
+
+  it('round-trips a mundane wearable used only as a spell material', () => {
+    const circlet = {
+      id: 'srd-5.1:equipment:jade-circlet-1500gp',
+      name: '玉石头环（1,500 gp）',
+      slot: 'helmet' as const,
+    }
+    expect(normalizeDnd5eCharacterEquipment({
+      charClass: '法师',
+      equipment: { helmet: circlet },
+    })?.helmet).toEqual(circlet)
   })
 
   it('migrates legacy +N magic weapons and drops invalid provenance values', () => {
@@ -279,6 +292,73 @@ describe('D&D 5e 2014 fighter equipment', () => {
       equipment,
       dnd5eClassChoices: { fighter: { fightingStyles: ['two-weapon-fighting'] } },
     }))?.damage.bonus).toBe(3)
+  })
+
+  it('turns Alter Self natural weapons into a proficient +1 magical 1d6 attack', () => {
+    const naturalWeapon = createDnd5eMechanicalEffect({
+      definitionId: 'adjudicated:alter-self:natural-weapon',
+      label: '变身术·天生武器（魔法爪；1d6挥砍；熟练；攻击与伤害+1）',
+      targetId: 'fighter',
+      source: { kind: 'spell', actorId: 'fighter', rulesId: 'alter-self', magical: true },
+      duration: {
+        type: 'concentration', sourceActorId: 'fighter', concentrationId: 'alter-self', remainingRounds: 600,
+      },
+      tags: ['alter-self', 'alter-self-natural-weapon', 'alter-self-natural-weapon:slashing'],
+    })
+    const character = fighter({
+      equipment: { mainWeapon: { id: 'dnd5e-arcane-focus', name: '奥术法器', slot: 'mainWeapon' } },
+      dnd5eCombatState: {
+        schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+        activeEffects: [naturalWeapon],
+      },
+    })
+
+    const profile = dnd5eWeaponAttackProfile(character)
+    expect(profile).toMatchObject({
+      weaponName: '变身术·天生武器',
+      attackAbility: 'str',
+      proficient: true,
+      attackModifier: 6,
+      damage: { count: 1, sides: 6, bonus: 4, type: 'slashing' },
+      properties: ['徒手打击', '魔法'],
+      reachFeet: 5,
+    })
+    expect(dnd5eVirtualWeaponDamageSource(profile!.weaponId)).toEqual({
+      weaponId: 'srd-5.1:spell:alter-self:natural-weapon',
+      magical: true,
+    })
+  })
+
+  it('allows non-light one-handed melee weapons through the generic two-weapon capability', () => {
+    const pluginId = 'local.test.non-light-two-weapon'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Non-light two-weapon test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'dual-wielder', name: 'Dual Wielder', summary: 'Synthetic feat.', description: 'Synthetic feat.',
+          automation: 'full', staticModifiers: { allowNonLightTwoWeaponFighting: true },
+        })
+      },
+    })
+    try {
+      const mainWeapon = structuredClone(DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!)
+      const offHand = { ...structuredClone(mainWeapon), id: 'test-offhand-longsword', slot: 'offHand' as const }
+      const ordinary = fighter({ equipment: { mainWeapon, offHand } })
+      expect(dnd5eOffHandWeaponAttackProfile(ordinary)).toBeUndefined()
+      expect(dnd5eOffHandWeaponAttackProfile(fighter({
+        equipment: { mainWeapon, offHand },
+        dnd5eFeatIds: [`${pluginId}:dual-wielder`],
+      }))).toMatchObject({
+        weaponId: 'test-offhand-longsword',
+        mode: 'melee',
+        damage: { sides: 8, bonus: 0 },
+      })
+    } finally {
+      dispose()
+    }
   })
 
   it('uses the versatile die and enables Great Weapon Fighting only while wielded in two hands', () => {

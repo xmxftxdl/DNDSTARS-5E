@@ -1,0 +1,27 @@
+{
+  "mapId": "kraken-lightning-ui-1788599112248",
+  "combatId": "kraken-lightning-ui-1788599112248:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T09:05:12.942Z",
+  "selection": {
+    "targetIds": [
+      "target",
+      "target",
+      "target"
+    ],
+    "progress": [
+      "0/3",
+      "1/3",
+      "2/3"
+    ]
+  },
+  "settlement": {
+    "hpBefore": 200,
+    "hpAfter": 176
+  },
+  "dmLog": "克拉肯使用闪电风暴，共造成 24 点伤害。",
+  "playerLog": "克拉肯使用闪电风暴，共造成 24 点伤害。",
+  "status": "passed",
+  "finishedAt": "2026-09-05T09:05:49.463Z"
+}

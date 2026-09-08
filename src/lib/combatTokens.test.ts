@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
-import { characterNeedsDeathSave, checkCombatOutcome, decideTurnAction, getTokenCombatSide, isTokenAlive } from './combatTokens'
+import { createDnd5eMechanicalEffect } from '../rulesets/dnd5e'
+import {
+  characterNeedsDeathSave,
+  checkCombatOutcome,
+  decideTurnAction,
+  getTokenCombatSide,
+  isDnd5eTokenBanished,
+  isTokenAlive,
+  tokenPresentationHitPoints,
+} from './combatTokens'
 
 function token(patch: Partial<Token>): Token {
   return {
@@ -18,6 +27,92 @@ function token(patch: Partial<Token>): Token {
 }
 
 describe('combat token liveness', () => {
+  it('keeps a Blinked creature alive while marking its token unavailable on the material plane', () => {
+    const blinked = token({ id: 'wizard-token', characterId: 'wizard' })
+    const banished = createDnd5eMechanicalEffect({
+      definitionId: 'blink-ethereal-phase', label: '闪现术·以太位面', targetId: 'wizard',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'blink', spellLevel: 3, magical: true },
+      duration: { type: 'until-turn-boundary', boundary: 'target-turn-start' },
+      legacyCondition: 'banished',
+    })
+    const wizard = {
+      id: 'wizard', currentHp: 20, maxHp: 20, tempHp: 0,
+      dnd5eCombatState: { activeEffects: [banished] },
+    } as Character
+
+    expect(isDnd5eTokenBanished(blinked, [wizard])).toBe(true)
+    expect(isTokenAlive(blinked, [wizard])).toBe(true)
+  })
+
+  it('shows the effective Aid maximum for linked characters and independent tokens', () => {
+    const aid = createDnd5eMechanicalEffect({
+      definitionId: 'activity:aid:aid:modifiers:0', label: '援助术', targetId: 'hero',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'aid', spellLevel: 2 },
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: { hitPointMaximumBonus: 5 },
+    })
+    const linked = token({ characterId: 'hero' })
+    const hero = {
+      id: 'hero', currentHp: 25, maxHp: 20, tempHp: 0,
+      dnd5eCombatState: { activeEffects: [aid] },
+    } as Character
+    expect(tokenPresentationHitPoints(linked, hero)).toEqual({ hp: 25, max: 25, temp: 0 })
+    expect(tokenPresentationHitPoints(token({
+      type: 'enemy', hp: 25, maxHp: 20,
+      dnd5eCombatState: { activeEffects: [aid] },
+    }))).toEqual({ hp: 25, max: 25, temp: 0 })
+  })
+
+  it('shows a linked creature form HP pool instead of the base character HP pool', () => {
+    const transformed = token({
+      id: 'polymorphed-druid',
+      characterId: 'druid',
+      hp: 114,
+      maxHp: 136,
+    })
+    const druid = {
+      id: 'druid',
+      currentHp: 203,
+      maxHp: 203,
+      tempHp: 0,
+      dnd5eCombatState: {
+        wildShapeCurrentHp: 114,
+        wildShapeFormId: 'srd-5.1:tyrannosaurus-rex',
+      },
+    } as Character
+
+    expect(tokenPresentationHitPoints(transformed, druid)).toEqual({
+      hp: 114,
+      max: 136,
+      temp: 0,
+    })
+  })
+
+  it('keeps rendering a transformed HP pool when a persisted form ID cannot be resolved', () => {
+    const transformed = token({
+      id: 'legacy-form',
+      characterId: 'wizard',
+      hp: 9,
+      maxHp: 12,
+    })
+    const wizard = {
+      id: 'wizard',
+      currentHp: 30,
+      maxHp: 30,
+      tempHp: 0,
+      dnd5eCombatState: {
+        wildShapeCurrentHp: 9,
+        wildShapeFormId: 'missing:legacy-form',
+      },
+    } as Character
+
+    expect(tokenPresentationHitPoints(transformed, wizard)).toEqual({
+      hp: 9,
+      max: 12,
+      temp: 0,
+    })
+  })
+
   it('does not treat a linked token as defeated while its character is still syncing', () => {
     const linkedPlayer = token({ id: 'player-token', type: 'player', characterId: 'missing-character' })
     const enemy = token({ id: 'enemy-token', type: 'enemy', hp: 12, maxHp: 12 })

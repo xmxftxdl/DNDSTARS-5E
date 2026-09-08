@@ -129,6 +129,7 @@ export function resolvePreparedDnd5eMonsterEscapeActiveEffect(input: {
           map: input.prepared.map,
           characters: input.prepared.characters,
           characterIdByCombatantId: input.prepared.characterIdByCombatantId,
+          events: [...result.events],
         })
       : undefined,
   }
@@ -272,6 +273,7 @@ export function resolvePreparedDnd5eMonsterEscapeGrapple(input: {
           map: input.prepared.map,
           characters: input.prepared.characters,
           characterIdByCombatantId: input.prepared.characterIdByCombatantId,
+          events: [...result.events],
         })
       : undefined,
   }
@@ -372,6 +374,7 @@ export function resolveDnd5eMonsterReleaseGrapple(input: {
           map: input.map,
           characters: input.characters,
           characterIdByCombatantId: snapshot.characterIdByCombatantId,
+          events: [...result.events],
         })
       : undefined,
   }
@@ -428,6 +431,7 @@ export function resolveDnd5eMonsterDodge(input: {
           map: input.map,
           characters: input.characters,
           characterIdByCombatantId: snapshot.characterIdByCombatantId,
+          events: [...result.events],
         })
       : undefined,
   }

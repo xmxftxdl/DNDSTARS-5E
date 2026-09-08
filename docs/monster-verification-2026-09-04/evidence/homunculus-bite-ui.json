@@ -1,0 +1,105 @@
+{
+  "mapId": "homunculus-bite-ui-1788604445678",
+  "combatId": "homunculus-bite-ui-1788604445678:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T10:34:17.228Z",
+  "before": {
+    "currentHp": 20,
+    "conditions": []
+  },
+  "after": {
+    "currentHp": 19,
+    "conditions": [
+      "poisoned",
+      "unconscious"
+    ],
+    "activeEffects": [
+      {
+        "schemaVersion": 1,
+        "id": "monster-on-hit-save:actor:bite:bite-poisoned-unconscious:target:poisoned",
+        "definitionId": "monster:srd-5.1:homunculus:actor:bite:bite-poisoned-unconscious:poisoned",
+        "label": "中毒",
+        "kind": "condition",
+        "standardCondition": "poisoned",
+        "source": {
+          "kind": "monster",
+          "actorId": "actor",
+          "actorName": "魔宠人偶",
+          "rulesId": "monster:srd-5.1:homunculus:actor:bite:bite-poisoned-unconscious",
+          "magical": false
+        },
+        "appliedAt": 1788604487829,
+        "duration": {
+          "type": "rounds",
+          "remainingRounds": 50,
+          "tickOn": "target-turn-end"
+        },
+        "stackingKey": "monster-on-hit-save:actor:bite:bite-poisoned-unconscious:target:poisoned",
+        "stackingPolicy": "refresh-duration",
+        "visibility": "public"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "monster-on-hit-save:actor:bite:bite-poisoned-unconscious:target:unconscious",
+        "definitionId": "monster:srd-5.1:homunculus:actor:bite:bite-poisoned-unconscious:unconscious",
+        "label": "昏迷",
+        "kind": "condition",
+        "standardCondition": "unconscious",
+        "source": {
+          "kind": "monster",
+          "actorId": "actor",
+          "actorName": "魔宠人偶",
+          "rulesId": "monster:srd-5.1:homunculus:actor:bite:bite-poisoned-unconscious",
+          "magical": false
+        },
+        "appliedAt": 1788604487831,
+        "duration": {
+          "type": "rounds",
+          "remainingRounds": 50,
+          "tickOn": "target-turn-end"
+        },
+        "breakOn": [
+          "takes-damage",
+          "awakened"
+        ],
+        "dependsOnEffectId": "monster-on-hit-save:actor:bite:bite-poisoned-unconscious:target:poisoned",
+        "stackingKey": "monster-on-hit-save:actor:bite:bite-poisoned-unconscious:target:unconscious",
+        "stackingPolicy": "refresh-duration",
+        "visibility": "public"
+      }
+    ],
+    "durationRounds": 50,
+    "durationRollValue": 5
+  },
+  "publicDiceEvents": [
+    {
+      "id": "1788604489831-gvi",
+      "mapId": "homunculus-bite-ui-1788604445678",
+      "sourceMode": "dm",
+      "visibility": "public",
+      "rollerName": "魔宠人偶",
+      "status": "result",
+      "roll": {
+        "values": [],
+        "sides": 4,
+        "bonus": 1,
+        "total": 1,
+        "label": "魔宠人偶·啃咬（SRD 5.1）",
+        "targetName": "深度失败验证目标",
+        "d20Roll": {
+          "value": 10,
+          "modifier": 4,
+          "expression": "10+4=14",
+          "ac": 10,
+          "hit": true
+        }
+      },
+      "updatedAt": 1788604489831
+    }
+  ],
+  "dmLog": "魔宠人偶 使用啃咬攻击 深度失败验证目标：啃咬 → 深度失败验证目标 10+4=14 命中；共造成 1 点伤害。",
+  "playerLog": "魔宠人偶 使用啃咬攻击 深度失败验证目标：啃咬 → 深度失败验证目标 10+4=14 命中；共造成 1 点伤害。",
+  "status": "passed",
+  "finishedAt": "2026-09-05T10:35:00.574Z"
+}

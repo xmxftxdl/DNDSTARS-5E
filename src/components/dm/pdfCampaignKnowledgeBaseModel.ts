@@ -1,9 +1,17 @@
 import type {
+  PdfEncounterRecordV1,
   PdfImportCandidateV1,
   PdfNamedRecordV1,
+  PdfSceneRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
 import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
+import {
+  mergePdfEncounterRecords,
+  mergePdfSceneRecords,
+  normalizePdfEventIdentityName,
+  pdfEventRecordsLikelySame,
+} from '../../lib/pdfCampaignEventDeduplication'
 
 export type PdfKnowledgeTabV1 =
   | 'overview'
@@ -15,14 +23,17 @@ export type PdfKnowledgeTabV1 =
   | 'timeline'
   | 'maps'
   | 'monsters'
-  | 'relationships'
+  | 'bookmarks'
   | 'imports'
 
 export interface PdfMonsterCodexEntryV1 {
   name: string
   description: string
+  monsterStatBlockText: string
   source: 'import-candidate' | 'encounter-reference'
   automation: PdfImportCandidateV1['automation'] | 'unreviewed'
+  importCandidateIndex?: number
+  encounterIndexes: number[]
   encounterNames: string[]
   citations: PdfSourceCitationV1[]
 }
@@ -32,6 +43,17 @@ export interface PdfMapIndexEntryV1 {
   description: string
   source: 'map-candidate' | 'location'
   sceneNames: string[]
+  citations: PdfSourceCitationV1[]
+}
+
+export interface PdfEventIndexEntryV1 {
+  name: string
+  description: string
+  kind: 'scene' | 'encounter' | 'scene-encounter'
+  location: string
+  npcs: string[]
+  creatures: string[]
+  notes: string
   citations: PdfSourceCitationV1[]
 }
 
@@ -58,34 +80,99 @@ function mergeCitations(...collections: readonly PdfSourceCitationV1[][]): PdfSo
   })
 }
 
+function longerText(left: string, right: string): string {
+  return right.trim().length > left.trim().length ? right.trim() : left.trim()
+}
+
+function encounterAsEvent(encounter: PdfEncounterRecordV1): PdfEventIndexEntryV1 {
+  return {
+    name: encounter.name,
+    description: encounter.description,
+    kind: 'encounter',
+    location: '',
+    npcs: [],
+    creatures: [...encounter.creatures],
+    notes: encounter.notes,
+    citations: [...encounter.citations],
+  }
+}
+
+function sceneAsEvent(scene: PdfSceneRecordV1): PdfEventIndexEntryV1 {
+  return {
+    name: scene.name,
+    description: scene.description,
+    kind: 'scene',
+    location: scene.location,
+    npcs: [...scene.npcs],
+    creatures: [...scene.monsters],
+    notes: '',
+    citations: [...scene.citations],
+  }
+}
+
+/** Combines legacy duplicate scenes and their same-named combat encounters into one readable row. */
+export function buildPdfEventIndex(analysis: PdfCampaignAnalysisView): PdfEventIndexEntryV1[] {
+  const entries = new Map<string, PdfEventIndexEntryV1>()
+  for (const scene of mergePdfSceneRecords(analysis.scenes)) {
+    entries.set(normalizePdfEventIdentityName(scene.name), sceneAsEvent(scene))
+  }
+  for (const encounter of mergePdfEncounterRecords(analysis.encounters)) {
+    const key = normalizePdfEventIdentityName(encounter.name)
+    const exact = entries.get(key)
+    const similar = exact ? null : [...entries.entries()].find(([, entry]) => pdfEventRecordsLikelySame(entry, encounter))
+    const currentKey = exact ? key : similar?.[0]
+    const current = exact ?? similar?.[1]
+    if (!current) {
+      entries.set(key, encounterAsEvent(encounter))
+      continue
+    }
+    entries.set(currentKey ?? key, {
+      ...current,
+      kind: 'scene-encounter',
+      description: longerText(current.description, encounter.description),
+      creatures: [...new Set([...current.creatures, ...encounter.creatures])],
+      notes: longerText(current.notes, encounter.notes),
+      citations: mergeCitations(current.citations, encounter.citations),
+    })
+  }
+  return [...entries.values()]
+}
+
 export function buildPdfMonsterCodex(analysis: PdfCampaignAnalysisView): PdfMonsterCodexEntryV1[] {
   const byName = new Map<string, PdfMonsterCodexEntryV1>()
-  for (const candidate of analysis.importCandidates.filter((entry) => entry.kind === 'monster')) {
+  for (const [importCandidateIndex, candidate] of analysis.importCandidates.entries()) {
+    if (candidate.kind !== 'monster') continue
     const key = normalized(candidate.name)
     if (!key) continue
     byName.set(key, {
       name: candidate.name,
       description: candidate.description,
+      monsterStatBlockText: candidate.monsterStatBlockText?.trim() ?? '',
       source: 'import-candidate',
       automation: candidate.automation,
+      importCandidateIndex,
+      encounterIndexes: [],
       encounterNames: [],
       citations: [...candidate.citations],
     })
   }
-  for (const encounter of analysis.encounters) {
+  for (const [encounterIndex, encounter] of analysis.encounters.entries()) {
     for (const creature of encounter.creatures) {
       const key = normalized(creature)
       if (!key) continue
       const current = byName.get(key)
       byName.set(key, current ? {
         ...current,
+        encounterIndexes: [...new Set([...current.encounterIndexes, encounterIndex])],
         encounterNames: [...new Set([...current.encounterNames, encounter.name])],
         citations: mergeCitations(current.citations, encounter.citations),
       } : {
         name: creature,
         description: `在“${encounter.name}”中出现，尚未提取为可导入的结构化怪物。`,
+        monsterStatBlockText: '',
         source: 'encounter-reference',
         automation: 'unreviewed',
+        encounterIndexes: [encounterIndex],
         encounterNames: [encounter.name],
         citations: [...encounter.citations],
       })
@@ -152,12 +239,12 @@ export function pdfKnowledgeTabCounts(analysis: PdfCampaignAnalysisView): Record
     people: analysis.people.length,
     factions: analysis.factions.length,
     locations: analysis.locations.length,
-    events: analysis.scenes.length + analysis.encounters.length,
+    events: buildPdfEventIndex(analysis).length,
     clues: analysis.clues.length,
-    timeline: analysis.scenes.length,
+    timeline: analysis.timelineEvents?.length ?? 0,
     maps: buildPdfMapIndex(analysis).length,
     monsters: buildPdfMonsterCodex(analysis).length,
-    relationships: analysis.relationships.length,
+    bookmarks: analysis.bookmarks?.length ?? 0,
     imports: analysis.importCandidates.length,
   }
 }

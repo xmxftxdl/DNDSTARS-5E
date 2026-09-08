@@ -1,0 +1,334 @@
+{
+  "id": "srd-5.1:unicorn",
+  "slug": "unicorn",
+  "name": "独角兽",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：传送必须同时选择独角兽与至多三个 5 尺内、可见且自愿的生物，并前往一英里内熟悉地点；当前怪物传送只支持单体地图内落点，不能丢失同行目标与熟悉地点字段。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "hooves",
+      "name": "蹄击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "horn",
+      "name": "角撞",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "healing-touch",
+      "name": "治疗之触",
+      "automation": "headless",
+      "rule": "healing-touch",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.max",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.healing.count",
+        "rule.healing.sides",
+        "rule.healing.bonus",
+        "rule.removes[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "teleport",
+      "name": "传送",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "legendary-hooves",
+      "name": "蹄击",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "shimmering-shield-costs-2-actions",
+      "name": "闪烁护盾（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "temporary-armor-class-bonus",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.armorClassBonus",
+        "rule.duration",
+        "rule.magical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "heal-self-costs-3-actions",
+      "name": "自我治疗（消耗 3 动作）",
+      "automation": "headless",
+      "rule": "self-healing",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.healing.count",
+        "rule.healing.sides",
+        "rule.healing.bonus"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 91,
+      "slug": "unicorn",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:24:07.251Z",
+      "name": "独角兽",
+      "actionId": "hooves",
+      "actionName": "蹄击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "5",
+      "total": 334,
+      "mapId": "verify-ui-unicorn-hooves-1788567847293",
+      "combatId": "verify-ui-unicorn-hooves-1788567847293:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "独角兽 使用蹄击攻击 验证目标：蹄击 → 验证目标 6+7=13 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:24 PM\n结算\n\n独角兽 使用蹄击攻击 验证目标：蹄击 → 验证目标 6+7=13 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：蹄击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 6；最终采用 6；调整值 +7。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 蹄击（基础伤害·钝击）｜2d6 骰面：1 + 1 = 2｜固定加值 +4｜小计 6\n独角兽｜消耗动作\n验证目标｜受到 6 点伤害｜HP 320 → 314",
+      "playerLog": "独角兽 使用蹄击攻击 验证目标：蹄击 → 验证目标 6+7=13 命中；共造成 6 点伤害。",
+      "afterHp": 314,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:24:30.847Z",
+      "evidenceFile": "ui-cases/monsters/091-unicorn.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "冲锋",
+      "automation": "headless",
+      "rule": "charge-damage",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.minimumStraightMovementFeet",
+        "rule.actionId",
+        "rule.extraDamage.average",
+        "rule.extraDamage.count",
+        "rule.extraDamage.sides",
+        "rule.extraDamage.bonus",
+        "rule.extraDamage.type",
+        "rule.savingThrowOnHit.ability",
+        "rule.savingThrowOnHit.dc",
+        "rule.savingThrowOnHit.conditionOnFailedSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "no-movement",
+        "below-threshold",
+        "at-threshold"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 28,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

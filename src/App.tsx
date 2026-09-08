@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { PanelLeftOpen } from 'lucide-react'
 import AccountAppShell from './components/AccountAppShell'
@@ -7,23 +7,29 @@ import SharedIntegrityBanner from './components/SharedIntegrityBanner'
 import PageErrorBoundary from './components/PageErrorBoundary'
 import { SharedSyncRecoveryBanner } from './components/SharedSyncStatus'
 import { modeFromPort } from './lib/appMode'
-import { closeRoom, heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
+import { closeRoom, heartbeatRoomState, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
 import { clearRoomSession, getRoomSession, subscribeRoomSession } from './lib/roomSession'
 import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesState'
-import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
+import { applyRoomCharacterAssignment, getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
-import { nextCampaignRoomPath } from './lib/campaignNavigation'
+import { isMapWorkspacePath, nextCampaignRoomPath } from './lib/campaignNavigation'
 import { showAppConfirm } from './lib/appDialog'
+import {
+  closePdfSplitView,
+  subscribePdfSplitView,
+  type PdfSplitViewRequest,
+} from './lib/pdfSplitViewController'
 import { VoiceRoomProvider } from './voice/VoiceRoomContext'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
 const Sidebar = lazy(() => import('./components/Sidebar'))
+const PdfSplitViewPanel = lazy(() => import('./components/dm/PdfSplitViewPanel'))
 const AccountProfilePage = lazy(() => import('./pages/AccountProfilePage'))
 const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
 const PublicCombatPage = lazy(() => import('./pages/PublicCombatPage'))
-const PublicExtensionPage = lazy(() => import('./pages/PublicExtensionPage'))
 const PublicBlogPage = lazy(() => import('./pages/PublicBlogPage'))
 const PublicPricingPage = lazy(() => import('./pages/PublicPricingPage'))
+const PublicLegalPage = lazy(() => import('./pages/PublicLegalPage'))
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
@@ -37,6 +43,7 @@ const PluginsPage = lazy(() => import('./pages/PluginsPage'))
 const PluginPublisherPage = lazy(() => import('./pages/PluginPublisherPage'))
 const PluginCatalogDetailPage = lazy(() => import('./pages/PluginCatalogDetailPage'))
 const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
+const ShopsPage = lazy(() => import('./pages/ShopsPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
@@ -65,6 +72,8 @@ export default function App() {
   const navigate = useNavigate()
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
   const [collapsed, setCollapsed] = useState(false)
+  const [pdfSplitRequest, setPdfSplitRequest] = useState<PdfSplitViewRequest | null>(null)
+  const sidebarCollapsedBeforePdfRef = useRef<boolean | null>(null)
   const [account, setAccount] = useState(() => getAccountSession())
   const [roomSession, setRoomSession] = useState(() => getRoomSession())
   const [roomNotice, setRoomNotice] = useState<string | null>(null)
@@ -79,13 +88,14 @@ export default function App() {
   const defaultCampaignPath = `${campaignBasePath}/${endpointMode === 'player' ? 'maps' : 'overview'}`
   const campaignRouteMatch = location.pathname.match(/^\/campaign\/([^/]+)(?:\/|$)/)
   const campaignSectionMatch = location.pathname.match(/^\/campaign\/[^/]+\/([^/]+)(?:\/|$)/)
-  const publicWebsitePaths = new Set(['/', '/combat', '/extension', '/extensions', '/blog', '/pricing'])
+  const publicWebsitePaths = new Set(['/', '/combat', '/extension', '/extensions', '/blog', '/pricing', '/privacy', '/terms'])
   const publicWebsiteRequested = publicWebsitePaths.has(location.pathname) &&
     !(bypassRoomLobby && location.pathname === '/')
   const legacyWorkspacePaths = new Set([
     '/maps',
     '/characters',
     '/spellbook',
+    '/shops',
     '/communications',
     '/simulation',
     '/settings',
@@ -93,14 +103,28 @@ export default function App() {
   const workspaceRequested = campaignRouteMatch != null ||
     legacyWorkspacePaths.has(location.pathname) ||
     (bypassRoomLobby && location.pathname === '/')
+  const mapWorkspaceActive = isMapWorkspacePath(location.pathname)
 
   useEffect(() => subscribeAccountSession(setAccount), [])
   useEffect(() => subscribeRoomSession(setRoomSession), [])
+  useEffect(() => subscribePdfSplitView((request) => {
+    setPdfSplitRequest(request)
+    setCollapsed((current) => {
+      if (request) {
+        if (sidebarCollapsedBeforePdfRef.current == null) sidebarCollapsedBeforePdfRef.current = current
+        return true
+      }
+      const restore = sidebarCollapsedBeforePdfRef.current
+      sidebarCollapsedBeforePdfRef.current = null
+      return restore ?? current
+    })
+  }), [])
 
   useEffect(() => {
     if (publicWebsiteRequested || !roomSession) return
     let disposed = false
     let pulsing = false
+    let stopAssignmentInvalidation: (() => void) | undefined
     const pulse = async () => {
       if (pulsing) return
       pulsing = true
@@ -131,13 +155,15 @@ export default function App() {
           : roomSession.role === 'dm' && assignedCharacterId
             ? characterState.characters.find((character) => character.id === assignedCharacterId)
             : undefined
-        let rules = await heartbeatRoom(
+        const heartbeat = await heartbeatRoomState(
           roomSession,
           roomActiveDnd5eRulesPluginRequirements(),
           activeCharacter
             ? { activeCharacterId: activeCharacter.id, activeCharacterName: activeCharacter.name }
             : undefined,
         )
+        if (roomSession.role === 'player') applyRoomCharacterAssignment(heartbeat.characterAssignment)
+        let rules = heartbeat.rules
         if (!rules.member.ready) {
           try {
             const { synchronizeRoomPlugins } = await import('./lib/roomPluginSync')
@@ -170,6 +196,14 @@ export default function App() {
       }
     }
     void pulse()
+    void import('./lib/sharedApi').then(({ subscribeSharedResourceInvalidation }) => {
+      if (disposed) return
+      stopAssignmentInvalidation = subscribeSharedResourceInvalidation(
+        'room-character-assignment',
+        pulse,
+        { immediate: false, recoveryMs: 60_000, refreshOnVisibilityRestore: true },
+      )
+    })
     const timer = window.setInterval(() => void pulse(), 5_000)
     const wake = () => void pulse()
     const onVisibilityChange = () => {
@@ -180,6 +214,7 @@ export default function App() {
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       disposed = true
+      stopAssignmentInvalidation?.()
       window.clearInterval(timer)
       window.removeEventListener('focus', wake)
       window.removeEventListener('online', wake)
@@ -216,6 +251,20 @@ export default function App() {
   }, [endpointMode, publicWebsiteRequested, roomReady, roomSession])
 
   useEffect(() => {
+    if (publicWebsiteRequested || !roomReady || roomSession?.role === 'spectator') return
+    let disposed = false
+    let stopShopAuthority: (() => void) | undefined
+    void import('./lib/dnd5eShopAuthority').then(({ startDnd5eShopAuthoritySync }) => {
+      if (disposed) return
+      stopShopAuthority = startDnd5eShopAuthoritySync()
+    })
+    return () => {
+      disposed = true
+      stopShopAuthority?.()
+    }
+  }, [endpointMode, publicWebsiteRequested, roomReady, roomSession])
+
+  useEffect(() => {
     if (publicWebsiteRequested || roomSession?.role !== 'player') return
     let disposed = false
     let stopVault: (() => void) | undefined
@@ -234,10 +283,12 @@ export default function App() {
       <Routes>
         <Route path="/" element={lazyPage('星痕产品网站', <PublicLandingPage />)} />
         <Route path="/combat" element={lazyPage('星痕战斗系统', <PublicCombatPage />)} />
-        <Route path="/extension" element={lazyPage('星痕扩展中心', <PublicExtensionPage />)} />
-        <Route path="/extensions" element={<Navigate to="/extension" replace />} />
+        <Route path="/extension" element={<Navigate to="/app/extensions" replace />} />
+        <Route path="/extensions" element={<Navigate to="/app/extensions" replace />} />
         <Route path="/blog" element={lazyPage('星痕博客', <PublicBlogPage />)} />
         <Route path="/pricing" element={lazyPage('星痕价格', <PublicPricingPage />)} />
+        <Route path="/privacy" element={lazyPage('星痕隐私政策', <PublicLegalPage kind="privacy" />)} />
+        <Route path="/terms" element={lazyPage('星痕服务条款', <PublicLegalPage kind="terms" />)} />
       </Routes>
     )
   }
@@ -372,20 +423,20 @@ export default function App() {
       <Suspense fallback={null}>
         {!isSpectator && <RoomHandoutNotification />}
         <CampaignTimeSystem
-          key={`${roomSession?.roomId ?? 'local'}:${roomSession?.memberId ?? endpointMode}`}
+          key={`campaign-time:${roomSession?.roomId ?? 'local'}:${roomSession?.memberId ?? endpointMode}`}
           isDm={endpointMode !== 'player'}
         />
-        <SceneAudioPlaybackSystem />
+        <SceneAudioPlaybackSystem active={mapWorkspaceActive} />
         {roomSession && (
           <CampaignCombatBackgroundSystem
             key={`${roomSession.roomId}:${roomSession.memberId}:combat-background`}
             session={roomSession}
-            active={!/^\/campaign\/[^/]+\/maps(?:\/|$)/.test(location.pathname) && location.pathname !== '/maps'}
+            active={!mapWorkspaceActive}
           />
         )}
         {roomSession && (
           <VoiceRoomSystem
-            key={`${roomSession.roomId}:${roomSession.memberId}`}
+            key={`voice-room:${roomSession.roomId}:${roomSession.memberId}`}
           />
         )}
       </Suspense>
@@ -408,7 +459,14 @@ export default function App() {
           />
         </Suspense>
       )}
-      <main className={`relative flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
+      {pdfSplitRequest && (
+        <PageErrorBoundary scope="PDF 分屏阅读器">
+          <Suspense fallback={<div className="grid h-screen w-[clamp(24rem,42vw,48rem)] shrink-0 place-items-center border-r border-white/10 bg-slate-950 text-xs text-slate-500">正在打开 PDF…</div>}>
+            <PdfSplitViewPanel request={pdfSplitRequest} onClose={closePdfSplitView} />
+          </Suspense>
+        </PageErrorBoundary>
+      )}
+      <main className={`relative min-w-0 flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
         {collapsed && (
           <button
             onClick={() => setCollapsed(false)}
@@ -455,6 +513,7 @@ export default function App() {
           <Route path="/campaign/:campaignId/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
           {!isSpectator && <Route path="/campaign/:campaignId/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
+          {dmToolsAvailable && <Route path="/campaign/:campaignId/shops" element={lazyPage('冒险者商店', <ShopsPage />)} />}
           <Route path="/campaign/:campaignId/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />
           {!isSpectator && <Route path="/campaign/:campaignId/extensions" element={lazyPage('规则与扩展', <ActiveRulesExtensionsPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/settings" element={lazyPage('设置页面', <CampaignSettingsPage />)} />}
@@ -463,6 +522,7 @@ export default function App() {
           <Route path="/maps" element={<Navigate to={`${campaignBasePath}/maps`} replace />} />
           <Route path="/characters" element={<Navigate to={`${campaignBasePath}/characters`} replace />} />
           <Route path="/spellbook" element={<Navigate to={`${campaignBasePath}/spellbook`} replace />} />
+          {dmToolsAvailable && <Route path="/shops" element={<Navigate to={`${campaignBasePath}/shops`} replace />} />}
           <Route path="/communications" element={<Navigate to={`${campaignBasePath}/communications`} replace />} />
           <Route path="/simulation" element={<Navigate to={`${campaignBasePath}/dm-tools/simulation`} replace />} />
           <Route path="/settings" element={<Navigate to={`${campaignBasePath}/settings`} replace />} />

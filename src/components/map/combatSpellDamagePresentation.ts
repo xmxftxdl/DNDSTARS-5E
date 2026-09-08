@@ -13,6 +13,7 @@ import {
 } from '../../rulesets/dnd5e'
 import { dnd5e2014Adapter as rules } from '../../rulesets/dnd5e/dnd5e2014Adapter'
 import { DND5E_DAMAGE_TYPE_LABELS } from '../../rulesets/dnd5e/damageTypes'
+import type { Dnd5eMapWeather } from '../../rulesets/dnd5e/environmentRules'
 
 export interface Dnd5eCombatSpellDamagePreview {
   slotLevel: number
@@ -108,16 +109,25 @@ export function dnd5eCombatSpellDamagePreview(
   castingClassId: string,
   spellId: string,
   slotLevel: number,
+  options: { weather?: Dnd5eMapWeather } = {},
 ): Dnd5eCombatSpellDamagePreview | undefined {
   const spell = getDnd5eSrdCombatSpell(spellId)
   if (!spell || !Number.isInteger(slotLevel) || slotLevel < spell.level) return undefined
 
-  const damageDiceCounts = dnd5eSpellDamageDiceCounts(
+  const baseDamageDiceCounts = dnd5eSpellDamageDiceCounts(
     spell,
     character.level,
     slotLevel,
   )
-  const sustainedDiceCount = dnd5eSustainedSpellAttackDiceCount(spell, slotLevel)
+  const stormBonusDice = spell.id === 'call-lightning' && options.weather === 'storm' ? 1 : 0
+  const damageDiceCounts = stormBonusDice > 0
+    ? [baseDamageDiceCounts[0] + stormBonusDice, ...baseDamageDiceCounts.slice(1)]
+    : baseDamageDiceCounts
+  const sustainedDiceCount = dnd5eSustainedSpellAttackDiceCount(
+    spell,
+    slotLevel,
+    character.level,
+  ) + stormBonusDice
   const immediateSustainedAttack = spell.sustainedAttack?.immediateAttack === true
   const primaryDiceCount = immediateSustainedAttack
     ? sustainedDiceCount
@@ -224,6 +234,8 @@ export function dnd5eCombatSpellDamagePreview(
   return {
     slotLevel,
     summary: summaries.join('；'),
-    featureBonuses: features.labels,
+    featureBonuses: stormBonusDice > 0
+      ? [...features.labels, '既有暴风雨 +1d10']
+      : features.labels,
   }
 }

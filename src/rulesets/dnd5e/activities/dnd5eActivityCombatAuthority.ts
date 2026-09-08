@@ -1,4 +1,5 @@
 import type { Character } from '../../../types/character'
+import { dnd5eCombatantCanHearSource } from '../audibility'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../conditions'
 import {
   dnd5eHeadlessTurnKey,
@@ -26,9 +27,14 @@ const STANDARD_CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
  */
 export function dnd5eActivityActorSnapshotFromCombatantV1(
   combatant: Dnd5eCombatant,
+  activitySource?: Dnd5eCombatant,
 ): Dnd5eActivityActorSnapshot {
+  const spellAttackBonus = combatant.saveDc == null ? undefined : combatant.saveDc - 8
+  const resurrectionPenalty = combatant.classState.resurrectionPenalty?.value ?? 0
   return {
     id: combatant.id,
+    statBlockId: combatant.statBlockId,
+    name: combatant.name,
     controller: combatant.controller,
     level: combatant.level,
     proficiencyBonus: combatant.proficiencyBonus,
@@ -40,13 +46,49 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
     currentHp: combatant.currentHp,
     maxHp: combatant.maxHp,
     armorClass: combatant.armorClass,
+    sizeRank: combatant.sizeRank,
+    creatureType: combatant.creatureType,
+    illumination: combatant.illumination,
+    spellSaveDc: combatant.saveDc,
+    spellAttackBonus,
+    spellcastingAbilityModifier: spellAttackBonus == null
+      ? undefined
+      : spellAttackBonus - combatant.proficiencyBonus,
+    abilityCheckModifiers: Object.fromEntries(Object.entries(combatant.abilities).map(([ability, score]) => [
+      ability,
+      Math.floor((score - 10) / 2),
+    ])),
     conditions: combatant.conditions.filter((condition): condition is Dnd5eStandardConditionId =>
       STANDARD_CONDITIONS.has(condition)),
-    savingThrowModifiers: { ...combatant.savingThrowBonuses },
+    savingThrowModifiers: Object.fromEntries(Object.entries(combatant.savingThrowBonuses)
+      .map(([ability, modifier]) => [ability, modifier - resurrectionPenalty])),
     resources: Object.fromEntries(Object.entries(combatant.classResources).map(([id, resource]) => [id, {
       current: resource.current,
       maximum: resource.max,
     }])),
+    activeEffectDefinitionIds: (combatant.classState.activeEffects ?? []).map((effect) => ({
+      definitionId: effect.definitionId,
+      sourceActorId: effect.source.actorId,
+    })),
+    activeEffectSourceSpellSaveDcs: (combatant.classState.activeEffects ?? []).flatMap((effect) =>
+      effect.source.spellSaveDc == null ? [] : [{
+        definitionId: effect.definitionId,
+        sourceSpellSaveDc: effect.source.spellSaveDc,
+      }]),
+    equipment: combatant.activityEquipment ? structuredClone(combatant.activityEquipment) : undefined,
+    spellcasting: combatant.activitySpellcasting
+      ? { ...combatant.activitySpellcasting, classIds: [...combatant.activitySpellcasting.classIds] }
+      : undefined,
+    successfulSpellSaveNegatesDamage: combatant.successfulSpellSaveNegatesDamage,
+    magicSuppressed: combatant.magicSuppressed,
+    spellSuppressionAreas: combatant.spellSuppressionAreas?.map((entry) => ({ ...entry })),
+    elementalAdeptDamageTypes: combatant.elementalAdeptDamageTypes
+      ? [...combatant.elementalAdeptDamageTypes]
+      : undefined,
+    d20RollModifier: resurrectionPenalty || undefined,
+    canHearActivitySource: activitySource
+      ? dnd5eCombatantCanHearSource(combatant, activitySource)
+      : undefined,
   }
 }
 
@@ -78,6 +120,8 @@ export function resolveRegisteredDnd5eActivityInCombatV1(
 ): Dnd5eActivityHeadlessAuthorityBridgeResult {
   const actor = input.state.combatants[input.command.actorId]
   const targets = input.command.targetIds.map((id) => input.state.combatants[id])
+  const requestedAreaExemptTargetIds = input.command.areaExemptTargetIds ?? []
+  const areaExemptTargetIds = requestedAreaExemptTargetIds.filter((id) => !!input.state.combatants[id])
   if (!actor || targets.some((target) => !target)) {
     return {
       phase: 'resolve',
@@ -86,6 +130,12 @@ export function resolveRegisteredDnd5eActivityInCombatV1(
         reason: !actor ? 'unauthorized-actor' : 'target-snapshot-mismatch',
         details: [!actor ? 'actor is absent from Host combat state' : 'target is absent from Host combat state'],
       },
+    }
+  }
+  if (areaExemptTargetIds.length !== requestedAreaExemptTargetIds.length) {
+    return {
+      phase: 'resolve',
+      result: { ok: false, reason: 'target-snapshot-mismatch', details: ['an area trigger exemption is absent from Host combat state'] },
     }
   }
   const activity = getRegisteredDnd5eActivity(input.command.packageId, input.command.activityId)
@@ -118,13 +168,15 @@ export function resolveRegisteredDnd5eActivityInCombatV1(
   return resolveAndCommitDnd5eActivityCommand(input.state, {
     command: input.command,
     currentRevision: input.combatRevision,
-    actor: dnd5eActivityActorSnapshotFromCombatantV1(actor),
-    targets: targets.map((target) => dnd5eActivityActorSnapshotFromCombatantV1(target!)),
+    actor: dnd5eActivityActorSnapshotFromCombatantV1(actor, actor),
+    targets: targets.map((target) => dnd5eActivityActorSnapshotFromCombatantV1(target!, actor)),
     authoritativeRolls: input.authoritativeRolls,
     checkRollModes: input.checkRollModes,
     distanceFeetByTargetId,
     areaPlacementDistanceFeet: input.areaPlacementDistanceFeet,
     areaTargetIds: input.areaTargetIds,
+    areaExemptTargetIds,
+    secretPhrase: input.command.secretPhrase,
     parentDamageType: input.parentDamageType,
     usedTurnKeys,
     dmApproved: input.dmApproved,

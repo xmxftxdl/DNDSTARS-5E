@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Hammer, Search, ShieldCheck, Skull, Swords, X } from 'lucide-react'
 import {
   DND5E_SRD_ENEMY_POOL,
@@ -20,7 +20,9 @@ export interface EnemyPoolPlacementOptions {
   side: 'player' | 'enemy'
 }
 
-function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
+const ENEMY_POOL_PAGE_SIZE = 40
+
+const EnemyPoolThumbnail = memo(function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
   const [failedSource, setFailedSource] = useState<string>()
   const portrait = monster.tokenPortrait
   const showPortrait = !!portrait && failedSource !== portrait
@@ -41,7 +43,59 @@ function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
       ) : monster.emoji}
     </span>
   )
-}
+})
+
+const EnemyPoolResultRow = memo(function EnemyPoolResultRow({
+  monster,
+  onSelect,
+}: {
+  monster: EnemyTemplate
+  onSelect: (monster: EnemyTemplate) => void
+}) {
+  return <li data-enemy-pool-entry={monster.id}>
+    <button
+      type="button"
+      onClick={() => onSelect(monster)}
+      className="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left transition-colors hover:border-rose-500/30 hover:bg-rose-500/10"
+    >
+      <EnemyPoolThumbnail monster={monster} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-slate-100">{monster.name}</span>
+          <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-rose-200">
+            HP {monster.maxHp}
+          </span>
+          {monster.armorClass != null && (
+            <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-sky-200">
+              AC {monster.armorClass}
+            </span>
+          )}
+          {monster.challengeRating && (
+            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-amber-200">
+              CR {monster.challengeRating}
+            </span>
+          )}
+          {monster.size != null && monster.size !== 1 && (
+            <span className="text-[10px] text-slate-500">{monster.size}× 体型</span>
+          )}
+        </div>
+        {monster.description && (
+          <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{monster.description}</p>
+        )}
+        <div className="mt-1 flex flex-wrap gap-1">
+          {monster.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      </div>
+    </button>
+  </li>
+})
 
 export default function EnemyPoolPicker({
   open,
@@ -70,11 +124,17 @@ export default function EnemyPoolPicker({
   getUsedVisualVariantIds?: (template: EnemyTemplate) => readonly (string | undefined)[]
 }) {
   const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query)
   const [autoSelectNextAppearance, setAutoSelectNextAppearance] = useState(false)
   const [addAsFriendly, setAddAsFriendly] = useState(false)
   const [encounterOpen, setEncounterOpen] = useState(false)
   const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [appearanceTarget, setAppearanceTarget] = useState<EnemyTemplate>()
+  const [resultWindow, setResultWindow] = useState<{
+    query: string
+    pool: readonly EnemyTemplate[]
+    limit: number
+  }>({ query: '', pool: [], limit: ENEMY_POOL_PAGE_SIZE })
   const customMonsters = useCustomMonsterStore((state) => state.monsters)
   const customMonstersLoaded = useCustomMonsterStore((state) => state.loaded)
   const [customMonsterLoadError, setCustomMonsterLoadError] = useState<string>()
@@ -99,17 +159,19 @@ export default function EnemyPoolPicker({
     [customMonsters, pluginMonsters],
   )
 
-  const allResults = useMemo(() => searchEnemyPool(query, pool), [pool, query])
-  const results = allResults
-
-  if (!open) return null
+  const allResults = useMemo(() => searchEnemyPool(deferredQuery, pool), [deferredQuery, pool])
+  const resultLimit = resultWindow.query === deferredQuery && resultWindow.pool === pool
+    ? resultWindow.limit
+    : ENEMY_POOL_PAGE_SIZE
+  const results = useMemo(() => allResults.slice(0, resultLimit), [allResults, resultLimit])
+  const searchPending = query !== deferredQuery
 
   const closePicker = () => {
     setAppearanceTarget(undefined)
     onClose()
   }
 
-  const finishPick = (template: EnemyTemplate, visualVariantId?: string) => {
+  const finishPick = useCallback((template: EnemyTemplate, visualVariantId?: string) => {
     onPick(
       { ...template, visualVariantId },
       { side: allowFriendlyPlacement && addAsFriendly ? 'player' : 'enemy' },
@@ -117,7 +179,24 @@ export default function EnemyPoolPicker({
     setAppearanceTarget(undefined)
     setQuery('')
     onClose()
-  }
+  }, [addAsFriendly, allowFriendlyPlacement, onClose, onPick])
+
+  const selectMonster = useCallback((monster: EnemyTemplate) => {
+    if ((monster.visualVariants?.length ?? 0) > 1) {
+      if (enableAutomaticAppearanceSelection && autoSelectNextAppearance) {
+        finishPick(
+          monster,
+          selectNextEnemyVisualVariantId(monster, getUsedVisualVariantIds?.(monster) ?? []),
+        )
+        return
+      }
+      setAppearanceTarget(monster)
+      return
+    }
+    finishPick(monster)
+  }, [autoSelectNextAppearance, enableAutomaticAppearanceSelection, finishPick, getUsedVisualVariantIds])
+
+  if (!open) return null
 
   return <>
     <div
@@ -207,7 +286,7 @@ export default function EnemyPoolPicker({
           )}
           <p className="mt-2 text-xs text-slate-500">
             SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间怪物：{customMonsters.length}
-            {' '}· 扩展怪物：{pluginMonsters.length} · 显示 {results.length}/{allResults.length} 项
+            {' '}· 扩展怪物：{pluginMonsters.length} · {searchPending ? '正在筛选…' : `显示 ${results.length}/${allResults.length} 项`}
           </p>
           {!customMonstersLoaded && <p className="mt-1 text-xs text-cyan-200">正在恢复当前房间的怪物目录…</p>}
           {customMonsterLoadError && (
@@ -220,66 +299,21 @@ export default function EnemyPoolPicker({
             <p className="py-12 text-center text-sm text-slate-500">没有匹配的怪物</p>
           ) : (
             <ul className="space-y-1">
-              {results.map((m) => (
-                <li key={m.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if ((m.visualVariants?.length ?? 0) > 1) {
-                        if (enableAutomaticAppearanceSelection && autoSelectNextAppearance) {
-                          finishPick(
-                            m,
-                            selectNextEnemyVisualVariantId(m, getUsedVisualVariantIds?.(m) ?? []),
-                          )
-                          return
-                        }
-                        setAppearanceTarget(m)
-                        return
-                      }
-                      finishPick(m)
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left transition-colors hover:border-rose-500/30 hover:bg-rose-500/10"
-                  >
-                    <EnemyPoolThumbnail monster={m} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-slate-100">{m.name}</span>
-                        <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-rose-200">
-                          HP {m.maxHp}
-                        </span>
-                        {m.armorClass != null && (
-                          <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-sky-200">
-                            AC {m.armorClass}
-                          </span>
-                        )}
-                        {m.challengeRating && (
-                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-amber-200">
-                            CR {m.challengeRating}
-                          </span>
-                        )}
-                        {m.size != null && m.size !== 1 && (
-                          <span className="text-[10px] text-slate-500">{m.size}× 体型</span>
-                        )}
-                      </div>
-                      {m.description && (
-                        <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{m.description}</p>
-                      )}
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {m.tags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </button>
-                </li>
-              ))}
+              {results.map((monster) => <EnemyPoolResultRow key={monster.id} monster={monster} onSelect={selectMonster} />)}
             </ul>
           )}
+          {results.length < allResults.length ? <div className="flex flex-col items-center gap-1.5 px-2 py-4">
+            <button
+              type="button"
+              onClick={() => setResultWindow({
+                query: deferredQuery,
+                pool,
+                limit: resultLimit + ENEMY_POOL_PAGE_SIZE,
+              })}
+              className="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-100 transition hover:border-rose-300/40 hover:bg-rose-500/20"
+            >继续显示 {Math.min(ENEMY_POOL_PAGE_SIZE, allResults.length - results.length)} 个怪物</button>
+            <span className="text-[11px] text-slate-600">已显示 {results.length}/{allResults.length}</span>
+          </div> : null}
         </div>
       </div>
     </div>

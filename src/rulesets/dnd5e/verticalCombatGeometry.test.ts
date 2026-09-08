@@ -55,6 +55,34 @@ describe('D&D 5e vertical combat geometry', () => {
     })).toBe(5)
   })
 
+  it.each([
+    { label: '大型 2×2', rank: 3, actorX: 50, targetX: 35 },
+    { label: '超大型 3×3', rank: 4, actorX: 55, targetX: 35 },
+    { label: '巨型 4×4', rank: 5, actorX: 60, targetX: 35 },
+  ])('measures $label creatures from their occupied edge', ({ rank, actorX, targetX }) => {
+    const actor = token('sized-actor', {
+      x: actorX,
+      y: 50,
+      // Simulate an older persisted token whose visual size metadata was not
+      // migrated. The authoritative combatant size rank must still win.
+      size: 1,
+    })
+    const target = token('adjacent-target', {
+      x: targetX,
+      y: 55,
+      type: 'player',
+      size: 1,
+    })
+
+    expect(dnd5eMapTokenDistanceFeet({
+      map,
+      left: actor,
+      right: target,
+      leftSizeRank: rank,
+      rightSizeRank: 2,
+    })).toBe(5)
+  })
+
   it('does not let a ground-only area affect a creature flying over its cell', () => {
     const sourceToken = token('caster')
     const grounded = token('grounded', { elevationFeet: 0 })

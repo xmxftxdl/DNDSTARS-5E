@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, CheckCircle2, ClipboardPaste, FileJson, LoaderCircle, Pencil, Sparkles, Trash2 } from 'lucide-react'
+import {
+  AI_MODEL_POLICY,
+  creditCny,
+  reserveCredits,
+  textCredits,
+} from '../../../shared/ai-model-policy.mjs'
 import AiProviderSelector from './AiProviderSelector'
 import { AiProviderRegistryV1, DEFAULT_AI_PROVIDER_SELECTION } from '../../lib/aiProvider'
 import { showAppConfirm } from '../../lib/appDialog'
@@ -118,6 +124,12 @@ export default function Dnd5eLocalRulesAiImporter({
   const [coverage, setCoverage] = useState<Dnd5eContentAutomationCoverageReportV2 | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showJsonEditor, setShowJsonEditor] = useState(false)
+  const estimatedAiCredits = textCredits({
+    modelId: AI_MODEL_POLICY.generalModelId,
+    inputTokens: Math.max(1, Math.ceil(source.length / 2)),
+    outputTokens: 16_384,
+  })
+  const reservedAiCredits = reserveCredits(estimatedAiCredits)
 
   const previewDraft = useCallback(async (
     draftJson: string,
@@ -389,6 +401,9 @@ export default function Dnd5eLocalRulesAiImporter({
               <Trash2 className="h-3.5 w-3.5" />删除 AI 草稿
             </button>
           </div>
+          <p className="mt-2 text-[10px] leading-4 text-amber-100/55">
+            AI 转换固定使用 GPT-5.6 Luna；当前文本预计 {estimatedAiCredits.toLocaleString()} 积分（约 ¥{creditCny(estimatedAiCredits).toFixed(2)}），执行前预留 {reservedAiCredits.toLocaleString()} 积分。
+          </p>
 
           {draftNotice && (
             <p data-testid="local-room-ai-draft-restored" className="mt-3 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-3 py-2 text-xs leading-5 text-sky-100/75">

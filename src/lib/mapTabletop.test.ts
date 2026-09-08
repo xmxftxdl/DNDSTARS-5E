@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_MAP_TABLETOP_STATE,
   mapTabletopForMap,
+  nextMapTabletopExpiration,
   parseMapTabletopEvent,
   reduceMapTabletopState,
 } from './mapTabletop'
@@ -25,6 +26,12 @@ describe('map tabletop events', () => {
   it('rejects malformed or unbounded geometry', () => {
     expect(parseMapTabletopEvent({ ...annotation, to: { x: Number.POSITIVE_INFINITY, y: 0 } })).toBeNull()
     expect(parseMapTabletopEvent({ ...annotation, color: 'red' })).toBeNull()
+    expect(parseMapTabletopEvent({ ...annotation, shape: 'freehand', points: [{ x: 1, y: 1 }] })).toBeNull()
+    expect(parseMapTabletopEvent({
+      ...annotation,
+      shape: 'freehand',
+      points: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 4, y: 3 }],
+    })).toMatchObject({ shape: 'freehand' })
   })
 
   it('keeps temporary annotations per map and clears only the requested map', () => {
@@ -42,11 +49,37 @@ describe('map tabletop events', () => {
     expect(mapTabletopForMap(cleared, 'map-b', 3_000).annotations).toHaveLength(1)
   })
 
+  it('deletes one annotation without clearing the others', () => {
+    const sibling = { ...annotation, id: 'annotation-456' }
+    const withBoth = reduceMapTabletopState(
+      reduceMapTabletopState(EMPTY_MAP_TABLETOP_STATE, annotation, 2_000),
+      sibling,
+      2_000,
+    )
+    const deleted = reduceMapTabletopState(withBoth, {
+      type: 'delete-annotation', id: 'delete-event-123', annotationId: annotation.id, mapId: 'map-a',
+      memberId: 'dm-member', memberName: '地下城主', role: 'dm', createdAt: 3_000, expiresAt: 20_000,
+    }, 3_000)
+
+    expect(deleted.annotations.map((entry) => entry.id)).toEqual([sibling.id])
+  })
+
   it('drops expired pings during any reducer pass', () => {
     const withPing = reduceMapTabletopState(EMPTY_MAP_TABLETOP_STATE, {
       type: 'ping', id: 'ping-event-1', mapId: 'map-a', point: { x: 1, y: 2 },
       memberId: 'player-member', memberName: '玩家', role: 'player', createdAt: 1_000, expiresAt: 2_000,
     }, 1_500)
     expect(reduceMapTabletopState(withPing, null, 2_001).pings).toHaveLength(0)
+  })
+
+  it('keeps state identity before expiry and schedules the earliest real expiry', () => {
+    const withAnnotation = reduceMapTabletopState(EMPTY_MAP_TABLETOP_STATE, annotation, 2_000)
+    const withPing = reduceMapTabletopState(withAnnotation, {
+      type: 'ping', id: 'ping-event-2', mapId: 'map-a', point: { x: 1, y: 2 },
+      memberId: 'player-member', memberName: 'player', role: 'player', createdAt: 2_000, expiresAt: 5_000,
+    }, 2_000)
+
+    expect(nextMapTabletopExpiration(withPing)).toBe(5_000)
+    expect(reduceMapTabletopState(withPing, null, 4_999)).toBe(withPing)
   })
 })

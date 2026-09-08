@@ -5,6 +5,7 @@ import {
   emptyCombatInterruptQueue,
   finishCombatInterrupt,
   markCombatInterruptRolling,
+  recordCombatInterruptRollOptions,
   rollbackCombatInterrupt,
   upsertCombatInterrupt,
   waitCombatInterruptForDm,
@@ -100,6 +101,23 @@ export async function contributeSharedCombatInterrupt(
   }
   const next = contributeCombatInterrupt(await loadQueueForMap(input), input.id, input.contribution)
   await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('contribute', next))
+}
+
+export async function recordSharedCombatInterruptRollOptions(
+  input: SharedCombatInterruptStore & {
+    mapId: string
+    id: string
+    rollOptions: { contributionId: string; values: number[] }
+  },
+): Promise<void> {
+  if (input.mutateSharedCombatInterrupt) {
+    requireMutationResult('roll-options', await input.mutateSharedCombatInterrupt({
+      operation: 'roll-options', mapId: input.mapId, id: input.id, rollOptions: input.rollOptions,
+    }))
+    return
+  }
+  const next = recordCombatInterruptRollOptions(await loadQueueForMap(input), input.id, input.rollOptions)
+  await input.saveSharedResource(COMBAT_INTERRUPT_RESOURCE, requireMutationResult('roll-options', next))
 }
 
 export async function waitSharedCombatInterruptForDm(

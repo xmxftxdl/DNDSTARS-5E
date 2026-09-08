@@ -26,6 +26,7 @@ import {
   DND5E_EDITABLE_CURRENCIES,
   DND5E_EDITABLE_CURRENCY_LABELS,
 } from '../../types/inventory'
+import { showAppConfirm } from '../../lib/appDialog'
 
 const ICON_LABELS: Readonly<Record<SceneInteractionPoint['icon'], string>> = {
   bookshelf: '书柜',
@@ -252,6 +253,7 @@ export default function SceneInteractionPointsEditor({
   map,
   scene,
   combatActive,
+  requestedSelectedId,
   placingInteractionPointId,
   onBeginPlace,
   onCancelPlace,
@@ -259,6 +261,7 @@ export default function SceneInteractionPointsEditor({
   map: BattleMap
   scene: OrchestratedScene
   combatActive: boolean
+  requestedSelectedId?: string | null
   placingInteractionPointId?: string | null
   onBeginPlace: (interactionPointId: string) => void
   onCancelPlace: () => void
@@ -267,7 +270,7 @@ export default function SceneInteractionPointsEditor({
   const updateInteractionPoint = useSceneOrchestrationStore((state) => state.updateInteractionPoint)
   const removeInteractionPoint = useSceneOrchestrationStore((state) => state.removeInteractionPoint)
   const loadJournal = useRoomCommunicationsStore((state) => state.loadJournal)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(() => requestedSelectedId ?? null)
   const [itemFilter, setItemFilter] = useState('')
   const pluginRegistryRevision = useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -352,7 +355,7 @@ export default function SceneInteractionPointsEditor({
 
       {combatActive && (
         <p className="mt-3 rounded-lg border border-amber-300/15 bg-black/20 px-3 py-2 text-[11px] text-amber-100/70">
-          战斗进行中只允许玩家使用已有互动点；结束战斗后才能修改配置。
+          战斗进行中锁定检定与奖励配置；DM 仍可直接在地图上拖动已有互动点调整位置。
         </p>
       )}
 
@@ -380,7 +383,7 @@ export default function SceneInteractionPointsEditor({
           </div>
 
           {selected && (
-            <div className="mt-3 space-y-3 rounded-xl border border-white/8 bg-black/15 p-3">
+            <div data-testid="scene-interaction-point-details" className="mt-3 space-y-3 rounded-xl border border-white/8 bg-black/15 p-3">
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px_120px_auto]">
                 <input
                   value={selected.name}
@@ -416,16 +419,23 @@ export default function SceneInteractionPointsEditor({
                 </button>
                 <button
                   type="button"
-                  disabled={combatActive}
-                  onClick={() => {
+                  onClick={async () => {
+                    const confirmed = await showAppConfirm({
+                      title: '删除地图互动点',
+                      message: `确定删除“${selected.name}”？删除后玩家将无法再与它互动。`,
+                      confirmLabel: '删除',
+                      tone: 'danger',
+                    })
+                    if (!confirmed) return
                     removeInteractionPoint(scene.id, selected.id)
                     setSelectedId(null)
                     if (placingInteractionPointId === selected.id) onCancelPlace()
                   }}
-                  className="rounded-lg p-2 text-slate-600 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                  className="flex items-center justify-center gap-1 rounded-lg border border-red-300/15 bg-red-500/[0.06] px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/12"
                   aria-label="删除互动点"
                 >
                   <Trash2 className="h-4 w-4" />
+                  删除
                 </button>
               </div>
 

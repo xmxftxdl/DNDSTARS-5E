@@ -34,6 +34,7 @@ import {
 } from './airborneFallActionResolution'
 import {
   createDnd5eMapCombatSnapshot,
+  dnd5eRequestedInitiativeActorIndex,
   planDnd5eMapResultApplication,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
@@ -213,6 +214,7 @@ export function prepareDnd5eDragonbornBreathAction(input: {
     }) &&
     !mapGeometryLineOfEffectBlocked({
       geometry,
+      map: input.map,
       from: actorToken,
       to: candidate,
       fromElevationFeet: sourceElevationFeet,
@@ -254,7 +256,11 @@ export function prepareDnd5eDragonbornBreathAction(input: {
     characters: input.characters,
     initiativeOrder: snapshotInitiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   if (
     actorIndex < 0 ||
     !snapshot.state.combatants[actorToken.id] ||
@@ -316,6 +322,7 @@ export function resolvePreparedDnd5eDragonbornBreathAction(input: {
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

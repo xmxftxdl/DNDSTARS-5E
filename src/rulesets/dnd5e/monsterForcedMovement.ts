@@ -9,6 +9,7 @@ export interface Dnd5eMonsterForcedMovementPayload {
   to: { x: number; y: number }
   distanceFeet: number
   toElevationFeet?: number
+  toGroundElevationFeet?: number
   fallingDamageRolls?: readonly number[]
 }
 
@@ -75,6 +76,8 @@ export function dnd5eMonsterForcedMovementPayloadIsValid(input: {
   gridDistance?: {
     cellUnits: number
     feetPerCell: number
+    sourceFootprintCells?: number
+    targetFootprintCells?: number
   }
   coordinateUnitsPerFoot?: number
 }): boolean {
@@ -93,17 +96,58 @@ export function dnd5eMonsterForcedMovementPayloadIsValid(input: {
   if (movement.distanceFeet === 0) {
     return samePosition &&
       movement.toElevationFeet == null &&
+      movement.toGroundElevationFeet == null &&
       (movement.fallingDamageRolls?.length ?? 0) === 0
   }
   if (input.resisted || samePosition) return false
 
-  const sourceVectorX = input.source.x - input.target.x
-  const sourceVectorY = input.source.y - input.target.y
+  const grid = input.gridDistance
+  const usesGrid = !!grid &&
+    Number.isFinite(grid.cellUnits) &&
+    grid.cellUnits > 0 &&
+    Number.isFinite(grid.feetPerCell) &&
+    grid.feetPerCell > 0
+  const sourceFootprintCells = Math.max(
+    1,
+    Math.floor(grid?.sourceFootprintCells ?? 1),
+  )
+  const targetFootprintCells = Math.max(
+    1,
+    Math.floor(grid?.targetFootprintCells ?? 1),
+  )
+  const sourceHalfUnits = usesGrid
+    ? sourceFootprintCells * grid!.cellUnits / 2
+    : 0
+  const targetHalfUnits = usesGrid
+    ? targetFootprintCells * grid!.cellUnits / 2
+    : 0
+  const separatedAxisDirection = (
+    sourceCenter: number,
+    targetCenter: number,
+  ): number => {
+    if (!usesGrid) return Math.sign(sourceCenter - targetCenter)
+    const epsilon = 1e-6
+    const sourceMinimum = sourceCenter - sourceHalfUnits
+    const sourceMaximum = sourceCenter + sourceHalfUnits
+    const targetMinimum = targetCenter - targetHalfUnits
+    const targetMaximum = targetCenter + targetHalfUnits
+    if (sourceMinimum >= targetMaximum - epsilon) return 1
+    if (sourceMaximum <= targetMinimum + epsilon) return -1
+    return 0
+  }
+  let sourceDirectionX = separatedAxisDirection(input.source.x, input.target.x)
+  let sourceDirectionY = separatedAxisDirection(input.source.y, input.target.y)
+  // Overlapping footprints are invalid map state, but retaining the old
+  // center-vector fallback keeps validation deterministic for legacy maps.
+  if (sourceDirectionX === 0 && sourceDirectionY === 0) {
+    sourceDirectionX = Math.sign(input.source.x - input.target.x)
+    sourceDirectionY = Math.sign(input.source.y - input.target.y)
+  }
   const expectedDirectionX = Math.sign(
-    input.direction === 'toward-source' ? sourceVectorX : -sourceVectorX,
+    input.direction === 'toward-source' ? sourceDirectionX : -sourceDirectionX,
   )
   const expectedDirectionY = Math.sign(
-    input.direction === 'toward-source' ? sourceVectorY : -sourceVectorY,
+    input.direction === 'toward-source' ? sourceDirectionY : -sourceDirectionY,
   )
   const movementDirectionX = Math.sign(deltaX)
   const movementDirectionY = Math.sign(deltaY)
@@ -118,12 +162,6 @@ export function dnd5eMonsterForcedMovementPayloadIsValid(input: {
     )
   if (!directionMatches) return false
 
-  const grid = input.gridDistance
-  const usesGrid = !!grid &&
-    Number.isFinite(grid.cellUnits) &&
-    grid.cellUnits > 0 &&
-    Number.isFinite(grid.feetPerCell) &&
-    grid.feetPerCell > 0
   const actualDistanceFeet = usesGrid
     ? Math.max(Math.abs(deltaX), Math.abs(deltaY)) /
       grid.cellUnits * grid.feetPerCell

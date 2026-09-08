@@ -1,6 +1,9 @@
 import { createServer, type Server } from 'node:http'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { startLocalAiBridge } from '../../scripts/local-ai-bridge-core.mjs'
+import { openAiStrictJsonSchema, startLocalAiBridge } from '../../scripts/local-ai-bridge-core.mjs'
 
 const servers: Array<{ close: () => Promise<unknown> } | Server> = []
 
@@ -243,6 +246,90 @@ async function fakeRapidOcr() {
 }
 
 describe('Astral Trace Local AI Bridge', () => {
+  it('converts every nested object into an OpenAI strict output schema without mutating the source', () => {
+    const source = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['scenes'],
+      properties: {
+        scenes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['name'],
+            properties: {
+              name: { type: 'string' },
+              time: { type: 'string' },
+              tags: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+    }
+    const strict = openAiStrictJsonSchema(source) as typeof source
+    expect(strict.required).toEqual(['scenes'])
+    expect(strict.properties.scenes.items.required).toEqual(['name', 'time', 'tags'])
+    expect(strict.properties.scenes.items.additionalProperties).toBe(false)
+    expect(source.properties.scenes.items.required).toEqual(['name'])
+  })
+
+  it('记录结构化任务的 Provider、模型、Token、耗时和积分结算', async () => {
+    const external = await fakeRoutedExternalModelApi('test-secret')
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'astraltrace-ai-text-usage-'))
+    const bridge = await startLocalAiBridge({
+      port: 0,
+      accessToken: 'test-access-token',
+      externalApiUrl: external.apiUrl,
+      externalApiKey: 'test-secret',
+      externalModelId: 'gpt-5.6-luna',
+      usageAuditPath: path.join(directory, 'usage.jsonl'),
+      allowedOrigins: [],
+    })
+    servers.push(bridge)
+    try {
+      const response = await fetch(`${bridge.url}/api/generate-structured`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-access-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engine: 'external',
+          modelId: 'external:gpt-5.6-luna',
+          request: {
+            schemaVersion: 1,
+            jobId: 'usage-audit-text-job',
+            task: 'resource-structuring',
+            systemPrompt: '只输出结构化数据。',
+            userPrompt: '生成测试草稿。',
+            maxOutputTokens: 4_096,
+            outputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+          },
+        }),
+      })
+      const result = await response.json() as {
+        usage: { inputTokens: number; outputTokens: number }
+        billing: { providerId: string; modelId: string; actualCredits: number; reservedCredits: number }
+      }
+      expect(result.usage).toEqual({ inputTokens: 31, outputTokens: 7 })
+      expect(result.billing).toMatchObject({
+        providerId: 'external-account',
+        modelId: 'external:gpt-5.6-luna',
+      })
+      expect(result.billing.reservedCredits).toBeGreaterThanOrEqual(result.billing.actualCredits)
+
+      const auditResponse = await fetch(`${bridge.url}/api/usage?limit=1`, {
+        headers: { Authorization: 'Bearer test-access-token' },
+      })
+      const audit = await auditResponse.json() as { records: Array<Record<string, unknown>> }
+      expect(audit.records[0]).toMatchObject({
+        task: 'resource-structuring',
+        inputTokens: 31,
+        outputTokens: 7,
+        status: 'completed',
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
   it('只允许白名单 Origin，并要求一次性配对后才能发现和调用本地模型', async () => {
     const ollamaUrl = await fakeOllama()
     const bridge = await startLocalAiBridge({
@@ -1001,7 +1088,7 @@ describe('Astral Trace Local AI Bridge', () => {
       expect.objectContaining({
         id: 'external:synthesis:advanced-model',
         displayName: '高级综合模型',
-        supportedTasks: ['campaign-analysis', 'resource-structuring', 'session-summary', 'prep-recommendations'],
+        supportedTasks: ['campaign-analysis'],
       }),
     ]))
     expect(JSON.stringify(modelBody)).not.toContain('economy-secret')
@@ -1046,13 +1133,26 @@ describe('Astral Trace Local AI Bridge', () => {
         modelId: 'external:synthesis:advanced-model',
         output: { name: 'advanced-model' },
       })
-    expect(await generate('external:synthesis:advanced-model', 'route-resource', 'resource-structuring'))
-      .toMatchObject({
-        modelId: 'external:synthesis:advanced-model',
-        output: { name: 'advanced-model' },
-      })
     expect(economyExternal.requestedModels).toEqual(['economy-model'])
-    expect(advancedExternal.requestedModels).toEqual(['advanced-model', 'advanced-model'])
+    expect(advancedExternal.requestedModels).toEqual(['advanced-model'])
+
+    const nonPdfSynthesis = await fetch(`${bridge.url}/api/generate-structured`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        engine: 'external',
+        modelId: 'external:synthesis:advanced-model',
+        request: {
+          schemaVersion: 1,
+          jobId: 'route-resource',
+          task: 'resource-structuring',
+          systemPrompt: '只输出结构化数据。',
+          userPrompt: '分析资料。',
+          outputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+        },
+      }),
+    })
+    expect(nonPdfSynthesis.status).toBe(400)
 
     const roleViolation = await fetch(`${bridge.url}/api/generate-structured`, {
       method: 'POST',

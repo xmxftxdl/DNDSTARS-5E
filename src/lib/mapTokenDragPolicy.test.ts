@@ -56,7 +56,7 @@ describe('map Token drag policy', () => {
     })).toBe(false)
   })
 
-  it('disables every enemy drag during combat while preserving setup placement', () => {
+  it('lets the DM authoritatively place enemies during combat without granting players access', () => {
     expect(canDragMapToken({
       ...base,
       isDm: true,
@@ -64,21 +64,34 @@ describe('map Token drag policy', () => {
       token: { id: 'current-monster', type: 'enemy' },
     })).toBe(true)
 
-    // The current manually controlled monster moves by selecting a legal cell,
-    // never by bypassing Headless movement with a placement drag.
     expect(canDragMapToken({
       ...base,
       isDm: true,
       combatActive: true,
       token: { id: 'current-monster', type: 'enemy' },
-    })).toBe(false)
+    })).toBe(true)
 
-    // A monster that has not reached its turn cannot be repositioned either.
     expect(canDragMapToken({
       ...base,
       isDm: true,
       combatActive: true,
       token: { id: 'waiting-monster', type: 'enemy' },
+    })).toBe(true)
+
+    expect(canDragMapToken({
+      ...base,
+      isDm: false,
+      combatActive: true,
+      token: { id: 'current-monster', type: 'enemy' },
+      playerMovableTokenIds: ['current-monster'],
+    })).toBe(false)
+
+    expect(canDragMapToken({
+      ...base,
+      isDm: true,
+      combatActive: true,
+      token: { id: 'current-monster', type: 'enemy' },
+      lockDragTokenIds: ['current-monster'],
     })).toBe(false)
   })
 
@@ -101,7 +114,7 @@ describe('map Token drag policy', () => {
     })).toBe(false)
   })
 
-  it('skips local collision for DM placement and keeps player movement validated', () => {
+  it('defers DM placement and player path validation to their authority owners', () => {
     expect(shouldValidateMapTokenMoveLocally({
       isDm: true,
       token: { id: 'active-monster', type: 'enemy' },
@@ -116,7 +129,7 @@ describe('map Token drag policy', () => {
       isDm: false,
       token: { id: 'hero-token', type: 'player' },
       authoritativeMovementTokenIds: [],
-    })).toBe(true)
+    })).toBe(false)
   })
 
   it('holds the dragged position until authority catches up or rejects it', () => {

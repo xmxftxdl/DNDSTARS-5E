@@ -4,8 +4,9 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { prepareDnd5eClassFeature, previewDnd5eMonkBonusAttack, resolvePreparedDnd5eClassFeature } from './classFeatureAction'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { dnd5eSpellAuthorityResolutionContext } from '../../pages/maps/spellSettlementCoordinator'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   const result: Character = {
@@ -76,6 +77,102 @@ function fixture(actor: Character, payload: Dnd5eClassFeaturePayload, allies: Ch
 }
 
 describe('D&D 5e generic class feature authority bridge', () => {
+  it('routes voluntary Polymorph concentration ending for a non-Druid caster', () => {
+    const actor = character('wizard', '法师', {
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: true,
+      dnd5eCombatState: {
+        concentrationSpellId: 'polymorph',
+        concentrationRoundsRemaining: 600,
+        concentrationTargetIds: ['wizard-token'],
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'wizard-token',
+        wildShapeSourceActivityId: 'polymorph',
+        wildShapeMaximumChallengeRating: 6,
+        wildShapeCurrentHp: 11,
+        wildShapeRoundsRemaining: 600,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 30,
+        wildShapeOriginalArmorClass: 14,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 14, cha: 16 },
+        wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 2, cha: 3 },
+      },
+    })
+    const prepared = prepareDnd5eClassFeature(fixture(actor, { feature: 'druid-end-wild-shape' }))
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared })
+    expect(resolved.result).toMatchObject({ ok: true })
+    expect(resolved.application?.characters[0]).toMatchObject({
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: false,
+    })
+    expect(resolved.application?.characters[0].dnd5eCombatState?.wildShapeFormId).toBeUndefined()
+    expect(resolved.application?.characters[0].dnd5eCombatState?.concentrationSpellId).toBeUndefined()
+    expect(resolved.result.state.combatants['wizard-token'].turn.bonusActionAvailable).toBe(true)
+  })
+
+  it('ends a spell form through the same authority transaction outside combat', () => {
+    const actor = character('wizard', '法师', {
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: true,
+      dnd5eCombatState: {
+        concentrationSpellId: 'shapechange',
+        concentrationRoundsRemaining: 600,
+        concentrationTargetIds: ['wizard-token'],
+        wildShapeFormId: 'srd-5.1:adult-black-dragon',
+        wildShapeMode: 'shapechange',
+        wildShapeSourceActorId: 'wizard-token',
+        wildShapeSourceActivityId: 'srd-5.1:spell:shapechange',
+        wildShapeMaximumChallengeRating: 20,
+        wildShapeCurrentHp: 183,
+        wildShapeRoundsRemaining: 600,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 30,
+        wildShapeOriginalArmorClass: 14,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 14, cha: 16 },
+        wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 2, cha: 3 },
+      },
+    })
+    const input = fixture(actor, { feature: 'druid-end-wild-shape' })
+    input.action.combatId = undefined
+    const authority = dnd5eSpellAuthorityResolutionContext({
+      combatActive: false,
+      map: input.map,
+      actorTokenId: input.action.actorTokenId,
+      initiativeOrder: [],
+      turnEconomy: input.turnEconomy,
+    })
+    const prepared = prepareDnd5eClassFeature({
+      ...input,
+      initiativeOrder: [...authority.initiativeOrder],
+      turnEconomy: authority.turnEconomy,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0]).toMatchObject({
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: false,
+    })
+    expect(resolved.application?.characters[0].dnd5eCombatState?.wildShapeFormId).toBeUndefined()
+
+    const forbidden = fixture(actor, { feature: 'barbarian-rage' })
+    forbidden.action.combatId = undefined
+    expect(prepareDnd5eClassFeature(forbidden)).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
   it('persists Barbarian Rage through the map bridge without changing AP', () => {
     const actor = character('barbarian', '野蛮人', {
       hitDice: '6d12',
@@ -668,6 +765,56 @@ describe('D&D 5e generic class feature authority bridge', () => {
     expect(resolved.application?.characters[0].classResources?.['dnd5e-ki']).toEqual({ current: 1, max: 5 })
     expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(0)
     expect(resolved.result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(2)
+  })
+
+  it('applies a generic active-effect attack profile to Monk reach and damage while rejecting forged rewrites', () => {
+    const fireFist = createDnd5eMechanicalEffect({
+      definitionId: 'local:effect:fangs-of-fire-snake-mode',
+      label: '火蛇之牙',
+      source: { kind: 'feature', actorId: 'monk', rulesId: 'fangs-of-fire-snake-stance' },
+      targetId: 'monk',
+      duration: { type: 'until-turn-boundary', boundary: 'source-turn-end' },
+      modifiers: {
+        attackProfiles: [{ attackModes: ['unarmed'], reachBonusFeet: 10, damageTypeOverride: 'fire' }],
+      },
+    })
+    const monk = character('monk', '武僧', {
+      level: 5,
+      abilities: { str: 10, dex: 16, con: 14, int: 10, wis: 16, cha: 8 },
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        monkAttackActionTurnKey: 'combat:1:monk-token',
+        monkMartialArtsTurnKey: 'combat:1:monk-token',
+        activeEffects: [fireFist],
+      },
+    })
+    const input = fixture(monk, {
+      feature: 'monk-unarmed-bonus', mode: 'martial-arts', targetTokenIds: ['enemy-token'],
+    })
+    const enemy = input.map.tokens.find((entry) => entry.id === 'enemy-token')!
+    enemy.x = 175
+    enemy.y = 25
+    const prepared = prepareDnd5eClassFeature(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.monkBonusAttack).toMatchObject({ reachFeet: 15, damageType: 'fire' })
+    const resolved = resolvePreparedDnd5eClassFeature({
+      prepared: prepared.prepared,
+      monkAttackRolls: [{ d20: 15, damageRolls: [4] }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', attackMode: 'unarmed', damageType: 'fire', hit: true,
+    }))
+
+    const forged = prepareDnd5eClassFeature(input)
+    expect(forged.ok).toBe(true)
+    if (!forged.ok || forged.prepared.headlessAction.type !== 'monk-unarmed-bonus') return
+    forged.prepared.headlessAction = { ...forged.prepared.headlessAction, damageType: 'cold' }
+    expect(resolvePreparedDnd5eClassFeature({
+      prepared: forged.prepared,
+      monkAttackRolls: [{ d20: 15, damageRolls: [4] }],
+    }).result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
   })
 
   it('lets a Lore Bard reduce a Monk bonus unarmed damage roll', () => {

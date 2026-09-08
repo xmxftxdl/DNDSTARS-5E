@@ -12,8 +12,17 @@ export function normalizeDnd5eClassLevels(
     const level = Math.max(0, Math.min(20, Math.floor(rawLevel)))
     if (level > 0) normalized[classId] = level
   }
-  if (Object.keys(normalized).length > 0) return normalized
   const primary = dnd5eClassDefinition(character.charClass)
+  const classIds = Object.keys(normalized)
+  if (classIds.length > 0) {
+    // Older saves could change charClass without replacing the original
+    // single-class level map. In a valid multiclass record the starting class
+    // must always be present, so a one-entry mismatch is safe to repair.
+    if (primary && classIds.length === 1 && normalized[primary.id] == null) {
+      return { [primary.id]: Math.max(1, Math.min(20, Math.floor(character.level || normalized[classIds[0]] || 1))) }
+    }
+    return normalized
+  }
   return primary ? { [primary.id]: Math.max(1, Math.min(20, Math.floor(character.level || 1))) } : {}
 }
 

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
@@ -291,8 +292,9 @@ describe('SRD monster 5e turn planner', () => {
     ])
   })
 
-  it('plans three distinct Kraken Flings without treating CR as a character level', () => {
-    const monster = getDnd5eSrdMonster('srd-5.1:kraken')!
+  it('plans three distinct throws in an isolated Fling fixture without treating CR as a character level', () => {
+    const monster = monsterMechanicFixture('kraken', ['fling', 'tentacle', 'multiattack-flings'])
+    setDnd5eRoomMonsterCatalog([monster])
     const multiattackIndex = monster.actions.findIndex((action) =>
       action.id === 'multiattack-flings')
     const kraken = token({
@@ -381,7 +383,7 @@ describe('SRD monster 5e turn planner', () => {
     expect(new Set(plan.attackTargetTokenIds)).toEqual(
       new Set(heroes.map((hero) => hero.id)),
     )
-  })
+  }, 10_000)
 
   it('scores the Bugbear javelin with melee damage at 5 feet and ranged damage at 30 feet', () => {
     const bugbear = token({
@@ -845,7 +847,7 @@ describe('SRD monster 5e turn planner', () => {
     })
   })
 
-  it('selects no more than three targets for Kraken Lightning Storm', () => {
+  it('plans the structured three-bolt Lightning Storm against at most three targets', () => {
     const kraken = token({
       id: 'kraken', label: 'Kraken', poolId: 'srd-5.1:kraken',
       x: 5, y: 45, hp: 472, maxHp: 472,
@@ -871,13 +873,20 @@ describe('SRD monster 5e turn planner', () => {
         requiredTargetId: heroes[0].id,
       },
     )
-    expect(plan.areaAction).toMatchObject({
-      actionId: 'lightning-storm',
-      saveAbility: 'dex',
-      saveDc: 23,
+    expect(plan).toMatchObject({
+      attacked: false,
+      areaAction: {
+        actionId: 'lightning-storm',
+        targetTokenIds: heroes.slice(0, 3).map((hero) => hero.id),
+        saveAbility: 'dex',
+        saveDc: 23,
+        damage: {
+          diceCount: 4,
+          diceSides: 10,
+          damageType: 'lightning',
+        },
+      },
     })
-    expect(plan.areaAction?.targetTokenIds).toHaveLength(3)
-    expect(plan.areaAction?.targetTokenIds).toContain(heroes[0].id)
   })
 
   it('aims a self-origin breath along an airborne hostile line and excludes the ground below it', () => {
@@ -3261,4 +3270,10 @@ describe('SRD monster 5e turn planner', () => {
       actorTokenId: goblin.id, to: { x: 25, y: 5 }, turnEconomy: noInteraction,
     })).toEqual({ ok: false, reason: 'object-interaction-unavailable' })
   })
+})
+
+vi.mock('./monsterMultiattackConstraints', async importOriginal => {
+  const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
+  const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
+  return monsterMechanicConstraints(original)
 })

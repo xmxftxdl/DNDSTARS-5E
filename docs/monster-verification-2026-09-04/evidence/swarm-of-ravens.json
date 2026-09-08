@@ -1,0 +1,104 @@
+{
+  "id": "srd-5.1:swarm-of-ravens",
+  "slug": "swarm-of-ravens",
+  "name": "渡鸦群",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "beaks",
+      "name": "群喙啄击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.damageAtHalfHp[].average",
+        "attack.damageAtHalfHp[].count",
+        "attack.damageAtHalfHp[].sides",
+        "attack.damageAtHalfHp[].bonus",
+        "attack.damageAtHalfHp[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "half-hp"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 256,
+      "slug": "swarm-of-ravens",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:03:53.809Z",
+      "name": "渡鸦群",
+      "actionId": "beaks",
+      "actionName": "群喙啄击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/4",
+      "total": 334,
+      "mapId": "verify-ui-swarm-of-ravens-beaks-1788570233867",
+      "combatId": "verify-ui-swarm-of-ravens-beaks-1788570233867:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "渡鸦群 使用群喙啄击攻击 验证目标：群喙啄击 → 验证目标 6+4=10 命中；共造成 7 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:04 PM\n结算\n\n渡鸦群 使用群喙啄击攻击 验证目标：群喙啄击 → 验证目标 6+4=10 命中；共造成 7 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：群喙啄击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 6；最终采用 6；调整值 +4。\n结果 · 10 vs AC 10：命中。\n伤害骰 · 群喙啄击（基础伤害·穿刺）｜2d6 骰面：3 + 4 = 7｜固定加值 +0｜小计 7\n渡鸦群｜消耗动作\n验证目标｜受到 7 点伤害｜HP 320 → 313",
+      "playerLog": "渡鸦群 使用群喙啄击攻击 验证目标：群喙啄击 → 验证目标 6+4=10 命中；共造成 7 点伤害。",
+      "afterHp": 313,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:04:18.359Z",
+      "evidenceFile": "ui-cases/monsters/256-swarm-of-ravens.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "群集",
+      "automation": "headless",
+      "rule": "swarm",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.cannotRegainHitPoints",
+        "rule.cannotGainTemporaryHitPoints"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "healing",
+        "temporary-hit-points"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

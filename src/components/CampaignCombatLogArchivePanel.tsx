@@ -20,6 +20,8 @@ const KIND_LABEL = {
   damage: '结算',
 } as const
 
+const MAX_VISIBLE_ARCHIVES = 5
+
 function formatArchiveTime(value: number): string {
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
@@ -88,6 +90,7 @@ export function CampaignCombatLogArchiveView({
     .filter((session) => (session.logEntries?.length ?? 0) > 0)
     .sort((left, right) =>
       (right.endedAt ?? right.updatedAt) - (left.endedAt ?? left.updatedAt)), [sessions])
+  const visibleArchived = archived.slice(0, MAX_VISIBLE_ARCHIVES)
 
   const exportAll = () => {
     const body = archived.map((session) => formatCombatLogArchiveText(session)).join('\n\n' + '='.repeat(72) + '\n\n')
@@ -156,7 +159,7 @@ export function CampaignCombatLogArchiveView({
           </div>
         ) : (
           <div className="divide-y divide-white/[0.07]">
-            {archived.map((session) => {
+            {visibleArchived.map((session) => {
               const expanded = expandedCombatId === session.combatId
               const mapName = session.mapName ?? maps.find((map) => map.id === session.mapId)?.name ?? session.mapId
               const participants = Object.values(session.combatants)

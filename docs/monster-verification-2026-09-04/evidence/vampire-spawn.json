@@ -1,0 +1,328 @@
+{
+  "id": "srd-5.1:vampire-spawn",
+  "slug": "vampire-spawn",
+  "name": "吸血鬼衍体",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].damageBasis.kind",
+        "attack.onHitEffects[].damageBasis.damageType",
+        "attack.onHitEffects[].recovery",
+        "attack.onHitEffects[].healSourceByAmount",
+        "automation",
+        "targetEligibility.kind",
+        "targetEligibility.predicates[].kind",
+        "targetEligibility.predicates[].relationKind",
+        "targetEligibility.predicates[].condition",
+        "targetEligibility.dmAdjudicationAlternatives[].kind"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws",
+      "name": "双爪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws-grapple",
+      "name": "双爪 (Grapple)",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-claws-and-bite",
+      "name": "多重攻击：双爪 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-claws-and-grapple",
+      "name": "多重攻击：双爪 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-grapple-and-claws",
+      "name": "多重攻击：claws-grapple ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-grapples",
+      "name": "多重攻击：claws-grapple ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-grapple-and-bite",
+      "name": "多重攻击：claws-grapple ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 109,
+      "slug": "vampire-spawn",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:29:12.189Z",
+      "name": "吸血鬼衍体",
+      "actionId": "claws",
+      "actionName": "双爪",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "5",
+      "total": 334,
+      "mapId": "verify-ui-vampire-spawn-claws-1788568152238",
+      "combatId": "verify-ui-vampire-spawn-claws-1788568152238:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "吸血鬼衍体 使用双爪攻击 验证目标：双爪 → 验证目标 13+6=19 命中；共造成 5 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:29 PM\n结算\n\n吸血鬼衍体 使用双爪攻击 验证目标：双爪 → 验证目标 13+6=19 命中；共造成 5 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：双爪｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +6。\n结果 · 19 vs AC 10：命中。\n伤害骰 · 双爪（基础伤害·挥砍）｜2d4 骰面：1 + 1 = 2｜固定加值 +3｜小计 5\n吸血鬼衍体｜消耗动作\n验证目标｜受到 5 点伤害｜HP 320 → 315",
+      "playerLog": "吸血鬼衍体 使用双爪攻击 验证目标：双爪 → 验证目标 13+6=19 命中；共造成 5 点伤害。",
+      "afterHp": 315,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:29:35.778Z",
+      "evidenceFile": "ui-cases/monsters/109-vampire-spawn.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "再生",
+      "automation": "headless",
+      "rule": "regeneration",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.amount",
+        "rule.requiresPositiveHp",
+        "rule.diesAtZeroWhenSuppressed"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "injured",
+        "full-hp",
+        "suppressed"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "吸血鬼弱点",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 18,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

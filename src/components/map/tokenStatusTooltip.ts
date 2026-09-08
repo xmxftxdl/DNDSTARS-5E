@@ -39,6 +39,7 @@ export const MAP_SPELL_STATUS_IDS = [
   'blindness-deafness',
   'monster-damage-aversion',
   'monster-berserk',
+  'monster-regeneration-suppressed',
 ] as const
 
 export type MapSpellStatusId = typeof MAP_SPELL_STATUS_IDS[number]
@@ -78,6 +79,10 @@ const CUSTOM_SPELL_STATUS_TOOLTIPS: Partial<Record<MapSpellStatusId, TokenStatus
   'monster-berserk': {
     title: '狂暴',
     description: '该怪物已进入狂暴状态。其回合中会按狂暴规则选择并攻击最近的可见生物；DM 可以在怪物状态面板中手动解除。',
+  },
+  'monster-regeneration-suppressed': {
+    title: '再生受抑',
+    description: '该怪物受到其再生特质指定的克制伤害；下个回合开始时不会恢复生命值，随后此状态结束。',
   },
 }
 
@@ -131,10 +136,19 @@ export function overflowConditionTokenTooltip(
   }
 }
 
-export const FLIGHT_TOKEN_TOOLTIP: TokenStatusTooltipContent = {
-  title: '飞行中',
-  description: '该 Token 当前高度高于脚下地形；移动与坠落会按空中单位处理。',
+export function flightTokenTooltip(flightHeightFeet?: number): TokenStatusTooltipContent {
+  const normalizedHeightFeet = Number.isFinite(flightHeightFeet)
+    ? Math.max(0, Math.round(flightHeightFeet!))
+    : undefined
+  return {
+    title: '飞行中',
+    description: normalizedHeightFeet == null
+      ? '该 Token 当前高度高于脚下地形；移动与坠落会按空中单位处理。'
+      : `飞行高度：${normalizedHeightFeet} 尺。移动与坠落会按空中单位处理。`,
+  }
 }
+
+export const FLIGHT_TOKEN_TOOLTIP: TokenStatusTooltipContent = flightTokenTooltip()
 
 export const SHILLELAGH_TOKEN_TOOLTIP: TokenStatusTooltipContent = {
   title: '橡棍术 · Shillelagh',

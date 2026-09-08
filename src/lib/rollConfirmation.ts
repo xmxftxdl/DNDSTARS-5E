@@ -1,5 +1,6 @@
 import {
   createCombatInterrupt,
+  isCombatInterruptExpired,
   type CombatInterruptContribution,
   type SharedCombatInterruptQueueState,
 } from './combatInterruptQueue'
@@ -22,6 +23,48 @@ import {
 import type { D20EnemyModifierOption } from './d20InterruptPolicy'
 
 const CONTINUE_OPTION_ID = 'continue'
+export const D20_ROLL_CONFIRMATION_TIMEOUT_MS = 10_000
+
+function stableD20ReplayHash(value: string): string {
+  let first = 2166136261
+  let second = 2246822519
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    first = Math.imul(first ^ code, 16777619)
+    second = Math.imul(second ^ code, 3266489917)
+  }
+  return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`
+}
+
+/**
+ * A durable parent action can be replayed after a refresh while one of its d20
+ * interrupts is already settled. Give every logical d20 occurrence a stable
+ * identity so the replay consumes the stored result instead of rolling again.
+ */
+export function durableD20RollId(input: {
+  mapId: string
+  sourceMode: string
+  transactionId: string
+  occurrenceIndex: number
+}): string {
+  if (!Number.isSafeInteger(input.occurrenceIndex) || input.occurrenceIndex < 0) {
+    throw new Error('invalid-durable-d20-occurrence-index')
+  }
+  const mapId = requireText(input.mapId, 'map-id', 80)
+  const sourceMode = requireText(input.sourceMode, 'source-mode', 20)
+  const transactionId = requireText(input.transactionId, 'transaction-id', 500)
+  return `${sourceMode}:${mapId}:rr-d20:transaction:${stableD20ReplayHash(transactionId)}:${input.occurrenceIndex}`
+}
+
+export function findD20RollConfirmationByRollId(
+  queue: Pick<SharedCombatInterruptQueueState, 'interrupts'>,
+  rollId: string,
+): CombatInterruptByKind<'roll-confirmation'> | undefined {
+  return queue.interrupts.find((interrupt) =>
+    isCombatInterruptKind(interrupt, 'roll-confirmation') &&
+    interrupt.payload.rollId === rollId,
+  ) as CombatInterruptByKind<'roll-confirmation'> | undefined
+}
 
 function rollConfirmationGenerationKey(
   interrupt: CombatInterruptByKind<'roll-confirmation'>,
@@ -32,6 +75,10 @@ function rollConfirmationGenerationKey(
       entry.featureId,
       entry.modifierKind ?? 'replace-d20',
       entry.rerollScope ?? '',
+      entry.additionalDice ?? 1,
+      entry.fixedAmount ?? '',
+      entry.replacementValues?.join(',') ?? '',
+      entry.selectionPolicy ?? 'owner-chooses',
       entry.direction ?? '',
     ].join(':'))
     .sort()
@@ -56,6 +103,7 @@ function rollConfirmationGenerationKey(
  */
 export function currentD20RollConfirmations(
   queue: Pick<SharedCombatInterruptQueueState, 'interrupts'>,
+  now?: number,
 ): CombatInterruptByKind<'roll-confirmation'>[] {
   const latestByKey = new Map<string, CombatInterruptByKind<'roll-confirmation'>>()
   for (const interrupt of queue.interrupts) {
@@ -69,16 +117,23 @@ export function currentD20RollConfirmations(
     ) latestByKey.set(key, interrupt)
   }
   return [...latestByKey.values()]
-    .filter((interrupt) => interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm')
+    .filter((interrupt) =>
+      // A Host-selected reroll enters `rolling` before its dice animation.
+      // Keep it discoverable so a refresh or a transient write failure can
+      // resume from the recorded roll options instead of stranding the
+      // enclosing attack/save forever.
+      (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm' || interrupt.status === 'rolling') &&
+      (now == null || !isCombatInterruptExpired(interrupt, now)))
     .sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))
 }
 
 export function findCurrentD20RollConfirmation(
   queue: Pick<SharedCombatInterruptQueueState, 'interrupts'>,
   prototype: CombatInterruptByKind<'roll-confirmation'>,
+  now?: number,
 ): CombatInterruptByKind<'roll-confirmation'> | undefined {
   const key = rollConfirmationGenerationKey(prototype)
-  return currentD20RollConfirmations(queue)
+  return currentD20RollConfirmations(queue, now)
     .find((interrupt) => rollConfirmationGenerationKey(interrupt) === key)
 }
 
@@ -116,6 +171,9 @@ export function createD20RollConfirmationInterrupt(input: {
   const label = requireText(input.label, 'label', 160)
   const originalValue = requireD20(input.originalValue)
   const actorId = input.rollerCharacterId?.trim() || 'system'
+  const visibility = input.visibility ?? 'public'
+  const playerDecisionExpiresAt = visibility === 'public' && (input.eligibleModifiers?.length ?? 0) > 0
+    ? now + D20_ROLL_CONFIRMATION_TIMEOUT_MS : undefined
   let transaction = createCombatTransaction({
     id: `d20-confirmation:${rollId}`,
     mapId,
@@ -131,19 +189,20 @@ export function createD20RollConfirmationInterrupt(input: {
     label,
     dice: { sides: 20, values: [originalValue] },
     modifier: 0,
-    visibility: input.visibility ?? 'public',
+    visibility,
     sourceId: input.rollerCharacterId,
     createdAt: now,
   })
   transaction = openInterruptWindow(transaction, {
     id: `${rollId}:dm-confirmation`,
     phase: 'after-roll',
-    audience: 'dm',
-    title: '确认 d20 结果',
-    description: 'DM 放行前，玩家可以声明使用特性替换这次投掷。',
+    audience: playerDecisionExpiresAt ? 'actor' : 'dm',
+    title: playerDecisionExpiresAt ? '选择投骰修正' : '确认 d20 结果',
+    description: playerDecisionExpiresAt ? '玩家可在限时内使用已有特性改变本次投掷。' : 'DM 确认暗骰结果后继续结算。',
     options: [{ id: CONTINUE_OPTION_ID, label: '确认并继续' }],
     defaultOptionId: CONTINUE_OPTION_ID,
-    timeoutPolicy: 'wait-for-dm',
+    timeoutPolicy: playerDecisionExpiresAt ? 'rollback' : 'wait-for-dm',
+    expiresAt: playerDecisionExpiresAt,
     openedAt: now,
   })
   const interrupt = createCombatInterrupt<RollConfirmationInterruptPayload, RollConfirmationInterruptResponse>({
@@ -153,13 +212,14 @@ export function createD20RollConfirmationInterrupt(input: {
     actorCharId: input.rollerCharacterId,
     transactionId: transaction.id,
     phase: 'after-roll',
-    timeoutPolicy: 'wait-for-dm',
+    timeoutPolicy: playerDecisionExpiresAt ? 'rollback' : 'wait-for-dm',
+    expiresAt: playerDecisionExpiresAt,
     payload: {
       rollId,
       label,
       targetName: input.targetName?.trim().slice(0, 120) ?? '',
       originalValue,
-      visibility: input.visibility ?? 'public',
+      visibility,
       reason: input.reason,
       eligibleModifiers: input.eligibleModifiers?.map((entry) => ({
         characterId: requireText(entry.characterId, 'eligible-character-id', 160),
@@ -168,8 +228,19 @@ export function createD20RollConfirmationInterrupt(input: {
         ...(entry.modifierKind ? { modifierKind: entry.modifierKind } : {}),
         ...(entry.sourceTokenId ? { sourceTokenId: requireText(entry.sourceTokenId, 'eligible-source-token-id', 160) } : {}),
         ...(entry.dieSides != null ? { dieSides: entry.dieSides } : {}),
+        ...(entry.fixedAmount != null ? { fixedAmount: entry.fixedAmount } : {}),
+        ...(entry.replacementValues ? {
+          replacementValues: (() => {
+            if (entry.replacementValues.length < 1 || entry.replacementValues.length > 8) {
+              throw new Error('invalid-roll-confirmation-replacement-values')
+            }
+            return entry.replacementValues.map(requireD20)
+          })(),
+        } : {}),
         ...(entry.direction ? { direction: entry.direction } : {}),
         ...(entry.rerollScope ? { rerollScope: entry.rerollScope } : {}),
+        ...(entry.additionalDice ? { additionalDice: entry.additionalDice } : {}),
+        ...(entry.selectionPolicy ? { selectionPolicy: entry.selectionPolicy } : {}),
         ...(entry.resourceCosts ? {
           resourceCosts: entry.resourceCosts.map((cost) => ({
             resourceKey: requireText(cost.resourceKey, 'eligible-resource-key', 160),
@@ -192,15 +263,17 @@ export function settleD20RollConfirmation(
   now = Date.now(),
   dmOverrideValue?: number,
   adjustmentRoll?: number,
-  choiceRerollValue?: number,
+  choiceRerollValue?: number | readonly number[],
+  choiceSelectedIndex?: number,
 ): RollConfirmationInterruptResponse {
   const originalValue = requireD20(interrupt.payload.originalValue)
   const requiredCharacterIds = new Set((interrupt.payload.eligibleModifiers ?? [])
-    .filter((entry) => entry.modifierKind === 'choice-reroll' && entry.decisionRequired === true)
     .map((entry) => entry.characterId))
-  const choiceDecisions = (interrupt.contributions ?? []).filter(
+  const playerDecisions = (interrupt.contributions ?? []).filter(
+    (entry) => requiredCharacterIds.has(entry.characterId))
+  const choiceDecisions = playerDecisions.filter(
     (entry): entry is Extract<CombatInterruptContribution, { kind: 'choice-reroll' }> =>
-      entry.kind === 'choice-reroll' && requiredCharacterIds.has(entry.characterId),
+      entry.kind === 'choice-reroll',
   )
   const invalidChoiceDecision = choiceDecisions.find((decision) =>
     !interrupt.payload.eligibleModifiers?.some((eligible) =>
@@ -212,7 +285,8 @@ export function settleD20RollConfirmation(
     ))
   if (invalidChoiceDecision) throw new Error('invalid-roll-confirmation-choice-decision')
   if ([...requiredCharacterIds].some((characterId) =>
-    !choiceDecisions.some((entry) => entry.characterId === characterId))) {
+    !playerDecisions.some((entry) => entry.characterId === characterId)) &&
+    (interrupt.expiresAt == null || now < interrupt.expiresAt)) {
     throw new Error('roll-confirmation-player-decision-pending')
   }
   const requestedChoiceUse = choiceDecisions.find((entry) => entry.decision === 'use')
@@ -228,6 +302,16 @@ export function settleD20RollConfirmation(
   let choiceReroll: RollConfirmationInterruptResponse['choiceReroll']
   if (contribution?.kind === 'replace-d20') {
     requireD20(contribution.replacementValue)
+    const eligible = interrupt.payload.eligibleModifiers?.find((entry) =>
+      entry.characterId === contribution.characterId &&
+      entry.featureId === contribution.featureId &&
+      entry.featureLabel === contribution.featureLabel &&
+      (entry.modifierKind ?? 'replace-d20') === 'replace-d20',
+    )
+    if (
+      !eligible ||
+      (eligible.replacementValues != null && !eligible.replacementValues.includes(contribution.replacementValue))
+    ) throw new Error('invalid-roll-confirmation-replacement')
     transaction = replaceLedgerDie(transaction, {
       entryId: interrupt.payload.rollId,
       dieIndex: contribution.dieIndex,
@@ -244,28 +328,34 @@ export function settleD20RollConfirmation(
       entry.modifierKind === 'adjust-d20' &&
       entry.direction === contribution.direction,
     )
+    const fixedAmount = eligible?.fixedAmount
+    const hasFixedAmount = Number.isInteger(fixedAmount) && Number(fixedAmount) >= 1 && Number(fixedAmount) <= 100
+    const hasAdjustmentDie = Number.isInteger(eligible?.dieSides) &&
+      Number(eligible?.dieSides) >= 2 && Number(eligible?.dieSides) <= 100
+    const adjustmentAmount = hasFixedAmount ? Number(fixedAmount) : Number(adjustmentRoll)
     if (
-      !eligible || !eligible.sourceTokenId || !Number.isInteger(eligible.dieSides) ||
-      Number(eligible.dieSides) < 2 || Number(eligible.dieSides) > 100 ||
-      !Number.isInteger(adjustmentRoll) || Number(adjustmentRoll) < 1 ||
-      Number(adjustmentRoll) > Number(eligible.dieSides)
+      !eligible || !eligible.sourceTokenId || hasFixedAmount === hasAdjustmentDie ||
+      !Number.isInteger(adjustmentAmount) || adjustmentAmount < 1 ||
+      (hasAdjustmentDie && adjustmentAmount > Number(eligible.dieSides))
     ) throw new Error('invalid-roll-confirmation-adjustment')
     adjustment = {
       sourceId: eligible.sourceTokenId,
       featureId: contribution.featureId,
       direction: contribution.direction,
-      roll: Number(adjustmentRoll),
+      roll: adjustmentAmount,
     }
-    transaction = appendRollLedgerEntry(transaction, {
-      id: `${interrupt.payload.rollId}:adjustment`,
-      kind: 'other',
-      label: contribution.featureLabel,
-      dice: { sides: Number(eligible.dieSides), values: [Number(adjustmentRoll)] },
-      modifier: 0,
-      visibility: interrupt.payload.visibility,
-      sourceId: eligible.sourceTokenId,
-      createdAt: now,
-    })
+    if (hasAdjustmentDie) {
+      transaction = appendRollLedgerEntry(transaction, {
+        id: `${interrupt.payload.rollId}:adjustment`,
+        kind: 'other',
+        label: contribution.featureLabel,
+        dice: { sides: Number(eligible.dieSides), values: [adjustmentAmount] },
+        modifier: 0,
+        visibility: interrupt.payload.visibility,
+        sourceId: eligible.sourceTokenId,
+        createdAt: now,
+      })
+    }
   } else if (contribution?.kind === 'choice-reroll' && contribution.decision === 'use') {
     const eligible = interrupt.payload.eligibleModifiers?.find((entry) =>
       entry.characterId === contribution.characterId &&
@@ -279,17 +369,28 @@ export function settleD20RollConfirmation(
       !Array.isArray(eligible.resourceCosts) || eligible.resourceCosts.length < 1 ||
       eligible.resourceCosts.some((cost) =>
         !cost.resourceKey.trim() || !Number.isSafeInteger(cost.amount) || cost.amount < 1) ||
-      !Number.isInteger(choiceRerollValue) || Number(choiceRerollValue) < 1 || Number(choiceRerollValue) > 20
+      ![1, 2].includes(eligible.additionalDice ?? 1)
     ) throw new Error('invalid-roll-confirmation-choice-reroll')
-    const rerollValue = Number(choiceRerollValue)
-    const selectedValue = eligible.rerollScope === 'attack-against-self'
-      ? Math.min(originalValue, rerollValue)
-      : Math.max(originalValue, rerollValue)
+    const rerollValues = (Array.isArray(choiceRerollValue) ? choiceRerollValue : [choiceRerollValue])
+      .map(Number)
+    if (
+      rerollValues.length !== (eligible.additionalDice ?? 1) ||
+      rerollValues.some((value) => !Number.isInteger(value) || value < 1 || value > 20)
+    ) throw new Error('invalid-roll-confirmation-choice-reroll')
+    const values = [originalValue, ...rerollValues]
+    const selectionPolicy = eligible.selectionPolicy ?? 'owner-chooses'
+    const selectedValue = selectionPolicy === 'owner-chooses'
+      ? values[choiceSelectedIndex ?? -1]
+      : selectionPolicy === 'must-use-latest'
+        ? values.at(-1)!
+        : selectionPolicy === 'lowest' ? Math.min(...values) : Math.max(...values)
+    if (!Number.isInteger(selectedValue)) throw new Error('roll-confirmation-player-selection-pending')
+    const selectedIndex = selectionPolicy === 'owner-chooses' ? choiceSelectedIndex! : values.indexOf(selectedValue)
     transaction = appendRollLedgerEntry(transaction, {
       id: `${interrupt.payload.rollId}:choice-reroll`,
       kind: 'other',
       label: contribution.featureLabel,
-      dice: { sides: 20, values: [rerollValue] },
+      dice: { sides: 20, values: rerollValues },
       modifier: 0,
       visibility: interrupt.payload.visibility,
       sourceId: contribution.characterId,
@@ -311,7 +412,10 @@ export function settleD20RollConfirmation(
       resourceCosts: eligible.resourceCosts.map((cost) => ({ ...cost })),
       scope: eligible.rerollScope,
       originalValue,
-      rerollValue,
+      rerollValue: rerollValues[0],
+      rerollValues,
+      selectedIndex,
+      selectionPolicy,
       selectedValue,
     }
   } else if (
@@ -352,12 +456,61 @@ export function d20RollConfirmationPlayerDecisionsComplete(
   interrupt: CombatInterruptByKind<'roll-confirmation'>,
 ): boolean {
   const requiredCharacterIds = new Set((interrupt.payload.eligibleModifiers ?? [])
-    .filter((entry) => entry.modifierKind === 'choice-reroll' && entry.decisionRequired === true)
     .map((entry) => entry.characterId))
   if (requiredCharacterIds.size < 1) return true
   return [...requiredCharacterIds].every((characterId) =>
     interrupt.contributions?.some((entry) =>
-      entry.kind === 'choice-reroll' && entry.characterId === characterId) === true)
+      entry.characterId === characterId) === true)
+}
+
+export function d20RollConfirmationSettlementSelection(
+  interrupt: CombatInterruptByKind<'roll-confirmation'>,
+  acceptedContributionId?: string,
+) {
+  const contribution = acceptedContributionId
+    ? interrupt.contributions?.find((entry) => entry.id === acceptedContributionId)
+    : undefined
+  const eligible = contribution && contribution.kind !== 'decline-d20'
+    ? interrupt.payload.eligibleModifiers?.find((entry) =>
+        entry.characterId === contribution.characterId &&
+        entry.featureId === contribution.featureId &&
+        entry.featureLabel === contribution.featureLabel &&
+        (entry.modifierKind ?? 'replace-d20') === contribution.kind &&
+        (contribution.kind !== 'adjust-d20' || entry.direction === contribution.direction))
+    : undefined
+  return {
+    contribution,
+    adjustment: contribution?.kind === 'adjust-d20' ? eligible : undefined,
+    choiceReroll: contribution?.kind === 'choice-reroll' && contribution.decision === 'use' ? eligible : undefined,
+  }
+}
+
+/**
+ * Only owner-choice rerolls need a second player interaction after the Host
+ * has rolled the extra d20. Inspiration and other fixed selection policies
+ * must settle immediately or the suspended attack/save remains locked.
+ */
+export function d20ChoiceRerollRequiresOwnerSelection(
+  option?: Pick<D20EnemyModifierOption, 'selectionPolicy'>,
+): boolean {
+  return !!option && (option.selectionPolicy ?? 'owner-chooses') === 'owner-chooses'
+}
+
+export function createD20DeclineContribution(input: {
+  interruptId: string
+  characterId: string
+  characterName: string
+  now?: number
+}): CombatInterruptContribution {
+  const characterId = requireText(input.characterId, 'character-id', 160)
+  return {
+    id: `${requireText(input.interruptId, 'interrupt-id')}:${characterId}:decline`,
+    kind: 'decline-d20',
+    characterId,
+    characterName: requireText(input.characterName, 'character-name', 80),
+    featureLabel: '不使用投骰修正',
+    createdAt: input.now ?? Date.now(),
+  }
 }
 
 export function createD20ChoiceRerollContribution(input: {
@@ -367,10 +520,14 @@ export function createD20ChoiceRerollContribution(input: {
   featureId: string
   featureLabel: string
   decision: 'use' | 'decline'
+  selectedIndex?: number
   now?: number
 }): CombatInterruptContribution {
   const now = input.now ?? Date.now()
   const characterId = requireText(input.characterId, 'character-id', 160)
+  if (input.selectedIndex != null && (!Number.isInteger(input.selectedIndex) || input.selectedIndex < 0 || input.selectedIndex > 2)) {
+    throw new Error('invalid-roll-confirmation-selected-index')
+  }
   return {
     id: `${requireText(input.interruptId, 'interrupt-id')}:${characterId}:choice-reroll`,
     kind: 'choice-reroll',
@@ -379,8 +536,43 @@ export function createD20ChoiceRerollContribution(input: {
     featureId: requireText(input.featureId, 'feature-id', 160),
     featureLabel: requireText(input.featureLabel, 'feature-label', 120),
     decision: input.decision,
+    ...(input.selectedIndex != null ? { selectedIndex: input.selectedIndex } : {}),
     createdAt: now,
   }
+}
+
+/**
+ * Produces the player's safe timeout response without undoing a reroll that
+ * was already committed. Host-selected policies need no second player write;
+ * an owner-choice timeout keeps the original d20 while still preserving the
+ * resource-spending reroll transaction.
+ */
+export function d20RollConfirmationTimeoutContribution(input: {
+  contribution?: CombatInterruptContribution
+  rollOptions?: readonly number[]
+  selectionPolicy?: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
+  hasEligibleFeature: boolean
+}): {
+  featureId: string
+  featureLabel: string
+  choiceDecision?: 'use'
+  decline?: boolean
+  selectedIndex?: number
+} | undefined {
+  const contribution = input.contribution
+  if (contribution?.kind === 'choice-reroll' && contribution.decision === 'use') {
+    return input.rollOptions && (input.selectionPolicy ?? 'owner-chooses') === 'owner-chooses'
+      ? {
+          featureId: contribution.featureId,
+          featureLabel: contribution.featureLabel,
+          choiceDecision: 'use',
+          selectedIndex: 0,
+        }
+      : undefined
+  }
+  return input.hasEligibleFeature
+    ? { featureId: '', featureLabel: '', decline: true }
+    : undefined
 }
 
 export function createD20AdjustmentContribution(input: {

@@ -1,0 +1,154 @@
+{
+  "id": "srd-5.1:roc",
+  "slug": "roc",
+  "name": "鹏鸟",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "beak",
+      "name": "喙击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "talons",
+      "name": "利爪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 47,
+      "slug": "roc",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:08:30.500Z",
+      "name": "鹏鸟",
+      "actionId": "beak",
+      "actionName": "喙击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "11",
+      "total": 334,
+      "mapId": "verify-ui-roc-beak-1788566910561",
+      "combatId": "verify-ui-roc-beak-1788566910561:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "鹏鸟 使用喙击攻击 验证目标：喙击 → 验证目标 9+13=22 命中；共造成 26 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:08 PM\n结算\n\n鹏鸟 使用喙击攻击 验证目标：喙击 → 验证目标 9+13=22 命中；共造成 26 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：喙击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +13。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 喙击（基础伤害·穿刺）｜4d8 骰面：1 + 1 + 7 + 8 = 17｜固定加值 +9｜小计 26\n鹏鸟｜消耗动作\n验证目标｜受到 26 点伤害｜HP 320 → 294",
+      "playerLog": "鹏鸟 使用喙击攻击 验证目标：喙击 → 验证目标 9+13=22 命中；共造成 26 点伤害。",
+      "afterHp": 294,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:08:54.063Z",
+      "evidenceFile": "ui-cases/monsters/047-roc.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐视觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

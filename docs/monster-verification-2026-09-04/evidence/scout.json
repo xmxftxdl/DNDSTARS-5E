@@ -1,0 +1,165 @@
+{
+  "id": "srd-5.1:scout",
+  "slug": "scout",
+  "name": "斥候",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "shortsword",
+      "name": "短剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longbow",
+      "name": "长弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-longbow",
+      "name": "多重攻击：长弓 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 226,
+      "slug": "scout",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:55:54.137Z",
+      "name": "斥候",
+      "actionId": "shortsword",
+      "actionName": "短剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/2",
+      "total": 334,
+      "mapId": "verify-ui-scout-shortsword-1788569754175",
+      "combatId": "verify-ui-scout-shortsword-1788569754175:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "斥候 使用短剑攻击 验证目标：短剑 → 验证目标 12+4=16 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:56 PM\n结算\n\n斥候 使用短剑攻击 验证目标：短剑 → 验证目标 12+4=16 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：短剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 12；最终采用 12；调整值 +4。\n结果 · 16 vs AC 10：命中。\n伤害骰 · 短剑（基础伤害·穿刺）｜1d6 骰面：2 = 2｜固定加值 +2｜小计 4\n斥候｜消耗动作\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "playerLog": "斥候 使用短剑攻击 验证目标：短剑 → 验证目标 12+4=16 命中；共造成 4 点伤害。",
+      "afterHp": 316,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:56:17.847Z",
+      "evidenceFile": "ui-cases/monsters/226-scout.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐听觉与视觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 8,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

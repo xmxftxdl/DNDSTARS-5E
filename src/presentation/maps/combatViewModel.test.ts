@@ -26,6 +26,21 @@ describe('combat view model', () => {
     expect(entry).toMatchObject({ label: '旧名称', color: '#111111' })
   })
 
+  it('uses the room Token image when a monster has no separate initiative image', () => {
+    const entry: InitiativeEntry = {
+      tokenId: 'sphinx', label: '雄性斯芬克斯', emoji: '🦁', color: '#b45309', roll: 18,
+    }
+    const token = {
+      id: 'sphinx', label: entry.label, emoji: entry.emoji,
+      type: 'enemy', color: entry.color, tokenPortraitImageId: 'room-sphinx-token',
+    } as Token
+
+    expect(projectCombatInitiativeOrder([entry], [token], [], {
+      resolvePortrait: vi.fn(() => undefined),
+      resolveColor: vi.fn(() => entry.color),
+    })[0]?.portraitImageId).toBe('room-sphinx-token')
+  })
+
   it('derives hotbar selection with active targeting taking precedence', () => {
     expect(combatHotbarActiveActionId({
       baseSelectionId: 'system:dodge',
@@ -38,5 +53,20 @@ describe('combat view model', () => {
       moveActive: true,
       playerCanControlTurn: true,
     })).toBe('system:move')
+    expect(combatHotbarActiveActionId({
+      activeCharacterId: 'wizard',
+      spell: { characterId: 'wizard', castingClassId: 'wizard', spellId: 'prismatic-spray' },
+    })).toBe('spell:wizard:prismatic-spray')
+  })
+
+  it('keeps the selected creature-form attack highlighted', () => {
+    expect(combatHotbarActiveActionId({
+      activeCharacterId: 'druid',
+      weapon: {
+        characterId: 'druid',
+        creatureFormId: 'giant-eagle',
+        wildShapeActionIndex: 2,
+      },
+    })).toBe('creature-form:giant-eagle:attack:2')
   })
 })

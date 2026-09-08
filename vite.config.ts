@@ -30,6 +30,39 @@ export default defineConfig(({ command }) => ({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Map rendering is loaded lazily after the application shell. Without an
+  // explicit entry Vite discovers react-konva only on the first map visit,
+  // rebuilds the optimized dependency graph, and forces a full-page reload.
+  // Pre-bundle the renderer and its React peers before either tabletop opens.
+  optimizeDeps: {
+    // The map route and dice iframe are lazy HTML/application entries and are
+    // invisible to the default index.html scan. Scan them as cold-start roots
+    // so their shared chunks are fixed before any browser connects.
+    entries: [
+      'index.html',
+      'dice-box-frame.html',
+      'src/pages/MapsWorkspacePage.tsx',
+      'src/presentation/maps/MapViewportLayer.tsx',
+      'src/presentation/maps/MapWorkspacePanelsLayer.tsx',
+    ],
+    include: [
+      '@3d-dice/dice-box-threejs',
+      'fflate',
+      'react',
+      'react-dom',
+      'react-dom/client',
+      'react-dom/server',
+      'react-router-dom',
+      'konva',
+      'react-konva',
+      'livekit-client',
+      'lucide-react',
+      'pdfjs-dist',
+      'zustand',
+      'zustand/middleware',
+      'zustand/react/shallow',
+    ],
+  },
   build: {
     // Multi-page (T-P2-397): the dice iframe is its own HTML entry so Vite
     // bundles the threejs engine + the diceEngine/diceNotation modules into it.

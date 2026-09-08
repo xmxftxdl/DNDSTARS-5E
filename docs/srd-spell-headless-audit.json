@@ -1,0 +1,6686 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/audit-srd-spell-headless.mjs",
+  "criteria": {
+    "full": "All mandatory outcomes are determined by bounded choices, authoritative rolls, registered content and observable state.",
+    "partial": "A deterministic subset can be authoritative, but at least one mandatory clause depends on natural language, GM selection, scene semantics or unmodelled world state.",
+    "manual": "The spell primarily produces narrative answers, negotiation or open-ended reality changes; only cost/logging should be automated."
+  },
+  "summary": {
+    "catalog": 319,
+    "implemented": 123,
+    "catalogOnly": 196,
+    "current": {
+      "full": 94,
+      "manual": 225
+    },
+    "target": {
+      "full": 189,
+      "manual": 6,
+      "partial": 124
+    },
+    "newlyEligibleFull": 95,
+    "newlyEligiblePartial": 124,
+    "keepDm": 6
+  },
+  "capabilityDemand": {
+    "fullCandidates": {
+      "saving-throw": 17,
+      "persistent-area": 13,
+      "duration": 12,
+      "planar-state": 8,
+      "summon-companion": 7,
+      "condition-immunity": 6,
+      "inventory-effect": 6,
+      "mode-choice": 6,
+      "movement-blocking": 6,
+      "condition-lifecycle": 5,
+      "death-handoff": 5,
+      "movement-mode": 5,
+      "typed-target": 5,
+      "effect-removal": 4,
+      "granted-activity": 4,
+      "roll-mode-modifier": 4,
+      "sensor-vision": 4,
+      "stat-transform": 4,
+      "turn-trigger": 4,
+      "body-snapshot": 3,
+      "communication": 3,
+      "concentration": 3,
+      "condition-restoration": 3,
+      "entity-movement": 3,
+      "forced-movement": 3,
+      "form-catalog": 3,
+      "healing": 3,
+      "item-link": 3,
+      "language-capability": 3,
+      "random-table": 3,
+      "save-ends": 3,
+      "slot-scaling": 3,
+      "spell-attack": 3,
+      "body-restoration": 2,
+      "damage-resistance": 2,
+      "door-state": 2,
+      "effect-detection": 2,
+      "effect-modifier": 2,
+      "effect-suppression": 2,
+      "event-trigger": 2,
+      "falling-state": 2,
+      "hit-point-handoff": 2,
+      "item-generation": 2,
+      "long-term-penalty": 2,
+      "max-hit-points": 2,
+      "multi-save-counter": 2,
+      "multi-target": 2,
+      "object-enchantment": 2,
+      "reaction-trigger": 2,
+      "resurrection-timer": 2,
+      "saving-throw-modifier": 2,
+      "skill-check-modifier": 2,
+      "terrain-geometry": 2,
+      "vertical-movement": 2,
+      "ability-check": 1,
+      "ability-override": 1,
+      "ability-restoration": 1,
+      "action-economy": 1,
+      "action-escape": 1,
+      "action-restriction": 1,
+      "actor-control": 1,
+      "area-lifecycle": 1,
+      "area-movement": 1,
+      "area-slot-scaling": 1,
+      "attack-redirection": 1,
+      "attack-resolution": 1,
+      "automatic-escape": 1,
+      "carry-capacity": 1,
+      "contested-check": 1,
+      "corpse-state": 1,
+      "damage": 1,
+      "damage-accumulator": 1,
+      "damage-immunity": 1,
+      "damage-multiplier": 1,
+      "damage-pool": 1,
+      "damage-qualification": 1,
+      "damage-reflection": 1,
+      "damage-scaling": 1,
+      "darkvision": 1,
+      "dispel-state": 1,
+      "duplicate-counter": 1,
+      "effect-break": 1,
+      "ejection-damage": 1,
+      "expiry-penalty": 1,
+      "extra-turns": 1,
+      "hit-point-threshold": 1,
+      "invisibility": 1,
+      "language-immunity": 1,
+      "light-source": 1,
+      "long-term-save": 1,
+      "long-term-state": 1,
+      "maximum-healing": 1,
+      "metadata-visibility": 1,
+      "movement-capability": 1,
+      "movement-modifier": 1,
+      "movement-rate": 1,
+      "multi-cell-template": 1,
+      "multi-effect": 1,
+      "notification": 1,
+      "object-unlock": 1,
+      "occupant-permissions": 1,
+      "on-hit-rider": 1,
+      "open-text-trigger": 1,
+      "password-state": 1,
+      "periodic-damage": 1,
+      "periodic-healing": 1,
+      "planar-sight": 1,
+      "resolve-only": 1,
+      "resource-restriction": 1,
+      "restricted-extra-action": 1,
+      "round-timeline": 1,
+      "semantic-task": 1,
+      "shared-senses": 1,
+      "sound-event": 1,
+      "source-aura": 1,
+      "source-control": 1,
+      "source-following": 1,
+      "source-link": 1,
+      "target-linked-effect": 1,
+      "targeting-immunity": 1,
+      "teleport-save": 1,
+      "tracking-suppression": 1,
+      "transition-timer": 1,
+      "visibility-effect": 1,
+      "visibility-rule": 1,
+      "world-object": 1
+    },
+    "partialCandidates": {
+      "persistent-area": 30,
+      "legacy-core-transaction": 29,
+      "saving-throw": 22,
+      "cross-scene": 13,
+      "summon-companion": 12,
+      "dm-creature-choice": 10,
+      "dm-interpretation": 10,
+      "illusory-content": 10,
+      "mode-choice": 10,
+      "terrain-geometry": 8,
+      "semantic-command": 7,
+      "world-object": 7,
+      "active-effect": 5,
+      "open-text-trigger": 5,
+      "actor-control": 4,
+      "semantic-compliance": 4,
+      "semantic-destination": 4,
+      "stat-transform": 4,
+      "typed-target": 4,
+      "world-information": 4,
+      "barrier-material-thickness-gap": 3,
+      "communication": 3,
+      "count-choice": 3,
+      "effect-detection": 3,
+      "material-targeting": 3,
+      "object-creation": 3,
+      "off-map-search": 3,
+      "persistent-sense": 3,
+      "planar-state": 3,
+      "random-table": 3,
+      "semantic-target": 3,
+      "sensor-vision": 3,
+      "slot-scaling-gap": 2,
+      "teleport": 3,
+      "death-handoff": 2,
+      "dm-information": 2,
+      "dm-planar-destination": 2,
+      "dm-response": 2,
+      "door-state": 2,
+      "environment-state": 2,
+      "form-catalog": 2,
+      "invoke-activity": 2,
+      "long-term-state": 2,
+      "minor-world-effect": 2,
+      "npc-response": 2,
+      "off-map-destination": 2,
+      "slot-scaling": 2,
+      "spell-storage": 2,
+      "teleport-blocking": 2,
+      "world-object-gap": 2,
+      "world-state": 2,
+      "ability-check": 1,
+      "ability-override": 1,
+      "bounded-safe-options": 1,
+      "condition-lifecycle": 1,
+      "configured-sanctuary": 1,
+      "consecrated-object-gap": 1,
+      "contested-check": 1,
+      "crafting-judgment": 1,
+      "deity-veto": 1,
+      "dispel-state": 1,
+      "dm-actor-control": 1,
+      "dm-damage-type": 1,
+      "dm-equipment-fit": 1,
+      "dm-form-choice": 1,
+      "dm-initial-state": 1,
+      "dm-layout": 1,
+      "dm-narrative": 1,
+      "dm-object-fit": 1,
+      "dm-object-narration": 1,
+      "dm-weather": 1,
+      "duration-by-material": 1,
+      "effect-modifier": 1,
+      "effect-suppression": 1,
+      "entity-movement": 1,
+      "forced-movement": 1,
+      "healing": 1,
+      "hidden-object-tags": 1,
+      "invisibility": 1,
+      "layered-effects": 1,
+      "light-source": 1,
+      "long-term-world-state": 1,
+      "magic-item-detection": 1,
+      "magic-suppression": 1,
+      "metadata-override": 1,
+      "metadata-visibility": 1,
+      "minimum-roll": 1,
+      "movement-gap": 1,
+      "movement-mode": 1,
+      "multi-area": 1,
+      "narrative-effect": 1,
+      "npc-personality": 1,
+      "object-enchantment": 1,
+      "object-transform": 1,
+      "open-ended-content": 1,
+      "open-ended-effect": 1,
+      "open-ended-exclusions": 1,
+      "open-ended-form": 1,
+      "open-ended-object": 1,
+      "open-ended-option": 1,
+      "open-text-release": 1,
+      "passenger-movement": 1,
+      "poison-kind-gap": 1,
+      "random-damage": 1,
+      "reader-identity": 1,
+      "repair-state": 1,
+      "semantic-bargain": 1,
+      "semantic-creature-category": 1,
+      "semantic-detection": 1,
+      "semantic-entry": 1,
+      "semantic-familiarity": 1,
+      "semantic-location": 1,
+      "semantic-memory": 1,
+      "sensor-blocking": 1,
+      "sensor-information": 1,
+      "shared-spells": 1,
+      "source-anchoring": 1,
+      "spell-attack": 1,
+      "spell-level-suppression": 1,
+      "structure-damage": 1,
+      "terrain-state": 1,
+      "timed-delivery": 1,
+      "truth-detection-gap": 1,
+      "turn-trigger-gap": 1,
+      "voice-response": 1,
+      "world-material": 1,
+      "world-navigation": 1,
+      "world-registry": 1
+    }
+  },
+  "entries": [
+    {
+      "id": "acid-arrow",
+      "name": "强酸箭",
+      "englishName": "Acid Arrow",
+      "level": 2,
+      "classes": [
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "acid-splash",
+      "name": "酸液飞溅",
+      "englishName": "Acid Splash",
+      "level": 0,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "aid",
+      "name": "援助术",
+      "englishName": "Aid",
+      "level": 2,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "max-hit-points",
+        "slot-scaling"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "alarm",
+      "name": "警报术",
+      "englishName": "Alarm",
+      "level": 1,
+      "classes": [
+        "ranger",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "event-trigger",
+        "notification"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "alter-self",
+      "name": "变身术",
+      "englishName": "Alter Self",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "stat-transform",
+        "illusory-content"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "animal-friendship",
+      "name": "化兽为友",
+      "englishName": "Animal Friendship",
+      "level": 1,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "typed-target",
+        "condition-lifecycle"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "animal-messenger",
+      "name": "动物信使",
+      "englishName": "Animal Messenger",
+      "level": 2,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "timed-delivery",
+        "semantic-destination",
+        "npc-response"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "animal-shapes",
+      "name": "动物形态",
+      "englishName": "Animal Shapes",
+      "level": 8,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "stat-transform",
+        "form-catalog",
+        "hit-point-handoff"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "animate-dead",
+      "name": "操纵死尸",
+      "englishName": "Animate Dead",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "material-targeting",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "animate-objects",
+      "name": "活化物件",
+      "englishName": "Animate Objects",
+      "level": 5,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "world-object",
+        "dm-damage-type"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "antilife-shell",
+      "name": "防活物护罩",
+      "englishName": "Antilife Shell",
+      "level": 5,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "typed-target",
+        "movement-blocking"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "antimagic-field",
+      "name": "反魔法力场",
+      "englishName": "Antimagic Field",
+      "level": 8,
+      "classes": [
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "magic-suppression",
+        "source-anchoring",
+        "movement-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "antipathy-sympathy",
+      "name": "嫌恶/关怀术",
+      "englishName": "Antipathy/Sympathy",
+      "level": 8,
+      "classes": [
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "typed-target",
+        "semantic-creature-category"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "arcane-eye",
+      "name": "秘法眼",
+      "englishName": "Arcane Eye",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "sensor-vision",
+        "entity-movement",
+        "darkvision"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "arcane-hand",
+      "name": "奥术之手",
+      "englishName": "Arcane Hand",
+      "level": 5,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "summon-companion",
+        "granted-activity",
+        "contested-check"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "arcane-lock",
+      "name": "秘法锁",
+      "englishName": "Arcane Lock",
+      "level": 2,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "door-state",
+        "password-state",
+        "dispel-state"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "arcane-sword",
+      "name": "奥术之剑",
+      "englishName": "Arcane Sword",
+      "level": 7,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "summon-companion",
+        "granted-activity",
+        "spell-attack"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "arcanists-magic-aura",
+      "name": "奥法师魔法灵光",
+      "englishName": "Arcanist’s Magic Aura",
+      "level": 2,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "metadata-override",
+        "semantic-detection",
+        "long-term-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "astral-projection",
+      "name": "星界投影",
+      "englishName": "Astral Projection",
+      "level": 9,
+      "classes": [
+        "cleric",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "planar-state",
+        "cross-scene",
+        "death-handoff"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "augury",
+      "name": "卜筮术",
+      "englishName": "Augury",
+      "level": 2,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "manual",
+      "implementation": "catalog-only",
+      "migration": "keep-dm",
+      "codes": [
+        "dm-response",
+        "future-information"
+      ],
+      "review": "主要产出是 DM 回答、叙事交互或开放式现实改写，不应伪装成自动结算。"
+    },
+    {
+      "id": "awaken",
+      "name": "启蒙术",
+      "englishName": "Awaken",
+      "level": 5,
+      "classes": [
+        "bard",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "ability-override",
+        "condition-lifecycle",
+        "npc-personality"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "bane",
+      "name": "灾祸术",
+      "englishName": "Bane",
+      "level": 1,
+      "classes": [
+        "bard",
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "attack-save-debuff",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "banishment",
+      "name": "放逐术",
+      "englishName": "Banishment",
+      "level": 4,
+      "classes": [
+        "cleric",
+        "paladin",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "战斗状态已自动化；异界生物维持满时长后的位面归返仍需要 DM 裁定。"
+    },
+    {
+      "id": "barkskin",
+      "name": "树肤术",
+      "englishName": "Barkskin",
+      "level": 2,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "beacon-of-hope",
+      "name": "希望信标",
+      "englishName": "Beacon of Hope",
+      "level": 3,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw-modifier",
+        "maximum-healing",
+        "condition-immunity"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "bestow-curse",
+      "name": "降咒",
+      "englishName": "Bestow Curse",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "effect-modifier",
+        "open-ended-option"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "black-tentacles",
+      "name": "黑触手",
+      "englishName": "Black Tentacles",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "blade-barrier",
+      "name": "剑刃护壁",
+      "englishName": "Blade Barrier",
+      "level": 6,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "可调长度的直墙、环形墙、进入与回合开始伤害、困难地形和垂直范围已自动化；墙后的四分之三掩护仍需地图层或 DM 处理。"
+    },
+    {
+      "id": "bless",
+      "name": "祝福术",
+      "englishName": "Bless",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "attack-save-buff",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "blight",
+      "name": "枯萎术",
+      "englishName": "Blight",
+      "level": 4,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "blindness-deafness",
+      "name": "目盲/耳聋术",
+      "englishName": "Blindness/Deafness",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "blink",
+      "name": "闪现术",
+      "englishName": "Blink",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "random-table",
+        "planar-state",
+        "turn-trigger"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "blur",
+      "name": "朦胧术",
+      "englishName": "Blur",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "branding-smite",
+      "name": "印记斩",
+      "englishName": "Branding Smite",
+      "level": 2,
+      "classes": [
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "on-hit-rider",
+        "damage-scaling",
+        "visibility-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "burning-hands",
+      "name": "燃烧之手",
+      "englishName": "Burning Hands",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "call-lightning",
+      "name": "召雷术",
+      "englishName": "Call Lightning",
+      "level": 3,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "伤害、持续发动、权威高空空间限制及既有暴风雨额外伤害骰均已自动化。"
+    },
+    {
+      "id": "calm-emotions",
+      "name": "安定心神",
+      "englishName": "Calm Emotions",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "范围、类人生物筛选、魅力豁免、自愿友方失败、状态压制/恢复及有界漠然均已自动化；更细的社会态度仍可由语音叙事补充。"
+    },
+    {
+      "id": "chain-lightning",
+      "name": "连锁闪电",
+      "englishName": "Chain Lightning",
+      "level": 6,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "charm-person",
+      "name": "魅惑人类",
+      "englishName": "Charm Person",
+      "level": 1,
+      "classes": [
+        "bard",
+        "druid",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "chill-touch",
+      "name": "冻寒之触",
+      "englishName": "Chill Touch",
+      "level": 0,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "circle-of-death",
+      "name": "死亡法阵",
+      "englishName": "Circle of Death",
+      "level": 6,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "clairvoyance",
+      "name": "鹰眼术",
+      "englishName": "Clairvoyance",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "sensor-vision",
+        "cross-scene",
+        "semantic-location"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "clone",
+      "name": "克隆术",
+      "englishName": "Clone",
+      "level": 8,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "long-term-state",
+        "death-handoff",
+        "body-snapshot"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "cloudkill",
+      "name": "死云术",
+      "englishName": "Cloudkill",
+      "level": 5,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "进入与回合开始伤害、升环和垂直范围已自动化；重度遮蔽、毒雾自动移动、下沉与强风驱散仍需地图层或 DM 处理。"
+    },
+    {
+      "id": "color-spray",
+      "name": "七彩喷射",
+      "englishName": "Color Spray",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "color-spray-hit-point-pool",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "command",
+      "name": "命令术",
+      "englishName": "Command",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "mode-choice",
+        "turn-trigger",
+        "slot-scaling",
+        "language-immunity"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "commune",
+      "name": "通神术",
+      "englishName": "Commune",
+      "level": 5,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "manual",
+      "implementation": "catalog-only",
+      "migration": "keep-dm",
+      "codes": [
+        "dm-response",
+        "future-information"
+      ],
+      "review": "主要产出是 DM 回答、叙事交互或开放式现实改写，不应伪装成自动结算。"
+    },
+    {
+      "id": "commune-with-nature",
+      "name": "问道自然",
+      "englishName": "Commune with Nature",
+      "level": 5,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "manual",
+      "implementation": "catalog-only",
+      "migration": "keep-dm",
+      "codes": [
+        "dm-response",
+        "world-information"
+      ],
+      "review": "主要产出是 DM 回答、叙事交互或开放式现实改写，不应伪装成自动结算。"
+    },
+    {
+      "id": "comprehend-languages",
+      "name": "通晓语言",
+      "englishName": "Comprehend Languages",
+      "level": 1,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "language-capability",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "compulsion",
+      "name": "强迫术",
+      "englishName": "Compulsion",
+      "level": 4,
+      "classes": [
+        "bard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "forced-movement",
+        "turn-trigger"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "cone-of-cold",
+      "name": "寒冰锥",
+      "englishName": "Cone of Cold",
+      "level": 5,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "confusion",
+      "name": "困惑术",
+      "englishName": "Confusion",
+      "level": 4,
+      "classes": [
+        "bard",
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "random-table",
+        "save-ends",
+        "area-slot-scaling"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "conjure-animals",
+      "name": "召唤动物",
+      "englishName": "Conjure Animals",
+      "level": 3,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "count-choice",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "conjure-celestial",
+      "name": "召唤天界生物",
+      "englishName": "Conjure Celestial",
+      "level": 7,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "slot-scaling",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "conjure-elemental",
+      "name": "召唤元素生物",
+      "englishName": "Conjure Elemental",
+      "level": 5,
+      "classes": [
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "material-targeting",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "conjure-fey",
+      "name": "召唤精类生物",
+      "englishName": "Conjure Fey",
+      "level": 6,
+      "classes": [
+        "druid",
+        "warlock"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "slot-scaling",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "conjure-minor-elementals",
+      "name": "召唤次级元素生物",
+      "englishName": "Conjure Minor Elementals",
+      "level": 4,
+      "classes": [
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "count-choice",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "conjure-woodland-beings",
+      "name": "召唤林地之精",
+      "englishName": "Conjure Woodland Beings",
+      "level": 4,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "count-choice",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "contact-other-plane",
+      "name": "异界探知",
+      "englishName": "Contact Other Plane",
+      "level": 5,
+      "classes": [
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "voice-response",
+        "saving-throw",
+        "random-damage"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "contagion",
+      "name": "疫病术",
+      "englishName": "Contagion",
+      "level": 5,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "spell-attack",
+        "multi-save-counter",
+        "mode-choice"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "contingency",
+      "name": "触发术",
+      "englishName": "Contingency",
+      "level": 6,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "invoke-activity",
+        "open-text-trigger",
+        "spell-storage"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "continual-flame",
+      "name": "不灭明焰",
+      "englishName": "Continual Flame",
+      "level": 2,
+      "classes": [
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "light-source",
+        "object-enchantment",
+        "dm-object-narration",
+        "dispel-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "control-water",
+      "name": "操控水体",
+      "englishName": "Control Water",
+      "level": 4,
+      "classes": [
+        "cleric",
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "terrain-geometry",
+        "environment-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "control-weather",
+      "name": "操控天气",
+      "englishName": "Control Weather",
+      "level": 8,
+      "classes": [
+        "cleric",
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "environment-state",
+        "dm-initial-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "counterspell",
+      "name": "法术反制",
+      "englishName": "Counterspell",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "counterspell",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "create-food-and-water",
+      "name": "造粮术",
+      "englishName": "Create Food and Water",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "item-generation",
+        "inventory-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "create-undead",
+      "name": "唤起死灵",
+      "englishName": "Create Undead",
+      "level": 6,
+      "classes": [
+        "cleric",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "material-targeting",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "create-or-destroy-water",
+      "name": "造水/枯水术",
+      "englishName": "Create or Destroy Water",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "world-object",
+        "terrain-geometry"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "creation",
+      "name": "造物术",
+      "englishName": "Creation",
+      "level": 5,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "object-creation",
+        "open-ended-object",
+        "duration-by-material"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "cure-wounds",
+      "name": "疗伤术",
+      "englishName": "Cure Wounds",
+      "level": 1,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "healing",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "dancing-lights",
+      "name": "舞光术",
+      "englishName": "Dancing Lights",
+      "level": 0,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "darkness",
+      "name": "黑暗术",
+      "englishName": "Darkness",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "固定区域、魔法黑暗与视觉压制已自动化；物体载体、遮盖阻断及随物体移动仍需地图层处理。"
+    },
+    {
+      "id": "darkvision",
+      "name": "黑暗视觉",
+      "englishName": "Darkvision",
+      "level": 2,
+      "classes": [
+        "druid",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "daylight",
+      "name": "昼明术",
+      "englishName": "Daylight",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger",
+        "sorcerer"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "固定光照区域及与黑暗区域的压制已自动化；施加到物体并随物体移动仍需地图层处理。"
+    },
+    {
+      "id": "death-ward",
+      "name": "防死结界",
+      "englishName": "Death Ward",
+      "level": 4,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "delayed-blast-fireball",
+      "name": "延迟爆裂火球",
+      "englishName": "Delayed Blast Fireball",
+      "level": 7,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "damage-accumulator",
+        "event-trigger",
+        "slot-scaling"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "demiplane",
+      "name": "创造半位面",
+      "englishName": "Demiplane",
+      "level": 8,
+      "classes": [
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "cross-scene",
+        "door-state",
+        "semantic-destination"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "detect-evil-and-good",
+      "name": "侦测善恶",
+      "englishName": "Detect Evil and Good",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-sense",
+        "typed-target",
+        "effect-detection",
+        "consecrated-object-gap",
+        "barrier-material-thickness-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "detect-magic",
+      "name": "侦测魔法",
+      "englishName": "Detect Magic",
+      "level": 1,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-sense",
+        "effect-detection",
+        "magic-item-detection",
+        "metadata-visibility",
+        "world-object-gap",
+        "barrier-material-thickness-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "detect-poison-and-disease",
+      "name": "侦测毒性和疾病",
+      "englishName": "Detect Poison and Disease",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-sense",
+        "effect-detection",
+        "typed-target",
+        "world-object-gap",
+        "poison-kind-gap",
+        "barrier-material-thickness-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "detect-thoughts",
+      "name": "侦测思想",
+      "englishName": "Detect Thoughts",
+      "level": 2,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "sensor-information",
+        "dm-response"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "dimension-door",
+      "name": "任意门",
+      "englishName": "Dimension Door",
+      "level": 4,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "teleport",
+        "passenger-movement",
+        "off-map-destination"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "disguise-self",
+      "name": "易容术",
+      "englishName": "Disguise Self",
+      "level": 1,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "illusory-content",
+        "ability-check",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "disintegrate",
+      "name": "解离术",
+      "englishName": "Disintegrate",
+      "level": 6,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "dispel-evil-and-good",
+      "name": "反制善恶",
+      "englishName": "Dispel Evil and Good",
+      "level": 5,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "mode-choice",
+        "effect-removal",
+        "planar-state"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "dispel-magic",
+      "name": "解除魔法",
+      "englishName": "Dispel Magic",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "dispel-magic",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "divination",
+      "name": "预言术",
+      "englishName": "Divination",
+      "level": 4,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "manual",
+      "implementation": "catalog-only",
+      "migration": "keep-dm",
+      "codes": [
+        "dm-response",
+        "future-information"
+      ],
+      "review": "主要产出是 DM 回答、叙事交互或开放式现实改写，不应伪装成自动结算。"
+    },
+    {
+      "id": "divine-favor",
+      "name": "神恩",
+      "englishName": "Divine Favor",
+      "level": 1,
+      "classes": [
+        "paladin"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "divine-word",
+      "name": "圣言术",
+      "englishName": "Divine Word",
+      "level": 7,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "hit-point-threshold",
+        "condition-lifecycle",
+        "planar-state"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "dominate-beast",
+      "name": "支配野兽",
+      "englishName": "Dominate Beast",
+      "level": 4,
+      "classes": [
+        "druid",
+        "sorcerer"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "actor-control",
+        "semantic-command"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "dominate-monster",
+      "name": "支配怪物",
+      "englishName": "Dominate Monster",
+      "level": 8,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "actor-control",
+        "semantic-command"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "dominate-person",
+      "name": "支配人类",
+      "englishName": "Dominate Person",
+      "level": 5,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "actor-control",
+        "semantic-command"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "dream",
+      "name": "托梦术",
+      "englishName": "Dream",
+      "level": 5,
+      "classes": [
+        "bard",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "communication",
+        "saving-throw",
+        "dm-narrative"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "druidcraft",
+      "name": "德鲁伊伎俩",
+      "englishName": "Druidcraft",
+      "level": 0,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "minor-world-effect",
+        "dm-weather"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "earthquake",
+      "name": "地震术",
+      "englishName": "Earthquake",
+      "level": 8,
+      "classes": [
+        "cleric",
+        "druid",
+        "sorcerer"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "terrain-geometry",
+        "structure-damage"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "eldritch-blast",
+      "name": "魔能爆",
+      "englishName": "Eldritch Blast",
+      "level": 0,
+      "classes": [
+        "warlock"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "enhance-ability",
+      "name": "强化属性",
+      "englishName": "Enhance Ability",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "sorcerer"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "enlarge-reduce",
+      "name": "变巨/缩小术",
+      "englishName": "Enlarge/Reduce",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "生物目标已自动化；物件目标仍需要 DM 裁定。"
+    },
+    {
+      "id": "entangle",
+      "name": "纠缠术",
+      "englishName": "Entangle",
+      "level": 1,
+      "classes": [
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "enthrall",
+      "name": "注目术",
+      "englishName": "Enthrall",
+      "level": 2,
+      "classes": [
+        "bard",
+        "warlock"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "skill-check-modifier",
+        "source-link"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "etherealness",
+      "name": "以太化",
+      "englishName": "Etherealness",
+      "level": 7,
+      "classes": [
+        "bard",
+        "cleric",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "planar-state",
+        "movement-mode",
+        "effect-suppression",
+        "slot-scaling-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "expeditious-retreat",
+      "name": "脚底抹油",
+      "englishName": "Expeditious Retreat",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "eyebite",
+      "name": "摄心目光",
+      "englishName": "Eyebite",
+      "level": 6,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "mode-choice",
+        "saving-throw",
+        "save-ends"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "fabricate",
+      "name": "鬼斧神工",
+      "englishName": "Fabricate",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "object-creation",
+        "world-material",
+        "crafting-judgment"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "faerie-fire",
+      "name": "妖火",
+      "englishName": "Faerie Fire",
+      "level": 1,
+      "classes": [
+        "bard",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "生物豁免、显形和攻击优势已自动化；区域内物体的描边效果仍需地图层处理。"
+    },
+    {
+      "id": "faithful-hound",
+      "name": "忠犬术",
+      "englishName": "Faithful Hound",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "granted-activity",
+        "visibility-rule"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "false-life",
+      "name": "虚假生命",
+      "englishName": "False Life",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "temporary-hit-points",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "fear",
+      "name": "恐惧术",
+      "englishName": "Fear",
+      "level": 3,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "forced-movement",
+        "condition-lifecycle"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "feather-fall",
+      "name": "羽落术",
+      "englishName": "Feather Fall",
+      "level": 1,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "reaction-trigger",
+        "falling-state",
+        "movement-rate"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "feeblemind",
+      "name": "弱智术",
+      "englishName": "Feeblemind",
+      "level": 8,
+      "classes": [
+        "bard",
+        "druid",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "ability-override",
+        "long-term-save"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "find-familiar",
+      "name": "获得魔宠",
+      "englishName": "Find Familiar",
+      "level": 1,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "summon-companion",
+        "form-catalog",
+        "shared-senses"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "find-steed",
+      "name": "召唤坐骑",
+      "englishName": "Find Steed",
+      "level": 2,
+      "classes": [
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "shared-spells",
+        "dm-creature-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "find-traps",
+      "name": "寻找陷阱",
+      "englishName": "Find Traps",
+      "level": 2,
+      "classes": [
+        "cleric",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-information",
+        "hidden-object-tags",
+        "dm-information"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "find-the-path",
+      "name": "寻路术",
+      "englishName": "Find the Path",
+      "level": 6,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-navigation",
+        "semantic-destination",
+        "dm-information"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "finger-of-death",
+      "name": "死亡一指",
+      "englishName": "Finger of Death",
+      "level": 7,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "伤害已自动化；击杀人形生物后的僵尸生成与控制仍需要 DM 裁定。"
+    },
+    {
+      "id": "fire-bolt",
+      "name": "火焰箭",
+      "englishName": "Fire Bolt",
+      "level": 0,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "fire-shield",
+      "name": "火焰护盾",
+      "englishName": "Fire Shield",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "mode-choice",
+        "damage-resistance",
+        "damage-reflection"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "fire-storm",
+      "name": "火焰风暴",
+      "englishName": "Fire Storm",
+      "level": 7,
+      "classes": [
+        "cleric",
+        "druid",
+        "sorcerer"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "multi-cell-template",
+        "saving-throw",
+        "damage"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "fireball",
+      "name": "火球术",
+      "englishName": "Fireball",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "flame-blade",
+      "name": "火焰刀",
+      "englishName": "Flame Blade",
+      "level": 2,
+      "classes": [
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "flame-strike",
+      "name": "焰击术",
+      "englishName": "Flame Strike",
+      "level": 5,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "flaming-sphere",
+      "name": "炽焰法球",
+      "englishName": "Flaming Sphere",
+      "level": 2,
+      "classes": [
+        "druid",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "flesh-to-stone",
+      "name": "石化术",
+      "englishName": "Flesh to Stone",
+      "level": 6,
+      "classes": [
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "multi-save-counter",
+        "condition-lifecycle"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "floating-disk",
+      "name": "浮碟术",
+      "englishName": "Floating Disk",
+      "level": 1,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "summon-companion",
+        "source-following",
+        "carry-capacity"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "fly",
+      "name": "飞行术",
+      "englishName": "Fly",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "fog-cloud",
+      "name": "云雾术",
+      "englishName": "Fog Cloud",
+      "level": 1,
+      "classes": [
+        "druid",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "forbiddance",
+      "name": "禁制术",
+      "englishName": "Forbiddance",
+      "level": 6,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "typed-target",
+        "teleport-blocking",
+        "turn-trigger-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "forcecage",
+      "name": "魔力监牢",
+      "englishName": "Forcecage",
+      "level": 7,
+      "classes": [
+        "bard",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "movement-blocking",
+        "teleport-save"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "foresight",
+      "name": "预警术",
+      "englishName": "Foresight",
+      "level": 9,
+      "classes": [
+        "bard",
+        "druid",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "roll-mode-modifier",
+        "condition-immunity",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "freedom-of-movement",
+      "name": "行动自如",
+      "englishName": "Freedom of Movement",
+      "level": 4,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "condition-immunity",
+        "movement-modifier",
+        "automatic-escape"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "freezing-sphere",
+      "name": "冰封法球",
+      "englishName": "Freezing Sphere",
+      "level": 6,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "立即发射已自动化；延迟发射与冻结水面仍需要 DM 裁定。"
+    },
+    {
+      "id": "gaseous-form",
+      "name": "气化形体",
+      "englishName": "Gaseous Form",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "stat-transform",
+        "movement-mode",
+        "action-restriction"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "gate",
+      "name": "异界之门",
+      "englishName": "Gate",
+      "level": 9,
+      "classes": [
+        "cleric",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "cross-scene",
+        "summon-companion",
+        "deity-veto"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "geas",
+      "name": "指使术",
+      "englishName": "Geas",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "semantic-command",
+        "semantic-compliance"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "gentle-repose",
+      "name": "遗体防腐",
+      "englishName": "Gentle Repose",
+      "level": 2,
+      "classes": [
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "corpse-state",
+        "duration",
+        "resurrection-timer"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "giant-insect",
+      "name": "巨虫术",
+      "englishName": "Giant Insect",
+      "level": 4,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "stat-transform",
+        "form-catalog",
+        "dm-actor-control"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "glibness",
+      "name": "花言巧语",
+      "englishName": "Glibness",
+      "level": 8,
+      "classes": [
+        "bard",
+        "warlock"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "minimum-roll",
+        "truth-detection-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "globe-of-invulnerability",
+      "name": "法术无效结界",
+      "englishName": "Globe of Invulnerability",
+      "level": 6,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "spell-level-suppression"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "glyph-of-warding",
+      "name": "守卫刻文",
+      "englishName": "Glyph of Warding",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "open-text-trigger",
+        "spell-storage"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "goodberry",
+      "name": "神莓术",
+      "englishName": "Goodberry",
+      "level": 1,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "item-generation",
+        "healing",
+        "inventory-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "grease",
+      "name": "油腻术",
+      "englishName": "Grease",
+      "level": 1,
+      "classes": [
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "greater-invisibility",
+      "name": "高等隐形术",
+      "englishName": "Greater Invisibility",
+      "level": 4,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "greater-restoration",
+      "name": "高等复原术",
+      "englishName": "Greater Restoration",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "mode-choice",
+        "effect-removal",
+        "ability-restoration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "guardian-of-faith",
+      "name": "信仰守卫",
+      "englishName": "Guardian of Faith",
+      "level": 4,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "saving-throw",
+        "damage-pool"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "guards-and-wards",
+      "name": "铜墙铁壁",
+      "englishName": "Guards and Wards",
+      "level": 6,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "multi-area",
+        "door-state",
+        "illusory-content"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "guidance",
+      "name": "神导术",
+      "englishName": "Guidance",
+      "level": 0,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "guiding-bolt",
+      "name": "曳光弹",
+      "englishName": "Guiding Bolt",
+      "level": 1,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "gust-of-wind",
+      "name": "造风术",
+      "englishName": "Gust of Wind",
+      "level": 2,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "forced-movement",
+        "area-movement"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "hallow",
+      "name": "圣居",
+      "englishName": "Hallow",
+      "level": 5,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "mode-choice",
+        "open-ended-exclusions"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "hallucinatory-terrain",
+      "name": "幻景",
+      "englishName": "Hallucinatory Terrain",
+      "level": 4,
+      "classes": [
+        "bard",
+        "druid",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "terrain-geometry",
+        "illusory-content",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "harm",
+      "name": "重伤术",
+      "englishName": "Harm",
+      "level": 6,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "haste",
+      "name": "加速术",
+      "englishName": "Haste",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "effect-modifier",
+        "restricted-extra-action",
+        "expiry-penalty"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "heal",
+      "name": "医疗术",
+      "englishName": "Heal",
+      "level": 6,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "fixed-healing",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "healing-word",
+      "name": "治愈真言",
+      "englishName": "Healing Word",
+      "level": 1,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "healing",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "heat-metal",
+      "name": "灼热金属",
+      "englishName": "Heat Metal",
+      "level": 2,
+      "classes": [
+        "bard",
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "automatic-damage",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "hellish-rebuke",
+      "name": "炼狱叱喝",
+      "englishName": "Hellish Rebuke",
+      "level": 1,
+      "classes": [
+        "warlock"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "heroes-feast",
+      "name": "英雄宴",
+      "englishName": "Heroes’ Feast",
+      "level": 6,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "max-hit-points",
+        "condition-immunity",
+        "saving-throw-modifier"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "heroism",
+      "name": "英雄气概",
+      "englishName": "Heroism",
+      "level": 1,
+      "classes": [
+        "bard",
+        "paladin"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "hideous-laughter",
+      "name": "狂笑术",
+      "englishName": "Hideous Laughter",
+      "level": 1,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "hold-monster",
+      "name": "怪物定身术",
+      "englishName": "Hold Monster",
+      "level": 5,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "hold-person",
+      "name": "人类定身术",
+      "englishName": "Hold Person",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "holy-aura",
+      "name": "圣洁灵光",
+      "englishName": "Holy Aura",
+      "level": 8,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "roll-mode-modifier",
+        "typed-target",
+        "reaction-trigger"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "hunters-mark",
+      "name": "猎人印记",
+      "englishName": "Hunter's Mark",
+      "level": 1,
+      "classes": [
+        "ranger"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "mark",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "hypnotic-pattern",
+      "name": "催眠图纹",
+      "englishName": "Hypnotic Pattern",
+      "level": 3,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "ice-storm",
+      "name": "冰风暴",
+      "englishName": "Ice Storm",
+      "level": 4,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "identify",
+      "name": "鉴定术",
+      "englishName": "Identify",
+      "level": 1,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "metadata-visibility",
+        "effect-detection",
+        "inventory-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "illusory-script",
+      "name": "迷幻手稿",
+      "englishName": "Illusory Script",
+      "level": 1,
+      "classes": [
+        "bard",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "illusory-content",
+        "reader-identity",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "imprisonment",
+      "name": "禁锢术",
+      "englishName": "Imprisonment",
+      "level": 9,
+      "classes": [
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "planar-state",
+        "open-text-release"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "incendiary-cloud",
+      "name": "焚云术",
+      "englishName": "Incendiary Cloud",
+      "level": 8,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "saving-throw",
+        "area-lifecycle"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "inflict-wounds",
+      "name": "致伤术",
+      "englishName": "Inflict Wounds",
+      "level": 1,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "insect-plague",
+      "name": "疫病虫群",
+      "englishName": "Insect Plague",
+      "level": 5,
+      "classes": [
+        "cleric",
+        "druid",
+        "sorcerer"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "初始范围伤害、升环、进入与回合结束触发、困难地形和垂直范围已自动化；轻度遮蔽与精确球面边界仍需地图层或 DM 处理。"
+    },
+    {
+      "id": "instant-summons",
+      "name": "瞬间召唤",
+      "englishName": "Instant Summons",
+      "level": 6,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "item-link",
+        "planar-state",
+        "inventory-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "invisibility",
+      "name": "隐形术",
+      "englishName": "Invisibility",
+      "level": 2,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "irresistible-dance",
+      "name": "迷舞术",
+      "englishName": "Irresistible Dance",
+      "level": 6,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "effect-modifier",
+        "saving-throw",
+        "action-escape"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "jump",
+      "name": "跳跃术",
+      "englishName": "Jump",
+      "level": 1,
+      "classes": [
+        "druid",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "knock",
+      "name": "敲击术",
+      "englishName": "Knock",
+      "level": 2,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "door-state",
+        "object-unlock",
+        "sound-event"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "legend-lore",
+      "name": "通晓传奇",
+      "englishName": "Legend Lore",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "resolve-only"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "lesser-restoration",
+      "name": "次级复原术",
+      "englishName": "Lesser Restoration",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "remove-condition",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "levitate",
+      "name": "浮空术",
+      "englishName": "Levitate",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "vertical-movement",
+        "source-control"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "light",
+      "name": "光亮术",
+      "englishName": "Light",
+      "level": 0,
+      "classes": [
+        "bard",
+        "cleric",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "light-source",
+        "object-enchantment",
+        "saving-throw"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "lightning-bolt",
+      "name": "闪电束",
+      "englishName": "Lightning Bolt",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "locate-animals-or-plants",
+      "name": "动植物定位术",
+      "englishName": "Locate Animals or Plants",
+      "level": 2,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-information",
+        "semantic-target",
+        "off-map-search"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "locate-creature",
+      "name": "生物定位术",
+      "englishName": "Locate Creature",
+      "level": 4,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-information",
+        "semantic-target",
+        "off-map-search"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "locate-object",
+      "name": "物件定位术",
+      "englishName": "Locate Object",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-information",
+        "semantic-target",
+        "off-map-search"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "longstrider",
+      "name": "大步奔行",
+      "englishName": "Longstrider",
+      "level": 1,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mage-armor",
+      "name": "法师护甲",
+      "englishName": "Mage Armor",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mage-hand",
+      "name": "法师之手",
+      "englishName": "Mage Hand",
+      "level": 0,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "手的持续时间与地图投影已支持；抓取、移动及操作具体物体仍需地图交互或 DM 裁定。"
+    },
+    {
+      "id": "magic-circle",
+      "name": "防护法阵",
+      "englishName": "Magic Circle",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "paladin",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "typed-target",
+        "movement-blocking"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "magic-jar",
+      "name": "魔魂壶",
+      "englishName": "Magic Jar",
+      "level": 6,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "planar-state",
+        "actor-control",
+        "body-snapshot"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "magic-missile",
+      "name": "魔法飞弹",
+      "englishName": "Magic Missile",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "automatic-damage",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "magic-mouth",
+      "name": "魔嘴术",
+      "englishName": "Magic Mouth",
+      "level": 2,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "object-enchantment",
+        "open-text-trigger",
+        "communication"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "magic-weapon",
+      "name": "魔化武器",
+      "englishName": "Magic Weapon",
+      "level": 2,
+      "classes": [
+        "paladin",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "magnificent-mansion",
+      "name": "豪宅术",
+      "englishName": "Magnificent Mansion",
+      "level": 7,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "cross-scene",
+        "object-creation",
+        "dm-layout"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "major-image",
+      "name": "高等幻影",
+      "englishName": "Major Image",
+      "level": 3,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "illusory-content",
+        "sensor-vision",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "mass-cure-wounds",
+      "name": "群体疗伤术",
+      "englishName": "Mass Cure Wounds",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "healing",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mass-heal",
+      "name": "群体医疗术",
+      "englishName": "Mass Heal",
+      "level": 9,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "healing-pool",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mass-healing-word",
+      "name": "群体治愈真言",
+      "englishName": "Mass Healing Word",
+      "level": 3,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "healing",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mass-suggestion",
+      "name": "群体暗示术",
+      "englishName": "Mass Suggestion",
+      "level": 6,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "semantic-command",
+        "semantic-compliance"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "maze",
+      "name": "迷宫术",
+      "englishName": "Maze",
+      "level": 8,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "planar-state",
+        "ability-check",
+        "turn-trigger"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "meld-into-stone",
+      "name": "融身入石",
+      "englishName": "Meld into Stone",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "terrain-geometry",
+        "planar-state",
+        "ejection-damage"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "mending",
+      "name": "修复术",
+      "englishName": "Mending",
+      "level": 0,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-object",
+        "repair-state",
+        "dm-object-fit"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "message",
+      "name": "传讯术",
+      "englishName": "Message",
+      "level": 0,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "action-economy"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "meteor-swarm",
+      "name": "流星爆",
+      "englishName": "Meteor Swarm",
+      "level": 9,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mind-blank",
+      "name": "心灵屏障",
+      "englishName": "Mind Blank",
+      "level": 8,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "damage-immunity",
+        "condition-immunity",
+        "effect-suppression"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "minor-illusion",
+      "name": "次级幻影",
+      "englishName": "Minor Illusion",
+      "level": 0,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "narrative-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "mirage-arcane",
+      "name": "海市蜃楼",
+      "englishName": "Mirage Arcane",
+      "level": 7,
+      "classes": [
+        "bard",
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "terrain-geometry",
+        "illusory-content",
+        "world-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "mirror-image",
+      "name": "镜影术",
+      "englishName": "Mirror Image",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "attack-redirection",
+        "duplicate-counter",
+        "attack-resolution"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "mislead",
+      "name": "假象术",
+      "englishName": "Mislead",
+      "level": 5,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "sensor-vision",
+        "invisibility",
+        "entity-movement"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "misty-step",
+      "name": "迷踪步",
+      "englishName": "Misty Step",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "teleport",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "modify-memory",
+      "name": "篡改记忆",
+      "englishName": "Modify Memory",
+      "level": 5,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "semantic-memory",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "moonbeam",
+      "name": "月华之光",
+      "englishName": "Moonbeam",
+      "level": 2,
+      "classes": [
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "move-earth",
+      "name": "地动术",
+      "englishName": "Move Earth",
+      "level": 6,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "terrain-geometry",
+        "world-state",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "nondetection",
+      "name": "回避侦测",
+      "englishName": "Nondetection",
+      "level": 3,
+      "classes": [
+        "bard",
+        "ranger",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "effect-suppression",
+        "duration",
+        "targeting-immunity"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "pass-without-trace",
+      "name": "行动无踪",
+      "englishName": "Pass without Trace",
+      "level": 2,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "skill-check-modifier",
+        "source-aura",
+        "tracking-suppression"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "passwall",
+      "name": "穿墙术",
+      "englishName": "Passwall",
+      "level": 5,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "terrain-geometry",
+        "movement-blocking",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "phantasmal-killer",
+      "name": "魅影杀手",
+      "englishName": "Phantasmal Killer",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "phantom-steed",
+      "name": "魅影驹",
+      "englishName": "Phantom Steed",
+      "level": 3,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "summon-companion",
+        "movement-mode",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "planar-ally",
+      "name": "异界盟誓",
+      "englishName": "Planar Ally",
+      "level": 6,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "summon-companion",
+        "dm-creature-choice",
+        "semantic-bargain"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "planar-binding",
+      "name": "异界誓缚",
+      "englishName": "Planar Binding",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "actor-control",
+        "semantic-command"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "plane-shift",
+      "name": "异界传送",
+      "englishName": "Plane Shift",
+      "level": 7,
+      "classes": [
+        "cleric",
+        "druid",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "spell-attack",
+        "saving-throw",
+        "cross-scene"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "plant-growth",
+      "name": "植物滋长",
+      "englishName": "Plant Growth",
+      "level": 3,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "terrain-geometry",
+        "long-term-world-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "poison-spray",
+      "name": "毒气喷溅",
+      "englishName": "Poison Spray",
+      "level": 0,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "polymorph",
+      "name": "变形术",
+      "englishName": "Polymorph",
+      "level": 4,
+      "classes": [
+        "bard",
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "stat-transform",
+        "form-catalog",
+        "hit-point-handoff"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "power-word-kill",
+      "name": "律令死亡",
+      "englishName": "Power Word Kill",
+      "level": 9,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "power-word-kill",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "power-word-stun",
+      "name": "律令震慑",
+      "englishName": "Power Word Stun",
+      "level": 8,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "power-word-stun",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "prayer-of-healing",
+      "name": "治疗祷言",
+      "englishName": "Prayer of Healing",
+      "level": 2,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "healing",
+        "legacy-core-transaction"
+      ],
+      "review": "多目标治疗、升环以及亡灵与构装体限制已自动化；10分钟施法过程与战斗外时间推进仍需 DM 确认。"
+    },
+    {
+      "id": "prestidigitation",
+      "name": "魔法伎俩",
+      "englishName": "Prestidigitation",
+      "level": 0,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "mode-choice",
+        "minor-world-effect",
+        "open-ended-content"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "prismatic-spray",
+      "name": "虹光喷射",
+      "englishName": "Prismatic Spray",
+      "level": 7,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "random-table",
+        "dm-planar-destination"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "prismatic-wall",
+      "name": "虹光法墙",
+      "englishName": "Prismatic Wall",
+      "level": 9,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "layered-effects",
+        "dm-planar-destination"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "private-sanctum",
+      "name": "私人密室",
+      "englishName": "Private Sanctum",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "sensor-blocking",
+        "teleport-blocking",
+        "slot-scaling-gap"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "produce-flame",
+      "name": "燃火术",
+      "englishName": "Produce Flame",
+      "level": 0,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "投掷火焰的攻击与伤害已自动化；手持火焰的照明、熄灭和持续时间仍需地图层处理。"
+    },
+    {
+      "id": "programmed-illusion",
+      "name": "预置幻影",
+      "englishName": "Programmed Illusion",
+      "level": 6,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "illusory-content",
+        "open-text-trigger",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "project-image",
+      "name": "投影术",
+      "englishName": "Project Image",
+      "level": 7,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "sensor-vision",
+        "entity-movement"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "protection-from-energy",
+      "name": "防护能量伤害",
+      "englishName": "Protection from Energy",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "druid",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "protection-from-evil-and-good",
+      "name": "防护善恶",
+      "englishName": "Protection from Evil and Good",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "paladin",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "typed-target",
+        "roll-mode-modifier",
+        "condition-immunity"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "protection-from-poison",
+      "name": "防护毒素",
+      "englishName": "Protection from Poison",
+      "level": 2,
+      "classes": [
+        "cleric",
+        "druid",
+        "paladin",
+        "ranger"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "purify-food-and-drink",
+      "name": "净化食粮",
+      "englishName": "Purify Food and Drink",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "druid",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "world-object",
+        "effect-removal",
+        "inventory-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "raise-dead",
+      "name": "死者复活",
+      "englishName": "Raise Dead",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "death-handoff",
+        "condition-restoration",
+        "long-term-penalty"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "ray-of-enfeeblement",
+      "name": "衰弱射线",
+      "englishName": "Ray of Enfeeblement",
+      "level": 2,
+      "classes": [
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "spell-attack",
+        "damage-multiplier",
+        "save-ends"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "ray-of-frost",
+      "name": "冷冻射线",
+      "englishName": "Ray of Frost",
+      "level": 0,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "regenerate",
+      "name": "再生术",
+      "englishName": "Regenerate",
+      "level": 7,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "healing",
+        "periodic-healing",
+        "body-restoration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "reincarnate",
+      "name": "转生术",
+      "englishName": "Reincarnate",
+      "level": 5,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "death-handoff",
+        "random-table",
+        "dm-form-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "remove-curse",
+      "name": "移除诅咒",
+      "englishName": "Remove Curse",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "paladin",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "effect-removal",
+        "item-link",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "resilient-sphere",
+      "name": "弹力法球",
+      "englishName": "Resilient Sphere",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "persistent-area",
+        "movement-blocking"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "resistance",
+      "name": "抗力术",
+      "englishName": "Resistance",
+      "level": 0,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "resurrection",
+      "name": "复生术",
+      "englishName": "Resurrection",
+      "level": 7,
+      "classes": [
+        "bard",
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "death-handoff",
+        "condition-restoration",
+        "long-term-penalty"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "reverse-gravity",
+      "name": "反重力",
+      "englishName": "Reverse Gravity",
+      "level": 7,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "vertical-movement",
+        "falling-state"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "revivify",
+      "name": "回生术",
+      "englishName": "Revivify",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "death-handoff",
+        "resurrection-timer",
+        "healing"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "rope-trick",
+      "name": "魔绳术",
+      "englishName": "Rope Trick",
+      "level": 2,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "cross-scene",
+        "persistent-area",
+        "semantic-entry"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "sacred-flame",
+      "name": "圣火术",
+      "englishName": "Sacred Flame",
+      "level": 0,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "sanctuary",
+      "name": "庇护术",
+      "englishName": "Sanctuary",
+      "level": 1,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "scorching-ray",
+      "name": "灼热射线",
+      "englishName": "Scorching Ray",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "scrying",
+      "name": "探知",
+      "englishName": "Scrying",
+      "level": 5,
+      "classes": [
+        "bard",
+        "cleric",
+        "druid",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "sensor-vision",
+        "cross-scene"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "secret-chest",
+      "name": "秘藏箱",
+      "englishName": "Secret Chest",
+      "level": 4,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "item-link",
+        "planar-state",
+        "inventory-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "see-invisibility",
+      "name": "识破隐形",
+      "englishName": "See Invisibility",
+      "level": 2,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "识破隐形已自动化；看入以太位面的地图语义仍需 DM 裁定。"
+    },
+    {
+      "id": "seeming",
+      "name": "伪装术",
+      "englishName": "Seeming",
+      "level": 5,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "illusory-content",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "sending",
+      "name": "短讯术",
+      "englishName": "Sending",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "communication",
+        "cross-scene",
+        "npc-response"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "sequester",
+      "name": "隔离术",
+      "englishName": "Sequester",
+      "level": 7,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "invisibility",
+        "open-text-trigger",
+        "long-term-state"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "shapechange",
+      "name": "形体变化",
+      "englishName": "Shapechange",
+      "level": 9,
+      "classes": [
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "stat-transform",
+        "form-catalog",
+        "dm-equipment-fit"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "shatter",
+      "name": "粉碎音波",
+      "englishName": "Shatter",
+      "level": 2,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "shield",
+      "name": "护盾术",
+      "englishName": "Shield",
+      "level": 1,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "armor-class-buff",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "shield-of-faith",
+      "name": "虔诚护盾",
+      "englishName": "Shield of Faith",
+      "level": 1,
+      "classes": [
+        "cleric",
+        "paladin"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "armor-class-buff",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "shillelagh",
+      "name": "橡棍术",
+      "englishName": "Shillelagh",
+      "level": 0,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "武器伤害骰、施法属性选择、重施、持续时间及权威物品栏中的武器离手生命周期已自动化；临时地图物件或叙事性放手仍需 DM 处理。"
+    },
+    {
+      "id": "shocking-grasp",
+      "name": "电爪",
+      "englishName": "Shocking Grasp",
+      "level": 0,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "silence",
+      "name": "沉默术",
+      "englishName": "Silence",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "区域内言语成分禁用和雷鸣伤害免疫已自动化；声音传播、耳聋叙事与边界争议仍由 DM 裁定。"
+    },
+    {
+      "id": "silent-image",
+      "name": "无声幻影",
+      "englishName": "Silent Image",
+      "level": 1,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "illusory-content",
+        "entity-movement",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "simulacrum",
+      "name": "拟像术",
+      "englishName": "Simulacrum",
+      "level": 7,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "body-snapshot",
+        "summon-companion",
+        "resource-restriction"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "sleep",
+      "name": "睡眠术",
+      "englishName": "Sleep",
+      "level": 1,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "sleep-hit-point-pool",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "sleet-storm",
+      "name": "雪雨暴",
+      "englishName": "Sleet Storm",
+      "level": 3,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "重度遮蔽、困难地形、倒地豁免及施法专注检定已自动化；裸露火焰熄灭仍由 DM 裁定。"
+    },
+    {
+      "id": "slow",
+      "name": "缓慢术",
+      "englishName": "Slow",
+      "level": 3,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "速度、AC、敏捷豁免、反应、攻击次数、行动经济及核心 1 动作法术的施法动作延迟均已自动化；插件、怪物专用及地图实体法术的延迟完成仍保留 DM 裁定边界。"
+    },
+    {
+      "id": "spare-the-dying",
+      "name": "维生术",
+      "englishName": "Spare the Dying",
+      "level": 0,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "stabilize",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "speak-with-animals",
+      "name": "动物交谈术",
+      "englishName": "Speak with Animals",
+      "level": 1,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "manual",
+      "implementation": "catalog-only",
+      "migration": "keep-dm",
+      "codes": [
+        "communication",
+        "npc-response"
+      ],
+      "review": "主要产出是 DM 回答、叙事交互或开放式现实改写，不应伪装成自动结算。"
+    },
+    {
+      "id": "speak-with-dead",
+      "name": "死者交谈",
+      "englishName": "Speak with Dead",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "manual",
+      "implementation": "catalog-only",
+      "migration": "keep-dm",
+      "codes": [
+        "communication",
+        "npc-response"
+      ],
+      "review": "主要产出是 DM 回答、叙事交互或开放式现实改写，不应伪装成自动结算。"
+    },
+    {
+      "id": "speak-with-plants",
+      "name": "植物交谈",
+      "englishName": "Speak with Plants",
+      "level": 3,
+      "classes": [
+        "bard",
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "communication",
+        "terrain-state",
+        "dm-response"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "spider-climb",
+      "name": "蛛行术",
+      "englishName": "Spider Climb",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "movement-mode",
+        "duration",
+        "concentration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "spike-growth",
+      "name": "荆棘丛生",
+      "englishName": "Spike Growth",
+      "level": 2,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "困难地形与移动伤害已自动化；未目睹施法者的主动察觉识别流程仍需 DM 或地图层处理。"
+    },
+    {
+      "id": "spirit-guardians",
+      "name": "灵体卫士",
+      "englishName": "Spirit Guardians",
+      "level": 3,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "spiritual-weapon",
+      "name": "灵体武器",
+      "englishName": "Spiritual Weapon",
+      "level": 2,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "stinking-cloud",
+      "name": "臭云术",
+      "englishName": "Stinking Cloud",
+      "level": 3,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "重度遮蔽和回合开始体质豁免失败失去动作已自动化；无需呼吸者及强风驱散等特殊情况仍由 DM 裁定。"
+    },
+    {
+      "id": "stone-shape",
+      "name": "塑石术",
+      "englishName": "Stone Shape",
+      "level": 4,
+      "classes": [
+        "cleric",
+        "druid",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "terrain-geometry",
+        "world-object",
+        "dm-interpretation"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "stoneskin",
+      "name": "石肤术",
+      "englishName": "Stoneskin",
+      "level": 4,
+      "classes": [
+        "druid",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "damage-resistance",
+        "damage-qualification",
+        "concentration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "storm-of-vengeance",
+      "name": "复仇风暴",
+      "englishName": "Storm of Vengeance",
+      "level": 9,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "round-timeline",
+        "multi-effect"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "suggestion",
+      "name": "暗示术",
+      "englishName": "Suggestion",
+      "level": 2,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "saving-throw",
+        "semantic-command",
+        "semantic-compliance"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "sunbeam",
+      "name": "阳炎射线",
+      "englishName": "Sunbeam",
+      "level": 6,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "sunburst",
+      "name": "阳炎爆",
+      "englishName": "Sunburst",
+      "level": 8,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "symbol",
+      "name": "魔法徽记",
+      "englishName": "Symbol",
+      "level": 7,
+      "classes": [
+        "bard",
+        "cleric",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "open-text-trigger",
+        "mode-choice"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "telekinesis",
+      "name": "心灵遥控",
+      "englishName": "Telekinesis",
+      "level": 5,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "contested-check",
+        "forced-movement",
+        "world-object"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "telepathic-bond",
+      "name": "心灵联结",
+      "englishName": "Telepathic Bond",
+      "level": 5,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "communication",
+        "language-capability",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "teleport",
+      "name": "传送术",
+      "englishName": "Teleport",
+      "level": 7,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "random-table",
+        "cross-scene",
+        "semantic-familiarity"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "teleportation-circle",
+      "name": "传送法阵",
+      "englishName": "Teleportation Circle",
+      "level": 5,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "cross-scene",
+        "world-registry"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "thaumaturgy",
+      "name": "奇术",
+      "englishName": "Thaumaturgy",
+      "level": 0,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "narrative-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "环境与叙事效果仍需要 DM 裁定。"
+    },
+    {
+      "id": "thunderwave",
+      "name": "雷鸣波",
+      "englishName": "Thunderwave",
+      "level": 1,
+      "classes": [
+        "bard",
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "time-stop",
+      "name": "时间停止",
+      "englishName": "Time Stop",
+      "level": 9,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "extra-turns",
+        "random-table",
+        "effect-break"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "tiny-hut",
+      "name": "小屋术",
+      "englishName": "Tiny Hut",
+      "level": 3,
+      "classes": [
+        "bard",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "persistent-area",
+        "movement-blocking",
+        "occupant-permissions"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "tongues",
+      "name": "巧言术",
+      "englishName": "Tongues",
+      "level": 3,
+      "classes": [
+        "bard",
+        "cleric",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "language-capability",
+        "communication",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "transport-via-plants",
+      "name": "木遁术",
+      "englishName": "Transport via Plants",
+      "level": 6,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-object",
+        "cross-scene",
+        "semantic-destination"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "tree-stride",
+      "name": "树跃术",
+      "englishName": "Tree Stride",
+      "level": 5,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "world-object",
+        "teleport",
+        "off-map-destination"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "true-polymorph",
+      "name": "完全变形术",
+      "englishName": "True Polymorph",
+      "level": 9,
+      "classes": [
+        "bard",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "stat-transform",
+        "object-transform",
+        "open-ended-form"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "true-resurrection",
+      "name": "完全复生术",
+      "englishName": "True Resurrection",
+      "level": 9,
+      "classes": [
+        "cleric",
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "death-handoff",
+        "body-restoration",
+        "condition-restoration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "true-seeing",
+      "name": "真知术",
+      "englishName": "True Seeing",
+      "level": 6,
+      "classes": [
+        "bard",
+        "cleric",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "sensor-vision",
+        "effect-detection",
+        "planar-sight"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "true-strike",
+      "name": "克敌机先",
+      "englishName": "True Strike",
+      "level": 0,
+      "classes": [
+        "bard",
+        "sorcerer",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "target-linked-effect",
+        "roll-mode-modifier",
+        "concentration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "unseen-servant",
+      "name": "隐形仆役",
+      "englishName": "Unseen Servant",
+      "level": 1,
+      "classes": [
+        "bard",
+        "warlock",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "summon-companion",
+        "granted-activity",
+        "semantic-task"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "vampiric-touch",
+      "name": "吸血鬼之触",
+      "englishName": "Vampiric Touch",
+      "level": 3,
+      "classes": [
+        "warlock",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "spell-attack",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "vicious-mockery",
+      "name": "恶言相加",
+      "englishName": "Vicious Mockery",
+      "level": 0,
+      "classes": [
+        "bard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "saving-throw",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "wall-of-fire",
+      "name": "火墙术",
+      "englishName": "Wall of Fire",
+      "level": 4,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "wall-of-force",
+      "name": "力场墙",
+      "englishName": "Wall of Force",
+      "level": 5,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "可旋转直墙的移动与效应线阻挡已自动化；球体/穹顶、夹住生物时的推向和解离术互动仍由 DM 裁定。"
+    },
+    {
+      "id": "wall-of-ice",
+      "name": "冰墙术",
+      "englishName": "Wall of Ice",
+      "level": 6,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "可旋转直墙、初始豁免伤害、升环及移动/视线/效应线阻挡已自动化；墙段生命、破坏后寒气与复杂造型仍由 DM 裁定。"
+    },
+    {
+      "id": "wall-of-stone",
+      "name": "石墙术",
+      "englishName": "Wall of Stone",
+      "level": 5,
+      "classes": [
+        "druid",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "可旋转直墙的移动、视线、效应线阻挡及维持完整持续时间后的永久化已自动化；独立墙板生命、复杂造型与围困反应仍由 DM 裁定。"
+    },
+    {
+      "id": "wall-of-thorns",
+      "name": "棘墙术",
+      "englishName": "Wall of Thorns",
+      "level": 6,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "可旋转直墙、初始及进入/回合结束伤害、升环、移动成本和视线阻挡已自动化；环形造型与植被细节仍由 DM 裁定。"
+    },
+    {
+      "id": "warding-bond",
+      "name": "守护之链",
+      "englishName": "Warding Bond",
+      "level": 2,
+      "classes": [
+        "cleric"
+      ],
+      "current": "full",
+      "target": "full",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "active-effect",
+        "legacy-core-transaction"
+      ],
+      "review": "现有核心 Headless 事务已覆盖规则定义中的确定性结算。"
+    },
+    {
+      "id": "water-breathing",
+      "name": "水下呼吸",
+      "englishName": "Water Breathing",
+      "level": 3,
+      "classes": [
+        "druid",
+        "ranger",
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "movement-capability",
+        "duration",
+        "multi-target"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "water-walk",
+      "name": "水上行走",
+      "englishName": "Water Walk",
+      "level": 3,
+      "classes": [
+        "cleric",
+        "druid",
+        "ranger",
+        "sorcerer"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "movement-mode",
+        "multi-target",
+        "duration"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "web",
+      "name": "蛛网术",
+      "englishName": "Web",
+      "level": 2,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "轻度遮蔽、困难地形、进入/回合开始豁免、束缚与力量挣脱已自动化；支撑条件、坠落和燃烧蛛网仍由 DM 裁定。"
+    },
+    {
+      "id": "weird",
+      "name": "怪影杀手",
+      "englishName": "Weird",
+      "level": 9,
+      "classes": [
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "saving-throw",
+        "condition-lifecycle",
+        "periodic-damage"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "wind-walk",
+      "name": "御风而行",
+      "englishName": "Wind Walk",
+      "level": 6,
+      "classes": [
+        "druid"
+      ],
+      "current": "manual",
+      "target": "full",
+      "implementation": "catalog-only",
+      "migration": "implement-full",
+      "codes": [
+        "stat-transform",
+        "movement-mode",
+        "transition-timer"
+      ],
+      "review": "规则的强制结果由有限选择、权威骰值和可观察状态决定，可迁移为完整 Headless。"
+    },
+    {
+      "id": "wind-wall",
+      "name": "风墙术",
+      "englishName": "Wind Wall",
+      "level": 3,
+      "classes": [
+        "druid",
+        "ranger"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "core-spell-transaction",
+      "migration": "native-activity-projection",
+      "codes": [
+        "persistent-area",
+        "legacy-core-transaction"
+      ],
+      "review": "可旋转直墙、初始力量豁免与伤害、驱散重叠雾气、普通飞射物阻挡、小型飞行生物与气化形体穿越限制已自动化；任意曲线路径和松散轻质材料仍由 DM 裁定。"
+    },
+    {
+      "id": "wish",
+      "name": "祈愿术",
+      "englishName": "Wish",
+      "level": 9,
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "invoke-activity",
+        "bounded-safe-options",
+        "open-ended-effect"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "word-of-recall",
+      "name": "回返真言",
+      "englishName": "Word of Recall",
+      "level": 6,
+      "classes": [
+        "cleric"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "teleport",
+        "cross-scene",
+        "configured-sanctuary"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    },
+    {
+      "id": "zone-of-truth",
+      "name": "诚实之域",
+      "englishName": "Zone of Truth",
+      "level": 2,
+      "classes": [
+        "bard",
+        "cleric",
+        "paladin"
+      ],
+      "current": "manual",
+      "target": "partial",
+      "implementation": "catalog-only",
+      "migration": "implement-partial",
+      "codes": [
+        "persistent-area",
+        "saving-throw",
+        "semantic-compliance"
+      ],
+      "review": "确定性条款可以进入 Headless，但至少一项结果依赖开放式语言、DM 选择、场景语义或未建模世界状态。"
+    }
+  ]
+}

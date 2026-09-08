@@ -1,0 +1,97 @@
+{
+  "id": "srd-5.1:merfolk",
+  "slug": "merfolk",
+  "name": "人鱼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "spear",
+      "name": "长矛",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangedDamage[].average",
+        "attack.rangedDamage[].count",
+        "attack.rangedDamage[].sides",
+        "attack.rangedDamage[].bonus",
+        "attack.rangedDamage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 195,
+      "slug": "merfolk",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:57:25.672Z",
+      "name": "人鱼",
+      "actionId": "spear",
+      "actionName": "长矛",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-merfolk-spear-1788562645743",
+      "combatId": "verify-ui-merfolk-spear-1788562645743:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "人鱼 使用长矛攻击 验证目标：长矛 → 验证目标 6+2=8 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:57 PM\n攻击\n\n人鱼 使用长矛攻击 验证目标：长矛 → 验证目标 6+2=8 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：长矛｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 6；最终采用 6；调整值 +2。\n结果 · 8 vs AC 10：未命中。\n人鱼｜消耗动作",
+      "playerLog": "人鱼 使用长矛攻击 验证目标：长矛 → 验证目标 6+2=8 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:57:46.439Z",
+      "evidenceFile": "ui-cases/monsters/195-merfolk.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

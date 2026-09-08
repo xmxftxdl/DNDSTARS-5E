@@ -28,7 +28,13 @@ async function runRoomPluginSync(
     rules.requiredPlugins,
     roomActiveDnd5eRulesPluginRequirements(),
   )
-  if (missing.length === 0) return { rules, installedPluginIds: [] }
+  if (missing.length === 0) {
+    // The caller can hold the heartbeat from before a plugin activation. A
+    // local match therefore still needs one authoritative heartbeat instead
+    // of returning that stale `member.ready = false` snapshot forever.
+    const refreshed = await heartbeatRoom(session, roomActiveDnd5eRulesPluginRequirements())
+    return { rules: refreshed, installedPluginIds: [] }
+  }
 
   const installedPluginIds: string[] = []
   for (const requirement of missing) {
@@ -70,4 +76,20 @@ export function synchronizeRoomPlugins(
     activeSync = null
   })
   return activeSync
+}
+
+/**
+ * Revalidates and, when necessary, installs the room's exact plugin set.
+ *
+ * This is intentionally callable from user actions such as “开始战斗”. The
+ * background heartbeat normally keeps the room ready, but a recovered tab or
+ * a previously invalid package must be able to repair itself immediately
+ * instead of asking the DM to wait for a timer tick.
+ */
+export async function ensureRoomPluginsReady(session: RoomSession): Promise<RoomPluginSyncResult> {
+  const { ensureDnd5eRulesPluginHost } = await import('../rulesets/dnd5e/pluginLoader')
+  await ensureDnd5eRulesPluginHost()
+  const rules = await heartbeatRoom(session, roomActiveDnd5eRulesPluginRequirements())
+  if (rules.member.ready) return { rules, installedPluginIds: [] }
+  return synchronizeRoomPlugins(session, rules)
 }

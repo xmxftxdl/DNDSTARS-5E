@@ -8,7 +8,7 @@ import {
 const actionTypes: SharedPlayerActionState['type'][] = [
   'end-turn', 'dnd5e-death-save', 'dnd5e-weapon-attack', 'dnd5e-fighter-feature',
   'dnd5e-class-feature', 'dnd5e-racial-action', 'dnd5e-plugin-action', 'dnd5e-item-use',
-  'dnd5e-ability-check', 'dnd5e-spell-cast', 'dnd5e-persistent-area-move',
+  'dnd5e-ability-check', 'dnd5e-spell-cast', 'dnd5e-spell-whisper-reply', 'dnd5e-persistent-area-move',
   'dnd5e-adjudicated-spell', 'dnd5e-map-interaction', 'move-token', 'disengage', 'dodge',
   'dnd5e-basic-action',
 ]
@@ -25,5 +25,55 @@ describe('combat banner coverage', () => {
       dnd5ePluginAction: { featureId: 'player.custom:starfall-stance' },
     } as SharedPlayerActionState
     expect(playerActionCombatBannerName(action)).toBe('starfall stance')
+  })
+
+  it('uses the registered Chinese name for granted spell activities', () => {
+    const action = {
+      type: 'dnd5e-plugin-action',
+      dnd5ePluginAction: { featureId: 'srd-5.1:area-control.spell:mislead:move-projection' },
+    } as SharedPlayerActionState
+    expect(playerActionCombatBannerName(action, {
+      pluginFeatureName: () => '假象术·移动投影',
+    })).toBe('假象术·移动投影')
+  })
+
+  it('does not publish a combat banner for scene interactions', () => {
+    const action = {
+      type: 'dnd5e-map-interaction',
+      dnd5eMapInteraction: {},
+    } as SharedPlayerActionState
+
+    expect(PLAYER_ACTION_COMBAT_BANNER_ROUTES['dnd5e-map-interaction']).toBe('none')
+    expect(playerActionCombatBannerName(action)).toBeNull()
+  })
+
+  it.each([
+    'release-grapple',
+    'escape-grapple',
+    'escape-effect',
+    'dismiss-effect',
+    'wake',
+    'other-action',
+    'other-bonus-action',
+  ] as const)('does not publish a combat banner for %s', (kind) => {
+    const action = {
+      type: 'dnd5e-basic-action',
+      dnd5eBasicAction: { kind },
+    } as SharedPlayerActionState
+
+    expect(playerActionCombatBannerName(action)).toBeNull()
+  })
+
+  it('publishes a named combat banner for an Animate Dead mental command', () => {
+    const action = {
+      type: 'dnd5e-basic-action',
+      dnd5eBasicAction: {
+        kind: 'command-animate-dead',
+        targetTokenIds: ['skeleton'],
+        command: '守卫这里。',
+      },
+    } as SharedPlayerActionState
+
+    expect(playerActionCombatBannerName(action)).toBe('操纵死尸·心灵命令')
   })
 })

@@ -1,0 +1,231 @@
+{
+  "id": "srd-5.1:vampire-mist",
+  "slug": "vampire-mist",
+  "name": "吸血鬼（雾化形态）",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：目录原先从本体复制了当前形态不允许的传奇攻击。雾化形态不再提供传奇动作；蝙蝠形态保留移动与啃咬，移除传奇徒手打击。已验证旧动作 ID 在权威入口被拒绝，且不扣点、不伤害目标。"
+  ],
+  "rows": [],
+  "ui": [
+    {
+      "index": 39,
+      "slug": "vampire-mist",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:05:24.551Z",
+      "name": "吸血鬼（雾化形态）",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "challengeRating": "13",
+      "total": 334,
+      "mapId": "verify-ui-vampire-mist-inspect-1788566724598",
+      "combatId": "verify-ui-vampire-mist-inspect-1788566724598:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-05T00:05:30.890Z",
+      "evidenceFile": "ui-cases/monsters/039-vampire-mist.json"
+    },
+    {
+      "index": 5,
+      "mode": "specials",
+      "startedAt": "2026-09-04T23:12:40.021Z",
+      "slug": "vampire-mist",
+      "name": "吸血鬼（雾化形态）",
+      "actionId": null,
+      "legendary": true,
+      "movement": "none",
+      "fixtureActionId": null,
+      "section": "legendaryActions",
+      "total": 7,
+      "mapId": "verify-ui-vampire-mist-inspect-1788563560773",
+      "combatId": "verify-ui-vampire-mist-inspect-1788563560773:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "before": {
+        "maps": [
+          {
+            "id": "verify-ui-vampire-mist-inspect-1788563560773",
+            "name": "怪物验证 · 吸血鬼（雾化形态）",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "吸血鬼（雾化形态）",
+                "x": 175,
+                "y": 245,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "enemy",
+                "poolId": "srd-5.1:vampire-mist",
+                "hp": 144,
+                "maxHp": 144,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2
+                }
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 245,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 100000,
+                "maxHp": 100000
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-vampire-mist-inspect-1788563560773",
+        "updatedAt": 1788563563712,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 704,
+          "writerId": "client:2e91958d-5aae-49b8-b482-2c6f80bfacf0",
+          "writtenAt": 1788563563716
+        }
+      },
+      "status": "passed",
+      "scope": "玩家真实结束回合；雾化吸血鬼没有非法传奇动作窗口。",
+      "finishedAt": "2026-09-04T23:12:48.755Z",
+      "evidenceFile": "ui-cases/specials/05.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "传奇抗性",
+      "automation": "headless",
+      "rule": "legendary-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumUses"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "choose",
+        "decline",
+        "exhausted"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "雾化逃脱",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "再生",
+      "automation": "headless",
+      "rule": "regeneration",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.amount",
+        "rule.requiresPositiveHp",
+        "rule.diesAtZeroWhenSuppressed"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "injured",
+        "full-hp",
+        "suppressed"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "吸血鬼弱点",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

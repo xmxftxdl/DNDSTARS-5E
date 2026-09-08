@@ -3,13 +3,22 @@ export const DND5E_HIT_POINT_MAXIMUM_REDUCTION_LEDGER_VERSION = 1 as const
 export type Dnd5eHitPointMaximumReductionRecovery =
   | 'long-rest'
   | 'greater-restoration-or-other-magic'
+  | 'effect-removal'
 
 export interface Dnd5eHitPointMaximumReductionEntry {
   id: string
   amount: number
   recovery: Dnd5eHitPointMaximumReductionRecovery
+  /**
+   * Optional duration for reductions that end naturally. One combat round is
+   * six seconds, so one minute of campaign time advances this value by ten.
+   * Recovery magic may still remove the entry before the duration expires.
+   */
+  remainingRounds?: number
   sourceActorId?: string
   sourceActionId?: string
+  /** Active Effect whose removal restores this exact campaign reduction. */
+  sourceEffectId?: string
   damageType?: string
   combatId?: string
 }
@@ -44,13 +53,21 @@ function normalizeEntry(
     amount < 1 ||
     (
       raw.recovery !== 'long-rest' &&
-      raw.recovery !== 'greater-restoration-or-other-magic'
+      raw.recovery !== 'greater-restoration-or-other-magic' &&
+      raw.recovery !== 'effect-removal'
     )
   ) return undefined
+  const remainingRounds = raw.remainingRounds == null
+    ? undefined
+    : nonNegativeInteger(raw.remainingRounds)
+  if (raw.remainingRounds != null && (remainingRounds == null || remainingRounds < 1)) {
+    return undefined
+  }
   return {
     id: raw.id,
     amount,
     recovery: raw.recovery,
+    ...(remainingRounds == null ? {} : { remainingRounds }),
     sourceActorId:
       typeof raw.sourceActorId === 'string' && raw.sourceActorId.length <= 256
         ? raw.sourceActorId
@@ -58,6 +75,10 @@ function normalizeEntry(
     sourceActionId:
       typeof raw.sourceActionId === 'string' && raw.sourceActionId.length <= 256
         ? raw.sourceActionId
+        : undefined,
+    sourceEffectId:
+      typeof raw.sourceEffectId === 'string' && raw.sourceEffectId.length <= 256
+        ? raw.sourceEffectId
         : undefined,
     damageType:
       typeof raw.damageType === 'string' && raw.damageType.length <= 64
@@ -159,18 +180,94 @@ export function appendDnd5eHitPointMaximumReduction(input: {
 export function recoverDnd5eHitPointMaximumReductions(
   ledger: Dnd5eHitPointMaximumReductionLedger | undefined,
   recovery: Dnd5eHitPointMaximumReductionRecovery,
+  maximumCount?: number,
 ): {
   ledger: Dnd5eHitPointMaximumReductionLedger | undefined
   maximum: number | undefined
   recoveredAmount: number
 } {
   if (!ledger) return { ledger: undefined, maximum: undefined, recoveredAmount: 0 }
-  const retained = ledger.entries.filter((entry) => entry.recovery !== recovery)
-  const recoveredAmount = ledger.entries
-    .filter((entry) => entry.recovery === recovery)
-    .reduce((total, entry) => total + entry.amount, 0)
+  let recoveredCount = 0
+  let recoveredAmount = 0
+  const retained = ledger.entries.filter((entry) => {
+    if (
+      entry.recovery !== recovery ||
+      (maximumCount != null && recoveredCount >= Math.max(0, Math.floor(maximumCount)))
+    ) return true
+    recoveredCount += 1
+    recoveredAmount += entry.amount
+    return false
+  })
   const nextLedger = retained.length > 0
     ? { ...ledger, entries: retained.map((entry) => ({ ...entry })) }
+    : undefined
+  return {
+    ledger: nextLedger,
+    maximum: dnd5eEffectiveHitPointMaximum(ledger.baseMaximum, nextLedger),
+    recoveredAmount,
+  }
+}
+
+/** Restores only reductions owned by one removed Active Effect instance. */
+export function recoverDnd5eHitPointMaximumReductionsForEffect(
+  ledger: Dnd5eHitPointMaximumReductionLedger | undefined,
+  sourceEffectId: string,
+): {
+  ledger: Dnd5eHitPointMaximumReductionLedger | undefined
+  maximum: number | undefined
+  recoveredAmount: number
+} {
+  if (!ledger) return { ledger: undefined, maximum: undefined, recoveredAmount: 0 }
+  let recoveredAmount = 0
+  const retained = ledger.entries.filter((entry) => {
+    if (entry.recovery !== 'effect-removal' || entry.sourceEffectId !== sourceEffectId) return true
+    recoveredAmount += entry.amount
+    return false
+  })
+  const nextLedger = retained.length > 0
+    ? { ...ledger, entries: retained.map((entry) => ({ ...entry })) }
+    : undefined
+  return {
+    ledger: nextLedger,
+    maximum: dnd5eEffectiveHitPointMaximum(ledger.baseMaximum, nextLedger),
+    recoveredAmount,
+  }
+}
+
+/**
+ * Advances only naturally timed reductions. The returned effective maximum is
+ * present whenever a valid ledger was supplied, including when every timed
+ * entry expired during this step.
+ */
+export function advanceDnd5eHitPointMaximumReductionDurations(
+  ledger: Dnd5eHitPointMaximumReductionLedger | undefined,
+  elapsedRounds: number,
+): {
+  ledger: Dnd5eHitPointMaximumReductionLedger | undefined
+  maximum: number | undefined
+  recoveredAmount: number
+} {
+  if (!ledger) return { ledger: undefined, maximum: undefined, recoveredAmount: 0 }
+  const rounds = nonNegativeInteger(elapsedRounds)
+  if (rounds == null || rounds < 1) {
+    return {
+      ledger: { ...ledger, entries: ledger.entries.map((entry) => ({ ...entry })) },
+      maximum: dnd5eEffectiveHitPointMaximum(ledger.baseMaximum, ledger),
+      recoveredAmount: 0,
+    }
+  }
+  let recoveredAmount = 0
+  const retained = ledger.entries.flatMap((entry) => {
+    if (entry.remainingRounds == null) return [{ ...entry }]
+    const remainingRounds = Math.max(0, entry.remainingRounds - rounds)
+    if (remainingRounds < 1) {
+      recoveredAmount += entry.amount
+      return []
+    }
+    return [{ ...entry, remainingRounds }]
+  })
+  const nextLedger = retained.length > 0
+    ? { ...ledger, entries: retained }
     : undefined
   return {
     ledger: nextLedger,

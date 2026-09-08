@@ -796,7 +796,8 @@ function expectExactHeadlessMultiattack(expected: ExpectedMultiattack): void {
   expect(monster, expected.slug).toBeDefined()
   expect(action, `${expected.slug}:${expected.actionId}`).toBeDefined()
   expect(action?.kind, `${expected.slug}:${expected.actionId}`).toBe('multiattack')
-  expect(action?.automation, `${expected.slug}:${expected.actionId}`).toBe('headless')
+  expect(action?.automation, `${expected.slug}:${expected.actionId}`).toBe(
+    ENGINE_GATED_MULTIATTACK_EXCEPTIONS[`${expected.slug}:${expected.actionId}`] ? 'dm-adjudication' : 'headless')
   expect(action?.sequence, `${expected.slug}:${expected.actionId}`).toEqual(expected.sequence)
   expect(
     action?.sequenceAttackMode,
@@ -868,7 +869,7 @@ describe('catalog Multiattack batch', () => {
 
     expect(
       unexpectedIncomplete,
-      'Every non-spell catalog Multiattack must be executable Headless.',
+      'Every non-spell catalog Multiattack must be executable or have an explicit missing-rule entry.',
     ).toEqual([])
   })
 

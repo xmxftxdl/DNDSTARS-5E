@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   appendDnd5eRepeatedProjectileTarget,
+  appendDnd5eVisibleGuessedProjectileTarget,
   dnd5eRepeatedProjectileTargetsComplete,
   dnd5eRepeatedProjectileTargetsRemaining,
 } from './spellProjectileTargeting'
@@ -33,6 +34,22 @@ describe('repeated spell projectile targeting', () => {
       maximumTargets: 3,
       targetTokenIds: ['a', 'b', 'c'],
     }, 'd')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps visible token clicks in repeated guessed targeting for per-projectile allocation', () => {
+    expect(appendDnd5eVisibleGuessedProjectileTarget({
+      guessedTargeting: true,
+      allowDuplicateTargets: true,
+      maximumTargets: 3,
+      targetTokenIds: ['bandit'],
+    }, 'dragon')).toEqual(['bandit', 'dragon'])
+
+    expect(appendDnd5eVisibleGuessedProjectileTarget({
+      guessedTargeting: true,
+      allowDuplicateTargets: false,
+      maximumTargets: 3,
+      targetTokenIds: [],
+    }, 'dragon')).toBeUndefined()
   })
 
   it('reports how many projectile targets still need to be chosen', () => {

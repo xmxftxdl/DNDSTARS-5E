@@ -1,0 +1,54 @@
+{
+  "mapId": "dryad-shillelagh-ui-1788598177141",
+  "combatId": "dryad-shillelagh-ui-1788598177141:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T08:49:37.856Z",
+  "beforeSpell": {
+    "enhancedAttackDisabled": true,
+    "remainingUses": 1
+  },
+  "afterSpell": {
+    "remainingUses": 0,
+    "effect": {
+      "schemaVersion": 1,
+      "id": "srd-5.1_3Aspell_3Ashillelagh:actor:actor",
+      "definitionId": "srd-5.1:spell:shillelagh",
+      "label": "橡棍术：武器伤害骰变为 d8，并使用施法属性攻击",
+      "kind": "debuff",
+      "source": {
+        "kind": "spell",
+        "actorId": "actor",
+        "actorName": "树精",
+        "rulesId": "shillelagh",
+        "spellLevel": 0,
+        "spellSaveDc": 14
+      },
+      "appliedAt": 1788598186237,
+      "appliedTurnKey": "dryad-shillelagh-ui-1788598177141:combat:1:actor",
+      "duration": {
+        "type": "rounds",
+        "remainingRounds": 10,
+        "tickOn": "target-turn-end"
+      },
+      "stackingKey": "srd-5.1:spell:shillelagh",
+      "stackingPolicy": "refresh-duration",
+      "visibility": "public",
+      "modifiers": {
+        "shillelagh": {
+          "weaponId": "club",
+          "spellcastingAbility": "cha",
+          "spellcastingModifier": 4
+        }
+      }
+    }
+  },
+  "afterAttack": {
+    "currentHp": 112,
+    "maxHp": 120
+  },
+  "dmLog": "树精 使用木棒 (Shillelagh)攻击 验证目标：木棒 (Shillelagh) → 验证目标 10+6=16 命中；共造成 8 点伤害。",
+  "playerLog": "树精 使用木棒 (Shillelagh)攻击 验证目标：木棒 (Shillelagh) → 验证目标 10+6=16 命中；共造成 8 点伤害。",
+  "status": "passed",
+  "finishedAt": "2026-09-05T08:50:01.259Z"
+}

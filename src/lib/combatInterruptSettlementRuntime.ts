@@ -1,4 +1,7 @@
-import type { DmAdjudicationInterruptResponse } from './combatInterruptProtocol'
+import type {
+  CounterspellInterruptResponse,
+  DmAdjudicationInterruptResponse,
+} from './combatInterruptProtocol'
 import type { DmCombatInterruptSettlement } from './combatInterruptDmSettlement'
 
 export interface PendingCombatInterruptChannel<T> {
@@ -12,7 +15,7 @@ export interface DmCombatInterruptSettlementChannels {
   opportunityAttack: PendingCombatInterruptChannel<boolean>
   protection: PendingCombatInterruptChannel<boolean>
   shieldSpell: PendingCombatInterruptChannel<boolean>
-  counterspell: PendingCombatInterruptChannel<boolean>
+  counterspell: PendingCombatInterruptChannel<CounterspellInterruptResponse>
   uncannyDodge: PendingCombatInterruptChannel<boolean>
   deflectMissiles: PendingCombatInterruptChannel<boolean>
   savingThrowReroll: PendingCombatInterruptChannel<boolean>
@@ -34,10 +37,9 @@ interface ApplyDmCombatInterruptSettlementsInput {
   waitForDmAdjudicationResume?: (settlement: Extract<DmCombatInterruptSettlement, { kind: 'dm-adjudication' }>) => Promise<void>
 }
 
-function takePending<T>(channel: PendingCombatInterruptChannel<T>, id: string) {
+function peekPending<T>(channel: PendingCombatInterruptChannel<T>, id: string) {
   const pending = channel.current
   if (!pending || pending.id !== id) return undefined
-  channel.current = null
   return pending
 }
 
@@ -47,9 +49,15 @@ async function settlePending<T>(
   channel: PendingCombatInterruptChannel<T>,
   value: T,
 ) {
-  const pending = takePending(channel, settlement.id)
+  const pending = peekPending(channel, settlement.id)
   if (!pending) return
+  // Keep ownership of the suspended Headless continuation until persistence
+  // succeeds. Clearing first turns any transient finish/rollback failure into
+  // a permanent unresolved attack or save because the next queue refresh has
+  // no resolver left to retry.
   await input.settle(settlement)
+  if (channel.current?.id !== settlement.id) return
+  channel.current = null
   pending.resolve(value)
 }
 
@@ -68,7 +76,12 @@ export async function applyDmCombatInterruptSettlements(
         await settlePending(input, settlement, input.channels.shieldSpell, settlement.useShieldSpell)
         break
       case 'counterspell':
-        await settlePending(input, settlement, input.channels.counterspell, settlement.useCounterspell)
+        await settlePending(
+          input,
+          settlement,
+          input.channels.counterspell,
+          settlement.finishResponse ?? { useCounterspell: settlement.useCounterspell },
+        )
         break
       case 'uncanny-dodge':
         await settlePending(input, settlement, input.channels.uncannyDodge, settlement.useUncannyDodge)
@@ -98,10 +111,12 @@ export async function applyDmCombatInterruptSettlements(
         await settlePending(input, settlement, input.channels.standAgainstTide, settlement.targetTokenId)
         break
       case 'dm-adjudication': {
-        const pending = takePending(input.channels.dmAdjudication, settlement.id)
+        const pending = peekPending(input.channels.dmAdjudication, settlement.id)
         if (!pending) break
         input.clearDmAdjudicationPrompt()
         await input.waitForDmAdjudicationResume?.(settlement)
+        if (input.channels.dmAdjudication.current?.id !== settlement.id) break
+        input.channels.dmAdjudication.current = null
         pending.resolve(settlement.response)
         break
       }

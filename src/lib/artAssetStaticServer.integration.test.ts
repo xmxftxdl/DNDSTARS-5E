@@ -89,6 +89,8 @@ async function startStaticServer(options: {
       STARS_ACCOUNT_STORAGE: 'json',
       STARS_SECURITY_MODE: 'development',
       STARS_SHARED_ROOT: options.sharedRoot,
+      ASTRALTRACE_LOCAL_AI_CONFIG_DIR: path.join(options.sharedRoot, 'local-ai-config'),
+      ASTRALTRACE_LOCAL_VOICE_CONFIG_DIR: path.join(options.sharedRoot, 'local-voice-config'),
       STARS_ART_ASSET_ROOT: options.artRoot ?? '',
       STARS_ART_ASSET_MANIFEST_PATH: options.manifestPath ?? '',
       STARS_ART_ASSET_MANIFEST_SHA256: options.manifestSha256 ?? '',
@@ -146,6 +148,7 @@ beforeAll(async () => {
     mkdir(portraitRoot, { recursive: true }),
     mkdir(path.join(publicRoot, 'assets', 'icons'), { recursive: true }),
     mkdir(path.join(publicRoot, 'assets', 'vfx'), { recursive: true }),
+    mkdir(path.join(distRoot, 'assets'), { recursive: true }),
     mkdir(path.join(distRoot, 'runtime-assets'), { recursive: true }),
     mkdir(sharedRoot, { recursive: true }),
   ])
@@ -172,6 +175,8 @@ beforeAll(async () => {
     writeFile(path.join(portraitRoot, 'fixture-token.png'), tokenBytes),
     writeFile(path.join(portraitRoot, 'fixture-initiative.png'), initiativeBytes),
     writeFile(path.join(distRoot, 'index.html'), '<!doctype html><title>fixture</title>'),
+    writeFile(path.join(distRoot, 'assets', 'main-AbCd1234.js'), 'export const fixture = true'),
+    writeFile(path.join(distRoot, 'runtime-assets', 'fixture.json'), '{"fixture":true}'),
   ])
 
   await runNode(manifestGeneratorScript, ['--root', fixtureRoot], repositoryRoot)
@@ -200,6 +205,17 @@ afterAll(async () => {
 })
 
 describe('external art pack static-server integration', () => {
+  it('keeps HTML fresh, build hashes immutable, and public metadata revalidated', async () => {
+    const shell = await fetch(`${runningServer!.baseUrl}/`)
+    expect(shell.headers.get('cache-control')).toBe('no-cache')
+
+    const buildAsset = await fetch(`${runningServer!.baseUrl}/assets/main-AbCd1234.js`)
+    expect(buildAsset.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
+    const metadata = await fetch(`${runningServer!.baseUrl}/runtime-assets/fixture.json`)
+    expect(metadata.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate')
+  })
+
   it('serves unchanged /assets URLs with GET, HEAD, range and conditional caching', async () => {
     const assetUrl = `${runningServer!.baseUrl}/assets/portraits/fixture-token.png`
     const getResponse = await fetch(assetUrl)

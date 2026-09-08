@@ -7,6 +7,7 @@ import { registerDnd5ePluginImageAsset } from '../rulesets/dnd5e/pluginAssets'
 import {
   DND5E_CLASS_ICON_PALETTES,
   dnd5eClassFeatureActionIcon,
+  dnd5eInventorySemanticIcon,
   dnd5eItemActionIcon,
   dnd5eSpellActionIcon,
 } from './dnd5eActionIcons'
@@ -55,7 +56,36 @@ describe('D&D 5e combat action icon registry', () => {
     expect(new Set(specs.map((spec) => spec.key)).size).toBe(DND5E_SRD_ITEM_TEMPLATES.length)
   })
 
-  it('为绘制魔法物品绑定前景资源与稀有度背景', () => {
+  it('classifies every core weapon and armor into a concrete semantic SVG family', () => {
+    const equipment = DND5E_SRD_ITEM_TEMPLATES.filter((item) =>
+      item.id.startsWith('srd-5.1:equipment:'),
+    )
+    const semanticIcons = equipment.map((item) => dnd5eInventorySemanticIcon(item))
+
+    expect(semanticIcons).not.toContain('generic')
+    expect(new Set(semanticIcons)).toEqual(new Set([
+      'sword', 'dagger', 'club', 'staff', 'hammer', 'sickle', 'spear', 'polearm',
+      'trident', 'flail', 'bow', 'crossbow', 'sling', 'dart', 'whip', 'blowgun',
+      'net', 'axe', 'shield', 'light-armor', 'medium-armor', 'heavy-armor',
+    ]))
+  })
+
+  it('classifies common room-content tools, containers, books, transport, and games', () => {
+    const semantic = (id: string, name: string, category: 'adventuring-gear' | 'container' | 'tool') =>
+      dnd5eInventorySemanticIcon({ id, name, category, icon: 'generic' })
+
+    expect(semantic('alchemists-supplies', '炼金工具', 'tool')).toBe('tool')
+    expect(semantic('barrel', '木桶', 'container')).toBe('container')
+    expect(semantic('book', '书籍', 'adventuring-gear')).toBe('book')
+    expect(semantic('lute', '鲁特琴', 'tool')).toBe('instrument')
+    expect(semantic('warhorse-mount', '战马（坐骑）', 'adventuring-gear')).toBe('mount')
+    expect(semantic('wagon', '篷车', 'adventuring-gear')).toBe('vehicle')
+    expect(semantic('sailing-ship', '帆船', 'adventuring-gear')).toBe('ship')
+    expect(semantic('dragonchess-set', '龙棋套组', 'tool')).toBe('gaming-set')
+    expect(semantic('cartographers-tools', '制图工具', 'tool')).toBe('tool')
+  })
+
+  it('保留旧原画资源但让内置魔法物品优先使用语义图标与稀有度背景', () => {
     const adamantineArmor = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:adamantine-armor')
     const amuletOfHealth = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:amulet-of-health')
     expect(adamantineArmor).toBeDefined()
@@ -63,11 +93,15 @@ describe('D&D 5e combat action icon registry', () => {
     expect(dnd5eItemActionIcon(adamantineArmor!)).toMatchObject({
       asset: '/assets/icons/adamantine-armor-item-action.png',
       assetMode: 'foreground',
+      inventoryIconId: 'armor',
+      preferSemanticGlyph: true,
       rarityBackdropId: 'uncommon',
       background: '#237A4A',
     })
     expect(dnd5eItemActionIcon(amuletOfHealth!)).toMatchObject({
       asset: '/assets/icons/amulet-of-health-item-action.png',
+      inventoryIconId: 'magic-wondrous',
+      preferSemanticGlyph: true,
       rarityBackdropId: 'rare',
       background: '#2563A8',
     })
@@ -148,6 +182,30 @@ describe('D&D 5e combat action icon registry', () => {
         assetTreatment: 'transparent-foreground',
         classBackdropId: 'wizard',
         background: '#3B82F6',
+      })
+    } finally {
+      registered.dispose()
+    }
+  })
+
+  it('lets a plugin-supplied item image explicitly override the semantic SVG', () => {
+    const registered = registerDnd5ePluginImageAsset('test-item-icon', {
+      id: 'moonblade',
+      mediaType: 'image/png',
+      dataBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    })
+    try {
+      expect(dnd5eItemActionIcon({
+        id: 'custom:moonblade',
+        name: '月刃',
+        category: 'equipment',
+        icon: 'weapon',
+        iconAssetId: registered.id,
+      })).toMatchObject({
+        inventoryIconId: 'sword',
+        preferSemanticGlyph: false,
+        assetMode: 'foreground',
+        assetTreatment: 'transparent-foreground',
       })
     } finally {
       registered.dispose()
@@ -363,8 +421,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -383,8 +441,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -403,8 +461,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -423,8 +481,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -443,8 +501,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -463,8 +521,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -483,8 +541,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -503,8 +561,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -523,8 +581,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -543,8 +601,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -563,8 +621,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -583,8 +641,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -603,8 +661,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -623,8 +681,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -643,8 +701,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',
@@ -780,7 +838,7 @@ describe('D&D 5e combat action icon registry', () => {
       ['shield-of-missile-attraction', 'shield-of-missile-attraction-item-action.png', 'rare', '#2563A8'],
       ['slippers-of-spider-climbing', 'slippers-of-spider-climbing-item-action.png', 'uncommon', '#237A4A'],
       ['sovereign-glue', 'sovereign-glue-item-action.png', 'legendary', '#B86A12'],
-      ['spell-scroll', 'spell-scroll-item-action.png', 'varies', '#326C8C'],
+      ['srd-5.1:spell-scroll:fireball', 'spell-scroll-item-action.png', 'uncommon', '#237A4A'],
       ['spellguard-shield', 'spellguard-shield-item-action.png', 'very-rare', '#7138A8'],
       ['sphere-of-annihilation', 'sphere-of-annihilation-item-action.png', 'legendary', '#B86A12'],
       ['staff-of-charming', 'staff-of-charming-item-action.png', 'rare', '#2563A8'],
@@ -832,8 +890,8 @@ describe('D&D 5e combat action icon registry', () => {
     ] as const
 
     for (const [id, filename, rarityBackdropId, background] of cases) {
-      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
-      expect(item).toBeDefined()
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === (id.startsWith('srd-5.1:') ? id : `srd-5.1:magic-item:${id}`))
+      expect(item, id).toBeDefined()
       expect(dnd5eItemActionIcon(item!)).toMatchObject({
         asset: `/assets/icons/${filename}`,
         assetMode: 'foreground',

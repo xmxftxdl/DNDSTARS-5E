@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BadgeDollarSign, ChevronDown, Download, FolderOpen, Plus, Save, Trash2, Upload, X } from 'lucide-react'
+import { DND5E_PLUGIN_CONTENT_CATEGORIES } from '../../../shared/plugin-content-category.mjs'
 import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   buildDnd5eCustomRulesContentPackageV2,
@@ -8,18 +9,23 @@ import {
   DND5E_PERSISTENT_AREA_VISUAL_PRESETS,
   DND5E_SRD_MONSTERS,
   DND5E_STANDARD_CONDITIONS,
+  dnd5eActivityAutomationAnalysisV1,
   dnd5eCustomClassAutomationReportV1,
   dnd5eCustomPluginAutomationReportV1,
   dnd5eCustomRulesPluginFileName,
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomHeadlessActionDraft,
+  type Dnd5eClassId,
   type Dnd5eActivityDefinitionV1,
+  type Dnd5eEffectDefinitionV1,
+  type Dnd5ePredicateV1,
   type Dnd5eCustomRulesPluginDraft,
   type Dnd5eContentPackageV2,
   type Dnd5eCantripScalingStep,
   type Dnd5eSpellMechanicsDefinition,
   type Dnd5eLocalContentAiTargetKind,
   type Dnd5eDamageType,
+  type Dnd5eStandardConditionId,
   type Dnd5ePluginAbilityGenerationDefinition,
   type Dnd5ePluginBackgroundDefinition,
   type Dnd5ePluginFeatureDefinition,
@@ -34,9 +40,11 @@ import {
   type Dnd5ePersistentAreaTriggerDeclaration,
   type Dnd5ePersistentAreaTriggerTiming,
   type Dnd5ePersistentAreaVisualPreset,
+  type Dnd5eWorkshopDamageFormulaV1,
   type Dnd5ePluginEffectDuration,
   type DeclarativeSubclassDefinitionV1,
   type DeclarativeClassDefinitionV1,
+  type DeclarativeAlternateResourceSpellcastingMechanicV1,
 } from '../../rulesets/dnd5e'
 import Dnd5eDeclarativeSubclassEditor from './Dnd5eDeclarativeSubclassEditor'
 import Dnd5eDeclarativeClassEditor from './Dnd5eDeclarativeClassEditor'
@@ -71,6 +79,9 @@ import {
 import AiImageGenerationButton from '../AiImageGenerationButton'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import { dnd5eSpellActionIcon, type Dnd5eActionIconSpec } from '../../lib/dnd5eActionIcons'
+import Dnd5eDamageFormulaEditor from './Dnd5eDamageFormulaEditor'
+import Dnd5eActivityTemplateEditor from './Dnd5eActivityTemplateEditor'
+import { restoreArrayBackedBuilderMetadata } from './customPluginBuilderDraftMigration'
 
 interface RaceDraft {
   id: string
@@ -126,6 +137,8 @@ interface FeatureDraft {
 interface FeatDraft extends FeatureDraft {
   prerequisiteAbilities: Record<AbilityKey, number>
   prerequisiteRaceIds: string
+  prerequisiteArmorProficiencies: Array<'light' | 'medium' | 'heavy' | 'shield'>
+  prerequisiteSpellcasting: boolean
   d20ChoiceRerollEnabled: boolean
   d20ChoiceRerollRollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
   d20ChoiceRerollScopes: Array<'self-roll' | 'attack-against-self'>
@@ -140,6 +153,7 @@ interface PersistentAreaTriggerEditorDraft {
   timing: Dnd5ePersistentAreaTriggerTiming
   oncePerRound: boolean
   oncePerTurn: boolean
+  oncePerTarget: boolean
   savingThrowEnabled: boolean
   savingThrowAbility: AbilityKey
   savingThrowDcMode: 'source-save-dc' | 'fixed'
@@ -149,6 +163,7 @@ interface PersistentAreaTriggerEditorDraft {
   damageCount: number
   damageSides: number
   damageModifier: number
+  damageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   damageType: Dnd5eDamageType
   conditionEnabled: boolean
   condition: keyof typeof DND5E_STANDARD_CONDITIONS
@@ -156,6 +171,9 @@ interface PersistentAreaTriggerEditorDraft {
   conditionRounds: number
   conditionSaveAbility: AbilityKey
   conditionSaveDc: number
+  notificationEnabled: boolean
+  notificationDelivery: 'mental-to-source' | 'audible'
+  notificationAudibleRadiusFeet: number
   dmAdjustable: boolean
   /** Preserves newer trigger fields that this compact editor does not expose yet. */
   sourceDeclaration?: Dnd5ePersistentAreaTriggerDeclaration
@@ -163,15 +181,195 @@ interface PersistentAreaTriggerEditorDraft {
 
 interface HeadlessEffectEditorDraft {
   enabled: boolean
-  executionMode: 'active' | 'passive-damage-reduction'
+  executionMode:
+    | 'active'
+    | 'passive-damage-reduction'
+    | 'extra-attacks'
+    | 'weapon-damage-rider'
+    | 'spell-damage-modifier'
+    | 'spell-ability-check-bonus'
+    | 'spell-interception'
+    | 'spell-target-expansion'
+    | 'damage-roll-maximization'
+    | 'passive-resistance'
+    | 'reaction-weapon-attack'
+    | 'reaction-attack-defense'
+    | 'reaction-attack-retarget'
+    | 'passive-death-prevention'
+    | 'spell-defeat-healing'
+    | 'summoned-creature-bonus'
+    | 'companion-profile-upgrade'
+    | 'creature-space-traversal'
+    | 'environmental-movement'
+    | 'persistent-projection'
+    | 'persistent-projection-upgrade'
+    | 'alternate-resource-spellcasting'
+    | 'granted-die-combat-options'
+    | 'creature-form-eligibility'
+    | 'creature-form-control'
+    | 'bonus-weapon-attack'
+    | 'turn-start-saving-throw-aura'
+    | 'timed-effect'
+    | 'advanced-activity'
+  primitiveAttackCount: number
+  primitiveSpellcastingClassId: 'bard' | 'cleric' | 'druid' | 'paladin' | 'ranger' | 'sorcerer' | 'warlock' | 'wizard'
+  primitiveAbility: AbilityKey
+  primitiveMaximumSpellLevel: number
+  primitiveSpellAbilityCheckSpellIds: string
+  primitiveSpellInterceptionClassId: Dnd5eClassId
+  primitiveSpellInterceptionSaveAbility: AbilityKey
+  primitiveSpellInterceptionDcAbility: AbilityKey
+  primitiveSpellInterceptionMinimumLevel: number
+  primitiveSpellInterceptionDurationRounds: number
+  primitiveSpellInterceptionNegates: boolean
+  primitiveSpellInterceptionGrantsAccess: boolean
+  primitiveSpellInterceptionProhibitsSource: boolean
+  primitiveSpellTargetSchool: 'abjuration' | 'conjuration' | 'divination' | 'enchantment' | 'evocation' | 'illusion' | 'necromancy' | 'transmutation'
+  primitiveSpellTargetAdditionalTargets: number
+  primitiveCoreResourceId: string
+  primitiveResourceAmount: number
+  primitiveDamageMaxDeliveries: Array<'weapon-attack' | 'spell' | 'feature'>
+  primitiveOncePerTurn: boolean
+  primitivePassiveDelivery: 'any' | 'weapon-attack' | 'spell' | 'other'
+  primitivePassiveMagical: 'any' | 'magical' | 'nonmagical'
+  primitiveSpellSaveAdvantage: boolean
+  primitiveHitPointMaximumReductionImmunity: boolean
+  primitiveDamageReflection: boolean
+  primitiveDamageReflectionMultiplier: number
+  primitiveConcentrationCheckImmunity: boolean
+  primitiveConcentrationCheckSchool: 'abjuration' | 'conjuration' | 'divination' | 'enchantment' | 'evocation' | 'illusion' | 'necromancy' | 'transmutation'
+  primitiveWeaponAttacksMagical: boolean
+  primitiveWeaponAttacksMagicalWhile: 'always' | 'transformed'
+  primitiveAttackDefenseOutcome: 'disadvantage' | 'automatic-miss'
+  primitiveAttackDefenseOnMiss: boolean
+  primitiveAttackDefenseProtects: 'self' | 'ally-or-self'
+  primitiveAttackRetargetSaveAbility: AbilityKey
+  primitiveAttackRetargetDcAbility: AbilityKey
+  primitiveAttackRetargetCharmImmunity: boolean
+  primitiveDeathHitPoints: number
+  primitiveDeathPreventsMassiveDamage: boolean
+  primitiveDefeatHealingMinimumSpellLevel: number
+  primitiveDefeatHealingBaseMultiplier: number
+  primitiveDefeatHealingSchool: 'none' | 'abjuration' | 'conjuration' | 'divination' | 'enchantment' | 'evocation' | 'illusion' | 'necromancy' | 'transmutation'
+  primitiveDefeatHealingSchoolMultiplier: number
+  primitiveDefeatHealingExcludedCreatureTypes: string
+  primitiveSummonTemporaryHitPoints: number
+  primitiveSummonSpellSchools: string
+  primitiveSummonSpellIds: string
+  primitiveSummonMaximumHitPointBonusMode: 'none' | 'fixed' | 'class-level'
+  primitiveSummonMaximumHitPointBonusValue: number
+  primitiveSummonMaximumHitPointBonusClassId: Dnd5eClassId
+  primitiveSummonWeaponDamageBonusMode: 'none' | 'fixed' | 'proficiency-bonus'
+  primitiveSummonWeaponDamageBonusValue: number
+  primitiveCompanionWeaponAttacksMagical: boolean
+  primitiveCompanionAttacksPerAction: number
+  primitiveCompanionShareSelfSpellsRangeFeet: number
+  primitiveTraversalMinimumLargerSizeRanks: number
+  primitiveEnvironmentalEnvironments: string
+  primitiveEnvironmentalMode: 'fly' | 'swim' | 'climb'
+  primitiveEnvironmentalWalkingSpeed: boolean
+  primitiveEnvironmentalFixedSpeed: number
+  primitiveProjectionId: string
+  primitiveProjectionInstanceCount: number
+  primitiveProjectionPlacementRangeFeet: number
+  primitiveProjectionDurationRounds: number
+  primitiveProjectionConcentration: boolean
+  primitiveProjectionMovementEnabled: boolean
+  primitiveProjectionMovementEconomy: 'action' | 'bonus-action'
+  primitiveProjectionMovementFeet: number
+  primitiveProjectionTetherFeet: number
+  primitiveProjectionSpellOrigin: boolean
+  primitiveProjectionAttackAdvantageFeet: number
+  primitiveAlternateSpellClassId: Dnd5eClassId
+  primitiveAlternateSpellAbility: AbilityKey
+  primitiveAlternateSpellResourceId: string
+  primitiveAlternateSpellResourceScope: 'core' | 'plugin'
+  primitiveAlternateSpellIgnoreMaterialComponents: boolean
+  primitiveAlternateSpellGrantsJson: string
+  primitiveGrantedDieWeaponDamage: boolean
+  primitiveGrantedDieArmorClass: boolean
+  primitiveFormCreatureTypes: string
+  primitiveFormSpecificIds: string
+  primitiveFormChallengeRatingMode: 'fixed' | 'class-level'
+  primitiveFormFixedChallengeRating: number
+  primitiveFormClassId: 'barbarian' | 'bard' | 'cleric' | 'druid' | 'fighter' | 'monk' | 'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard'
+  primitiveFormLevelDivisor: number
+  primitiveFormMinimumChallengeRating: number
+  primitiveFormRequiresKnown: boolean
+  primitiveFormResourceCost: number
+  primitiveFormResourceMode: 'core-wild-shape' | 'ability-uses'
+  primitiveFormDurationHours: number
+  primitiveFormActivationEconomy: 'action' | 'bonusAction'
+  primitiveFormCoreMovementLimits: boolean
+  primitiveFormHealingEnabled: boolean
+  primitiveFormHealingEconomy: 'action' | 'bonusAction'
+  primitiveFormHealingDiceCount: number
+  primitiveFormHealingDiceSides: number
+  primitiveFormHealingMaximumSlotLevel: number
+  primitiveUseLimit: number
+  primitiveUseReset: 'combat' | 'short-rest' | 'long-rest'
+  primitiveBonusAttackUseFormula: 'fixed' | 'ability-modifier'
+  primitiveBonusAttackAbility: AbilityKey
+  primitiveAuraRadiusFeet: number
+  primitiveAuraRelation: 'enemy' | 'any'
+  primitiveAuraSavingThrowAbility: AbilityKey
+  primitiveAuraDcAbility: AbilityKey
+  primitiveAuraDurationRounds: number
+  primitiveAuraBreakOnDamage: boolean
+  primitiveAuraMagical: boolean
+  primitiveAuraRequiresMutualSight: boolean
+  primitiveAuraImmunityRounds: number
+  primitiveAuraRequiredEffectId: string
   damageReductionAmount: number
   damageReductionDamageTypes: Dnd5eDamageType[]
   damageReductionMinimumIncomingDamage: number
   damageReductionMaximumCurrentHitPointPercent: number
   damageReductionOncePerTurn: boolean
+  effectDurationBoundary:
+    | 'permanent'
+    | 'source-turn-start'
+    | 'source-turn-end'
+    | 'target-turn-start'
+    | 'target-turn-end'
+    | 'concentration'
+  effectDurationRounds: number
+  effectArmorClassBonus: number
+  effectSpeedMode: 'none' | 'add' | 'multiply'
+  effectSpeedValue: number
+  effectSavingThrowMode: 'none' | 'add' | 'advantage' | 'disadvantage'
+  effectSavingThrowAbility: AbilityKey | 'all'
+  effectSavingThrowValue: number
+  effectSavingThrowProficiency: AbilityKey | 'none'
+  effectAbilityCheckMode: 'none' | 'advantage' | 'disadvantage'
+  effectAbilityCheckAbility: AbilityKey | 'all'
+  effectAbilityCheckSkill: string
+  effectPreventReactions: boolean
+  effectForcedFleeFromSource: boolean
+  effectMaximumAttacksPerTurn: number
+  effectDarkvisionRangeFeet: number
+  effectFlightSpeedFeet: number
+  effectSeeInvisible: boolean
+  effectAttackProfileModes: Array<'melee' | 'ranged' | 'unarmed'>
+  effectAttackProfileWeaponIds: string
+  effectAttackProfileReachBonusFeet: number
+  effectAttackProfileDamageType: Dnd5eDamageType | 'none'
+  effectSpellSaveDisadvantageAuraEnabled: boolean
+  effectSpellSaveDisadvantageAuraRadiusFeet: number
+  effectSpellSaveDisadvantageAuraDamageTypes: Dnd5eDamageType[]
+  effectSpellSaveDisadvantageAuraCastingClassIds: string
+  effectSpellActionAsBonusAction: boolean
+  effectSpellActionAsBonusActionClassIds: string
+  activationActorIllumination: ('bright' | 'dim' | 'darkness' | 'magical-darkness')[]
+  activationTargetCreatureTypes: string
+  activationTargetCondition: Dnd5eStandardConditionId | 'none'
+  activationTargetAbilityScoreEnabled: boolean
+  activationTargetAbility: AbilityKey
+  activationTargetAbilityComparison: 'below' | 'at-most' | 'at-least' | 'above'
+  activationTargetAbilityValue: number
+  effectBreakOn: NonNullable<Dnd5eEffectDefinitionV1['breakOn']>[number][]
   actionLabel: string
   economy: 'action' | 'bonusAction' | 'reaction' | 'none'
-  targetingKind: 'self' | 'single-creature' | 'area'
+  targetingKind: 'self' | 'single-creature' | 'multiple-creatures' | 'area'
   relation: 'any' | 'ally' | 'enemy'
   includeSelf: boolean
   rangeFeet: number
@@ -182,6 +380,11 @@ interface HeadlessEffectEditorDraft {
   areaLengthFeet: number
   areaRotatable: boolean
   maximumTargets: number
+  savingThrowEnabled: boolean
+  savingThrowAbility: AbilityKey
+  savingThrowDcMode: 'source-save-dc' | 'fixed'
+  savingThrowDc: number
+  savingThrowOnSuccess: 'none' | 'half'
   persistentAreaEnabled: boolean
   persistentAreaLabel: string
   persistentAreaColor: string
@@ -202,6 +405,7 @@ interface HeadlessEffectEditorDraft {
   damageCount: number
   damageSides: number
   damageModifier: number
+  damageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   damageType: Dnd5eDamageType
   healingEnabled: boolean
   healingCount: number
@@ -302,6 +506,7 @@ interface ItemDraft {
   onHitBonusDamageCount: number
   onHitBonusDamageSides: number
   onHitBonusDamageBonus: number
+  onHitBonusDamageModifierFormula?: Dnd5eWorkshopDamageFormulaV1
   onHitBonusDamageType: 'inherit' | Dnd5eDamageType
   onHitBonusDamageOncePerTurn: boolean
   onHitBonusDamageTargetCreatureTypes: string
@@ -454,10 +659,8 @@ const PLUGIN_DISTRIBUTION_POLICIES = [
   ['account-entitled', '每个账号需单独授权'],
   ['local-only', '仅本机使用'],
 ] as const
-const PLUGIN_CONTENT_CATEGORIES = [
-  ['mixed', '混合内容'], ['rules', '规则'], ['classes', '职业'], ['subclasses', '子职'], ['feats', '专长'], ['spells', '法术'],
-  ['items', '物品'], ['monsters', '怪物'], ['adventure', '冒险'],
-] as const
+const PLUGIN_CONTENT_CATEGORIES: readonly (readonly [Dnd5ePluginContentCategory, string])[] =
+  DND5E_PLUGIN_CONTENT_CATEGORIES.map((category) => [category.id, category.label] as const)
 const PLUGIN_CAPABILITIES: readonly Dnd5ePluginDeclaredCapability[] = [
   'damage', 'healing', 'temporary-hit-points', 'standard-condition', 'movement',
   'resource', 'summon', 'persistent-area', 'spell-transaction', 'interrupt',
@@ -469,6 +672,7 @@ const RANGE_SHAPES = [['none', '单体／无范围模板'], ['radius', '半径�
 const DURATION_TYPES = [['instantaneous', '立即'], ['timed', '计时'], ['until-dispelled', '直到被解除'], ['special', '特殊']] as const
 const DURATION_UNITS = [['round', '轮'], ['minute', '分钟'], ['hour', '小时'], ['day', '日']] as const
 const SPELL_CLASSES = [['bard', '吟游诗人'], ['cleric', '牧师'], ['druid', '德鲁伊'], ['paladin', '圣武士'], ['ranger', '游侠'], ['sorcerer', '术士'], ['warlock', '邪术师'], ['wizard', '法师']] as const
+const ALL_CLASSES = [['barbarian', '野蛮人'], ...SPELL_CLASSES.slice(0, 3), ['fighter', '战士'], ['monk', '武僧'], ...SPELL_CLASSES.slice(3, 5), ['rogue', '游荡者'], ...SPELL_CLASSES.slice(5)] as const
 const ITEM_KINDS = [['weapon', '武器'], ['armor', '护甲'], ['shield', '盾牌'], ['accessory', '饰品／其他装备'], ['consumable', '治疗消耗品']] as const
 const EQUIPMENT_SLOTS = [['mainWeapon', '主手'], ['offHand', '副手'], ['armor', '护甲'], ['helmet', '头部'], ['shoes', '足部'], ['ring', '戒指 1'], ['ring2', '戒指 2'], ['belt', '腰带'], ['necklace', '颈部']] as const
 const WEAPON_CATEGORIES = [['simple', '简易武器'], ['martial', '军用武器']] as const
@@ -478,7 +682,40 @@ const WEAPON_DAMAGE_TYPES = [['slashing', '挥砍'], ['piercing', '穿刺'], ['b
 const ARMOR_CATEGORIES = [['light', '轻甲'], ['medium', '中甲'], ['heavy', '重甲']] as const
 const DEXTERITY_BONUSES = [['full', '完整敏捷调整'], ['max-2', '敏捷最高 +2'], ['none', '不加敏捷']] as const
 const ACTION_ECONOMIES = [['action', '动作'], ['bonusAction', '附赠动作'], ['reaction', '反应'], ['none', '免费行动']] as const
-const TARGETING_KINDS = [['self', '自身'], ['single-creature', '单一生物'], ['area', '范围模板']] as const
+/** Frozen Legacy adapter identifiers. New mechanics are Activity operations + registered Host handlers. */
+const HEADLESS_FEATURE_EXECUTION_MODES = [
+  ['active', '主动能力'],
+  ['advanced-activity', '高级 Activity（AI / JSON 通用模板）'],
+  ['timed-effect', '持续状态／数值修正'],
+  ['passive-damage-reduction', '固定被动减伤'],
+  ['extra-attacks', '额外攻击次数'],
+  ['weapon-damage-rider', '武器命中附伤'],
+  ['spell-damage-modifier', '法术伤害属性加值'],
+  ['spell-ability-check-bonus', '指定法术的属性检定加入熟练加值'],
+  ['spell-interception', '受到法术影响前的反应拦截／临时窃取'],
+  ['spell-target-expansion', '单目标法术增加目标'],
+  ['damage-roll-maximization', '指定伤害类型的伤害骰取最大值'],
+  ['passive-resistance', '条件化被动抗性'],
+  ['reaction-weapon-attack', '受攻击事件触发的反应攻击'],
+  ['reaction-attack-defense', '攻击前反应防御／改写结果'],
+  ['reaction-attack-retarget', '攻击前豁免并改选最近目标'],
+  ['passive-death-prevention', '降至 0 HP 前的死亡避免'],
+  ['spell-defeat-healing', '法术击倒生物后治疗'],
+  ['summoned-creature-bonus', '法术召唤实体加成'],
+  ['companion-profile-upgrade', '持久伙伴战斗成长'],
+  ['creature-space-traversal', '穿越较大生物占位'],
+  ['environmental-movement', '按地图环境授予移动方式'],
+  ['persistent-projection', '持续投影／幻象分身'],
+  ['persistent-projection-upgrade', '提升既有投影实例数'],
+  ['alternate-resource-spellcasting', '用其他资源施放法术'],
+  ['granted-die-combat-options', '已授予奖励骰的战斗用途'],
+  ['creature-form-eligibility', '扩展 Host 变形目录'],
+  ['creature-form-control', '变形激活与形态内治疗'],
+  ['bonus-weapon-attack', '攻击动作后的附赠武器攻击'],
+  ['turn-start-saving-throw-aura', '回合开始范围豁免／状态灵光'],
+] as const
+const TARGETING_KINDS = [['self', '自身'], ['single-creature', '单一生物'], ['multiple-creatures', '多个独立目标'], ['area', '范围模板']] as const
+const SAVE_SUCCESS_EFFECTS = [['none', '成功则无效果'], ['half', '成功则伤害减半']] as const
 const TARGET_RELATIONS = [['enemy', '敌方'], ['ally', '友方'], ['any', '任意']] as const
 const AREA_SHAPES = [['circle', '圆形'], ['cone', '锥形'], ['line', '线形'], ['rect', '矩形']] as const
 const INTERRUPT_AUDIENCES = [['dm', 'DM'], ['actor', '行动者'], ['target', '目标']] as const
@@ -488,6 +725,34 @@ const CONDITION_EXPIRATIONS = [
   ['target-next-turn-start', '目标下回合开始'],
   ['target-turn-end', '目标回合结束'],
   ['target-turn-end-save', '目标回合结束重复豁免'],
+] as const
+const EFFECT_DURATION_BOUNDARIES = [
+  ['permanent', '永久（由规则或 DM 解除）'],
+  ['source-turn-start', '来源下回合开始'],
+  ['source-turn-end', '来源回合结束'],
+  ['target-turn-start', '目标回合开始'],
+  ['target-turn-end', '目标回合结束'],
+  ['concentration', '专注（最多若干轮）'],
+] as const
+const EFFECT_BREAK_EVENTS: readonly [NonNullable<Dnd5eEffectDefinitionV1['breakOn']>[number], string][] = [
+  ['takes-damage', '受到伤害'],
+  ['targeted-by-spell', '成为法术目标'],
+  ['targeted-by-attack', '成为攻击目标'],
+  ['hit-by-attack', '被攻击命中'],
+  ['makes-attack', '发起攻击'],
+  ['casts-spell', '施放法术'],
+  ['moves', '发生移动'],
+  ['spends-action', '消耗动作'],
+  ['spends-bonus-action', '消耗附赠动作'],
+  ['spends-reaction', '消耗反应'],
+  ['awakened', '被唤醒'],
+  ['magical-healing', '受到魔法治疗'],
+]
+const ILLUMINATION_OPTIONS = [
+  ['bright', '明亮'],
+  ['dim', '微光'],
+  ['darkness', '黑暗'],
+  ['magical-darkness', '魔法黑暗'],
 ] as const
 const PERSISTENT_AREA_TRIGGER_TIMINGS = [
   ['on-move-distance', '区域内移动距离'],
@@ -553,6 +818,18 @@ function newRace(index: number): RaceDraft {
   }
 }
 
+function restoreRaceDraft(value: Partial<RaceDraft>, index: number): RaceDraft {
+  const fallback = newRace(index + 1)
+  return {
+    ...fallback,
+    ...value,
+    abilityBonuses: value.abilityBonuses && typeof value.abilityBonuses === 'object'
+      ? { ...fallback.abilityBonuses, ...value.abilityBonuses }
+      : fallback.abilityBonuses,
+    flexibleExclude: Array.isArray(value.flexibleExclude) ? [...value.flexibleExclude] : [],
+  }
+}
+
 function newMethod(index: number): MethodDraft {
   return {
     id: `custom-method-${index}`,
@@ -578,6 +855,16 @@ function newBackground(index: number): BackgroundDraft {
   }
 }
 
+function restoreBackgroundDraft(value: Partial<BackgroundDraft>, index: number): BackgroundDraft {
+  return {
+    ...newBackground(index + 1),
+    ...value,
+    skillProficiencies: Array.isArray(value.skillProficiencies)
+      ? [...value.skillProficiencies]
+      : [],
+  }
+}
+
 function newFeature(index: number): FeatureDraft {
   return {
     id: `custom-feature-${index}`, name: `自定义特性 ${index}`,
@@ -595,6 +882,8 @@ function newFeat(index: number): FeatDraft {
     summary: '由 DM 提供的自定义专长。',
     prerequisiteAbilities: emptyBonuses(),
     prerequisiteRaceIds: '',
+    prerequisiteArmorProficiencies: [],
+    prerequisiteSpellcasting: false,
     d20ChoiceRerollEnabled: false,
     d20ChoiceRerollRollKinds: ['attack', 'ability-check', 'saving-throw'],
     d20ChoiceRerollScopes: ['self-roll', 'attack-against-self'],
@@ -606,17 +895,170 @@ function newFeat(index: number): FeatDraft {
 function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
   return {
       enabled: false,
-      executionMode: 'active',
+      executionMode: 'advanced-activity',
+      primitiveAttackCount: 2,
+      primitiveSpellcastingClassId: 'cleric',
+      primitiveAbility: 'wis',
+      primitiveMaximumSpellLevel: 0,
+      primitiveSpellAbilityCheckSpellIds: 'counterspell,dispel-magic',
+      primitiveSpellInterceptionClassId: 'rogue',
+      primitiveSpellInterceptionSaveAbility: 'int',
+      primitiveSpellInterceptionDcAbility: 'int',
+      primitiveSpellInterceptionMinimumLevel: 1,
+      primitiveSpellInterceptionDurationRounds: 4800,
+      primitiveSpellInterceptionNegates: true,
+      primitiveSpellInterceptionGrantsAccess: true,
+      primitiveSpellInterceptionProhibitsSource: true,
+      primitiveSpellTargetSchool: 'enchantment',
+      primitiveSpellTargetAdditionalTargets: 1,
+      primitiveCoreResourceId: '',
+      primitiveResourceAmount: 1,
+      primitiveDamageMaxDeliveries: ['spell'],
+      primitiveOncePerTurn: true,
+      primitivePassiveDelivery: 'any',
+      primitivePassiveMagical: 'any',
+      primitiveSpellSaveAdvantage: false,
+      primitiveHitPointMaximumReductionImmunity: false,
+      primitiveDamageReflection: false,
+      primitiveDamageReflectionMultiplier: 100,
+      primitiveConcentrationCheckImmunity: false,
+      primitiveConcentrationCheckSchool: 'conjuration',
+      primitiveWeaponAttacksMagical: false,
+      primitiveWeaponAttacksMagicalWhile: 'transformed',
+      primitiveAttackDefenseOutcome: 'disadvantage',
+      primitiveAttackDefenseOnMiss: false,
+      primitiveAttackDefenseProtects: 'self',
+      primitiveAttackRetargetSaveAbility: 'wis',
+      primitiveAttackRetargetDcAbility: 'int',
+      primitiveAttackRetargetCharmImmunity: true,
+      primitiveDeathHitPoints: 1,
+      primitiveDeathPreventsMassiveDamage: false,
+      primitiveDefeatHealingMinimumSpellLevel: 1,
+      primitiveDefeatHealingBaseMultiplier: 2,
+      primitiveDefeatHealingSchool: 'necromancy',
+      primitiveDefeatHealingSchoolMultiplier: 3,
+      primitiveDefeatHealingExcludedCreatureTypes: 'undead,construct,不死生物,构装生物',
+      primitiveSummonTemporaryHitPoints: 30,
+      primitiveSummonSpellSchools: 'conjuration',
+      primitiveSummonSpellIds: '',
+      primitiveSummonMaximumHitPointBonusMode: 'none',
+      primitiveSummonMaximumHitPointBonusValue: 1,
+      primitiveSummonMaximumHitPointBonusClassId: 'wizard',
+      primitiveSummonWeaponDamageBonusMode: 'none',
+      primitiveSummonWeaponDamageBonusValue: 1,
+      primitiveCompanionWeaponAttacksMagical: false,
+      primitiveCompanionAttacksPerAction: 1,
+      primitiveCompanionShareSelfSpellsRangeFeet: 0,
+      primitiveTraversalMinimumLargerSizeRanks: 1,
+      primitiveEnvironmentalEnvironments: 'outdoors',
+      primitiveEnvironmentalMode: 'fly',
+      primitiveEnvironmentalWalkingSpeed: true,
+      primitiveEnvironmentalFixedSpeed: 30,
+      primitiveProjectionId: 'custom-projection',
+      primitiveProjectionInstanceCount: 1,
+      primitiveProjectionPlacementRangeFeet: 30,
+      primitiveProjectionDurationRounds: 10,
+      primitiveProjectionConcentration: true,
+      primitiveProjectionMovementEnabled: true,
+      primitiveProjectionMovementEconomy: 'bonus-action',
+      primitiveProjectionMovementFeet: 30,
+      primitiveProjectionTetherFeet: 120,
+      primitiveProjectionSpellOrigin: false,
+      primitiveProjectionAttackAdvantageFeet: 0,
+      primitiveAlternateSpellClassId: 'monk',
+      primitiveAlternateSpellAbility: 'wis',
+      primitiveAlternateSpellResourceId: 'dnd5e-ki',
+      primitiveAlternateSpellResourceScope: 'core',
+      primitiveAlternateSpellIgnoreMaterialComponents: false,
+      primitiveAlternateSpellGrantsJson: JSON.stringify([{
+        id: 'resource-spell',
+        spellId: 'thunderwave',
+        minimumLevel: 1,
+        castAtLevel: 1,
+        resourceCost: 2,
+      }], null, 2),
+      primitiveGrantedDieWeaponDamage: true,
+      primitiveGrantedDieArmorClass: true,
+      primitiveFormCreatureTypes: 'beast,野兽',
+      primitiveFormSpecificIds: '',
+      primitiveFormChallengeRatingMode: 'class-level',
+      primitiveFormFixedChallengeRating: 1,
+      primitiveFormClassId: 'druid',
+      primitiveFormLevelDivisor: 3,
+      primitiveFormMinimumChallengeRating: 1,
+      primitiveFormRequiresKnown: true,
+      primitiveFormResourceCost: 1,
+      primitiveFormResourceMode: 'core-wild-shape',
+      primitiveFormDurationHours: 1,
+      primitiveFormActivationEconomy: 'action',
+      primitiveFormCoreMovementLimits: true,
+      primitiveFormHealingEnabled: false,
+      primitiveFormHealingEconomy: 'bonusAction',
+      primitiveFormHealingDiceCount: 1,
+      primitiveFormHealingDiceSides: 8,
+      primitiveFormHealingMaximumSlotLevel: 9,
+      primitiveUseLimit: 1,
+      primitiveUseReset: 'long-rest',
+      primitiveBonusAttackUseFormula: 'fixed',
+      primitiveBonusAttackAbility: 'wis',
+      primitiveAuraRadiusFeet: 30,
+      primitiveAuraRelation: 'enemy',
+      primitiveAuraSavingThrowAbility: 'wis',
+      primitiveAuraDcAbility: 'cha',
+      primitiveAuraDurationRounds: 10,
+      primitiveAuraBreakOnDamage: false,
+      primitiveAuraMagical: true,
+      primitiveAuraRequiresMutualSight: false,
+      primitiveAuraImmunityRounds: 0,
+      primitiveAuraRequiredEffectId: '',
       damageReductionAmount: 3,
       damageReductionDamageTypes: [],
       damageReductionMinimumIncomingDamage: 0,
       damageReductionMaximumCurrentHitPointPercent: 100,
       damageReductionOncePerTurn: false,
+      effectDurationBoundary: 'target-turn-end',
+      effectDurationRounds: 1,
+      effectArmorClassBonus: 0,
+      effectSpeedMode: 'none',
+      effectSpeedValue: 100,
+      effectSavingThrowMode: 'none',
+      effectSavingThrowAbility: 'all',
+      effectSavingThrowValue: 0,
+      effectSavingThrowProficiency: 'none',
+      effectAbilityCheckMode: 'none',
+      effectAbilityCheckAbility: 'all',
+      effectAbilityCheckSkill: '',
+      effectPreventReactions: false,
+      effectForcedFleeFromSource: false,
+      effectMaximumAttacksPerTurn: 0,
+      effectDarkvisionRangeFeet: 0,
+      effectFlightSpeedFeet: 0,
+      effectSeeInvisible: false,
+      effectAttackProfileModes: [],
+      effectAttackProfileWeaponIds: '',
+      effectAttackProfileReachBonusFeet: 0,
+      effectAttackProfileDamageType: 'none',
+      effectSpellSaveDisadvantageAuraEnabled: false,
+      effectSpellSaveDisadvantageAuraRadiusFeet: 60,
+      effectSpellSaveDisadvantageAuraDamageTypes: ['fire', 'radiant'],
+      effectSpellSaveDisadvantageAuraCastingClassIds: '',
+      effectSpellActionAsBonusAction: false,
+      effectSpellActionAsBonusActionClassIds: 'paladin',
+      activationActorIllumination: [],
+      activationTargetCreatureTypes: '',
+      activationTargetCondition: 'none',
+      activationTargetAbilityScoreEnabled: false,
+      activationTargetAbility: 'int',
+      activationTargetAbilityComparison: 'at-most',
+      activationTargetAbilityValue: 7,
+      effectBreakOn: [],
       actionLabel: '使用特性', economy: 'action', targetingKind: 'single-creature',
       relation: 'enemy', includeSelf: false, rangeFeet: 60,
       areaShape: 'circle', areaRadiusFeet: 10, areaWidthFeet: 10, areaHeightFeet: 10,
       areaRotatable: true,
       areaLengthFeet: 30, maximumTargets: 16,
+      savingThrowEnabled: false, savingThrowAbility: 'dex', savingThrowDcMode: 'source-save-dc', savingThrowDc: 13,
+      savingThrowOnSuccess: 'half',
       persistentAreaEnabled: false, persistentAreaLabel: '持续区域', persistentAreaColor: '#8b5cf6',
       persistentAreaDurationRounds: 10, persistentAreaConcentration: false,
       persistentAreaVerticalMode: 'ground', persistentAreaHeightFeet: 10,
@@ -640,6 +1082,7 @@ function newPersistentAreaTrigger(index: number): PersistentAreaTriggerEditorDra
     timing: 'on-enter',
     oncePerRound: true,
     oncePerTurn: false,
+    oncePerTarget: false,
     savingThrowEnabled: true,
     savingThrowAbility: 'con',
     savingThrowDcMode: 'source-save-dc',
@@ -656,17 +1099,31 @@ function newPersistentAreaTrigger(index: number): PersistentAreaTriggerEditorDra
     conditionRounds: 1,
     conditionSaveAbility: 'con',
     conditionSaveDc: 12,
+    notificationEnabled: false,
+    notificationDelivery: 'mental-to-source',
+    notificationAudibleRadiusFeet: 60,
     dmAdjustable: false,
   }
 }
 
 function restoreHeadlessEffectDraft(value: Partial<HeadlessEffectEditorDraft> | undefined): HeadlessEffectEditorDraft {
   const fallback = newHeadlessEffectDraft()
+  const executionMode = HEADLESS_FEATURE_EXECUTION_MODES.some(([id]) => id === value?.executionMode)
+    ? value!.executionMode!
+    : fallback.executionMode
   return {
     ...fallback,
     ...value,
+    // The list is frozen. Unknown future strings cannot silently create a new runtime branch.
+    executionMode,
     damageReductionDamageTypes: Array.isArray(value?.damageReductionDamageTypes)
       ? [...new Set(value.damageReductionDamageTypes)]
+      : [],
+    effectBreakOn: Array.isArray(value?.effectBreakOn)
+      ? [...new Set(value.effectBreakOn)]
+      : [],
+    activationActorIllumination: Array.isArray(value?.activationActorIllumination)
+      ? [...new Set(value.activationActorIllumination)]
       : [],
     // Drafts saved before vertical authoring must retain their old infinite-column behavior.
     persistentAreaVerticalMode: value?.persistentAreaVerticalMode ?? 'legacy',
@@ -691,6 +1148,12 @@ function restoreFeatDraft(value: Partial<FeatDraft>, index: number): FeatDraft {
     ...fallback,
     ...value,
     prerequisiteAbilities: { ...fallback.prerequisiteAbilities, ...value.prerequisiteAbilities },
+    d20ChoiceRerollRollKinds: Array.isArray(value.d20ChoiceRerollRollKinds)
+      ? [...value.d20ChoiceRerollRollKinds]
+      : fallback.d20ChoiceRerollRollKinds,
+    d20ChoiceRerollScopes: Array.isArray(value.d20ChoiceRerollScopes)
+      ? [...value.d20ChoiceRerollScopes]
+      : fallback.d20ChoiceRerollScopes,
     headless: restoreHeadlessEffectDraft(value.headless),
   }
 }
@@ -768,6 +1231,7 @@ function restoreSpellDraft(value: Partial<SpellDraft>, index: number): SpellDraf
     ...fallback,
     ...value,
     ...inferredLegacyRange,
+    classes: Array.isArray(value.classes) ? [...value.classes] : fallback.classes,
     cantripScalingSteps: Array.isArray(value.cantripScalingSteps) && value.cantripScalingSteps.length > 0
       ? value.cantripScalingSteps.map((step) => ({ ...step }))
       : cantripScalingStepsFromDamage(sourceDamage),
@@ -796,6 +1260,52 @@ function importedHeadlessEffectDraft(
   const damage = linkedAction?.effects.find((effect) => effect.kind === 'damage')
   const healing = linkedAction?.effects.find((effect) => effect.kind === 'healing')
   const condition = linkedAction?.effects.find((effect) => effect.kind === 'condition')
+  const declarativeAbility = definition.declarativeAbility
+  const declarativeMechanic = declarativeAbility?.mechanic
+  const declarativeActivityEffectReference = declarativeAbility?.effects.find((effect) => effect.kind === 'activity-effect')
+  const declarativeActivityEffect = declarativeActivityEffectReference
+    ? declarativeAbility?.activityEffects?.find((effect) => effect.id === declarativeActivityEffectReference.effectId)
+    : undefined
+  const primitiveExecutionMode: HeadlessEffectEditorDraft['executionMode'] | undefined =
+    declarativeAbility && (
+      (declarativeAbility.choices?.length ?? 0) > 0 ||
+      declarativeAbility.effects.some((effect) => effect.when != null || effect.whenChoice != null) ||
+      (declarativeAbility.activityEffects?.length ?? 0) > 1
+    ) ? 'advanced-activity'
+      : declarativeMechanic?.kind === 'turn-start-saving-throw-aura' ? 'turn-start-saving-throw-aura'
+      : declarativeActivityEffect ? 'timed-effect'
+      : declarativeMechanic?.kind === 'attacks-per-action' ? 'extra-attacks'
+      : declarativeMechanic?.kind === 'weapon-damage-rider' ? 'weapon-damage-rider'
+        : declarativeMechanic?.kind === 'spell-damage-ability-modifier' ? 'spell-damage-modifier'
+          : declarativeMechanic?.kind === 'spell-ability-check-bonus' ? 'spell-ability-check-bonus'
+          : declarativeMechanic?.kind === 'spell-interception' ? 'spell-interception'
+          : declarativeMechanic?.kind === 'spell-target-expansion' ? 'spell-target-expansion'
+          : declarativeMechanic?.kind === 'damage-roll-maximization' ? 'damage-roll-maximization'
+          : declarativeMechanic?.kind === 'passive-defense' ? 'passive-resistance'
+            : declarativeMechanic?.kind === 'reaction-weapon-attack' ? 'reaction-weapon-attack'
+              : declarativeMechanic?.kind === 'attack-disadvantage-interrupt' ? 'reaction-attack-defense'
+                : declarativeMechanic?.kind === 'attack-retarget-interrupt' ? 'reaction-attack-retarget'
+                : declarativeMechanic?.kind === 'death-prevention' ? 'passive-death-prevention'
+                : declarativeMechanic?.kind === 'spell-defeat-healing' ? 'spell-defeat-healing'
+                  : declarativeMechanic?.kind === 'summoned-creature-bonus' ? 'summoned-creature-bonus'
+                  : declarativeMechanic?.kind === 'companion-profile-upgrade' ? 'companion-profile-upgrade'
+                  : declarativeMechanic?.kind === 'creature-space-traversal' ? 'creature-space-traversal'
+                  : declarativeMechanic?.kind === 'environmental-movement' ? 'environmental-movement'
+                  : declarativeMechanic?.kind === 'persistent-projection' ? 'persistent-projection'
+                  : declarativeMechanic?.kind === 'persistent-projection-upgrade' ? 'persistent-projection-upgrade'
+                  : declarativeMechanic?.kind === 'alternate-resource-spellcasting' ? 'alternate-resource-spellcasting'
+                  : declarativeMechanic?.kind === 'granted-die-combat-options' ? 'granted-die-combat-options'
+                  : declarativeMechanic?.kind === 'creature-form-eligibility' ? 'creature-form-eligibility'
+                    : declarativeMechanic?.kind === 'creature-form-control' ? 'creature-form-control'
+                      : declarativeMechanic?.kind === 'bonus-weapon-attack' ? 'bonus-weapon-attack'
+                      : undefined
+  const primitiveDamageRoll = declarativeMechanic?.kind === 'weapon-damage-rider'
+    ? declarativeAbility?.rolls?.find((roll) =>
+        roll.kind === 'damage' && roll.id === declarativeMechanic.rollId)
+    : undefined
+  const passiveResistance = declarativeMechanic?.kind === 'passive-defense'
+    ? declarativeMechanic.damageResistance
+    : undefined
   const targeting = action?.targeting
   const template = targeting?.kind === 'area' ? targeting.template : undefined
   const templateRangeFeet = template?.shape === 'circle' || template?.shape === 'rect'
@@ -804,21 +1314,457 @@ function importedHeadlessEffectDraft(
       ? template.aimRangeFeet ?? fallback.rangeFeet
       : fallback.rangeFeet
   const editableConditionExpiration = condition?.duration.expiresAt
+  const effectArmorClass = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'armor-class')
+  const effectSpeed = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'speed')
+  const effectSavingThrow = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'saving-throw')
+  const effectSavingThrowProficiency = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'saving-throw-proficiency')
+  const effectAbilityCheck = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'ability-check')
+  const effectMaximumAttacks = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'maximum-attacks-per-turn')
+  const effectDarkvision = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'darkvision')
+  const effectFlightSpeed = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'flight-speed')
+  const effectSpellSaveDisadvantageAura = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'spell-save-disadvantage-aura')
+  const effectAttackProfile = declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'attack-profile')
+  const formulaConstant = (formula: { kind: string; value?: unknown } | undefined, fallbackValue: number) =>
+    formula?.kind === 'constant' && typeof formula.value === 'number' ? formula.value : fallbackValue
+  const effectDurationBoundary: HeadlessEffectEditorDraft['effectDurationBoundary'] =
+    declarativeActivityEffect?.duration.kind === 'permanent'
+      ? 'permanent'
+      : declarativeActivityEffect?.duration.kind === 'concentration'
+      ? 'concentration'
+      : declarativeActivityEffect?.duration.kind === 'rounds'
+        ? declarativeActivityEffect.duration.expiresAt
+        : fallback.effectDurationBoundary
+  const targetAbilityScoreRequirement = declarativeAbility?.requirements?.find(
+    (requirement): requirement is Extract<Dnd5ePredicateV1, { kind: 'ability-score' }> =>
+      requirement.kind === 'ability-score' && requirement.subject === 'target',
+  )
   return {
     ...fallback,
-    enabled: !!action || !!passiveDamageReduction,
-    executionMode: !action && passiveDamageReduction ? 'passive-damage-reduction' : 'active',
+    enabled: !!action || !!passiveDamageReduction || primitiveExecutionMode != null,
+    executionMode: primitiveExecutionMode ?? (!action && passiveDamageReduction ? 'passive-damage-reduction' : 'active'),
+    primitiveAttackCount: declarativeMechanic?.kind === 'attacks-per-action'
+      ? declarativeMechanic.attacks
+      : fallback.primitiveAttackCount,
+    primitiveSpellcastingClassId: declarativeMechanic?.kind === 'spell-damage-ability-modifier' || declarativeMechanic?.kind === 'spell-target-expansion'
+      ? declarativeMechanic.spellcastingClassId as HeadlessEffectEditorDraft['primitiveSpellcastingClassId']
+      : fallback.primitiveSpellcastingClassId,
+    primitiveAbility: declarativeMechanic?.kind === 'spell-damage-ability-modifier'
+      ? declarativeMechanic.ability
+      : fallback.primitiveAbility,
+    primitiveMaximumSpellLevel: declarativeMechanic?.kind === 'spell-damage-ability-modifier'
+      ? declarativeMechanic.maximumSpellLevel
+      : fallback.primitiveMaximumSpellLevel,
+    primitiveSpellAbilityCheckSpellIds: declarativeMechanic?.kind === 'spell-ability-check-bonus'
+      ? declarativeMechanic.spellIds.join(',')
+      : fallback.primitiveSpellAbilityCheckSpellIds,
+    primitiveSpellInterceptionClassId: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.spellcastingClassId
+      : fallback.primitiveSpellInterceptionClassId,
+    primitiveSpellInterceptionSaveAbility: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.saveAbility
+      : fallback.primitiveSpellInterceptionSaveAbility,
+    primitiveSpellInterceptionDcAbility: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.dcAbility
+      : fallback.primitiveSpellInterceptionDcAbility,
+    primitiveSpellInterceptionMinimumLevel: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.minimumSpellLevel
+      : fallback.primitiveSpellInterceptionMinimumLevel,
+    primitiveSpellInterceptionDurationRounds: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.durationRounds
+      : fallback.primitiveSpellInterceptionDurationRounds,
+    primitiveSpellInterceptionNegates: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.negateForSelf
+      : fallback.primitiveSpellInterceptionNegates,
+    primitiveSpellInterceptionGrantsAccess: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.grantTemporarySpellAccess
+      : fallback.primitiveSpellInterceptionGrantsAccess,
+    primitiveSpellInterceptionProhibitsSource: declarativeMechanic?.kind === 'spell-interception'
+      ? declarativeMechanic.prohibitSourceCasting
+      : fallback.primitiveSpellInterceptionProhibitsSource,
+    primitiveSpellTargetSchool: declarativeMechanic?.kind === 'spell-target-expansion'
+      ? declarativeMechanic.spellSchools[0] ?? fallback.primitiveSpellTargetSchool
+      : fallback.primitiveSpellTargetSchool,
+    primitiveSpellTargetAdditionalTargets: declarativeMechanic?.kind === 'spell-target-expansion'
+      ? declarativeMechanic.additionalTargets
+      : fallback.primitiveSpellTargetAdditionalTargets,
+    primitiveCoreResourceId: declarativeMechanic?.kind === 'damage-roll-maximization'
+      ? declarativeAbility?.cost?.resources?.find((cost) => cost.scope === 'core')?.resourceId ?? ''
+      : fallback.primitiveCoreResourceId,
+    primitiveResourceAmount: declarativeMechanic?.kind === 'damage-roll-maximization'
+      ? declarativeAbility?.cost?.resources?.find((cost) => cost.scope === 'core')?.amount ?? 1
+      : fallback.primitiveResourceAmount,
+    primitiveDamageMaxDeliveries: declarativeMechanic?.kind === 'damage-roll-maximization'
+      ? [...declarativeMechanic.deliveries]
+      : fallback.primitiveDamageMaxDeliveries,
+    primitiveOncePerTurn: declarativeAbility?.limits?.oncePerTurn ?? fallback.primitiveOncePerTurn,
+    primitivePassiveDelivery: passiveResistance?.delivery ?? 'any',
+    primitivePassiveMagical: passiveResistance?.magical == null
+      ? 'any'
+      : passiveResistance.magical ? 'magical' : 'nonmagical',
+    primitiveSpellSaveAdvantage: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.savingThrowAdvantageAgainstSpells ?? false
+      : false,
+    primitiveHitPointMaximumReductionImmunity: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.hitPointMaximumReductionImmunity ?? false
+      : false,
+    primitiveDamageReflection: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.damageReflection != null
+      : false,
+    primitiveDamageReflectionMultiplier: declarativeMechanic?.kind === 'passive-defense'
+      ? (declarativeMechanic.damageReflection?.multiplier ?? 1) * 100
+      : 100,
+    primitiveConcentrationCheckImmunity: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.concentrationCheckImmunity != null
+      : false,
+    primitiveConcentrationCheckSchool: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.concentrationCheckImmunity?.spellSchools[0] ?? 'conjuration'
+      : 'conjuration',
+    primitiveWeaponAttacksMagical: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.weaponAttacksMagical != null
+      : false,
+    primitiveWeaponAttacksMagicalWhile: declarativeMechanic?.kind === 'passive-defense'
+      ? declarativeMechanic.weaponAttacksMagical?.while ?? 'transformed'
+      : 'transformed',
+    primitiveAttackDefenseOutcome: declarativeMechanic?.kind === 'attack-disadvantage-interrupt'
+      ? declarativeMechanic.outcome ?? 'disadvantage'
+      : fallback.primitiveAttackDefenseOutcome,
+    primitiveAttackDefenseOnMiss: declarativeMechanic?.kind === 'attack-disadvantage-interrupt'
+      ? declarativeMechanic.onMiss === 'next-attack-advantage-against-attacker'
+      : false,
+    primitiveAttackDefenseProtects: declarativeMechanic?.kind === 'attack-disadvantage-interrupt'
+      ? declarativeMechanic.protects
+      : fallback.primitiveAttackDefenseProtects,
+    primitiveAttackRetargetSaveAbility: declarativeMechanic?.kind === 'attack-retarget-interrupt'
+      ? declarativeMechanic.saveAbility
+      : fallback.primitiveAttackRetargetSaveAbility,
+    primitiveAttackRetargetDcAbility: declarativeMechanic?.kind === 'attack-retarget-interrupt'
+      ? declarativeMechanic.dcAbility
+      : fallback.primitiveAttackRetargetDcAbility,
+    primitiveAttackRetargetCharmImmunity: declarativeMechanic?.kind === 'attack-retarget-interrupt'
+      ? declarativeMechanic.immunityCondition === 'charmed'
+      : fallback.primitiveAttackRetargetCharmImmunity,
+    primitiveDeathHitPoints: declarativeMechanic?.kind === 'death-prevention'
+      ? declarativeMechanic.hitPointsAfter
+      : fallback.primitiveDeathHitPoints,
+    primitiveDeathPreventsMassiveDamage: declarativeMechanic?.kind === 'death-prevention'
+      ? declarativeMechanic.preventsMassiveDamage ?? false
+      : false,
+    primitiveDefeatHealingMinimumSpellLevel: declarativeMechanic?.kind === 'spell-defeat-healing'
+      ? declarativeMechanic.minimumSpellLevel
+      : fallback.primitiveDefeatHealingMinimumSpellLevel,
+    primitiveDefeatHealingBaseMultiplier: declarativeMechanic?.kind === 'spell-defeat-healing'
+      ? declarativeMechanic.baseMultiplier
+      : fallback.primitiveDefeatHealingBaseMultiplier,
+    primitiveDefeatHealingSchool: declarativeMechanic?.kind === 'spell-defeat-healing'
+      ? (Object.keys(declarativeMechanic.schoolMultipliers ?? {})[0] as HeadlessEffectEditorDraft['primitiveDefeatHealingSchool'] | undefined) ?? 'none'
+      : fallback.primitiveDefeatHealingSchool,
+    primitiveDefeatHealingSchoolMultiplier: declarativeMechanic?.kind === 'spell-defeat-healing'
+      ? Object.values(declarativeMechanic.schoolMultipliers ?? {})[0] ?? declarativeMechanic.baseMultiplier
+      : fallback.primitiveDefeatHealingSchoolMultiplier,
+    primitiveDefeatHealingExcludedCreatureTypes: declarativeMechanic?.kind === 'spell-defeat-healing'
+      ? (declarativeMechanic.excludedCreatureTypes ?? []).join(',')
+      : fallback.primitiveDefeatHealingExcludedCreatureTypes,
+    primitiveSummonTemporaryHitPoints: declarativeMechanic?.kind === 'summoned-creature-bonus' && declarativeMechanic.temporaryHitPoints?.kind === 'fixed'
+      ? declarativeMechanic.temporaryHitPoints.value
+      : fallback.primitiveSummonTemporaryHitPoints,
+    primitiveSummonSpellSchools: declarativeMechanic?.kind === 'summoned-creature-bonus'
+      ? (declarativeMechanic.spellSchools ?? []).join(',')
+      : fallback.primitiveSummonSpellSchools,
+    primitiveSummonSpellIds: declarativeMechanic?.kind === 'summoned-creature-bonus'
+      ? (declarativeMechanic.spellIds ?? []).join(',')
+      : fallback.primitiveSummonSpellIds,
+    primitiveSummonMaximumHitPointBonusMode: declarativeMechanic?.kind === 'summoned-creature-bonus'
+      ? declarativeMechanic.maximumHitPointBonus?.kind === 'class-level' ? 'class-level'
+        : declarativeMechanic.maximumHitPointBonus?.kind === 'fixed' ? 'fixed' : 'none'
+      : fallback.primitiveSummonMaximumHitPointBonusMode,
+    primitiveSummonMaximumHitPointBonusValue: declarativeMechanic?.kind === 'summoned-creature-bonus'
+      ? declarativeMechanic.maximumHitPointBonus?.kind === 'fixed'
+        ? declarativeMechanic.maximumHitPointBonus.value
+        : declarativeMechanic.maximumHitPointBonus?.kind === 'class-level'
+          ? declarativeMechanic.maximumHitPointBonus.multiplier ?? 1
+          : fallback.primitiveSummonMaximumHitPointBonusValue
+      : fallback.primitiveSummonMaximumHitPointBonusValue,
+    primitiveSummonMaximumHitPointBonusClassId: declarativeMechanic?.kind === 'summoned-creature-bonus' && declarativeMechanic.maximumHitPointBonus?.kind === 'class-level'
+      ? declarativeMechanic.maximumHitPointBonus.classId
+      : fallback.primitiveSummonMaximumHitPointBonusClassId,
+    primitiveSummonWeaponDamageBonusMode: declarativeMechanic?.kind === 'summoned-creature-bonus'
+      ? declarativeMechanic.weaponDamageBonus?.kind === 'proficiency-bonus' ? 'proficiency-bonus'
+        : declarativeMechanic.weaponDamageBonus?.kind === 'fixed' ? 'fixed' : 'none'
+      : fallback.primitiveSummonWeaponDamageBonusMode,
+    primitiveSummonWeaponDamageBonusValue: declarativeMechanic?.kind === 'summoned-creature-bonus' && declarativeMechanic.weaponDamageBonus?.kind === 'fixed'
+      ? declarativeMechanic.weaponDamageBonus.value
+      : fallback.primitiveSummonWeaponDamageBonusValue,
+    primitiveCompanionWeaponAttacksMagical: declarativeMechanic?.kind === 'companion-profile-upgrade'
+      ? declarativeMechanic.weaponAttacksMagical === true
+      : fallback.primitiveCompanionWeaponAttacksMagical,
+    primitiveCompanionAttacksPerAction: declarativeMechanic?.kind === 'companion-profile-upgrade'
+      ? declarativeMechanic.attacksPerAction ?? 1
+      : fallback.primitiveCompanionAttacksPerAction,
+    primitiveCompanionShareSelfSpellsRangeFeet: declarativeMechanic?.kind === 'companion-profile-upgrade'
+      ? declarativeMechanic.shareSelfSpellsRangeFeet ?? 0
+      : fallback.primitiveCompanionShareSelfSpellsRangeFeet,
+    primitiveTraversalMinimumLargerSizeRanks: declarativeMechanic?.kind === 'creature-space-traversal'
+      ? declarativeMechanic.minimumLargerSizeRanks
+      : fallback.primitiveTraversalMinimumLargerSizeRanks,
+    primitiveEnvironmentalEnvironments: declarativeMechanic?.kind === 'environmental-movement'
+      ? declarativeMechanic.environments.join(',')
+      : fallback.primitiveEnvironmentalEnvironments,
+    primitiveEnvironmentalMode: declarativeMechanic?.kind === 'environmental-movement'
+      ? declarativeMechanic.mode
+      : fallback.primitiveEnvironmentalMode,
+    primitiveEnvironmentalWalkingSpeed: declarativeMechanic?.kind === 'environmental-movement'
+      ? declarativeMechanic.speed === 'walking'
+      : fallback.primitiveEnvironmentalWalkingSpeed,
+    primitiveEnvironmentalFixedSpeed: declarativeMechanic?.kind === 'environmental-movement' && typeof declarativeMechanic.speed === 'number'
+      ? declarativeMechanic.speed
+      : fallback.primitiveEnvironmentalFixedSpeed,
+    primitiveProjectionId: declarativeMechanic?.kind === 'persistent-projection' || declarativeMechanic?.kind === 'persistent-projection-upgrade'
+      ? declarativeMechanic.projectionId
+      : fallback.primitiveProjectionId,
+    primitiveProjectionInstanceCount: declarativeMechanic?.kind === 'persistent-projection' || declarativeMechanic?.kind === 'persistent-projection-upgrade'
+      ? declarativeMechanic.instanceCount ?? 1
+      : fallback.primitiveProjectionInstanceCount,
+    primitiveProjectionPlacementRangeFeet: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.placementRangeFeet
+      : fallback.primitiveProjectionPlacementRangeFeet,
+    primitiveProjectionDurationRounds: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.durationRounds
+      : fallback.primitiveProjectionDurationRounds,
+    primitiveProjectionConcentration: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.concentration
+      : fallback.primitiveProjectionConcentration,
+    primitiveProjectionMovementEnabled: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.movement != null
+      : fallback.primitiveProjectionMovementEnabled,
+    primitiveProjectionMovementEconomy: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.movement?.economy ?? 'bonus-action'
+      : fallback.primitiveProjectionMovementEconomy,
+    primitiveProjectionMovementFeet: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.movement?.maximumFeet ?? 30
+      : fallback.primitiveProjectionMovementFeet,
+    primitiveProjectionTetherFeet: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.movement?.maximumDistanceFromSourceFeet ?? 0
+      : fallback.primitiveProjectionTetherFeet,
+    primitiveProjectionSpellOrigin: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.spellOrigin === true
+      : fallback.primitiveProjectionSpellOrigin,
+    primitiveProjectionAttackAdvantageFeet: declarativeMechanic?.kind === 'persistent-projection'
+      ? declarativeMechanic.attackAdvantageWithinFeet ?? 0
+      : fallback.primitiveProjectionAttackAdvantageFeet,
+    primitiveAlternateSpellClassId: declarativeMechanic?.kind === 'alternate-resource-spellcasting'
+      ? declarativeMechanic.classId
+      : fallback.primitiveAlternateSpellClassId,
+    primitiveAlternateSpellAbility: declarativeMechanic?.kind === 'alternate-resource-spellcasting'
+      ? declarativeMechanic.ability
+      : fallback.primitiveAlternateSpellAbility,
+    primitiveAlternateSpellResourceId: declarativeMechanic?.kind === 'alternate-resource-spellcasting'
+      ? declarativeMechanic.resourceId
+      : fallback.primitiveAlternateSpellResourceId,
+    primitiveAlternateSpellResourceScope: declarativeMechanic?.kind === 'alternate-resource-spellcasting'
+      ? declarativeMechanic.resourceScope ?? 'core'
+      : fallback.primitiveAlternateSpellResourceScope,
+    primitiveAlternateSpellIgnoreMaterialComponents: declarativeMechanic?.kind === 'alternate-resource-spellcasting'
+      ? declarativeMechanic.ignoreMaterialComponents === true
+      : fallback.primitiveAlternateSpellIgnoreMaterialComponents,
+    primitiveAlternateSpellGrantsJson: declarativeMechanic?.kind === 'alternate-resource-spellcasting'
+      ? JSON.stringify(declarativeMechanic.grants, null, 2)
+      : fallback.primitiveAlternateSpellGrantsJson,
+    primitiveGrantedDieWeaponDamage: declarativeMechanic?.kind === 'granted-die-combat-options'
+      ? declarativeMechanic.addToWeaponDamage === true
+      : fallback.primitiveGrantedDieWeaponDamage,
+    primitiveGrantedDieArmorClass: declarativeMechanic?.kind === 'granted-die-combat-options'
+      ? declarativeMechanic.addToArmorClassAgainstAttack === true
+      : fallback.primitiveGrantedDieArmorClass,
+    primitiveFormCreatureTypes: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? declarativeMechanic.creatureTypes.join(',')
+      : fallback.primitiveFormCreatureTypes,
+    primitiveFormSpecificIds: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? (declarativeMechanic.specificFormIds ?? []).join(',')
+      : fallback.primitiveFormSpecificIds,
+    primitiveFormChallengeRatingMode: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? declarativeMechanic.maximumChallengeRating.kind === 'fixed' ? 'fixed' : 'class-level'
+      : fallback.primitiveFormChallengeRatingMode,
+    primitiveFormFixedChallengeRating: declarativeMechanic?.kind === 'creature-form-eligibility' && declarativeMechanic.maximumChallengeRating.kind === 'fixed'
+      ? declarativeMechanic.maximumChallengeRating.value
+      : fallback.primitiveFormFixedChallengeRating,
+    primitiveFormClassId: declarativeMechanic?.kind === 'creature-form-eligibility' && declarativeMechanic.maximumChallengeRating.kind === 'class-level'
+      ? declarativeMechanic.maximumChallengeRating.classId as HeadlessEffectEditorDraft['primitiveFormClassId']
+      : fallback.primitiveFormClassId,
+    primitiveFormLevelDivisor: declarativeMechanic?.kind === 'creature-form-eligibility' && declarativeMechanic.maximumChallengeRating.kind === 'class-level'
+      ? declarativeMechanic.maximumChallengeRating.divisor ?? 1
+      : fallback.primitiveFormLevelDivisor,
+    primitiveFormMinimumChallengeRating: declarativeMechanic?.kind === 'creature-form-eligibility' && declarativeMechanic.maximumChallengeRating.kind !== 'fixed'
+      ? declarativeMechanic.maximumChallengeRating.minimum ?? 0
+      : fallback.primitiveFormMinimumChallengeRating,
+    primitiveFormRequiresKnown: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? declarativeMechanic.requiresKnownForm ?? true
+      : fallback.primitiveFormRequiresKnown,
+    primitiveFormResourceCost: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? declarativeMechanic.resourceCost ?? 1
+      : fallback.primitiveFormResourceCost,
+    primitiveFormResourceMode: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? declarativeMechanic.resourceMode ?? 'core-wild-shape'
+      : fallback.primitiveFormResourceMode,
+    primitiveFormDurationHours: declarativeMechanic?.kind === 'creature-form-eligibility' && declarativeMechanic.durationHours?.kind === 'fixed'
+      ? declarativeMechanic.durationHours.value
+      : fallback.primitiveFormDurationHours,
+    primitiveFormActivationEconomy: declarativeMechanic?.kind === 'creature-form-eligibility' || declarativeMechanic?.kind === 'creature-form-control'
+      ? declarativeMechanic.activationEconomy ?? 'action'
+      : fallback.primitiveFormActivationEconomy,
+    primitiveFormCoreMovementLimits: declarativeMechanic?.kind === 'creature-form-eligibility'
+      ? declarativeMechanic.useCoreMovementLimits ?? false
+      : fallback.primitiveFormCoreMovementLimits,
+    primitiveFormHealingEnabled: declarativeMechanic?.kind === 'creature-form-control'
+      ? declarativeMechanic.inFormHealing != null
+      : fallback.primitiveFormHealingEnabled,
+    primitiveFormHealingEconomy: declarativeMechanic?.kind === 'creature-form-control'
+      ? declarativeMechanic.inFormHealing?.economy ?? 'bonusAction'
+      : fallback.primitiveFormHealingEconomy,
+    primitiveFormHealingDiceCount: declarativeMechanic?.kind === 'creature-form-control'
+      ? declarativeMechanic.inFormHealing?.dicePerResourceLevel.count ?? 1
+      : fallback.primitiveFormHealingDiceCount,
+    primitiveFormHealingDiceSides: declarativeMechanic?.kind === 'creature-form-control'
+      ? declarativeMechanic.inFormHealing?.dicePerResourceLevel.sides ?? 8
+      : fallback.primitiveFormHealingDiceSides,
+    primitiveFormHealingMaximumSlotLevel: declarativeMechanic?.kind === 'creature-form-control'
+      ? declarativeMechanic.inFormHealing?.maximumResourceLevel ?? 9
+      : fallback.primitiveFormHealingMaximumSlotLevel,
+    primitiveUseLimit: declarativeAbility?.limits?.uses?.kind === 'fixed'
+      ? declarativeAbility.limits.uses.value
+      : fallback.primitiveUseLimit,
+    primitiveUseReset: declarativeAbility?.limits?.reset === 'combat' ||
+      declarativeAbility?.limits?.reset === 'short-rest' || declarativeAbility?.limits?.reset === 'long-rest'
+      ? declarativeAbility.limits.reset
+      : fallback.primitiveUseReset,
+    primitiveBonusAttackUseFormula: declarativeMechanic?.kind === 'bonus-weapon-attack' &&
+      declarativeAbility?.limits?.uses?.kind === 'ability-modifier'
+      ? 'ability-modifier'
+      : fallback.primitiveBonusAttackUseFormula,
+    primitiveBonusAttackAbility: declarativeMechanic?.kind === 'bonus-weapon-attack' &&
+      declarativeAbility?.limits?.uses?.kind === 'ability-modifier'
+      ? declarativeAbility.limits.uses.ability
+      : fallback.primitiveBonusAttackAbility,
+    primitiveAuraRadiusFeet: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.radiusFeet
+      : fallback.primitiveAuraRadiusFeet,
+    primitiveAuraRelation: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.relation
+      : fallback.primitiveAuraRelation,
+    primitiveAuraSavingThrowAbility: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.ability
+      : fallback.primitiveAuraSavingThrowAbility,
+    primitiveAuraDcAbility: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.dcAbility
+      : fallback.primitiveAuraDcAbility,
+    primitiveAuraDurationRounds: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.durationRounds
+      : fallback.primitiveAuraDurationRounds,
+    primitiveAuraBreakOnDamage: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.breakOnDamage ?? false
+      : fallback.primitiveAuraBreakOnDamage,
+    primitiveAuraMagical: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.magical ?? false
+      : fallback.primitiveAuraMagical,
+    primitiveAuraRequiresMutualSight: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.requiresMutualSight ?? false
+      : fallback.primitiveAuraRequiresMutualSight,
+    primitiveAuraImmunityRounds: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.successfulSaveImmunityRounds ?? 0
+      : fallback.primitiveAuraImmunityRounds,
+    primitiveAuraRequiredEffectId: declarativeMechanic?.kind === 'turn-start-saving-throw-aura'
+      ? declarativeMechanic.requiredEffectId ?? ''
+      : fallback.primitiveAuraRequiredEffectId,
     damageReductionAmount: passiveDamageReduction?.amount ?? fallback.damageReductionAmount,
-    damageReductionDamageTypes: [...(passiveDamageReduction?.damageTypes ?? [])],
+    damageReductionDamageTypes: [...(passiveResistance?.damageTypes ?? passiveDamageReduction?.damageTypes ?? [])],
     damageReductionMinimumIncomingDamage: passiveDamageReduction?.minimumIncomingDamage ?? 0,
     damageReductionMaximumCurrentHitPointPercent: passiveDamageReduction?.maximumCurrentHitPointPercent ?? 100,
     damageReductionOncePerTurn: passiveDamageReduction?.oncePerTurn ?? false,
+    effectDurationBoundary,
+    effectDurationRounds: declarativeActivityEffect?.duration.kind === 'rounds'
+      ? declarativeActivityEffect.duration.rounds
+      : declarativeActivityEffect?.duration.kind === 'concentration'
+        ? declarativeActivityEffect.duration.maximumRounds
+        : fallback.effectDurationRounds,
+    effectArmorClassBonus: effectArmorClass?.kind === 'armor-class'
+      ? formulaConstant(effectArmorClass.value, fallback.effectArmorClassBonus)
+      : fallback.effectArmorClassBonus,
+    effectSpeedMode: effectSpeed?.kind === 'speed' && (effectSpeed.mode === 'add' || effectSpeed.mode === 'multiply')
+      ? effectSpeed.mode
+      : 'none',
+    effectSpeedValue: effectSpeed?.kind === 'speed'
+      ? formulaConstant(effectSpeed.value, fallback.effectSpeedValue) * (effectSpeed.mode === 'multiply' ? 100 : 1)
+      : fallback.effectSpeedValue,
+    effectSavingThrowMode: effectSavingThrow?.kind === 'saving-throw'
+      ? effectSavingThrow.mode
+      : 'none',
+    effectSavingThrowAbility: effectSavingThrow?.kind === 'saving-throw'
+      ? effectSavingThrow.ability ?? 'all'
+      : 'all',
+    effectSavingThrowValue: effectSavingThrow?.kind === 'saving-throw'
+      ? formulaConstant(effectSavingThrow.value, fallback.effectSavingThrowValue)
+      : fallback.effectSavingThrowValue,
+    effectSavingThrowProficiency: effectSavingThrowProficiency?.kind === 'saving-throw-proficiency'
+      ? effectSavingThrowProficiency.ability
+      : 'none',
+    effectAbilityCheckMode: effectAbilityCheck?.kind === 'ability-check'
+      ? effectAbilityCheck.mode
+      : fallback.effectAbilityCheckMode,
+    effectAbilityCheckAbility: effectAbilityCheck?.kind === 'ability-check'
+      ? effectAbilityCheck.ability ?? 'all'
+      : fallback.effectAbilityCheckAbility,
+    effectAbilityCheckSkill: effectAbilityCheck?.kind === 'ability-check'
+      ? effectAbilityCheck.skill ?? ''
+      : fallback.effectAbilityCheckSkill,
+    effectPreventReactions: declarativeActivityEffect?.modifiers?.some((modifier) => modifier.kind === 'prohibit-reaction') ?? false,
+    effectForcedFleeFromSource: declarativeActivityEffect?.modifiers?.some((modifier) => modifier.kind === 'forced-flee-from-source') ?? false,
+    effectMaximumAttacksPerTurn: effectMaximumAttacks?.kind === 'maximum-attacks-per-turn'
+      ? effectMaximumAttacks.value
+      : 0,
+    effectDarkvisionRangeFeet: effectDarkvision?.kind === 'darkvision'
+      ? effectDarkvision.rangeFeet
+      : 0,
+    effectFlightSpeedFeet: effectFlightSpeed?.kind === 'flight-speed'
+      ? effectFlightSpeed.speedFeet
+      : 0,
+    effectSeeInvisible: declarativeActivityEffect?.modifiers?.some((modifier) => modifier.kind === 'see-invisible') ?? false,
+    effectAttackProfileModes: effectAttackProfile?.kind === 'attack-profile'
+      ? [...effectAttackProfile.attackModes]
+      : [],
+    effectAttackProfileWeaponIds: effectAttackProfile?.kind === 'attack-profile'
+      ? (effectAttackProfile.weaponIds ?? []).join(',')
+      : '',
+    effectAttackProfileReachBonusFeet: effectAttackProfile?.kind === 'attack-profile'
+      ? effectAttackProfile.reachBonusFeet ?? 0
+      : 0,
+    effectAttackProfileDamageType: effectAttackProfile?.kind === 'attack-profile'
+      ? effectAttackProfile.damageTypeOverride ?? 'none'
+      : 'none',
+    effectSpellSaveDisadvantageAuraEnabled: effectSpellSaveDisadvantageAura?.kind === 'spell-save-disadvantage-aura',
+    effectSpellSaveDisadvantageAuraRadiusFeet: effectSpellSaveDisadvantageAura?.kind === 'spell-save-disadvantage-aura'
+      ? effectSpellSaveDisadvantageAura.radiusFeet
+      : fallback.effectSpellSaveDisadvantageAuraRadiusFeet,
+    effectSpellSaveDisadvantageAuraDamageTypes: effectSpellSaveDisadvantageAura?.kind === 'spell-save-disadvantage-aura'
+      ? [...(effectSpellSaveDisadvantageAura.damageTypes ?? [])]
+      : fallback.effectSpellSaveDisadvantageAuraDamageTypes,
+    effectSpellSaveDisadvantageAuraCastingClassIds: effectSpellSaveDisadvantageAura?.kind === 'spell-save-disadvantage-aura'
+      ? (effectSpellSaveDisadvantageAura.spellcastingClassIds ?? []).join(',')
+      : fallback.effectSpellSaveDisadvantageAuraCastingClassIds,
+    effectSpellActionAsBonusAction: declarativeActivityEffect?.modifiers?.some((modifier) => modifier.kind === 'spell-action-as-bonus-action') === true,
+    effectSpellActionAsBonusActionClassIds: declarativeActivityEffect?.modifiers?.find((modifier) => modifier.kind === 'spell-action-as-bonus-action')?.spellcastingClassIds.join(',') ?? fallback.effectSpellActionAsBonusActionClassIds,
+    activationActorIllumination: [...(declarativeAbility?.predicates?.actorIllumination ?? [])],
+    activationTargetCreatureTypes: (declarativeAbility?.predicates?.targetCreatureTypes ?? []).join(','),
+    activationTargetCondition: declarativeAbility?.predicates?.targetHasConditions?.[0] ?? 'none',
+    activationTargetAbilityScoreEnabled: targetAbilityScoreRequirement != null,
+    activationTargetAbility: targetAbilityScoreRequirement?.ability ?? 'int',
+    activationTargetAbilityComparison: targetAbilityScoreRequirement?.comparison ?? 'at-most',
+    activationTargetAbilityValue: targetAbilityScoreRequirement?.value ?? 7,
+    effectBreakOn: [...(declarativeActivityEffect?.breakOn ?? [])],
     actionLabel: action?.label ?? definition.name,
     economy: action?.economy ?? fallback.economy,
     targetingKind: targeting?.kind ?? fallback.targetingKind,
     relation: targeting && targeting.kind !== 'self' ? targeting.relation ?? 'any' : fallback.relation,
     includeSelf: targeting && targeting.kind !== 'self' ? targeting.includeSelf ?? false : true,
-    rangeFeet: targeting?.kind === 'single-creature'
+    rangeFeet: targeting?.kind === 'single-creature' || targeting?.kind === 'multiple-creatures'
       ? targeting.rangeFeet ?? fallback.rangeFeet
       : templateRangeFeet,
     areaShape: template?.shape ?? fallback.areaShape,
@@ -827,7 +1773,16 @@ function importedHeadlessEffectDraft(
     areaHeightFeet: template?.shape === 'rect' ? template.heightFeet : fallback.areaHeightFeet,
     areaLengthFeet: template?.shape === 'cone' || template?.shape === 'line' ? template.lengthFeet : fallback.areaLengthFeet,
     areaRotatable: template?.shape === 'rect' ? template.rotatable ?? false : fallback.areaRotatable,
-    maximumTargets: targeting?.kind === 'area' ? targeting.maximumTargets ?? fallback.maximumTargets : 1,
+    maximumTargets: targeting?.kind === 'area' || targeting?.kind === 'multiple-creatures'
+      ? targeting.maximumTargets ?? fallback.maximumTargets
+      : 1,
+    savingThrowEnabled: !!linkedAction?.savingThrow,
+    savingThrowAbility: linkedAction?.savingThrow?.ability ?? fallback.savingThrowAbility,
+    savingThrowDcMode: linkedAction?.savingThrow?.dc === 'source-save-dc' ? 'source-save-dc' : 'fixed',
+    savingThrowDc: typeof linkedAction?.savingThrow?.dc === 'number'
+      ? linkedAction.savingThrow.dc
+      : fallback.savingThrowDc,
+    savingThrowOnSuccess: linkedAction?.savingThrow?.onSuccess ?? fallback.savingThrowOnSuccess,
     persistentAreaEnabled: !!action?.persistentArea,
     persistentAreaLabel: action?.persistentArea?.label ?? fallback.persistentAreaLabel,
     persistentAreaColor: action?.persistentArea?.color ?? fallback.persistentAreaColor,
@@ -846,6 +1801,7 @@ function importedHeadlessEffectDraft(
       timing: trigger.timing as PersistentAreaTriggerEditorDraft['timing'],
       oncePerRound: trigger.oncePerRound ?? false,
       oncePerTurn: trigger.oncePerTurn ?? false,
+      oncePerTarget: trigger.oncePerTarget ?? false,
       savingThrowEnabled: !!trigger.savingThrow,
       savingThrowAbility: trigger.savingThrow?.ability ?? 'con',
       savingThrowDcMode: trigger.savingThrow?.dc === 'source-save-dc' ? 'source-save-dc' : 'fixed',
@@ -855,6 +1811,7 @@ function importedHeadlessEffectDraft(
       damageCount: trigger.damage?.count ?? 1,
       damageSides: trigger.damage?.sides ?? 6,
       damageModifier: trigger.damage?.modifier ?? 0,
+      damageModifierFormula: trigger.damage?.modifierFormula,
       damageType: trigger.damage?.type ?? 'force',
       conditionEnabled: !!trigger.condition,
       condition: trigger.condition?.condition ?? 'prone',
@@ -862,6 +1819,11 @@ function importedHeadlessEffectDraft(
       conditionRounds: trigger.condition?.duration.remainingRounds ?? 1,
       conditionSaveAbility: trigger.condition?.duration.saveAbility ?? 'con',
       conditionSaveDc: trigger.condition?.duration.saveDc ?? 10,
+      notificationEnabled: !!trigger.notification,
+      notificationDelivery: trigger.notification?.delivery ?? 'mental-to-source',
+      notificationAudibleRadiusFeet: trigger.notification?.delivery === 'audible'
+        ? trigger.notification.audibleRadiusFeet
+        : 60,
       dmAdjustable: trigger.dmAdjustable ?? false,
       sourceDeclaration: structuredClone(trigger),
       })),
@@ -871,17 +1833,20 @@ function importedHeadlessEffectDraft(
     summonDurationRounds: action?.summon?.durationRounds ?? fallback.summonDurationRounds,
     summonConcentration: action?.summon?.concentration ?? false,
     summonSide: action?.summon?.side ?? 'ally',
-    damageEnabled: !!damage,
-    damageCount: damage?.dice.count ?? fallback.damageCount,
-    damageSides: damage?.dice.sides ?? fallback.damageSides,
+    damageEnabled: !!damage || !!primitiveDamageRoll,
+    damageCount: primitiveDamageRoll?.kind === 'damage' ? primitiveDamageRoll.dice.count : damage?.dice.count ?? fallback.damageCount,
+    damageSides: primitiveDamageRoll?.kind === 'damage' ? primitiveDamageRoll.dice.sides : damage?.dice.sides ?? fallback.damageSides,
     damageModifier: damage?.dice.modifier ?? 0,
-    damageType: damage?.damageType ?? fallback.damageType,
+    damageModifierFormula: damage?.dice.modifierFormula,
+    damageType: primitiveDamageRoll?.kind === 'damage' && primitiveDamageRoll.damageType !== 'parent-weapon'
+      ? primitiveDamageRoll.damageType
+      : damage?.damageType ?? fallback.damageType,
     healingEnabled: !!healing,
     healingCount: healing?.dice.count ?? fallback.healingCount,
     healingSides: healing?.dice.sides ?? fallback.healingSides,
     healingModifier: healing?.dice.modifier ?? 0,
-    conditionEnabled: !!condition,
-    condition: condition?.condition ?? fallback.condition,
+    conditionEnabled: !!condition || (declarativeActivityEffect?.conditions?.length ?? 0) > 0,
+    condition: condition?.condition ?? declarativeActivityEffect?.conditions?.[0] ?? fallback.condition,
     conditionExpiresAt: editableConditionExpiration ?? fallback.conditionExpiresAt,
     conditionRounds: condition?.duration.remainingRounds ?? fallback.conditionRounds,
     conditionSaveAbility: condition?.duration.saveAbility ?? fallback.conditionSaveAbility,
@@ -961,6 +1926,8 @@ function importedFeatDraft(
     ...feature,
     prerequisiteAbilities: { ...emptyBonuses(), ...(definition.prerequisite?.abilityScores ?? {}) },
     prerequisiteRaceIds: (definition.prerequisite?.raceIds ?? []).join(', '),
+    prerequisiteArmorProficiencies: [...(definition.prerequisite?.armorProficiencies ?? [])],
+    prerequisiteSpellcasting: definition.prerequisite?.spellcasting === true,
     minimumLevel: definition.prerequisite?.minimumLevel ?? feature.minimumLevel,
     d20ChoiceRerollEnabled: Boolean(choiceRerollMechanic),
     d20ChoiceRerollRollKinds: choiceRerollMechanic
@@ -1045,6 +2012,7 @@ function importedSpellDraft(
     damageCount: damage?.dice.count ?? linkedDamage?.dice.count ?? 1,
     damageSides: damage?.dice.sides ?? linkedDamage?.dice.sides ?? 6,
     damageModifier: damage?.dice.bonus ?? linkedDamage?.dice.modifier ?? 0,
+    damageModifierFormula: damage?.dice.modifierFormula ?? linkedDamage?.dice.modifierFormula,
     damageType: damage?.type ?? linkedDamage?.damageType ?? 'force',
     conditionEnabled: !!(condition || linkedCondition),
     condition: condition?.condition ?? linkedCondition?.condition ?? 'prone',
@@ -1164,6 +2132,7 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
     onHitBonusDamageCount: bonusDamage?.damage.count ?? draft.onHitBonusDamageCount,
     onHitBonusDamageSides: bonusDamage?.damage.sides ?? draft.onHitBonusDamageSides,
     onHitBonusDamageBonus: bonusDamage?.damage.bonus ?? draft.onHitBonusDamageBonus,
+    onHitBonusDamageModifierFormula: bonusDamage?.damage.modifierFormula,
     onHitBonusDamageType: bonusDamage?.damageType ?? draft.onHitBonusDamageType,
     onHitBonusDamageOncePerTurn: bonusDamage?.oncePerTurn === true,
     onHitBonusDamageTargetCreatureTypes: bonusDamage?.targetCreatureTypes?.join('，') ?? '',
@@ -1265,6 +2234,45 @@ function toBackgroundDefinition(background: BackgroundDraft): Dnd5ePluginBackgro
   }
 }
 
+function declarativeTargetingFromHeadlessDraft(
+  headless: HeadlessEffectEditorDraft,
+): NonNullable<Dnd5ePluginFeatureDefinition['declarativeAbility']>['targeting'] {
+  if (headless.targetingKind === 'self') return { kind: 'self' }
+  if (headless.targetingKind === 'single-creature') return {
+    kind: 'single-creature', relation: headless.relation, rangeFeet: headless.rangeFeet,
+    includeSelf: headless.includeSelf,
+  }
+  if (headless.targetingKind === 'multiple-creatures') return {
+    kind: 'multiple-creatures', relation: headless.relation, rangeFeet: headless.rangeFeet,
+    maximumTargets: headless.maximumTargets, includeSelf: headless.includeSelf,
+  }
+  return {
+    kind: 'area', relation: headless.relation, includeSelf: headless.includeSelf,
+    maximumTargets: headless.maximumTargets, shape: headless.areaShape, rangeFeet: headless.rangeFeet,
+    ...(headless.areaShape === 'circle' ? { radiusFeet: headless.areaRadiusFeet } : {}),
+    ...(headless.areaShape === 'cone' ? { lengthFeet: headless.areaLengthFeet } : {}),
+    ...(headless.areaShape === 'line'
+      ? { lengthFeet: headless.areaLengthFeet, widthFeet: headless.areaWidthFeet }
+      : {}),
+    ...(headless.areaShape === 'rect'
+      ? { widthFeet: headless.areaWidthFeet, heightFeet: headless.areaHeightFeet }
+      : {}),
+  }
+}
+
+function alternateResourceSpellGrantsFromDraft(
+  value: string,
+): DeclarativeAlternateResourceSpellcastingMechanicV1['grants'] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed as DeclarativeAlternateResourceSpellcastingMechanicV1['grants']
+      : []
+  } catch {
+    return []
+  }
+}
+
 function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinition {
   if (!feature.headless.enabled) {
     return {
@@ -1275,6 +2283,765 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
       automation: 'manual',
       action: undefined,
       passiveEffects: undefined,
+    }
+  }
+  const primitiveBase = {
+    ...feature.sourceDefinition,
+    id: feature.id.trim(),
+    name: feature.name.trim(),
+    summary: feature.summary.trim(),
+    description: feature.description.trim(),
+    minimumLevel: feature.minimumLevel,
+    canModifyEnemyD20: feature.canModifyEnemyD20,
+    automation: 'full' as const,
+    action: undefined,
+    passiveEffects: undefined,
+  }
+  if (feature.headless.executionMode === 'advanced-activity') {
+    const source = feature.sourceDefinition?.declarativeAbility
+    if (!source) return { ...primitiveBase, automation: 'manual' }
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        ...structuredClone(source),
+        id: feature.id.trim(),
+        name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(),
+        level: feature.minimumLevel,
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'timed-effect') {
+    const effectId = `${feature.id.trim()}-effect`
+    const effectModifiers: NonNullable<Dnd5eEffectDefinitionV1['modifiers']>[number][] = []
+    if (feature.headless.effectArmorClassBonus !== 0) effectModifiers.push({
+      kind: 'armor-class', mode: 'add',
+      value: { kind: 'constant', value: feature.headless.effectArmorClassBonus },
+    })
+    if (feature.headless.effectSpeedMode !== 'none') effectModifiers.push({
+      kind: 'speed', mode: feature.headless.effectSpeedMode,
+      value: {
+        kind: 'constant',
+        value: feature.headless.effectSpeedMode === 'multiply'
+          ? feature.headless.effectSpeedValue / 100
+          : feature.headless.effectSpeedValue,
+      },
+    })
+    if (feature.headless.effectSavingThrowMode !== 'none') effectModifiers.push({
+      kind: 'saving-throw', mode: feature.headless.effectSavingThrowMode,
+      ...(feature.headless.effectSavingThrowAbility !== 'all'
+        ? { ability: feature.headless.effectSavingThrowAbility }
+        : {}),
+      ...(feature.headless.effectSavingThrowMode === 'add'
+        ? { value: { kind: 'constant' as const, value: feature.headless.effectSavingThrowValue } }
+        : {}),
+    })
+    if (feature.headless.effectSavingThrowProficiency !== 'none') effectModifiers.push({
+      kind: 'saving-throw-proficiency', ability: feature.headless.effectSavingThrowProficiency,
+    })
+    if (feature.headless.effectAbilityCheckMode !== 'none') effectModifiers.push({
+      kind: 'ability-check', mode: feature.headless.effectAbilityCheckMode,
+      ...(feature.headless.effectAbilityCheckAbility !== 'all'
+        ? { ability: feature.headless.effectAbilityCheckAbility }
+        : {}),
+      ...(feature.headless.effectAbilityCheckSkill.trim()
+        ? { skill: feature.headless.effectAbilityCheckSkill.trim() }
+        : {}),
+    })
+    for (const damageType of feature.headless.damageReductionDamageTypes) {
+      effectModifiers.push({ kind: 'damage-resistance', damageType })
+    }
+    if (feature.headless.effectPreventReactions) effectModifiers.push({ kind: 'prohibit-reaction' })
+    if (feature.headless.effectForcedFleeFromSource) effectModifiers.push({ kind: 'forced-flee-from-source' })
+    if (feature.headless.effectMaximumAttacksPerTurn > 0) effectModifiers.push({
+      kind: 'maximum-attacks-per-turn', value: feature.headless.effectMaximumAttacksPerTurn,
+    })
+    if (feature.headless.effectDarkvisionRangeFeet > 0) effectModifiers.push({
+      kind: 'darkvision', rangeFeet: feature.headless.effectDarkvisionRangeFeet,
+    })
+    if (feature.headless.effectFlightSpeedFeet > 0) effectModifiers.push({
+      kind: 'flight-speed', speedFeet: feature.headless.effectFlightSpeedFeet,
+    })
+    if (feature.headless.effectSeeInvisible) effectModifiers.push({ kind: 'see-invisible' })
+    const attackProfileWeaponIds = feature.headless.effectAttackProfileWeaponIds
+      .split(',').map((entry) => entry.trim()).filter(Boolean)
+    if (
+      feature.headless.effectAttackProfileModes.length > 0 &&
+      (feature.headless.effectAttackProfileReachBonusFeet > 0 || feature.headless.effectAttackProfileDamageType !== 'none')
+    ) effectModifiers.push({
+      kind: 'attack-profile',
+      attackModes: [...feature.headless.effectAttackProfileModes],
+      ...(attackProfileWeaponIds.length > 0 ? { weaponIds: attackProfileWeaponIds } : {}),
+      ...(feature.headless.effectAttackProfileReachBonusFeet > 0
+        ? { reachBonusFeet: feature.headless.effectAttackProfileReachBonusFeet }
+        : {}),
+      ...(feature.headless.effectAttackProfileDamageType !== 'none'
+        ? { damageTypeOverride: feature.headless.effectAttackProfileDamageType }
+        : {}),
+    })
+    const auraCastingClassIds = feature.headless.effectSpellSaveDisadvantageAuraCastingClassIds
+      .split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+    if (feature.headless.effectSpellSaveDisadvantageAuraEnabled &&
+      (feature.headless.effectSpellSaveDisadvantageAuraDamageTypes.length > 0 || auraCastingClassIds.length > 0)) effectModifiers.push({
+      kind: 'spell-save-disadvantage-aura',
+      radiusFeet: feature.headless.effectSpellSaveDisadvantageAuraRadiusFeet,
+      damageTypes: [...feature.headless.effectSpellSaveDisadvantageAuraDamageTypes],
+      ...(auraCastingClassIds.length > 0 ? { spellcastingClassIds: auraCastingClassIds } : {}),
+    })
+    const bonusActionCastingClassIds = feature.headless.effectSpellActionAsBonusActionClassIds
+      .split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+    if (feature.headless.effectSpellActionAsBonusAction && bonusActionCastingClassIds.length > 0) effectModifiers.push({
+      kind: 'spell-action-as-bonus-action', spellcastingClassIds: bonusActionCastingClassIds,
+    })
+    const effectDuration: Dnd5eEffectDefinitionV1['duration'] =
+      feature.headless.effectDurationBoundary === 'permanent'
+        ? { kind: 'permanent' }
+        : feature.headless.effectDurationBoundary === 'concentration'
+        ? { kind: 'concentration', maximumRounds: feature.headless.effectDurationRounds }
+        : {
+            kind: 'rounds', rounds: feature.headless.effectDurationRounds,
+            expiresAt: feature.headless.effectDurationBoundary,
+          }
+    const effectTarget = feature.headless.targetingKind === 'self'
+      ? 'actor' as const
+      : feature.headless.targetingKind === 'single-creature'
+        ? 'target' as const
+        : 'all-targets' as const
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' },
+        ...(
+          feature.headless.activationActorIllumination.length > 0 ||
+          feature.headless.activationTargetCreatureTypes.trim() ||
+          feature.headless.activationTargetCondition !== 'none'
+            ? { predicates: {
+                ...(feature.headless.activationActorIllumination.length > 0
+                  ? { actorIllumination: [...feature.headless.activationActorIllumination] }
+                  : {}),
+                ...(feature.headless.activationTargetCreatureTypes.trim()
+                  ? { targetCreatureTypes: feature.headless.activationTargetCreatureTypes
+                      .split(',').map((entry) => entry.trim()).filter(Boolean) }
+                  : {}),
+                ...(feature.headless.activationTargetCondition !== 'none'
+                  ? { targetHasConditions: [feature.headless.activationTargetCondition] }
+                  : {}),
+              } }
+            : {}
+        ),
+        ...(feature.headless.activationTargetAbilityScoreEnabled ? { requirements: [{
+          kind: 'ability-score' as const,
+          subject: 'target' as const,
+          ability: feature.headless.activationTargetAbility,
+          comparison: feature.headless.activationTargetAbilityComparison,
+          value: feature.headless.activationTargetAbilityValue,
+        }] } : {}),
+        ...(feature.headless.economy !== 'none' ? { cost: { economy: feature.headless.economy } } : {}),
+        targeting: declarativeTargetingFromHeadlessDraft(feature.headless),
+        effects: [{ kind: 'activity-effect', target: effectTarget, effectId }],
+        activityEffects: [{
+          schemaVersion: 1, id: effectId, name: feature.name.trim(), duration: effectDuration,
+          ...(feature.headless.conditionEnabled ? { conditions: [feature.headless.condition] } : {}),
+          ...(effectModifiers.length > 0 ? { modifiers: effectModifiers } : {}),
+          ...(feature.headless.effectBreakOn.length > 0 ? { breakOn: [...feature.headless.effectBreakOn] } : {}),
+          stacking: 'refresh-duration',
+          ...(feature.headless.effectDurationBoundary === 'concentration' ? { concentration: true } : {}),
+        }],
+        automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'extra-attacks') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: { kind: 'attacks-per-action', attacks: feature.headless.primitiveAttackCount },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'weapon-damage-rider') {
+    const rollId = `${feature.id.trim()}-damage`
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-attack-hit' },
+        targeting: { kind: 'single-creature', relation: 'enemy' },
+        rolls: [{
+          id: rollId, kind: 'damage', label: feature.name.trim(),
+          dice: { count: feature.headless.damageCount, sides: feature.headless.damageSides },
+          damageType: feature.headless.damageType,
+        }],
+        effects: [{ kind: 'damage', target: 'target', rollId }],
+        ...(feature.headless.primitiveOncePerTurn ? { limits: { oncePerTurn: true } } : {}),
+        mechanic: { kind: 'weapon-damage-rider', rollId }, automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'spell-damage-modifier') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-spell-cast' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'spell-damage-ability-modifier',
+          spellcastingClassId: feature.headless.primitiveSpellcastingClassId,
+          ability: feature.headless.primitiveAbility,
+          maximumSpellLevel: feature.headless.primitiveMaximumSpellLevel,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'spell-ability-check-bonus') {
+    const spellIds = [...new Set(feature.headless.primitiveSpellAbilityCheckSpellIds
+      .split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean))]
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: { kind: 'spell-ability-check-bonus', spellIds, bonus: 'proficiency' },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'spell-interception') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'before-spell-effect' }, cost: { economy: 'reaction' },
+        targeting: { kind: 'self' },
+        limits: {
+          uses: { kind: 'fixed', value: feature.headless.primitiveUseLimit },
+          reset: feature.headless.primitiveUseReset,
+        },
+        mechanic: {
+          kind: 'spell-interception',
+          spellcastingClassId: feature.headless.primitiveSpellInterceptionClassId,
+          saveAbility: feature.headless.primitiveSpellInterceptionSaveAbility,
+          dcAbility: feature.headless.primitiveSpellInterceptionDcAbility,
+          minimumSpellLevel: feature.headless.primitiveSpellInterceptionMinimumLevel,
+          maximumSpellLevel: 'actor-maximum-slot',
+          negateForSelf: feature.headless.primitiveSpellInterceptionNegates,
+          grantTemporarySpellAccess: feature.headless.primitiveSpellInterceptionGrantsAccess,
+          prohibitSourceCasting: feature.headless.primitiveSpellInterceptionProhibitsSource,
+          durationRounds: feature.headless.primitiveSpellInterceptionDurationRounds,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'spell-target-expansion') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-spell-cast' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'spell-target-expansion',
+          spellcastingClassId: feature.headless.primitiveSpellcastingClassId,
+          spellSchools: [feature.headless.primitiveSpellTargetSchool],
+          baseMaximumTargets: 1,
+          additionalTargets: feature.headless.primitiveSpellTargetAdditionalTargets,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'damage-roll-maximization') {
+    const resourceId = feature.headless.primitiveCoreResourceId.trim()
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-spell-cast' }, targeting: { kind: 'self' },
+        ...(resourceId ? { cost: { resources: [{
+          scope: 'core' as const,
+          resourceId,
+          amount: feature.headless.primitiveResourceAmount,
+        }] } } : {}),
+        mechanic: {
+          kind: 'damage-roll-maximization',
+          damageTypes: feature.headless.damageReductionDamageTypes,
+          deliveries: feature.headless.primitiveDamageMaxDeliveries,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'passive-resistance') {
+    const damageTypes = feature.headless.damageReductionDamageTypes
+    const reflectionDamageTypes = damageTypes.length > 0 ? damageTypes : [feature.headless.damageType]
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'before-damage-taken' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'passive-defense',
+          ...(damageTypes.length > 0 ? { damageResistance: {
+              damageTypes,
+              ...(feature.headless.primitivePassiveDelivery !== 'any'
+                ? { delivery: feature.headless.primitivePassiveDelivery }
+                : {}),
+              ...(feature.headless.primitivePassiveMagical !== 'any'
+                ? { magical: feature.headless.primitivePassiveMagical === 'magical' }
+                : {}),
+            } } : {}),
+          ...(feature.headless.primitiveSpellSaveAdvantage
+            ? { savingThrowAdvantageAgainstSpells: true }
+            : {}),
+          ...(feature.headless.primitiveHitPointMaximumReductionImmunity
+            ? { hitPointMaximumReductionImmunity: true }
+            : {}),
+          ...(feature.headless.conditionEnabled
+            ? { conditionImmunities: [feature.headless.condition] }
+            : {}),
+          ...(feature.headless.primitiveDamageReflection
+            ? {
+                damageReflection: {
+                  damageTypes: reflectionDamageTypes,
+                  multiplier: feature.headless.primitiveDamageReflectionMultiplier / 100,
+                },
+              }
+            : {}),
+          ...(feature.headless.primitiveConcentrationCheckImmunity
+            ? {
+                concentrationCheckImmunity: {
+                  spellSchools: [feature.headless.primitiveConcentrationCheckSchool],
+                },
+              }
+            : {}),
+          ...(feature.headless.primitiveWeaponAttacksMagical
+            ? { weaponAttacksMagical: { while: feature.headless.primitiveWeaponAttacksMagicalWhile } }
+            : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'reaction-weapon-attack') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-attack-hit' }, cost: { economy: 'reaction' },
+        targeting: {
+          kind: 'single-creature', relation: 'enemy', rangeFeet: feature.headless.rangeFeet,
+        },
+        mechanic: { kind: 'reaction-weapon-attack', event: 'other-creature-hit' },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'reaction-attack-defense') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'before-attack-roll' }, cost: { economy: 'reaction' },
+        targeting: {
+          kind: 'single-creature', relation: 'enemy', rangeFeet: feature.headless.rangeFeet,
+          requiresSight: true,
+        },
+        mechanic: {
+          kind: 'attack-disadvantage-interrupt',
+          protects: feature.headless.primitiveAttackDefenseProtects,
+          outcome: feature.headless.primitiveAttackDefenseOutcome,
+          ...(feature.headless.primitiveAttackDefenseOnMiss
+            ? { onMiss: 'next-attack-advantage-against-attacker' as const }
+            : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'reaction-attack-retarget') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'before-attack-roll' }, cost: { economy: 'reaction' },
+        targeting: {
+          kind: 'single-creature', relation: 'enemy', rangeFeet: feature.headless.rangeFeet,
+          requiresSight: true,
+        },
+        mechanic: {
+          kind: 'attack-retarget-interrupt', protects: 'self',
+          saveAbility: feature.headless.primitiveAttackRetargetSaveAbility,
+          dcAbility: feature.headless.primitiveAttackRetargetDcAbility,
+          alternativeTarget: 'nearest-other-creature',
+          ...(feature.headless.primitiveAttackRetargetCharmImmunity
+            ? { immunityCondition: 'charmed' as const }
+            : {}),
+          successfulSaveImmunity: 'long-rest',
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'passive-death-prevention') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'before-drop-to-zero' }, targeting: { kind: 'self' },
+        limits: {
+          uses: { kind: 'fixed', value: feature.headless.primitiveUseLimit },
+          reset: feature.headless.primitiveUseReset,
+        },
+        mechanic: {
+          kind: 'death-prevention', hitPointsAfter: feature.headless.primitiveDeathHitPoints,
+          ...(feature.headless.primitiveDeathPreventsMassiveDamage ? { preventsMassiveDamage: true } : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'spell-defeat-healing') {
+    const school = feature.headless.primitiveDefeatHealingSchool
+    const excludedCreatureTypes = feature.headless.primitiveDefeatHealingExcludedCreatureTypes
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-spell-cast' }, targeting: { kind: 'self' },
+        limits: { oncePerTurn: feature.headless.primitiveOncePerTurn },
+        mechanic: {
+          kind: 'spell-defeat-healing',
+          minimumSpellLevel: feature.headless.primitiveDefeatHealingMinimumSpellLevel,
+          baseMultiplier: feature.headless.primitiveDefeatHealingBaseMultiplier,
+          ...(school !== 'none' ? {
+            schoolMultipliers: {
+              [school]: feature.headless.primitiveDefeatHealingSchoolMultiplier,
+            },
+          } : {}),
+          ...(excludedCreatureTypes.length > 0 ? { excludedCreatureTypes } : {}),
+          oncePerTurn: feature.headless.primitiveOncePerTurn,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'summoned-creature-bonus') {
+    const validSchools = new Set<string>(SPELL_SCHOOLS.map(([id]) => id))
+    const spellSchools = feature.headless.primitiveSummonSpellSchools.split(',')
+      .map((entry) => entry.trim())
+      .filter((entry): entry is typeof SPELL_SCHOOLS[number][0] => validSchools.has(entry))
+    const spellIds = [...new Set(feature.headless.primitiveSummonSpellIds.split(',')
+      .map((entry) => entry.trim().toLowerCase()).filter(Boolean))]
+    const maximumHitPointBonus = feature.headless.primitiveSummonMaximumHitPointBonusMode === 'fixed'
+      ? { kind: 'fixed' as const, value: feature.headless.primitiveSummonMaximumHitPointBonusValue }
+      : feature.headless.primitiveSummonMaximumHitPointBonusMode === 'class-level'
+        ? {
+            kind: 'class-level' as const,
+            classId: feature.headless.primitiveSummonMaximumHitPointBonusClassId,
+            multiplier: feature.headless.primitiveSummonMaximumHitPointBonusValue,
+          }
+        : undefined
+    const weaponDamageBonus = feature.headless.primitiveSummonWeaponDamageBonusMode === 'fixed'
+      ? { kind: 'fixed' as const, value: feature.headless.primitiveSummonWeaponDamageBonusValue }
+      : feature.headless.primitiveSummonWeaponDamageBonusMode === 'proficiency-bonus'
+        ? { kind: 'proficiency-bonus' as const }
+        : undefined
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-spell-cast' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'summoned-creature-bonus', source: 'spell',
+          temporaryHitPoints: { kind: 'fixed', value: feature.headless.primitiveSummonTemporaryHitPoints },
+          ...(maximumHitPointBonus ? { maximumHitPointBonus } : {}),
+          ...(weaponDamageBonus ? { weaponDamageBonus } : {}),
+          ...(spellSchools.length > 0 ? { spellSchools } : {}),
+          ...(spellIds.length > 0 ? { spellIds } : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'companion-profile-upgrade') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'companion-profile-upgrade',
+          ...(feature.headless.primitiveCompanionWeaponAttacksMagical ? { weaponAttacksMagical: true } : {}),
+          ...(feature.headless.primitiveCompanionAttacksPerAction > 1
+            ? { attacksPerAction: feature.headless.primitiveCompanionAttacksPerAction }
+            : {}),
+          ...(feature.headless.primitiveCompanionShareSelfSpellsRangeFeet > 0
+            ? { shareSelfSpellsRangeFeet: feature.headless.primitiveCompanionShareSelfSpellsRangeFeet }
+            : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'creature-space-traversal') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'creature-space-traversal',
+          minimumLargerSizeRanks: feature.headless.primitiveTraversalMinimumLargerSizeRanks,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'environmental-movement') {
+    const environments = feature.headless.primitiveEnvironmentalEnvironments
+      .split(',').map((entry) => entry.trim()).filter((entry): entry is 'normal' | 'outdoors' | 'indoors' | 'underground' | 'underwater' =>
+        ['normal', 'outdoors', 'indoors', 'underground', 'underwater'].includes(entry))
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'environmental-movement',
+          environments: environments.length > 0 ? environments : ['outdoors'],
+          mode: feature.headless.primitiveEnvironmentalMode,
+          speed: feature.headless.primitiveEnvironmentalWalkingSpeed
+            ? 'walking'
+            : feature.headless.primitiveEnvironmentalFixedSpeed,
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'persistent-projection') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' },
+        cost: { economy: feature.headless.economy },
+        targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'persistent-projection',
+          projectionId: feature.headless.primitiveProjectionId.trim().toLowerCase(),
+          label: feature.name.trim(),
+          ...(feature.headless.primitiveProjectionInstanceCount > 1
+            ? { instanceCount: feature.headless.primitiveProjectionInstanceCount }
+            : {}),
+          placementRangeFeet: feature.headless.primitiveProjectionPlacementRangeFeet,
+          durationRounds: feature.headless.primitiveProjectionDurationRounds,
+          concentration: feature.headless.primitiveProjectionConcentration,
+          ...(feature.headless.primitiveProjectionMovementEnabled ? {
+            movement: {
+              economy: feature.headless.primitiveProjectionMovementEconomy,
+              maximumFeet: feature.headless.primitiveProjectionMovementFeet,
+              ...(feature.headless.primitiveProjectionTetherFeet > 0
+                ? { maximumDistanceFromSourceFeet: feature.headless.primitiveProjectionTetherFeet }
+                : {}),
+            },
+          } : {}),
+          ...(feature.headless.primitiveProjectionSpellOrigin ? { spellOrigin: true } : {}),
+          ...(feature.headless.primitiveProjectionAttackAdvantageFeet > 0
+            ? { attackAdvantageWithinFeet: feature.headless.primitiveProjectionAttackAdvantageFeet }
+            : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'persistent-projection-upgrade') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'persistent-projection-upgrade',
+          projectionId: feature.headless.primitiveProjectionId.trim().toLowerCase(),
+          instanceCount: Math.max(2, feature.headless.primitiveProjectionInstanceCount),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'alternate-resource-spellcasting') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'alternate-resource-spellcasting',
+          classId: feature.headless.primitiveAlternateSpellClassId,
+          ability: feature.headless.primitiveAlternateSpellAbility,
+          resourceId: feature.headless.primitiveAlternateSpellResourceId.trim(),
+          resourceScope: feature.headless.primitiveAlternateSpellResourceScope,
+          ignoreMaterialComponents: feature.headless.primitiveAlternateSpellIgnoreMaterialComponents,
+          grants: alternateResourceSpellGrantsFromDraft(feature.headless.primitiveAlternateSpellGrantsJson),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'granted-die-combat-options') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-attack-roll' },
+        targeting: { kind: 'single-creature', relation: 'ally' },
+        mechanic: {
+          kind: 'granted-die-combat-options', dieState: 'bardic-inspiration',
+          ...(feature.headless.primitiveGrantedDieWeaponDamage ? { addToWeaponDamage: true } : {}),
+          ...(feature.headless.primitiveGrantedDieArmorClass ? { addToArmorClassAgainstAttack: true } : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'creature-form-eligibility') {
+    const creatureTypes = feature.headless.primitiveFormCreatureTypes.split(',').map((entry) => entry.trim()).filter(Boolean)
+    const specificFormIds = feature.headless.primitiveFormSpecificIds.split(',').map((entry) => entry.trim()).filter(Boolean)
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'creature-form-eligibility', system: 'wild-shape',
+          creatureTypes: creatureTypes.length > 0 ? creatureTypes : ['beast'],
+          maximumChallengeRating: feature.headless.primitiveFormChallengeRatingMode === 'fixed' ? {
+            kind: 'fixed', value: feature.headless.primitiveFormFixedChallengeRating,
+          } : {
+            kind: 'class-level', classId: feature.headless.primitiveFormClassId,
+            divisor: feature.headless.primitiveFormLevelDivisor,
+            minimum: feature.headless.primitiveFormMinimumChallengeRating,
+          },
+          ...(specificFormIds.length > 0 ? { specificFormIds } : {}),
+          requiresKnownForm: feature.headless.primitiveFormRequiresKnown,
+          resourceCost: feature.headless.primitiveFormResourceCost,
+          resourceMode: feature.headless.primitiveFormResourceMode,
+          durationHours: { kind: 'fixed', value: feature.headless.primitiveFormDurationHours },
+          activationEconomy: feature.headless.primitiveFormActivationEconomy,
+          useCoreMovementLimits: feature.headless.primitiveFormCoreMovementLimits,
+        },
+        ...(feature.headless.primitiveFormResourceMode === 'ability-uses' ? {
+          limits: {
+            uses: { kind: 'fixed' as const, value: feature.headless.primitiveUseLimit },
+            reset: feature.headless.primitiveUseReset,
+          },
+        } : {}),
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'creature-form-control') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'creature-form-control', system: 'wild-shape',
+          activationEconomy: feature.headless.primitiveFormActivationEconomy,
+          ...(feature.headless.primitiveFormHealingEnabled ? {
+            inFormHealing: {
+              economy: feature.headless.primitiveFormHealingEconomy,
+              resource: 'spell-slot' as const,
+              dicePerResourceLevel: {
+                count: feature.headless.primitiveFormHealingDiceCount,
+                sides: feature.headless.primitiveFormHealingDiceSides,
+              },
+              maximumResourceLevel: feature.headless.primitiveFormHealingMaximumSlotLevel,
+            },
+          } : {}),
+        },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'bonus-weapon-attack') {
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'after-attack-roll' }, cost: { economy: 'bonusAction', uses: 1 },
+        targeting: { kind: 'self' },
+        limits: {
+          uses: feature.headless.primitiveBonusAttackUseFormula === 'ability-modifier'
+            ? { kind: 'ability-modifier', ability: feature.headless.primitiveBonusAttackAbility, minimum: 1 }
+            : { kind: 'fixed', value: feature.headless.primitiveUseLimit },
+          reset: feature.headless.primitiveUseReset,
+        },
+        mechanic: { kind: 'bonus-weapon-attack', event: 'after-attack-action' },
+        effects: [], automation: 'full',
+      },
+    }
+  }
+  if (feature.headless.executionMode === 'turn-start-saving-throw-aura') {
+    const requiredEffectId = feature.headless.primitiveAuraRequiredEffectId.trim()
+    return {
+      ...primitiveBase,
+      declarativeAbility: {
+        schemaVersion: 1, id: feature.id.trim(), name: feature.name.trim(),
+        description: feature.description.trim() || feature.summary.trim(), level: feature.minimumLevel,
+        trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+        mechanic: {
+          kind: 'turn-start-saving-throw-aura',
+          radiusFeet: feature.headless.primitiveAuraRadiusFeet,
+          relation: feature.headless.primitiveAuraRelation,
+          ability: feature.headless.primitiveAuraSavingThrowAbility,
+          dcAbility: feature.headless.primitiveAuraDcAbility,
+          condition: feature.headless.condition,
+          durationRounds: feature.headless.primitiveAuraDurationRounds,
+          breakOnDamage: feature.headless.primitiveAuraBreakOnDamage,
+          magical: feature.headless.primitiveAuraMagical,
+          requiresMutualSight: feature.headless.primitiveAuraRequiresMutualSight,
+          ...(feature.headless.primitiveAuraImmunityRounds > 0
+            ? { successfulSaveImmunityRounds: feature.headless.primitiveAuraImmunityRounds }
+            : {}),
+          ...(requiredEffectId ? { requiredEffectId } : {}),
+        },
+        effects: [], automation: 'full',
+      },
     }
   }
   if (feature.headless.executionMode === 'passive-damage-reduction') {
@@ -1313,6 +3080,14 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
           rangeFeet: feature.headless.rangeFeet,
           includeSelf: feature.headless.includeSelf,
         }
+      : feature.headless.targetingKind === 'multiple-creatures'
+        ? {
+            kind: 'multiple-creatures' as const,
+            relation: feature.headless.relation,
+            rangeFeet: feature.headless.rangeFeet,
+            maximumTargets: feature.headless.maximumTargets,
+            includeSelf: feature.headless.includeSelf,
+          }
       : {
           kind: 'area' as const,
           relation: feature.headless.relation,
@@ -1391,8 +3166,9 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
               id: trigger.id.trim(),
               label: trigger.label.trim(),
               timing: trigger.timing,
-              oncePerRound: trigger.oncePerTurn ? false : trigger.oncePerRound,
-              oncePerTurn: trigger.oncePerTurn,
+              oncePerRound: trigger.oncePerTarget || trigger.oncePerTurn ? false : trigger.oncePerRound,
+              oncePerTurn: trigger.oncePerTarget ? false : trigger.oncePerTurn,
+              oncePerTarget: trigger.oncePerTarget,
               ...(trigger.savingThrowEnabled ? {
                 savingThrow: {
                   ability: trigger.savingThrowAbility,
@@ -1407,6 +3183,7 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
                   count: trigger.damageCount,
                   sides: trigger.damageSides,
                   modifier: trigger.damageModifier,
+                  ...(trigger.damageModifierFormula ? { modifierFormula: trigger.damageModifierFormula } : {}),
                   type: trigger.damageType,
                 },
               } : {}),
@@ -1423,6 +3200,14 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
                   },
                 },
               } : {}),
+              notification: trigger.notificationEnabled
+                ? trigger.notificationDelivery === 'audible'
+                  ? {
+                      delivery: 'audible' as const,
+                      audibleRadiusFeet: trigger.notificationAudibleRadiusFeet,
+                    }
+                  : { delivery: 'mental-to-source' as const }
+                : undefined,
               dmAdjustable: trigger.dmAdjustable,
             })),
           } : {}),
@@ -1499,6 +3284,10 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
       ...(feat.minimumLevel > 1 ? { minimumLevel: feat.minimumLevel } : {}),
       ...(Object.keys(abilityScores).length ? { abilityScores } : {}),
       ...(raceIds.length ? { raceIds } : {}),
+      ...(feat.prerequisiteArmorProficiencies.length
+        ? { armorProficiencies: [...feat.prerequisiteArmorProficiencies] }
+        : {}),
+      ...(feat.prerequisiteSpellcasting ? { spellcasting: true } : {}),
     },
   }
 }
@@ -1512,6 +3301,7 @@ function toHeadlessActionDraftFromEditor(id: string, name: string, headless: Hea
       count: headless.damageCount,
       sides: headless.damageSides,
       modifier: headless.damageModifier,
+      ...(headless.damageModifierFormula ? { modifierFormula: headless.damageModifierFormula } : {}),
     },
     damageType: headless.damageType,
   })
@@ -1539,6 +3329,15 @@ function toHeadlessActionDraftFromEditor(id: string, name: string, headless: Hea
     id: id.trim(),
     label: headless.actionLabel.trim() || name.trim(),
     effects,
+    ...(headless.savingThrowEnabled ? {
+      savingThrow: {
+        ability: headless.savingThrowAbility,
+        dc: headless.savingThrowDcMode === 'source-save-dc'
+          ? 'source-save-dc'
+          : headless.savingThrowDc,
+        onSuccess: headless.savingThrowOnSuccess,
+      },
+    } : {}),
     ...(headless.interruptEnabled ? { requiredInterruptOptionId: 'apply' } : {}),
   }
 }
@@ -1550,6 +3349,10 @@ function toHeadlessActionDraft(feature: FeatureDraft): Dnd5eCustomHeadlessAction
 function spellHeadlessEffectDraft(spell: SpellDraft): HeadlessEffectEditorDraft {
   return {
     ...spell.headless,
+    savingThrowEnabled: spell.resolution === 'saving-throw',
+    savingThrowAbility: spell.saveAbility,
+    savingThrowDcMode: 'source-save-dc',
+    savingThrowOnSuccess: spell.saveOnSuccess === 'half' ? 'half' : 'none',
     ...dnd5eCustomSpellHeadlessRangePatch({
       rangeType: spell.rangeType,
       rangeFeet: spell.rangeFeet,
@@ -1613,7 +3416,12 @@ function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
         ...(spell.resolution === 'saving-throw' ? { savingThrow: { ability: spell.saveAbility, onSuccess: spell.saveOnSuccess } } : {}),
         ...(spell.headless.damageEnabled ? {
           damage: {
-            dice: { count: spell.headless.damageCount, sides: spell.headless.damageSides, bonus: spell.headless.damageModifier },
+            dice: {
+              count: spell.headless.damageCount,
+              sides: spell.headless.damageSides,
+              bonus: spell.headless.damageModifier,
+              ...(spell.headless.damageModifierFormula ? { modifierFormula: spell.headless.damageModifierFormula } : {}),
+            },
             type: spell.headless.damageType,
             ...(spell.level === 0 && spell.cantripScaling ? {
               cantripScaling: {
@@ -1706,6 +3514,9 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
         count: item.onHitBonusDamageCount,
         sides: item.onHitBonusDamageSides,
         bonus: item.onHitBonusDamageBonus,
+        ...(item.onHitBonusDamageModifierFormula
+          ? { modifierFormula: item.onHitBonusDamageModifierFormula }
+          : {}),
       },
       damageType: item.onHitBonusDamageType,
       doubleDiceOnCritical: true,
@@ -1847,10 +3658,11 @@ interface SpellIconPreviewState {
 }
 
 function internalActivityAutomationLabel(activity: Dnd5eActivityDefinitionV1): string {
-  if (activity.automation.level === 'full') return '完整 Headless'
-  if (activity.automation.level === 'assisted') return '部分 Headless'
-  if (activity.automation.level === 'dm-adjudication') return 'DM 裁定'
-  if (activity.automation.level === 'display-only') return '仅资料'
+  const level = dnd5eActivityAutomationAnalysisV1(activity).capability.level
+  if (level === 'full') return '完整 Headless'
+  if (level === 'assisted') return '部分 Headless'
+  if (level === 'dm-adjudication') return 'DM 裁定'
+  if (level === 'display-only') return '仅资料'
   return '不支持'
 }
 
@@ -1917,9 +3729,18 @@ export default function Dnd5eCustomPluginBuilder({
   const [restoredDraft] = useState(() => readSavedBuilderDraft(draftStorageKey))
   const [open, setOpen] = useState(alwaysExpanded)
   const [activeSection, setActiveSection] = useState<BuilderSection>('monsters')
-  const [metadata, setMetadata] = useState(() => ({ ...defaultMetadata, ...(restoredDraft?.metadata ?? {}) }))
-  const [races, setRaces] = useState<RaceDraft[]>(() => Array.isArray(restoredDraft?.races) ? restoredDraft.races : [])
-  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>(() => Array.isArray(restoredDraft?.backgrounds) ? restoredDraft.backgrounds : [])
+  const [metadata, setMetadata] = useState(() =>
+    restoreArrayBackedBuilderMetadata(
+      restoredDraft?.metadata,
+      defaultBuilderMetadata(defaultPublisher),
+      PLUGIN_CAPABILITIES,
+    ))
+  const [races, setRaces] = useState<RaceDraft[]>(() => Array.isArray(restoredDraft?.races)
+    ? restoredDraft.races.map((race, index) => restoreRaceDraft(race, index))
+    : [])
+  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>(() => Array.isArray(restoredDraft?.backgrounds)
+    ? restoredDraft.backgrounds.map((background, index) => restoreBackgroundDraft(background, index))
+    : [])
   const [features, setFeatures] = useState<FeatureDraft[]>(() => Array.isArray(restoredDraft?.features)
     ? restoredDraft.features.map((feature, index) => restoreFeatureDraft(feature, index))
     : [])
@@ -1944,6 +3765,36 @@ export default function Dnd5eCustomPluginBuilder({
     Array.isArray(restoredDraft?.importedHeadlessActions) ? restoredDraft.importedHeadlessActions : [])
   const [importedActivities, setImportedActivities] = useState<Dnd5eActivityDefinitionV1[]>(() =>
     Array.isArray(restoredDraft?.importedActivities) ? restoredDraft.importedActivities : [])
+  const activitiesForContent = (
+    kind: NonNullable<Dnd5eActivityDefinitionV1['legacySource']>['kind'],
+    id: string,
+  ) => importedActivities.filter((activity) => activity.legacySource?.kind === kind && activity.legacySource.id === id)
+  const setActivitiesForContent = (
+    kind: NonNullable<Dnd5eActivityDefinitionV1['legacySource']>['kind'],
+    id: string,
+    next: readonly Dnd5eActivityDefinitionV1[],
+  ) => setImportedActivities((current) => [
+    ...current.filter((activity) => activity.legacySource?.kind !== kind || activity.legacySource.id !== id),
+    ...next.map((activity) => ({ ...activity, legacySource: { kind, id } })),
+  ])
+  const removeActivitiesForContent = (
+    kind: NonNullable<Dnd5eActivityDefinitionV1['legacySource']>['kind'],
+    id: string,
+  ) => setImportedActivities((current) => current.filter(
+    (activity) => activity.legacySource?.kind !== kind || activity.legacySource.id !== id,
+  ))
+  const migrateActivityContentId = (
+    kind: NonNullable<Dnd5eActivityDefinitionV1['legacySource']>['kind'],
+    previousId: string | undefined,
+    nextId: string | undefined,
+  ) => {
+    if (!previousId || !nextId || previousId === nextId) return
+    setImportedActivities((current) => current.map((activity) =>
+      activity.legacySource?.kind === kind && activity.legacySource.id === previousId
+        ? { ...activity, legacySource: { kind, id: nextId } }
+        : activity,
+    ))
+  }
   const [monsterWorkshopOpen, setMonsterWorkshopOpen] = useState(false)
   const [selectedMonsterWorkshopEdit, setSelectedMonsterWorkshopEdit] = useState<Dnd5eMonsterWorkshopEditRequest | null>(null)
   const monsterWorkshopEditRequestId = useRef(0)
@@ -2264,9 +4115,15 @@ export default function Dnd5eCustomPluginBuilder({
       if (!saved.metadata || !Array.isArray(saved.races) || !Array.isArray(saved.methods)) {
         return setLocalError('本地草稿格式无效。')
       }
-      setMetadata((current) => ({ ...current, ...saved.metadata }))
-      setRaces(saved.races)
-      setBackgrounds(Array.isArray(saved.backgrounds) ? saved.backgrounds : [])
+      setMetadata(restoreArrayBackedBuilderMetadata(
+        saved.metadata,
+        defaultBuilderMetadata(defaultPublisher),
+        PLUGIN_CAPABILITIES,
+      ))
+      setRaces(saved.races.map((race, index) => restoreRaceDraft(race, index)))
+      setBackgrounds(Array.isArray(saved.backgrounds)
+        ? saved.backgrounds.map((background, index) => restoreBackgroundDraft(background, index))
+        : [])
       setFeatures(Array.isArray(saved.features)
         ? saved.features.map((feature, index) => restoreFeatureDraft(feature, index))
         : [])
@@ -2358,12 +4215,18 @@ export default function Dnd5eCustomPluginBuilder({
   }
   const patchBackground = (index: number, patch: Partial<BackgroundDraft>) => setBackgrounds((current) =>
     current.map((background, itemIndex) => itemIndex === index ? { ...background, ...patch } : background))
-  const patchFeature = (index: number, patch: Partial<FeatureDraft>) => setFeatures((current) =>
-    current.map((feature, itemIndex) => itemIndex === index ? { ...feature, ...patch } : feature))
-  const patchFeat = (index: number, patch: Partial<FeatDraft>) => setFeats((current) =>
-    current.map((feat, itemIndex) => itemIndex === index ? { ...feat, ...patch } : feat))
-  const patchSpell = (index: number, patch: Partial<SpellDraft>) => setSpells((current) =>
-    current.map((spell, itemIndex) => itemIndex === index ? { ...spell, ...patch } : spell))
+  const patchFeature = (index: number, patch: Partial<FeatureDraft>) => {
+    migrateActivityContentId('feature', features[index]?.id, patch.id)
+    setFeatures((current) => current.map((feature, itemIndex) => itemIndex === index ? { ...feature, ...patch } : feature))
+  }
+  const patchFeat = (index: number, patch: Partial<FeatDraft>) => {
+    migrateActivityContentId('feat', feats[index]?.id, patch.id)
+    setFeats((current) => current.map((feat, itemIndex) => itemIndex === index ? { ...feat, ...patch } : feat))
+  }
+  const patchSpell = (index: number, patch: Partial<SpellDraft>) => {
+    migrateActivityContentId('spell', spells[index]?.id, patch.id)
+    setSpells((current) => current.map((spell, itemIndex) => itemIndex === index ? { ...spell, ...patch } : spell))
+  }
   const patchCantripScalingStep = (spellIndex: number, stepIndex: number, patch: Partial<Dnd5eCantripScalingStep>) => {
     const spell = spells[spellIndex]
     if (!spell) return
@@ -2426,7 +4289,9 @@ export default function Dnd5eCustomPluginBuilder({
   }
   const removeSpell = (index: number) => {
     const assetId = spells[index]?.iconAssetId
+    const spellId = spells[index]?.id
     setSpells((current) => current.filter((_, itemIndex) => itemIndex !== index))
+    if (spellId) removeActivitiesForContent('spell', spellId)
     if (assetId && !spells.some((spell, spellIndex) => spellIndex !== index && spell.iconAssetId === assetId)) {
       setAssets((current) => current.filter((asset) => asset.id !== assetId))
     }
@@ -2438,8 +4303,10 @@ export default function Dnd5eCustomPluginBuilder({
           ? current - 1
           : current)
   }
-  const patchItem = (index: number, patch: Partial<ItemDraft>) => setItems((current) =>
-    current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  const patchItem = (index: number, patch: Partial<ItemDraft>) => {
+    migrateActivityContentId('item', items[index]?.id, patch.id)
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  }
 
   return (
     <section data-testid="custom-rules-plugin-builder" className="glass mb-5 rounded-2xl border border-arcane-400/15 p-5">
@@ -2739,6 +4606,20 @@ export default function Dnd5eCustomPluginBuilder({
                     ))}
                   </div>
                 </fieldset>
+                <fieldset className="mt-3 rounded-xl border border-white/8 p-3">
+                  <legend className="px-1 text-xs font-semibold text-slate-500">通用资格前提</legend>
+                  <div className="flex flex-wrap gap-2">
+                    {([['light', '轻甲熟练'], ['medium', '中甲熟练'], ['heavy', '重甲熟练'], ['shield', '盾牌熟练']] as const).map(([id, label]) => {
+                      const selected = feat.prerequisiteArmorProficiencies.includes(id)
+                      return <button key={id} type="button" onClick={() => patchFeat(index, {
+                        prerequisiteArmorProficiencies: selected
+                          ? feat.prerequisiteArmorProficiencies.filter((entry) => entry !== id)
+                          : [...feat.prerequisiteArmorProficiencies, id],
+                      })} className={`rounded-lg border px-2.5 py-1.5 text-xs ${selected ? 'border-amber-400/35 bg-amber-500/10 text-amber-100' : 'border-white/8 text-slate-500'}`}>{label}</button>
+                    })}
+                  </div>
+                  <div className="mt-3"><Toggle label="需要至少一个 Host 可识别的施法来源" value={feat.prerequisiteSpellcasting} onChange={(prerequisiteSpellcasting) => patchFeat(index, { prerequisiteSpellcasting })} /></div>
+                </fieldset>
                 <div className="mt-3">
                   <Toggle label="可改变敌方 d20 结果" value={feat.canModifyEnemyD20} onChange={(canModifyEnemyD20) => patchFeat(index, { canModifyEnemyD20 })} />
                 </div>
@@ -2824,7 +4705,13 @@ export default function Dnd5eCustomPluginBuilder({
                   </div>}
                 </fieldset>
                 <HeadlessEffectEditor title="专长 Headless 效果" mode="feat" value={feat.headless} onChange={(headless) => patchFeat(index, { headless })} />
-                <div className="mt-3 flex justify-end"><DeleteButton label={`删除专长 ${feat.name}`} onClick={() => setFeats((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
+                <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-black/10 p-4">
+                  <Dnd5eActivityTemplateEditor value={activitiesForContent('feat', feat.id)} onChange={(next) => setActivitiesForContent('feat', feat.id, next)} />
+                </div>
+                <div className="mt-3 flex justify-end"><DeleteButton label={`删除专长 ${feat.name}`} onClick={() => {
+                  removeActivitiesForContent('feat', feat.id)
+                  setFeats((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                }} /></div>
               </article>)}
             </div>
           </div>}
@@ -2847,7 +4734,10 @@ export default function Dnd5eCustomPluginBuilder({
                 <div className="mt-3 grid gap-3 md:grid-cols-[0.65fr_1.35fr_auto] md:items-end">
                   <BuilderInput label="摘要" value={feature.summary} onChange={(value) => patchFeature(index, { summary: value })} />
                   <BuilderTextarea label="规则正文" value={feature.description} onChange={(value) => patchFeature(index, { description: value })} />
-                  <DeleteButton label={`删除特性 ${feature.name}`} onClick={() => setFeatures((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
+                  <DeleteButton label={`删除特性 ${feature.name}`} onClick={() => {
+                    removeActivitiesForContent('feature', feature.id)
+                    setFeatures((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                  }} />
                 </div>
                 <div className="mt-3">
                   <Toggle
@@ -2863,6 +4753,9 @@ export default function Dnd5eCustomPluginBuilder({
                   value={feature.headless}
                   onChange={(headless) => patchFeature(index, { headless })}
                 />
+                <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-black/10 p-4">
+                  <Dnd5eActivityTemplateEditor value={activitiesForContent('feature', feature.id)} onChange={(next) => setActivitiesForContent('feature', feature.id, next)} />
+                </div>
               </article>)}
             </div>
           </div>}
@@ -3102,6 +4995,9 @@ export default function Dnd5eCustomPluginBuilder({
                       : '当前仅接入法术资料；启用法术效果编辑器并配置至少一种效果后，才会生成 Host 可执行事务。'}
                 </div>
                 <HeadlessEffectEditor title="法术效果编辑器" mode="spell" value={spellHeadlessEffectDraft(spell)} onChange={(headless) => patchSpell(index, { headless })} />
+                <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-black/10 p-4">
+                  <Dnd5eActivityTemplateEditor value={activitiesForContent('spell', spell.id)} onChange={(next) => setActivitiesForContent('spell', spell.id, next)} />
+                </div>
                 <div className="mt-3 flex justify-end"><DeleteButton label={`删除法术 ${spell.name}`} onClick={() => removeSpell(index)} /></div>
                 </div>}
               </article>
@@ -3159,7 +5055,17 @@ export default function Dnd5eCustomPluginBuilder({
                     <Toggle label="上述效果消耗共享充能" value={item.headlessEffectsUseCharges || item.attackRerollEnabled} onChange={(headlessEffectsUseCharges) => patchItem(index, { headlessEffectsUseCharges })} />
                   </div>
                   {(item.attackRerollEnabled || item.headlessEffectsUseCharges) && <div className="mt-3 grid gap-3 sm:grid-cols-2"><BuilderNumber label="最大充能" value={item.attackRerollCharges} min={1} max={1000000} onChange={(attackRerollCharges) => patchItem(index, { attackRerollCharges })} /><BuilderSelect label="充能恢复时点" value={item.attackRerollResetOn} options={[["none", "不自动恢复"], ["short-rest", "短休"], ["long-rest", "长休"], ["dawn", "黎明（由战役日历推进）"]]} onChange={(attackRerollResetOn) => patchItem(index, { attackRerollResetOn: attackRerollResetOn as ItemDraft['attackRerollResetOn'] })} /></div>}
-                  {item.onHitBonusDamageEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-3 xl:grid-cols-6"><BuilderNumber label="额外伤害骰数量" value={item.onHitBonusDamageCount} min={1} max={40} onChange={(onHitBonusDamageCount) => patchItem(index, { onHitBonusDamageCount })} /><BuilderNumber label="骰子面数" value={item.onHitBonusDamageSides} min={2} max={100} onChange={(onHitBonusDamageSides) => patchItem(index, { onHitBonusDamageSides })} /><BuilderNumber label="固定加值" value={item.onHitBonusDamageBonus} min={-1000} max={1000} onChange={(onHitBonusDamageBonus) => patchItem(index, { onHitBonusDamageBonus })} /><BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} /><BuilderInput label="限定目标生物类型（逗号分隔）" value={item.onHitBonusDamageTargetCreatureTypes} onChange={(onHitBonusDamageTargetCreatureTypes) => patchItem(index, { onHitBonusDamageTargetCreatureTypes })} /><Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} /></div>}
+                  {item.onHitBonusDamageEnabled && <div className="mt-3 space-y-3 rounded-xl border border-white/8 bg-black/15 p-3">
+                    <Dnd5eDamageFormulaEditor
+                      value={{ count: item.onHitBonusDamageCount, sides: item.onHitBonusDamageSides, fixedModifier: item.onHitBonusDamageBonus, modifierFormula: item.onHitBonusDamageModifierFormula }}
+                      onChange={(formula) => patchItem(index, { onHitBonusDamageCount: formula.count, onHitBonusDamageSides: formula.sides, onHitBonusDamageBonus: formula.fixedModifier, onHitBonusDamageModifierFormula: formula.modifierFormula })}
+                    />
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <BuilderSelect label="伤害类型" value={item.onHitBonusDamageType} options={[["inherit", "继承原伤害类型"], ...HEADLESS_DAMAGE_TYPES]} onChange={(onHitBonusDamageType) => patchItem(index, { onHitBonusDamageType: onHitBonusDamageType as ItemDraft['onHitBonusDamageType'] })} />
+                      <BuilderInput label="限定目标生物类型（逗号分隔）" value={item.onHitBonusDamageTargetCreatureTypes} onChange={(onHitBonusDamageTargetCreatureTypes) => patchItem(index, { onHitBonusDamageTargetCreatureTypes })} />
+                      <Toggle label="每回合一次" value={item.onHitBonusDamageOncePerTurn} onChange={(onHitBonusDamageOncePerTurn) => patchItem(index, { onHitBonusDamageOncePerTurn })} />
+                    </div>
+                  </div>}
                   {item.damageReductionEnabled && <div className="mt-3 grid gap-3 rounded-xl border border-white/8 bg-black/15 p-3 sm:grid-cols-2 xl:grid-cols-5">
                     <BuilderSelect label="减伤方式" value={item.damageReductionMode} options={[["dice", "骰式减伤"], ["fixed", "固定减伤"]]} onChange={(damageReductionMode) => patchItem(index, { damageReductionMode: damageReductionMode as ItemDraft['damageReductionMode'] })} />
                     {item.damageReductionMode === 'fixed'
@@ -3181,7 +5087,13 @@ export default function Dnd5eCustomPluginBuilder({
                   </div>}
                   {(item.attackRerollEnabled || item.onHitBonusDamageEnabled || item.damageReductionEnabled || item.deathPreventionEnabled || item.spellSlotRecoveryEnabled || item.spellCastEnabled) && <p className="mt-3 text-xs text-emerald-300">兼容报告：所选效果可由 Host 完整 Headless 结算；插件不能执行 JavaScript，也不能直接修改角色或战斗 Store。</p>}
                 </section>
-                <div className="mt-3 flex justify-end"><DeleteButton label={`删除物品 ${item.name}`} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
+                <div className="mt-4 rounded-2xl border border-cyan-400/15 bg-black/10 p-4">
+                  <Dnd5eActivityTemplateEditor value={activitiesForContent('item', item.id)} onChange={(next) => setActivitiesForContent('item', item.id, next)} />
+                </div>
+                <div className="mt-3 flex justify-end"><DeleteButton label={`删除物品 ${item.name}`} onClick={() => {
+                  removeActivitiesForContent('item', item.id)
+                  setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                }} /></div>
               </article>)}
             </div>
           </div>}
@@ -3313,6 +5225,14 @@ function SpellWorkshopIconPreviewDialog({
   )
 }
 
+function FrozenExecutionMode({ value }: { value: HeadlessEffectEditorDraft['executionMode'] }) {
+  const label = HEADLESS_FEATURE_EXECUTION_MODES.find(([id]) => id === value)?.[1] ?? value
+  return <div className="rounded-xl border border-white/8 bg-black/10 px-3 py-2.5">
+    <span className="block text-xs font-semibold text-slate-500">执行模式（已冻结）</span>
+    <strong className="mt-1 block text-sm text-slate-200">{value === 'advanced-activity' ? 'Unified Activity / Effect' : `${label} · Legacy adapter`}</strong>
+  </div>
+}
+
 function HeadlessEffectEditor({
   value,
   onChange,
@@ -3340,7 +5260,7 @@ function HeadlessEffectEditor({
   const removePersistentAreaTrigger = (index: number) => {
     patch({ persistentAreaTriggers: value.persistentAreaTriggers.filter((_, triggerIndex) => triggerIndex !== index) })
   }
-  if (mode === 'feat' && value.enabled && value.executionMode === 'passive-damage-reduction') {
+  if (featureLike && value.enabled && value.executionMode === 'passive-damage-reduction') {
     return (
       <section className="mt-4 rounded-2xl border border-violet-400/15 bg-violet-500/[0.045] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3354,12 +5274,7 @@ function HeadlessEffectEditor({
         </div>
         <div className="mt-4 space-y-4 border-t border-violet-400/10 pt-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <BuilderSelect
-              label="效果机制"
-              value={value.executionMode}
-              options={[["active", "主动能力"], ["passive-damage-reduction", "被动减伤"]]}
-              onChange={(executionMode) => patch({ executionMode: executionMode as HeadlessEffectEditorDraft['executionMode'] })}
-            />
+            <FrozenExecutionMode value={value.executionMode} />
             <div className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] px-3 py-2.5">
               <span className="block text-xs font-semibold text-slate-500">触发时点</span>
               <strong className="mt-1.5 block text-sm text-cyan-100">受到伤害前（自动）</strong>
@@ -3420,6 +5335,549 @@ function HeadlessEffectEditor({
       </section>
     )
   }
+  const primitiveMode = featureLike && value.enabled && [
+    'advanced-activity',
+    'timed-effect',
+    'extra-attacks',
+    'weapon-damage-rider',
+    'spell-damage-modifier',
+    'spell-ability-check-bonus',
+    'spell-interception',
+    'spell-target-expansion',
+    'damage-roll-maximization',
+    'passive-resistance',
+    'reaction-weapon-attack',
+    'reaction-attack-defense',
+    'reaction-attack-retarget',
+    'passive-death-prevention',
+    'spell-defeat-healing',
+    'summoned-creature-bonus',
+    'companion-profile-upgrade',
+    'creature-space-traversal',
+    'environmental-movement',
+    'persistent-projection',
+    'persistent-projection-upgrade',
+    'alternate-resource-spellcasting',
+    'granted-die-combat-options',
+    'creature-form-eligibility',
+    'creature-form-control',
+    'bonus-weapon-attack',
+    'turn-start-saving-throw-aura',
+  ].includes(value.executionMode)
+  if (primitiveMode) {
+    return (
+      <section className="mt-4 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.045] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-cyan-100">{title}</h4>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-cyan-100/65">
+              生成统一 Activity 原语。触发事件、目标、每回合凭证、攻击次数和最终伤害都由 Host 重新校验。
+            </p>
+          </div>
+          <Toggle label="已启用自动结算" value={value.enabled} onChange={(enabled) => patch({ enabled })} />
+        </div>
+        <div className="mt-4 space-y-4 border-t border-cyan-300/10 pt-4">
+          <FrozenExecutionMode value={value.executionMode} />
+          {value.executionMode === 'advanced-activity' && (
+            <div className="rounded-xl border border-violet-300/15 bg-violet-500/[0.045] p-3 text-xs leading-5 text-violet-100/75">
+              该条目使用 AI／JSON 导入的完整通用 Activity：可包含多分支豁免、运行时选择、多个持续 Effect 与解除条件。工坊会原样保留并严格校验；实际行动时，玩家会在地图面板选择声明的选项。
+            </div>
+          )}
+          {value.executionMode === 'timed-effect' && (
+            <div className="space-y-4 rounded-xl border border-white/8 bg-black/10 p-3">
+              <div>
+                <h5 className="text-xs font-semibold text-cyan-100">统一 Effect 实例</h5>
+                <p className="mt-1 text-[11px] leading-5 text-cyan-100/60">同一数据结构可由职业、子职、种族、专长、物品和法术复用；Host 负责持续时间、叠加、解除与数值投影。</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="行动类型" value={value.economy} options={ACTION_ECONOMIES} onChange={(economy) => patch({ economy: economy as HeadlessEffectEditorDraft['economy'] })} />
+                <BuilderSelect label="目标模式" value={value.targetingKind} options={TARGETING_KINDS} onChange={(targetingKind) => patch({ targetingKind: targetingKind as HeadlessEffectEditorDraft['targetingKind'] })} />
+                {value.targetingKind !== 'self' && <BuilderSelect label="目标关系" value={value.relation} options={TARGET_RELATIONS} onChange={(relation) => patch({ relation: relation as HeadlessEffectEditorDraft['relation'] })} />}
+                {value.targetingKind !== 'self' && <BuilderNumber label="射程（尺）" value={value.rangeFeet} min={0} max={10000} onChange={(rangeFeet) => patch({ rangeFeet })} />}
+                <BuilderSelect label="到期边界" value={value.effectDurationBoundary} options={EFFECT_DURATION_BOUNDARIES} onChange={(effectDurationBoundary) => patch({ effectDurationBoundary: effectDurationBoundary as HeadlessEffectEditorDraft['effectDurationBoundary'] })} />
+                <BuilderNumber label="持续轮数上限" value={value.effectDurationRounds} min={1} max={14400} onChange={(effectDurationRounds) => patch({ effectDurationRounds })} />
+                <BuilderNumber label="AC 加值" value={value.effectArmorClassBonus} min={-20} max={20} onChange={(effectArmorClassBonus) => patch({ effectArmorClassBonus })} />
+                <BuilderSelect label="速度修正方式" value={value.effectSpeedMode} options={[["none", "不修改"], ["add", "增加／减少尺数"], ["multiply", "乘数"]]} onChange={(effectSpeedMode) => patch({ effectSpeedMode: effectSpeedMode as HeadlessEffectEditorDraft['effectSpeedMode'] })} />
+                {value.effectSpeedMode !== 'none' && <BuilderNumber label={value.effectSpeedMode === 'multiply' ? '速度乘数（%，50＝一半）' : '速度变化（尺）'} value={value.effectSpeedValue} min={value.effectSpeedMode === 'multiply' ? 1 : -1000} max={value.effectSpeedMode === 'multiply' ? 1000 : 1000} onChange={(effectSpeedValue) => patch({ effectSpeedValue })} />}
+                <BuilderSelect label="豁免修正" value={value.effectSavingThrowMode} options={[["none", "不修改"], ["add", "固定加值"], ["advantage", "优势"], ["disadvantage", "劣势"]]} onChange={(effectSavingThrowMode) => patch({ effectSavingThrowMode: effectSavingThrowMode as HeadlessEffectEditorDraft['effectSavingThrowMode'] })} />
+                {value.effectSavingThrowMode !== 'none' && <BuilderSelect label="豁免属性" value={value.effectSavingThrowAbility} options={[["all", "全部"], ...ABILITIES.map((ability) => [ability.key, ability.label] as const)]} onChange={(effectSavingThrowAbility) => patch({ effectSavingThrowAbility: effectSavingThrowAbility as HeadlessEffectEditorDraft['effectSavingThrowAbility'] })} />}
+                {value.effectSavingThrowMode === 'add' && <BuilderNumber label="豁免加值" value={value.effectSavingThrowValue} min={-20} max={20} onChange={(effectSavingThrowValue) => patch({ effectSavingThrowValue })} />}
+                <BuilderSelect label="授予豁免熟练" value={value.effectSavingThrowProficiency} options={[["none", "不授予"], ...ABILITIES.map((ability) => [ability.key, ability.label] as const)]} onChange={(effectSavingThrowProficiency) => patch({ effectSavingThrowProficiency: effectSavingThrowProficiency as HeadlessEffectEditorDraft['effectSavingThrowProficiency'] })} />
+                <BuilderSelect label="技能／属性检定修正" value={value.effectAbilityCheckMode} options={[["none", "不修改"], ["advantage", "优势"], ["disadvantage", "劣势"]]} onChange={(effectAbilityCheckMode) => patch({ effectAbilityCheckMode: effectAbilityCheckMode as HeadlessEffectEditorDraft['effectAbilityCheckMode'] })} />
+                {value.effectAbilityCheckMode !== 'none' && <BuilderSelect label="检定属性" value={value.effectAbilityCheckAbility} options={[["all", "全部属性"], ...ABILITIES.map((ability) => [ability.key, ability.label] as const)]} onChange={(effectAbilityCheckAbility) => patch({ effectAbilityCheckAbility: effectAbilityCheckAbility as HeadlessEffectEditorDraft['effectAbilityCheckAbility'] })} />}
+                {value.effectAbilityCheckMode !== 'none' && <BuilderInput label="限定技能 ID（可留空，如 stealth）" value={value.effectAbilityCheckSkill} onChange={(effectAbilityCheckSkill) => patch({ effectAbilityCheckSkill })} />}
+                <BuilderNumber label="每回合最多攻击数（0＝不限）" value={value.effectMaximumAttacksPerTurn} min={0} max={100} onChange={(effectMaximumAttacksPerTurn) => patch({ effectMaximumAttacksPerTurn })} />
+                <BuilderNumber label="黑暗视觉距离（尺，0＝不授予）" value={value.effectDarkvisionRangeFeet} min={0} max={10000} onChange={(effectDarkvisionRangeFeet) => patch({ effectDarkvisionRangeFeet })} />
+                <BuilderNumber label="飞行速度（尺，0＝不授予）" value={value.effectFlightSpeedFeet} min={0} max={10000} onChange={(effectFlightSpeedFeet) => patch({ effectFlightSpeedFeet })} />
+                <div className="self-end pb-0.5"><Toggle label="识破隐形" value={value.effectSeeInvisible} onChange={(effectSeeInvisible) => patch({ effectSeeInvisible })} /></div>
+              </div>
+              <div className="rounded-xl border border-white/8 p-3">
+                <span className="mb-2 block text-xs font-semibold text-slate-500">临时改写攻击档案（可留空）</span>
+                <div className="flex flex-wrap gap-2">
+                  {([['unarmed', '徒手攻击'], ['melee', '近战攻击'], ['ranged', '远程攻击']] as const).map(([mode, label]) => {
+                    const selected = value.effectAttackProfileModes.includes(mode)
+                    return <Toggle key={mode} label={label} value={selected} onChange={() => patch({
+                      effectAttackProfileModes: selected
+                        ? value.effectAttackProfileModes.filter((entry) => entry !== mode)
+                        : [...value.effectAttackProfileModes, mode],
+                    })} />
+                  })}
+                </div>
+                {value.effectAttackProfileModes.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <BuilderInput label="限定武器 ID（可留空，逗号分隔）" value={value.effectAttackProfileWeaponIds} onChange={(effectAttackProfileWeaponIds) => patch({ effectAttackProfileWeaponIds })} />
+                  <BuilderNumber label="额外触及（尺）" value={value.effectAttackProfileReachBonusFeet} min={0} max={1000} onChange={(effectAttackProfileReachBonusFeet) => patch({ effectAttackProfileReachBonusFeet })} />
+                  <BuilderSelect label="覆盖伤害类型" value={value.effectAttackProfileDamageType} options={[["none", "不覆盖"], ...HEADLESS_DAMAGE_TYPES]} onChange={(effectAttackProfileDamageType) => patch({ effectAttackProfileDamageType: effectAttackProfileDamageType as Dnd5eDamageType | 'none' })} />
+                </div>}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-white/8 p-3">
+                  <Toggle label="施加标准状态" value={value.conditionEnabled} onChange={(conditionEnabled) => patch({ conditionEnabled })} />
+                  {value.conditionEnabled && <div className="mt-3"><BuilderSelect label="标准状态" value={value.condition} options={Object.entries(DND5E_STANDARD_CONDITIONS).map(([id, condition]) => [id, condition.label] as const)} onChange={(condition) => patch({ condition: condition as HeadlessEffectEditorDraft['condition'] })} /></div>}
+                  <div className="mt-3"><Toggle label="期间不能使用反应" value={value.effectPreventReactions} onChange={(effectPreventReactions) => patch({ effectPreventReactions })} /></div>
+                  <div className="mt-3"><Toggle label="强制远离效果来源（驱散／逃离）" value={value.effectForcedFleeFromSource} onChange={(effectForcedFleeFromSource) => patch({ effectForcedFleeFromSource })} /></div>
+                </div>
+                <div className="rounded-xl border border-white/8 p-3">
+                  <span className="mb-2 block text-xs font-semibold text-slate-500">获得伤害抗性（不选＝无）</span>
+                  <div className="flex flex-wrap gap-2">{HEADLESS_DAMAGE_TYPES.map(([damageType, label]) => {
+                    const selected = value.damageReductionDamageTypes.includes(damageType)
+                    return <Toggle key={damageType} label={label} value={selected} onChange={() => patch({ damageReductionDamageTypes: selected ? value.damageReductionDamageTypes.filter((entry) => entry !== damageType) : [...value.damageReductionDamageTypes, damageType] })} />
+                  })}</div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-white/8 p-3">
+                <Toggle
+                  label="敌人在光环内对指定伤害类型法术的豁免具有劣势"
+                  value={value.effectSpellSaveDisadvantageAuraEnabled}
+                  onChange={(effectSpellSaveDisadvantageAuraEnabled) => patch({ effectSpellSaveDisadvantageAuraEnabled })}
+                />
+                {value.effectSpellSaveDisadvantageAuraEnabled && (
+                  <div className="mt-3 space-y-3">
+                    <BuilderNumber
+                      label="光环半径（尺）"
+                      value={value.effectSpellSaveDisadvantageAuraRadiusFeet}
+                      min={1}
+                      max={10000}
+                      onChange={(effectSpellSaveDisadvantageAuraRadiusFeet) => patch({ effectSpellSaveDisadvantageAuraRadiusFeet })}
+                    />
+                    <BuilderInput label="限定施法职业 ID（可留空，逗号分隔）" value={value.effectSpellSaveDisadvantageAuraCastingClassIds} onChange={(effectSpellSaveDisadvantageAuraCastingClassIds) => patch({ effectSpellSaveDisadvantageAuraCastingClassIds })} />
+                    <div>
+                      <span className="mb-2 block text-xs font-semibold text-slate-500">法术伤害类型（至少一项）</span>
+                      <div className="flex flex-wrap gap-2">{HEADLESS_DAMAGE_TYPES.map(([damageType, label]) => {
+                        const selected = value.effectSpellSaveDisadvantageAuraDamageTypes.includes(damageType)
+                        return <Toggle key={damageType} label={label} value={selected} onChange={() => patch({
+                          effectSpellSaveDisadvantageAuraDamageTypes: selected
+                            ? value.effectSpellSaveDisadvantageAuraDamageTypes.filter((entry) => entry !== damageType)
+                            : [...value.effectSpellSaveDisadvantageAuraDamageTypes, damageType],
+                        })} />
+                      })}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="rounded-xl border border-white/8 p-3">
+                <Toggle label="允许动作施法改用附赠动作" value={value.effectSpellActionAsBonusAction} onChange={(effectSpellActionAsBonusAction) => patch({ effectSpellActionAsBonusAction })} />
+                {value.effectSpellActionAsBonusAction && <div className="mt-3"><BuilderInput label="限定施法职业 ID（逗号分隔）" value={value.effectSpellActionAsBonusActionClassIds} onChange={(effectSpellActionAsBonusActionClassIds) => patch({ effectSpellActionAsBonusActionClassIds })} /></div>}
+              </div>
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-slate-500">激活位置光照（可留空＝不限）</span>
+                <div className="flex flex-wrap gap-2">{ILLUMINATION_OPTIONS.map(([illumination, label]) => {
+                  const selected = value.activationActorIllumination.includes(illumination)
+                  return <Toggle key={illumination} label={label} value={selected} onChange={() => patch({
+                    activationActorIllumination: selected
+                      ? value.activationActorIllumination.filter((entry) => entry !== illumination)
+                      : [...value.activationActorIllumination, illumination],
+                  })} />
+                })}</div>
+              </div>
+              <div className="rounded-xl border border-white/8 p-3">
+                <span className="mb-2 block text-xs font-semibold text-slate-500">目标资格条件（均可留空）</span>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <BuilderInput label="生物类型（逗号分隔）" value={value.activationTargetCreatureTypes} onChange={(activationTargetCreatureTypes) => patch({ activationTargetCreatureTypes })} />
+                  <BuilderSelect label="目标必须具有状态" value={value.activationTargetCondition} options={[["none", "不限"], ...Object.entries(DND5E_STANDARD_CONDITIONS).map(([id, condition]) => [id, condition.label] as const)]} onChange={(activationTargetCondition) => patch({ activationTargetCondition: activationTargetCondition as HeadlessEffectEditorDraft['activationTargetCondition'] })} />
+                  <div className="self-end pb-0.5"><Toggle label="限制目标属性值" value={value.activationTargetAbilityScoreEnabled} onChange={(activationTargetAbilityScoreEnabled) => patch({ activationTargetAbilityScoreEnabled })} /></div>
+                </div>
+                {value.activationTargetAbilityScoreEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <BuilderSelect label="目标属性" value={value.activationTargetAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(activationTargetAbility) => patch({ activationTargetAbility: activationTargetAbility as AbilityKey })} />
+                  <BuilderSelect label="比较方式" value={value.activationTargetAbilityComparison} options={[["below", "低于"], ["at-most", "不高于"], ["at-least", "不低于"], ["above", "高于"]]} onChange={(activationTargetAbilityComparison) => patch({ activationTargetAbilityComparison: activationTargetAbilityComparison as HeadlessEffectEditorDraft['activationTargetAbilityComparison'] })} />
+                  <BuilderNumber label="属性值" value={value.activationTargetAbilityValue} min={0} max={30} onChange={(activationTargetAbilityValue) => patch({ activationTargetAbilityValue })} />
+                </div>}
+              </div>
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-slate-500">自动解除条件（可留空）</span>
+                <div className="flex flex-wrap gap-2">{EFFECT_BREAK_EVENTS.map(([event, label]) => {
+                  const selected = value.effectBreakOn.includes(event)
+                  return <Toggle key={event} label={label} value={selected} onChange={() => patch({ effectBreakOn: selected ? value.effectBreakOn.filter((entry) => entry !== event) : [...value.effectBreakOn, event] })} />
+                })}</div>
+              </div>
+            </div>
+          )}
+          {value.executionMode === 'extra-attacks' && (
+            <BuilderNumber label="执行攻击动作时的总攻击次数" value={value.primitiveAttackCount} min={2} max={8} onChange={(primitiveAttackCount) => patch({ primitiveAttackCount })} />
+          )}
+          {value.executionMode === 'weapon-damage-rider' && (
+            <div className="space-y-3">
+              <Dnd5eDamageFormulaEditor
+                value={{ count: value.damageCount, sides: value.damageSides, fixedModifier: 0 }}
+                onChange={(formula) => patch({ damageCount: formula.count, damageSides: formula.sides })}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BuilderSelect label="附加伤害类型" value={value.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patch({ damageType: damageType as Dnd5eDamageType })} />
+                <div className="self-end pb-0.5"><Toggle label="每回合最多一次" value={value.primitiveOncePerTurn} onChange={(primitiveOncePerTurn) => patch({ primitiveOncePerTurn })} /></div>
+              </div>
+            </div>
+          )}
+          {value.executionMode === 'spell-damage-modifier' && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <BuilderSelect label="施法职业" value={value.primitiveSpellcastingClassId} options={SPELL_CLASSES} onChange={(primitiveSpellcastingClassId) => patch({ primitiveSpellcastingClassId: primitiveSpellcastingClassId as HeadlessEffectEditorDraft['primitiveSpellcastingClassId'] })} />
+              <BuilderSelect label="加入伤害的属性" value={value.primitiveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveAbility) => patch({ primitiveAbility: primitiveAbility as AbilityKey })} />
+              <BuilderNumber label="最高法术环级（0＝仅戏法）" value={value.primitiveMaximumSpellLevel} min={0} max={9} onChange={(primitiveMaximumSpellLevel) => patch({ primitiveMaximumSpellLevel })} />
+            </div>
+          )}
+          {value.executionMode === 'spell-ability-check-bonus' && (
+            <div className="space-y-3">
+              <BuilderInput
+                label="适用法术 ID（逗号分隔）"
+                value={value.primitiveSpellAbilityCheckSpellIds}
+                onChange={(primitiveSpellAbilityCheckSpellIds) => patch({ primitiveSpellAbilityCheckSpellIds })}
+              />
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">
+                Host 会把熟练加值加入这些法术要求的施法属性检定，并根据施法属性、熟练加值和提交总值反推原始 d20（必须为 1–20）。
+              </p>
+            </div>
+          )}
+          {value.executionMode === 'spell-interception' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="临时施法使用职业" value={value.primitiveSpellInterceptionClassId} options={ALL_CLASSES} onChange={(primitiveSpellInterceptionClassId) => patch({ primitiveSpellInterceptionClassId: primitiveSpellInterceptionClassId as Dnd5eClassId })} />
+                <BuilderSelect label="施法者豁免属性" value={value.primitiveSpellInterceptionSaveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveSpellInterceptionSaveAbility) => patch({ primitiveSpellInterceptionSaveAbility: primitiveSpellInterceptionSaveAbility as AbilityKey })} />
+                <BuilderSelect label="反应者 DC 属性" value={value.primitiveSpellInterceptionDcAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveSpellInterceptionDcAbility) => patch({ primitiveSpellInterceptionDcAbility: primitiveSpellInterceptionDcAbility as AbilityKey })} />
+                <BuilderNumber label="最低法术环级" value={value.primitiveSpellInterceptionMinimumLevel} min={1} max={9} onChange={(primitiveSpellInterceptionMinimumLevel) => patch({ primitiveSpellInterceptionMinimumLevel })} />
+                <BuilderNumber label="失败效果持续轮数（4800＝8小时）" value={value.primitiveSpellInterceptionDurationRounds} min={1} max={14400} onChange={(primitiveSpellInterceptionDurationRounds) => patch({ primitiveSpellInterceptionDurationRounds })} />
+                <BuilderNumber label="每次恢复的使用次数" value={value.primitiveUseLimit} min={1} max={1000} onChange={(primitiveUseLimit) => patch({ primitiveUseLimit })} />
+                <BuilderSelect label="次数恢复" value={value.primitiveUseReset} options={[["combat", "每场战斗"], ["short-rest", "短休"], ["long-rest", "长休"]]} onChange={(primitiveUseReset) => patch({ primitiveUseReset: primitiveUseReset as HeadlessEffectEditorDraft['primitiveUseReset'] })} />
+              </div>
+              <div className="flex flex-wrap gap-3 rounded-xl border border-white/8 p-3">
+                <Toggle label="失败时仅对反应者无效" value={value.primitiveSpellInterceptionNegates} onChange={(primitiveSpellInterceptionNegates) => patch({ primitiveSpellInterceptionNegates })} />
+                <Toggle label="失败时临时授予该法术" value={value.primitiveSpellInterceptionGrantsAccess} onChange={(primitiveSpellInterceptionGrantsAccess) => patch({ primitiveSpellInterceptionGrantsAccess })} />
+                <Toggle label="失败时禁止原施法者施放" value={value.primitiveSpellInterceptionProhibitsSource} onChange={(primitiveSpellInterceptionProhibitsSource) => patch({ primitiveSpellInterceptionProhibitsSource })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">
+                Host 只会对实际受结构化法术影响的自身目标开放反应，并复核可施放环级、反应次数、豁免、法术位以及临时授权／禁用状态；插件不能注入脚本。
+              </p>
+            </div>
+          )}
+          {value.executionMode === 'spell-target-expansion' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <BuilderSelect label="施法职业" value={value.primitiveSpellcastingClassId} options={SPELL_CLASSES} onChange={(primitiveSpellcastingClassId) => patch({ primitiveSpellcastingClassId: primitiveSpellcastingClassId as HeadlessEffectEditorDraft['primitiveSpellcastingClassId'] })} />
+                <BuilderSelect label="适用法术学派" value={value.primitiveSpellTargetSchool} options={SPELL_SCHOOLS} onChange={(primitiveSpellTargetSchool) => patch({ primitiveSpellTargetSchool: primitiveSpellTargetSchool as HeadlessEffectEditorDraft['primitiveSpellTargetSchool'] })} />
+                <BuilderNumber label="额外目标数" value={value.primitiveSpellTargetAdditionalTargets} min={1} max={8} onChange={(primitiveSpellTargetAdditionalTargets) => patch({ primitiveSpellTargetAdditionalTargets })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">
+                只扩展原本最大目标数为 1 的对应职业法术；物品、种族施法、持续法术攻击与超魔不会叠加使用。
+              </p>
+            </div>
+          )}
+          {value.executionMode === 'damage-roll-maximization' && (
+            <div className="space-y-3">
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-slate-500">可最大化的伤害类型（至少一项）</span>
+                <div className="flex flex-wrap gap-2">
+                  {HEADLESS_DAMAGE_TYPES.map(([damageType, label]) => {
+                    const selected = value.damageReductionDamageTypes.includes(damageType)
+                    return <Toggle key={damageType} label={label} value={selected} onChange={() => patch({
+                      damageReductionDamageTypes: selected
+                        ? value.damageReductionDamageTypes.filter((entry) => entry !== damageType)
+                        : [...value.damageReductionDamageTypes, damageType],
+                    })} />
+                  })}
+                </div>
+              </div>
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-slate-500">适用伤害来源（至少一项）</span>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ['weapon-attack', '武器攻击'],
+                    ['spell', '法术'],
+                    ['feature', '特性'],
+                  ] as const).map(([delivery, label]) => {
+                    const selected = value.primitiveDamageMaxDeliveries.includes(delivery)
+                    return <Toggle key={delivery} label={label} value={selected} onChange={() => patch({
+                      primitiveDamageMaxDeliveries: selected
+                        ? value.primitiveDamageMaxDeliveries.filter((entry) => entry !== delivery)
+                        : [...value.primitiveDamageMaxDeliveries, delivery],
+                    })} />
+                  })}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BuilderInput label="消耗的核心资源 ID（可留空＝不消耗）" value={value.primitiveCoreResourceId} onChange={(primitiveCoreResourceId) => patch({ primitiveCoreResourceId })} />
+                <BuilderNumber label="每次消耗" value={value.primitiveResourceAmount} min={1} max={99} onChange={(primitiveResourceAmount) => patch({ primitiveResourceAmount })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">
+                玩家在伤害结算前显式激活；Host 会复核来源、伤害类型、资源与能力归属。法术覆盖单一即时伤害；武器攻击通过攻击前意图接入，复合或延迟伤害会安全拒绝。
+              </p>
+            </div>
+          )}
+          {value.executionMode === 'passive-resistance' && (
+            <div className="space-y-3">
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-slate-500">抗性伤害类型（至少选择一项）</span>
+                <div className="flex flex-wrap gap-2">
+                  {HEADLESS_DAMAGE_TYPES.map(([damageType, label]) => {
+                    const selected = value.damageReductionDamageTypes.includes(damageType)
+                    return <Toggle key={damageType} label={label} value={selected} onChange={() => patch({
+                      damageReductionDamageTypes: selected
+                        ? value.damageReductionDamageTypes.filter((entry) => entry !== damageType)
+                        : [...value.damageReductionDamageTypes, damageType],
+                    })} />
+                  })}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="伤害来源" value={value.primitivePassiveDelivery} options={[["any", "任意来源"], ["weapon-attack", "武器攻击"], ["spell", "法术"], ["other", "其他"]]} onChange={(primitivePassiveDelivery) => patch({ primitivePassiveDelivery: primitivePassiveDelivery as HeadlessEffectEditorDraft['primitivePassiveDelivery'] })} />
+                <BuilderSelect label="魔法属性" value={value.primitivePassiveMagical} options={[["any", "不限"], ["magical", "仅魔法"], ["nonmagical", "仅非魔法"]]} onChange={(primitivePassiveMagical) => patch({ primitivePassiveMagical: primitivePassiveMagical as HeadlessEffectEditorDraft['primitivePassiveMagical'] })} />
+                <div className="self-end pb-0.5"><Toggle label="对抗法术豁免具有优势" value={value.primitiveSpellSaveAdvantage} onChange={(primitiveSpellSaveAdvantage) => patch({ primitiveSpellSaveAdvantage })} /></div>
+                <div className="self-end pb-0.5"><Toggle label="生命上限不能降低" value={value.primitiveHitPointMaximumReductionImmunity} onChange={(primitiveHitPointMaximumReductionImmunity) => patch({ primitiveHitPointMaximumReductionImmunity })} /></div>
+                <div className="self-end pb-0.5"><Toggle label="免疫一种标准状态" value={value.conditionEnabled} onChange={(conditionEnabled) => patch({ conditionEnabled })} /></div>
+                {value.conditionEnabled && <BuilderSelect label="免疫状态" value={value.condition} options={Object.entries(DND5E_STANDARD_CONDITIONS).map(([id, condition]) => [id, condition.label] as const)} onChange={(condition) => patch({ condition: condition as HeadlessEffectEditorDraft['condition'] })} />}
+                <div className="self-end pb-0.5"><Toggle label="将实际承受伤害反射给来源" value={value.primitiveDamageReflection} onChange={(primitiveDamageReflection) => patch({ primitiveDamageReflection })} /></div>
+                {value.primitiveDamageReflection && <BuilderNumber label="反射比例（%）" value={value.primitiveDamageReflectionMultiplier} min={1} max={1000} onChange={(primitiveDamageReflectionMultiplier) => patch({ primitiveDamageReflectionMultiplier })} />}
+                <div className="self-end pb-0.5"><Toggle label="指定学派法术不因伤害进行专注豁免" value={value.primitiveConcentrationCheckImmunity} onChange={(primitiveConcentrationCheckImmunity) => patch({ primitiveConcentrationCheckImmunity })} /></div>
+                {value.primitiveConcentrationCheckImmunity && <BuilderSelect label="受保护的法术学派" value={value.primitiveConcentrationCheckSchool} options={SPELL_SCHOOLS} onChange={(primitiveConcentrationCheckSchool) => patch({ primitiveConcentrationCheckSchool: primitiveConcentrationCheckSchool as HeadlessEffectEditorDraft['primitiveConcentrationCheckSchool'] })} />}
+                <div className="self-end pb-0.5"><Toggle label="攻击视为魔法攻击" value={value.primitiveWeaponAttacksMagical} onChange={(primitiveWeaponAttacksMagical) => patch({ primitiveWeaponAttacksMagical })} /></div>
+                {value.primitiveWeaponAttacksMagical && <BuilderSelect label="魔法攻击生效状态" value={value.primitiveWeaponAttacksMagicalWhile} options={[["transformed", "仅变形状态"], ["always", "始终"]]} onChange={(primitiveWeaponAttacksMagicalWhile) => patch({ primitiveWeaponAttacksMagicalWhile: primitiveWeaponAttacksMagicalWhile as HeadlessEffectEditorDraft['primitiveWeaponAttacksMagicalWhile'] })} />}
+              </div>
+            </div>
+          )}
+          {value.executionMode === 'reaction-weapon-attack' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <BuilderNumber label="触发目标距离（尺）" value={value.rangeFeet} min={5} max={1000} onChange={(rangeFeet) => patch({ rangeFeet })} />
+              <p className="self-end rounded-xl border border-amber-300/15 bg-amber-500/[0.04] px-3 py-2 text-xs leading-5 text-amber-100/75">当另一生物被攻击命中且目标为你的敌方时，Host 发出反应确认；确认后进行一次近战武器攻击。</p>
+            </div>
+          )}
+          {value.executionMode === 'reaction-attack-defense' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="保护对象" value={value.primitiveAttackDefenseProtects} options={[["self", "仅自己"], ["ally-or-self", "自己或盟友"]]} onChange={(primitiveAttackDefenseProtects) => patch({ primitiveAttackDefenseProtects: primitiveAttackDefenseProtects as HeadlessEffectEditorDraft['primitiveAttackDefenseProtects'] })} />
+                <BuilderSelect label="防御结果" value={value.primitiveAttackDefenseOutcome} options={[["disadvantage", "令该次攻击具有劣势"], ["automatic-miss", "令该次攻击自动未命中"]]} onChange={(primitiveAttackDefenseOutcome) => patch({ primitiveAttackDefenseOutcome: primitiveAttackDefenseOutcome as HeadlessEffectEditorDraft['primitiveAttackDefenseOutcome'] })} />
+                <BuilderNumber label="触发目标距离（尺）" value={value.rangeFeet} min={0} max={1000} onChange={(rangeFeet) => patch({ rangeFeet })} />
+                <div className="self-end pb-0.5"><Toggle label="若未命中，下次攻击该攻击者时获得优势" value={value.primitiveAttackDefenseOnMiss} onChange={(primitiveAttackDefenseOnMiss) => patch({ primitiveAttackDefenseOnMiss })} /></div>
+              </div>
+              <p className="rounded-xl border border-amber-300/15 bg-amber-500/[0.04] px-3 py-2 text-xs leading-5 text-amber-100/75">Host 会在攻击骰落地前验证反应、距离、视线和次数；结果改写与后续一次性优势都记录在同一权威事务中。</p>
+            </div>
+          )}
+          {value.executionMode === 'reaction-attack-retarget' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderNumber label="触发距离（尺）" value={value.rangeFeet} min={1} max={1000} onChange={(rangeFeet) => patch({ rangeFeet })} />
+                <BuilderSelect label="攻击者豁免属性" value={value.primitiveAttackRetargetSaveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveAttackRetargetSaveAbility) => patch({ primitiveAttackRetargetSaveAbility: primitiveAttackRetargetSaveAbility as AbilityKey })} />
+                <BuilderSelect label="豁免 DC 来源属性" value={value.primitiveAttackRetargetDcAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveAttackRetargetDcAbility) => patch({ primitiveAttackRetargetDcAbility: primitiveAttackRetargetDcAbility as AbilityKey })} />
+                <div className="self-end pb-0.5"><Toggle label="魅惑免疫者不受影响" value={value.primitiveAttackRetargetCharmImmunity} onChange={(primitiveAttackRetargetCharmImmunity) => patch({ primitiveAttackRetargetCharmImmunity })} /></div>
+              </div>
+              <p className="rounded-xl border border-amber-300/15 bg-amber-500/[0.04] px-3 py-2 text-xs leading-5 text-amber-100/75">玩家确认后，Host 消耗反应、权威投掷豁免并按地图距离限定为最近的其他生物；成功豁免会记录到下次长休，客户端不能指定任意替代目标。</p>
+            </div>
+          )}
+          {value.executionMode === 'passive-death-prevention' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderNumber label="触发后保留 HP" value={value.primitiveDeathHitPoints} min={1} max={1000000} onChange={(primitiveDeathHitPoints) => patch({ primitiveDeathHitPoints })} />
+                <BuilderNumber label="可用次数" value={value.primitiveUseLimit} min={1} max={1000} onChange={(primitiveUseLimit) => patch({ primitiveUseLimit })} />
+                <BuilderSelect label="恢复时点" value={value.primitiveUseReset} options={[["combat", "每场战斗"], ["short-rest", "短休"], ["long-rest", "长休"]]} onChange={(primitiveUseReset) => patch({ primitiveUseReset: primitiveUseReset as HeadlessEffectEditorDraft['primitiveUseReset'] })} />
+                <div className="self-end pb-0.5"><Toggle label="也能阻止巨量伤害即死" value={value.primitiveDeathPreventsMassiveDamage} onChange={(primitiveDeathPreventsMassiveDamage) => patch({ primitiveDeathPreventsMassiveDamage })} /></div>
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">Host 只在一次真实伤害将目标降至 0 HP 时检查，并在同一事务中验证即死规则、消耗次数和改写后的生命值。</p>
+            </div>
+          )}
+          {value.executionMode === 'spell-defeat-healing' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderNumber label="最低法术环级" value={value.primitiveDefeatHealingMinimumSpellLevel} min={1} max={9} onChange={(primitiveDefeatHealingMinimumSpellLevel) => patch({ primitiveDefeatHealingMinimumSpellLevel })} />
+                <BuilderNumber label="基础治疗：环级 ×" value={value.primitiveDefeatHealingBaseMultiplier} min={1} max={20} onChange={(primitiveDefeatHealingBaseMultiplier) => patch({ primitiveDefeatHealingBaseMultiplier })} />
+                <BuilderSelect label="特殊学派（可选）" value={value.primitiveDefeatHealingSchool} options={[["none", "无"], ...SPELL_SCHOOLS]} onChange={(primitiveDefeatHealingSchool) => patch({ primitiveDefeatHealingSchool: primitiveDefeatHealingSchool as HeadlessEffectEditorDraft['primitiveDefeatHealingSchool'] })} />
+                <BuilderNumber label="特殊学派治疗：环级 ×" value={value.primitiveDefeatHealingSchoolMultiplier} min={1} max={20} onChange={(primitiveDefeatHealingSchoolMultiplier) => patch({ primitiveDefeatHealingSchoolMultiplier })} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <BuilderInput label="排除生物类型（逗号分隔）" value={value.primitiveDefeatHealingExcludedCreatureTypes} onChange={(primitiveDefeatHealingExcludedCreatureTypes) => patch({ primitiveDefeatHealingExcludedCreatureTypes })} />
+                <div className="self-end pb-0.5"><Toggle label="每回合最多一次" value={value.primitiveOncePerTurn} onChange={(primitiveOncePerTurn) => patch({ primitiveOncePerTurn })} /></div>
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">Host 只接受本次法术事务实际降至 0 HP 的目标，并校验环级、生物类型、学派倍率和每回合账本；AI／JSON 导入可复用同一 mechanic。</p>
+            </div>
+          )}
+          {value.executionMode === 'summoned-creature-bonus' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BuilderNumber label="每个召唤实体获得临时 HP" value={value.primitiveSummonTemporaryHitPoints} min={0} max={1000000} onChange={(primitiveSummonTemporaryHitPoints) => patch({ primitiveSummonTemporaryHitPoints })} />
+                <BuilderInput label="限定法术学派（可留空，逗号分隔）" value={value.primitiveSummonSpellSchools} onChange={(primitiveSummonSpellSchools) => patch({ primitiveSummonSpellSchools })} />
+                <BuilderInput label="限定法术 ID（可留空，逗号分隔）" value={value.primitiveSummonSpellIds} onChange={(primitiveSummonSpellIds) => patch({ primitiveSummonSpellIds })} />
+                <BuilderSelect label="最大 HP 加值公式" value={value.primitiveSummonMaximumHitPointBonusMode} options={[["none", "无"], ["fixed", "固定值"], ["class-level", "职业等级 × 倍率"]]} onChange={(primitiveSummonMaximumHitPointBonusMode) => patch({ primitiveSummonMaximumHitPointBonusMode: primitiveSummonMaximumHitPointBonusMode as HeadlessEffectEditorDraft['primitiveSummonMaximumHitPointBonusMode'] })} />
+                {value.primitiveSummonMaximumHitPointBonusMode !== 'none' && <BuilderNumber label={value.primitiveSummonMaximumHitPointBonusMode === 'class-level' ? '职业等级倍率' : '固定最大 HP 加值'} value={value.primitiveSummonMaximumHitPointBonusValue} min={0} max={1000000} onChange={(primitiveSummonMaximumHitPointBonusValue) => patch({ primitiveSummonMaximumHitPointBonusValue })} />}
+                {value.primitiveSummonMaximumHitPointBonusMode === 'class-level' && <BuilderSelect label="用于最大 HP 的职业" value={value.primitiveSummonMaximumHitPointBonusClassId} options={ALL_CLASSES} onChange={(primitiveSummonMaximumHitPointBonusClassId) => patch({ primitiveSummonMaximumHitPointBonusClassId: primitiveSummonMaximumHitPointBonusClassId as HeadlessEffectEditorDraft['primitiveSummonMaximumHitPointBonusClassId'] })} />}
+                <BuilderSelect label="武器每次命中伤害加值" value={value.primitiveSummonWeaponDamageBonusMode} options={[["none", "无"], ["fixed", "固定值"], ["proficiency-bonus", "召唤者熟练加值"]]} onChange={(primitiveSummonWeaponDamageBonusMode) => patch({ primitiveSummonWeaponDamageBonusMode: primitiveSummonWeaponDamageBonusMode as HeadlessEffectEditorDraft['primitiveSummonWeaponDamageBonusMode'] })} />
+                {value.primitiveSummonWeaponDamageBonusMode === 'fixed' && <BuilderNumber label="固定武器伤害加值" value={value.primitiveSummonWeaponDamageBonusValue} min={0} max={1000000} onChange={(primitiveSummonWeaponDamageBonusValue) => patch({ primitiveSummonWeaponDamageBonusValue })} />}
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">只增强由真实法术 Activity 产生的召唤交接；Host 校验施法来源、学派和特性归属，在创建地图 Token 时固化临时 HP、最大 HP 与每次武器命中的伤害加值。</p>
+            </div>
+          )}
+          {value.executionMode === 'companion-profile-upgrade' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="self-end pb-0.5"><Toggle label="伙伴武器攻击视为魔法" value={value.primitiveCompanionWeaponAttacksMagical} onChange={(primitiveCompanionWeaponAttacksMagical) => patch({ primitiveCompanionWeaponAttacksMagical })} /></div>
+                <BuilderNumber label="伙伴每次攻击动作的攻击数" value={value.primitiveCompanionAttacksPerAction} min={1} max={8} onChange={(primitiveCompanionAttacksPerAction) => patch({ primitiveCompanionAttacksPerAction })} />
+                <BuilderNumber label="共享自身法术距离（尺，0＝不共享）" value={value.primitiveCompanionShareSelfSpellsRangeFeet} min={0} max={1000} onChange={(primitiveCompanionShareSelfSpellsRangeFeet) => patch({ primitiveCompanionShareSelfSpellsRangeFeet })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">Host 按拥有者的已激活特性实时覆盖其持久伙伴；刷新地图或重新放置后仍生效，客户端不能提交最终攻击数或共享距离。</p>
+            </div>
+          )}
+          {value.executionMode === 'creature-space-traversal' && (
+            <div className="space-y-3">
+              <BuilderNumber label="至少大于移动者的体型级数" value={value.primitiveTraversalMinimumLargerSizeRanks} min={1} max={5} onChange={(primitiveTraversalMinimumLargerSizeRanks) => patch({ primitiveTraversalMinimumLargerSizeRanks })} />
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">Host 逐格比较地图实体体型：符合条件的占位格可作为路径中间点，但仍禁止把移动终点停在任何生物占据的空间。</p>
+            </div>
+          )}
+          {value.executionMode === 'environmental-movement' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderInput label="启用环境（逗号分隔）" value={value.primitiveEnvironmentalEnvironments} onChange={(primitiveEnvironmentalEnvironments) => patch({ primitiveEnvironmentalEnvironments })} />
+                <BuilderSelect label="移动方式" value={value.primitiveEnvironmentalMode} options={[["fly", "飞行"], ["swim", "游泳"], ["climb", "攀爬"]]} onChange={(primitiveEnvironmentalMode) => patch({ primitiveEnvironmentalMode: primitiveEnvironmentalMode as HeadlessEffectEditorDraft['primitiveEnvironmentalMode'] })} />
+                <div className="self-end pb-0.5"><Toggle label="速度等同步行速度" value={value.primitiveEnvironmentalWalkingSpeed} onChange={(primitiveEnvironmentalWalkingSpeed) => patch({ primitiveEnvironmentalWalkingSpeed })} /></div>
+                {!value.primitiveEnvironmentalWalkingSpeed && <BuilderNumber label="固定速度（尺）" value={value.primitiveEnvironmentalFixedSpeed} min={1} max={1000} onChange={(primitiveEnvironmentalFixedSpeed) => patch({ primitiveEnvironmentalFixedSpeed })} />}
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">可用环境值：normal、outdoors、indoors、underground、underwater。Host 只读取 DM 保存的地图环境标签，玩家提交的行动不能伪造。</p>
+            </div>
+          )}
+          {value.executionMode === 'persistent-projection' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderInput label="投影 ID" value={value.primitiveProjectionId} onChange={(primitiveProjectionId) => patch({ primitiveProjectionId })} />
+                <BuilderNumber label="投影实例数" value={value.primitiveProjectionInstanceCount} min={1} max={16} onChange={(primitiveProjectionInstanceCount) => patch({ primitiveProjectionInstanceCount })} />
+                <BuilderNumber label="初始放置距离（尺）" value={value.primitiveProjectionPlacementRangeFeet} min={0} max={10000} onChange={(primitiveProjectionPlacementRangeFeet) => patch({ primitiveProjectionPlacementRangeFeet })} />
+                <BuilderNumber label="持续轮数" value={value.primitiveProjectionDurationRounds} min={1} max={14400} onChange={(primitiveProjectionDurationRounds) => patch({ primitiveProjectionDurationRounds })} />
+                <div className="self-end pb-0.5"><Toggle label="需要专注" value={value.primitiveProjectionConcentration} onChange={(primitiveProjectionConcentration) => patch({ primitiveProjectionConcentration })} /></div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="self-end pb-0.5"><Toggle label="投影可移动" value={value.primitiveProjectionMovementEnabled} onChange={(primitiveProjectionMovementEnabled) => patch({ primitiveProjectionMovementEnabled })} /></div>
+                {value.primitiveProjectionMovementEnabled && <BuilderSelect label="移动消耗" value={value.primitiveProjectionMovementEconomy} options={[["action", "动作"], ["bonus-action", "附赠动作"]]} onChange={(primitiveProjectionMovementEconomy) => patch({ primitiveProjectionMovementEconomy: primitiveProjectionMovementEconomy as HeadlessEffectEditorDraft['primitiveProjectionMovementEconomy'] })} />}
+                {value.primitiveProjectionMovementEnabled && <BuilderNumber label="单次移动上限（尺）" value={value.primitiveProjectionMovementFeet} min={1} max={1000} onChange={(primitiveProjectionMovementFeet) => patch({ primitiveProjectionMovementFeet })} />}
+                {value.primitiveProjectionMovementEnabled && <BuilderNumber label="距来源最大距离（尺，0＝不限）" value={value.primitiveProjectionTetherFeet} min={0} max={10000} onChange={(primitiveProjectionTetherFeet) => patch({ primitiveProjectionTetherFeet })} />}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BuilderNumber label="双方邻近时攻击优势距离（尺，0＝无）" value={value.primitiveProjectionAttackAdvantageFeet} min={0} max={1000} onChange={(primitiveProjectionAttackAdvantageFeet) => patch({ primitiveProjectionAttackAdvantageFeet })} />
+                <div className="self-end pb-0.5"><Toggle label="允许作为施法起点" value={value.primitiveProjectionSpellOrigin} onChange={(primitiveProjectionSpellOrigin) => patch({ primitiveProjectionSpellOrigin })} /></div>
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">创建、实例数量、专注、轮数、地图移动、来源牵引、邻近攻击优势与施法起点均由 Host 结算；多个实例会从玩家选择的锚点起自动放入最近的合法空格，之后可分别移动和选择为施法起点。</p>
+            </div>
+          )}
+          {value.executionMode === 'persistent-projection-upgrade' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <BuilderInput label="既有投影 ID" value={value.primitiveProjectionId} onChange={(primitiveProjectionId) => patch({ primitiveProjectionId })} />
+                <BuilderNumber label="提升后的实例数" value={value.primitiveProjectionInstanceCount} min={2} max={16} onChange={(primitiveProjectionInstanceCount) => patch({ primitiveProjectionInstanceCount })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">该被动原语不会创建第二套按钮；Host 在执行相同投影 ID 的基础能力时自动采用更高实例数。</p>
+            </div>
+          )}
+          {value.executionMode === 'alternate-resource-spellcasting' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="等级来源职业" value={value.primitiveAlternateSpellClassId} options={ALL_CLASSES} onChange={(primitiveAlternateSpellClassId) => patch({ primitiveAlternateSpellClassId: primitiveAlternateSpellClassId as Dnd5eClassId })} />
+                <BuilderSelect label="施法属性" value={value.primitiveAlternateSpellAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveAlternateSpellAbility) => patch({ primitiveAlternateSpellAbility: primitiveAlternateSpellAbility as AbilityKey })} />
+                <BuilderInput label="资源 ID" value={value.primitiveAlternateSpellResourceId} onChange={(primitiveAlternateSpellResourceId) => patch({ primitiveAlternateSpellResourceId })} />
+                <BuilderSelect label="资源命名空间" value={value.primitiveAlternateSpellResourceScope} options={[["core", "核心资源"], ["plugin", "当前插件资源"]]} onChange={(primitiveAlternateSpellResourceScope) => patch({ primitiveAlternateSpellResourceScope: primitiveAlternateSpellResourceScope as HeadlessEffectEditorDraft['primitiveAlternateSpellResourceScope'] })} />
+              </div>
+              <div className="self-end pb-0.5"><Toggle label="忽略材料成分（仍校验言语／姿势）" value={value.primitiveAlternateSpellIgnoreMaterialComponents} onChange={(primitiveAlternateSpellIgnoreMaterialComponents) => patch({ primitiveAlternateSpellIgnoreMaterialComponents })} /></div>
+              <BuilderTextarea label="法术授权 JSON" value={value.primitiveAlternateSpellGrantsJson} onChange={(primitiveAlternateSpellGrantsJson) => patch({ primitiveAlternateSpellGrantsJson })} />
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">每项授权填写 id、spellId、castAtLevel、resourceCost；可加 minimumLevel、selection 与 upcast。Host 会根据已安装法术、职业等级、选择项、升环上限和当前资源重新校验并原子扣费。</p>
+            </div>
+          )}
+          {value.executionMode === 'granted-die-combat-options' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Toggle label="持有者可在武器命中后把骰值加入伤害" value={value.primitiveGrantedDieWeaponDamage} onChange={(primitiveGrantedDieWeaponDamage) => patch({ primitiveGrantedDieWeaponDamage })} />
+                <Toggle label="持有者可用反应把骰值加入本次 AC" value={value.primitiveGrantedDieArmorClass} onChange={(primitiveGrantedDieArmorClass) => patch({ primitiveGrantedDieArmorClass })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">该原语扩展已经由来源授予并保存在目标身上的奖励骰；Host 会验证来源特性仍存在、骰值上限、武器命中、反应以及一次性消耗。至少启用一种用途。</p>
+            </div>
+          )}
+          {value.executionMode === 'creature-form-eligibility' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderInput label="允许的生物类型（逗号分隔）" value={value.primitiveFormCreatureTypes} onChange={(primitiveFormCreatureTypes) => patch({ primitiveFormCreatureTypes })} />
+                <BuilderInput label="限定形态 ID（可留空，逗号分隔）" value={value.primitiveFormSpecificIds} onChange={(primitiveFormSpecificIds) => patch({ primitiveFormSpecificIds })} />
+                <BuilderSelect label="挑战等级上限" value={value.primitiveFormChallengeRatingMode} options={[["class-level", "按职业等级"], ["fixed", "固定值"]]} onChange={(primitiveFormChallengeRatingMode) => patch({ primitiveFormChallengeRatingMode: primitiveFormChallengeRatingMode as HeadlessEffectEditorDraft['primitiveFormChallengeRatingMode'] })} />
+                {value.primitiveFormChallengeRatingMode === 'fixed'
+                  ? <BuilderNumber label="固定挑战等级上限" value={value.primitiveFormFixedChallengeRating} min={0} max={30} onChange={(primitiveFormFixedChallengeRating) => patch({ primitiveFormFixedChallengeRating })} />
+                  : <BuilderSelect label="等级来源职业" value={value.primitiveFormClassId} options={ALL_CLASSES} onChange={(primitiveFormClassId) => patch({ primitiveFormClassId: primitiveFormClassId as HeadlessEffectEditorDraft['primitiveFormClassId'] })} />}
+              </div>
+              {value.primitiveFormChallengeRatingMode === 'class-level' && <div className="grid gap-3 sm:grid-cols-2">
+                <BuilderNumber label="挑战等级＝职业等级 ÷" value={value.primitiveFormLevelDivisor} min={1} max={20} onChange={(primitiveFormLevelDivisor) => patch({ primitiveFormLevelDivisor })} />
+                <BuilderNumber label="最低挑战等级上限" value={value.primitiveFormMinimumChallengeRating} min={0} max={30} onChange={(primitiveFormMinimumChallengeRating) => patch({ primitiveFormMinimumChallengeRating })} />
+              </div>}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="激活经济" value={value.primitiveFormActivationEconomy} options={[["action", "动作"], ["bonusAction", "附赠动作"]]} onChange={(primitiveFormActivationEconomy) => patch({ primitiveFormActivationEconomy: primitiveFormActivationEconomy as HeadlessEffectEditorDraft['primitiveFormActivationEconomy'] })} />
+                <BuilderNumber label="形态资源消耗" value={value.primitiveFormResourceCost} min={1} max={20} onChange={(primitiveFormResourceCost) => patch({ primitiveFormResourceCost })} />
+                <BuilderSelect label="资源来源" value={value.primitiveFormResourceMode} options={[["core-wild-shape", "核心野性变形"], ["ability-uses", "本能力使用次数"]]} onChange={(primitiveFormResourceMode) => patch({ primitiveFormResourceMode: primitiveFormResourceMode as HeadlessEffectEditorDraft['primitiveFormResourceMode'] })} />
+                <BuilderNumber label="形态持续小时" value={value.primitiveFormDurationHours} min={1} max={24} onChange={(primitiveFormDurationHours) => patch({ primitiveFormDurationHours })} />
+                <div className="self-end pb-0.5"><Toggle label="必须预先登记为已知形态" value={value.primitiveFormRequiresKnown} onChange={(primitiveFormRequiresKnown) => patch({ primitiveFormRequiresKnown })} /></div>
+                <div className="self-end pb-0.5"><Toggle label="保留基础游泳／飞行等级限制" value={value.primitiveFormCoreMovementLimits} onChange={(primitiveFormCoreMovementLimits) => patch({ primitiveFormCoreMovementLimits })} /></div>
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">只扩展 Host 已知怪物目录的可选范围；怪物数据、已知形态、CR、移动类型和当前职业等级仍由服务器验证。</p>
+            </div>
+          )}
+          {value.executionMode === 'creature-form-control' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="变形激活经济" value={value.primitiveFormActivationEconomy} options={[["action", "动作"], ["bonusAction", "附赠动作"]]} onChange={(primitiveFormActivationEconomy) => patch({ primitiveFormActivationEconomy: primitiveFormActivationEconomy as HeadlessEffectEditorDraft['primitiveFormActivationEconomy'] })} />
+                <div className="self-end pb-0.5"><Toggle label="允许形态内消耗法术位治疗" value={value.primitiveFormHealingEnabled} onChange={(primitiveFormHealingEnabled) => patch({ primitiveFormHealingEnabled })} /></div>
+              </div>
+              {value.primitiveFormHealingEnabled && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="治疗行动经济" value={value.primitiveFormHealingEconomy} options={[["action", "动作"], ["bonusAction", "附赠动作"]]} onChange={(primitiveFormHealingEconomy) => patch({ primitiveFormHealingEconomy: primitiveFormHealingEconomy as HeadlessEffectEditorDraft['primitiveFormHealingEconomy'] })} />
+                <BuilderNumber label="每环治疗骰数量" value={value.primitiveFormHealingDiceCount} min={1} max={20} onChange={(primitiveFormHealingDiceCount) => patch({ primitiveFormHealingDiceCount })} />
+                <BuilderNumber label="治疗骰面数" value={value.primitiveFormHealingDiceSides} min={2} max={100} onChange={(primitiveFormHealingDiceSides) => patch({ primitiveFormHealingDiceSides })} />
+                <BuilderNumber label="最高可消耗法术环级" value={value.primitiveFormHealingMaximumSlotLevel} min={1} max={9} onChange={(primitiveFormHealingMaximumSlotLevel) => patch({ primitiveFormHealingMaximumSlotLevel })} />
+              </div>}
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">Host 验证当前形态、行动经济、实际法术位与骰子配方，并只恢复当前形态生命值；同一原语可由任意自定义变形特性复用。</p>
+            </div>
+          )}
+          {value.executionMode === 'bonus-weapon-attack' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderSelect label="次数公式" value={value.primitiveBonusAttackUseFormula} options={[["fixed", "固定次数"], ["ability-modifier", "属性调整值（至少 1）"]]} onChange={(primitiveBonusAttackUseFormula) => patch({ primitiveBonusAttackUseFormula: primitiveBonusAttackUseFormula as HeadlessEffectEditorDraft['primitiveBonusAttackUseFormula'] })} />
+                {value.primitiveBonusAttackUseFormula === 'fixed'
+                  ? <BuilderNumber label="可用次数" value={value.primitiveUseLimit} min={1} max={1000} onChange={(primitiveUseLimit) => patch({ primitiveUseLimit })} />
+                  : <BuilderSelect label="次数属性" value={value.primitiveBonusAttackAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveBonusAttackAbility) => patch({ primitiveBonusAttackAbility: primitiveBonusAttackAbility as AbilityKey })} />}
+                <BuilderSelect label="恢复时点" value={value.primitiveUseReset} options={[["combat", "每场战斗"], ["short-rest", "短休"], ["long-rest", "长休"]]} onChange={(primitiveUseReset) => patch({ primitiveUseReset: primitiveUseReset as HeadlessEffectEditorDraft['primitiveUseReset'] })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">完成真实攻击动作后才会出现按钮；Host 在同一攻击事务中验证附赠动作、武器、次数资源、目标与距离，并在结算时消耗次数。</p>
+            </div>
+          )}
+          {value.executionMode === 'turn-start-saving-throw-aura' && (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <BuilderNumber label="灵光半径（尺）" value={value.primitiveAuraRadiusFeet} min={5} max={1000} onChange={(primitiveAuraRadiusFeet) => patch({ primitiveAuraRadiusFeet })} />
+                <BuilderSelect label="影响关系" value={value.primitiveAuraRelation} options={[["enemy", "敌方"], ["any", "除来源外任意生物"]]} onChange={(primitiveAuraRelation) => patch({ primitiveAuraRelation: primitiveAuraRelation as HeadlessEffectEditorDraft['primitiveAuraRelation'] })} />
+                <BuilderSelect label="目标豁免属性" value={value.primitiveAuraSavingThrowAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveAuraSavingThrowAbility) => patch({ primitiveAuraSavingThrowAbility: primitiveAuraSavingThrowAbility as AbilityKey })} />
+                <BuilderSelect label="来源 DC 属性" value={value.primitiveAuraDcAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(primitiveAuraDcAbility) => patch({ primitiveAuraDcAbility: primitiveAuraDcAbility as AbilityKey })} />
+                <BuilderSelect label="豁免失败状态" value={value.condition} options={Object.entries(DND5E_STANDARD_CONDITIONS).map(([id, condition]) => [id, condition.label] as const)} onChange={(condition) => patch({ condition: condition as HeadlessEffectEditorDraft['condition'] })} />
+                <BuilderNumber label="失败状态持续轮数" value={value.primitiveAuraDurationRounds} min={1} max={14400} onChange={(primitiveAuraDurationRounds) => patch({ primitiveAuraDurationRounds })} />
+                <BuilderNumber label="成功后免疫轮数（0＝不免疫）" value={value.primitiveAuraImmunityRounds} min={0} max={14400} onChange={(primitiveAuraImmunityRounds) => patch({ primitiveAuraImmunityRounds })} />
+                <BuilderInput label="要求存在的 Effect ID（可留空）" value={value.primitiveAuraRequiredEffectId} onChange={(primitiveAuraRequiredEffectId) => patch({ primitiveAuraRequiredEffectId })} />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Toggle label="魔法效果" value={value.primitiveAuraMagical} onChange={(primitiveAuraMagical) => patch({ primitiveAuraMagical })} />
+                <Toggle label="要求双方互相看见" value={value.primitiveAuraRequiresMutualSight} onChange={(primitiveAuraRequiresMutualSight) => patch({ primitiveAuraRequiresMutualSight })} />
+                <Toggle label="受到伤害后解除状态" value={value.primitiveAuraBreakOnDamage} onChange={(primitiveAuraBreakOnDamage) => patch({ primitiveAuraBreakOnDamage })} />
+              </div>
+              <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">目标回合开始时由 Host 重新计算距离、阵营、视线、来源属性 DC 与来源绑定免疫。Effect ID 留空表示被动常驻；填写后只有来源身上存在该统一 Effect 时才生效。</p>
+            </div>
+          )}
+          <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.045] px-3 py-2 text-xs leading-5 text-emerald-100">
+            保存后会生成声明式 mechanic，不会为被动机制创建重复的战斗按钮。
+          </p>
+        </div>
+      </section>
+    )
+  }
   return (
     <section className="mt-4 rounded-2xl border border-violet-400/15 bg-violet-500/[0.045] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3433,12 +5891,7 @@ function HeadlessEffectEditor({
       </div>
 
       {value.enabled && <div className="mt-4 space-y-4 border-t border-violet-400/10 pt-4">
-        {mode === 'feat' && <BuilderSelect
-          label="效果机制"
-          value={value.executionMode}
-          options={[["active", "主动能力"], ["passive-damage-reduction", "被动减伤"]]}
-          onChange={(executionMode) => patch({ executionMode: executionMode as HeadlessEffectEditorDraft['executionMode'] })}
-        />}
+        {featureLike && <FrozenExecutionMode value={value.executionMode} />}
         {featureLike ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <BuilderInput label="战斗按钮文字" value={value.actionLabel} onChange={(actionLabel) => patch({ actionLabel })} />
           <BuilderSelect label="行动类型" value={value.economy} options={ACTION_ECONOMIES} onChange={(economy) => patch({ economy: economy as HeadlessEffectEditorDraft['economy'] })} />
@@ -3446,8 +5899,9 @@ function HeadlessEffectEditor({
           {value.targetingKind !== 'self' && <BuilderSelect label="目标关系" value={value.relation} options={TARGET_RELATIONS} onChange={(relation) => patch({ relation: relation as HeadlessEffectEditorDraft['relation'] })} />}
         </div> : <p className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] px-3 py-2 text-xs leading-5 text-cyan-100/70">行动类型、射程与目标取自上方的法术资料；法术位、V／S／M、命中／豁免、升环和专注由 Host 统一校验。</p>}
 
-        {featureLike && value.targetingKind === 'single-creature' && <div className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end">
+        {featureLike && (value.targetingKind === 'single-creature' || value.targetingKind === 'multiple-creatures') && <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
           <BuilderNumber label="射程（尺）" value={value.rangeFeet} min={0} max={10000} onChange={(rangeFeet) => patch({ rangeFeet })} />
+          {value.targetingKind === 'multiple-creatures' && <BuilderNumber label="最多目标" value={value.maximumTargets} min={1} max={256} onChange={(maximumTargets) => patch({ maximumTargets })} />}
           <div className="pb-0.5"><Toggle label="允许选择自己" value={value.includeSelf} onChange={(includeSelf) => patch({ includeSelf })} /></div>
         </div>}
 
@@ -3556,8 +6010,9 @@ function HeadlessEffectEditor({
                         <BuilderInput label="触发名称" value={trigger.label} onChange={(label) => patchPersistentAreaTrigger(index, { label })} />
                         <BuilderSelect label="触发时点" value={trigger.timing} options={PERSISTENT_AREA_TRIGGER_TIMINGS} onChange={(timing) => patchPersistentAreaTrigger(index, { timing: timing as PersistentAreaTriggerEditorDraft['timing'] })} />
                         <div className="flex flex-wrap items-end gap-2 pb-0.5">
-                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound, oncePerTurn: oncePerRound ? false : trigger.oncePerTurn })} />
-                          <Toggle label="同一目标每回合一次" value={trigger.oncePerTurn} onChange={(oncePerTurn) => patchPersistentAreaTrigger(index, { oncePerTurn, oncePerRound: oncePerTurn ? false : trigger.oncePerRound })} />
+                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound, oncePerTurn: oncePerRound ? false : trigger.oncePerTurn, oncePerTarget: oncePerRound ? false : trigger.oncePerTarget })} />
+                          <Toggle label="同一目标每回合一次" value={trigger.oncePerTurn} onChange={(oncePerTurn) => patchPersistentAreaTrigger(index, { oncePerTurn, oncePerRound: oncePerTurn ? false : trigger.oncePerRound, oncePerTarget: oncePerTurn ? false : trigger.oncePerTarget })} />
+                          <Toggle label="同一目标整个区域只触发一次" value={trigger.oncePerTarget} onChange={(oncePerTarget) => patchPersistentAreaTrigger(index, { oncePerTarget, oncePerRound: oncePerTarget ? false : trigger.oncePerRound, oncePerTurn: oncePerTarget ? false : trigger.oncePerTurn })} />
                           <Toggle label="提交前由 DM 调整" value={trigger.dmAdjustable} onChange={(dmAdjustable) => patchPersistentAreaTrigger(index, { dmAdjustable })} />
                         </div>
                       </div>
@@ -3578,10 +6033,11 @@ function HeadlessEffectEditor({
                       <div className="mt-3 grid gap-3 xl:grid-cols-2">
                         <fieldset className={`rounded-lg border p-3 ${trigger.damageEnabled ? 'border-rose-300/15 bg-rose-500/[0.025]' : 'border-white/8 bg-black/10'}`}>
                           <legend className="px-1"><Toggle label="触发伤害" value={trigger.damageEnabled} onChange={(damageEnabled) => patchPersistentAreaTrigger(index, { damageEnabled })} /></legend>
-                          {trigger.damageEnabled && <div className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                            <BuilderNumber label="骰子数量" value={trigger.damageCount} min={1} max={40} onChange={(damageCount) => patchPersistentAreaTrigger(index, { damageCount })} />
-                            <BuilderNumber label="骰面" value={trigger.damageSides} min={2} max={100} onChange={(damageSides) => patchPersistentAreaTrigger(index, { damageSides })} />
-                            <BuilderNumber label="调整值" value={trigger.damageModifier} min={-1000} max={1000} onChange={(damageModifier) => patchPersistentAreaTrigger(index, { damageModifier })} />
+                          {trigger.damageEnabled && <div className="mt-2 space-y-3">
+                            <Dnd5eDamageFormulaEditor
+                              value={{ count: trigger.damageCount, sides: trigger.damageSides, fixedModifier: trigger.damageModifier, modifierFormula: trigger.damageModifierFormula }}
+                              onChange={(formula) => patchPersistentAreaTrigger(index, { damageCount: formula.count, damageSides: formula.sides, damageModifier: formula.fixedModifier, damageModifierFormula: formula.modifierFormula })}
+                            />
                             <BuilderSelect label="伤害类型" value={trigger.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patchPersistentAreaTrigger(index, { damageType: damageType as Dnd5eDamageType })} />
                           </div>}
                         </fieldset>
@@ -3598,7 +6054,19 @@ function HeadlessEffectEditor({
                           </div>}
                         </fieldset>
                       </div>
-                      {!trigger.damageEnabled && !trigger.conditionEnabled && <p className="mt-3 rounded-lg border border-rose-300/15 bg-rose-500/5 px-3 py-2 text-[11px] text-rose-100">触发效果至少需要伤害或标准状态。</p>}
+                      <fieldset className={`mt-3 rounded-lg border p-3 ${trigger.notificationEnabled ? 'border-cyan-300/15 bg-cyan-500/[0.025]' : 'border-white/8 bg-black/10'}`}>
+                        <legend className="px-1"><Toggle label="触发通知" value={trigger.notificationEnabled} onChange={(notificationEnabled) => patchPersistentAreaTrigger(index, { notificationEnabled })} /></legend>
+                        {trigger.notificationEnabled && <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <BuilderSelect
+                            label="通知方式"
+                            value={trigger.notificationDelivery}
+                            options={[["mental-to-source", "仅向来源发出心灵通知"], ["audible", "发出可听见的声音"]]}
+                            onChange={(notificationDelivery) => patchPersistentAreaTrigger(index, { notificationDelivery: notificationDelivery as PersistentAreaTriggerEditorDraft['notificationDelivery'] })}
+                          />
+                          {trigger.notificationDelivery === 'audible' && <BuilderNumber label="可听半径（尺）" value={trigger.notificationAudibleRadiusFeet} min={1} max={10000} onChange={(notificationAudibleRadiusFeet) => patchPersistentAreaTrigger(index, { notificationAudibleRadiusFeet })} />}
+                        </div>}
+                      </fieldset>
+                      {!trigger.damageEnabled && !trigger.conditionEnabled && !trigger.notificationEnabled && <p className="mt-3 rounded-lg border border-rose-300/15 bg-rose-500/5 px-3 py-2 text-[11px] text-rose-100">触发效果至少需要伤害、标准状态或通知。</p>}
                     </article>
                   ))}
                 </div>
@@ -3620,13 +6088,30 @@ function HeadlessEffectEditor({
           </div>
         </div>}
 
+        {featureLike && value.targetingKind !== 'self' && <div className="rounded-xl border border-sky-400/15 bg-sky-500/[0.035] p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h5 className="text-xs font-semibold text-sky-100">目标豁免</h5>
+              <p className="mt-1 text-[11px] leading-5 text-sky-100/60">Host 会为每个权威目标分别掷 d20，并自动使用该目标的豁免加值；失败才应用状态与完整效果。</p>
+            </div>
+            <Toggle label={value.savingThrowEnabled ? '已启用逐目标豁免' : '启用逐目标豁免'} value={value.savingThrowEnabled} onChange={(savingThrowEnabled) => patch({ savingThrowEnabled })} />
+          </div>
+          {value.savingThrowEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <BuilderSelect label="豁免属性" value={value.savingThrowAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(savingThrowAbility) => patch({ savingThrowAbility: savingThrowAbility as AbilityKey })} />
+            <BuilderSelect label="豁免 DC" value={value.savingThrowDcMode} options={PERSISTENT_AREA_SAVE_DC_MODES} onChange={(savingThrowDcMode) => patch({ savingThrowDcMode: savingThrowDcMode as HeadlessEffectEditorDraft['savingThrowDcMode'] })} />
+            {value.savingThrowDcMode === 'fixed' && <BuilderNumber label="固定 DC" value={value.savingThrowDc} min={1} max={40} onChange={(savingThrowDc) => patch({ savingThrowDc })} />}
+            <BuilderSelect label="豁免成功" value={value.savingThrowOnSuccess} options={SAVE_SUCCESS_EFFECTS} onChange={(savingThrowOnSuccess) => patch({ savingThrowOnSuccess: savingThrowOnSuccess as HeadlessEffectEditorDraft['savingThrowOnSuccess'] })} />
+          </div>}
+        </div>}
+
         <div className="grid gap-3 xl:grid-cols-3">
           <fieldset className={`rounded-xl border p-3 ${value.damageEnabled ? 'border-rose-400/25 bg-rose-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
             <legend className="px-1"><Toggle label="伤害" value={value.damageEnabled} onChange={(damageEnabled) => patch({ damageEnabled })} /></legend>
-            {value.damageEnabled && <div className="mt-2 grid grid-cols-2 gap-3">
-              <BuilderNumber label="骰子数量" value={value.damageCount} min={1} max={12} onChange={(damageCount) => patch({ damageCount })} />
-              <BuilderNumber label="骰面" value={value.damageSides} min={2} max={100} onChange={(damageSides) => patch({ damageSides })} />
-              <BuilderNumber label="固定调整值" value={value.damageModifier} min={-1000000} max={1000000} onChange={(damageModifier) => patch({ damageModifier })} />
+            {value.damageEnabled && <div className="mt-2 space-y-3">
+              <Dnd5eDamageFormulaEditor
+                value={{ count: value.damageCount, sides: value.damageSides, fixedModifier: value.damageModifier, modifierFormula: value.damageModifierFormula }}
+                onChange={(formula) => patch({ damageCount: formula.count, damageSides: formula.sides, damageModifier: formula.fixedModifier, damageModifierFormula: formula.modifierFormula })}
+              />
               <BuilderSelect label="伤害类型" value={value.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patch({ damageType: damageType as Dnd5eDamageType })} />
             </div>}
           </fieldset>

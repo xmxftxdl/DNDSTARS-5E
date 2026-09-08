@@ -1,0 +1,1054 @@
+{
+  "id": "srd-5.1:adult-red-dragon",
+  "slug": "adult-red-dragon",
+  "name": "成年红龙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复入口：传奇侦测不再错误要求 DM 手工裁定；检定骰、修正值与传奇动作点走 Headless。真实 UI 专项已验证按钮、窗口、点数消耗及双端日志。",
+    "已修复运行时与入口：传奇移动使用当前窗口内的一次可选额度，不再累加到普通移动池；翼击限定飞行。已覆盖超距、模式错误、重复和过期请求；真实 UI 专项已覆盖取消移动与完成移动。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "frightful-presence",
+      "name": "骇人威仪",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.frightfulPresenceImmunityRounds"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "fire-breath",
+      "name": "火焰吐息",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.lengthFeet",
+        "rule.area.aimRangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-weapons-only",
+      "name": "多重攻击: Weapons Only",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "detect",
+      "name": "侦测",
+      "automation": "headless",
+      "rule": "ability-check",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.ability",
+        "rule.skillKey"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "tail-attack",
+      "name": "尾击攻击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "referencedActionId",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "wing-attack-costs-2-actions",
+      "name": "翼击（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "legendary-wing-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave",
+        "rule.conditionOnFailedSave",
+        "rule.followUpMovement.kind",
+        "rule.followUpMovement.maximumSpeedFraction"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "no-points",
+        "out-of-range",
+        "behind-wall",
+        "invalid-dice",
+        "move",
+        "move-too-far",
+        "wrong-mode",
+        "window-expired"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 9,
+      "slug": "adult-red-dragon",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:06:43.411Z",
+      "name": "成年红龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-adult-red-dragon-bite-1788556003485",
+      "combatId": "verify-ui-adult-red-dragon-bite-1788556003485:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "成年红龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 16+14=30 命中；共造成 33 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:07 PM\n结算\n\n成年红龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 16+14=30 命中；共造成 33 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 16；最终采用 16；调整值 +14。\n结果 · 30 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜2d10 骰面：6 + 7 = 13｜固定加值 +8｜小计 21\n伤害骰 · 啃咬（基础伤害 2·火焰）｜2d6 骰面：6 + 6 = 12｜固定加值 +0｜小计 12\n成年红龙｜消耗动作\n验证目标｜受到 33 点伤害｜HP 320 → 287",
+      "playerLog": "成年红龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 16+14=30 命中；共造成 33 点伤害。",
+      "afterHp": 287,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:07:11.921Z",
+      "evidenceFile": "ui-cases/monsters/009-adult-red-dragon.json"
+    },
+    {
+      "index": 16,
+      "slug": "adult-red-dragon",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:55:11.833Z",
+      "name": "成年红龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "17",
+      "total": 334,
+      "mapId": "verify-ui-adult-red-dragon-bite-1788566111896",
+      "combatId": "verify-ui-adult-red-dragon-bite-1788566111896:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "成年红龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+14=28 命中；共造成 27 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:55 PM\n结算\n\n成年红龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+14=28 命中；共造成 27 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 14；最终采用 14；调整值 +14。\n结果 · 28 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜2d10 骰面：4 + 8 = 12｜固定加值 +8｜小计 20\n伤害骰 · 啃咬（基础伤害 2·火焰）｜2d6 骰面：6 + 1 = 7｜固定加值 +0｜小计 7\n成年红龙｜消耗动作\n验证目标｜受到 27 点伤害｜HP 320 → 293",
+      "playerLog": "成年红龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+14=28 命中；共造成 27 点伤害。",
+      "afterHp": 293,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:55:39.495Z",
+      "evidenceFile": "ui-cases/monsters/016-adult-red-dragon.json"
+    },
+    {
+      "index": 0,
+      "mode": "specials",
+      "startedAt": "2026-09-04T23:09:26.181Z",
+      "slug": "adult-red-dragon",
+      "name": "成年红龙",
+      "actionId": "detect",
+      "actionName": "侦测",
+      "legendary": true,
+      "movement": "none",
+      "fixtureActionId": "bite",
+      "section": "legendaryActions",
+      "total": 7,
+      "mapId": "verify-ui-adult-red-dragon-detect-1788563367026",
+      "combatId": "verify-ui-adult-red-dragon-detect-1788563367026:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "before": {
+        "maps": [
+          {
+            "id": "verify-ui-adult-red-dragon-detect-1788563367026",
+            "name": "怪物验证 · 成年红龙",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "成年红龙",
+                "x": 245,
+                "y": 315,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 3,
+                "creatureSize": "超大型",
+                "type": "enemy",
+                "poolId": "srd-5.1:adult-red-dragon",
+                "hp": 256,
+                "maxHp": 256,
+                "dnd5eCombatState": {
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-detect-1788563367026:combat:1:actor",
+                  "monsterLegendaryActionPoints": 3,
+                  "monsterActionUsesByActionId": {},
+                  "schemaVersion": 2
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 385,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 100000,
+                "maxHp": 100000
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-adult-red-dragon-detect-1788563367026",
+        "updatedAt": 1788563370319,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 679,
+          "writerId": "client:4ad5147a-f2ac-4018-8e6c-0877bb053f7e",
+          "writtenAt": 1788563370532
+        }
+      },
+      "window": "传奇动作时机\n\n验证目标 的回合即将结束。使用一次传奇动作，或跳过后继续推进先攻。\n\n传奇动作点\n\n3 / 3\n\n侦测\n消耗 1 点\n\n该龙进行一次感知（察觉）检定。\n\n尾击攻击\n消耗 1 点\n\n该龙发动一次尾击。\n\n翼击（消耗 2 动作）\n消耗 2 点\n\n该龙拍打双翼。该龙 10 尺内每个生物必须通过一次 DC 22 的敏捷豁免，否则受到 15 (2d6 + 8) 点钝击伤害并倒地。随后，该龙可以飞行至多等于其飞行速度一半的距离。\n\n跳过并继续\n使用传奇动作",
+      "after": {
+        "maps": [
+          {
+            "id": "verify-ui-adult-red-dragon-detect-1788563367026",
+            "name": "怪物验证 · 成年红龙",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "成年红龙",
+                "x": 245,
+                "y": 315,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 3,
+                "creatureSize": "超大型",
+                "type": "enemy",
+                "poolId": "srd-5.1:adult-red-dragon",
+                "hp": 256,
+                "maxHp": 256,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-detect-1788563367026:combat:1:actor",
+                  "legendaryResistanceUses": 3,
+                  "monsterLegendaryActionPoints": 2,
+                  "monsterActionUsesByActionId": {}
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 385,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 320,
+                "maxHp": 320
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-detect-1788563367026:combat:1:witness",
+                  "monsterActionUsesByActionId": {}
+                }
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-adult-red-dragon-detect-1788563367026",
+        "updatedAt": 1788563386346,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 682,
+          "writerId": "client:4ad5147a-f2ac-4018-8e6c-0877bb053f7e",
+          "writtenAt": 1788563387245
+        }
+      },
+      "dmLog": "成年红龙使用传奇动作侦测：检定 20。",
+      "playerLog": "成年红龙使用传奇动作侦测：检定 20。",
+      "afterHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:09:56.214Z",
+      "evidenceFile": "ui-cases/specials/00.json"
+    },
+    {
+      "index": 1,
+      "mode": "specials",
+      "startedAt": "2026-09-04T23:10:00.855Z",
+      "slug": "adult-red-dragon",
+      "name": "成年红龙",
+      "actionId": "wing-attack-costs-2-actions",
+      "actionName": "翼击（消耗 2 动作）",
+      "legendary": true,
+      "movement": "cancel",
+      "fixtureActionId": "bite",
+      "section": "legendaryActions",
+      "total": 7,
+      "mapId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864",
+      "combatId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "before": {
+        "maps": [
+          {
+            "id": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864",
+            "name": "怪物验证 · 成年红龙",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "成年红龙",
+                "x": 245,
+                "y": 315,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 3,
+                "creatureSize": "超大型",
+                "type": "enemy",
+                "poolId": "srd-5.1:adult-red-dragon",
+                "hp": 256,
+                "maxHp": 256,
+                "dnd5eCombatState": {
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864:combat:1:actor",
+                  "monsterLegendaryActionPoints": 3,
+                  "monsterActionUsesByActionId": {},
+                  "schemaVersion": 2
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 385,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 100000,
+                "maxHp": 100000
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864",
+        "updatedAt": 1788563404971,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 685,
+          "writerId": "client:d16752d3-7b3b-4a98-891b-fd8da1e24798",
+          "writtenAt": 1788563405132
+        }
+      },
+      "window": "传奇动作时机\n\n验证目标 的回合即将结束。使用一次传奇动作，或跳过后继续推进先攻。\n\n传奇动作点\n\n3 / 3\n\n侦测\n消耗 1 点\n\n该龙进行一次感知（察觉）检定。\n\n尾击攻击\n消耗 1 点\n\n该龙发动一次尾击。\n\n翼击（消耗 2 动作）\n消耗 2 点\n\n该龙拍打双翼。该龙 10 尺内每个生物必须通过一次 DC 22 的敏捷豁免，否则受到 15 (2d6 + 8) 点钝击伤害并倒地。随后，该龙可以飞行至多等于其飞行速度一半的距离。\n\n跳过并继续\n使用传奇动作",
+      "movementPrompt": "为“翼击（消耗 2 动作） · 可选移动 40 尺（取消则留在原地）”选择移动终点（0/1）。\n取消本次 Activity",
+      "afterPurchase": {
+        "id": "actor",
+        "label": "成年红龙",
+        "x": 245,
+        "y": 315,
+        "color": "#ef4444",
+        "emoji": "M",
+        "size": 3,
+        "creatureSize": "超大型",
+        "type": "enemy",
+        "poolId": "srd-5.1:adult-red-dragon",
+        "hp": 256,
+        "maxHp": 256,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864:combat:1:actor",
+          "legendaryResistanceUses": 3,
+          "monsterLegendaryActionPoints": 1,
+          "monsterLegendaryMovement": {
+            "schemaVersion": 1,
+            "actionId": "wing-attack-costs-2-actions",
+            "boundaryKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864:combat:1:target",
+            "maximumFeet": 40,
+            "traversalMode": "fly",
+            "provokesOpportunityAttacks": true
+          },
+          "monsterActionUsesByActionId": {}
+        },
+        "dnd5eWorldTimeAppliedMinute": 480
+      },
+      "after": {
+        "maps": [
+          {
+            "id": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864",
+            "name": "怪物验证 · 成年红龙",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "成年红龙",
+                "x": 245,
+                "y": 315,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 3,
+                "creatureSize": "超大型",
+                "type": "enemy",
+                "poolId": "srd-5.1:adult-red-dragon",
+                "hp": 256,
+                "maxHp": 256,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864:combat:1:actor",
+                  "legendaryResistanceUses": 3,
+                  "monsterLegendaryActionPoints": 1,
+                  "monsterActionUsesByActionId": {}
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 385,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 300,
+                "maxHp": 320
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864:combat:1:witness",
+                  "monsterActionUsesByActionId": {}
+                }
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563401864",
+        "updatedAt": 1788563427120,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 688,
+          "writerId": "client:d16752d3-7b3b-4a98-891b-fd8da1e24798",
+          "writtenAt": 1788563427342
+        }
+      },
+      "dmLog": "成年红龙使用传奇动作翼击（消耗 2 动作）。",
+      "playerLog": "成年红龙使用传奇动作翼击（消耗 2 动作）。",
+      "afterHp": 300,
+      "conditions": [
+        "prone"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:10:34.999Z",
+      "evidenceFile": "ui-cases/specials/01.json"
+    },
+    {
+      "index": 2,
+      "mode": "specials",
+      "startedAt": "2026-09-04T23:10:39.564Z",
+      "slug": "adult-red-dragon",
+      "name": "成年红龙",
+      "actionId": "wing-attack-costs-2-actions",
+      "actionName": "翼击（消耗 2 动作）",
+      "legendary": true,
+      "movement": "move",
+      "fixtureActionId": "bite",
+      "section": "legendaryActions",
+      "total": 7,
+      "mapId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743",
+      "combatId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "before": {
+        "maps": [
+          {
+            "id": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743",
+            "name": "怪物验证 · 成年红龙",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "成年红龙",
+                "x": 245,
+                "y": 315,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 3,
+                "creatureSize": "超大型",
+                "type": "enemy",
+                "poolId": "srd-5.1:adult-red-dragon",
+                "hp": 256,
+                "maxHp": 256,
+                "dnd5eCombatState": {
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:actor",
+                  "monsterLegendaryActionPoints": 3,
+                  "monsterActionUsesByActionId": {},
+                  "schemaVersion": 2
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 385,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 100000,
+                "maxHp": 100000
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743",
+        "updatedAt": 1788563444067,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 691,
+          "writerId": "client:18c023d6-0b54-4534-829d-c981f1235921",
+          "writtenAt": 1788563444263
+        }
+      },
+      "window": "传奇动作时机\n\n验证目标 的回合即将结束。使用一次传奇动作，或跳过后继续推进先攻。\n\n传奇动作点\n\n3 / 3\n\n侦测\n消耗 1 点\n\n该龙进行一次感知（察觉）检定。\n\n尾击攻击\n消耗 1 点\n\n该龙发动一次尾击。\n\n翼击（消耗 2 动作）\n消耗 2 点\n\n该龙拍打双翼。该龙 10 尺内每个生物必须通过一次 DC 22 的敏捷豁免，否则受到 15 (2d6 + 8) 点钝击伤害并倒地。随后，该龙可以飞行至多等于其飞行速度一半的距离。\n\n跳过并继续\n使用传奇动作",
+      "movementPrompt": "为“翼击（消耗 2 动作） · 可选移动 40 尺（取消则留在原地）”选择移动终点（0/1）。\n取消本次 Activity",
+      "afterPurchase": {
+        "id": "actor",
+        "label": "成年红龙",
+        "x": 245,
+        "y": 315,
+        "color": "#ef4444",
+        "emoji": "M",
+        "size": 3,
+        "creatureSize": "超大型",
+        "type": "enemy",
+        "poolId": "srd-5.1:adult-red-dragon",
+        "hp": 256,
+        "maxHp": 256,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:actor",
+          "legendaryResistanceUses": 3,
+          "monsterLegendaryActionPoints": 1,
+          "monsterLegendaryMovement": {
+            "schemaVersion": 1,
+            "actionId": "wing-attack-costs-2-actions",
+            "boundaryKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:target",
+            "maximumFeet": 40,
+            "traversalMode": "fly",
+            "provokesOpportunityAttacks": true
+          },
+          "monsterActionUsesByActionId": {}
+        },
+        "dnd5eWorldTimeAppliedMinute": 480
+      },
+      "after": {
+        "maps": [
+          {
+            "id": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743",
+            "name": "怪物验证 · 成年红龙",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "成年红龙",
+                "x": 245,
+                "y": 245,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 3,
+                "creatureSize": "超大型",
+                "type": "enemy",
+                "poolId": "srd-5.1:adult-red-dragon",
+                "hp": 256,
+                "maxHp": 256,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:actor",
+                  "monsterMechanicMovementTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:target",
+                  "monsterMechanicMovementFeet": 5,
+                  "monsterMechanicMovementOrigin": {
+                    "x": 245,
+                    "y": 315
+                  },
+                  "monsterMechanicMovementLast": {
+                    "x": 245,
+                    "y": 245
+                  },
+                  "monsterMechanicMovementStraight": true,
+                  "legendaryResistanceUses": 3,
+                  "monsterLegendaryActionPoints": 1,
+                  "monsterActionUsesByActionId": {}
+                },
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "movementAnimation": {
+                  "id": "monster-move:verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:actor:1788563464251",
+                  "points": [
+                    {
+                      "x": 245,
+                      "y": 315
+                    },
+                    {
+                      "x": 245,
+                      "y": 245
+                    }
+                  ],
+                  "durationMs": 245,
+                  "issuedAt": 1788563464351
+                }
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 385,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 306,
+                "maxHp": 320
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743:combat:1:witness",
+                  "monsterActionUsesByActionId": {}
+                }
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-adult-red-dragon-wing-attack-costs-2-actions-1788563440743",
+        "updatedAt": 1788563466697,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 695,
+          "writerId": "client:18c023d6-0b54-4534-829d-c981f1235921",
+          "writtenAt": 1788563467128
+        }
+      },
+      "dmLog": "成年红龙使用传奇动作翼击（消耗 2 动作）。",
+      "playerLog": "成年红龙使用传奇动作翼击（消耗 2 动作）。",
+      "afterHp": 306,
+      "conditions": [
+        "prone"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:11:15.078Z",
+      "evidenceFile": "ui-cases/specials/02.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "传奇抗性",
+      "automation": "headless",
+      "rule": "legendary-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumUses"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "choose",
+        "decline",
+        "exhausted"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 37,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

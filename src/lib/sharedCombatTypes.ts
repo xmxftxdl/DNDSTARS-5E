@@ -4,12 +4,18 @@ import type { AbilityKey } from './dnd'
 import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 import type { CombatSettlementMode } from './combatSettlementMode'
-import type { Dnd5eMonsterControlStateV1 } from './monsterControlState'
-import type { Dnd5eMonsterTurnProgressV1 } from './monsterTurnProgress'
+import type { Dnd5eMonsterControlWireStateV1 } from './monsterControlState'
 import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
 import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
 import type { Dnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
+import type { Dnd5eMagicMouthConfigV1 } from '../rulesets/dnd5e/magicMouth'
+import type { Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
+import type { Dnd5eCreationDeclarationV1 } from '../rulesets/dnd5e/creation'
+import type { Dnd5eCreateOrDestroyWaterDeclarationV1 } from '../rulesets/dnd5e/createOrDestroyWater'
+
+export type { Dnd5eCreationDeclarationV1 } from '../rulesets/dnd5e/creation'
+export type { Dnd5eCreateOrDestroyWaterDeclarationV1 } from '../rulesets/dnd5e/createOrDestroyWater'
 
 // Shared DM/player state contracts transported through sharedApi.
 // Keep these runtime-free so UI, sync helpers, and headless services can depend
@@ -25,6 +31,8 @@ export type SharedJsonValue =
 
 export interface Dnd5eTurnEconomyCounts {
   turnKey: string
+  /** Host-persisted receipts for declarative requirements that allow one use per turn. */
+  usedOncePerTurnKeys?: readonly string[]
   /** 本回合已结算的单次武器攻击数，用于在刷新后继续额外攻击。 */
   attacksUsed: number
   action: { current: number; max: number }
@@ -33,7 +41,7 @@ export interface Dnd5eTurnEconomyCounts {
   /** 每回合一次与环境物件的免费交互；第二次需改用主动动作。 */
   objectInteraction?: { current: number; max: number }
   /** 5e 移动不是动作，也不消耗 AP；这里记录本回合尚可移动的尺数。 */
-  movement: { current: number; max: number }
+  movement: { current: number; max: number; spent?: number }
 }
 
 export type Dnd5eTurnEconomyByToken = Record<string, Dnd5eTurnEconomyCounts>
@@ -93,6 +101,7 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'monk-stillness-of-mind'; condition: 'charmed' | 'frightened' }
   | { feature: 'monk-empty-body' }
   | { feature: 'druid-wild-shape'; formId: string }
+  | { feature: 'druid-creature-form-heal'; slotLevel: number }
   | { feature: 'druid-end-wild-shape' }
   | { feature: 'warlock-hurl-through-hell-ready'; active: boolean }
   | { feature: 'linked-equipment-recall'; weaponId: string }
@@ -103,6 +112,8 @@ export interface Dnd5eAbilityCheckPayload {
   skill?: string
   /** Host-validated situational feature context selected before this check. */
   context?: 'push-pull-lift-break' | 'interact-with-dragons'
+  /** Host token inspected by a Perception check; required for source-relative obscuration effects. */
+  perceivedTargetId?: string
   mode?: 'normal' | 'advantage' | 'disadvantage'
   dc: number
   /** 部分检定由 DM 判定为一个动作；关闭时只进行检定，不消耗行动经济。 */
@@ -112,6 +123,12 @@ export interface Dnd5eAbilityCheckPayload {
 export interface Dnd5ePluginActionPayload {
   /** 完整的插件命名空间特性 ID，例如 com.example.rules:guardian-spark。 */
   featureId: string
+  /**
+   * Player-selected data-only modifiers for this Activity. The Host resolves
+   * ownership, delivery, damage type and costs from its registered package;
+   * clients can only name a feature that is already installed and owned.
+   */
+  modifierFeatureIds?: string[]
   /** 插件自定义的纯 JSON 参数；DM 仍会重建目标、距离与行动经济。 */
   payload?: SharedJsonValue
 }
@@ -122,6 +139,8 @@ export type Dnd5eRacialActionPayload =
 export interface Dnd5eItemUsePayload {
   /** 名称、数量、骰值与效果由 DM 端当前角色快照重建。 */
   instanceId: string
+  /** 多动作物品只提交动作 ID；实际动作定义与消耗由 DM 端模板重建。 */
+  useActionId?: string
   /** 地图落点仅是玩家请求；合法范围与实际占格由 DM/Headless 重建。 */
   targetCell?: GridCell
   /** 生物目标仅是玩家请求；关系、距离、命中与效果由 DM/Headless 重建。 */
@@ -152,6 +171,12 @@ export interface Dnd5eWeaponAttackOptions {
   offHandAttack?: boolean
   /** Bonus-action weapon attack entitlement opened by an imported feature. */
   featureBonusWeaponAttack?: boolean
+  /** Stable imported feature id for a generic post-Attack bonus weapon attack. */
+  featureBonusWeaponAttackId?: string
+  /** One-shot Host credential created by a unified Activity trigger. */
+  activityWeaponAttackGrantId?: string
+  /** Equipped hand selected for that Activity credential; Host rebuilds the weapon profile. */
+  activityWeaponAttackWeaponSlot?: 'main-hand' | 'off-hand'
   /** 猎人“灭群者”在同回合对原目标 5 尺内另一生物进行的免费攻击。 */
   hordeBreakerAttack?: boolean
   /** 猎人 11 级多重攻击；点击的 Token 作为万箭齐发中心或旋风攻击的目标确认点。 */
@@ -182,8 +207,59 @@ export interface Dnd5eSpellMetamagicPayload {
   heightenedTargetId?: string
 }
 
+/** Stable identifiers for controls granted by an already active spell. */
+export type Dnd5eSustainedSpellControlId =
+  | 'flame-blade'
+  | 'spiritual-weapon'
+  | 'call-lightning'
+  | 'expeditious-retreat'
+  | 'heat-metal'
+  | 'vampiric-touch'
+  | 'sunbeam'
+  | 'produce-flame'
+
+/** Host-normalized open declaration for the two bounded Minor Illusion modes. */
+export interface Dnd5eMinorIllusionConfigV1 {
+  mode: 'image' | 'sound'
+  description: string
+  soundVolume?: 'whisper' | 'normal' | 'scream'
+  soundPattern?: 'continuous' | 'intermittent' | 'discrete'
+}
+
+/** Host-normalized appearance and interior illumination chosen for Tiny Hut. */
+export interface Dnd5eTinyHutConfigV1 {
+  schemaVersion: 1
+  color: string
+  interiorIllumination: 'dim' | 'darkness'
+}
+
+/** Host-validated open declaration for Antipathy/Sympathy's semantic target. */
+export interface Dnd5eAntipathySympathyConfigV1 {
+  schemaVersion: 1
+  mode: 'antipathy' | 'sympathy'
+  targetKind: 'creature' | 'object' | 'area'
+  creatureCategory: string
+  targetDescription: string
+  /** Selected cube side length when targetKind is area (5-foot steps, max 200 feet). */
+  areaSizeFeet?: number
+}
+
 export interface Dnd5eSpellCastPayload {
   spellId: string
+  /** Host-validated ritual protocol; executes the ordinary spell effect but spends no action or slot. */
+  ritual?: true
+  /**
+   * Optional Host-owned persistent projection used only as this cast's
+   * geometric origin. Ownership and the projection mechanic's spellOrigin
+   * permission are revalidated by the authority Host.
+   */
+  spellOriginAreaId?: string
+  /**
+   * Held component focus used by a character/class cast. This is not an item
+   * spell source: the Host revalidates the held focus while retaining the
+   * caster's class features, spell slots and spellcasting ability.
+   */
+  focusItemInstanceId?: string
   /**
    * Inventory spell source selected by the player. All spell facts, costs and
    * ownership are resolved again by the DM Host; no client-supplied item
@@ -192,10 +268,33 @@ export interface Dnd5eSpellCastPayload {
   itemInstanceId?: string
   /** Selects one Host-declared action on a multi-action item. */
   itemUseActionId?: string
+  /**
+   * Inventory instance selected for an audited Activity operation such as
+   * Identify. This is separate from itemInstanceId, which means the item is
+   * the source of the spell itself.
+   */
+  activityInventoryInstanceId?: string
+  /**
+   * Character whose inventory owns activityInventoryInstanceId. Identify may
+   * target an unidentified item carried by any player character in the room;
+   * the Host revalidates this owner instead of assuming the caster.
+   */
+  activityInventoryCharacterId?: string
+  /** Optimistic-concurrency revision paired with activityInventoryInstanceId. */
+  expectedActivityInventoryRevision?: number
+  /** Host-validated inventory object targeted by the spell, never the source of the cast. */
+  targetInventoryInstanceId?: string
   /** The class whose spellcasting feature authorizes this cast. */
   castingClassId?: Dnd5eClassId
   /** The character's racial spell grant authorizes this cast instead of a class spellcasting feature. */
   racialInnate?: boolean
+  /** A Host-registered feature grant authorizes this cast and replaces spell-slot consumption. */
+  alternateResourceSpell?: { featureId: string; grantId: string }
+  /**
+   * Host-owned War Caster reaction credential. A client flag alone never grants
+   * an out-of-turn cast; the DM runtime binds it to a live opportunity trigger.
+   */
+  opportunityAttackSpell?: boolean
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
@@ -208,6 +307,8 @@ export interface Dnd5eSpellCastPayload {
   areaTargetCell?: GridCell
   /** Multi-origin area spells submit every distinct origin for Host validation. */
   areaTargetCells?: GridCell[]
+  /** Dancing Lights may remain separate or combine all four lights into one vague Medium humanoid. */
+  dancingLightsForm?: 'lights' | 'humanoid'
   /** 可旋转矩形模板的方向；DM 只接受 0–3 并据此重建覆盖格。 */
   areaTargetOrientation?: 0 | 1 | 2 | 3
   /** 通用可旋转长方形模板的自由角度；Host 会归一化为 0–359 度后重建覆盖格。 */
@@ -234,9 +335,11 @@ export interface Dnd5eSpellCastPayload {
   projectileTargetIds?: string[]
   /** 塑能学派14级“超限导能”：由DM端重新验证资格并掷后续反噬伤害。 */
   overchannel?: boolean
+  /** 通用声明式伤害骰最大化；Host 会重建特性、伤害类型与资源消耗。 */
+  damageMaximizationFeatureId?: string
   /** 塑能学派2级“法术塑形”：必须是本次区域法术所影响、且不含施法者的生物。 */
   sculptedTargetIds?: string[]
-  /** Creatures explicitly designated as unaffected by a persistent area such as Spirit Guardians. */
+  /** Creatures explicitly designated as unaffected by, or unable to trigger, a persistent area. */
   excludedAreaTargetIds?: string[]
   /** 术士超魔法；种类、已知选项、术法点与附加参数都由DM端重新验证。 */
   metamagic?: Dnd5eSpellMetamagicPayload
@@ -260,14 +363,237 @@ export interface Dnd5eSpellCastPayload {
     | 'eagle-splendor'
     | 'fox-cunning'
     | 'owl-wisdom'
+  /** 安定心神的两种规则分支；Host 只接受该法术声明的闭合选项。 */
+  calmEmotionsMode?: 'suppress' | 'indifferent'
+  /** 漠然分支中由玩家选定的有界生物组，Host 会重建为当时场上的具体目标。 */
+  calmEmotionsIndifferenceScope?: 'caster-allies' | 'caster-enemies' | 'everyone'
   /** 使用一个仍在维持的核心法术效果；不会再次施法或消费新的法术位。 */
-  sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  sustainedEffectAttack?: Dnd5eSustainedSpellControlId
   /** 独立法术实体或固定持续区域授予后续动作时，指向 Host 已创建并同步的地图实体。 */
   sustainedEffectAreaId?: string
   /** 群体医疗术的逐目标治疗分配；总和不得超过法术的治疗池。 */
   healingAllocations?: Array<{ targetTokenId: string; amount: number }>
   /** 焰击术等法术升环时，由施法者选择额外伤害加入哪一种法术伤害类型。 */
   higherSlotDamageType?: 'acid' | 'bludgeoning' | 'cold' | 'fire' | 'force' | 'lightning' | 'necrotic' | 'piercing' | 'poison' | 'psychic' | 'radiant' | 'slashing' | 'thunder'
+  /** Closed choices declared by a unified spell Activity; the Host validates every id and option. */
+  activityChoices?: Record<string, string>
+  /** Optional cast-time phrase for an Activity that explicitly accepts one, such as Arcane Lock. */
+  secretPhrase?: string
+  /** Spoken creature name required when True Resurrection creates a replacement body. */
+  trueResurrectionSpokenName?: string
+  /** Host-revalidated Magic Mouth message, observable trigger and repetition policy. */
+  magicMouth?: Dnd5eMagicMouthConfigV1
+  /** Message cantrip content. The Host trims and bounds it before any private delivery. */
+  communicationText?: string
+  /** Minor Illusion's bounded player declaration; the Host cross-checks it with the Activity mode. */
+  minorIllusion?: Dnd5eMinorIllusionConfigV1
+  /** Tiny Hut's bounded color and interior-light declaration. */
+  tinyHut?: Dnd5eTinyHutConfigV1
+  /** Host-normalized semantic declaration for Antipathy/Sympathy. */
+  antipathySympathy?: Dnd5eAntipathySympathyConfigV1
+}
+
+export interface Dnd5eSpellWhisperReplyPayload {
+  /** The accepted Message cast whose one-time reply channel is being used. */
+  originalActionId: string
+  text: string
+}
+
+export interface Dnd5eSendingDeclarationV1 {
+  schemaVersion: 1
+  /** A creature personally familiar to the caster; the DM verifies this during adjudication. */
+  recipientName: string
+  /** The exact player-authored message, bounded to no more than 25 words. */
+  message: string
+}
+
+export interface Dnd5eSendingResolutionV1 {
+  schemaVersion: 1
+  targetIntelligenceAtLeastOne: boolean
+  plane: 'same' | 'different'
+  /** Required only across planes. Rolls 1-5 fail; 6-100 deliver. */
+  crossPlaneRoll?: number
+  delivered: boolean
+  /** The target's optional immediate response, also bounded to 25 words. */
+  reply?: string
+}
+
+export interface Dnd5eAnimalMessengerDeclarationV1 {
+  schemaVersion: 1
+  /** Exact current-map token identity; the Host revalidates Tiny beast and 30-foot range. */
+  targetTokenId: string
+  targetName: string
+  /** A place the caster claims to have visited; the DM confirms that claim before settlement. */
+  destination: string
+  /** General description used by the beast to identify the only eligible recipient. */
+  recipientDescription: string
+  /** Exact player-authored message, bounded to no more than 25 words. */
+  message: string
+  /** DM-estimated route distance, used to expose the 25/50 miles-per-day rule in the UI. */
+  routeDistanceMiles: number
+}
+
+export interface Dnd5eAnimalMessengerResolutionV1 {
+  schemaVersion: 1
+  /** Confirms the caster has personally visited the declared destination. */
+  destinationPreviouslyVisitedConfirmed: boolean
+  /** Confirms the selected Tiny beast is currently visible to the caster. */
+  targetVisibleConfirmed: boolean
+}
+
+export interface Dnd5eAnimateDeadTargetV1 {
+  /** Exact current-map identity; the Host re-resolves its kind, name, and 10-foot range. */
+  tokenId: string
+  targetName: string
+  /** Present only while animating remains. Bones become a skeleton; a humanoid corpse becomes a zombie. */
+  remainsKind?: 'bone-pile' | 'humanoid-corpse'
+}
+
+export type Dnd5eCreateUndeadKindV1 = 'ghoul' | 'ghast' | 'wight' | 'mummy'
+
+export type Dnd5eAnimateDeadDeclarationV1 = {
+  schemaVersion: 1
+  mode: 'animate' | 'reassert-control'
+  /** Create Undead reuses this bounded corpse/control declaration and must name the chosen undead profile. */
+  undeadKind?: Dnd5eCreateUndeadKindV1
+  targets: Dnd5eAnimateDeadTargetV1[]
+}
+
+export interface Dnd5eAnimateDeadResolutionV1 {
+  schemaVersion: 1
+  /** DM confirms the displayed remains/control targets before the atomic map replacement. */
+  targetsConfirmed: boolean
+}
+
+export interface Dnd5eAnimateObjectsTargetV1 {
+  /** Exact current-map object identity; the Host re-resolves every mutable rule field. */
+  tokenId: string
+  targetName: string
+}
+
+export interface Dnd5eAnimateObjectsDeclarationV1 {
+  schemaVersion: 1
+  /** Selected unattended nonmagical map objects. Size costs are Host-derived, never player-authored. */
+  targets: Dnd5eAnimateObjectsTargetV1[]
+}
+
+export interface Dnd5eAnimateObjectsResolutionV1 {
+  schemaVersion: 1
+  /** DM confirms the displayed weighted-capacity and exact stat-block replacement plan. */
+  targetsConfirmed: boolean
+}
+
+export interface Dnd5eSequesterDeclarationV1 {
+  schemaVersion: 1
+  targetKind: 'creature' | 'object'
+  /** Exact map-token identity; the Host re-resolves its kind, name, and touch distance. */
+  targetTokenId: string
+  targetName: string
+  /** Optional observable event chosen by the caster. It must occur/be visible within 1 mile. */
+  endingCondition?: string
+}
+
+export interface Dnd5eSequesterResolutionV1 {
+  schemaVersion: 1
+  /** Objects do not require consent; creature casts cannot settle unless the DM confirms this. */
+  willingCreatureConfirmed: boolean
+}
+
+export interface Dnd5eWordOfRecallTargetV1 {
+  /** Exact current-map token identity; the Host re-resolves name, creature kind, and 5-foot distance. */
+  tokenId: string
+  name: string
+}
+
+export type Dnd5eWordOfRecallDeclarationV1 =
+  | {
+      schemaVersion: 1
+      mode: 'designate-sanctuary'
+      /** Player-authored human-readable name for the consecrated destination. */
+      sanctuaryName: string
+      /** Why this place is dedicated to, or strongly linked with, the caster's deity. */
+      deityConnection: string
+    }
+  | {
+      schemaVersion: 1
+      mode: 'recall'
+      /** Up to five willing creatures in addition to the caster. */
+      targets: Dnd5eWordOfRecallTargetV1[]
+    }
+
+export interface Dnd5eWordOfRecallResolutionV1 {
+  schemaVersion: 1
+  /** Required while designating a sanctuary; confirms the rules-text location restriction. */
+  sanctuaryConsecratedConfirmed: boolean
+  /** Required while recalling; confirms every declared companion is willing. */
+  willingCreaturesConfirmed: boolean
+}
+
+export interface Dnd5eWishTargetV1 {
+  /** Exact map-token identity; the Host re-resolves the token and name. */
+  tokenId: string
+  name: string
+}
+
+export type Dnd5eWishDeclarationV1 =
+  | {
+      schemaVersion: 1
+      mode: 'duplicate-spell'
+      spellId: string
+      spellName: string
+      spellLevel: number
+    }
+  | {
+      schemaVersion: 1
+      mode: 'create-object'
+      objectDescription: string
+      valueGp: number
+      maximumDimensionFeet: number
+      placementDescription: string
+    }
+  | {
+      schemaVersion: 1
+      mode: 'heal-and-restore'
+      targets: Dnd5eWishTargetV1[]
+    }
+  | {
+      schemaVersion: 1
+      mode: 'grant-resistance'
+      targets: Dnd5eWishTargetV1[]
+      damageType: Dnd5eDamageType
+    }
+  | {
+      schemaVersion: 1
+      mode: 'grant-immunity'
+      targets: Dnd5eWishTargetV1[]
+      namedEffect: string
+    }
+  | {
+      schemaVersion: 1
+      mode: 'reroll-last-round'
+      rollDescription: string
+      rollMode: 'advantage' | 'disadvantage'
+    }
+  | {
+      schemaVersion: 1
+      mode: 'open-ended'
+      exactWish: string
+    }
+
+export interface Dnd5eSpellWhisperEnvelope {
+  direction: 'message' | 'reply' | 'sending-result'
+  originalActionId: string
+  spellId: 'message' | 'sending'
+  casterTokenId: string
+  casterCharacterId: string
+  casterName: string
+  targetTokenId: string
+  targetCharacterId: string
+  targetName: string
+  text: string
+  allowsImmediateReply: boolean
+  expiresAt: number
+  sending?: Dnd5eSendingResolutionV1
 }
 
 /**
@@ -275,16 +601,61 @@ export interface Dnd5eSpellCastPayload {
  * 目标、伤害、治疗与状态效果必须由 DM 通过 dm-adjudication Interrupt 回填，
  * 不能从这个玩家可写的请求载荷进入 Headless。
  */
+export type Dnd5eAdjudicatedSpellCastingVariant =
+  | 'plant-growth-action'
+  | 'plant-growth-8-hours'
+
 export interface Dnd5eAdjudicatedSpellPayload {
   spellId: string
   /** The class whose spellcasting feature authorizes this cast. */
   castingClassId?: Dnd5eClassId
   slotLevel: number
+  /**
+   * Voice-table narrative protocol. The Host accepts this only for a spell
+   * without full automation or for an audited voice-narrative spell. It
+   * spends the selected slot without opening a DM-adjudication interrupt and
+   * never accepts player-authored target/effect mutations.
+   */
+  narrativeOnly?: true
+  /** Host-audited rules-text mode for spells with mutually exclusive casting times. */
+  castingVariant?: Dnd5eAdjudicatedSpellCastingVariant
+  /** Requests the class's ritual-casting protocol. Host validates the spell and class; no slot is spent. */
+  ritual?: true
+  /**
+   * A bounded table declaration for a Host-approved environment-narrative
+   * spell. It records the player's selected legal mode and scene description,
+   * but never authorizes a player to mutate map geometry or creature state.
+   */
+  narrativeContext?: string
+  /** Sending's bounded player declaration. Delivery and reply remain Host-authored. */
+  sending?: Dnd5eSendingDeclarationV1
+  /** Animal Messenger's bounded target, route, recipient, and message declaration. */
+  animalMessenger?: Dnd5eAnimalMessengerDeclarationV1
+  /** Animate Dead's bounded mode and exact remains/controlled-undead targets. */
+  animateDead?: Dnd5eAnimateDeadDeclarationV1
+  /** Animate Objects' exact unattended nonmagical object targets. */
+  animateObjects?: Dnd5eAnimateObjectsDeclarationV1
+  /** Creation's exact material mix, bounded cube edge and map placement. */
+  creation?: Dnd5eCreationDeclarationV1
+  /** Create or Destroy Water's exact mode, volume/area and map target. */
+  createOrDestroyWater?: Dnd5eCreateOrDestroyWaterDeclarationV1
+  /** Sequester's bounded target and optional early-ending declaration. */
+  sequester?: Dnd5eSequesterDeclarationV1
+  /** Word of Recall's sanctuary-designation or bounded willing-companion declaration. */
+  wordOfRecall?: Dnd5eWordOfRecallDeclarationV1
+  /** Wish's exact selected rules mode and bounded player-authored declaration. */
+  wish?: Dnd5eWishDeclarationV1
 }
 
 export interface Dnd5ePersistentAreaMovePayload {
   areaId: string
   targetCell: GridCell
+  /**
+   * Multi-origin persistent spells (currently Dancing Lights) submit every
+   * independently moved origin in stable creation order. `targetCell` remains
+   * the first destination for backwards compatibility with older clients.
+   */
+  targetCells?: GridCell[]
 }
 
 export interface SharedCombatState {
@@ -296,12 +667,10 @@ export interface SharedCombatState {
   initiativeOrder: InitiativeEntry[]
   /** DM 权威的结算策略；旧快照缺失时按 automatic 处理。 */
   settlementMode?: CombatSettlementMode
-  /** DM-authoritative automatic/manual monster control and safe takeover state. */
-  monsterControl?: Dnd5eMonsterControlStateV1
+  /** Legacy-compatible envelope; normalized to permanent DM manual monster control. */
+  monsterControl?: Dnd5eMonsterControlWireStateV1
   /** Room-wide gate. DM adjudications remain blocked here until the DM explicitly resumes combat. */
   flowPause?: SharedCombatFlowPauseV1
-  /** Short-lived authority lease shown while the active monster plan is pending. */
-  monsterTurnProgress?: Dnd5eMonsterTurnProgressV1
   dnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   /** DM-pinned rules and exact plugin set; active room combat rejects plugin actions when absent. */
   effectiveRules?: Dnd5eEffectiveRulesContextV1
@@ -316,17 +685,22 @@ export interface SharedCombatState {
 }
 
 export type Dnd5eBasicActionPayload =
-  | { kind: 'dash' }
+  | { kind: 'dash'; sourceSpellId?: 'expeditious-retreat' }
   | { kind: 'hide' }
   | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string }
   | { kind: 'ready'; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetTokenId?: string }
   | { kind: 'use-object'; interactionId: string }
-  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
-  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
+  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; activityBasicActionGrantId?: string }
+  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; activityBasicActionGrantId?: string }
   | { kind: 'release-grapple'; targetTokenId: string }
   | { kind: 'escape-grapple'; targetTokenId: string }
   | { kind: 'escape-effect' }
+  | { kind: 'dismiss-effect'; effectId: string }
+  | { kind: 'set-flame-blade-manifestation'; effectId: string; manifested: boolean }
+  | { kind: 'dismiss-warding-bond' }
   | { kind: 'wake'; targetTokenId: string }
+  | { kind: 'command-animate-dead'; targetTokenIds: string[]; command: string }
+  | { kind: 'command-animate-objects'; targetTokenIds: string[]; command: string }
   | { kind: 'other-action'; description?: string }
   | { kind: 'other-bonus-action'; description?: string }
 
@@ -349,6 +723,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-item-use'
     | 'dnd5e-ability-check'
     | 'dnd5e-spell-cast'
+    | 'dnd5e-spell-whisper-reply'
     | 'dnd5e-persistent-area-move'
     | 'dnd5e-adjudicated-spell'
     | 'dnd5e-map-interaction'
@@ -379,6 +754,7 @@ export interface SharedPlayerActionState {
   dnd5eAbilityCheck?: Dnd5eAbilityCheckPayload
   dnd5eWeaponAttackOptions?: Dnd5eWeaponAttackOptions
   dnd5eSpellCast?: Dnd5eSpellCastPayload
+  dnd5eSpellWhisperReply?: Dnd5eSpellWhisperReplyPayload
   dnd5ePersistentAreaMove?: Dnd5ePersistentAreaMovePayload
   dnd5eAdjudicatedSpell?: Dnd5eAdjudicatedSpellPayload
   dnd5eMapInteraction?: Dnd5eMapInteractionPayload
@@ -424,6 +800,8 @@ export interface SharedPlayerActionAckState {
     triggeredFeatureIds: string[]
     consumedFeatureIds: string[]
   }
+  /** Private, server-recipient-filtered Message delivery. Never persisted to the public combat log. */
+  spellWhisper?: Dnd5eSpellWhisperEnvelope
   round: number
   initiativeIndex: number
   updatedAt: number
@@ -453,8 +831,9 @@ export interface SharedDiceEventsState {
   updatedAt: number
 }
 
-// Result-broadcast path. DM emits one roll-request carrying the already-decided
-// values; each end renders the same terminal face from `values`.
+// Dice presentation handshake. Ordinary events carry an already-decided result.
+// A player-owned d20 uses request -> result so the player's browser generates
+// and animates the authoritative face before the Host resumes Headless combat.
 export interface SharedRollRequestEvent {
   eventId: string
   mapId: string
@@ -466,6 +845,10 @@ export interface SharedRollRequestEvent {
   values: number[]
   label: string
   targetName: string
+  delivery?: 'broadcast-result' | 'player-roll-request' | 'player-roll-result'
+  targetCharacterId?: string
+  rollKind?: 'attack' | 'ability-check' | 'saving-throw'
+  savingThrowAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
   updatedAt: number
 }
 

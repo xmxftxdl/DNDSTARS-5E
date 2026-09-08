@@ -38,11 +38,68 @@ describe('PDF Source Repository', () => {
     expect(await repository.loadDocument('pdf_b')).toBeNull()
   })
 
+  it('按最近访问顺序列出本机保存的 PDF 文档', async () => {
+    const repository = createMemoryPdfSourceRepositoryForTests()
+    vi.spyOn(Date, 'now').mockReturnValueOnce(1).mockReturnValueOnce(2).mockReturnValueOnce(3)
+    await repository.saveDocument(document('pdf_a'), [page('pdf_a')])
+    await repository.saveDocument(document('pdf_b'), [page('pdf_b')])
+    await repository.loadDocument('pdf_a')
+    expect((await repository.listDocuments()).map((entry) => entry.id)).toEqual(['pdf_a', 'pdf_b'])
+  })
+
+  it('把原 PDF 与文字索引保存在同一份本机文档记录中', async () => {
+    const repository = createMemoryPdfSourceRepositoryForTests()
+    const original = new File(['%PDF-original-layout'], '原始冒险.pdf', { type: 'application/pdf', lastModified: 42 })
+    await repository.saveDocument(document(), [page()], original)
+
+    const restored = await repository.loadOriginalFile('pdf_a')
+    expect(restored?.name).toBe('原始冒险.pdf')
+    expect(restored?.lastModified).toBe(42)
+    expect(await restored?.text()).toBe('%PDF-original-layout')
+  })
+
+  it('允许旧分析在校验后补挂原 PDF', async () => {
+    const repository = createMemoryPdfSourceRepositoryForTests()
+    await repository.saveDocument(document(), [page()])
+    expect(await repository.loadOriginalFile('pdf_a')).toBeNull()
+
+    await repository.saveOriginalFile('pdf_a', new File(['%PDF-restored'], 'pdf_a.pdf', { type: 'application/pdf' }))
+    expect(await (await repository.loadOriginalFile('pdf_a'))?.text()).toBe('%PDF-restored')
+  })
+
+  it('在当前设备保存任务原始 PDF，并按战役隔离恢复', async () => {
+    const repository = createMemoryPdfSourceRepositoryForTests()
+    const source = new File(['pdf-content'], '冒险.pdf', { type: 'application/pdf', lastModified: 42 })
+    await repository.saveJobFiles('campaign-a', 'job-1', [source])
+
+    expect(await repository.loadJobFiles('campaign-b', 'job-1')).toBeNull()
+    const restored = await repository.loadJobFiles('campaign-a', 'job-1')
+    expect(restored).toHaveLength(1)
+    expect(restored?.[0]?.name).toBe('冒险.pdf')
+    expect(restored?.[0]?.lastModified).toBe(42)
+    expect(await restored?.[0]?.text()).toBe('pdf-content')
+
+    await repository.deleteJobFiles('job-1')
+    expect(await repository.loadJobFiles('campaign-a', 'job-1')).toBeNull()
+  })
+
+  it('清除本机断点时删除全部任务 PDF 副本', async () => {
+    const repository = createMemoryPdfSourceRepositoryForTests()
+    await repository.saveJobFiles('campaign-a', 'job-1', [new File(['a'], 'a.pdf', { type: 'application/pdf' })])
+    await repository.saveJobFiles('campaign-a', 'job-2', [new File(['b'], 'b.pdf', { type: 'application/pdf' })])
+    await repository.clearJobFiles()
+    expect(await repository.loadJobFiles('campaign-a', 'job-1')).toBeNull()
+    expect(await repository.loadJobFiles('campaign-a', 'job-2')).toBeNull()
+  })
+
   it('缺少 IndexedDB 时读取优雅降级，保存给调用方可捕获的错误', async () => {
     vi.stubGlobal('indexedDB', undefined)
     const repository = createIndexedDbPdfSourceRepository()
+    expect(await repository.listDocuments()).toEqual([])
     expect(await repository.loadPage('missing', 1)).toBeNull()
+    expect(await repository.loadJobFiles('campaign-a', 'missing')).toBeNull()
     await expect(repository.saveDocument(document(), [page()])).rejects.toThrow('pdf-source-repository-unavailable')
+    await expect(repository.saveJobFiles('campaign-a', 'job-1', [new File(['a'], 'a.pdf')])).rejects.toThrow('pdf-source-repository-unavailable')
     await expect(repository.deleteDocument('missing')).resolves.toBeUndefined()
   })
 })

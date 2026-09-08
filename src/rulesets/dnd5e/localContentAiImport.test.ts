@@ -140,7 +140,58 @@ describe('natural-language local content AI import', () => {
     }))
   })
 
-  it('uses Luna first and upgrades to Terra only when the Host rejects an empty draft', async () => {
+  it('accepts a feature draft with an auxiliary unified Activity', async () => {
+    const registry = new AiProviderRegistryV1()
+    registry.register(runtime({
+      schemaVersion: 1,
+      contentJson: JSON.stringify({
+        name: 'Unified Activity draft',
+        features: [{
+          id: 'restorative-pulse', name: 'Restorative Pulse', summary: 'Restore vitality.',
+          description: 'Uses the shared Activity execution contract.', automation: 'full',
+        }],
+        activities: [{
+          schemaVersion: 1,
+          id: 'restorative-pulse-activity',
+          name: 'Restorative Pulse',
+          activation: { kind: 'action', cost: 1 },
+          invocation: { kind: 'active', confirmation: 'actor-choice' },
+          target: { kind: 'self' },
+          outcomes: [{ id: 'heal', when: { kind: 'always' }, operations: [{
+            id: 'healing', kind: 'healing', target: 'actor', amount: { kind: 'constant', value: 1 },
+          }] }],
+          automation: {
+            schemaVersion: 1, level: 'full',
+            supportedPhases: ['eligibility', 'cost', 'targeting', 'healing', 'persistence'],
+            manualPhases: [], limitations: [],
+          },
+          legacySource: { kind: 'feature', id: 'restorative-pulse' },
+        }],
+      }),
+      assumptions: [],
+      unsupported: [],
+    }))
+
+    const result = await generateDnd5eLocalContentAiDraft({
+      sourceText: 'Create a restorative feature that uses an action.',
+      registry,
+      selection,
+      targetKind: 'feature',
+    })
+    const prepared = await prepareDnd5eLocalContentJson(result.draft.contentJson)
+    expect(result.fallback).toBe(false)
+    expect(prepared.package.content.features).toEqual([
+      expect.objectContaining({ id: 'restorative-pulse', automation: 'full' }),
+    ])
+    expect(prepared.package.content.activities).toEqual([
+      expect.objectContaining({
+        id: 'restorative-pulse-activity',
+        legacySource: { kind: 'feature', id: 'restorative-pulse' },
+      }),
+    ])
+  })
+
+  it('uses the fixed Luna route and rejects an empty draft without upgrading to Terra', async () => {
     const lunaId = 'external:gpt-5.6-luna'
     const terraId = 'external:synthesis:gpt-5.6-terra'
     const provider = routedExternalRuntime({
@@ -169,7 +220,7 @@ describe('natural-language local content AI import', () => {
     const registry = new AiProviderRegistryV1()
     registry.register(provider)
 
-    const result = await generateDnd5eLocalContentAiDraft({
+    await expect(generateDnd5eLocalContentAiDraft({
       sourceText: '新增一个名为余烬专注的自定义特性。',
       registry,
       selection: {
@@ -179,23 +230,10 @@ describe('natural-language local content AI import', () => {
         allowPaidFallback: false,
         maxCreditsPerTask: 0,
       },
-    })
+    })).rejects.toThrow('模型没有生成任何可导入条目')
 
-    expect(provider.generateStructured).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(provider.generateStructured).mock.calls.map((call) => call[1].model?.id))
-      .toEqual([lunaId, terraId])
-    expect(result).toMatchObject({
-      model: { id: terraId, name: 'GPT-5.6 Terra' },
-      routing: {
-        primary: { modelId: lunaId, tier: 'luna' },
-        fallback: { modelId: terraId, tier: 'terra' },
-        fallbackUsed: true,
-        fallbackReason: 'empty-content',
-      },
-    })
-    expect(result.draft.assumptions.join('\n')).toContain('已自动升级到 GPT-5.6 Terra 重试')
-    const prepared = await prepareDnd5eLocalContentJson(result.draft.contentJson)
-    expect(prepared.package.content.features).toContainEqual(expect.objectContaining({ id: 'ember-focus' }))
+    expect(provider.generateStructured).toHaveBeenCalledOnce()
+    expect(vi.mocked(provider.generateStructured).mock.calls[0][1].model?.id).toBe(lunaId)
   })
 
   it('does not call Terra when the Luna draft passes the Host gate', async () => {

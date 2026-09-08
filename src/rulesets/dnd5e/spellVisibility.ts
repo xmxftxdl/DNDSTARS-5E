@@ -1,3 +1,8 @@
+import type { Character } from '../../types/character'
+import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { dnd5eStandardConditionId } from './conditions'
+import type { Dnd5eActivityTargetV1 } from './activities/dnd5eActivityContracts'
+
 /**
  * SRD 5.1 spell visibility audit.
  *
@@ -9,6 +14,7 @@
 export type Dnd5eSpellVisibilityRequirement = 'required' | 'conditional' | 'not-required'
 
 const REQUIRED_SIGHT_SPELL_IDS = new Set<string>([
+  'acid-splash',
   'animal-friendship',
   'animal-messenger',
   'animal-shapes',
@@ -115,3 +121,28 @@ export function dnd5eSpellVisibilityRequirement(
 
 export const DND5E_REQUIRED_SIGHT_SPELL_IDS: ReadonlySet<string> = REQUIRED_SIGHT_SPELL_IDS
 export const DND5E_CONDITIONAL_SIGHT_SPELL_IDS: ReadonlySet<string> = CONDITIONAL_SIGHT_SPELL_IDS
+
+type Dnd5eVisibleTargetRequirement = boolean | 'primary' | 'placement' | undefined
+
+/** Host-authoritative condition check shared by both core spell cast pipelines. */
+export function dnd5eCharacterIsBlinded(
+  character: Pick<Character, 'conditions' | 'dnd5eCombatState'>,
+): boolean {
+  return dnd5eConditionsFromActiveEffects(
+    character.dnd5eCombatState?.activeEffects,
+    character.conditions,
+  ).some((condition) => dnd5eStandardConditionId(condition) === 'blinded')
+}
+
+/** True when the spell text/Activity contract requires the caster to see its target or placement. */
+export function dnd5eSpellTargetRequiresSight(input: {
+  requiresVisibleTarget?: Dnd5eVisibleTargetRequirement
+  activityTarget?: Dnd5eActivityTargetV1
+}): boolean {
+  if (
+    input.requiresVisibleTarget === true ||
+    input.requiresVisibleTarget === 'primary' ||
+    input.requiresVisibleTarget === 'placement'
+  ) return true
+  return input.activityTarget?.kind !== 'self' && input.activityTarget?.requiresLineOfSight === true
+}

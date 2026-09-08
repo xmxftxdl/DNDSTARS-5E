@@ -1,0 +1,162 @@
+{
+  "mapId": "kraken-bite-ui-1788601608029",
+  "combatId": "kraken-bite-ui-1788601608029:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T09:46:48.512Z",
+  "beforeHp": 200,
+  "afterTentacle": {
+    "currentHp": 175,
+    "conditions": [
+      "grappled",
+      "restrained"
+    ],
+    "activeEffects": [
+      {
+        "schemaVersion": 1,
+        "id": "relation:grapple:actor:tentacle:target",
+        "definitionId": "condition:grappled",
+        "label": "擒抱",
+        "kind": "condition",
+        "standardCondition": "grappled",
+        "source": {
+          "kind": "monster",
+          "actorId": "actor",
+          "actorName": "克拉肯",
+          "rulesId": "monster:srd-5.1:kraken:tentacle:tentacle-grapple",
+          "magical": false
+        },
+        "appliedAt": 1788601622930,
+        "duration": {
+          "type": "permanent"
+        },
+        "escapeCheck": {
+          "ability": "str",
+          "skill": "athletics",
+          "alternativeAbility": "dex",
+          "alternativeSkill": "acrobatics",
+          "dc": 18,
+          "economy": "action"
+        },
+        "relation": {
+          "schemaVersion": 1,
+          "kind": "grapple",
+          "sourceActorId": "actor",
+          "sourceActionId": "tentacle",
+          "slotGroup": "tentacle",
+          "maxDistanceFeet": 30,
+          "movement": "drag-target",
+          "endsOnSourceIncapacitated": true
+        },
+        "stackingKey": "relation:grapple:actor:tentacle:target",
+        "stackingPolicy": "refresh-duration",
+        "visibility": "public"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "relation-dependent:grapple:actor:tentacle:target:restrained",
+        "definitionId": "condition:restrained",
+        "label": "束缚",
+        "kind": "condition",
+        "standardCondition": "restrained",
+        "source": {
+          "kind": "monster",
+          "actorId": "actor",
+          "actorName": "克拉肯",
+          "rulesId": "monster:srd-5.1:kraken:tentacle:tentacle-grapple",
+          "magical": false
+        },
+        "appliedAt": 1788601622931,
+        "duration": {
+          "type": "permanent"
+        },
+        "dependsOnEffectId": "relation:grapple:actor:tentacle:target",
+        "stackingKey": "relation-dependent:grapple:actor:tentacle:target:restrained",
+        "stackingPolicy": "refresh-duration",
+        "visibility": "public"
+      }
+    ]
+  },
+  "afterBite": {
+    "currentHp": 144,
+    "conditions": [
+      "restrained",
+      "blinded"
+    ],
+    "activeEffects": [
+      {
+        "schemaVersion": 1,
+        "id": "relation:swallowed:actor:swallow:target",
+        "definitionId": "condition:restrained",
+        "label": "束缚",
+        "kind": "condition",
+        "standardCondition": "restrained",
+        "source": {
+          "kind": "monster",
+          "actorId": "actor",
+          "actorName": "克拉肯",
+          "rulesId": "monster:srd-5.1:kraken:bite:bite-swallow",
+          "magical": false
+        },
+        "appliedAt": 1788601640284,
+        "duration": {
+          "type": "permanent"
+        },
+        "periodicDamage": {
+          "timing": "source-turn-start",
+          "count": 12,
+          "sides": 6,
+          "modifier": 0,
+          "type": "acid"
+        },
+        "relation": {
+          "schemaVersion": 1,
+          "kind": "swallowed",
+          "sourceActorId": "actor",
+          "sourceActionId": "bite",
+          "slotGroup": "swallow",
+          "maxDistanceFeet": 5,
+          "movement": "carry-target",
+          "endsOnSourceIncapacitated": false
+        },
+        "stackingKey": "relation:swallowed:actor:swallow:target",
+        "stackingPolicy": "refresh-duration",
+        "visibility": "public"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "relation-dependent:swallowed:actor:swallow:target:blinded",
+        "definitionId": "condition:blinded",
+        "label": "目盲",
+        "kind": "condition",
+        "standardCondition": "blinded",
+        "source": {
+          "kind": "monster",
+          "actorId": "actor",
+          "actorName": "克拉肯",
+          "rulesId": "monster:srd-5.1:kraken:bite:bite-swallow",
+          "magical": false
+        },
+        "appliedAt": 1788601640286,
+        "duration": {
+          "type": "permanent"
+        },
+        "dependsOnEffectId": "relation:swallowed:actor:swallow:target",
+        "stackingKey": "relation-dependent:swallowed:actor:swallow:target:blinded",
+        "stackingPolicy": "refresh-duration",
+        "visibility": "public"
+      }
+    ],
+    "actionAvailable": 0
+  },
+  "dmLogs": [
+    "海妖克拉肯 使用触手攻击 吞咽验证目标：触手 → 吞咽验证目标 16+17=33 命中；共造成 25 点伤害。",
+    "海妖克拉肯 使用啃咬攻击 吞咽验证目标：啃咬 → 吞咽验证目标 16+17=33 命中；共造成 31 点伤害。"
+  ],
+  "playerLogs": [
+    "海妖克拉肯 使用触手攻击 吞咽验证目标：触手 → 吞咽验证目标 16+17=33 命中；共造成 25 点伤害。",
+    "海妖克拉肯 使用啃咬攻击 吞咽验证目标：啃咬 → 吞咽验证目标 16+17=33 命中；共造成 31 点伤害。"
+  ],
+  "status": "passed",
+  "finishedAt": "2026-09-05T09:47:23.429Z"
+}

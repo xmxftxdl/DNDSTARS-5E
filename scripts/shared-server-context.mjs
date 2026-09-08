@@ -33,10 +33,12 @@ export function createSharedServerContext(options) {
     eventClients: new Map(),
     eventBacklog: new Map(),
     eventSequences: new Map(),
+    pushNotificationDebounce: new Map(),
     storage,
     telemetry,
     serverInstanceId: options.serverInstanceId ?? randomUUID(),
     serverStartedAt: options.serverStartedAt ?? Date.now(),
     serverBuildId: options.serverBuildId,
+    playerAiService: options.playerAiService ?? null,
   }
 }

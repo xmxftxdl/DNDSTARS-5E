@@ -8,11 +8,13 @@ const TEMPLATE: Dnd5eMonsterAbilityTemplate = {
   id: 'srd-5.1:test:trait:0:magic-resistance',
   section: 'trait',
   name: '魔法抗性',
-  description: '对抗法术和其他魔法效应时进行的豁免检定具有优势。',
+  description: '【名称】对抗法术和其他魔法效应时进行的豁免检定具有优势。',
   sourceMonsterId: 'srd-5.1:test',
   sourceMonsterName: '测试魔物',
   sourceMonsterEnglishName: 'Test Monster',
+  sourceCount: 3,
   ruleKind: 'magic-resistance',
+  mechanicTags: ['魔法抗性'],
   dependencyCount: 0,
   searchText: '魔法抗性 magic-resistance 测试魔物 test monster',
   sourceIndex: 0,
@@ -29,7 +31,8 @@ describe('Dnd5eMonsterAbilityTemplateLibrary', () => {
     }))
     expect(markup).toContain('Headless 怪物能力模板库')
     expect(markup).toContain('魔法抗性')
-    expect(markup).toContain('测试魔物 / Test Monster')
+    expect(markup).toContain('通用模板 · 3 个图鉴来源')
+    expect(markup).toContain('【名称】')
     expect(markup).toContain('对抗法术和其他魔法效应')
   })
 

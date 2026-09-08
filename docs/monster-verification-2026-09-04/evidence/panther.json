@@ -1,0 +1,174 @@
+{
+  "id": "srd-5.1:panther",
+  "slug": "panther",
+  "name": "黑豹",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "bonusActions",
+      "sectionLabel": "附赠动作",
+      "id": "pounce-bite-bonus-action",
+      "name": "猛扑：啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "economy",
+        "automation",
+        "referencedActionId",
+        "targetEligibility.kind",
+        "targetEligibility.predicates[].kind",
+        "targetEligibility.predicates[].condition"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 260,
+      "slug": "panther",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:04:43.048Z",
+      "name": "黑豹",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/4",
+      "total": 334,
+      "mapId": "verify-ui-panther-bite-1788570283098",
+      "combatId": "verify-ui-panther-bite-1788570283098:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "黑豹 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+4=7 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:04 PM\n攻击\n\n黑豹 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+4=7 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 3；最终采用 3；调整值 +4。\n结果 · 7 vs AC 10：未命中。\n黑豹｜消耗动作",
+      "playerLog": "黑豹 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+4=7 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:05:03.529Z",
+      "evidenceFile": "ui-cases/monsters/260-panther.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "猛扑",
+      "automation": "headless",
+      "rule": "charge-damage",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.minimumStraightMovementFeet",
+        "rule.actionId",
+        "rule.savingThrowOnHit.ability",
+        "rule.savingThrowOnHit.dc",
+        "rule.savingThrowOnHit.conditionOnFailedSave",
+        "rule.bonusActionFollowUp.actionId",
+        "rule.bonusActionFollowUp.referencedActionId",
+        "rule.bonusActionFollowUp.requiredTargetCondition"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "no-movement",
+        "below-threshold",
+        "at-threshold"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 12,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

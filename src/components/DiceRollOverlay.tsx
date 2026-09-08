@@ -6,6 +6,8 @@ import DiceOverlayPortal from './DiceOverlayPortal'
 export interface D20AttackRoll {
   value: number
   modifier: number
+  /** Complete authoritative arithmetic when effects add or subtract dice. */
+  expression?: string
   ac: number
   hit: boolean
   isCrit?: boolean
@@ -36,7 +38,15 @@ function formatRollBonus(bonus: number) {
  * threejs overlays (DiceBoxD20Overlay / DiceBoxRollOverlay); this component
  * only shows the authoritative result card.
  */
-export default function DiceRollOverlay({ roll, onDone }: { roll: DiceRoll; onDone: () => void }) {
+export default function DiceRollOverlay({
+  roll,
+  onDone,
+  showCard = true,
+}: {
+  roll: DiceRoll
+  onDone: () => void
+  showCard?: boolean
+}) {
   const onDoneRef = useRef(onDone)
 
   useEffect(() => {
@@ -50,6 +60,8 @@ export default function DiceRollOverlay({ roll, onDone }: { roll: DiceRoll; onDo
     const timer = window.setTimeout(() => onDoneRef.current(), DICE_TIMING.HUD_MS)
     return () => window.clearTimeout(timer)
   }, [roll])
+
+  if (!showCard) return null
 
   return (
     <DiceOverlayPortal>
@@ -73,7 +85,7 @@ export default function DiceRollOverlay({ roll, onDone }: { roll: DiceRoll; onDo
                   : 'text-slate-500',
             ].join(' ')}
           >
-            d20: {d20.value} + {d20.modifier} = {d20.value + d20.modifier} vs AC {d20.ac}
+            d20: {d20.expression ?? `${d20.value} + ${d20.modifier} = ${d20.value + d20.modifier}`} vs AC {d20.ac}
             {d20.kind === 'dodge'
               ? d20.hit
                 ? ' · 攻击命中'

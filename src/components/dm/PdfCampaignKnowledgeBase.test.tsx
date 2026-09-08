@@ -14,7 +14,7 @@ const analysis: PdfCampaignAnalysisV1 = {
 }
 
 describe('PdfCampaignKnowledgeBase', () => {
-  it('把分析结果组织为独立页签、搜索模式、地图、怪物图鉴和关系图入口', () => {
+  it('把分析结果组织为独立页签、搜索模式、地图、怪物图鉴和原文书签入口', () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <PdfCampaignKnowledgeBase
@@ -29,9 +29,47 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('战役知识库')
     expect(html).toContain('全库搜索模式')
     expect(html).toContain('怪物图鉴')
-    expect(html).toContain('人物关系图')
+    expect(html).toContain('原文与书签')
+    expect(html).not.toContain('人物关系图')
     expect(html).toContain('地图')
     expect(html).toContain('编辑知识库')
+  })
+
+  it('按备团工作区收拢剧情、世界与资源页签', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={analysis}
+          section="story"
+          mapHref="/campaign/test/maps"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('时间线')
+    expect(html).toContain('事件与场景')
+    expect(html).toContain('线索')
+    expect(html).not.toContain('怪物图鉴')
+    expect(html).not.toContain('原文与书签')
+  })
+
+  it('旧版分析进入原文页时给出安全的重新附加提示', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={analysis}
+          mapHref="/campaign/test/maps"
+          initialTab="bookmarks"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('没有可安全打开的本机原文索引')
+    expect(html).toContain('重新附加同一份 PDF')
   })
 
   it('把 NPC 待导入草稿渲染为可打开详情的按钮，并提示战斗单位可能误分类', () => {
@@ -59,5 +97,222 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('查看详情')
     expect(html).toContain('可能应归类为怪物')
     expect(html).toContain('<button')
+  })
+
+  it('怪物图鉴卡片可直接定位到导入条目或来源遭遇进行编辑', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            importCandidates: [{ name: '伊利法军兵', description: '已结构化。', kind: 'monster', automation: 'full', citations: [] }],
+            encounters: [{ name: '冒险者综合体废墟', description: '', creatures: ['两个作儒'], notes: '', citations: [] }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="monsters"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('data-edit-tab="imports"')
+    expect(html).toContain('data-edit-tab="encounters"')
+    expect(html.match(/>编辑<\/button>/g)).toHaveLength(2)
+  })
+
+  it('资源页提供怪物工坊入口，并把导入候选与遭遇引用使用同一交接动作', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            importCandidates: [{ name: '潮汐祭司', description: '施法怪物。', kind: 'monster', automation: 'partial', monsterStatBlockText: '潮汐祭司\nAC 14\n动作\n潮汐打击。近战武器攻击。', citations: [] }],
+            encounters: [{ name: '灯塔决战', description: '', creatures: ['潮汐祭司', '潮汐魔像'], notes: '', citations: [] }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="monsters"
+          onEdit={vi.fn()}
+          onEditMonster={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('data-monster-workshop-entry="潮汐祭司"')
+    expect(html).toContain('data-monster-workshop-entry="潮汐魔像"')
+    expect(html).toContain('含完整能力属性块')
+    expect(html).toContain('仅基础资料')
+    expect(html.match(/>怪物工坊<\/button>/g)).toHaveLength(2)
+    expect(html).not.toContain('data-edit-tab=')
+  })
+
+  it('把简称与完整姓名安全归并为一行，并在详情面板展示完整人物档案', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            people: [{
+              name: '费兰迪尔',
+              description: '负责核查送回的信件。',
+              role: '文书官',
+              appearance: '',
+              personality: '谨慎',
+              motivation: '维护文书程序与家族法律底线。',
+              secret: '',
+              voice: '措辞正式。',
+              citations: [{ documentName: '模组.pdf', page: 3 }],
+            }, {
+              name: '费兰迪尔·银翼',
+              description: '森都四大家族内阁文书官。',
+              role: '银翼家族文书官',
+              appearance: '办公桌整齐，常备一枝银杆羽笔。',
+              personality: '',
+              motivation: '',
+              secret: '拒绝海都求情。',
+              voice: '',
+              citations: [{ documentName: '模组.pdf', page: 12 }],
+            }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="people"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html.match(/data-testid="pdf-person-row"/g)).toHaveLength(1)
+    expect(html).toContain('费兰迪尔·银翼')
+    expect(html).toContain('别名：费兰迪尔')
+    expect(html).toContain('人物详情')
+    expect(html).toContain('欲望或目标')
+    expect(html).toContain('维护文书程序与家族法律底线。')
+  })
+
+  it('按全书剧情顺序展示紧凑事件列表，不再按引用页码误排', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            scenes: [{
+              name: '不应进入时间线的设施说明', description: '这只是一个可运行场景资料。', location: '文书室', npcs: [], monsters: [], citations: [{ documentName: '模组.pdf', page: 15 }],
+            }],
+            timelineEvents: [{
+              name: '进入翠羽城', description: '玩家抵达翠羽城。', location: '翠羽城', npcs: [], monsters: [],
+              time: '黑桦弯伏击后', timelineKind: 'current', timelineOrder: 30, tags: ['主线'],
+              citations: [{ documentName: '模组.pdf', page: 2 }],
+            }, {
+              name: '白鹿案', description: '海都官员在森都拜访白鹿。', location: '翠羽森林', npcs: [], monsters: [],
+              time: '数年前', timelineKind: 'history', timelineOrder: 10, tags: ['背景'],
+              citations: [{ documentName: '模组.pdf', page: 20 }],
+            }, {
+              name: '海都密信求助', description: '潮木村出现少量死者复起迹象。', location: '潮木村', npcs: [], monsters: [],
+              time: '故事开始前', timelineKind: 'history', timelineOrder: 20, tags: ['背景'],
+              citations: [{ documentName: '模组.pdf', page: 18 }],
+            }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="timeline"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html.indexOf('白鹿案')).toBeLessThan(html.indexOf('海都密信求助'))
+    expect(html.indexOf('海都密信求助')).toBeLessThan(html.indexOf('进入翠羽城'))
+    expect(html).toContain('数年前')
+    expect(html).toContain('背景历史')
+    expect(html).toContain('事件详情')
+    expect(html).not.toContain('不应进入时间线的设施说明')
+  })
+
+  it('旧分析仅有页段场景时不会回退生成伪时间线', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            scenes: Array.from({ length: 52 }, (_, index) => ({
+              name: `页段场景 ${index + 1}`,
+              description: '用于地图与备团的细颗粒度场景。',
+              location: '',
+              npcs: [],
+              monsters: [],
+              citations: [{ documentName: '模组.pdf', page: index + 1 }],
+            })),
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="timeline"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('尚未生成全书关键时间线')
+    expect(html).toContain('页段场景不会再被当作时间线展示')
+    expect(html).not.toContain('页段场景 1')
+  })
+
+  it('用房间战役时钟绘制当前时间红线，并分开未绑定的叙事事件', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            timelineEvents: [{
+              name: '早间会面', description: '已绑定的事件。', location: '', npcs: [], monsters: [],
+              gameTimeWorldMinute: 7 * 60, time: '当日早间', citations: [],
+            }, {
+              name: '午后调查', description: '已绑定的事件。', location: '', npcs: [], monsters: [],
+              gameTimeWorldMinute: 13 * 60, time: '当日午后', citations: [],
+            }, {
+              name: '古代事件', description: '只有叙事时间。', location: '', npcs: [], monsters: [],
+              time: '数年前', citations: [],
+            }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="timeline"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+    expect(html).toContain('data-testid="pdf-timeline-now-marker"')
+    expect(html).toContain('当前时间 · 第 1 日 08:00')
+    expect(html.indexOf('早间会面')).toBeLessThan(html.indexOf('当前时间 ·'))
+    expect(html.indexOf('当前时间 ·')).toBeLessThan(html.indexOf('午后调查'))
+    expect(html).toContain('未绑定游戏时间 · 1')
+  })
+
+  it('允许 DM 在时间线页直接切换战役时间或公历日期并编辑节点', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            timelineEvents: [{
+              name: '调查白鹿案', description: '玩家开始调查。', location: '白鹿小教堂', npcs: [], monsters: [],
+              gameTimeWorldMinute: 10 * 60, time: '调查阶段', citations: [],
+            }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="timeline"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+          onTimelineEventsChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('data-testid="pdf-timeline-clock-editor"')
+    expect(html).toContain('战役时间')
+    expect(html).toContain('公历日期')
+    expect(html).toContain('新增时间节点')
+    expect(html).toContain('直接编辑此节点')
   })
 })

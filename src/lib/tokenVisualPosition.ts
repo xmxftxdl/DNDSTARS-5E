@@ -10,6 +10,11 @@ export interface TokenVisualNodeLike {
   getLayer: () => TokenVisualLayerLike | null
 }
 
+export interface TokenVisualPositionFrameEntry {
+  nodes: Iterable<TokenVisualNodeLike>
+  point: { x: number; y: number }
+}
+
 /** Reads the live rendered position of one of a Token's synchronized layers. */
 export function tokenVisualNodesDisplayPosition(
   nodes: Iterable<TokenVisualNodeLike> | undefined,
@@ -50,6 +55,28 @@ export function syncTokenVisualNodes(
     const layer = node.getLayer()
     if (layer) layers.add(layer)
     count += 1
+  }
+  for (const layer of layers) layer.batchDraw()
+  return count
+}
+
+/**
+ * Writes every moving Token representation before drawing any of its detached
+ * layers. Unlike pointer-drag synchronization, this deliberately leaves the
+ * shared movement clock running and batches each Konva layer only once.
+ */
+export function syncTokenVisualPositionFrame(
+  entries: Iterable<TokenVisualPositionFrameEntry>,
+): number {
+  const layers = new Set<TokenVisualLayerLike>()
+  let count = 0
+  for (const entry of entries) {
+    for (const node of entry.nodes) {
+      node.position(entry.point)
+      const layer = node.getLayer()
+      if (layer) layers.add(layer)
+      count += 1
+    }
   }
   for (const layer of layers) layer.batchDraw()
   return count

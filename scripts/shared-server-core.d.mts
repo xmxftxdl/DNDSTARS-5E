@@ -96,7 +96,7 @@ export function createMarketplaceCheckout(
 }>
 export function applySecurityHeaders(
   res: { setHeader(name: string, value: string): void },
-  options?: { production?: boolean; env?: Record<string, string | undefined> },
+  options?: { production?: boolean; env?: Record<string, string | undefined>; crossOriginResourcePolicy?: 'same-origin' | 'same-site' | 'cross-origin' },
 ): void
 export function applyCors(
   req: { headers?: Record<string, string | string[] | undefined> } | null | undefined,
@@ -126,7 +126,7 @@ export function projectMapsForPlayer<T>(
   fogState?: unknown,
   worldMinute?: number | null,
 ): T
-export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null, worldMinute?: number | null): T
+export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null, worldMinute?: number | null, perceptionContext?: unknown): T
 export function projectMapExplorationForPlayer<T>(value: T, memberId?: string | null): T
 export function fogPointState(fog: unknown, x: number, y: number): 'covered' | 'revealed' | 'neutral'
 
@@ -221,9 +221,30 @@ export function projectCustomMonstersForRoomMember(
 ): Record<string, unknown> & { monsters: Array<Record<string, unknown>> }
 export function projectSceneOrchestrationForPlayer(value: unknown): {
   schemaVersion: 1
-  scenes: []
+  scenes: Array<Record<string, unknown>>
   runtime: { paused: false; pendingRuns: []; receipts: []; history: [] }
   updatedAt: number
+}
+export function applyPlayerCharacterCommand(
+  currentState: Record<string, any>,
+  rawCommand: Record<string, any>,
+  member: Record<string, any>,
+  options?: {
+    roomId?: string
+    combatActive?: boolean
+    now?: number
+    rollDie?: (sides: number) => number
+    concentrationSourceActorIds?: readonly string[]
+  },
+): any
+export function sendExpoPushMessages(
+  messages: readonly Record<string, unknown>[],
+  fetchImpl?: typeof fetch,
+): Promise<{ sent: number; tickets: Array<Record<string, unknown>> }>
+export function projectDnd5eShopsForPlayer(value: unknown): Record<string, unknown> & {
+  shops: Array<Record<string, unknown>>
+  transactions: []
+  purchaseReceipts: []
 }
 export function mutateCampaignTimeState(
   current: unknown,
@@ -297,6 +318,9 @@ export function atomicWriteJsonStateCasLocked(
   | { ok: true; revision: number; value: Record<string, unknown>; writtenAt: number }
   | { ok: false; conflict?: boolean; stale?: boolean; invalid?: boolean; reason?: string; currentRevision: number; current: unknown }
 >
+export function removeCharacterConcentrationEffectsFromMaps<T>(
+  currentState: T, characterId: string, endedSpellId?: string, revertedCreatureForms?: readonly Record<string, unknown>[],
+): { changed: boolean; next: T; removedEffectIds: string[]; sourceActorIds: string[] }
 export function mergePlayerCharactersStateForAuthority(
   currentState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null } | null,
   incomingState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null; [key: string]: unknown },
@@ -344,6 +368,18 @@ export function normalizeLobbyRoomCode(value: unknown): string
 export function roomHostIsOnline(room: unknown, now?: number): boolean
 export function roomHostPresence(room: unknown, now?: number): 'online' | 'grace' | 'offline' | 'closed'
 export function roomPlayerPresence(player: unknown, now?: number): 'online' | 'temporarily-offline' | 'left' | 'removed'
+export interface RoomMemberCharacterAssignment {
+  revision: number
+  enforced: boolean
+  characterId: string | null
+  characterName: string | null
+}
+export function roomMemberCharacterAssignment(member: unknown): RoomMemberCharacterAssignment
+export function mutateRoomPlayerCharacterAssignment(
+  room: Record<string, unknown>,
+  input: { targetMemberId: string; characterId?: string | null; characterName?: string | null },
+  now?: number,
+): { ok: boolean; status?: number; error?: string; assignment?: RoomMemberCharacterAssignment; next?: Record<string, unknown> }
 export function normalizeAccountRecoveryCode(value: unknown): { accountId: string; secret: string; formatted: string } | null
 export function normalizeAccountUsername(value: unknown): { value: string; key: string } | null
 export function normalizeAccountEmail(value: unknown): string | null

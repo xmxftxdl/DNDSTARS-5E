@@ -1,0 +1,160 @@
+{
+  "id": "srd-5.1:air-elemental",
+  "slug": "air-elemental",
+  "name": "气元素",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：旋风的首次力量豁免与伤害可结构化，但随机方向抛飞、撞击物体的逐 10 尺伤害、撞上另一生物时的第二次敏捷豁免与倒地必须绑定同一次移动事务；完整碰撞链建立前继续由 DM 裁定。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "slam",
+      "name": "猛击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "whirlwind",
+      "name": "旋风",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 12,
+      "slug": "air-elemental",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:09:02.949Z",
+      "name": "气元素",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-air-elemental-slam-1788556143015",
+      "combatId": "verify-ui-air-elemental-slam-1788556143015:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "status": "failed",
+      "error": "TimeoutError: locator.click: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: '展开怪物控制台', exact: true })\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:09:25.436Z",
+      "evidenceFile": "ui-cases/monsters/012-air-elemental.json"
+    },
+    {
+      "index": 101,
+      "slug": "air-elemental",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:26:44.252Z",
+      "name": "气元素",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "5",
+      "total": 334,
+      "mapId": "verify-ui-air-elemental-slam-1788568004325",
+      "combatId": "verify-ui-air-elemental-slam-1788568004325:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "气元素 使用猛击攻击 验证目标：猛击 → 验证目标 9+8=17 命中；共造成 18 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:27 PM\n结算\n\n气元素 使用猛击攻击 验证目标：猛击 → 验证目标 9+8=17 命中；共造成 18 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：猛击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +8。\n结果 · 17 vs AC 10：命中。\n伤害骰 · 猛击（基础伤害·钝击）｜2d8 骰面：8 + 5 = 13｜固定加值 +5｜小计 18\n气元素｜消耗动作\n验证目标｜受到 18 点伤害｜HP 320 → 302",
+      "playerLog": "气元素 使用猛击攻击 验证目标：猛击 → 验证目标 9+8=17 命中；共造成 18 点伤害。",
+      "afterHp": 302,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:27:07.857Z",
+      "evidenceFile": "ui-cases/monsters/101-air-elemental.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "气体形态",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 4,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

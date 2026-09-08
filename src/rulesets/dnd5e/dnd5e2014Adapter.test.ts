@@ -17,9 +17,16 @@ describe('D&D 5e 2014 ruleset adapter', () => {
       reactionAvailable: true,
       objectInteractionAvailable: true,
       movementRemaining: 10,
+      movementSpent: 20,
     })
     expect(rules.validateTurnCost(acted, { resource: 'action' })).toEqual({ valid: false, reason: 'action-unavailable' })
     expect(rules.validateTurnCost(acted, { resource: 'movement', amount: 15 })).toEqual({ valid: false, reason: 'insufficient-movement' })
+  })
+
+  it('allows fractional normalized movement costs without relaxing discrete turn resources', () => {
+    const moved = rules.spendTurnCost(rules.createTurn(30), { resource: 'movement', amount: 0.5 })
+    expect(moved.movementRemaining).toBe(29.5)
+    expect(() => rules.validateTurnCost(moved, { resource: 'action', amount: 0.5 })).toThrow(RangeError)
   })
 
   it('resolves advantage, disadvantage, automatic attack misses, and critical hits', () => {

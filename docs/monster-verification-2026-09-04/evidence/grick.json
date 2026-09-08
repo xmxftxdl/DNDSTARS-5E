@@ -1,0 +1,142 @@
+{
+  "id": "srd-5.1:grick",
+  "slug": "grick",
+  "name": "格里克异怪",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tentacles",
+      "name": "触手群攻",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "beak",
+      "name": "喙击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 152,
+      "slug": "grick",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:32:38.541Z",
+      "name": "格里克异怪",
+      "actionId": "tentacles",
+      "actionName": "触手群攻",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-grick-tentacles-1788561158602",
+      "combatId": "verify-ui-grick-tentacles-1788561158602:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "格里克异怪 使用触手群攻攻击 验证目标：触手群攻 → 验证目标 19+4=23 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:32 PM\n结算\n\n格里克异怪 使用触手群攻攻击 验证目标：触手群攻 → 验证目标 19+4=23 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：触手群攻｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +4。\n结果 · 23 vs AC 10：命中。\n伤害骰 · 触手群攻（基础伤害·挥砍）｜2d6 骰面：3 + 1 = 4｜固定加值 +2｜小计 6\n格里克异怪｜消耗动作\n验证目标｜受到 6 点伤害｜HP 320 → 314",
+      "playerLog": "格里克异怪 使用触手群攻攻击 验证目标：触手群攻 → 验证目标 19+4=23 命中；共造成 6 点伤害。",
+      "afterHp": 314,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:33:03.284Z",
+      "evidenceFile": "ui-cases/monsters/152-grick.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "岩石伪装",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

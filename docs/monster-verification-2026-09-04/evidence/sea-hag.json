@@ -1,0 +1,155 @@
+{
+  "id": "srd-5.1:sea-hag",
+  "slug": "sea-hag",
+  "name": "海鬼婆",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws",
+      "name": "双爪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "death-glare",
+      "name": "死亡瞪视",
+      "automation": "headless",
+      "rule": "saving-throw-terminal-effect",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource",
+        "rule.requiredCondition",
+        "rule.failure"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded",
+        "missing-condition"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "illusory-appearance",
+      "name": "幻象外貌",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 164,
+      "slug": "sea-hag",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:44:14.888Z",
+      "name": "海鬼婆",
+      "actionId": "claws",
+      "actionName": "双爪",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "2",
+      "total": 334,
+      "mapId": "verify-ui-sea-hag-claws-1788569054954",
+      "combatId": "verify-ui-sea-hag-claws-1788569054954:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "海鬼婆 使用双爪攻击 验证目标：双爪 → 验证目标 12+5=17 命中；共造成 9 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:44 PM\n结算\n\n海鬼婆 使用双爪攻击 验证目标：双爪 → 验证目标 12+5=17 命中；共造成 9 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：双爪｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 12；最终采用 12；调整值 +5。\n结果 · 17 vs AC 10：命中。\n伤害骰 · 双爪（基础伤害·挥砍）｜2d6 骰面：4 + 2 = 6｜固定加值 +3｜小计 9\n海鬼婆｜消耗动作\n验证目标｜受到 9 点伤害｜HP 320 → 311",
+      "playerLog": "海鬼婆 使用双爪攻击 验证目标：双爪 → 验证目标 12+5=17 命中；共造成 9 点伤害。",
+      "afterHp": 311,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:44:39.574Z",
+      "evidenceFile": "ui-cases/monsters/164-sea-hag.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "骇人外貌",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 10,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

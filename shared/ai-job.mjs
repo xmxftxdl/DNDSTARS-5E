@@ -360,6 +360,27 @@ export function normalizePdfCampaignAnalysisArtifactV2(value) {
     if (relationship.reviewStatus === 'auto-verified' && !relationship.evidenceIds.some((entry) => ['exact', 'normalized'].includes(evidence.get(entry)?.verification))) return null
     relationshipIds.add(id)
   }
+  if (payload.bookmarks != null) {
+    if (!Array.isArray(payload.bookmarks) || payload.bookmarks.length > 1_000) return null
+    const bookmarkIds = new Set()
+    const bookmarkKinds = new Set(['person', 'location', 'faction', 'clue', 'event', 'monster', 'note'])
+    for (const bookmark of payload.bookmarks) {
+      if (!plainObject(bookmark) || bookmark.schemaVersion !== 1) return null
+      const id = boundedString(bookmark.id, 120)
+      const documentId = boundedString(bookmark.documentId, 120)
+      const documentName = boundedString(bookmark.documentName, 500)
+      const label = boundedString(bookmark.label, 160)
+      const document = documentId ? documents.get(documentId) : null
+      if (!id || bookmarkIds.has(id) || !document || document.name !== documentName || !label ||
+        !Number.isSafeInteger(bookmark.page) || bookmark.page < 1 || bookmark.page > document.pageCount ||
+        !bookmarkKinds.has(bookmark.kind) || typeof bookmark.quote !== 'string' || bookmark.quote.length > 500 ||
+        typeof bookmark.note !== 'string' || bookmark.note.length > 2_000 || !['dm', 'ai'].includes(bookmark.origin) ||
+        !Number.isSafeInteger(bookmark.createdAt) || bookmark.createdAt < 1 ||
+        (bookmark.entityId != null && !boundedString(bookmark.entityId, 120)) ||
+        (bookmark.entityName != null && !boundedString(bookmark.entityName, 160))) return null
+      bookmarkIds.add(id)
+    }
+  }
   if (!Array.isArray(payload.warnings) || payload.warnings.length > 100 || payload.warnings.some((entry) => typeof entry !== 'string' || entry.length > 2_000)) return null
   if (typeof payload.overview !== 'string' || payload.overview.length > 24_000 || !Number.isSafeInteger(payload.analyzedChunks) || payload.analyzedChunks < 0) return null
   return {

@@ -1,12 +1,13 @@
 import type { Character } from '../../types/character'
 import { dnd5eClassDefinition } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
-import { dnd5ePluginRaceDefinition } from './pluginApi'
+import { dnd5ePluginFeatDefinition, dnd5ePluginRaceDefinition } from './pluginApi'
 import {
   dnd5eEffectiveHitPointMaximum,
   normalizeDnd5eHitPointMaximumReductionLedger,
   rebaseDnd5eHitPointMaximumReductionLedger,
 } from './hitPointMaximumReductions'
+import { dnd5eActiveHitPointMaximumBonus } from './activeEffects'
 
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
 
@@ -68,7 +69,7 @@ function draconicResilienceHitPoints(
     : 0
 }
 
-type RacialHitPointCharacter = Partial<Pick<Character, 'race' | 'dnd5eRaceId'>>
+type RacialHitPointCharacter = Partial<Pick<Character, 'race' | 'dnd5eRaceId' | 'dnd5eFeatIds'>>
 
 function racialHitPoints(
   character: Pick<Character, 'level'> & RacialHitPointCharacter,
@@ -80,11 +81,29 @@ function racialHitPoints(
   return clampLevel(character.level) * bonus
 }
 
+function featHitPoints(
+  character: Pick<Character, 'level'> & RacialHitPointCharacter,
+): number {
+  const perLevel = [...new Set(character.dnd5eFeatIds ?? [])].reduce((total, featId) =>
+    total + (dnd5ePluginFeatDefinition(featId)?.staticModifiers?.hitPointsPerLevelBonus ?? 0), 0)
+  return clampLevel(character.level) * perLevel
+}
+
+function featStaticModifierMaximum(
+  character: RacialHitPointCharacter,
+  key: 'minimumHitDieHealingConstitutionMultiplier',
+): number {
+  return [...new Set(character.dnd5eFeatIds ?? [])].reduce((maximum, featId) => Math.max(
+    maximum,
+    dnd5ePluginFeatDefinition(featId)?.staticModifiers?.[key] ?? 0,
+  ), 0)
+}
+
 function additionalHitPoints(
   character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'> &
     RacialHitPointCharacter,
 ): number {
-  return draconicResilienceHitPoints(character) + racialHitPoints(character)
+  return draconicResilienceHitPoints(character) + racialHitPoints(character) + featHitPoints(character)
 }
 
 export function isDnd5e2014Character(character: Pick<Character, 'rulesetId'>): boolean {
@@ -311,10 +330,14 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
     baseMaxHp,
   )
   const maxHp = dnd5eEffectiveHitPointMaximum(baseMaxHp, reductionLedger)
+  const activeMaximumBonus = dnd5eActiveHitPointMaximumBonus(
+    character.dnd5eCombatState?.activeEffects,
+  )
+  const effectiveMaxHp = maxHp + activeMaximumBonus
   const previousCurrent = Math.max(0, Math.floor(Number(character.currentHp) || 0))
   const currentHp = previousCurrent > 0 && maxHp > previousMaximum
-    ? Math.min(maxHp, previousCurrent + (maxHp - previousMaximum))
-    : Math.min(maxHp, previousCurrent)
+    ? Math.min(effectiveMaxHp, previousCurrent + (maxHp - previousMaximum))
+    : Math.min(effectiveMaxHp, previousCurrent)
 
   return {
     ...character,
@@ -353,6 +376,10 @@ export function resolveDnd5eShortRestHitDice(input: {
   let hitDiceSpent = 0
   let hitDiceHealing = 0
   const constitutionModifier = abilityModifier(input.character.abilities.con)
+  const minimumHealingMultiplier = featStaticModifierMaximum(
+    input.character,
+    'minimumHitDieHealingConstitutionMultiplier',
+  )
 
   for (const spend of input.spends) {
     if (!Number.isInteger(spend.poolIndex) || spend.poolIndex < 0 || spend.poolIndex >= pools.length) {
@@ -365,7 +392,11 @@ export function resolveDnd5eShortRestHitDice(input: {
     }
     for (const roll of spend.rolls) {
       if (!Number.isInteger(roll) || roll < 1 || roll > pool.sides) throw new RangeError('Invalid Hit Die roll')
-      hitDiceHealing += Math.max(0, roll + constitutionModifier)
+      hitDiceHealing += Math.max(
+        0,
+        roll + constitutionModifier,
+        constitutionModifier * minimumHealingMultiplier,
+      )
       hitDiceSpent += 1
     }
     spentByPool.set(spend.poolIndex, alreadySpent + spend.rolls.length)

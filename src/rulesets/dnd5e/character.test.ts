@@ -9,6 +9,8 @@ import {
 } from './headlessCombatEngine'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
+import { DND5E_CHAIN_MAIL, DND5E_LONGSWORD, DND5E_SHIELD } from './equipment'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function legacyCharacter(): Character {
   return {
@@ -34,6 +36,60 @@ describe('D&D 5e character boundary', () => {
     const character = migrateCharacterToDnd5e({ ...legacyCharacter(), concentrating: true })
     const combatant = createCombatantFromDnd5eCharacter({ character, controller: 'player', initiativeD20: 12, position: { x: 5, y: 5 } })
     expect(combatant).toMatchObject({ concentrating: true, initiative: 15, proficiencyBonus: 3, turn: { actionAvailable: true, reactionAvailable: true, movementRemaining: 30 } })
+  })
+
+  it('preserves current HP granted above the base maximum by an active Aid-style effect', () => {
+    const aid = createDnd5eMechanicalEffect({
+      definitionId: 'activity:aid:aid:modifiers:0',
+      label: '援助术',
+      targetId: 'hero',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'aid', spellLevel: 2 },
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: { hitPointMaximumBonus: 5 },
+    })
+    const migrated = migrateCharacterToDnd5e({
+      ...legacyCharacter(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      maxHp: 40,
+      currentHp: 45,
+      dnd5eCombatState: { activeEffects: [aid] },
+    })
+    expect(migrated).toMatchObject({ maxHp: 40, currentHp: 45 })
+    expect(createCombatantFromDnd5eCharacter({
+      character: migrated,
+      controller: 'player',
+      initiativeD20: 12,
+      position: { x: 5, y: 5 },
+    })).toMatchObject({ maxHp: 40, currentHp: 45 })
+  })
+
+  it('preserves authoritative death saves when constructing a map combatant', () => {
+    const character = migrateCharacterToDnd5e({
+      ...legacyCharacter(), currentHp: 0,
+      deathSaveSuccesses: 1, deathSaveFailures: 3, deathSaveStable: false,
+    })
+    expect(character.deathSaves).toEqual({ successes: 1, failures: 3, stable: false, dead: true })
+    const combatant = createCombatantFromDnd5eCharacter({
+      character, controller: 'player', initiativeD20: 12, position: { x: 5, y: 5 },
+    })
+    expect(combatant.deathSaves).toEqual({ successes: 1, failures: 3, stable: false, dead: true })
+  })
+
+  it('projects equipment and spellcasting qualifications for generic Activity predicates', () => {
+    const fighter = migrateCharacterToDnd5e({
+      ...legacyCharacter(), charClass: '战士', rulesetId: 'dnd5e-2014-srd-5.1',
+      equipment: { mainWeapon: DND5E_LONGSWORD, offHand: DND5E_SHIELD, armor: DND5E_CHAIN_MAIL },
+    })
+    expect(fighter.activityEquipment).toMatchObject({
+      armorCategory: 'heavy', armorProficient: true,
+      armorProficiencies: ['light', 'medium', 'heavy', 'shield'], freeHands: 0,
+      mainHand: { roles: ['weapon'], weaponMode: 'melee', proficient: true },
+      offHand: { roles: ['shield'], proficient: true },
+    })
+    expect(fighter.activitySpellcasting).toEqual({ capable: false, classIds: [] })
+
+    const wizard = migrateCharacterToDnd5e({ ...legacyCharacter(), charClass: '法师' })
+    expect(wizard.activitySpellcasting).toEqual({ capable: true, classIds: ['wizard'] })
   })
 
   it('preserves persistent hover through the Character boundary and keeps a prone flyer aloft', () => {
@@ -200,6 +256,36 @@ describe('D&D 5e character boundary', () => {
       armorClass: 13,
       statBlockId: 'srd-5.1:wolf',
       classState: { wildShapeOriginalCurrentHp: 16, wildShapeCurrentHp: 7 },
+    })
+  })
+
+  it('rehydrates a flying polymorph form with its full movement pool', () => {
+    const source: Character = {
+      ...legacyCharacter(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      dnd5eCombatState: {
+        wildShapeFormId: 'srd-5.1:giant-eagle',
+        wildShapeMode: 'polymorph',
+        wildShapeCurrentHp: 26,
+        wildShapeRoundsRemaining: 10,
+        wildShapeMaximumChallengeRating: 1,
+        wildShapeOriginalCurrentHp: 30,
+        wildShapeOriginalMaxHp: 40,
+        wildShapeOriginalArmorClass: 12,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 },
+        wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 1, cha: -1 },
+      },
+    }
+    const combatant = createCombatantFromDnd5eCharacter({
+      character: migrateCharacterToDnd5e(source), controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 },
+    })
+
+    expect(combatant).toMatchObject({
+      speed: 80,
+      movementSpeeds: { walk: 10, fly: 80 },
+      turn: { movementRemaining: 80 },
     })
   })
 })

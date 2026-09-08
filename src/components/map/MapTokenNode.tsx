@@ -13,22 +13,31 @@ import { tokenMovementAnimationPosition, type TokenMovementAnimation } from '../
 import Dnd5eConcentrationTokenBadge, { DND5E_CONCENTRATION_TOKEN_IMAGE_SRC, type ConcentrationTokenMark } from './Dnd5eConcentrationTokenBadge'
 import { TOKEN_BORDER_FLOW_BASE_OPACITY, type TokenBorderFlowPalette, tokenBorderFlowGradientColorStops, tokenBorderFlowRotationDegrees, tokenBorderFlowWorldMetrics } from './tokenBorderFlow'
 import {
-  FLIGHT_TOKEN_TOOLTIP,
   SHILLELAGH_TOKEN_TOOLTIP,
   concentrationTokenTooltip,
-  overflowConditionTokenTooltip,
+  flightTokenTooltip,
   spellStatusTokenTooltip,
   standardConditionTokenTooltip,
   type TokenStatusTooltipContent,
   type TokenStatusTooltipPoint,
 } from './tokenStatusTooltip'
-import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
+import { DND5E_CONDITION_MARKERS, DND5E_FLIGHT_MARKER_ICON } from './dnd5eConditionMarkers'
 import { dnd5eActionIconBackdropImage } from './dnd5eActionIconBackdropImage'
 import { MAP_SPELL_STATUS_ICONS } from './mapSpellStatusIcons'
 import { usePrefersReducedMotion, useStatusAnimation, useTokenBadgeImage } from './mapEffectHooks'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
 import type { SpellStatusTokenMark, StandardConditionTokenMark } from './mapCanvasContracts'
+import type { MapTokenStatusInstance } from './mapTokenStatusInstance'
+import {
+  mergeDnd5eTokenStatusMarkersForDisplay,
+  type Dnd5eTokenStatusMarker,
+} from '../../rulesets/dnd5e/tokenStatusMarkers'
+import {
+  dnd5eTokenStatusMarkerStyle,
+  dnd5eTokenStatusMarkerTooltip,
+} from './dnd5eTokenStatusMarkerPresentation'
+import { mapTokenLabelFontSize } from './mapTokenLabelTypography'
 
 const TOKEN_MOVE_DURATION = TOKEN_MOVE_DURATION_S
 const TOKEN_DRAG_THRESHOLD_PX = 4
@@ -65,6 +74,46 @@ const RIGHT_BADGE_ANCHOR_Y_RATIO = -0.84
 export interface TokenStatusTooltipRequest extends TokenStatusTooltipContent, TokenStatusTooltipPoint {}
 
 export type TokenStatusTooltipChange = (tooltip?: TokenStatusTooltipRequest) => void
+
+function tokenStatusMarkerInstance(
+  tokenId: string,
+  marker: Dnd5eTokenStatusMarker,
+): MapTokenStatusInstance {
+  const tooltip = dnd5eTokenStatusMarkerTooltip(marker)
+  return {
+    id: marker.id,
+    tokenId,
+    kind: marker.id.startsWith('monster-trait:')
+      ? 'monster-trait'
+      : marker.mechanical ? 'active-effect' : 'token-marker',
+    title: tooltip.title,
+    description: tooltip.description,
+    statusId: marker.statusId,
+    activeEffectId: marker.activeEffectId,
+    sourceActorId: marker.sourceActorId,
+    sourceLabel: marker.sourceLabel ?? (marker.source === 'dm'
+      ? 'DM 手动标注'
+      : marker.source === 'workshop' ? '怪物工坊' : 'Headless 规则'),
+    authority: marker.mechanical ? 'headless' : 'dm-annotation',
+  }
+}
+
+function fallbackStandardConditionInstance(
+  tokenId: string,
+  condition: Dnd5eStandardConditionId,
+): MapTokenStatusInstance {
+  const tooltip = standardConditionTokenTooltip(condition)
+  return {
+    id: `legacy-condition:${tokenId}:${condition}`,
+    tokenId,
+    kind: 'active-effect',
+    title: tooltip.title,
+    description: tooltip.description,
+    statusId: condition,
+    sourceLabel: '旧版状态投影',
+    authority: 'headless',
+  }
+}
 
 function showTokenStatusTooltip(
   onTooltipChange: TokenStatusTooltipChange | undefined,
@@ -187,16 +236,22 @@ function Dnd5eStandardConditionBadge({
   const size = rightBadgeSize(radius)
   const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
   const style = condition ? DND5E_CONDITION_MARKERS[condition] : undefined
-  const proneImage = useTokenBadgeImage(
-    condition === 'prone' ? '/assets/icons/prone-condition-status.png' : undefined,
-  )
+  const conditionImage = useTokenBadgeImage(style?.icon)
   return (
     <Group
       x={x}
       y={y}
       listening={!!onClick || !!onTooltipChange}
-      onClick={(event) => { event.cancelBubble = true; onClick?.() }}
-      onTap={(event) => { event.cancelBubble = true; onClick?.() }}
+      onClick={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onTap={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
       onMouseEnter={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
       onMouseMove={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
       onMouseLeave={() => onTooltipChange?.()}
@@ -218,19 +273,93 @@ function Dnd5eStandardConditionBadge({
         offsetY={size / 2}
         fontSize={Math.max(7, size * (overflowCount ? 0.34 : 0.52))}
         fontStyle="bold"
-        opacity={condition === 'prone' && proneImage && !overflowCount ? 0 : 1}
+        opacity={conditionImage && !overflowCount ? 0 : 1}
         fill={style?.text ?? '#f5f3ff'}
         align="center"
         verticalAlign="middle"
         listening={!!onClick || !!onTooltipChange}
       />
-      {proneImage && !overflowCount && (
+      {conditionImage && !overflowCount && (
         <KonvaImage
-          image={proneImage}
-          crop={{ x: 48, y: 165, width: 424, height: 208 }}
-          x={-size * 0.5}
+          image={conditionImage}
+          x={-size * 0.36}
           y={-size * 0.36}
-          width={size}
+          width={size * 0.72}
+          height={size * 0.72}
+          listening={!!onClick || !!onTooltipChange}
+        />
+      )}
+    </Group>
+  )
+}
+
+function Dnd5eTokenStatusMarkerBadge({
+  radius,
+  gridIndex,
+  marker,
+  onClick,
+  onTooltipChange,
+}: {
+  radius: number
+  gridIndex: number
+  marker: Dnd5eTokenStatusMarker
+  onClick?: () => void
+  onTooltipChange?: TokenStatusTooltipChange
+}) {
+  const size = rightBadgeSize(radius)
+  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
+  const style = dnd5eTokenStatusMarkerStyle(marker.statusId)
+  const tooltip = dnd5eTokenStatusMarkerTooltip(marker)
+  const markerImage = useTokenBadgeImage(style.icon)
+  return (
+    <Group
+      x={x}
+      y={y}
+      name={`token-status-marker token-status-marker-${marker.statusId}`}
+      listening={!!onClick || !!onTooltipChange}
+      onClick={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onTap={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onMouseEnter={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
+      onMouseMove={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
+      onMouseLeave={() => onTooltipChange?.()}
+    >
+      <Circle
+        radius={size / 2}
+        fill={marker.backgroundColor ?? style.fill}
+        stroke={marker.borderColor ?? style.stroke}
+        strokeWidth={tokenLineWidth(radius, 1.5)}
+        shadowBlur={4 * tokenScale(radius)}
+        shadowColor={marker.glowColor ?? marker.borderColor ?? style.stroke}
+        listening={!!onClick || !!onTooltipChange}
+      />
+      <Text
+        text={style.glyph}
+        width={size}
+        height={size}
+        offsetX={size / 2}
+        offsetY={size / 2}
+        fontSize={Math.max(7, size * 0.5)}
+        fontStyle="bold"
+        opacity={markerImage ? 0 : 1}
+        fill={style.text}
+        align="center"
+        verticalAlign="middle"
+        listening={!!onTooltipChange}
+      />
+      {markerImage && (
+        <KonvaImage
+          image={markerImage}
+          x={-size * 0.36}
+          y={-size * 0.36}
+          width={size * 0.72}
           height={size * 0.72}
           listening={!!onClick || !!onTooltipChange}
         />
@@ -242,10 +371,12 @@ function Dnd5eStandardConditionBadge({
 function ShillelaghTokenBadge({
   radius,
   gridIndex,
+  onClick,
   onTooltipChange,
 }: {
   radius: number
   gridIndex: number
+  onClick?: () => void
   onTooltipChange?: TokenStatusTooltipChange
 }) {
   const size = rightBadgeSize(radius)
@@ -255,7 +386,17 @@ function ShillelaghTokenBadge({
     <Group
       x={x}
       y={y}
-      listening={!!onTooltipChange}
+      listening={!!onClick || !!onTooltipChange}
+      onClick={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onTap={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
       onMouseEnter={(event) => showTokenStatusTooltip(onTooltipChange, SHILLELAGH_TOKEN_TOOLTIP, event)}
       onMouseMove={(event) => showTokenStatusTooltip(onTooltipChange, SHILLELAGH_TOKEN_TOOLTIP, event)}
       onMouseLeave={() => onTooltipChange?.()}
@@ -289,6 +430,7 @@ function SpellStatusTokenBadge(input: {
   radius: number
   gridIndex: number
   mark: SpellStatusTokenMark
+  onClick?: () => void
   onTooltipChange?: TokenStatusTooltipChange
 }) {
   const size = rightBadgeSize(input.radius)
@@ -321,8 +463,18 @@ function SpellStatusTokenBadge(input: {
     <Group
       x={x}
       y={y}
-      listening={!!input.onTooltipChange}
+      listening={!!input.onClick || !!input.onTooltipChange}
       name={`spell-status-token spell-status-${input.mark.statusId}`}
+      onClick={(event) => {
+        if (!input.onClick) return
+        event.cancelBubble = true
+        input.onClick()
+      }}
+      onTap={(event) => {
+        if (!input.onClick) return
+        event.cancelBubble = true
+        input.onClick()
+      }}
       onMouseEnter={(event) => showTokenStatusTooltip(input.onTooltipChange, tooltip, event)}
       onMouseMove={(event) => showTokenStatusTooltip(input.onTooltipChange, tooltip, event)}
       onMouseLeave={() => input.onTooltipChange?.()}
@@ -413,24 +565,35 @@ function SpellStatusTokenBadge(input: {
 
 function Dnd5eFlightBadge({
   radius,
+  tooltip,
   onClick,
   onTooltipChange,
 }: {
   radius: number
+  tooltip: TokenStatusTooltipContent
   onClick?: () => void
   onTooltipChange?: TokenStatusTooltipChange
 }) {
   const size = rightBadgeSize(radius)
   const { x, y } = rightBadgeGridPos(radius, size, 0)
+  const flightImage = useTokenBadgeImage(DND5E_FLIGHT_MARKER_ICON)
   return (
     <Group
       x={x}
       y={y}
       listening={!!onClick || !!onTooltipChange}
-      onClick={(event) => { event.cancelBubble = true; onClick?.() }}
-      onTap={(event) => { event.cancelBubble = true; onClick?.() }}
-      onMouseEnter={(event) => showTokenStatusTooltip(onTooltipChange, FLIGHT_TOKEN_TOOLTIP, event)}
-      onMouseMove={(event) => showTokenStatusTooltip(onTooltipChange, FLIGHT_TOKEN_TOOLTIP, event)}
+      onClick={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onTap={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onMouseEnter={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
+      onMouseMove={(event) => showTokenStatusTooltip(onTooltipChange, tooltip, event)}
       onMouseLeave={() => onTooltipChange?.()}
     >
       <Circle
@@ -450,11 +613,22 @@ function Dnd5eFlightBadge({
         offsetY={size / 2}
         fontSize={Math.max(7, size * 0.48)}
         fontStyle="bold"
+        opacity={flightImage ? 0 : 1}
         fill="#ecfeff"
         align="center"
         verticalAlign="middle"
         listening={!!onClick || !!onTooltipChange}
       />
+      {flightImage && (
+        <KonvaImage
+          image={flightImage}
+          x={-size * 0.37}
+          y={-size * 0.37}
+          width={size * 0.74}
+          height={size * 0.74}
+          listening={!!onClick || !!onTooltipChange}
+        />
+      )}
     </Group>
   )
 }
@@ -657,6 +831,7 @@ export function TokenNode({
   builtinGrid = false,
   selected,
   targetSelected = false,
+  targetSelectable = false,
   defeated = false,
   currentTurn = false,
   borderColor,
@@ -664,12 +839,15 @@ export function TokenNode({
   hp,
   showHpBar = true,
   standardConditions = [],
+  derivedTokenStatusMarkers = [],
   standardConditionMarks = [],
   shillelaghActive = false,
+  shillelaghEffectId,
   spellStatusMarks = [],
   concentrationMark,
   airborne = false,
-  onStandardConditionClick,
+  flightHeightFeet,
+  onStatusTokenClick,
   onStatusTooltipChange,
   hoverLabel,
   showName = true,
@@ -688,6 +866,7 @@ export function TokenNode({
   builtinGrid?: boolean
   selected: boolean
   targetSelected?: boolean
+  targetSelectable?: boolean
   defeated?: boolean
   currentTurn?: boolean
   borderColor?: string
@@ -695,12 +874,16 @@ export function TokenNode({
   hp?: { hp: number; max: number; temp?: number }
   showHpBar?: boolean
   standardConditions?: readonly Dnd5eStandardConditionId[]
+  /** Presentation badges projected from authoritative non-standard ActiveEffects. */
+  derivedTokenStatusMarkers?: readonly Dnd5eTokenStatusMarker[]
   standardConditionMarks?: readonly StandardConditionTokenMark[]
   shillelaghActive?: boolean
+  shillelaghEffectId?: string
   spellStatusMarks?: readonly SpellStatusTokenMark[]
   concentrationMark?: ConcentrationTokenMark
   airborne?: boolean
-  onStandardConditionClick?: (condition?: Dnd5eStandardConditionId) => void
+  flightHeightFeet?: number
+  onStatusTokenClick?: (instance: MapTokenStatusInstance) => void
   onStatusTooltipChange?: TokenStatusTooltipChange
   hoverLabel?: string
   showName?: boolean
@@ -714,6 +897,7 @@ export function TokenNode({
   registerPositionNode?: RegisterTokenPositionNode
   instantPosition?: boolean
 }) {
+  const flightTooltip = flightTokenTooltip(flightHeightFeet)
   const groupRef = useRef<Konva.Group>(null)
   const sharedTokenImageId = token.tokenPortraitImageId ?? token.portraitImageId
   const tokenImageKey = token.tokenPortrait
@@ -726,6 +910,19 @@ export function TokenNode({
   const concentrationTokenImage = useTokenBadgeImage(
     concentrationMark ? DND5E_CONCENTRATION_TOKEN_IMAGE_SRC : undefined,
   )
+  const tokenStatusMarkers = mergeDnd5eTokenStatusMarkersForDisplay(
+    token.dnd5eTokenStatusMarkers,
+    derivedTokenStatusMarkers,
+  ).filter((marker) => marker.statusId !== 'concentrating' || !concentrationMark)
+  const visibleStandardConditions = standardConditions
+  const standardConditionBadgeInstances = [
+    ...standardConditionMarks
+      .filter((mark) => visibleStandardConditions.includes(mark.condition))
+      .map((mark) => ({ condition: mark.condition, mark })),
+    ...visibleStandardConditions
+      .filter((condition) => !standardConditionMarks.some((mark) => mark.condition === condition))
+      .map((condition) => ({ condition, mark: undefined })),
+  ]
   const movementAnimation = token.movementAnimation
   const latestPositionRef = useRef({ x: token.x, y: token.y })
   const draggingRef = useRef(false)
@@ -757,7 +954,9 @@ export function TokenNode({
 
   useEffect(() => () => cancelPositionAnimation(), [cancelPositionAnimation])
   const radius = tokenDisplayRadius(gridSize, token.size, builtinGrid)
-  const labelSize = Math.max(9, radius * 0.42)
+  const labelWidth = (radius + 6) * 2
+  const preferredLabelSize = Math.max(9, radius * 0.42)
+  const labelSize = mapTokenLabelFontSize(token.label, labelWidth, preferredLabelSize)
   const labelBarH = Math.max(14, radius * 0.55)
   const scale = tokenScale(radius)
   const selectedStrokeW = tokenLineWidth(radius, 3)
@@ -790,13 +989,18 @@ export function TokenNode({
     : radius * 2.4
   const isDragonEmoji = token.emoji === '\u{1f409}' || token.emoji === '\u{1f432}'
   const isDetectedUnseen = token.perceptionVisibility === 'detected-unseen'
+  const isMirrorImageDecoy = token.dnd5eSpellEffect?.spellId === 'mirror-image' &&
+    token.dnd5eSpellEffect.projectionKind === 'attack-decoy'
   // Flaming Sphere already has a persistent animated area visual. Keep its
   // authoritative effect token as an invisible drag/select hit target so
   // movement and Headless settlement still work without drawing a second
   // black-backed fire token on top of the sphere.
   const hidePersistentEffectTokenBody =
+    token.dnd5eSpellEffect?.hiddenBody === true ||
     token.dnd5eSpellEffect?.spellId === 'flaming-sphere' ||
-    token.dnd5eSpellEffect?.spellId === 'spiritual-weapon'
+    token.dnd5eSpellEffect?.spellId === 'spiritual-weapon' ||
+    token.dnd5eSpellEffect?.spellId === 'mislead' ||
+    token.dnd5eSpellEffect?.spellId === 'project-image'
   const emojiFontScale = isDragonEmoji ? 0.94 : 1
   const emojiOffsetY = isDragonEmoji ? radius * 0.07 : 0
 
@@ -861,6 +1065,14 @@ export function TokenNode({
     node.position(animated ?? latestPositionRef.current)
   }, [movementAnimation])
 
+  useLayoutEffect(() => {
+    if (!instantPosition) return
+    const node = groupRef.current
+    if (!node) return
+    cancelPositionAnimation()
+    node.position({ x: token.x, y: token.y })
+  }, [cancelPositionAnimation, instantPosition, token.x, token.y])
+
   useEffect(() => {
     const node = groupRef.current
     if (!node) return
@@ -917,7 +1129,8 @@ export function TokenNode({
       !node ||
       !movementAnimation ||
       instantPosition ||
-      externalPositionLockedRef.current
+      externalPositionLockedRef.current ||
+      registerPositionNode
     ) return
 
     cancelPositionAnimation()
@@ -949,13 +1162,13 @@ export function TokenNode({
         movementFrameRef.current = 0
       }
     }
-  }, [cancelPositionAnimation, instantPosition, movementAnimation, token.x, token.y])
+  }, [cancelPositionAnimation, instantPosition, movementAnimation, registerPositionNode, token.x, token.y])
 
   const nameLayer = showName && !hidePersistentEffectTokenBody ? (
     <Group y={radius + 4}>
       <Rect
         x={-radius - 6}
-        width={(radius + 6) * 2}
+        width={labelWidth}
         height={labelBarH}
         fill="rgba(10,11,22,0.8)"
         cornerRadius={Math.max(4, radius * 0.12)}
@@ -964,7 +1177,7 @@ export function TokenNode({
         text={token.label}
         fontSize={labelSize}
         fill={defeated ? '#94a3b8' : '#e2e8f0'}
-        width={(radius + 6) * 2}
+        width={labelWidth}
         offsetX={radius + 6}
         height={labelBarH}
         align="center"
@@ -972,6 +1185,14 @@ export function TokenNode({
       />
     </Group>
   ) : null
+
+  const handleStatusTokenClick = (instance: MapTokenStatusInstance) => {
+    if (onStatusTokenClick) {
+      onStatusTokenClick(instance)
+      return
+    }
+    onSelect()
+  }
 
   const vitalsLayer = (
     <>
@@ -1028,7 +1249,17 @@ export function TokenNode({
             {airborne && (
               <Dnd5eFlightBadge
                 radius={radius}
-                onClick={() => onStandardConditionClick?.()}
+                tooltip={flightTooltip}
+                onClick={() => handleStatusTokenClick({
+                  id: `geometry-flight:${token.id}`,
+                  tokenId: token.id,
+                  kind: 'flight',
+                  title: flightTooltip.title,
+                  description: flightTooltip.description,
+                  statusId: 'flying',
+                  sourceLabel: '地图高度与地形',
+                  authority: 'geometry',
+                })}
                 onTooltipChange={onStatusTooltipChange}
               />
             )}
@@ -1036,6 +1267,18 @@ export function TokenNode({
               <ShillelaghTokenBadge
                 radius={radius}
                 gridIndex={airborne ? 1 : 0}
+                onClick={() => handleStatusTokenClick({
+                  id: shillelaghEffectId ?? `spell-effect:${token.id}:shillelagh`,
+                  tokenId: token.id,
+                  kind: 'shillelagh',
+                  title: SHILLELAGH_TOKEN_TOOLTIP.title,
+                  description: SHILLELAGH_TOKEN_TOOLTIP.description,
+                  statusId: 'shillelagh',
+                  activeEffectId: shillelaghEffectId,
+                  sourceActorId: token.id,
+                  sourceLabel: token.label,
+                  authority: 'headless',
+                })}
                 onTooltipChange={onStatusTooltipChange}
               />
             )}
@@ -1049,6 +1292,7 @@ export function TokenNode({
                   size={size}
                   image={concentrationTokenImage}
                   mark={concentrationMark}
+                  onClick={() => handleStatusTokenClick(concentrationMark.instance)}
                   onTooltipChange={(point) => onStatusTooltipChange?.(point ? {
                     ...concentrationTokenTooltip(concentrationMark.spellId),
                     ...point,
@@ -1058,36 +1302,37 @@ export function TokenNode({
             })()}
             {spellStatusMarks.map((mark) => (
               <SpellStatusTokenBadge
-                key={`spell-status:${mark.statusId}`}
+                key={`spell-status:${mark.instance.id}`}
                 radius={radius}
                 gridIndex={grid++}
                 mark={mark}
+                onClick={() => handleStatusTokenClick(mark.instance)}
                 onTooltipChange={onStatusTooltipChange}
               />
             ))}
-            {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
-              .map((condition) => (
+            {tokenStatusMarkers.map((marker) => (
+              <Dnd5eTokenStatusMarkerBadge
+                key={`token-status-marker:${marker.id}`}
+                radius={radius}
+                gridIndex={grid++}
+                marker={marker}
+                onClick={() => handleStatusTokenClick(tokenStatusMarkerInstance(token.id, marker))}
+                onTooltipChange={onStatusTooltipChange}
+              />
+            ))}
+            {standardConditionBadgeInstances.map(({ condition, mark }) => (
                 <Dnd5eStandardConditionBadge
-                  key={`dnd5e-condition:${condition}`}
+                  key={`dnd5e-condition:${mark?.instance.id ?? condition}`}
                   radius={radius}
                   gridIndex={grid++}
                   condition={condition}
-                  mark={standardConditionMarks.find((mark) => mark.condition === condition)}
-                  onClick={() => onStandardConditionClick?.(condition)}
+                  mark={mark}
+                  onClick={() => handleStatusTokenClick(
+                    mark?.instance ?? fallbackStandardConditionInstance(token.id, condition))}
                   tooltip={standardConditionTokenTooltip(condition)}
                   onTooltipChange={onStatusTooltipChange}
                 />
               ))}
-            {standardConditions.length > 4 && (
-              <Dnd5eStandardConditionBadge
-                radius={radius}
-                gridIndex={grid++}
-                overflowCount={standardConditions.length - 3}
-                onClick={() => onStandardConditionClick?.()}
-                tooltip={overflowConditionTokenTooltip(standardConditions.slice(3))}
-                onTooltipChange={onStatusTooltipChange}
-              />
-            )}
           </>
         )
       })()}
@@ -1154,8 +1399,9 @@ export function TokenNode({
     <Group
       ref={groupRef}
       name="map-token"
+      id={token.id}
       draggable={draggable}
-      opacity={defeated ? 0.55 : 1}
+      opacity={defeated ? 0.55 : isMirrorImageDecoy ? 0.74 : 1}
       onClick={handleTokenSelect}
       onTap={handleTokenSelect}
       onMouseEnter={() => onHoverChange?.(true)}
@@ -1185,6 +1431,27 @@ export function TokenNode({
         onDragEnd(x, y)
       }}
     >
+      {isMirrorImageDecoy && (
+        <>
+          <Circle
+            radius={radius + selectedGap * 0.75}
+            stroke={token.color}
+            strokeWidth={Math.max(1.5, baseStrokeW * 0.7)}
+            dash={tokenDash(radius, [4, 5])}
+            opacity={0.9}
+            shadowBlur={10 * scale}
+            shadowColor={token.color}
+            listening={false}
+          />
+          <Circle
+            radius={radius + selectedGap * 0.28}
+            stroke="rgba(165,243,252,0.95)"
+            strokeWidth={Math.max(1, baseStrokeW * 0.45)}
+            opacity={0.8}
+            listening={false}
+          />
+        </>
+      )}
       {selected && (
         <Circle
           radius={radius + selectedGap}
@@ -1201,6 +1468,18 @@ export function TokenNode({
           two-wave halo around the portrait. */}
       {currentTurn && !borderColor && !defeated && !hidePersistentEffectTokenBody && (
         <ActiveTurnHalo radius={radius} />
+      )}
+      {targetSelectable && !targetSelected && (
+        <Circle
+          radius={radius + selectedGap * 1.55}
+          stroke="#38bdf8"
+          strokeWidth={Math.max(2, selectedStrokeW * 0.8)}
+          dash={tokenDash(radius, [3, 4])}
+          opacity={0.9}
+          shadowBlur={7 * scale}
+          shadowColor="rgba(56,189,248,0.72)"
+          listening={false}
+        />
       )}
       {targetSelected && (
         <Circle
@@ -1233,7 +1512,11 @@ export function TokenNode({
       ) : (
         <Circle
           radius={radius}
-          fill={defeated ? 'rgba(30,32,45,0.92)' : 'rgba(10,11,22,0.85)'}
+          fill={defeated
+            ? 'rgba(30,32,45,0.92)'
+            : isMirrorImageDecoy
+              ? 'rgba(30,41,82,0.68)'
+              : 'rgba(10,11,22,0.85)'}
           stroke={strokeColor}
           strokeWidth={bodyStrokeWidth}
         />
@@ -1254,7 +1537,7 @@ export function TokenNode({
             width={radius * 2}
             height={radius * 2}
             crop={tokenImageCrop}
-            opacity={defeated ? 0.55 : 1}
+            opacity={defeated ? 0.55 : isMirrorImageDecoy ? 0.82 : 1}
           />
         </Group>
       )}
@@ -1357,13 +1640,42 @@ export function TokenNode({
         />
       )}
       {renderMode !== 'body' && (() => {
-        let grid = airborne ? 1 : 0
+        let grid = (airborne ? 1 : 0) + (shillelaghActive ? 1 : 0)
         return (
           <>
             {airborne && (
               <Dnd5eFlightBadge
                 radius={radius}
-                onClick={() => onStandardConditionClick?.()}
+                tooltip={flightTooltip}
+                onClick={() => handleStatusTokenClick({
+                  id: `geometry-flight:${token.id}`,
+                  tokenId: token.id,
+                  kind: 'flight',
+                  title: flightTooltip.title,
+                  description: flightTooltip.description,
+                  statusId: 'flying',
+                  sourceLabel: '地图高度与地形',
+                  authority: 'geometry',
+                })}
+                onTooltipChange={onStatusTooltipChange}
+              />
+            )}
+            {shillelaghActive && (
+              <ShillelaghTokenBadge
+                radius={radius}
+                gridIndex={airborne ? 1 : 0}
+                onClick={() => handleStatusTokenClick({
+                  id: shillelaghEffectId ?? `spell-effect:${token.id}:shillelagh`,
+                  tokenId: token.id,
+                  kind: 'shillelagh',
+                  title: SHILLELAGH_TOKEN_TOOLTIP.title,
+                  description: SHILLELAGH_TOKEN_TOOLTIP.description,
+                  statusId: 'shillelagh',
+                  activeEffectId: shillelaghEffectId,
+                  sourceActorId: token.id,
+                  sourceLabel: token.label,
+                  authority: 'headless',
+                })}
                 onTooltipChange={onStatusTooltipChange}
               />
             )}
@@ -1377,6 +1689,7 @@ export function TokenNode({
                   size={size}
                   image={concentrationTokenImage}
                   mark={concentrationMark}
+                  onClick={() => handleStatusTokenClick(concentrationMark.instance)}
                   onTooltipChange={(point) => onStatusTooltipChange?.(point ? {
                     ...concentrationTokenTooltip(concentrationMark.spellId),
                     ...point,
@@ -1384,29 +1697,39 @@ export function TokenNode({
                 />
               )
             })()}
-            {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
-              .map((condition) => (
+            {spellStatusMarks.map((mark) => (
+              <SpellStatusTokenBadge
+                key={`spell-status:${mark.instance.id}`}
+                radius={radius}
+                gridIndex={grid++}
+                mark={mark}
+                onClick={() => handleStatusTokenClick(mark.instance)}
+                onTooltipChange={onStatusTooltipChange}
+              />
+            ))}
+            {tokenStatusMarkers.map((marker) => (
+              <Dnd5eTokenStatusMarkerBadge
+                key={`token-status-marker:${marker.id}`}
+                radius={radius}
+                gridIndex={grid++}
+                marker={marker}
+                onClick={() => handleStatusTokenClick(tokenStatusMarkerInstance(token.id, marker))}
+                onTooltipChange={onStatusTooltipChange}
+              />
+            ))}
+            {standardConditionBadgeInstances.map(({ condition, mark }) => (
                 <Dnd5eStandardConditionBadge
-                  key={`dnd5e-condition:${condition}`}
+                  key={`dnd5e-condition:${mark?.instance.id ?? condition}`}
                   radius={radius}
                   gridIndex={grid++}
                   condition={condition}
-                  mark={standardConditionMarks.find((mark) => mark.condition === condition)}
-                  onClick={() => onStandardConditionClick?.(condition)}
+                  mark={mark}
+                  onClick={() => handleStatusTokenClick(
+                    mark?.instance ?? fallbackStandardConditionInstance(token.id, condition))}
                   tooltip={standardConditionTokenTooltip(condition)}
                   onTooltipChange={onStatusTooltipChange}
                 />
               ))}
-            {standardConditions.length > 4 && (
-              <Dnd5eStandardConditionBadge
-                radius={radius}
-                gridIndex={grid++}
-                overflowCount={standardConditions.length - 3}
-                onClick={() => onStandardConditionClick?.()}
-                tooltip={overflowConditionTokenTooltip(standardConditions.slice(3))}
-                onTooltipChange={onStatusTooltipChange}
-              />
-            )}
           </>
         )
       })()}
@@ -1415,7 +1738,7 @@ export function TokenNode({
         <Group y={radius + 4}>
           <Rect
             x={-radius - 6}
-            width={(radius + 6) * 2}
+            width={labelWidth}
             height={labelBarH}
             fill="rgba(10,11,22,0.8)"
             cornerRadius={Math.max(4, radius * 0.12)}
@@ -1424,7 +1747,7 @@ export function TokenNode({
             text={token.label}
             fontSize={labelSize}
             fill={defeated ? '#94a3b8' : '#e2e8f0'}
-            width={(radius + 6) * 2}
+            width={labelWidth}
             offsetX={radius + 6}
             height={labelBarH}
             align="center"

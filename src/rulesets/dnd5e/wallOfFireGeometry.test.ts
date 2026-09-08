@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dnd5eWallOfFireCells, dnd5eWallOfFireDamageCells } from './wallOfFireGeometry'
+import { dnd5eThinWallCells, dnd5eWallOfFireCells, dnd5eWallOfFireDamageCells } from './wallOfFireGeometry'
 
 const map = { width: 1000, height: 1000, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0 }
 
@@ -63,10 +63,37 @@ describe('Wall of Fire geometry', () => {
     const wallCells = dnd5eWallOfFireCells({ anchor, shape: 'line', angleDegrees: 37, map })
     const left = dnd5eWallOfFireDamageCells({ anchor, wallCells, shape: 'line', angleDegrees: 37, damagingSide: 'left', map })
     const right = dnd5eWallOfFireDamageCells({ anchor, wallCells, shape: 'line', angleDegrees: 37, damagingSide: 'right', map })
-    expect(wallCells.length).toBeGreaterThan(12)
+    expect(wallCells.length).toBeGreaterThanOrEqual(12)
+    expect(wallCells.length).toBeLessThanOrEqual(18)
     expect(left).not.toEqual(right)
     expect(left).toEqual(expect.arrayContaining(wallCells))
     expect(right).toEqual(expect.arrayContaining(wallCells))
+  })
+
+  it.each([0, 180])('keeps a 100-foot rules-thin wall to one row at %i degrees', (angleDegrees) => {
+    const cells = dnd5eThinWallCells({
+      anchor: { col: 10, row: 10 },
+      angleDegrees,
+      lengthFeet: 100,
+      maximumLengthFeet: 100,
+      map,
+    })
+
+    expect(cells).toHaveLength(20)
+    expect(new Set(cells.map((cell) => cell.row))).toEqual(new Set([10]))
+  })
+
+  it.each([90, 270])('keeps a 100-foot rules-thin wall to one column at %i degrees', (angleDegrees) => {
+    const cells = dnd5eThinWallCells({
+      anchor: { col: 10, row: 10 },
+      angleDegrees,
+      lengthFeet: 100,
+      maximumLengthFeet: 100,
+      map,
+    })
+
+    expect(cells).toHaveLength(20)
+    expect(new Set(cells.map((cell) => cell.col))).toEqual(new Set([10]))
   })
 
   it('supports a ring with independently selected inside and outside damage bands', () => {

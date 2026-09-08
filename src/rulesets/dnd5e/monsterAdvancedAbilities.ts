@@ -29,6 +29,15 @@ export function dnd5eMonsterShapechangeFormIds(statBlockId: string): readonly st
   return forms?.filter((formId) => formId !== statBlockId) ?? []
 }
 
+/**
+ * Returns the rules-defined true form for a structured shapechanger family.
+ * The first member of each family is deliberately the true form: vampire,
+ * werebear humanoid, and werewolf humanoid respectively.
+ */
+export function dnd5eMonsterShapechangeTrueFormId(statBlockId: string): string | undefined {
+  return STRUCTURED_SHAPECHANGE_FORMS.find((forms) => forms.includes(statBlockId))?.[0]
+}
+
 export function dnd5eMonsterHasStructuredShapechange(statBlockId: string): boolean {
   return STRUCTURED_SHAPECHANGE_FORMS.some((forms) => forms.includes(statBlockId))
 }
@@ -47,11 +56,17 @@ const MONSTER_CORE_ACTIVE_EFFECT_SPELL_IDS = new Set([
   'longstrider',
   'mage-armor',
   'protection-from-poison',
+  'shillelagh',
 ])
 
 const MONSTER_CORE_CONTROL_SPELL_IDS = new Set([
   'banishment',
   'hold-person',
+  'slow',
+])
+
+const MONSTER_CORE_ON_HIT_EFFECT_SPELL_IDS = new Set([
+  'ray-of-frost',
 ])
 
 const MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS = new Set([
@@ -62,6 +77,16 @@ const MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS = new Set([
   'insect-plague',
   'spirit-guardians',
   'wall-of-fire',
+  'fog-cloud',
+  'web',
+  'silence',
+  'sleet-storm',
+  'stinking-cloud',
+  'wind-wall',
+  'wall-of-force',
+  'wall-of-stone',
+  'wall-of-ice',
+  'wall-of-thorns',
 ])
 
 /**
@@ -101,11 +126,10 @@ export function dnd5eMonsterCoreSpellCompatibility(
       (spell.appliedEffect !== 'sanctuary' || spell.id !== 'sanctuary') &&
       spell.appliedEffect !== 'magic-weapon' &&
       !supportedActiveEffect) ||
-    spell.onHitEffect ||
+    (spell.onHitEffect && !MONSTER_CORE_ON_HIT_EFFECT_SPELL_IDS.has(spell.id)) ||
     (spell.onFailedSaveEffect &&
       spell.onFailedSaveEffect !== 'charm-person' &&
-      !(spell.id === 'hold-person' && spell.onFailedSaveEffect === 'hold-person') &&
-      !(spell.id === 'banishment' && spell.onFailedSaveEffect === 'banishment') &&
+      !(MONSTER_CORE_CONTROL_SPELL_IDS.has(spell.id) && spell.onFailedSaveEffect === spell.id) &&
       !(spell.id === 'thunderwave' && spell.onFailedSaveEffect === 'thunderwave-push')) ||
     spell.sustainedAttack ||
     spell.delayedDamage ||

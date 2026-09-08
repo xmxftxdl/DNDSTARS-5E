@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  advanceCampaignTimeSnapshot,
   campaignDawnsCrossed,
   campaignGregorianDate,
   campaignLightIsActive,
   campaignLightPresetPatch,
+  campaignWorldMinuteFromDisplay,
   canBenefitFromLongRest,
   formatCampaignTime,
   normalizeSharedCampaignTime,
@@ -16,6 +18,46 @@ describe('campaign time model', () => {
     expect(formatCampaignTime(1_440 + 75)).toBe('第 2 日 01:15')
     expect(campaignDawnsCrossed(5 * 60, 6 * 60)).toBe(1)
     expect(campaignDawnsCrossed(8 * 60, 1_440 + 8 * 60)).toBe(1)
+  })
+
+  it('prepares a deterministic forward snapshot for an atomic long cast', () => {
+    const state = normalizeSharedCampaignTime({
+      schemaVersion: 2,
+      worldMinute: 350,
+      displayMode: 'campaign-day',
+      displayMinuteOffset: 0,
+      timers: [{
+        id: 'spell-timer', kind: 'concentration', label: '旧法术',
+        createdAtWorldMinute: 300, expiresAtWorldMinute: 360,
+        status: 'active', createdAt: 1,
+      }],
+      advances: [],
+      updatedAt: 1,
+    })
+    const next = advanceCampaignTimeSnapshot({
+      state,
+      minutes: 60,
+      reason: '完成长时施法',
+      now: 100,
+      advanceId: 'campaign-time:action-1',
+    })
+
+    expect(next).toMatchObject({
+      worldMinute: 410,
+      updatedAt: 100,
+      timers: [{ id: 'spell-timer', status: 'expired', expiredAtWorldMinute: 360 }],
+      advances: [{
+        id: 'campaign-time:action-1',
+        kind: 'advance',
+        fromWorldMinute: 350,
+        toWorldMinute: 410,
+        minutes: 60,
+        dawnsCrossed: 1,
+        expiredTimerIds: ['spell-timer'],
+      }],
+    })
+    expect(state.worldMinute).toBe(350)
+    expect(state.timers[0].status).toBe('active')
   })
 
   it('formats a Gregorian campaign clock without using the browser timezone', () => {
@@ -31,6 +73,13 @@ describe('campaign time model', () => {
     })
     expect(formatCampaignTime(clock)).toBe('1992年10月10日 08:00')
     expect(campaignGregorianDate({ ...clock, worldMinute: 1_440 + 75 })).toBe('1992-10-11')
+    expect(campaignWorldMinuteFromDisplay(clock, { date: '1992-10-11', hour: 1, minute: 15 })).toBe(1_440 + 75)
+  })
+
+  it('converts an editable campaign-day display time back to the authoritative minute', () => {
+    expect(campaignWorldMinuteFromDisplay({ displayMode: 'campaign-day', displayMinuteOffset: 60 }, {
+      day: 2, hour: 2, minute: 30,
+    })).toBe(1_530)
   })
 
   it('requires 24 campaign hours between long-rest benefits', () => {
@@ -79,6 +128,26 @@ describe('campaign time model', () => {
     expect(validateSharedCampaignTime({
       ...state,
       advances: [{ ...state.advances[0], beneficiaryCharacterIds: ['hero', 'hero'] }],
+    })).toBe(false)
+    const longRestState = {
+      ...state,
+      worldMinute: 960,
+      advances: [{
+        ...state.advances[0], kind: 'long-rest', toWorldMinute: 960, minutes: 480,
+        restRecoveryReports: undefined,
+        restFeatureD20Rolls: [{
+          characterId: 'hero', featureId: 'local.test:diviner.portent', values: [5, 16],
+        }],
+      }],
+    }
+    expect(validateSharedCampaignTime(longRestState)).toBe(true)
+    expect(normalizeSharedCampaignTime(longRestState).advances[0].restFeatureD20Rolls?.[0].values)
+      .toEqual([5, 16])
+    expect(validateSharedCampaignTime({
+      ...longRestState,
+      advances: [{ ...longRestState.advances[0], restFeatureD20Rolls: [{
+        characterId: 'hero', featureId: 'local.test:diviner.portent', values: [21],
+      }] }],
     })).toBe(false)
   })
 

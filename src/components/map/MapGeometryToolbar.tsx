@@ -66,7 +66,8 @@ interface MapGeometryToolbarProps {
   }) => Promise<void>
 }
 
-const TOOL_LABELS: Record<Exclude<MapGeometryTool, 'select'>, string> = {
+const TOOL_LABELS: Record<MapGeometryTool, string> = {
+  select: '选择／编辑',
   wall: '墙',
   door: '门',
   window: '窗户',
@@ -174,6 +175,8 @@ export default function MapGeometryToolbar({
   const removeEntity = useMapGeometryStore((state) => state.removeEntity)
   const setVision = useMapGeometryStore((state) => state.setVision)
   const setEnvironment = useMapGeometryStore((state) => state.setEnvironment)
+  const setWeather = useMapGeometryStore((state) => state.setWeather)
+  const setOverheadSpace = useMapGeometryStore((state) => state.setOverheadSpace)
   const clearMap = useMapGeometryStore((state) => state.clearMap)
   const duplicateEntity = useMapGeometryStore((state) => state.duplicateEntity)
   const replaceMap = useMapGeometryStore((state) => state.replaceMap)
@@ -255,7 +258,7 @@ export default function MapGeometryToolbar({
             onChange={(event) => onToolChange(event.target.value as MapGeometryTool)}
             aria-label="地图几何工具"
             className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-            title="按住并拖动绘制；门窗工具下从空白地图拖动仍可平移视角"
+            title="选择／编辑可选中并拖动现有墙体节点；其他工具用于绘制"
           >
             {Object.entries(TOOL_LABELS).map(([value, label]) => (
               <option key={value} value={value} disabled={terrainEditingLocked && value === 'elevation'}>{label}</option>
@@ -353,12 +356,39 @@ export default function MapGeometryToolbar({
               全图环境
               <select
                 value={geometry.environment ?? 'normal'}
-                onChange={(event) => setEnvironment(mapId, event.target.value as 'normal' | 'underwater')}
+                onChange={(event) => setEnvironment(mapId, event.target.value as NonNullable<MapGeometryState['environment']>)}
                 className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
                 aria-label="全图环境规则"
               >
-                <option value="normal">地表</option>
+                <option value="normal">普通／未指定</option>
+                <option value="outdoors">室外地表</option>
+                <option value="indoors">室内</option>
+                <option value="underground">地下</option>
                 <option value="underwater">水下</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-slate-400" title="权威天气会参与需要既有暴风雨的法术结算；召雷术会自动增加 1d10">
+              全图天气
+              <select
+                value={geometry.weather ?? 'normal'}
+                onChange={(event) => setWeather(mapId, event.target.value as NonNullable<MapGeometryState['weather']>)}
+                className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+                aria-label="全图天气规则"
+              >
+                <option value="normal">普通／未指定</option>
+                <option value="storm">暴风雨</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-slate-400" title="受限表示施法者看不到可容纳高 10 尺、半径 60 尺云层的高空空间；召雷术会在消耗资源前失败">
+              高空空间
+              <select
+                value={geometry.overheadSpace ?? 'open'}
+                onChange={(event) => setOverheadSpace(mapId, event.target.value as NonNullable<MapGeometryState['overheadSpace']>)}
+                className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+                aria-label="高空空间规则"
+              >
+                <option value="open">可容纳云层</option>
+                <option value="confined">受限／无法容纳</option>
               </select>
             </label>
             <label
@@ -788,6 +818,18 @@ export default function MapGeometryToolbar({
                 />
                 暗门
               </label>
+              {selectedEntity.secret && (
+                <label className="flex items-center gap-0.5 text-[10px] text-violet-200">
+                  <input
+                    type="checkbox"
+                    checked={selectedEntity.magicallyHidden === true}
+                    onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                      magicallyHidden: event.target.checked || undefined,
+                    })}
+                  />
+                  魔法隐藏
+                </label>
+              )}
               {mapGeometryDoorLockState(selectedEntity) !== 'unlocked' && <LockKeyhole className="h-3.5 w-3.5 text-rose-300" />}
               <NumberField
                 label="开锁 DC"
@@ -896,12 +938,23 @@ export default function MapGeometryToolbar({
             </>
           )}
           {(selectedEntity.kind === 'door' || selectedEntity.kind === 'window') && (
-            <span className="text-[10px] text-slate-400">
-              {selectedEntity.parentWallId
-                ? `嵌入：${geometry.walls.find((wall) => wall.id === selectedEntity.parentWallId)?.label ?? '墙体'}`
-                : '旧式独立几何'}
-              {' · 拖动端点调整宽度，拖动中点沿墙移动'}
-            </span>
+            <>
+              <NumberField
+                label="实体缝隙（英寸）"
+                help="普通门默认 1 英寸；0 表示完全密闭。气化形体等明确允许穿狭缝的能力可通过，普通生物仍被阻挡。"
+                min={0}
+                value={selectedEntity.passageGapInches ?? (selectedEntity.kind === 'door' ? 1 : 0)}
+                onChange={(passageGapInches) => updateEntity(mapId, selectedEntity.id, {
+                  passageGapInches,
+                })}
+              />
+              <span className="text-[10px] text-slate-400">
+                {selectedEntity.parentWallId
+                  ? `嵌入：${geometry.walls.find((wall) => wall.id === selectedEntity.parentWallId)?.label ?? '墙体'}`
+                  : '旧式独立几何'}
+                {' · 拖动端点调整宽度，拖动中点沿墙移动'}
+              </span>
+            </>
           )}
           {selectedEntity.kind === 'obstacle' && (
             selectedTerrainRegion ? (
@@ -1060,9 +1113,8 @@ export default function MapGeometryToolbar({
           </button>}
           <button
             type="button"
-            disabled={selectedTerrainRegionLocked}
             onClick={() => removeEntity(mapId, selectedEntity.id)}
-            className="rounded p-1 text-rose-300 hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-35"
+            className="rounded p-1 text-rose-300 hover:bg-rose-500/15"
             title="删除选中几何"
           >
             <Trash2 className="h-3.5 w-3.5" />

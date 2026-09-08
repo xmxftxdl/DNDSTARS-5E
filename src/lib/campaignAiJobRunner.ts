@@ -14,6 +14,7 @@ import {
   createLocalBridgePdfOcrProvider,
   createLocalAiBridgeRuntime,
   localAiBridgeSnapshot,
+  probeLocalAiBridge,
 } from './localAiBridgeApi'
 import {
   analyzeExtractedPdfDocuments,
@@ -39,6 +40,25 @@ const PDF_ANALYSIS_PROMPT_VERSION = 'pdf-campaign-analysis-v5-ocr-evidence'
 export interface CampaignPdfAnalysisRunResult {
   job: PublicAiJobV2
   result: PdfCampaignAnalysisV2
+}
+
+export function canAutoResumeCampaignPdfAnalysisJob(
+  job: PublicAiJobV2,
+  runnerId: string,
+  now = Date.now(),
+): boolean {
+  if (job.taskKind !== 'campaign-analysis' || job.executionMode !== 'local-runner') return false
+  if (job.status === 'awaiting-local-runner') return true
+  if (job.status !== 'running') return false
+  return job.lease?.runnerId === runnerId || (job.lease?.expiresAt ?? 0) <= now
+}
+
+export async function loadRecoverableCampaignPdfFiles(
+  campaignId: string,
+  job: PublicAiJobV2,
+): Promise<File[] | null> {
+  const files = await pdfSourceRepository.loadJobFiles(campaignId, job.jobId)
+  return files && pdfFilesMatchAiJob(files, job) ? files : null
 }
 
 function sourceAssetsForFiles(files: readonly File[]) {
@@ -95,6 +115,10 @@ export async function runCampaignPdfAnalysisJob(input: {
   onJob?: (job: PublicAiJobV2) => void
 }): Promise<CampaignPdfAnalysisRunResult> {
   if (input.files.length === 0) throw new Error('pdf-files-required')
+  if (
+    ['local-bridge', 'external-account'].includes(input.selection.providerId) &&
+    localAiBridgeSnapshot().status !== 'ready'
+  ) await probeLocalAiBridge()
   const registry = new AiProviderRegistryV1()
   registerBridgeProvider(registry, input.selection)
   const bridge = localAiBridgeSnapshot()
@@ -128,7 +152,7 @@ export async function runCampaignPdfAnalysisJob(input: {
         taskKind: 'campaign-analysis',
         executionMode: 'local-runner',
         providerId: input.selection.providerId,
-        modelId: input.selection.modelId ?? '',
+        modelId: modelRouting.extraction.modelId,
         promptVersion: PDF_ANALYSIS_PROMPT_VERSION,
         idempotencyKey: `pdf-${crypto.randomUUID()}`,
         sourceAssets: sourceAssetsForFiles(input.files),
@@ -140,6 +164,12 @@ export async function runCampaignPdfAnalysisJob(input: {
       })
       job = created.job
     }
+
+    // The server deliberately never receives the original PDF. Keep an origin-scoped
+    // browser copy while the job is active so a reload can reacquire the same lease
+    // and continue from the persisted extraction/pass cache without asking the DM to
+    // select the document again.
+    await pdfSourceRepository.saveJobFiles(input.campaignId, job.jobId, input.files).catch(() => undefined)
 
     const leased = await leaseCampaignAiJob(
       input.campaignId,
@@ -221,6 +251,7 @@ export async function runCampaignPdfAnalysisJob(input: {
       depth: input.depth,
       cachedPasses: cache.passes,
       cachedSynthesis: cache.synthesis,
+      executionId: leased.job.jobId,
       onProgress: reportProgress,
       onPassCompleted: async (key, analysis) => {
         cache.passes[key] = analysis
@@ -235,10 +266,10 @@ export async function runCampaignPdfAnalysisJob(input: {
     const result = await finalizePdfCampaignAnalysisV2({ analysis: legacyAnalysis, documents })
     try {
       const records = new Map(result.documents.map((document) => [document.id, document]))
-      for (const document of documents) {
+      for (const [index, document] of documents.entries()) {
         const record = records.get(document.id)
         if (!record || !document.pages) continue
-        await pdfSourceRepository.saveDocument(record, document.pages)
+        await pdfSourceRepository.saveDocument(record, document.pages, input.files[index])
       }
     } catch {
       result.warnings = [...new Set([
@@ -265,6 +296,7 @@ export async function runCampaignPdfAnalysisJob(input: {
       },
     )
     await deletePdfAnalysisCache(cacheKey).catch(() => undefined)
+    await pdfSourceRepository.deleteJobFiles(leased.job.jobId).catch(() => undefined)
     input.onJob?.(persisted)
     return { job: persisted, result }
   } catch (error) {

@@ -1,4 +1,8 @@
-import type { Dnd5eInventoryItemTemplate, Dnd5eMagicItemRarity } from '../types/inventory'
+import type {
+  Dnd5eInventoryIconId,
+  Dnd5eInventoryItemTemplate,
+  Dnd5eMagicItemRarity,
+} from '../types/inventory'
 import { DND5E_SRD_SPELL_CATALOG } from '../rulesets/dnd5e/spellCatalog'
 import { dnd5ePluginImageAssetUrl } from '../rulesets/dnd5e/pluginAssets'
 
@@ -48,6 +52,10 @@ export interface Dnd5eActionIconSpec {
   classBackdropId?: string
   /** Magic-item rarity controls the inventory background and ornamental frame. */
   rarityBackdropId?: Dnd5eMagicItemRarity
+  /** Optional multicolour semantic vector rendered for inventory items without bespoke art. */
+  inventoryIconId?: Dnd5eInventoryIconId
+  /** Built-in item paintings may remain registered, while the UI deliberately shows the scalable semantic glyph. */
+  preferSemanticGlyph?: boolean
 }
 
 export interface Dnd5eSpellActionIconInput {
@@ -464,7 +472,12 @@ const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = Object.free
   fabricate: '/assets/icons/fabricate-spell-action.png',
 })
 
-const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
+/**
+ * Legacy generated item paintings are kept on disk for compatibility and art
+ * reference, but built-in inventory items now use semantic SVG glyphs. A
+ * plugin can still opt into its own bitmap explicitly through iconAssetId.
+ */
+export const DND5E_LEGACY_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:adamantine-armor': '/assets/icons/adamantine-armor-item-action.png',
   'srd-5.1:magic-item:ammunition': '/assets/icons/ammunition-item-action.png',
   'srd-5.1:magic-item:amulet-of-health': '/assets/icons/amulet-of-health-item-action.png',
@@ -852,9 +865,75 @@ export function dnd5eSpellActionIcon(input: Dnd5eSpellActionIconInput): Dnd5eAct
   }
 }
 
-export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' | 'name' | 'englishName' | 'category' | 'icon' | 'iconAssetId' | 'magicItem' | 'use'>): Dnd5eActionIconSpec {
+export function dnd5eInventorySemanticIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' | 'name' | 'englishName' | 'category' | 'icon' | 'magicItem' | 'equipment' | 'use'>): Dnd5eInventoryIconId {
+  const searchable = `${item.id} ${item.name} ${item.englishName ?? ''}`
+  const equipmentRules = item.equipment?.dnd5e
+
+  if (/(?:sling[- ]?bullets?|投石索弹丸|投石索铅丸)/i.test(searchable)) return 'sling-bullets'
+  if (/(?:string[- ]?10[- ]?feet|\bstring\b|细绳)/i.test(searchable)) return 'string'
+  if (/(?:perfume|香水)/i.test(searchable)) return 'perfume'
+  if (/(?:small[- ]?knife|小刀)/i.test(searchable)) return 'small-knife'
+  if (/(?:dulcimer|扬琴)/i.test(searchable)) return 'dulcimer'
+  if (/(?:oil[- ]?flask|oil \(flask\)|油（瓶）|油瓶)/i.test(searchable)) return 'oil-flask'
+  if (/(?:piton|nails?|岩钉|铁钉|营钉|钉子)/i.test(searchable)) return 'nails'
+  if (/(?:pickaxe|mining[- ]?pick|矿镐|鹤嘴锄|十字镐)/i.test(searchable)) return 'pickaxe'
+  if (equipmentRules?.kind === 'shield' || /(?:\bshield\b|盾牌|护盾)/i.test(searchable)) return 'shield'
+  if (equipmentRules?.kind === 'armor') return `${equipmentRules.category}-armor`
+  if (item.magicItem?.kind === 'armor') {
+    if (/(?:leather|studded|padded|皮甲|镶钉皮甲|布甲)/i.test(searchable)) return 'light-armor'
+    if (/(?:scale|hide|breastplate|half plate|鳞甲|兽皮甲|胸甲|半身板甲)/i.test(searchable)) return 'medium-armor'
+    if (/(?:chain|splint|plate|ring mail|链甲|板条甲|板甲|环甲)/i.test(searchable)) return 'heavy-armor'
+    return 'armor'
+  }
+
+  if (item.magicItem?.kind === 'ring') return 'magic-ring'
+  if (item.magicItem?.kind === 'wand') return 'magic-wand'
+  if (item.magicItem?.kind === 'staff') return 'magic-staff'
+  if (item.magicItem?.kind === 'rod') return 'magic-rod'
+  if (item.magicItem?.kind === 'scroll') return 'magic-scroll'
+  if (item.magicItem?.kind === 'potion') {
+    return item.use?.effect.kind === 'healing' || /(?:healing|治疗|治愈|疗伤)/i.test(searchable)
+      ? 'healing-potion'
+      : 'magic-potion'
+  }
+  if (item.magicItem?.kind === 'ammunition') return 'ammunition'
+
+  if (/(?:\bdice[- ]?set\b|\bdragonchess\b|\bplaying[- ]?card[- ]?set\b|\bthree[- ]dragon[- ]ante\b|gaming[- ]?set|骰子套组|龙棋套组|纸牌套组|三龙牌套组|游戏套组)/i.test(searchable)) return 'gaming-set'
+  if (/(?:\bbagpipes?\b|\bdrums?\b|\bflutes?\b|\bhorns?\b|\blutes?\b|\blyres?\b|pan[- ]flute|\bshawm\b|\bviols?\b|风笛|鼓|长笛|横笛|号角|鲁特琴|里拉琴|排箫|唢呐|提琴)/i.test(searchable)) return 'instrument'
+  if (/(?:\bgalley\b|\bkeelboat\b|\blongship\b|\browboat\b|\bsailing[- ]ship\b|\bwarship\b|桨帆战舰|龙骨船|长船|划艇|帆船|战舰)/i.test(searchable)) return 'ship'
+  if (/(?:\bcarriage\b|\bcart\b|\bchariot\b|\bsled\b|\bwagon\b|四轮马车|货车|战车|雪橇|篷车)/i.test(searchable)) return 'vehicle'
+  if (/(?:\b[a-z]+(?:-[a-z]+)*-mount\b|\bsaddles?\b|bit[- ]and[- ]bridle|（坐骑）|马嚼与缰绳|[军驮骑特]用?鞍|特殊鞍)/i.test(searchable)) return 'mount'
+  if (/(?:\bbooks?\b|书籍)/i.test(searchable)) return 'book'
+  if (item.category === 'container') return 'container'
+  if (item.category === 'tool') return 'tool'
+
+  if (/(?:\bclothes?\b|clothing|costume|vestments?|\brobe\b|\bcloak\b|服装|衣装|戏服|祭服|长袍|斗篷)/i.test(searchable)) return 'clothing'
+  if (/(?:crossbow|弩)/i.test(searchable)) return 'crossbow'
+  if (/(?:longbow|shortbow|oathbow|\bbow\b|长弓|短弓|誓约弓)/i.test(searchable)) return 'bow'
+  if (/(?:trident|三叉戟)/i.test(searchable)) return 'trident'
+  if (/(?:glaive|halberd|长柄刀|长戟|\b戟\b)/i.test(searchable)) return 'polearm'
+  if (/(?:javelin|spear|lance|pike|标枪|骑枪|长枪|\b矛\b)/i.test(searchable)) return 'spear'
+  if (/(?:dagger|匕首)/i.test(searchable)) return 'dagger'
+  if (/(?:handaxe|battleaxe|greataxe|wood axe|berserker axe|\baxe\b|斧)/i.test(searchable)) return 'axe'
+  if (/(?:flail|连枷)/i.test(searchable)) return 'flail'
+  if (/(?:morningstar|warhammer|light hammer|\bhammer\b|\bmaul\b|\bmace\b|war pick|钉头锤|战锤|轻锤|巨锤|硬头锤|战镐|锤子)/i.test(searchable)) return 'hammer'
+  if (/(?:quarterstaff|greatclub|\bclub\b|长棍|短棒|大棒)/i.test(searchable)) return /(?:quarterstaff|长棍)/i.test(searchable) ? 'staff' : 'club'
+  if (/(?:sickle|镰刀)/i.test(searchable)) return 'sickle'
+  if (/(?:sling|投石索)/i.test(searchable)) return 'sling'
+  if (/(?:\bdart\b|飞镖)/i.test(searchable)) return 'dart'
+  if (/(?:whip|长鞭)/i.test(searchable)) return 'whip'
+  if (/(?:blowgun|吹箭筒)/i.test(searchable)) return 'blowgun'
+  if (/(?:\bnet\b|捕网)/i.test(searchable)) return 'net'
+  if (/(?:longsword|shortsword|greatsword|rapier|scimitar|sword|blade|defender|frost brand|flame tongue|holy avenger|长剑|短剑|巨剑|刺剑|弯刀|剑|刃)/i.test(searchable)) return 'sword'
+  if (item.magicItem?.kind === 'weapon') return 'weapon'
+  if (item.magicItem?.kind === 'wondrous-item') return 'magic-wondrous'
+  return item.icon
+}
+
+export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' | 'name' | 'englishName' | 'category' | 'icon' | 'iconAssetId' | 'magicItem' | 'equipment' | 'use'>): Dnd5eActionIconSpec {
   const key = `item:${item.id}`
   const searchable = `${item.id} ${item.name} ${item.englishName ?? ''}`
+  const semanticIcon = dnd5eInventorySemanticIcon(item)
   const textMotif = motifFromText(searchable)
   const motif = textMotif ??
     (item.icon === 'weapon' || item.magicItem?.kind === 'weapon' || item.magicItem?.kind === 'ammunition' ? 'weapon'
@@ -868,9 +947,14 @@ export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' 
                     : item.category === 'equipment' ? 'weapon' : 'beast')
   const base = paletteFor(key, motif)
   const rarityPalette = item.magicItem ? DND5E_MAGIC_ITEM_RARITY_PALETTES[item.magicItem.rarity] : undefined
-  const asset = dnd5ePluginImageAssetUrl(item.iconAssetId) ?? DND5E_PAINTED_ITEM_ASSETS[item.id]
+  const customAsset = dnd5ePluginImageAssetUrl(item.iconAssetId)
+  const asset = customAsset ?? DND5E_LEGACY_PAINTED_ITEM_ASSETS[item.id] ??
+    (item.id.startsWith('srd-5.1:spell-scroll:') && item.magicItem?.kind === 'scroll'
+      ? DND5E_LEGACY_PAINTED_ITEM_ASSETS['srd-5.1:magic-item:spell-scroll'] : undefined)
   return {
     ...base,
+    inventoryIconId: semanticIcon,
+    preferSemanticGlyph: !customAsset,
     ...(rarityPalette ? {
       background: rarityPalette[0],
       backgroundDeep: rarityPalette[1],
@@ -879,5 +963,6 @@ export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' 
       rarityBackdropId: item.magicItem!.rarity,
     } : {}),
     ...(asset ? { asset, assetMode: 'foreground' as const } : {}),
+    ...(customAsset ? { assetTreatment: 'transparent-foreground' as const } : {}),
   }
 }

@@ -1,7 +1,10 @@
 {
   "name": "dndstars-5e",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0-beta.1",
+  "description": "Astral Trace online virtual tabletop for D&D 5e",
+  "author": "Astral Trace",
+  "main": "desktop/main.mjs",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
@@ -14,7 +17,11 @@
     "dev:player2": "node scripts/vite-server.mjs --host 127.0.0.1 --port 5275 --strictPort --art-asset-root public",
     "dev:player3": "node scripts/vite-server.mjs --host 127.0.0.1 --port 5276 --strictPort --art-asset-root public",
     "dev:table": "node scripts/start-table.mjs",
+    "dev:mobile-demo": "node scripts/mobile-demo-server.mjs",
+    "dev:mobile": "npm --prefix apps/player-mobile start",
     "local-ai-bridge": "node scripts/local-ai-bridge.mjs",
+    "local-ai:configure": "node scripts/configure-local-ai.mjs",
+    "local-voice:configure": "node scripts/configure-local-voice.mjs",
     "local-ocr": "python scripts/rapidocr-server.py",
     "serve:dm": "node scripts/static-server.mjs --host 127.0.0.1 --port 5273 --root dist --art-asset-root public",
     "serve:player": "node scripts/static-server.mjs --host 127.0.0.1 --port 5274 --root dist --art-asset-root public",
@@ -34,11 +41,18 @@
     "audit:art-assets": "node scripts/generate-art-asset-manifest.mjs --check",
     "audit:local-content": "node scripts/audit-local-content-boundary.mjs --dist dist",
     "audit:srd-content": "vitest run src/rulesets/dnd5e/srdContentAudit.test.ts",
+    "audit:srd-spell-headless": "node scripts/audit-srd-spell-headless.mjs --check",
+    "audit:srd-spell-runtime": "node scripts/audit-srd-spell-runtime-coverage.mjs",
     "migrate:sqlite": "node scripts/migrate-json-indexes-to-sqlite.mjs",
     "migrate:postgres": "node scripts/migrate-storage-to-postgres.mjs",
     "test": "vitest run",
     "test:postgres": "node scripts/postgres-storage.integration.mjs",
     "test:combat-scenarios": "vitest run src/rulesets/dnd5e/combatScenarioRegression.test.ts",
+    "test:mobile-demo": "node --test scripts/mobile-demo-server.test.mjs",
+    "test:desktop": "node --test desktop/client-update.test.mjs desktop/plugin-package-store.test.mjs",
+    "desktop:start": "electron .",
+    "desktop:client:package": "node scripts/build-desktop-client.mjs",
+    "desktop:package": "npm run build && npm run desktop:client:package && electron-builder --win nsis --x64 --publish never",
     "e2e": "playwright test",
     "e2e:combat-scenarios": "playwright test e2e/combat-scenario-replay.spec.ts",
     "e2e:ui": "playwright test --ui",
@@ -50,6 +64,8 @@
   "dependencies": {
     "@3d-dice/dice-box-threejs": "^0.0.12",
     "@tailwindcss/vite": "^4.3.0",
+    "electron-updater": "^6.8.9",
+    "fflate": "^0.8.3",
     "konva": "^10.3.0",
     "livekit-client": "^2.21.0",
     "livekit-server-sdk": "^2.17.0",
@@ -59,7 +75,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-konva": "^19.2.4",
-    "react-router-dom": "7.18.1",
+    "react-router-dom": "^7.18.3",
     "tailwindcss": "^4.3.0",
     "zustand": "^5.0.14"
   },
@@ -70,6 +86,8 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -78,5 +96,48 @@
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
     "vitest": "^4.1.9"
+  },
+  "build": {
+    "appId": "com.astraltrace.desktop",
+    "productName": "Astral Trace",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": {
+      "output": "artifacts/desktop"
+    },
+    "files": [
+      "desktop/**/*",
+      "!desktop/**/*.test.mjs",
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "src/assets/starmark-logo.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "AstralTrace-Setup-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Astral Trace"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "xmxftxdl",
+        "repo": "DNDSTARS-5E",
+        "releaseType": "release"
+      }
+    ]
   }
 }

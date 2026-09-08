@@ -31,11 +31,44 @@ function fail(message) {
   process.exit(1)
 }
 
-const packageJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-if (packageJson.dependencies?.['react-router-dom'] !== '7.18.1') {
-  fail('React Router 安全例外只允许精确版本 react-router-dom@7.18.1。')
+const npmCli = process.env.npm_execpath
+const npmCommand = npmCli ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm')
+const npmArguments = [...(npmCli ? [npmCli] : []), 'audit', '--omit=dev', '--json']
+const audit = spawnSync(npmCommand, npmArguments, {
+  cwd: ROOT,
+  encoding: 'utf8',
+  windowsHide: true,
+  // Windows cannot spawn a .cmd shim directly without a command interpreter.
+  // The fallback command and all arguments above are fixed, not user input.
+  shell: !npmCli && process.platform === 'win32',
+})
+if (audit.error) fail(`无法执行 npm audit：${audit.error.message}`)
+
+let report
+try {
+  report = JSON.parse(audit.stdout)
+} catch {
+  fail(`npm audit 没有返回有效 JSON：${audit.stderr || '未知错误'}`)
+}
+if (report.error || !report.vulnerabilities || !report.metadata ||
+  (audit.status !== 0 && audit.status !== 1)) {
+  fail(`npm audit 未能完成，不能视为无漏洞：${report.error?.summary || audit.stderr || `exit=${audit.status}`}`)
 }
 
+const vulnerabilities = Object.entries(report.vulnerabilities ?? {})
+if (vulnerabilities.length === 0) {
+  console.log('生产依赖审计通过：没有已知漏洞。')
+  process.exit(0)
+}
+
+// An upgrade with a clean audit needs no historical exception. If the old
+// advisory remains, retain the exact reviewed lockfile version and API guard.
+const lockfile = JSON.parse(readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'))
+for (const name of ALLOWED_PACKAGES) {
+  if (lockfile.packages?.[`node_modules/${name}`]?.version !== '7.18.1') {
+    fail(`React Router 的历史安全例外只适用于锁定的 ${name}@7.18.1；当前漏洞需要重新审查。`)
+  }
+}
 for (const file of sourceFiles(path.join(ROOT, 'src'))) {
   const source = readFileSync(file, 'utf8')
   if (/from\s+['"]react-router['"]/.test(source)) {
@@ -45,29 +78,6 @@ for (const file of sourceFiles(path.join(ROOT, 'src'))) {
   if (forbidden) {
     fail(`${path.relative(ROOT, file)} 使用了 ${forbidden}；RSC／Data Router 安全例外不再成立。`)
   }
-}
-
-const npmCli = process.env.npm_execpath
-const npmCommand = npmCli ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm')
-const npmArguments = [...(npmCli ? [npmCli] : []), 'audit', '--omit=dev', '--json']
-const audit = spawnSync(npmCommand, npmArguments, {
-  cwd: ROOT,
-  encoding: 'utf8',
-  windowsHide: true,
-})
-if (audit.error) fail(`无法执行 npm audit：${audit.error.message}`)
-
-let report
-try {
-  report = JSON.parse(audit.stdout || '{}')
-} catch {
-  fail(`npm audit 没有返回有效 JSON：${audit.stderr || '未知错误'}`)
-}
-
-const vulnerabilities = Object.entries(report.vulnerabilities ?? {})
-if (vulnerabilities.length === 0) {
-  console.log('生产依赖审计通过：没有已知漏洞。')
-  process.exit(0)
 }
 
 for (const [packageName, vulnerability] of vulnerabilities) {

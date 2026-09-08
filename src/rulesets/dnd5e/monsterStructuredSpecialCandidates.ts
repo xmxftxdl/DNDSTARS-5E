@@ -6,6 +6,8 @@ import {
   tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
+import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import {
   mapGeometryCanSeeToken,
   mapGeometryPlacementBlocked,
@@ -25,6 +27,7 @@ import type {
   Dnd5eMonsterBehaviorStyle,
   Dnd5eMonsterStatBlock,
 } from './monsters'
+import { dnd5eMonsterActionUsageId } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 
 export interface MonsterStructuredSpecialCandidateServices {
@@ -68,21 +71,105 @@ export function createMonsterStructuredSpecialActionCandidates(input: {
   const actions = monster.actions.filter((action) =>
     action.kind === 'other' &&
     dnd5eMonsterActionAutomation(action) === 'headless' &&
-    (action.rule?.kind === 'teleport' || action.rule?.kind === 'invisibility') &&
+    (
+      action.rule?.kind === 'teleport' ||
+      action.rule?.kind === 'invisibility' ||
+      action.rule?.kind === 'persistent-area'
+    ) &&
     (input.requiredActionId == null || action.id === input.requiredActionId) &&
     (
       action.usage?.kind !== 'recharge' ||
-      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[action.id] !== false
+      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ] !== false
     ) &&
     (
       action.usage?.kind !== 'per-day' ||
-      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ??
+      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ]?.current ??
         action.usage.max) > 0
     ))
   if (actions.length === 0) return []
 
   return actions.flatMap<MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>>((action) => {
     const rule = action.rule
+    if (rule?.kind === 'persistent-area') {
+      if (
+        rule.requiredEnvironment != null &&
+        geometry?.environment !== rule.requiredEnvironment
+      ) return []
+      const featureId = `monster:${monster.id}:${action.id}`
+      if ((map.dnd5ePluginAreas ?? []).some((area) =>
+        area.sourceTokenId === enemy.id && area.featureId === featureId)) return []
+      if (rule.concentration && enemy.dnd5eCombatState?.concentrationSpellId) return []
+      const sourceCell = tokenAnchorCellFromPixel(enemy.x, enemy.y, enemy, map)
+      const destinationCell = rule.area.origin === 'self'
+        ? sourceCell
+        : tokenAnchorCellFromPixel(target.x, target.y, target, map)
+      if (!canPlaceAoe(rule.area, sourceCell, destinationCell)) return []
+      const cells = cellsForAoe(rule.area, sourceCell, destinationCell)
+      const affected = tokensInCells(map, map.tokens, cells).filter((candidate) =>
+        candidate.type !== 'obstacle' &&
+        (candidate.id !== enemy.id || rule.includeSelf === true))
+      const hostiles = affected.filter((candidate) => areOpposedCombatTokens(enemy, candidate))
+      const friendlies = affected.filter((candidate) =>
+        candidate.id !== enemy.id && !areOpposedCombatTokens(enemy, candidate))
+      if (hostiles.length === 0 || (friendlies.length > 0 && input.requiredActionId == null)) return []
+      const averageDamage = rule.triggers.reduce((total, trigger) => total + (
+        trigger.damage
+          ? trigger.damage.count * (trigger.damage.sides + 1) / 2 + (trigger.damage.modifier ?? 0)
+          : 0
+      ), 0)
+      const controlValue = rule.triggers.some((trigger) => trigger.condition) ? 18 : 0
+      const visibilityValue = rule.lighting?.kind === 'magical-darkness' ||
+        rule.obscuration?.kind === 'heavy'
+        ? 14
+        : 0
+      const destinationPoint = tokenCenterForAnchorCell(destinationCell, { size: 1 }, map)
+      const destinationElevationFeet = rule.area.origin === 'self'
+        ? mapGeometryTokenElevation(geometry, enemy)
+        : mapGeometryTerrainElevationAtPoint(geometry, destinationPoint)
+      return [{
+        id: `special:persistent-area:${action.id}:${destinationCell.col},${destinationCell.row}`,
+        kind: 'control' as const,
+        payload: {
+          moved: false,
+          attacked: false,
+          attackerTokenId: enemy.id,
+          targetTokenId: target.id,
+          specialAction: {
+            kind: 'persistent-area' as const,
+            actionId: action.id,
+            actionName: action.name,
+            destinationCell,
+            destinationElevationFeet,
+          },
+          message: `${enemy.label}使用${action.name}制造持续区域。`,
+        },
+        metrics: {
+          expectedDamage: Math.max(0, averageDamage * hostiles.length * 0.75),
+          targetCurrentHp: hp.current,
+          targetMaximumHp: hp.maximum,
+          targetArmorClass: targetAc,
+          hitProbability: 1,
+          controlValue: (controlValue + visibilityValue) * hostiles.length,
+          resourceCost: action.usage ? 4 : rule.concentration ? 3 : 1,
+          targetDistanceFeet: startDistanceFeet,
+          preferredDistanceFeet: preferred,
+          movementFeet: 0,
+          distanceImprovementFeet: 0,
+          defensiveCoverBonus: 0,
+          opportunityAttackRisk: 0,
+          attacksThisTurn: false,
+          consumesAction: true,
+          dodges: false,
+          dashes: false,
+          usesNimbleEscape: false,
+          usesPreciseCoverRoute: false,
+        },
+      }]
+    }
     if (rule?.kind === 'invisibility') {
       const alreadyInvisible = services.conditions(enemy, characters).some((condition) =>
         dnd5eStandardConditionId(condition) === 'invisible')

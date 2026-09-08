@@ -7,9 +7,18 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eMonsterAreaForcedMovementPlans,
+  dnd5eMonsterAreaActionTargetIds,
+  dnd5eMonsterAreaSuccessfulSaveExitOptions,
   prepareDnd5eMonsterAreaAction,
   resolvePreparedDnd5eMonsterAreaAction,
 } from './monsterAreaAction'
+import {
+  buildDnd5eCustomMonster,
+  createDnd5eCustomMonsterActionDraft,
+  createDnd5eCustomMonsterDraft,
+} from './customMonsterWorkshop'
+import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 function token(patch: Partial<Token>): Token {
@@ -87,13 +96,146 @@ function initiative(tokens: readonly Token[]) {
 }
 
 describe('monster area action map authority', () => {
-  afterEach(() => setMapGeometryRuntime([]))
+  afterEach(() => {
+    setMapGeometryRuntime([])
+    setDnd5eRoomMonsterCatalog([])
+  })
 
-  it('accepts a bounded Kraken Lightning Storm subset without requiring every creature in range', () => {
+  it('requires and resolves each target-selected saving throw ability authoritatively', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    const action = createDnd5eCustomMonsterActionDraft()
+    action.id = 'strength-or-dexterity-burst'
+    action.name = '力量或敏捷爆发'
+    action.description = '目标选择力量或敏捷豁免。'
+    action.kind = 'area-saving-throw'
+    action.areaShape = 'circle'
+    action.areaSizeFeet = 10
+    action.areaSaveAbility = 'str'
+    action.areaSaveAbilityChoices = ['str', 'dex']
+    action.areaSaveDc = 16
+    action.areaDamageDice = '2d6'
+    action.areaDamageType = 'bludgeoning'
+    draft.actions = [action]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+
+    const source = token({ id: 'source', poolId: monster.id, hp: 50, maxHp: 50 })
+    const target = token({
+      id: 'target', type: 'player', characterId: 'target-character', x: 75, y: 25,
+    })
+    const map = battleMap('target-choice-save', [source, target])
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: 'target-choice-save',
+      map,
+      characters: [character('target-character')],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: source.id,
+      actionId: action.id,
+      targetTokenIds: [target.id],
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const missingChoice = resolvePreparedDnd5eMonsterAreaAction({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: target.id, d20: 20 }],
+        damageRolls: [4, 4],
+      },
+    })
+    expect(missingChoice.result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+
+    const resolved = resolvePreparedDnd5eMonsterAreaAction({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: target.id, ability: 'dex', d20: 20 }],
+        damageRolls: [4, 4],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: target.id,
+      ability: 'dex',
+      success: true,
+    }))
+  })
+
+  it('resolves Bulette Deadly Leap as an overlapping jump and lets a successful target choose an exit', () => {
+    const bulette = token({
+      id: 'bulette',
+      label: 'Bulette',
+      poolId: 'srd-5.1:bulette',
+      creatureSize: '大型',
+      hp: 94,
+      maxHp: 94,
+      x: 50,
+      y: 50,
+    })
+    const target = token({
+      id: 'target',
+      type: 'player',
+      characterId: 'target-character',
+      x: 225,
+      y: 50,
+    })
+    const map = battleMap('bulette-deadly-leap', [bulette, target])
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: map.id,
+      map,
+      characters: [character('target-character')],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: bulette.id,
+      actionId: 'deadly-leap',
+      targetTokenIds: [target.id],
+      areaTargetCell: { col: 3, row: 0 },
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.actorMovement).toMatchObject({
+      traversalMode: 'long-jump-running',
+    })
+    expect(prepared.prepared.actorMovement?.distanceFeet).toBeGreaterThanOrEqual(15)
+
+    const exits = dnd5eMonsterAreaSuccessfulSaveExitOptions({
+      prepared: prepared.prepared,
+      targetId: target.id,
+    })
+    expect(exits.length).toBeGreaterThan(0)
+    const exit = exits[0]!
+    const resolved = resolvePreparedDnd5eMonsterAreaAction({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: target.id, ability: 'dex', d20: 20 }],
+        damageRolls: [3, 3, 3, 3, 3, 3],
+        forcedMovements: [{
+          targetId: exit.targetId,
+          to: exit.to,
+          distanceFeet: exit.distanceFeet,
+          toElevationFeet: exit.toElevationFeet,
+          toGroundElevationFeet: exit.toGroundElevationFeet,
+        }],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'moved', actorId: bulette.id,
+    }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'moved', actorId: target.id, to: exit.to,
+    }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved', targetId: target.id, ability: 'dex', success: true,
+    }))
+  })
+
+  it('accepts a distinct bounded-area fixture without claiming complete three-bolt Lightning Storm', () => {
+    const fixture = monsterMechanicFixture('kraken', ['lightning-storm'])
+    setDnd5eRoomMonsterCatalog([fixture])
     const kraken = token({
       id: 'kraken',
       label: 'Kraken',
-      poolId: 'srd-5.1:kraken',
+      poolId: fixture.id,
       hp: 472,
       maxHp: 472,
     })
@@ -130,6 +272,61 @@ describe('monster area action map authority', () => {
       actionId: 'lightning-storm',
       targetTokenIds: heroes.map((hero) => hero.id),
     })).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('omits swallowed creatures behind the inside/outside total-cover boundary', () => {
+    const fixture = monsterMechanicFixture('kraken', ['lightning-storm'])
+    setDnd5eRoomMonsterCatalog([fixture])
+    const kraken = token({ id: 'kraken', poolId: fixture.id })
+    const outside = token({
+      id: 'outside', type: 'player', characterId: 'outside-character', x: 75,
+    })
+    const inside = token({
+      id: 'inside', type: 'player', characterId: 'inside-character', x: 75, y: 75,
+    })
+    const container = token({ id: 'container', x: 775, y: 275 })
+    const insideCharacter = character('inside-character')
+    insideCharacter.dnd5eCombatState = {
+      activeEffects: [{
+        schemaVersion: 1,
+        id: 'relation:swallowed:container:swallow:inside',
+        definitionId: 'condition:restrained',
+        label: 'Swallowed',
+        kind: 'condition',
+        standardCondition: 'restrained',
+        source: {
+          kind: 'monster', actorId: container.id, actorName: 'Container',
+          rulesId: 'monster:test:container:bite:swallow', magical: false,
+        },
+        appliedAt: 0,
+        duration: { type: 'permanent' },
+        relation: {
+          schemaVersion: 1,
+          kind: 'swallowed',
+          sourceActorId: container.id,
+          sourceActionId: 'bite',
+          slotGroup: 'swallow',
+          maxDistanceFeet: 5,
+          movement: 'carry-target',
+          endsOnSourceIncapacitated: false,
+        },
+        stackingKey: 'relation:swallowed:container:swallow:inside',
+        stackingPolicy: 'refresh-duration',
+        visibility: 'public',
+      }],
+    }
+    const map = battleMap('swallowed-area-cover', [kraken, outside, inside, container])
+
+    const targets = dnd5eMonsterAreaActionTargetIds({
+      map,
+      characters: [character('outside-character'), insideCharacter],
+      actorTokenId: kraken.id,
+      actionId: 'lightning-storm',
+      areaTargetCell: { col: 0, row: 0 },
+    })
+
+    expect(targets).toContain(outside.id)
+    expect(targets).not.toContain(inside.id)
   })
 
   it('authoritatively includes hostiles, monster allies, neutral NPCs, and living downed players', () => {
@@ -457,6 +654,62 @@ describe('monster area action map authority', () => {
       .toBe(28)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === ankheg.id)
       ?.dnd5eCombatState?.monsterRechargeReadyByActionId?.['acid-spray'])
+      .toBe(false)
+  })
+
+  it('lets a DM-controlled red dragon use a breath recharged on its previous turn', () => {
+    const dragon = token({
+      id: 'red-dragon',
+      label: 'Red Dragon Wyrmling',
+      poolId: 'srd-5.1:red-dragon-wyrmling',
+      hp: 75,
+      maxHp: 75,
+      dnd5eCombatState: {
+        monsterRechargeReadyByActionId: { 'fire-breath': true },
+      },
+    })
+    const hero = token({
+      id: 'hero',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero-character',
+      x: 75,
+      y: 25,
+    })
+    const map = battleMap('red-dragon-recharged-breath', [dragon, hero])
+    const targetIds = dnd5eMonsterAreaActionTargetIds({
+      map,
+      characters: [character('hero-character')],
+      actorTokenId: dragon.id,
+      actionId: 'fire-breath',
+      areaTargetCell: { col: 1, row: 0 },
+    })
+    expect(targetIds).toEqual([hero.id])
+
+    const prepared = prepareDnd5eMonsterAreaAction({
+      combatId: 'combat',
+      map,
+      characters: [character('hero-character')],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: dragon.id,
+      actionId: 'fire-breath',
+      targetTokenIds: targetIds ?? [],
+      areaTargetCell: { col: 1, row: 0 },
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eMonsterAreaAction({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: hero.id, d20: 1 }],
+        damageRolls: [1, 2, 3, 4, 5, 6, 1],
+        forcedMovements: [],
+      },
+    })
+
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === dragon.id)
+      ?.dnd5eCombatState?.monsterRechargeReadyByActionId?.['fire-breath'])
       .toBe(false)
   })
 

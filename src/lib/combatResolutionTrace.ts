@@ -32,6 +32,15 @@ export function formatDnd5eAttackResolutionTrace(input: {
   cover?: 'none' | 'half' | 'three-quarters' | 'total'
   coverOverriddenByDm?: boolean
   mode: 'normal' | 'advantage' | 'disadvantage'
+  /** Concrete Headless rule sources that produced (or cancelled into) the roll mode. */
+  modeReasons?: {
+    /** Authoritative Dnd5eRollModeResolution field names. */
+    advantageReasons?: readonly string[]
+    disadvantageReasons?: readonly string[]
+    /** Legacy trace-only aliases retained for older callers and saved fixtures. */
+    advantage?: readonly string[]
+    disadvantage?: readonly string[]
+  }
   d20: number
   d20Second?: number
   modifier: number
@@ -56,10 +65,44 @@ export function formatDnd5eAttackResolutionTrace(input: {
     ? `双方海拔均为 ${input.actorElevationFeet} 尺`
     : `${input.actorName}海拔 ${input.actorElevationFeet} 尺；${input.targetName}海拔 ${input.targetElevationFeet} 尺`
   const modifierDetail = input.modifierDetails?.filter(Boolean).join('；')
+  // Prepared attack actions expose `advantageReasons` / `disadvantageReasons`.
+  // The trace originally read only the old `advantage` / `disadvantage` aliases,
+  // silently discarding exact sources such as "目标处于目盲状态" and then
+  // printing an opaque authority fallback. Accept both shapes at this audit
+  // boundary so old records remain readable while live Headless resolutions
+  // retain their concrete rule sources.
+  const advantageReasons = [...new Set([
+    ...(input.modeReasons?.advantageReasons ?? []),
+    ...(input.modeReasons?.advantage ?? []),
+  ].filter(Boolean))]
+  const disadvantageReasons = [...new Set([
+    ...(input.modeReasons?.disadvantageReasons ?? []),
+    ...(input.modeReasons?.disadvantage ?? []),
+  ].filter(Boolean))]
+  const hasModeReasons = advantageReasons.length > 0 || disadvantageReasons.length > 0
+  const modeReasonDetail = [
+    advantageReasons.length > 0 ? `优势：${advantageReasons.join('、')}` : '',
+    disadvantageReasons.length > 0 ? `劣势：${disadvantageReasons.join('、')}` : '',
+  ].filter(Boolean).join('；')
+  const selectedModeReason = input.mode === 'advantage'
+    ? advantageReasons.length > 0
+      ? `；采用优势的原因：${advantageReasons.join('、')}`
+      : '；采用优势的原因：本次旧结算记录未保存具体规则来源'
+    : input.mode === 'disadvantage'
+      ? disadvantageReasons.length > 0
+        ? `；采用劣势的原因：${disadvantageReasons.join('、')}`
+        : '；采用劣势的原因：本次旧结算记录未保存具体规则来源'
+      : advantageReasons.length > 0 && disadvantageReasons.length > 0
+        ? '；采用普通骰的原因：优势与劣势互相抵消'
+        : ''
   return [
     `攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 ${input.distanceFeet} 尺（${input.rangeLabel}）。`,
     `空间判定 · ${elevationDetail}；${input.cover ? `掩护：${COVER_LABELS[input.cover]}${input.coverOverriddenByDm ? '（DM 覆盖）' : ''}。` : '掩护：已由 Headless 计入目标 AC。'}`,
-    `攻击骰 · ${rollModeLabel(input.mode)}；各骰面 ${rolledFaces}；最终采用 ${selected}；调整值 ${input.modifier >= 0 ? '+' : ''}${input.modifier}${modifierDetail ? `（${modifierDetail}）` : ''}。`,
+    ...(hasModeReasons ? [`优劣势依据 · ${modeReasonDetail}。`] : []),
+    ...(advantageReasons.length > 0 && disadvantageReasons.length > 0
+      ? ['抵消关系 · 本次同时存在优势与劣势，按 D&D 5e 规则互相抵消，最终使用普通攻击骰。']
+      : []),
+    `攻击骰 · ${rollModeLabel(input.mode)}${selectedModeReason}；各骰面 ${rolledFaces}；最终采用 ${selected}；调整值 ${input.modifier >= 0 ? '+' : ''}${input.modifier}${modifierDetail ? `（${modifierDetail}）` : ''}。`,
     ...(input.reactionDetails ?? []).filter(Boolean).map((detail) => `反应资格/消耗 · ${detail}`),
     `结果 · ${input.total} vs AC ${input.targetArmorClass}：${input.critical ? '重击' : input.hit ? '命中' : '未命中'}。`,
   ]

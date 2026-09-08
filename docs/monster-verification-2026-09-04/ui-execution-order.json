@@ -1,0 +1,2010 @@
+{
+  "order": "challenge-rating-descending-then-name",
+  "count": 334,
+  "monsters": [
+    {
+      "index": 0,
+      "challengeRating": "30",
+      "slug": "tarrasque",
+      "name": "塔拉斯克"
+    },
+    {
+      "index": 1,
+      "challengeRating": "24",
+      "slug": "ancient-red-dragon",
+      "name": "远古红龙"
+    },
+    {
+      "index": 2,
+      "challengeRating": "24",
+      "slug": "ancient-gold-dragon",
+      "name": "远古金龙"
+    },
+    {
+      "index": 3,
+      "challengeRating": "23",
+      "slug": "kraken",
+      "name": "海妖克拉肯"
+    },
+    {
+      "index": 4,
+      "challengeRating": "23",
+      "slug": "ancient-blue-dragon",
+      "name": "远古蓝龙"
+    },
+    {
+      "index": 5,
+      "challengeRating": "23",
+      "slug": "ancient-silver-dragon",
+      "name": "远古银龙"
+    },
+    {
+      "index": 6,
+      "challengeRating": "22",
+      "slug": "ancient-green-dragon",
+      "name": "远古绿龙"
+    },
+    {
+      "index": 7,
+      "challengeRating": "22",
+      "slug": "ancient-bronze-dragon",
+      "name": "远古青铜龙"
+    },
+    {
+      "index": 8,
+      "challengeRating": "21",
+      "slug": "solar",
+      "name": "太阳神使"
+    },
+    {
+      "index": 9,
+      "challengeRating": "21",
+      "slug": "lich",
+      "name": "巫妖"
+    },
+    {
+      "index": 10,
+      "challengeRating": "21",
+      "slug": "ancient-copper-dragon",
+      "name": "远古赤铜龙"
+    },
+    {
+      "index": 11,
+      "challengeRating": "21",
+      "slug": "ancient-black-dragon",
+      "name": "远古黑龙"
+    },
+    {
+      "index": 12,
+      "challengeRating": "20",
+      "slug": "pit-fiend",
+      "name": "深狱炼魔"
+    },
+    {
+      "index": 13,
+      "challengeRating": "20",
+      "slug": "ancient-white-dragon",
+      "name": "远古白龙"
+    },
+    {
+      "index": 14,
+      "challengeRating": "20",
+      "slug": "ancient-brass-dragon",
+      "name": "远古黄铜龙"
+    },
+    {
+      "index": 15,
+      "challengeRating": "19",
+      "slug": "balor",
+      "name": "巴洛炎魔"
+    },
+    {
+      "index": 16,
+      "challengeRating": "17",
+      "slug": "adult-red-dragon",
+      "name": "成年红龙"
+    },
+    {
+      "index": 17,
+      "challengeRating": "17",
+      "slug": "adult-gold-dragon",
+      "name": "成年金龙"
+    },
+    {
+      "index": 18,
+      "challengeRating": "17",
+      "slug": "dragon-turtle",
+      "name": "龙龟"
+    },
+    {
+      "index": 19,
+      "challengeRating": "17",
+      "slug": "androsphinx",
+      "name": "雄性斯芬克斯"
+    },
+    {
+      "index": 20,
+      "challengeRating": "16",
+      "slug": "adult-blue-dragon",
+      "name": "成年蓝龙"
+    },
+    {
+      "index": 21,
+      "challengeRating": "16",
+      "slug": "adult-silver-dragon",
+      "name": "成年银龙"
+    },
+    {
+      "index": 22,
+      "challengeRating": "16",
+      "slug": "marilith",
+      "name": "六臂蛇魔"
+    },
+    {
+      "index": 23,
+      "challengeRating": "16",
+      "slug": "iron-golem",
+      "name": "铁魔像"
+    },
+    {
+      "index": 24,
+      "challengeRating": "16",
+      "slug": "planetar",
+      "name": "行星神使"
+    },
+    {
+      "index": 25,
+      "challengeRating": "15",
+      "slug": "adult-green-dragon",
+      "name": "成年绿龙"
+    },
+    {
+      "index": 26,
+      "challengeRating": "15",
+      "slug": "adult-bronze-dragon",
+      "name": "成年青铜龙"
+    },
+    {
+      "index": 27,
+      "challengeRating": "15",
+      "slug": "mummy-lord",
+      "name": "木乃伊领主"
+    },
+    {
+      "index": 28,
+      "challengeRating": "15",
+      "slug": "purple-worm",
+      "name": "紫虫"
+    },
+    {
+      "index": 29,
+      "challengeRating": "14",
+      "slug": "ice-devil",
+      "name": "冰魔"
+    },
+    {
+      "index": 30,
+      "challengeRating": "14",
+      "slug": "adult-copper-dragon",
+      "name": "成年赤铜龙"
+    },
+    {
+      "index": 31,
+      "challengeRating": "14",
+      "slug": "adult-black-dragon",
+      "name": "成年黑龙"
+    },
+    {
+      "index": 32,
+      "challengeRating": "13",
+      "slug": "adult-white-dragon",
+      "name": "成年白龙"
+    },
+    {
+      "index": 33,
+      "challengeRating": "13",
+      "slug": "adult-brass-dragon",
+      "name": "成年黄铜龙"
+    },
+    {
+      "index": 34,
+      "challengeRating": "13",
+      "slug": "storm-giant",
+      "name": "风暴巨人"
+    },
+    {
+      "index": 35,
+      "challengeRating": "13",
+      "slug": "rakshasa",
+      "name": "罗刹"
+    },
+    {
+      "index": 36,
+      "challengeRating": "13",
+      "slug": "nalfeshnee",
+      "name": "纳尔弗魔"
+    },
+    {
+      "index": 37,
+      "challengeRating": "13",
+      "slug": "vampire-vampire",
+      "name": "吸血鬼（本体形态）"
+    },
+    {
+      "index": 38,
+      "challengeRating": "13",
+      "slug": "vampire-bat",
+      "name": "吸血鬼（蝙蝠形态）"
+    },
+    {
+      "index": 39,
+      "challengeRating": "13",
+      "slug": "vampire-mist",
+      "name": "吸血鬼（雾化形态）"
+    },
+    {
+      "index": 40,
+      "challengeRating": "12",
+      "slug": "archmage",
+      "name": "大法师"
+    },
+    {
+      "index": 41,
+      "challengeRating": "12",
+      "slug": "erinyes",
+      "name": "欲魔"
+    },
+    {
+      "index": 42,
+      "challengeRating": "11",
+      "slug": "behir",
+      "name": "贝希摩斯"
+    },
+    {
+      "index": 43,
+      "challengeRating": "11",
+      "slug": "gynosphinx",
+      "name": "雌性斯芬克斯"
+    },
+    {
+      "index": 44,
+      "challengeRating": "11",
+      "slug": "remorhaz",
+      "name": "寒炎虫"
+    },
+    {
+      "index": 45,
+      "challengeRating": "11",
+      "slug": "efreeti",
+      "name": "火巨灵"
+    },
+    {
+      "index": 46,
+      "challengeRating": "11",
+      "slug": "horned-devil",
+      "name": "角魔"
+    },
+    {
+      "index": 47,
+      "challengeRating": "11",
+      "slug": "roc",
+      "name": "鹏鸟"
+    },
+    {
+      "index": 48,
+      "challengeRating": "11",
+      "slug": "djinni",
+      "name": "气巨灵"
+    },
+    {
+      "index": 49,
+      "challengeRating": "10",
+      "slug": "aboleth",
+      "name": "底栖魔鱼"
+    },
+    {
+      "index": 50,
+      "challengeRating": "10",
+      "slug": "young-red-dragon",
+      "name": "青年红龙"
+    },
+    {
+      "index": 51,
+      "challengeRating": "10",
+      "slug": "young-gold-dragon",
+      "name": "青年金龙"
+    },
+    {
+      "index": 52,
+      "challengeRating": "10",
+      "slug": "stone-golem",
+      "name": "石魔像"
+    },
+    {
+      "index": 53,
+      "challengeRating": "10",
+      "slug": "guardian-naga",
+      "name": "守护纳迦"
+    },
+    {
+      "index": 54,
+      "challengeRating": "10",
+      "slug": "deva",
+      "name": "提婆"
+    },
+    {
+      "index": 55,
+      "challengeRating": "9",
+      "slug": "glabrezu",
+      "name": "格拉兹特魔"
+    },
+    {
+      "index": 56,
+      "challengeRating": "9",
+      "slug": "bone-devil",
+      "name": "骨魔"
+    },
+    {
+      "index": 57,
+      "challengeRating": "9",
+      "slug": "fire-giant",
+      "name": "火巨人"
+    },
+    {
+      "index": 58,
+      "challengeRating": "9",
+      "slug": "clay-golem",
+      "name": "黏土魔像"
+    },
+    {
+      "index": 59,
+      "challengeRating": "9",
+      "slug": "young-blue-dragon",
+      "name": "青年蓝龙"
+    },
+    {
+      "index": 60,
+      "challengeRating": "9",
+      "slug": "young-silver-dragon",
+      "name": "青年银龙"
+    },
+    {
+      "index": 61,
+      "challengeRating": "9",
+      "slug": "treant",
+      "name": "树人"
+    },
+    {
+      "index": 62,
+      "challengeRating": "9",
+      "slug": "cloud-giant",
+      "name": "云巨人"
+    },
+    {
+      "index": 63,
+      "challengeRating": "8",
+      "slug": "tyrannosaurus-rex",
+      "name": "霸王龙"
+    },
+    {
+      "index": 64,
+      "challengeRating": "8",
+      "slug": "assassin",
+      "name": "刺客"
+    },
+    {
+      "index": 65,
+      "challengeRating": "8",
+      "slug": "hydra",
+      "name": "多头蛇"
+    },
+    {
+      "index": 66,
+      "challengeRating": "8",
+      "slug": "hezrou",
+      "name": "赫兹鲁魔"
+    },
+    {
+      "index": 67,
+      "challengeRating": "8",
+      "slug": "cloaker",
+      "name": "披风怪"
+    },
+    {
+      "index": 68,
+      "challengeRating": "8",
+      "slug": "young-green-dragon",
+      "name": "青年绿龙"
+    },
+    {
+      "index": 69,
+      "challengeRating": "8",
+      "slug": "young-bronze-dragon",
+      "name": "青年青铜龙"
+    },
+    {
+      "index": 70,
+      "challengeRating": "8",
+      "slug": "frost-giant",
+      "name": "霜巨人"
+    },
+    {
+      "index": 71,
+      "challengeRating": "8",
+      "slug": "chain-devil",
+      "name": "锁链魔"
+    },
+    {
+      "index": 72,
+      "challengeRating": "8",
+      "slug": "spirit-naga",
+      "name": "邪灵纳迦"
+    },
+    {
+      "index": 73,
+      "challengeRating": "7",
+      "slug": "shield-guardian",
+      "name": "盾卫者"
+    },
+    {
+      "index": 74,
+      "challengeRating": "7",
+      "slug": "oni",
+      "name": "鬼人"
+    },
+    {
+      "index": 75,
+      "challengeRating": "7",
+      "slug": "giant-ape",
+      "name": "巨猿"
+    },
+    {
+      "index": 76,
+      "challengeRating": "7",
+      "slug": "young-copper-dragon",
+      "name": "青年赤铜龙"
+    },
+    {
+      "index": 77,
+      "challengeRating": "7",
+      "slug": "young-black-dragon",
+      "name": "青年黑龙"
+    },
+    {
+      "index": 78,
+      "challengeRating": "7",
+      "slug": "stone-giant",
+      "name": "石巨人"
+    },
+    {
+      "index": 79,
+      "challengeRating": "6",
+      "slug": "mage",
+      "name": "法师"
+    },
+    {
+      "index": 80,
+      "challengeRating": "6",
+      "slug": "vrock",
+      "name": "弗洛魔"
+    },
+    {
+      "index": 81,
+      "challengeRating": "6",
+      "slug": "medusa",
+      "name": "美杜莎"
+    },
+    {
+      "index": 82,
+      "challengeRating": "6",
+      "slug": "mammoth",
+      "name": "猛犸象"
+    },
+    {
+      "index": 83,
+      "challengeRating": "6",
+      "slug": "chimera",
+      "name": "奇美拉"
+    },
+    {
+      "index": 84,
+      "challengeRating": "6",
+      "slug": "young-white-dragon",
+      "name": "青年白龙"
+    },
+    {
+      "index": 85,
+      "challengeRating": "6",
+      "slug": "young-brass-dragon",
+      "name": "青年黄铜龙"
+    },
+    {
+      "index": 86,
+      "challengeRating": "6",
+      "slug": "wyvern",
+      "name": "双足飞龙"
+    },
+    {
+      "index": 87,
+      "challengeRating": "6",
+      "slug": "invisible-stalker",
+      "name": "隐形追猎者"
+    },
+    {
+      "index": 88,
+      "challengeRating": "6",
+      "slug": "drider",
+      "name": "蛛化精灵"
+    },
+    {
+      "index": 89,
+      "challengeRating": "5",
+      "slug": "otyugh",
+      "name": "奥图克"
+    },
+    {
+      "index": 90,
+      "challengeRating": "5",
+      "slug": "half-red-dragon-veteran",
+      "name": "半红龙老兵"
+    },
+    {
+      "index": 91,
+      "challengeRating": "5",
+      "slug": "unicorn",
+      "name": "独角兽"
+    },
+    {
+      "index": 92,
+      "challengeRating": "5",
+      "slug": "wraith",
+      "name": "缚灵"
+    },
+    {
+      "index": 93,
+      "challengeRating": "5",
+      "slug": "salamander",
+      "name": "火蜥蜴"
+    },
+    {
+      "index": 94,
+      "challengeRating": "5",
+      "slug": "fire-elemental",
+      "name": "火元素"
+    },
+    {
+      "index": 95,
+      "challengeRating": "5",
+      "slug": "gladiator",
+      "name": "角斗士"
+    },
+    {
+      "index": 96,
+      "challengeRating": "5",
+      "slug": "troll",
+      "name": "巨魔"
+    },
+    {
+      "index": 97,
+      "challengeRating": "5",
+      "slug": "giant-shark",
+      "name": "巨鲨"
+    },
+    {
+      "index": 98,
+      "challengeRating": "5",
+      "slug": "giant-crocodile",
+      "name": "巨型鳄鱼"
+    },
+    {
+      "index": 99,
+      "challengeRating": "5",
+      "slug": "bulette",
+      "name": "掘地鲨"
+    },
+    {
+      "index": 100,
+      "challengeRating": "5",
+      "slug": "shambling-mound",
+      "name": "蔓生怪"
+    },
+    {
+      "index": 101,
+      "challengeRating": "5",
+      "slug": "air-elemental",
+      "name": "气元素"
+    },
+    {
+      "index": 102,
+      "challengeRating": "5",
+      "slug": "hill-giant",
+      "name": "丘陵巨人"
+    },
+    {
+      "index": 103,
+      "challengeRating": "5",
+      "slug": "triceratops",
+      "name": "三角龙"
+    },
+    {
+      "index": 104,
+      "challengeRating": "5",
+      "slug": "roper",
+      "name": "绳索怪"
+    },
+    {
+      "index": 105,
+      "challengeRating": "5",
+      "slug": "water-elemental",
+      "name": "水元素"
+    },
+    {
+      "index": 106,
+      "challengeRating": "5",
+      "slug": "xorn",
+      "name": "索尔石怪"
+    },
+    {
+      "index": 107,
+      "challengeRating": "5",
+      "slug": "gorgon",
+      "name": "铁甲牛"
+    },
+    {
+      "index": 108,
+      "challengeRating": "5",
+      "slug": "earth-elemental",
+      "name": "土元素"
+    },
+    {
+      "index": 109,
+      "challengeRating": "5",
+      "slug": "vampire-spawn",
+      "name": "吸血鬼衍体"
+    },
+    {
+      "index": 110,
+      "challengeRating": "5",
+      "slug": "werebear-hybrid",
+      "name": "熊人（混合形态）"
+    },
+    {
+      "index": 111,
+      "challengeRating": "5",
+      "slug": "werebear-human",
+      "name": "熊人（人类形态）"
+    },
+    {
+      "index": 112,
+      "challengeRating": "5",
+      "slug": "werebear-bear",
+      "name": "熊人（熊形态）"
+    },
+    {
+      "index": 113,
+      "challengeRating": "5",
+      "slug": "flesh-golem",
+      "name": "血肉魔像"
+    },
+    {
+      "index": 114,
+      "challengeRating": "5",
+      "slug": "night-hag",
+      "name": "夜鬼婆"
+    },
+    {
+      "index": 115,
+      "challengeRating": "5",
+      "slug": "barbed-devil",
+      "name": "针刺魔"
+    },
+    {
+      "index": 116,
+      "challengeRating": "4",
+      "slug": "chuul",
+      "name": "楚尔异怪"
+    },
+    {
+      "index": 117,
+      "challengeRating": "4",
+      "slug": "elephant",
+      "name": "大象"
+    },
+    {
+      "index": 118,
+      "challengeRating": "4",
+      "slug": "black-pudding",
+      "name": "黑布丁"
+    },
+    {
+      "index": 119,
+      "challengeRating": "4",
+      "slug": "red-dragon-wyrmling",
+      "name": "红龙雏龙"
+    },
+    {
+      "index": 120,
+      "challengeRating": "4",
+      "slug": "weretiger-tiger",
+      "name": "虎人（虎形态）"
+    },
+    {
+      "index": 121,
+      "challengeRating": "4",
+      "slug": "weretiger-hybrid",
+      "name": "虎人（混合形态）"
+    },
+    {
+      "index": 122,
+      "challengeRating": "4",
+      "slug": "weretiger-human",
+      "name": "虎人（人类形态）"
+    },
+    {
+      "index": 123,
+      "challengeRating": "4",
+      "slug": "lamia",
+      "name": "拉弥亚"
+    },
+    {
+      "index": 124,
+      "challengeRating": "4",
+      "slug": "succubus-incubus",
+      "name": "魅魔／梦魔"
+    },
+    {
+      "index": 125,
+      "challengeRating": "4",
+      "slug": "ettin",
+      "name": "双头巨人"
+    },
+    {
+      "index": 126,
+      "challengeRating": "4",
+      "slug": "wereboar-hybrid",
+      "name": "野猪人（混合形态）"
+    },
+    {
+      "index": 127,
+      "challengeRating": "4",
+      "slug": "wereboar-human",
+      "name": "野猪人（人类形态）"
+    },
+    {
+      "index": 128,
+      "challengeRating": "4",
+      "slug": "wereboar-boar",
+      "name": "野猪人（野猪形态）"
+    },
+    {
+      "index": 129,
+      "challengeRating": "4",
+      "slug": "ghost",
+      "name": "幽灵"
+    },
+    {
+      "index": 130,
+      "challengeRating": "4",
+      "slug": "couatl",
+      "name": "羽蛇"
+    },
+    {
+      "index": 131,
+      "challengeRating": "3",
+      "slug": "doppelganger",
+      "name": "变形怪"
+    },
+    {
+      "index": 132,
+      "challengeRating": "3",
+      "slug": "hell-hound",
+      "name": "地狱犬"
+    },
+    {
+      "index": 133,
+      "challengeRating": "3",
+      "slug": "winter-wolf",
+      "name": "冬狼"
+    },
+    {
+      "index": 134,
+      "challengeRating": "3",
+      "slug": "killer-whale",
+      "name": "虎鲸"
+    },
+    {
+      "index": 135,
+      "challengeRating": "3",
+      "slug": "gold-dragon-wyrmling",
+      "name": "金龙雏龙"
+    },
+    {
+      "index": 136,
+      "challengeRating": "3",
+      "slug": "giant-scorpion",
+      "name": "巨蝎"
+    },
+    {
+      "index": 137,
+      "challengeRating": "3",
+      "slug": "blue-dragon-wyrmling",
+      "name": "蓝龙雏龙"
+    },
+    {
+      "index": 138,
+      "challengeRating": "3",
+      "slug": "werewolf-hybrid",
+      "name": "狼人（混合形态）"
+    },
+    {
+      "index": 139,
+      "challengeRating": "3",
+      "slug": "werewolf-wolf",
+      "name": "狼人（狼形态）"
+    },
+    {
+      "index": 140,
+      "challengeRating": "3",
+      "slug": "werewolf-human",
+      "name": "狼人（人类形态）"
+    },
+    {
+      "index": 141,
+      "challengeRating": "3",
+      "slug": "veteran",
+      "name": "老兵"
+    },
+    {
+      "index": 142,
+      "challengeRating": "3",
+      "slug": "green-hag",
+      "name": "绿鬼婆"
+    },
+    {
+      "index": 143,
+      "challengeRating": "3",
+      "slug": "nightmare",
+      "name": "梦魇兽"
+    },
+    {
+      "index": 144,
+      "challengeRating": "3",
+      "slug": "mummy",
+      "name": "木乃伊"
+    },
+    {
+      "index": 145,
+      "challengeRating": "3",
+      "slug": "minotaur",
+      "name": "牛头人"
+    },
+    {
+      "index": 146,
+      "challengeRating": "3",
+      "slug": "knight",
+      "name": "骑士"
+    },
+    {
+      "index": 147,
+      "challengeRating": "3",
+      "slug": "wight",
+      "name": "尸鬼"
+    },
+    {
+      "index": 148,
+      "challengeRating": "3",
+      "slug": "basilisk",
+      "name": "石化蜥蜴"
+    },
+    {
+      "index": 149,
+      "challengeRating": "3",
+      "slug": "phase-spider",
+      "name": "相位蜘蛛"
+    },
+    {
+      "index": 150,
+      "challengeRating": "3",
+      "slug": "owlbear",
+      "name": "枭熊"
+    },
+    {
+      "index": 151,
+      "challengeRating": "3",
+      "slug": "manticore",
+      "name": "蝎尾狮"
+    },
+    {
+      "index": 152,
+      "challengeRating": "3",
+      "slug": "bearded-devil",
+      "name": "须魔"
+    },
+    {
+      "index": 153,
+      "challengeRating": "2",
+      "slug": "azer",
+      "name": "艾泽"
+    },
+    {
+      "index": 154,
+      "challengeRating": "2",
+      "slug": "ankheg",
+      "name": "安赫格掘穴虫"
+    },
+    {
+      "index": 155,
+      "challengeRating": "2",
+      "slug": "white-dragon-wyrmling",
+      "name": "白龙雏龙"
+    },
+    {
+      "index": 156,
+      "challengeRating": "2",
+      "slug": "centaur",
+      "name": "半人马"
+    },
+    {
+      "index": 157,
+      "challengeRating": "2",
+      "slug": "polar-bear",
+      "name": "北极熊"
+    },
+    {
+      "index": 158,
+      "challengeRating": "2",
+      "slug": "druid",
+      "name": "德鲁伊"
+    },
+    {
+      "index": 159,
+      "challengeRating": "2",
+      "slug": "gibbering-mouther",
+      "name": "喋喋不休怪"
+    },
+    {
+      "index": 160,
+      "challengeRating": "2",
+      "slug": "swarm-of-poisonous-snakes",
+      "name": "毒蛇群"
+    },
+    {
+      "index": 161,
+      "challengeRating": "2",
+      "slug": "pegasus",
+      "name": "飞马"
+    },
+    {
+      "index": 162,
+      "challengeRating": "2",
+      "slug": "grick",
+      "name": "格里克异怪"
+    },
+    {
+      "index": 163,
+      "challengeRating": "2",
+      "slug": "will-o-wisp",
+      "name": "鬼火"
+    },
+    {
+      "index": 164,
+      "challengeRating": "2",
+      "slug": "sea-hag",
+      "name": "海鬼婆"
+    },
+    {
+      "index": 165,
+      "challengeRating": "2",
+      "slug": "black-dragon-wyrmling",
+      "name": "黑龙雏龙"
+    },
+    {
+      "index": 166,
+      "challengeRating": "2",
+      "slug": "priest",
+      "name": "祭司"
+    },
+    {
+      "index": 167,
+      "challengeRating": "2",
+      "slug": "saber-toothed-tiger",
+      "name": "剑齿虎"
+    },
+    {
+      "index": 168,
+      "challengeRating": "2",
+      "slug": "gelatinous-cube",
+      "name": "胶质立方怪"
+    },
+    {
+      "index": 169,
+      "challengeRating": "2",
+      "slug": "giant-elk",
+      "name": "巨鹿"
+    },
+    {
+      "index": 170,
+      "challengeRating": "2",
+      "slug": "giant-constrictor-snake",
+      "name": "巨蟒"
+    },
+    {
+      "index": 171,
+      "challengeRating": "2",
+      "slug": "giant-boar",
+      "name": "巨型野猪"
+    },
+    {
+      "index": 172,
+      "challengeRating": "2",
+      "slug": "awakened-tree",
+      "name": "觉醒树木"
+    },
+    {
+      "index": 173,
+      "challengeRating": "2",
+      "slug": "berserker",
+      "name": "狂战士"
+    },
+    {
+      "index": 174,
+      "challengeRating": "2",
+      "slug": "hunter-shark",
+      "name": "猎鲨"
+    },
+    {
+      "index": 175,
+      "challengeRating": "2",
+      "slug": "green-dragon-wyrmling",
+      "name": "绿龙雏龙"
+    },
+    {
+      "index": 176,
+      "challengeRating": "2",
+      "slug": "merrow",
+      "name": "魔化人鱼"
+    },
+    {
+      "index": 177,
+      "challengeRating": "2",
+      "slug": "mimic",
+      "name": "拟态怪"
+    },
+    {
+      "index": 178,
+      "challengeRating": "2",
+      "slug": "minotaur-skeleton",
+      "name": "牛头人骷髅"
+    },
+    {
+      "index": 179,
+      "challengeRating": "2",
+      "slug": "bandit-captain",
+      "name": "强盗头目"
+    },
+    {
+      "index": 180,
+      "challengeRating": "2",
+      "slug": "bronze-dragon-wyrmling",
+      "name": "青铜龙雏龙"
+    },
+    {
+      "index": 181,
+      "challengeRating": "2",
+      "slug": "plesiosaurus",
+      "name": "蛇颈龙"
+    },
+    {
+      "index": 182,
+      "challengeRating": "2",
+      "slug": "ghast",
+      "name": "尸妖"
+    },
+    {
+      "index": 183,
+      "challengeRating": "2",
+      "slug": "griffon",
+      "name": "狮鹫"
+    },
+    {
+      "index": 184,
+      "challengeRating": "2",
+      "slug": "gargoyle",
+      "name": "石像鬼"
+    },
+    {
+      "index": 185,
+      "challengeRating": "2",
+      "slug": "ogre",
+      "name": "食人魔"
+    },
+    {
+      "index": 186,
+      "challengeRating": "2",
+      "slug": "ogre-zombie",
+      "name": "食人魔僵尸"
+    },
+    {
+      "index": 187,
+      "challengeRating": "2",
+      "slug": "wererat-hybrid",
+      "name": "鼠人（混合形态）"
+    },
+    {
+      "index": 188,
+      "challengeRating": "2",
+      "slug": "wererat-rat",
+      "name": "鼠人（巨鼠形态）"
+    },
+    {
+      "index": 189,
+      "challengeRating": "2",
+      "slug": "wererat-human",
+      "name": "鼠人（人类形态）"
+    },
+    {
+      "index": 190,
+      "challengeRating": "2",
+      "slug": "rhinoceros",
+      "name": "犀牛"
+    },
+    {
+      "index": 191,
+      "challengeRating": "2",
+      "slug": "cult-fanatic",
+      "name": "邪教狂信徒"
+    },
+    {
+      "index": 192,
+      "challengeRating": "2",
+      "slug": "silver-dragon-wyrmling",
+      "name": "银龙雏龙"
+    },
+    {
+      "index": 193,
+      "challengeRating": "2",
+      "slug": "ochre-jelly",
+      "name": "赭冻怪"
+    },
+    {
+      "index": 194,
+      "challengeRating": "2",
+      "slug": "ettercap",
+      "name": "蜘蛛人"
+    },
+    {
+      "index": 195,
+      "challengeRating": "2",
+      "slug": "rug-of-smothering",
+      "name": "窒息地毯"
+    },
+    {
+      "index": 196,
+      "challengeRating": "1",
+      "slug": "copper-dragon-wyrmling",
+      "name": "赤铜龙雏龙"
+    },
+    {
+      "index": 197,
+      "challengeRating": "1",
+      "slug": "brass-dragon-wyrmling",
+      "name": "黄铜龙雏龙"
+    },
+    {
+      "index": 198,
+      "challengeRating": "1",
+      "slug": "duergar",
+      "name": "灰矮人"
+    },
+    {
+      "index": 199,
+      "challengeRating": "1",
+      "slug": "animated-armor",
+      "name": "活化护甲"
+    },
+    {
+      "index": 200,
+      "challengeRating": "1",
+      "slug": "spy",
+      "name": "间谍"
+    },
+    {
+      "index": 201,
+      "challengeRating": "1",
+      "slug": "giant-toad",
+      "name": "巨蟾蜍"
+    },
+    {
+      "index": 202,
+      "challengeRating": "1",
+      "slug": "giant-hyena",
+      "name": "巨型鬣狗"
+    },
+    {
+      "index": 203,
+      "challengeRating": "1",
+      "slug": "giant-vulture",
+      "name": "巨型秃鹫"
+    },
+    {
+      "index": 204,
+      "challengeRating": "1",
+      "slug": "giant-octopus",
+      "name": "巨型章鱼"
+    },
+    {
+      "index": 205,
+      "challengeRating": "1",
+      "slug": "giant-spider",
+      "name": "巨型蜘蛛"
+    },
+    {
+      "index": 206,
+      "challengeRating": "1",
+      "slug": "giant-eagle",
+      "name": "巨鹰"
+    },
+    {
+      "index": 207,
+      "challengeRating": "1",
+      "slug": "hippogriff",
+      "name": "骏鹰"
+    },
+    {
+      "index": 208,
+      "challengeRating": "1",
+      "slug": "dire-wolf",
+      "name": "恐狼"
+    },
+    {
+      "index": 209,
+      "challengeRating": "1",
+      "slug": "quasit",
+      "name": "夸塞魔"
+    },
+    {
+      "index": 210,
+      "challengeRating": "1",
+      "slug": "tiger",
+      "name": "老虎"
+    },
+    {
+      "index": 211,
+      "challengeRating": "1",
+      "slug": "lion",
+      "name": "狮子"
+    },
+    {
+      "index": 212,
+      "challengeRating": "1",
+      "slug": "swarm-of-quippers",
+      "name": "食人鱼群"
+    },
+    {
+      "index": 213,
+      "challengeRating": "1",
+      "slug": "ghoul",
+      "name": "食尸鬼"
+    },
+    {
+      "index": 214,
+      "challengeRating": "1",
+      "slug": "dryad",
+      "name": "树精"
+    },
+    {
+      "index": 215,
+      "challengeRating": "1",
+      "slug": "death-dog",
+      "name": "死亡犬"
+    },
+    {
+      "index": 216,
+      "challengeRating": "1",
+      "slug": "imp",
+      "name": "小魔鬼"
+    },
+    {
+      "index": 217,
+      "challengeRating": "1",
+      "slug": "bugbear",
+      "name": "熊地精"
+    },
+    {
+      "index": 218,
+      "challengeRating": "1",
+      "slug": "harpy",
+      "name": "鹰身女妖"
+    },
+    {
+      "index": 219,
+      "challengeRating": "1",
+      "slug": "specter",
+      "name": "幽魂"
+    },
+    {
+      "index": 220,
+      "challengeRating": "1",
+      "slug": "brown-bear",
+      "name": "棕熊"
+    },
+    {
+      "index": 221,
+      "challengeRating": "1/2",
+      "slug": "darkmantle",
+      "name": "暗幕怪"
+    },
+    {
+      "index": 222,
+      "challengeRating": "1/2",
+      "slug": "thug",
+      "name": "暴徒"
+    },
+    {
+      "index": 223,
+      "challengeRating": "1/2",
+      "slug": "ice-mephit",
+      "name": "冰魔蝠"
+    },
+    {
+      "index": 224,
+      "challengeRating": "1/2",
+      "slug": "gnoll",
+      "name": "豺狼人"
+    },
+    {
+      "index": 225,
+      "challengeRating": "1/2",
+      "slug": "dust-mephit",
+      "name": "尘土魔蝠"
+    },
+    {
+      "index": 226,
+      "challengeRating": "1/2",
+      "slug": "scout",
+      "name": "斥候"
+    },
+    {
+      "index": 227,
+      "challengeRating": "1/2",
+      "slug": "hobgoblin",
+      "name": "大地精"
+    },
+    {
+      "index": 228,
+      "challengeRating": "1/2",
+      "slug": "deep-gnome-svirfneblin",
+      "name": "地底侏儒（斯涅布力）"
+    },
+    {
+      "index": 229,
+      "challengeRating": "1/2",
+      "slug": "crocodile",
+      "name": "鳄鱼"
+    },
+    {
+      "index": 230,
+      "challengeRating": "1/2",
+      "slug": "swarm-of-wasps",
+      "name": "蜂群"
+    },
+    {
+      "index": 231,
+      "challengeRating": "1/2",
+      "slug": "black-bear",
+      "name": "黑熊"
+    },
+    {
+      "index": 232,
+      "challengeRating": "1/2",
+      "slug": "gray-ooze",
+      "name": "灰泥怪"
+    },
+    {
+      "index": 233,
+      "challengeRating": "1/2",
+      "slug": "cockatrice",
+      "name": "鸡蛇兽"
+    },
+    {
+      "index": 234,
+      "challengeRating": "1/2",
+      "slug": "swarm-of-beetles",
+      "name": "甲虫群"
+    },
+    {
+      "index": 235,
+      "challengeRating": "1/2",
+      "slug": "reef-shark",
+      "name": "礁鲨"
+    },
+    {
+      "index": 236,
+      "challengeRating": "1/2",
+      "slug": "giant-wasp",
+      "name": "巨蜂"
+    },
+    {
+      "index": 237,
+      "challengeRating": "1/2",
+      "slug": "giant-sea-horse",
+      "name": "巨型海马"
+    },
+    {
+      "index": 238,
+      "challengeRating": "1/2",
+      "slug": "giant-goat",
+      "name": "巨型山羊"
+    },
+    {
+      "index": 239,
+      "challengeRating": "1/2",
+      "slug": "swarm-of-insects",
+      "name": "昆虫群"
+    },
+    {
+      "index": 240,
+      "challengeRating": "1/2",
+      "slug": "satyr",
+      "name": "萨堤尔"
+    },
+    {
+      "index": 241,
+      "challengeRating": "1/2",
+      "slug": "sahuagin",
+      "name": "沙华鱼人"
+    },
+    {
+      "index": 242,
+      "challengeRating": "1/2",
+      "slug": "orc",
+      "name": "兽人"
+    },
+    {
+      "index": 243,
+      "challengeRating": "1/2",
+      "slug": "swarm-of-centipedes",
+      "name": "蜈蚣群"
+    },
+    {
+      "index": 244,
+      "challengeRating": "1/2",
+      "slug": "lizardfolk",
+      "name": "蜥蜴人"
+    },
+    {
+      "index": 245,
+      "challengeRating": "1/2",
+      "slug": "rust-monster",
+      "name": "锈蚀怪"
+    },
+    {
+      "index": 246,
+      "challengeRating": "1/2",
+      "slug": "magmin",
+      "name": "岩浆怪"
+    },
+    {
+      "index": 247,
+      "challengeRating": "1/2",
+      "slug": "magma-mephit",
+      "name": "岩浆魔蝠"
+    },
+    {
+      "index": 248,
+      "challengeRating": "1/2",
+      "slug": "shadow",
+      "name": "幽影"
+    },
+    {
+      "index": 249,
+      "challengeRating": "1/2",
+      "slug": "ape",
+      "name": "猿"
+    },
+    {
+      "index": 250,
+      "challengeRating": "1/2",
+      "slug": "warhorse",
+      "name": "战马"
+    },
+    {
+      "index": 251,
+      "challengeRating": "1/2",
+      "slug": "warhorse-skeleton",
+      "name": "战马骷髅"
+    },
+    {
+      "index": 252,
+      "challengeRating": "1/2",
+      "slug": "swarm-of-spiders",
+      "name": "蜘蛛群"
+    },
+    {
+      "index": 253,
+      "challengeRating": "1/2",
+      "slug": "worg",
+      "name": "座狼"
+    },
+    {
+      "index": 254,
+      "challengeRating": "1/4",
+      "slug": "swarm-of-bats",
+      "name": "蝙蝠群"
+    },
+    {
+      "index": 255,
+      "challengeRating": "1/4",
+      "slug": "goblin",
+      "name": "地精"
+    },
+    {
+      "index": 256,
+      "challengeRating": "1/4",
+      "slug": "swarm-of-ravens",
+      "name": "渡鸦群"
+    },
+    {
+      "index": 257,
+      "challengeRating": "1/4",
+      "slug": "flying-sword",
+      "name": "飞剑"
+    },
+    {
+      "index": 258,
+      "challengeRating": "1/4",
+      "slug": "axe-beak",
+      "name": "斧喙鸟"
+    },
+    {
+      "index": 259,
+      "challengeRating": "1/4",
+      "slug": "grimlock",
+      "name": "格里姆洛克"
+    },
+    {
+      "index": 260,
+      "challengeRating": "1/4",
+      "slug": "panther",
+      "name": "黑豹"
+    },
+    {
+      "index": 261,
+      "challengeRating": "1/4",
+      "slug": "zombie",
+      "name": "僵尸"
+    },
+    {
+      "index": 262,
+      "challengeRating": "1/4",
+      "slug": "giant-badger",
+      "name": "巨獾"
+    },
+    {
+      "index": 263,
+      "challengeRating": "1/4",
+      "slug": "giant-frog",
+      "name": "巨蛙"
+    },
+    {
+      "index": 264,
+      "challengeRating": "1/4",
+      "slug": "giant-lizard",
+      "name": "巨蜥"
+    },
+    {
+      "index": 265,
+      "challengeRating": "1/4",
+      "slug": "giant-owl",
+      "name": "巨枭"
+    },
+    {
+      "index": 266,
+      "challengeRating": "1/4",
+      "slug": "giant-bat",
+      "name": "巨型蝙蝠"
+    },
+    {
+      "index": 267,
+      "challengeRating": "1/4",
+      "slug": "giant-poisonous-snake",
+      "name": "巨型毒蛇"
+    },
+    {
+      "index": 268,
+      "challengeRating": "1/4",
+      "slug": "giant-wolf-spider",
+      "name": "巨型狼蛛"
+    },
+    {
+      "index": 269,
+      "challengeRating": "1/4",
+      "slug": "giant-centipede",
+      "name": "巨型蜈蚣"
+    },
+    {
+      "index": 270,
+      "challengeRating": "1/4",
+      "slug": "skeleton",
+      "name": "骷髅"
+    },
+    {
+      "index": 271,
+      "challengeRating": "1/4",
+      "slug": "wolf",
+      "name": "狼"
+    },
+    {
+      "index": 272,
+      "challengeRating": "1/4",
+      "slug": "constrictor-snake",
+      "name": "蟒蛇"
+    },
+    {
+      "index": 273,
+      "challengeRating": "1/4",
+      "slug": "elk",
+      "name": "麋鹿"
+    },
+    {
+      "index": 274,
+      "challengeRating": "1/4",
+      "slug": "riding-horse",
+      "name": "骑乘马"
+    },
+    {
+      "index": 275,
+      "challengeRating": "1/4",
+      "slug": "dretch",
+      "name": "怯魔"
+    },
+    {
+      "index": 276,
+      "challengeRating": "1/4",
+      "slug": "blink-dog",
+      "name": "闪现犬"
+    },
+    {
+      "index": 277,
+      "challengeRating": "1/4",
+      "slug": "acolyte",
+      "name": "侍僧"
+    },
+    {
+      "index": 278,
+      "challengeRating": "1/4",
+      "slug": "swarm-of-rats",
+      "name": "鼠群"
+    },
+    {
+      "index": 279,
+      "challengeRating": "1/4",
+      "slug": "draft-horse",
+      "name": "挽马"
+    },
+    {
+      "index": 280,
+      "challengeRating": "1/4",
+      "slug": "pseudodragon",
+      "name": "伪龙"
+    },
+    {
+      "index": 281,
+      "challengeRating": "1/4",
+      "slug": "sprite",
+      "name": "小妖精"
+    },
+    {
+      "index": 282,
+      "challengeRating": "1/4",
+      "slug": "boar",
+      "name": "野猪"
+    },
+    {
+      "index": 283,
+      "challengeRating": "1/4",
+      "slug": "steam-mephit",
+      "name": "蒸汽魔蝠"
+    },
+    {
+      "index": 284,
+      "challengeRating": "1/4",
+      "slug": "drow",
+      "name": "卓尔"
+    },
+    {
+      "index": 285,
+      "challengeRating": "1/4",
+      "slug": "violet-fungus",
+      "name": "紫罗兰蕈"
+    },
+    {
+      "index": 286,
+      "challengeRating": "1/8",
+      "slug": "pony",
+      "name": "矮种马"
+    },
+    {
+      "index": 287,
+      "challengeRating": "1/8",
+      "slug": "mastiff",
+      "name": "獒犬"
+    },
+    {
+      "index": 288,
+      "challengeRating": "1/8",
+      "slug": "tribal-warrior",
+      "name": "部落战士"
+    },
+    {
+      "index": 289,
+      "challengeRating": "1/8",
+      "slug": "poisonous-snake",
+      "name": "毒蛇"
+    },
+    {
+      "index": 290,
+      "challengeRating": "1/8",
+      "slug": "flying-snake",
+      "name": "飞蛇"
+    },
+    {
+      "index": 291,
+      "challengeRating": "1/8",
+      "slug": "kobold",
+      "name": "狗头人"
+    },
+    {
+      "index": 292,
+      "challengeRating": "1/8",
+      "slug": "noble",
+      "name": "贵族"
+    },
+    {
+      "index": 293,
+      "challengeRating": "1/8",
+      "slug": "giant-rat",
+      "name": "巨鼠"
+    },
+    {
+      "index": 294,
+      "challengeRating": "1/8",
+      "slug": "giant-crab",
+      "name": "巨蟹"
+    },
+    {
+      "index": 295,
+      "challengeRating": "1/8",
+      "slug": "giant-weasel",
+      "name": "巨型鼬"
+    },
+    {
+      "index": 296,
+      "challengeRating": "1/8",
+      "slug": "mule",
+      "name": "骡子"
+    },
+    {
+      "index": 297,
+      "challengeRating": "1/8",
+      "slug": "camel",
+      "name": "骆驼"
+    },
+    {
+      "index": 298,
+      "challengeRating": "1/8",
+      "slug": "bandit",
+      "name": "强盗"
+    },
+    {
+      "index": 299,
+      "challengeRating": "1/8",
+      "slug": "giant-rat-diseased",
+      "name": "染病巨鼠"
+    },
+    {
+      "index": 300,
+      "challengeRating": "1/8",
+      "slug": "merfolk",
+      "name": "人鱼"
+    },
+    {
+      "index": 301,
+      "challengeRating": "1/8",
+      "slug": "guard",
+      "name": "守卫"
+    },
+    {
+      "index": 302,
+      "challengeRating": "1/8",
+      "slug": "stirge",
+      "name": "吸血飞虫"
+    },
+    {
+      "index": 303,
+      "challengeRating": "1/8",
+      "slug": "cultist",
+      "name": "邪教徒"
+    },
+    {
+      "index": 304,
+      "challengeRating": "1/8",
+      "slug": "blood-hawk",
+      "name": "血鹰"
+    },
+    {
+      "index": 305,
+      "challengeRating": "0",
+      "slug": "bat",
+      "name": "蝙蝠"
+    },
+    {
+      "index": 306,
+      "challengeRating": "0",
+      "slug": "raven",
+      "name": "渡鸦"
+    },
+    {
+      "index": 307,
+      "challengeRating": "0",
+      "slug": "baboon",
+      "name": "狒狒"
+    },
+    {
+      "index": 308,
+      "challengeRating": "0",
+      "slug": "sea-horse",
+      "name": "海马"
+    },
+    {
+      "index": 309,
+      "challengeRating": "0",
+      "slug": "jackal",
+      "name": "胡狼"
+    },
+    {
+      "index": 310,
+      "challengeRating": "0",
+      "slug": "badger",
+      "name": "獾"
+    },
+    {
+      "index": 311,
+      "challengeRating": "0",
+      "slug": "shrieker",
+      "name": "尖叫蕈"
+    },
+    {
+      "index": 312,
+      "challengeRating": "0",
+      "slug": "giant-fire-beetle",
+      "name": "巨型火甲虫"
+    },
+    {
+      "index": 313,
+      "challengeRating": "0",
+      "slug": "awakened-shrub",
+      "name": "觉醒灌木"
+    },
+    {
+      "index": 314,
+      "challengeRating": "0",
+      "slug": "rat",
+      "name": "老鼠"
+    },
+    {
+      "index": 315,
+      "challengeRating": "0",
+      "slug": "lemure",
+      "name": "劣魔"
+    },
+    {
+      "index": 316,
+      "challengeRating": "0",
+      "slug": "hyena",
+      "name": "鬣狗"
+    },
+    {
+      "index": 317,
+      "challengeRating": "0",
+      "slug": "deer",
+      "name": "鹿"
+    },
+    {
+      "index": 318,
+      "challengeRating": "0",
+      "slug": "cat",
+      "name": "猫"
+    },
+    {
+      "index": 319,
+      "challengeRating": "0",
+      "slug": "owl",
+      "name": "猫头鹰"
+    },
+    {
+      "index": 320,
+      "challengeRating": "0",
+      "slug": "homunculus",
+      "name": "魔宠人偶"
+    },
+    {
+      "index": 321,
+      "challengeRating": "0",
+      "slug": "crab",
+      "name": "螃蟹"
+    },
+    {
+      "index": 322,
+      "challengeRating": "0",
+      "slug": "commoner",
+      "name": "平民"
+    },
+    {
+      "index": 323,
+      "challengeRating": "0",
+      "slug": "frog",
+      "name": "青蛙"
+    },
+    {
+      "index": 324,
+      "challengeRating": "0",
+      "slug": "goat",
+      "name": "山羊"
+    },
+    {
+      "index": 325,
+      "challengeRating": "0",
+      "slug": "quipper",
+      "name": "食人鱼"
+    },
+    {
+      "index": 326,
+      "challengeRating": "0",
+      "slug": "hawk",
+      "name": "隼"
+    },
+    {
+      "index": 327,
+      "challengeRating": "0",
+      "slug": "vulture",
+      "name": "秃鹫"
+    },
+    {
+      "index": 328,
+      "challengeRating": "0",
+      "slug": "lizard",
+      "name": "蜥蜴"
+    },
+    {
+      "index": 329,
+      "challengeRating": "0",
+      "slug": "scorpion",
+      "name": "蝎子"
+    },
+    {
+      "index": 330,
+      "challengeRating": "0",
+      "slug": "eagle",
+      "name": "鹰"
+    },
+    {
+      "index": 331,
+      "challengeRating": "0",
+      "slug": "weasel",
+      "name": "鼬"
+    },
+    {
+      "index": 332,
+      "challengeRating": "0",
+      "slug": "octopus",
+      "name": "章鱼"
+    },
+    {
+      "index": 333,
+      "challengeRating": "0",
+      "slug": "spider",
+      "name": "蜘蛛"
+    }
+  ]
+}

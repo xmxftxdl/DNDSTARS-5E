@@ -45,6 +45,13 @@ function activeEffectDarkvisionRangeFeet(input) {
   ), 0)
 }
 
+function activeEffectTruesightRangeFeet(input) {
+  return activeEffectsFrom(input).reduce((maximum, effect) => Math.max(
+    maximum,
+    rangeFeet(effect?.modifiers?.truesightRangeFeet),
+  ), 0)
+}
+
 function selectionContainsDevilsSight(value) {
   if (Array.isArray(value)) {
     return value.some((entry) => {
@@ -123,6 +130,7 @@ export function compileDnd5eEffectiveVisionProfile(input = {}) {
   const truesightRangeFeet = Math.max(
     rangeFeet(token.truesightRangeFeet),
     monsterSenseRangeFeet(monster, ['truesight', '\u771f\u89c6']),
+    activeEffectTruesightRangeFeet(input),
   )
   const devilsSight = dnd5eCharacterHasDevilsSight(character) || monsterHasDevilsSight(monster)
   const explicitDarknessSightRangeFeet = rangeFeet(token.darknessSightRangeFeet)

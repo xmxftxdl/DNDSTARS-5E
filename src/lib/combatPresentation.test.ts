@@ -762,7 +762,7 @@ describe('combat presentation events', () => {
     ])
   })
 
-  it('projects the low-level cone, circle, and square spell atlases at native sizes', () => {
+  it('projects cone, circle, and square spell atlases at native sizes', () => {
     const base = {
       schemaVersion: 1 as const,
       type: 'spell-area-effect' as const,
@@ -781,6 +781,15 @@ describe('combat presentation events', () => {
         shape: 'cone' as const,
         lengthFeet: 15,
         widthFeet: 15,
+      },
+      {
+        ...base,
+        id: 'prismatic-spray-area',
+        transactionId: 'prismatic-spray-transaction',
+        spellId: 'prismatic-spray' as const,
+        shape: 'cone' as const,
+        lengthFeet: 60,
+        widthFeet: 60,
       },
       {
         ...base,
@@ -808,15 +817,6 @@ describe('combat presentation events', () => {
         widthFeet: 20,
         heightFeet: 20,
       },
-      {
-        ...base,
-        id: 'grease-area',
-        transactionId: 'grease-transaction',
-        spellId: 'grease' as const,
-        shape: 'rect' as const,
-        widthFeet: 10,
-        heightFeet: 10,
-      },
     ]
     const state = events.reduce(
       (current, event) => reduceCombatPresentationState(current, event, 1_100),
@@ -824,10 +824,105 @@ describe('combat presentation events', () => {
     )
     expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
       expect.objectContaining({ kind: 'color-spray', areaWidthPx: 150 }),
+      expect.objectContaining({
+        kind: 'prismatic-spray',
+        areaWidthPx: 600,
+        durationMs: 1_500,
+      }),
       expect.objectContaining({ kind: 'faerie-fire', radiusPx: 100, areaWidthPx: 200 }),
       expect.objectContaining({ kind: 'sleep', radiusPx: 200 }),
       expect.objectContaining({ kind: 'entangle', radiusPx: 100, areaWidthPx: 200 }),
-      expect.objectContaining({ kind: 'grease', radiusPx: 50, areaWidthPx: 100 }),
+    ])
+  })
+
+  it('leaves Grease and Fog Cloud visuals to their authoritative animated ground layers', () => {
+    const event = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 0 },
+      createdAt: 1_000,
+      expiresAt: 1_000 + WALL_OF_FIRE_HANDOFF_TIMEOUT_MS,
+      id: 'grease-area',
+      transactionId: 'grease-transaction',
+      spellId: 'grease' as const,
+      shape: 'rect' as const,
+      widthFeet: 10,
+      heightFeet: 10,
+    }
+    const greaseState = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      event,
+      1_100,
+    )
+
+    expect(combatPresentationProjectilesForMap(greaseState, map, 1_100)).toEqual([])
+    const fogEvent = {
+      ...event,
+      id: 'fog-cloud-area',
+      transactionId: 'fog-cloud-transaction',
+      spellId: 'fog-cloud' as const,
+      shape: 'circle' as const,
+      radiusFeet: 20,
+      widthFeet: undefined,
+      heightFeet: undefined,
+    }
+    const fogState = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      fogEvent,
+      1_100,
+    )
+    expect(combatPresentationProjectilesForMap(fogState, map, 1_100)).toEqual([])
+  })
+
+  it('projects Web and Stinking Cloud entrances with persistent-area handoff ids', () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 3, row: 2 },
+      createdAt: 1_000,
+      expiresAt: 1_000 + WALL_OF_FIRE_HANDOFF_TIMEOUT_MS,
+    }
+    const events = [
+      {
+        ...base,
+        id: 'web-entrance:area',
+        transactionId: 'web-entrance',
+        spellId: 'web' as const,
+        shape: 'rect' as const,
+        widthFeet: 20,
+        heightFeet: 20,
+      },
+      {
+        ...base,
+        id: 'stinking-cloud-entrance:area',
+        transactionId: 'stinking-cloud-entrance',
+        spellId: 'stinking-cloud' as const,
+        shape: 'circle' as const,
+        radiusFeet: 20,
+      },
+    ]
+    for (const event of events) expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    const state = events.reduce(
+      (current, event) => reduceCombatPresentationState(current, event, event.createdAt),
+      EMPTY_COMBAT_PRESENTATION_STATE,
+    )
+
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+      expect.objectContaining({
+        kind: 'web',
+        areaWidthPx: 200,
+        areaHeightPx: 200,
+        handoffAreaId: 'core-spell-area:web-entrance',
+      }),
+      expect.objectContaining({
+        kind: 'stinking-cloud',
+        radiusPx: 200,
+        handoffAreaId: 'core-spell-area:stinking-cloud-entrance',
+      }),
     ])
   })
 
@@ -1103,6 +1198,27 @@ describe('combat presentation events', () => {
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(21_000 + FLAMING_SPHERE_ENTRANCE_DURATION_MS)
     expect((event as { expiresAt: number }).expiresAt).toBeGreaterThan(schedule.completesAt)
+    vi.useRealTimers()
+  })
+
+  it('creates Fog Cloud immediately without publishing a duplicate entrance atlas', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(20_750)
+    await refreshCombatPresentationClock(true)
+    vi.clearAllMocks()
+    const schedule = await publishAreaSpellPresentation({
+      id: 'fog-cloud-live:area',
+      mapId: 'map-a',
+      transactionId: 'fog-cloud-live',
+      sourceTokenId: 'wizard',
+      spellId: 'fog-cloud',
+      targetCell: { col: 3, row: 2 },
+      shape: 'circle',
+      radiusFeet: 20,
+    })
+
+    expect(publishSharedEvent).not.toHaveBeenCalled()
+    expect(schedule.completesAt).toBe(21_250)
     vi.useRealTimers()
   })
 
@@ -1790,6 +1906,8 @@ describe('combat presentation events', () => {
       phase: 'result' as const,
       total: 17,
       success: true,
+      damage: 12,
+      damageType: 'fire' as const,
       createdAt: 2_000,
       expiresAt: 2_000 + SAVING_THROW_RESULT_TTL_MS,
     }
@@ -1800,9 +1918,13 @@ describe('combat presentation events', () => {
     const resultState = reduceCombatPresentationState(pendingState, result, 2_000)
     expect(resultState.spellProjectiles).toHaveLength(1)
     expect(combatPresentationSavingThrowForMap(resultState, 'map-a', 2_100)).toEqual(
-      expect.objectContaining({ phase: 'result', total: 17, success: true }),
+      expect.objectContaining({
+        phase: 'result', total: 17, success: true, damage: 12, damageType: 'fire',
+      }),
     )
     expect(parseCombatPresentationEvent({ ...result, total: undefined })).toBeNull()
+    expect(parseCombatPresentationEvent({ ...pending, damage: 12 })).toBeNull()
+    expect(parseCombatPresentationEvent({ ...result, damage: -1 })).toBeNull()
   })
 
   it('publishes pending and final Dexterity save states using the calibrated server clock', async () => {
@@ -1823,6 +1945,8 @@ describe('combat presentation events', () => {
       phase: 'result',
       total: 17,
       success: true,
+      damage: 12,
+      damageType: 'fire',
     })
     expect(publishSharedEvent).toHaveBeenNthCalledWith(
       1,
@@ -1843,6 +1967,8 @@ describe('combat presentation events', () => {
         phase: 'result',
         total: 17,
         success: true,
+        damage: 12,
+        damageType: 'fire',
         expiresAt: 28_500 + SAVING_THROW_RESULT_TTL_MS,
       }),
     )

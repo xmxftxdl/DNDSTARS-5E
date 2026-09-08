@@ -40,10 +40,16 @@ import {
 } from '../../domain/automation/automationCapability'
 import { resolveDnd5ePluginKind } from '../../domain/plugins/pluginKind'
 import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
-import { registerDnd5eActivityPackage } from './activities/dnd5eActivityRegistry'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
-import { registerContentDefinitionPackage } from '../../domain/content/contentDefinitionRegistry'
+import { registerDnd5eUnifiedContentPackageV1 } from './activities/dnd5eUnifiedContentRegistry'
+import { dnd5eActivityAutomationAnalysisV1 } from './plugins/pluginMechanicsRegistry'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
+import { dnd5ePluginFeatureActionFromActivityV1 } from './activities/dnd5eActivityFeatureActionAdapter'
+import {
+  compileDnd5eActivityHeadlessAction,
+  dnd5eActivityManualAdjudicationOperationsV1,
+  dnd5eActivityHeadlessCompatibility,
+} from './activities/dnd5eActivityHeadlessCompiler'
 
 export const DND5E_CONTENT_PACKAGE_FORMAT = 'dndstars5e-content' as const
 export const DND5E_CONTENT_PACKAGE_SCHEMA_VERSION = 2 as const
@@ -323,10 +329,11 @@ export function dnd5eContentPackageAutomationCoverageV2(
       return activity ? [activity] : []
     })
     if (!activities.length) return undefined
-    const levels = activities.map((activity) => activity.automation.level)
+    const analyses = activities.map(dnd5eActivityAutomationAnalysisV1)
+    const levels = analyses.map((analysis) => analysis.capability.level)
     const reasons = [
       ...projectedEntries.flatMap((entry) => entry.issues),
-      ...activities.flatMap((activity) => activity.automation.limitations),
+      ...analyses.flatMap((analysis) => analysis.capability.limitations),
     ].filter((reason, index, all) => reason && all.indexOf(reason) === index)
     const status: Dnd5eContentAutomationStatusV2 = levels.every((level) => level === 'full')
       ? 'full'
@@ -353,7 +360,11 @@ export function dnd5eContentPackageAutomationCoverageV2(
   for (const race of value.content.races) {
     add('race', race.id, race.automation ?? 'full', race.automationReasons)
   }
-  for (const background of value.content.backgrounds) add('background', background.id, 'full')
+  for (const background of value.content.backgrounds) {
+    add('background', background.id, 'partial', [
+      '技能熟练可在建卡时应用；工具、语言选择与叙事背景特性仍需人物卡或 DM 流程确认',
+    ])
+  }
   for (const feature of value.content.features) {
     const projected = projectedAutomation('feature', feature.id)
     add('feature', feature.id, projected?.status ?? feature.automation, projected?.reasons)
@@ -473,6 +484,8 @@ export function dnd5eContentPackageAutomationCoverageV2(
     ...value.content.feats.flatMap((feat) => feat.iconAssetId ? [feat.iconAssetId] : []),
     ...value.content.spells.flatMap((spell) => spell.iconAssetId ? [spell.iconAssetId] : []),
     ...value.content.items.flatMap((item) => item.iconAssetId ? [item.iconAssetId] : []),
+    ...value.content.subclasses.flatMap((subclass) =>
+      subclass.abilities.flatMap((ability) => ability.iconAssetId ? [ability.iconAssetId] : [])),
   ])
   const activityMigration = activityProjection.counts
 
@@ -706,6 +719,42 @@ export function encodeDnd5eContentPackageV2(value: Dnd5eContentPackageV2): Array
   return new TextEncoder().encode(`${JSON.stringify(value)}\n`).buffer
 }
 
+function activeContentActivity(
+  value: Dnd5eContentPackageV2,
+  kind: 'feature' | 'feat' | 'spell',
+  id: string,
+): Dnd5eActivityDefinitionV1 | undefined {
+  return value.content.activities?.find((activity) =>
+    activity.legacySource?.kind === kind && activity.legacySource.id === id &&
+    (activity.invocation == null || activity.invocation.kind === 'active') &&
+    (
+      dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full' ||
+      (
+        dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'assisted' &&
+        dnd5eActivityManualAdjudicationOperationsV1(activity).length > 0
+      )
+    ) && !activity.authorityBinding)
+}
+
+function areaGrantedContentActivities(
+  value: Dnd5eContentPackageV2,
+): readonly Dnd5eActivityDefinitionV1[] {
+  const activityIds = new Set(value.content.activities?.flatMap((source) =>
+    source.outcomes.flatMap((outcome) => outcome.operations.flatMap((operation) =>
+      operation.kind === 'create-persistent-area'
+        ? (operation.grantedActivities ?? []).map((grant) => grant.activityId)
+        : [],
+    ))) ?? [])
+  return [...activityIds].map((activityId) => {
+    const activity = value.content.activities?.find((candidate) => candidate.id === activityId)
+    if (
+      !activity || (activity.invocation != null && activity.invocation.kind !== 'active') ||
+      dnd5eActivityAutomationAnalysisV1(activity).capability.level !== 'full' || activity.authorityBinding
+    ) throw new Error(`Persistent area grants unavailable Activity: ${activityId}`)
+    return activity
+  })
+}
+
 export function dnd5eRoomRuntimeProjectionBytesV2(bytes: ArrayBuffer): ArrayBuffer {
   const parsed = parseDnd5eContentPackageV2(bytes)
   if (!parsed) throw new Error('The selected file is not a V2 content package')
@@ -723,16 +772,9 @@ export function dnd5eRulesPluginFromContentPackageV2(
     manifest: structuredClone(value.manifest),
     setup(api) {
       const assetDisposers: Array<() => void> = []
-      let activityDisposer: (() => void) | undefined
       let contentDefinitionDisposer: (() => void) | undefined
       try {
-        const activityProjection = dnd5eContentPackageActivityProjectionV1(value)
-        activityDisposer = registerDnd5eActivityPackage({
-          packageId: activityProjection.packageId,
-          packageVersion: activityProjection.packageVersion,
-          activities: activityProjection.activities,
-        }).dispose
-        contentDefinitionDisposer = registerContentDefinitionPackage({
+        contentDefinitionDisposer = registerDnd5eUnifiedContentPackageV1({
           packageId: value.manifest.id,
           packageVersion: value.manifest.version,
           definitions: dnd5eContentDefinitionsFromPackageV2(value),
@@ -743,11 +785,79 @@ export function dnd5eRulesPluginFromContentPackageV2(
         for (const action of value.content.headlessActions) {
           api.registerHeadlessAction(dnd5eHeadlessActionFromDeclarativeDraft(action))
         }
+        const nativeActiveActivities = [
+          ...value.content.features.flatMap((feature) => {
+            if (feature.action) return []
+            const activity = activeContentActivity(value, 'feature', feature.id)
+            return activity && dnd5ePluginFeatureActionFromActivityV1(activity)
+              ? [{ activity, outerSpellTransaction: false }]
+              : []
+          }),
+          ...value.content.feats.flatMap((feat) => {
+            if (feat.action) return []
+            const activity = activeContentActivity(value, 'feat', feat.id)
+            return activity && dnd5ePluginFeatureActionFromActivityV1(activity)
+              ? [{ activity, outerSpellTransaction: false }]
+              : []
+          }),
+          ...value.content.spells.flatMap((spell) => {
+            const activity = activeContentActivity(value, 'spell', spell.id)
+            return activity ? [{ activity, outerSpellTransaction: true }] : []
+          }),
+          ...areaGrantedContentActivities(value).map((activity) => ({
+            activity,
+            outerSpellTransaction: false,
+          })),
+        ]
+        const uniqueNativeActiveActivities = [...new Map(nativeActiveActivities.map((entry) => [
+          entry.activity.id,
+          entry,
+        ])).values()]
+        for (const { activity, outerSpellTransaction } of uniqueNativeActiveActivities) {
+          const compatibility = dnd5eActivityHeadlessCompatibility(activity, { outerSpellTransaction })
+          if (!compatibility.supported) {
+            throw new Error(`Activity ${activity.id} cannot become an active Headless action: ${compatibility.reasons.join('; ')}`)
+          }
+          api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction }))
+        }
         for (const race of value.content.races) api.registerRace(structuredClone(race))
         for (const background of value.content.backgrounds) api.registerBackground(structuredClone(background))
-        for (const feature of value.content.features) api.registerFeature(structuredClone(feature))
-        for (const feat of value.content.feats) api.registerFeat(structuredClone(feat))
-        for (const spell of value.content.spells) api.registerSpell(structuredClone(spell))
+        for (const feature of value.content.features) {
+          const activity = feature.action ? undefined : activeContentActivity(value, 'feature', feature.id)
+          api.registerFeature(structuredClone({
+            ...feature,
+            action: feature.action ?? (activity ? dnd5ePluginFeatureActionFromActivityV1(activity) : undefined),
+          }))
+        }
+        for (const feat of value.content.feats) {
+          const activity = feat.action ? undefined : activeContentActivity(value, 'feat', feat.id)
+          api.registerFeat(structuredClone({
+            ...feat,
+            action: feat.action ?? (activity ? dnd5ePluginFeatureActionFromActivityV1(activity) : undefined),
+          }))
+        }
+        for (const activity of areaGrantedContentActivities(value)) {
+          const action = dnd5ePluginFeatureActionFromActivityV1(activity)
+          if (!action) throw new Error(`Persistent area Activity cannot become an active control: ${activity.id}`)
+          api.registerFeature({
+            id: `area-control.${activity.id}`,
+            name: activity.name,
+            summary: activity.description ?? activity.name,
+            description: activity.description ?? activity.name,
+            sourceLabel: '持续区域授予',
+            automation: 'full',
+            action,
+          })
+        }
+        for (const spell of value.content.spells) {
+          const activity = activeContentActivity(value, 'spell', spell.id)
+          api.registerSpell(structuredClone({
+            ...spell,
+            automation: activity
+              ? { mode: 'headless-action' as const, actionId: activity.id }
+              : spell.automation,
+          }))
+        }
         for (const item of value.content.items) api.registerItem(structuredClone(item))
         for (const method of value.content.abilityGenerationMethods) {
           api.registerAbilityGenerationMethod(structuredClone(method))
@@ -757,13 +867,11 @@ export function dnd5eRulesPluginFromContentPackageV2(
         for (const monster of value.content.monsters) api.registerMonster(structuredClone(monster))
       } catch (error) {
         contentDefinitionDisposer?.()
-        activityDisposer?.()
         for (const dispose of assetDisposers.reverse()) dispose()
         throw error
       }
       return () => {
         contentDefinitionDisposer?.()
-        activityDisposer?.()
         for (const dispose of assetDisposers.reverse()) dispose()
       }
     },

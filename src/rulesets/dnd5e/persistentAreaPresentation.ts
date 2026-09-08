@@ -17,6 +17,16 @@ export function dnd5ePersistentAreaPresentationVisual(
 ): Dnd5ePersistentAreaVisual | undefined {
   const legacyGenericPreset = area.coreSpellId === 'mage-hand'
     ? 'arcane'
+    : area.coreSpellId === 'silent-image'
+      ? 'arcane'
+    : area.coreSpellId === 'major-image'
+        ? 'arcane'
+      : area.coreSpellId === 'mislead'
+        ? 'arcane'
+      : area.coreSpellId === 'project-image'
+        ? 'arcane'
+      : area.coreSpellId === 'unseen-servant'
+        ? 'arcane'
     : area.coreSpellId === 'insect-plague'
       ? 'toxic-cloud'
       : area.coreSpellId === 'cloudkill'
@@ -31,5 +41,20 @@ export function dnd5ePersistentAreaPresentationVisual(
     !(area.sourceKind === 'core-spell' && legacyGenericPreset === area.visual.preset)
   ) return area.visual
   if (area.sourceKind !== 'core-spell' || !area.coreSpellId) return undefined
+  if (area.coreSpellId === 'silent-image') {
+    return { preset: 'silent-image', intensity: 'strong' }
+  }
+  if (area.coreSpellId === 'major-image') {
+    return { preset: 'major-image', intensity: 'strong' }
+  }
+  if (area.coreSpellId === 'mislead') {
+    return { preset: 'mislead', intensity: 'strong' }
+  }
+  if (area.coreSpellId === 'project-image') {
+    return { preset: 'project-image', intensity: 'strong' }
+  }
+  if (area.coreSpellId === 'unseen-servant') {
+    return { preset: 'unseen-servant', intensity: 'strong' }
+  }
   return dnd5eCoreSpellAreaVisual(area.coreSpellId)
 }

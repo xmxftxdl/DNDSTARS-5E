@@ -1,12 +1,15 @@
 import type {
   PdfAnalysisDepthV1,
   PdfAnalysisModelRoutingV1,
+  PdfCausalBranchV1,
   PdfCampaignAnalysisV1,
   PdfImportCandidateKindV1,
+  PdfTimelineKindV1,
 } from './pdfCampaignAnalysis'
 
 export const PDF_CAMPAIGN_ANALYSIS_SCHEMA_VERSION = 2 as const
 export const PDF_EVIDENCE_SCHEMA_VERSION = 1 as const
+export const PDF_SOURCE_BOOKMARK_SCHEMA_VERSION = 1 as const
 
 export type PdfEvidenceVerificationV2 = 'exact' | 'normalized' | 'legacy' | 'unverified'
 export type PdfReviewStatusV2 = 'auto-verified' | 'needs-review' | 'approved' | 'rejected'
@@ -19,6 +22,32 @@ export type PdfEntityKindV2 =
   | 'encounter'
   | 'import-candidate'
   | 'prep-tip'
+
+export type PdfSourceBookmarkKindV1 =
+  | 'person'
+  | 'location'
+  | 'faction'
+  | 'clue'
+  | 'event'
+  | 'monster'
+  | 'note'
+
+export interface PdfSourceBookmarkV1 {
+  schemaVersion: 1
+  id: string
+  documentId: string
+  documentName: string
+  page: number
+  kind: PdfSourceBookmarkKindV1
+  label: string
+  /** A short source excerpt only. Full pages stay in the local IndexedDB repository. */
+  quote: string
+  note: string
+  origin: 'dm' | 'ai'
+  entityId?: string
+  entityName?: string
+  createdAt: number
+}
 
 export interface PdfDocumentRecordV2 {
   id: string
@@ -141,6 +170,18 @@ export interface PdfSceneRecordV2 extends PdfNamedRecordV2 {
   location: string
   npcs: string[]
   monsters: string[]
+  time?: string
+  timelineOrder?: number
+  /** DM-authored authoritative campaign minute used to place this event against the room clock. */
+  gameTimeWorldMinute?: number
+  timelineKind?: PdfTimelineKindV1
+  tags?: string[]
+  causedBy?: string[]
+  causalBranches?: PdfCausalBranchV1[]
+  causalExplanation?: string
+  branchCondition?: string
+  branchPerson?: string
+  branchPersonState?: 'dead' | 'alive' | 'unspecified'
 }
 
 export interface PdfEncounterRecordV2 extends PdfNamedRecordV2 {
@@ -151,6 +192,7 @@ export interface PdfEncounterRecordV2 extends PdfNamedRecordV2 {
 export interface PdfImportCandidateV2 extends PdfNamedRecordV2 {
   kind: PdfImportCandidateKindV1
   automation: 'full' | 'partial' | 'manual'
+  monsterStatBlockText?: string
 }
 
 export interface PdfPrepTipV2 extends PdfEntityIdentityV2 {
@@ -170,10 +212,13 @@ export interface PdfCampaignAnalysisV2 {
   locations: PdfNamedRecordV2[]
   factions: PdfNamedRecordV2[]
   clues: PdfClueRecordV2[]
+  timelineEvents?: PdfSceneRecordV2[]
   scenes: PdfSceneRecordV2[]
   encounters: PdfEncounterRecordV2[]
   importCandidates: PdfImportCandidateV2[]
   prepTips: PdfPrepTipV2[]
+  /** DM-reviewed source bookmarks. This never contains complete PDF page text. */
+  bookmarks?: PdfSourceBookmarkV1[]
   warnings: string[]
   analyzedChunks: number
   analysisDepth?: PdfAnalysisDepthV1
@@ -191,6 +236,7 @@ export interface PdfCampaignAnalysisArtifactV2 {
 /** Read-only UI projection shared by migrated V1 artifacts and native V2 artifacts. */
 export type PdfCampaignAnalysisView = Omit<PdfCampaignAnalysisV1, 'schemaVersion'> & {
   schemaVersion: 1 | 2
+  bookmarks?: PdfSourceBookmarkV1[]
 }
 
 export interface PdfOcrPageInputV1 {

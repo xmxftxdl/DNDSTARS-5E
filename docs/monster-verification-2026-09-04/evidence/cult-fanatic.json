@@ -1,0 +1,156 @@
+{
+  "id": "srd-5.1:cult-fanatic",
+  "slug": "cult-fanatic",
+  "name": "邪教狂信徒",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "dagger",
+      "name": "匕首",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 73,
+      "slug": "cult-fanatic",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:46:33.393Z",
+      "name": "邪教狂信徒",
+      "actionId": "dagger",
+      "actionName": "匕首",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-cult-fanatic-dagger-1788558393482",
+      "combatId": "verify-ui-cult-fanatic-dagger-1788558393482:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "邪教狂信徒 使用匕首攻击 验证目标：匕首 → 验证目标 9+4=13 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:47 PM\n结算\n\n邪教狂信徒 使用匕首攻击 验证目标：匕首 → 验证目标 9+4=13 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：匕首｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +4。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 匕首（基础伤害·穿刺）｜1d4 骰面：2 = 2｜固定加值 +2｜小计 4\n邪教狂信徒｜消耗动作\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/邪教狂信徒 使用匕首攻击 验证目标：/)\nExpected: \u001b[32m\"邪教狂信徒 使用匕首攻击 验证目标：匕首 → 验证目标 9+4=13 命中；共造成 4 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/邪教狂信徒 使用匕首攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:47:26.188Z",
+      "evidenceFile": "ui-cases/monsters/073-cult-fanatic.json"
+    },
+    {
+      "index": 191,
+      "slug": "cult-fanatic",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:48:43.082Z",
+      "name": "邪教狂信徒",
+      "actionId": "dagger",
+      "actionName": "匕首",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "2",
+      "total": 334,
+      "mapId": "verify-ui-cult-fanatic-dagger-1788569323135",
+      "combatId": "verify-ui-cult-fanatic-dagger-1788569323135:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "邪教狂信徒 使用匕首攻击 验证目标：匕首 → 验证目标 16+4=20 命中；共造成 3 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:49 PM\n结算\n\n邪教狂信徒 使用匕首攻击 验证目标：匕首 → 验证目标 16+4=20 命中；共造成 3 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：匕首｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 16；最终采用 16；调整值 +4。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 匕首（基础伤害·穿刺）｜1d4 骰面：1 = 1｜固定加值 +2｜小计 3\n邪教狂信徒｜消耗动作\n验证目标｜受到 3 点伤害｜HP 320 → 317",
+      "playerLog": "邪教狂信徒 使用匕首攻击 验证目标：匕首 → 验证目标 16+4=20 命中；共造成 3 点伤害。",
+      "afterHp": 317,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:49:06.644Z",
+      "evidenceFile": "ui-cases/monsters/191-cult-fanatic.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "黑暗奉献",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 4,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { createD20ChoiceRerollContribution, createD20RollConfirmationInterrupt } from '../src/lib/rollConfirmation'
 
 const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
 const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
@@ -297,10 +298,105 @@ async function linkDmWizardToEnemy(
   return reactor
 }
 
+test('怪物由 DM 接管时仍接受玩家法术 Headless 事务', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `manual-player-spell-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['magic-missile'])
+  const currentCombat = await getState<Record<string, unknown> & { _sync?: unknown }>(request, 'combat')
+  const combat = { ...currentCombat }
+  delete combat._sync
+  await putState(request, 'combat', {
+    ...combat,
+    settlementMode: 'automatic',
+    monsterControl: {
+      schemaVersion: 1,
+      mode: 'manual',
+      pauseRequested: false,
+      updatedAt: Date.now(),
+    },
+    updatedAt: Date.now(),
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId('combat-settlement-mode')).toHaveCount(0)
+  await expect(player.getByTestId('combat-settlement-mode-label')).toHaveCount(0)
+  await useDeterministicBrowserRandom(dm, 0.5)
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:magic-missile:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    targetTokenIds: [seeded.enemyToken.id],
+    dnd5eSpellCast: {
+      spellId: 'magic-missile',
+      castingClassId: 'wizard',
+      slotLevel: 2,
+      targetTokenId: seeded.enemyToken.id,
+      targetTokenIds: [seeded.enemyToken.id],
+      projectileTargetIds: Array.from({ length: 4 }, () => seeded.enemyToken.id),
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await submitPlayerAction(player, action)
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
+  }, { timeout: 45_000 }).toBe('accepted:')
+  await expect.poll(async () => {
+    const state = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+    return state.maps.find((map) => map.id === mapId)?.tokens
+      .find((token) => token.id === seeded.enemyToken.id)?.hp
+  }).toBe(24)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters[0].classResources?.['dnd5e-spell-slot-2']?.current
+  }).toBe(1)
+
+  const sharedCombat = await getState<{
+    settlementMode?: string
+    initiativeIndex?: number
+    monsterControl?: { mode?: string }
+  }>(request, 'combat')
+  expect(sharedCombat.settlementMode).toBe('automatic')
+  expect(sharedCombat.monsterControl?.mode).toBe('manual')
+  expect(sharedCombat.initiativeIndex).toBe(0)
+  await context.close()
+})
+
 test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动继续', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const mapId = `spell-interrupt-${Date.now()}`
-  const seeded = await seedCombat(request, mapId, ['suggestion'])
+  // “暗示术”已经迁移为 Activity Headless，不能再伪装成旧式手工法术。
+  // 使用仍明确保留 DM 裁量的叙事法术验证统一暂停协议。
+  const seeded = await seedCombat(request, mapId, ['speak-with-animals'], 'druid')
+  await putState(request, 'characters', {
+    characters: [{
+      ...seeded.character,
+      classResources: {
+        ...seeded.character.classResources,
+        'dnd5e-spell-slot-1': { current: 2, max: 4 },
+      },
+    }],
+    selectedId: seeded.character.id,
+    updatedAt: Date.now(),
+  })
   const context = await browser.newContext()
   let dm = await context.newPage()
   const player = await context.newPage()
@@ -312,7 +408,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
 
   const now = Date.now()
   const action = {
-    id: `${mapId}:suggestion:${now}`,
+    id: `${mapId}:speak-with-animals:${now}`,
     mapId,
     combatId: `${mapId}:combat`,
     sourceMode: 'player',
@@ -320,7 +416,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
     type: 'dnd5e-adjudicated-spell',
     actorTokenId: seeded.actorToken.id,
     characterId: seeded.character.id,
-    dnd5eAdjudicatedSpell: { spellId: 'suggestion', castingClassId: 'wizard', slotLevel: 2 },
+    dnd5eAdjudicatedSpell: { spellId: 'speak-with-animals', castingClassId: 'druid', slotLevel: 1 },
     round: 1,
     initiativeIndex: 0,
     seq: 1,
@@ -330,7 +426,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
 
   let dialog = dm.getByTestId('dm-adjudication-dialog')
   await expect(dialog).toBeVisible({ timeout: 20_000 })
-  await expect(dialog).toContainText('DM 裁定 · 暗示术')
+  await expect(dialog).toContainText('DM 裁定 · 动物交谈术')
   await expect(player.getByTestId('dm-adjudication-dialog')).toHaveCount(0)
   await expect(dm.getByTestId('combat-flow-pause-control')).toContainText('DM 裁定中')
   await expect(dm.getByTestId('combat-flow-pause-control')).toBeDisabled()
@@ -340,7 +436,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
     return combat.flowPause?.phase
   }).toBe('adjudicating')
   const before = await getState<{ characters: ResourceCharacter[]; _sync?: unknown }>(request, 'characters')
-  expect(before.characters[0].classResources?.['dnd5e-spell-slot-2']?.current).toBe(2)
+  expect(before.characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(2)
 
   // 未完成的权威事务不能只存在于 DM 页面的内存里。关闭并重新打开 DM 端后，
   // 同一个裁定窗口应从共享资源恢复，并继续原来的 actionId。
@@ -349,7 +445,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
   await dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' })
   dialog = dm.getByTestId('dm-adjudication-dialog')
   await expect(dialog).toBeVisible({ timeout: 20_000 })
-  await expect(dialog).toContainText('DM 裁定 · 暗示术')
+  await expect(dialog).toContainText('DM 裁定 · 动物交谈术')
 
   await dialog.getByRole('button', { name: '＋ 添加目标效果' }).click()
   await dialog.getByLabel('目标').selectOption(seeded.enemyToken.id)
@@ -370,7 +466,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
 
   // 裁定已经回答，但门闩尚未打开：资源、伤害和 action ACK 都不能提前提交。
   const pausedCharacters = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
-  expect(pausedCharacters.characters[0].classResources?.['dnd5e-spell-slot-2']?.current).toBe(2)
+  expect(pausedCharacters.characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(2)
   const pausedMaps = await getState<{ maps: ResourceMap[] }>(request, 'maps')
   expect(pausedMaps.maps.find((map) => map.id === mapId)?.tokens
     .find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(40)
@@ -386,7 +482,7 @@ test('未机械化法术跨端进入 DM Interrupt，裁定后仍等待 DM 手动
   await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
   await expect.poll(async () => {
     const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
-    return state.characters[0].classResources?.['dnd5e-spell-slot-2']?.current
+    return state.characters[0].classResources?.['dnd5e-spell-slot-1']?.current
   }).toBe(1)
   await expect.poll(async () => {
     const state = await getState<{ maps: ResourceMap[] }>(request, 'maps')
@@ -1008,5 +1104,163 @@ test('核心持续区域由 DM 原子创建，并在玩家刷新和重复投递�
   expect(rejoined.maps.find((map) => map.id === mapId)?.dnd5ePluginAreas).toContainEqual(expect.objectContaining({
     sourceKind: 'core-spell', coreSpellId: 'moonbeam', anchorCell: { col: 5, row: 2 },
   }))
+  await context.close()
+})
+
+test('投骰修正只在玩家左侧显示，玩家决定后 Host 无需 DM 复核即自动结算', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `roll-adjustment-drawer-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, [])
+  await putState(request, 'characters', {
+    characters: [{ ...seeded.character, inspiration: 1 }],
+    selectedId: seeded.character.id,
+    updatedAt: Date.now(),
+  })
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    expect(dm.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 }),
+    expect(player.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 }),
+  ])
+  await useDeterministicBrowserRandom(dm, 0.7)
+  const interrupt = createD20RollConfirmationInterrupt({
+    mapId, combatId: `${mapId}:combat`, rollId: `${mapId}:attack-roll`,
+    label: '跨端攻击检定', targetName: '跨端测试食人魔', originalValue: 7,
+    rollerCharacterId: seeded.character.id,
+    eligibleModifiers: [{
+      characterId: seeded.character.id, featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      modifierKind: 'choice-reroll', sourceTokenId: seeded.actorToken.id, rerollScope: 'self-roll',
+      additionalDice: 1, selectionPolicy: 'highest',
+      resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }], decisionRequired: true,
+    }],
+    now: Date.now(),
+  })
+  await putState(request, 'combat-interrupts', {
+    mapId, interrupts: [interrupt], revision: 1, updatedAt: Date.now(),
+  })
+
+  const drawer = player.getByTestId('d20-roll-confirmation')
+  await expect(drawer).toBeVisible({ timeout: 20_000 })
+  await expect(drawer).toHaveAttribute('data-layout', 'left-drawer')
+  await expect(drawer).toContainText('激励')
+  await expect(drawer).toContainText('额外投掷 1 枚 d20')
+  await expect(drawer).not.toContainText('2 个结果中采用')
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/\d+ 秒/)
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
+  const box = await drawer.boundingBox()
+  expect(box?.x).toBeLessThan(20)
+  expect(box?.width).toBeLessThan(400)
+
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/2 秒|1 秒/, { timeout: 9_000 })
+  await drawer.getByTestId('d20-roll-contribute').click()
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
+  await expect(drawer).toHaveCount(0, { timeout: 30_000 })
+  await expect.poll(async () => {
+    const state = await getState<{
+      interrupts: Array<{ id: string; status: string; response?: { choiceReroll?: { selectionPolicy?: string } } }>
+    }>(request, 'combat-interrupts')
+    const settled = state.interrupts.find((entry) => entry.id === interrupt.id)
+    return `${settled?.status}:${settled?.response?.choiceReroll?.selectionPolicy ?? ''}`
+  }, { timeout: 30_000 }).toBe('done:highest')
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return (state.characters[0] as ResourceCharacter & { inspiration?: number }).inspiration
+  }).toBe(0)
+  await expect.poll(async () => {
+    const state = await getState<{ entries: Array<{ text?: string }> }>(request, 'combat-log')
+    return state.entries.some((entry) => entry.text?.includes('跨端攻击检定') && entry.text.includes('使用「激励」'))
+  }).toBe(true)
+
+  const charactersAfterUse = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+  await putState(request, 'characters', {
+    ...charactersAfterUse,
+    characters: [{ ...charactersAfterUse.characters[0], inspiration: 1 }],
+  })
+  const recoveryBase = createD20RollConfirmationInterrupt({
+    mapId, combatId: `${mapId}:combat`, rollId: `${mapId}:recovery-roll`,
+    label: '中断恢复豁免', targetName: '跨端测试法师', originalValue: 6,
+    rollerCharacterId: seeded.character.id,
+    eligibleModifiers: [{
+      characterId: seeded.character.id, featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      modifierKind: 'choice-reroll', sourceTokenId: seeded.actorToken.id, rerollScope: 'self-roll',
+      additionalDice: 1, selectionPolicy: 'highest',
+      resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }], decisionRequired: true,
+    }],
+    now: Date.now(),
+  })
+  const recoveryUse = createD20ChoiceRerollContribution({
+    interruptId: recoveryBase.id,
+    characterId: seeded.character.id,
+    characterName: seeded.character.name,
+    featureId: 'dnd5e-core-inspiration',
+    featureLabel: '激励',
+    decision: 'use',
+    now: Date.now(),
+  })
+  const recoveryInterrupt = {
+    ...recoveryBase,
+    status: 'rolling' as const,
+    contributions: [recoveryUse],
+    expiresAt: Date.now() + 10_000,
+    payload: {
+      ...recoveryBase.payload,
+      rollOptions: { contributionId: recoveryUse.id, values: [6, 17] },
+    },
+  }
+  await putState(request, 'combat-interrupts', {
+    mapId, interrupts: [recoveryInterrupt], revision: 10, updatedAt: Date.now(),
+  })
+  await expect.poll(async () => {
+    const state = await getState<{
+      interrupts: Array<{ id: string; status: string; response?: { choiceReroll?: { selectedValue?: number } } }>
+    }>(request, 'combat-interrupts')
+    const settled = state.interrupts.find((entry) => entry.id === recoveryInterrupt.id)
+    return `${settled?.status}:${settled?.response?.choiceReroll?.selectedValue ?? ''}`
+  }, { timeout: 30_000 }).toBe('done:17')
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return (state.characters[0] as ResourceCharacter & { inspiration?: number }).inspiration
+  }).toBe(0)
+
+  const charactersAfterRecovery = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+  await putState(request, 'characters', {
+    ...charactersAfterRecovery,
+    characters: [{ ...charactersAfterRecovery.characters[0], inspiration: 1 }],
+  })
+  const timeoutInterrupt = createD20RollConfirmationInterrupt({
+    mapId, combatId: `${mapId}:combat`, rollId: `${mapId}:timeout-roll`,
+    label: '超时攻击检定', targetName: '跨端测试食人魔', originalValue: 11,
+    rollerCharacterId: seeded.character.id,
+    eligibleModifiers: [{
+      characterId: seeded.character.id, featureId: 'dnd5e-core-inspiration', featureLabel: '激励',
+      modifierKind: 'choice-reroll', sourceTokenId: seeded.actorToken.id, rerollScope: 'self-roll',
+      additionalDice: 1, selectionPolicy: 'owner-chooses',
+      resourceCosts: [{ resourceKey: 'dnd5e-core-inspiration', amount: 1 }], decisionRequired: true,
+    }],
+    now: Date.now(),
+  })
+  await putState(request, 'combat-interrupts', {
+    mapId, interrupts: [timeoutInterrupt], revision: 20, updatedAt: Date.now(),
+  })
+  await expect(drawer).toBeVisible({ timeout: 20_000 })
+  await expect(drawer.getByTestId('d20-countdown')).toContainText(/10|9/)
+  await expect(drawer).toHaveCount(0, { timeout: 15_000 })
+  await expect.poll(async () => {
+    const state = await getState<{
+      interrupts: Array<{ id: string; status: string; rollbackReason?: string; response?: { finalValue?: number; choiceReroll?: unknown } }>
+    }>(request, 'combat-interrupts')
+    const settled = state.interrupts.find((entry) => entry.id === timeoutInterrupt.id)
+    if (settled?.status === 'rolled-back') return settled.rollbackReason === 'timeout'
+    return settled?.status === 'done' && settled.response?.finalValue === 11 && settled.response.choiceReroll == null
+  }, { timeout: 20_000 }).toBe(true)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return (state.characters[0] as ResourceCharacter & { inspiration?: number }).inspiration
+  }).toBe(1)
   await context.close()
 })

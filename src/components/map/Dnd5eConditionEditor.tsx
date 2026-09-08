@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Clock3, Link2, ShieldCheck, Tags, Trash2 } from 'lucide-react'
+import { Clock3, Eye, Link2, Plus, ShieldCheck, Tags, Trash2 } from 'lucide-react'
 import type { AbilityKey } from '../../lib/dnd'
 import {
   DND5E_STANDARD_CONDITION_IDS,
@@ -12,6 +12,9 @@ import {
 import {
   applyDnd5eActiveEffect,
   createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  dnd5eActiveConditionImmuneBySourceCreatureType,
+  dnd5eActiveConditionImmunities,
   dnd5eActiveEffectRemainingLabel,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
@@ -22,7 +25,15 @@ import {
   type Dnd5eActiveEffectInstance,
   type Dnd5eActiveEffectStackingPolicy,
 } from '../../rulesets/dnd5e/activeEffects'
+import {
+  dnd5eCustomTokenStatusMarkerId,
+  dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition,
+  type Dnd5eMonsterRuntimeStatusId,
+  type Dnd5eTokenStatusMarkerOption,
+} from '../../rulesets/dnd5e/tokenStatusMarkers'
 import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
+import { dnd5eTokenStatusMarkerStyle } from './dnd5eTokenStatusMarkerPresentation'
+import Dnd5eActiveEffectDetailsDialog from './Dnd5eActiveEffectDetailsDialog'
 
 const ABILITY_OPTIONS: readonly { value: AbilityKey; label: string }[] = [
   { value: 'str', label: '力量' },
@@ -35,6 +46,7 @@ const ABILITY_OPTIONS: readonly { value: AbilityKey; label: string }[] = [
 
 const BREAK_OPTIONS: readonly { value: Dnd5eActiveEffectBreakTrigger; label: string }[] = [
   { value: 'takes-damage', label: '受到伤害' },
+  { value: 'targeted-by-spell', label: '成为法术目标' },
   { value: 'targeted-by-attack', label: '成为攻击目标' },
   { value: 'hit-by-attack', label: '被攻击命中' },
   { value: 'makes-attack', label: '发动攻击' },
@@ -42,14 +54,15 @@ const BREAK_OPTIONS: readonly { value: Dnd5eActiveEffectBreakTrigger; label: str
   { value: 'moves', label: '发生移动' },
 ]
 
-function normalizedConditionLabels(conditions: readonly string[]): Array<{ key: string; label: string; glyph: string }> {
+function normalizedConditionLabels(conditions: readonly string[]): Array<{ key: string; label: string; glyph: string; icon?: string }> {
   const seen = new Set<string>()
   return conditions.flatMap((value) => {
     const standard = dnd5eStandardConditionId(value)
     const key = standard ? `standard:${standard}` : `extension:${value}`
     if (seen.has(key)) return []
     seen.add(key)
-    return [{ key, label: dnd5eConditionLabel(value), glyph: standard ? DND5E_CONDITION_MARKERS[standard].glyph : '•' }]
+    const marker = standard ? DND5E_CONDITION_MARKERS[standard] : undefined
+    return [{ key, label: dnd5eConditionLabel(value), glyph: marker?.glyph ?? '•', icon: marker?.icon }]
   })
 }
 
@@ -75,7 +88,9 @@ export function Dnd5eConditionTags({
             onClick={onClick ? () => onClick(condition.key.replace(/^standard:/, '')) : undefined}
             className="inline-flex items-center gap-1 rounded-full border border-violet-300/20 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-100 hover:border-violet-300/40"
           >
-            <span aria-hidden="true" className="text-violet-300">{condition.glyph}</span>
+            {condition.icon
+              ? <img src={condition.icon} alt="" aria-hidden="true" className="h-3.5 w-3.5" />
+              : <span aria-hidden="true" className="text-violet-300">{condition.glyph}</span>}
             {condition.label}
           </Tag>
         )
@@ -87,21 +102,31 @@ export function Dnd5eConditionTags({
 export interface Dnd5eConditionSourceOption {
   id: string
   label: string
+  creatureTypes?: readonly string[]
 }
 
 export interface Dnd5eRuntimeStatusOption {
-  id: string
+  id: Dnd5eMonsterRuntimeStatusId
   label: string
   description: string
   glyph: string
   active: boolean
 }
 
+export function dnd5eConditionButtonRemovesExisting(
+  selected: boolean,
+  stackingPolicy: Dnd5eActiveEffectStackingPolicy,
+): boolean {
+  return selected && stackingPolicy !== 'stack'
+}
+
 export default function Dnd5eConditionEditor({
   activeEffects,
   targetId = 'unknown-target',
+  targetName,
   sourceOptions = [],
   conditionImmunities = [],
+  tacticalStatusOptions = [],
   runtimeStatuses = [],
   onRuntimeStatusChange,
   onChange,
@@ -109,17 +134,30 @@ export default function Dnd5eConditionEditor({
   conditions: readonly string[]
   activeEffects?: readonly Dnd5eActiveEffectInstance[]
   targetId?: string
+  targetName?: string
   sourceOptions?: readonly Dnd5eConditionSourceOption[]
   conditionImmunities?: readonly string[]
+  tacticalStatusOptions?: readonly Dnd5eTokenStatusMarkerOption[]
   runtimeStatuses?: readonly Dnd5eRuntimeStatusOption[]
-  onRuntimeStatusChange?: (statusId: string, active: boolean) => void
+  onRuntimeStatusChange?: (statusId: Dnd5eMonsterRuntimeStatusId, active: boolean) => void
   onChange: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
 }) {
   const effects = useMemo(() => normalizeDnd5eActiveEffects(activeEffects), [activeEffects])
   const active = new Set(dnd5eActiveStandardConditions({ conditions: dnd5eConditionsFromActiveEffects(effects) }))
-  const immunities = new Set(conditionImmunities.flatMap((value) => {
+  const effectiveConditionImmunities = [
+    ...conditionImmunities,
+    ...dnd5eActiveConditionImmunities(effects),
+  ]
+  const immunities = new Set(effectiveConditionImmunities.flatMap((value) => {
     const condition = dnd5eStandardConditionId(value)
     return condition ? [condition] : []
+  }))
+  const availableTacticalStatuses = tacticalStatusOptions.filter((option) =>
+    option.kind === 'participant-grant' && option.applications.includes('active-effect'))
+  const activeTacticalStatusIds = new Set<string>(effects.flatMap((effect) => {
+    const statusId = dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.legacyCondition) ??
+      dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label)
+    return statusId ? [statusId] : []
   }))
   const [sourceActorId, setSourceActorId] = useState('')
   const [sourceLabel, setSourceLabel] = useState('DM 裁定')
@@ -133,7 +171,13 @@ export default function Dnd5eConditionEditor({
   const [breakOn, setBreakOn] = useState<Dnd5eActiveEffectBreakTrigger[]>([])
   const [stackingPolicy, setStackingPolicy] = useState<Dnd5eActiveEffectStackingPolicy>('refresh-duration')
   const [sourceError, setSourceError] = useState('')
+  const [customStatusName, setCustomStatusName] = useState('')
+  const [customStatusCategory, setCustomStatusCategory] = useState<'status' | 'disease' | 'curse'>('status')
+  const [customStatusMagical, setCustomStatusMagical] = useState(false)
+  const [customStatusError, setCustomStatusError] = useState('')
+  const [selectedEffectId, setSelectedEffectId] = useState<string>()
   const availableSources = sourceOptions.filter((source) => source.id !== targetId)
+  const selectedEffect = effects.find((effect) => effect.id === selectedEffectId)
 
   const commit = (next: readonly Dnd5eActiveEffectInstance[]) => {
     const list = [...next]
@@ -149,9 +193,60 @@ export default function Dnd5eConditionEditor({
     return { type: 'permanent' }
   }
 
-  const removeEffect = (effectId: string) => commit(removeDnd5eActiveEffectById({ effects, id: effectId }).effects)
+  const removeEffect = (effectId: string) => {
+    commit(removeDnd5eActiveEffectById({ effects, id: effectId }).effects)
+    if (selectedEffectId === effectId) setSelectedEffectId(undefined)
+  }
+
+  const addCustomStatus = () => {
+    const label = Array.from(customStatusName.trim())
+      .filter((character) => {
+        const codePoint = character.codePointAt(0) ?? 0
+        return codePoint >= 32 && codePoint !== 127
+      })
+      .join('')
+      .slice(0, 40)
+    if (!label) {
+      setCustomStatusError('请输入自定义状态名称。')
+      return
+    }
+    const standard = dnd5eStandardConditionId(label)
+    if (standard) {
+      setCustomStatusError(`“${dnd5eConditionLabel(standard)}”已有标准状态按钮，请直接选择标准状态。`)
+      return
+    }
+    const markerId = dnd5eCustomTokenStatusMarkerId(label)
+    const definitionId = `dm:custom-status:${markerId.slice('custom:'.length)}`
+    const incoming = createDnd5eMechanicalEffect({
+      id: `dm:${targetId}:custom-status:${markerId.slice('custom:'.length)}:${Date.now()}`,
+      definitionId,
+      label,
+      kind: 'mark',
+      tags: customStatusCategory === 'status' ? undefined : [customStatusCategory],
+      legacyCondition: label,
+      targetId,
+      source: {
+        kind: 'dm',
+        actorId: sourceActorId || undefined,
+        actorName: sourceOptions.find((entry) => entry.id === sourceActorId)?.label,
+        magical: customStatusMagical || undefined,
+        label: sourceLabel.trim() || 'DM 裁定',
+      },
+      duration: configuredDuration(),
+      repeatSave: repeatSave
+        ? { ability: saveAbility, dc: Math.max(1, Math.floor(saveDc)), timing: saveTiming, onSuccess: 'remove' }
+        : undefined,
+      breakOn,
+      stackingKey: definitionId,
+      stackingPolicy,
+    })
+    commit(applyDnd5eActiveEffect({ effects, incoming }).effects)
+    setCustomStatusName('')
+    setCustomStatusError('')
+  }
 
   return (
+    <>
     <section className="rounded-xl border border-violet-300/15 bg-violet-500/[0.06] p-3" data-testid="dnd5e-condition-editor">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-100">
@@ -194,7 +289,11 @@ export default function Dnd5eConditionEditor({
         {DND5E_STANDARD_CONDITION_IDS.map((condition) => {
           const selected = active.has(condition)
           const immune = immunities.has(condition)
-          const disabled = immune && !selected
+          const sourceOption = sourceOptions.find((source) => source.id === sourceActorId)
+          const sourceTypedImmune = sourceOption?.creatureTypes?.some((sourceCreatureType) =>
+            dnd5eActiveConditionImmuneBySourceCreatureType(effects, condition, sourceCreatureType)) === true
+          const removesExisting = dnd5eConditionButtonRemovesExisting(selected, stackingPolicy)
+          const disabled = (immune || sourceTypedImmune) && !removesExisting
           const marker = DND5E_CONDITION_MARKERS[condition]
           const label = DND5E_STANDARD_CONDITIONS[condition].label
           return (
@@ -204,9 +303,15 @@ export default function Dnd5eConditionEditor({
               data-testid={`dnd5e-condition-toggle-${condition}`}
               aria-pressed={selected}
               disabled={disabled}
-              title={disabled ? `${label}：目标免疫` : selected ? `移除全部${label}来源` : `按下方配置附加${label}`}
+              title={disabled
+                ? sourceTypedImmune
+                  ? `${label}：目标免疫所选来源生物施加的该状态`
+                  : `${label}：目标免疫`
+                : removesExisting
+                  ? `移除全部${label}来源`
+                  : `按下方配置附加${label}${selected ? '（允许叠加）' : ''}`}
               onClick={() => {
-                if (selected) {
+                if (dnd5eConditionButtonRemovesExisting(selected, stackingPolicy)) {
                   setSourceError('')
                   commit(removeDnd5eActiveEffectsByStandardCondition({ effects, condition }).effects)
                   return
@@ -233,7 +338,11 @@ export default function Dnd5eConditionEditor({
                   breakOn,
                   stackingPolicy,
                 })
-                const mutation = applyDnd5eActiveEffect({ effects, incoming, conditionImmunities })
+                const mutation = applyDnd5eActiveEffect({
+                  effects,
+                  incoming,
+                  conditionImmunities: effectiveConditionImmunities,
+                })
                 if (mutation.status !== 'rejected-immune') commit(mutation.effects)
               }}
               className={[
@@ -247,7 +356,9 @@ export default function Dnd5eConditionEditor({
                 className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
                 style={{ backgroundColor: marker.fill, color: marker.text, boxShadow: `inset 0 0 0 1px ${marker.stroke}` }}
               >
-                {marker.glyph}
+                {marker.icon
+                  ? <img src={marker.icon} alt="" className="h-3 w-3" />
+                  : marker.glyph}
               </span>
               <span className="truncate">{label}</span>
               {immune && <ShieldCheck className="ml-auto h-3 w-3 shrink-0 text-emerald-300" aria-label="免疫" />}
@@ -255,6 +366,133 @@ export default function Dnd5eConditionEditor({
           )
         })}
       </div>
+
+      <div className="mt-3 rounded-lg border border-violet-300/15 bg-violet-500/[0.04] p-2">
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-violet-200/80">自定义状态</p>
+        <div className="flex gap-1.5">
+          <input
+            data-testid="dnd5e-custom-status-name"
+            value={customStatusName}
+            maxLength={40}
+            placeholder="例如：被追踪、士气低落"
+            aria-label="自定义状态名称"
+            onChange={(event) => {
+              setCustomStatusName(event.target.value)
+              setCustomStatusError('')
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              addCustomStatus()
+            }}
+            className="min-w-0 flex-1 rounded border border-white/10 bg-void-950 px-2 py-1.5 text-[11px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-violet-300/45"
+          />
+          <button
+            type="button"
+            data-testid="dnd5e-add-custom-status"
+            disabled={!customStatusName.trim()}
+            onClick={addCustomStatus}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-violet-300/20 bg-violet-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-3.5 w-3.5" />添加
+          </button>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+          <label>语义类型
+            <select
+              data-testid="dnd5e-custom-status-category"
+              aria-label="自定义状态语义类型"
+              value={customStatusCategory}
+              onChange={(event) => setCustomStatusCategory(event.target.value as typeof customStatusCategory)}
+              className="mt-1 w-full rounded border border-white/10 bg-void-950 px-2 py-1 text-slate-200"
+            >
+              <option value="status">普通状态</option>
+              <option value="disease">疾病</option>
+              <option value="curse">诅咒</option>
+            </select>
+          </label>
+          <label className="flex items-end gap-2 rounded border border-white/8 bg-black/10 px-2 py-1.5">
+            <input
+              type="checkbox"
+              data-testid="dnd5e-custom-status-magical"
+              aria-label="魔法来源"
+              checked={customStatusMagical}
+              onChange={(event) => setCustomStatusMagical(event.target.checked)}
+            />
+            <span>魔法来源</span>
+          </label>
+        </div>
+        {customStatusError ? <p role="alert" className="mt-1 text-[10px] text-rose-300">{customStatusError}</p> : null}
+      </div>
+
+      {availableTacticalStatuses.length > 0 ? (
+        <div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-500/[0.04] p-2">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-sky-200/80">遭遇可触发状态</p>
+          <p className="mb-2 text-[10px] leading-4 text-slate-500">
+            来自本次遭遇怪物的结构化特质与动作。这里创建的是可追踪来源和持续时间的 ActiveEffect；具体数值规则仍由对应 Headless 特质负责。
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {availableTacticalStatuses.map((option) => {
+              const statusId = option.definition.id
+              const selected = activeTacticalStatusIds.has(statusId)
+              const style = dnd5eTokenStatusMarkerStyle(statusId)
+              return (
+                <button
+                  key={statusId}
+                  type="button"
+                  data-testid={`dnd5e-tactical-status-toggle-${statusId}`}
+                  aria-pressed={selected}
+                  title={`${selected ? '移除' : '触发'}${option.definition.label}；来源：${option.sourceLabels.join('、') || '当前遭遇'}`}
+                  onClick={() => {
+                    if (selected) {
+                      commit(effects.filter((effect) => {
+                        const projected = dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.legacyCondition) ??
+                          dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label)
+                        return projected !== statusId
+                      }))
+                      return
+                    }
+                    const incoming = createDnd5eMechanicalEffect({
+                      id: `dm:${targetId}:status:${statusId}:${Date.now()}`,
+                      definitionId: `dm:tactical-status:${statusId}`,
+                      label: option.definition.label,
+                      kind: 'mark',
+                      legacyCondition: statusId,
+                      targetId,
+                      source: {
+                        kind: 'dm',
+                        actorId: sourceActorId || option.sourceTokenIds[0] || undefined,
+                        actorName: sourceOptions.find((entry) => entry.id === sourceActorId)?.label ?? option.sourceLabels[0],
+                        label: sourceLabel.trim() || option.sourceLabels[0] || 'DM 裁定',
+                      },
+                      duration: configuredDuration(),
+                      breakOn,
+                      stackingPolicy,
+                    })
+                    commit(applyDnd5eActiveEffect({ effects, incoming }).effects)
+                  }}
+                  className={[
+                    'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors',
+                    selected
+                      ? 'border-sky-300/55 bg-sky-500/25 font-semibold text-sky-50'
+                      : 'border-white/8 bg-void-950/35 text-slate-400 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-slate-200',
+                  ].join(' ')}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                    style={{ backgroundColor: style.fill, color: style.text, boxShadow: `inset 0 0 0 1px ${style.stroke}` }}
+                  >
+                    {style.icon ? <img src={style.icon} alt="" className="h-3 w-3" /> : style.glyph}
+                  </span>
+                  {option.definition.label}
+                  {selected ? <Trash2 className="h-3 w-3 text-sky-200/70" aria-hidden="true" /> : null}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <details className="mt-3 rounded-lg border border-white/8 bg-void-950/30 p-2" open>
         <summary className="cursor-pointer text-[11px] font-semibold text-slate-300">新状态生命周期配置</summary>
@@ -333,7 +571,15 @@ export default function Dnd5eConditionEditor({
           <div className="flex items-center gap-1.5 text-slate-200">
             <span className="font-semibold">{effect.label}</span>
             <span className="text-slate-500">· {effect.source.actorName ?? effect.source.label ?? effect.source.rulesId ?? '未知来源'}</span>
-            <button type="button" onClick={() => removeEffect(effect.id)} className="ml-auto text-slate-500 hover:text-rose-300" title="移除该状态实例"><Trash2 className="h-3 w-3" /></button>
+            <button
+              type="button"
+              onClick={() => setSelectedEffectId(effect.id)}
+              className="ml-auto inline-flex items-center gap-1 text-slate-500 hover:text-violet-200"
+              title={`查看${effect.label}的全部结构化字段`}
+            >
+              <Eye className="h-3 w-3" />查看详情
+            </button>
+            <button type="button" onClick={() => removeEffect(effect.id)} className="text-slate-500 hover:text-rose-300" title="移除该状态实例"><Trash2 className="h-3 w-3" /></button>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-slate-500">
             <span className="inline-flex items-center gap-1"><Clock3 className="h-3 w-3" />{dnd5eActiveEffectRemainingLabel(effect)}</span>
@@ -344,5 +590,14 @@ export default function Dnd5eConditionEditor({
         </div>)}
       </div> : <p className="mt-2 text-[10px] text-slate-500">当前没有状态效果。</p>}
     </section>
+    {selectedEffect ? (
+      <Dnd5eActiveEffectDetailsDialog
+        targetName={targetName ?? targetId}
+        effects={[selectedEffect]}
+        onRemove={() => removeEffect(selectedEffect.id)}
+        onClose={() => setSelectedEffectId(undefined)}
+      />
+    ) : null}
+    </>
   )
 }

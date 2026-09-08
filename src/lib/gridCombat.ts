@@ -118,13 +118,12 @@ export function measureSnapsToGrid(map: BattleMap): boolean {
   return map.snapMonstersToGrid !== false
 }
 
-/** 拖放后是否吸附到格心 */
+/** 拖放后是否吸附到格心；地图吸附开关对玩家、敌人和 NPC 一致生效。 */
 export function shouldSnapTokenOnDrop(token: Token, map: BattleMap): boolean {
-  if (token.type === 'player') return true
-  if (token.type === 'enemy' || token.type === 'npc') {
+  if (token.type === 'player' || token.type === 'enemy' || token.type === 'npc') {
     return map.snapMonstersToGrid !== false
   }
-  return true
+  return map.snapMonstersToGrid !== false
 }
 
 export function resolveTokenDropPosition(
@@ -154,6 +153,12 @@ export function snapToCellCenter(x: number, y: number, map: BattleMap): { x: num
 }
 
 export function tokenFootprintCells(token: Pick<Token, 'creatureSize' | 'size'>): number {
+  // Creature sizes top out at a 4×4 Gargantuan footprint, but ordinary map
+  // objects can be larger. Creation cast with a 9th-level slot, for example,
+  // must preserve its full 25-foot (5×5 on the default grid) cube edge.
+  if (!token.creatureSize && Number.isFinite(token.size) && token.size > 4) {
+    return Math.max(1, Math.round(token.size))
+  }
   return creatureSizeToFootprintCells(token.creatureSize ?? sizeFromTokenSize(token.size))
 }
 

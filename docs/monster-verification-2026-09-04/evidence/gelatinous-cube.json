@@ -1,0 +1,122 @@
+{
+  "id": "srd-5.1:gelatinous-cube",
+  "slug": "gelatinous-cube",
+  "name": "胶质立方怪",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "pseudopod",
+      "name": "伪足",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "engulf",
+      "name": "吞没",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 108,
+      "slug": "gelatinous-cube",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:09:27.264Z",
+      "name": "胶质立方怪",
+      "actionId": "pseudopod",
+      "actionName": "伪足",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-gelatinous-cube-pseudopod-1788559767331",
+      "combatId": "verify-ui-gelatinous-cube-pseudopod-1788559767331:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "胶质立方怪 使用伪足攻击 验证目标：伪足 → 验证目标 11+4=15 命中；共造成 10 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:09 PM\n结算\n\n胶质立方怪 使用伪足攻击 验证目标：伪足 → 验证目标 11+4=15 命中；共造成 10 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：伪足｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 11；最终采用 11；调整值 +4。\n结果 · 15 vs AC 10：命中。\n伤害骰 · 伪足（基础伤害·强酸）｜3d6 骰面：2 + 5 + 3 = 10｜固定加值 +0｜小计 10\n胶质立方怪｜消耗动作\n验证目标｜受到 10 点伤害｜HP 320 → 310",
+      "playerLog": "胶质立方怪 使用伪足攻击 验证目标：伪足 → 验证目标 11+4=15 命中；共造成 10 点伤害。",
+      "afterHp": 310,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:09:52.812Z",
+      "evidenceFile": "ui-cases/monsters/108-gelatinous-cube.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "泥怪立方",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "透明",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

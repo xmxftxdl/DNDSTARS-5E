@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   BookOpenText,
+  Bookmark,
   Bot,
   Boxes,
   CheckCircle2,
   Download,
   FileText,
-  GitBranch,
   Hammer,
   History,
   KeyRound,
@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Mic2,
   PackageCheck,
+  PanelLeftOpen,
   PencilLine,
   RotateCcw,
   Sparkles,
@@ -25,12 +26,19 @@ import {
   WandSparkles,
   XCircle,
 } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
 import AiProviderSelector from '../components/dm/AiProviderSelector'
 import DmMapAnalysisPanel from '../components/dm/DmMapAnalysisPanel'
-import PdfCampaignAnalysisEditor from '../components/dm/PdfCampaignAnalysisEditor'
+import DmPrepWorkspaceShell, { type DmPrepWorkspaceSection } from '../components/dm/DmPrepWorkspaceShell'
+import DmSessionPrepDashboard from '../components/dm/DmSessionPrepDashboard'
+import DmSessionLifecyclePanel from '../components/dm/DmSessionLifecyclePanel'
+import DmStoryEventWorkspace from '../components/dm/DmStoryEventWorkspace'
+import { campaignPrepPlanDraft, createDefaultCampaignPrepPlan } from '../components/dm/dmSessionPrepPlanModel'
+import PdfCampaignAnalysisEditor, { type PdfCampaignAnalysisEditorTarget } from '../components/dm/PdfCampaignAnalysisEditor'
 import PdfCampaignKnowledgeBase from '../components/dm/PdfCampaignKnowledgeBase'
+import type { PdfSourceBookmarkTargetV1 } from '../components/dm/PdfSourceBookmarkWorkspace'
+import type { PdfMonsterCodexEntryV1 } from '../components/dm/pdfCampaignKnowledgeBaseModel'
 import PageHeader from '../components/PageHeader'
 import { DEFAULT_AI_PROVIDER_SELECTION } from '../lib/aiProvider'
 import { isAccountCampaignId } from '../lib/campaignNavigation'
@@ -44,8 +52,24 @@ import {
   type PublicAiJobV2,
 } from '../lib/aiJobApi'
 import { campaignBackupErrorMessage, downloadCampaignExport } from '../lib/campaignBackupApi'
-import { pdfFilesMatchAiJob, runCampaignPdfAnalysisJob } from '../lib/campaignAiJobRunner'
+import {
+  accountApiErrorMessage,
+  loadAccountCampaigns,
+  updateAccountCampaign,
+  type AccountCampaignPrepPlanDraftV1,
+  type AccountCampaignPrepPlanV1,
+} from '../lib/accountApi'
+import { getRoomSession } from '../lib/roomSession'
+import { useRoomCommunicationsStore } from '../store/roomCommunications'
+import {
+  canAutoResumeCampaignPdfAnalysisJob,
+  loadRecoverableCampaignPdfFiles,
+  pdfFilesMatchAiJob,
+  runCampaignPdfAnalysisJob,
+} from '../lib/campaignAiJobRunner'
 import { clearPdfAnalysisCaches } from '../lib/pdfAnalysisCache'
+import { pdfSourceRepository } from '../lib/pdfSourceRepository'
+import { localAiBridgeSnapshot, subscribeLocalAiBridge } from '../lib/localAiBridgeApi'
 import {
   estimatePdfAnalysisWorkload,
   inspectPdfAnalysisWorkload,
@@ -60,10 +84,12 @@ import {
   normalizeDmEditedPdfCampaignAnalysisV2,
   type PdfCampaignAnalysisArtifact,
 } from '../lib/pdfCampaignAnalysisMigration'
+import { stageDmWorkshopMonsterHandoff } from '../lib/dmWorkshopMonsterHandoff'
+import { requestPdfSplitView } from '../lib/pdfSplitViewController'
 
 type StageStatus = 'available' | 'partial' | 'planned'
 type Notice = { kind: 'success' | 'error'; text: string }
-type PendingAiJobAction = { mode: 'resume' | 'retry'; job: PublicAiJobV2 }
+type PendingAiJobAction = { mode: 'resume' | 'retry'; job: PublicAiJobV2; automatic?: boolean }
 
 const STATUS_LABELS: Record<StageStatus, string> = {
   available: '已可用',
@@ -132,15 +158,26 @@ function formatJobTime(value: number): string {
 
 export default function DmPrepAssistantPage() {
   const { campaignId = 'local' } = useParams()
+  const navigate = useNavigate()
   const campaignBasePath = `/campaign/${encodeURIComponent(campaignId)}`
+  const roomJournal = useRoomCommunicationsStore((state) => state.journal)
+  const loadRoomJournal = useRoomCommunicationsStore((state) => state.loadJournal)
+  const currentRoomSession = getRoomSession()
+  const journalConnected = currentRoomSession?.role === 'dm' && currentRoomSession.campaignId === campaignId
   const pdfInputRef = useRef<HTMLInputElement>(null)
   const [pdfFiles, setPdfFiles] = useState<File[]>([])
   const [pdfNotice, setPdfNotice] = useState<string | null>(null)
   const [pdfAnalysisBusy, setPdfAnalysisBusy] = useState(false)
   const pdfAnalysisRunRef = useRef(false)
+  const autoResumeAttemptedRef = useRef(new Set<string>())
+  const pdfSaveRunRef = useRef(false)
+  const pdfEditRevisionRef = useRef(0)
+  const sessionPrepEditRevisionRef = useRef(0)
+  const sessionPrepSaveRunRef = useRef(false)
   const [pdfAnalysisProgress, setPdfAnalysisProgress] = useState<PdfAnalysisProgressV1 | null>(null)
   const [pdfAnalysisResult, setPdfAnalysisResult] = useState<PdfCampaignAnalysisV2 | null>(null)
   const [pdfAnalysisEditorOpen, setPdfAnalysisEditorOpen] = useState(false)
+  const [pdfAnalysisEditorTarget, setPdfAnalysisEditorTarget] = useState<PdfCampaignAnalysisEditorTarget | undefined>()
   const [pdfAnalysisDirty, setPdfAnalysisDirty] = useState(false)
   const [pdfAnalysisDepth, setPdfAnalysisDepth] = useState<PdfAnalysisDepthV1>('quick')
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null)
@@ -149,11 +186,23 @@ export default function DmPrepAssistantPage() {
   const [aiJobs, setAiJobs] = useState<PublicAiJobV2[]>([])
   const [aiJobClock, setAiJobClock] = useState(() => Date.now())
   const [aiRunnerId] = useState(() => localAiRunnerId())
+  const [aiBridgeRevision, setAiBridgeRevision] = useState(0)
   const [aiJobActionBusy, setAiJobActionBusy] = useState<string | null>(null)
   const [aiJobDeleteConfirm, setAiJobDeleteConfirm] = useState<string | null>(null)
   const [aiCacheClearBusy, setAiCacheClearBusy] = useState(false)
   const [pendingAiJobAction, setPendingAiJobAction] = useState<PendingAiJobAction | null>(null)
   const [pdfSaveBusy, setPdfSaveBusy] = useState(false)
+  const [pdfSaveFailed, setPdfSaveFailed] = useState(false)
+  const [, setPdfLastSavedAt] = useState<number | null>(null)
+  const [sessionPrepPlan, setSessionPrepPlan] = useState<AccountCampaignPrepPlanV1 | null>(null)
+  const [sessionPrepDraft, setSessionPrepDraft] = useState<AccountCampaignPrepPlanDraftV1 | null>(null)
+  const [sessionPrepLoadedCampaignId, setSessionPrepLoadedCampaignId] = useState<string | null>(null)
+  const [sessionPrepDirty, setSessionPrepDirty] = useState(false)
+  const [sessionPrepSaveBusy, setSessionPrepSaveBusy] = useState(false)
+  const [sessionPrepSaveFailed, setSessionPrepSaveFailed] = useState(false)
+  const [, setSessionPrepLastSavedAt] = useState<number | null>(null)
+  const [workspaceSection, setWorkspaceSection] = useState<DmPrepWorkspaceSection>('session')
+  const [pdfSourceTarget, setPdfSourceTarget] = useState<PdfSourceBookmarkTargetV1 | undefined>()
   const [aiProviderSelection, setAiProviderSelection] = useState(() => ({ ...DEFAULT_AI_PROVIDER_SELECTION }))
   const [exportBusy, setExportBusy] = useState(false)
   const [exportNotice, setExportNotice] = useState<Notice | null>(null)
@@ -163,6 +212,26 @@ export default function DmPrepAssistantPage() {
     const jobs = await listCampaignAiJobs(campaignId, true)
     setAiJobs(jobs)
     return jobs
+  }, [campaignId])
+
+  useEffect(() => {
+    sessionPrepEditRevisionRef.current = 0
+    if (!isAccountCampaignId(campaignId)) return
+    let cancelled = false
+    const editRevisionAtLoad = sessionPrepEditRevisionRef.current
+    void loadAccountCampaigns().then((campaigns) => {
+      if (cancelled || sessionPrepEditRevisionRef.current !== editRevisionAtLoad) return
+      const campaign = campaigns.find((candidate) => candidate.campaignId === campaignId)
+      setSessionPrepLoadedCampaignId(campaignId)
+      setSessionPrepPlan(campaign?.prepPlan ?? null)
+      setSessionPrepDraft(campaign?.prepPlan ? campaignPrepPlanDraft(campaign.prepPlan) : null)
+      setSessionPrepDirty(false)
+      setSessionPrepSaveFailed(false)
+      setSessionPrepLastSavedAt(campaign?.prepPlan?.updatedAt ?? null)
+    }).catch((error) => {
+      if (!cancelled) setPdfNotice(accountApiErrorMessage(error))
+    })
+    return () => { cancelled = true }
   }, [campaignId])
 
   useEffect(() => {
@@ -179,6 +248,7 @@ export default function DmPrepAssistantPage() {
       setActiveAiJob(latest)
       setPdfAnalysisResult(materializePdfCampaignAnalysis(latest.artifact as PdfCampaignAnalysisArtifact))
       setPdfAnalysisDirty(false)
+      setPdfLastSavedAt(latest.updatedAt)
       setPdfNotice('已从战役档案恢复上一次保存的 PDF 分析草稿。')
     }).catch(() => {})
     return () => { cancelled = true }
@@ -188,6 +258,24 @@ export default function DmPrepAssistantPage() {
     const timer = window.setInterval(() => setAiJobClock(Date.now()), 30_000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => subscribeLocalAiBridge(() => setAiBridgeRevision((current) => current + 1)), [])
+
+  useEffect(() => {
+    if (pdfAnalysisBusy || pdfAnalysisRunRef.current) return
+    const hasRecoverableJob = aiJobs.some((candidate) => canAutoResumeCampaignPdfAnalysisJob(candidate, aiRunnerId, aiJobClock))
+    if (!hasRecoverableJob) return
+    const timer = window.setTimeout(() => {
+      setAiJobClock(Date.now())
+      void reloadAiJobs().catch(() => undefined)
+    }, 5_000)
+    return () => window.clearTimeout(timer)
+  }, [aiJobClock, aiJobs, aiRunnerId, pdfAnalysisBusy, reloadAiJobs])
+
+  useEffect(() => {
+    if (!journalConnected) return
+    void loadRoomJournal().catch(() => {})
+  }, [journalConnected, loadRoomJournal])
 
   useEffect(() => {
     if (pdfFiles.length === 0) return
@@ -223,39 +311,40 @@ export default function DmPrepAssistantPage() {
     setPdfAnalysisResult(null)
     setPdfAnalysisProgress(null)
     setPdfAnalysisEditorOpen(false)
+    setPdfAnalysisEditorTarget(undefined)
     setPdfAnalysisDirty(false)
     setActiveAiJob(null)
     setPdfAnalysisDepth('quick')
   }
 
-  const runPdfAnalysis = async () => {
-    if (pdfFiles.length === 0 || pdfAnalysisBusy || pdfAnalysisRunRef.current) return
+  const executePdfAnalysis = useCallback(async (input: {
+    files: readonly File[]
+    selection: AiProviderSelectionV1
+    depth: PdfAnalysisDepthV1
+    resumeJob?: PublicAiJobV2 | null
+    automaticRecovery?: boolean
+  }) => {
+    if (input.files.length === 0 || pdfAnalysisRunRef.current) return false
     if (!isAccountCampaignId(campaignId)) {
       setPdfNotice('当前房间没有绑定账号级战役。请返回战役列表，从对应战役进入或恢复房间后再分析 PDF。')
-      return
+      return false
     }
     pdfAnalysisRunRef.current = true
     setPdfAnalysisBusy(true)
     setPdfNotice(null)
     setPdfAnalysisResult(null)
-    let attemptedProviderId = aiProviderSelection.providerId
+    setPdfFiles([...input.files])
+    setAiProviderSelection(input.selection)
+    setPdfAnalysisDepth(input.depth)
+    const attemptedProviderId = input.selection.providerId
     try {
-      const templateJob = pendingAiJobAction?.job ?? null
-      const selection = pendingAiJobAction?.mode === 'resume' && templateJob
-        ? { ...aiProviderSelection, providerId: templateJob.providerId, modelId: templateJob.modelId }
-        : aiProviderSelection
-      attemptedProviderId = selection.providerId
-      const depth = templateJob?.input?.depth === 'quick' ? 'quick' : templateJob ? 'deep' : pdfAnalysisDepth
-      const resumeJob = pendingAiJobAction?.mode === 'resume' ? templateJob : null
-      if (resumeJob && !pdfFilesMatchAiJob(pdfFiles, resumeJob)) throw new Error('ai-job-source-mismatch')
-      setAiProviderSelection(selection)
-      setPdfAnalysisDepth(depth)
+      if (input.resumeJob && !pdfFilesMatchAiJob(input.files, input.resumeJob)) throw new Error('ai-job-source-mismatch')
       const completed = await runCampaignPdfAnalysisJob({
         campaignId,
-        files: pdfFiles,
-        selection,
-        depth,
-        resumeJob,
+        files: input.files,
+        selection: input.selection,
+        depth: input.depth,
+        resumeJob: input.resumeJob,
         onProgress: (progress) => {
           setPdfAnalysisProgress(progress)
         },
@@ -270,7 +359,9 @@ export default function DmPrepAssistantPage() {
         ? materializePdfCampaignAnalysis(persistedArtifact as PdfCampaignAnalysisArtifact)
         : completed.result)
       setPdfAnalysisDirty(false)
-      setPdfNotice(`分析完成并已保存到战役：${completed.result.documents.length} 个文档，共 ${completed.result.analyzedChunks} 个页段、${completed.result.analysisPasses ?? completed.result.analyzedChunks} 个分析阶段。结果只作为 DM 审阅草稿，不会自动写入 Headless。`)
+      setPdfLastSavedAt(completed.job.updatedAt)
+      setPdfNotice(`${input.automaticRecovery ? '刷新后的任务已自动续跑完成。' : '分析完成并已保存到战役。'}${completed.result.documents.length} 个文档，共 ${completed.result.analyzedChunks} 个页段、${completed.result.analysisPasses ?? completed.result.analyzedChunks} 个分析阶段。结果只作为 DM 审阅草稿，不会自动写入 Headless。`)
+      return true
     } catch (error) {
       setPdfAnalysisProgress(null)
       const errorCode = error instanceof Error ? error.message : String(error)
@@ -281,23 +372,90 @@ export default function DmPrepAssistantPage() {
           : /^(?:pdf-|provider-|local-|external-|bridge-)|structured-output/.test(errorCode)
           ? pdfAnalysisErrorMessage(error, attemptedProviderId)
           : aiJobApiErrorMessage(error))
+      return false
     } finally {
       pdfAnalysisRunRef.current = false
       setPdfAnalysisBusy(false)
       setPendingAiJobAction(null)
       void reloadAiJobs().catch(() => undefined)
     }
+  }, [campaignId, reloadAiJobs])
+
+  const runPdfAnalysis = async () => {
+    if (pdfFiles.length === 0 || pdfAnalysisBusy || pdfAnalysisRunRef.current) return
+    const templateJob = pendingAiJobAction?.job ?? null
+    const selection = pendingAiJobAction?.mode === 'resume' && templateJob
+      ? { ...aiProviderSelection, providerId: templateJob.providerId, modelId: templateJob.modelId }
+      : aiProviderSelection
+    const depth = templateJob?.input?.depth === 'quick' ? 'quick' : templateJob ? 'deep' : pdfAnalysisDepth
+    await executePdfAnalysis({
+      files: pdfFiles,
+      selection,
+      depth,
+      resumeJob: pendingAiJobAction?.mode === 'resume' ? templateJob : null,
+      automaticRecovery: pendingAiJobAction?.automatic,
+    })
   }
+
+  const resumeAiJobFromLocalSource = useCallback(async (
+    job: PublicAiJobV2,
+    automaticRecovery: boolean,
+  ): Promise<{ found: boolean; completed: boolean }> => {
+    const files = await loadRecoverableCampaignPdfFiles(campaignId, job).catch(() => null)
+    if (!files) return { found: false, completed: false }
+    const selection: AiProviderSelectionV1 = {
+      ...aiProviderSelection,
+      providerId: job.providerId,
+      modelId: job.modelId,
+    }
+    const depth = job.input?.depth === 'quick' ? 'quick' : 'deep'
+    setPendingAiJobAction({ mode: 'resume', job, automatic: automaticRecovery })
+    setActiveAiJob(job)
+    setPdfNotice(automaticRecovery
+      ? '已从此设备恢复原始 PDF，正在自动续跑刷新前的分析任务。'
+      : '已找到此设备保存的原始 PDF，正在从断点继续分析。')
+    const completed = await executePdfAnalysis({ files, selection, depth, resumeJob: job, automaticRecovery })
+    return { found: true, completed }
+  }, [aiProviderSelection, campaignId, executePdfAnalysis])
+
+  useEffect(() => {
+    if (pdfAnalysisBusy || pdfAnalysisRunRef.current || !isAccountCampaignId(campaignId)) return
+    const bridge = localAiBridgeSnapshot()
+    const job = aiJobs.find((candidate) => (
+      canAutoResumeCampaignPdfAnalysisJob(candidate, aiRunnerId, aiJobClock) &&
+      (!['local-bridge', 'external-account'].includes(candidate.providerId) || bridge.status === 'ready' || bridge.status === 'unknown') &&
+      !autoResumeAttemptedRef.current.has(candidate.jobId)
+    ))
+    if (!job) return
+    let cancelled = false
+    void resumeAiJobFromLocalSource(job, true).then(({ found, completed }) => {
+      if (cancelled) return
+      // Keep jobs without a local source marked as inspected so an older pre-fix
+      // task cannot starve a newer recoverable task on every refresh poll.
+      if (found && !completed) autoResumeAttemptedRef.current.delete(job.jobId)
+    }).catch(() => {
+      if (!cancelled) setPdfNotice('无法读取此设备保存的 PDF 断点；请重新选择原始 PDF 后接管任务。')
+    })
+    if (!cancelled) {
+      autoResumeAttemptedRef.current.add(job.jobId)
+    }
+    return () => { cancelled = true }
+  }, [aiBridgeRevision, aiJobClock, aiJobs, aiRunnerId, campaignId, pdfAnalysisBusy, resumeAiJobFromLocalSource])
 
   const restoreAiJob = (job: PublicAiJobV2) => {
     if (job.artifact?.kind !== 'pdf-campaign-analysis') return
     setActiveAiJob(job)
     setPdfAnalysisResult(materializePdfCampaignAnalysis(job.artifact as PdfCampaignAnalysisArtifact))
     setPdfAnalysisDirty(false)
+    setPdfLastSavedAt(job.updatedAt)
     setPdfNotice(`已恢复 ${formatJobTime(job.updatedAt)} 保存的分析草稿。`)
   }
 
-  const prepareAiJobAction = (job: PublicAiJobV2, mode: PendingAiJobAction['mode']) => {
+  const prepareAiJobAction = async (job: PublicAiJobV2, mode: PendingAiJobAction['mode']) => {
+    if (mode === 'resume') {
+      const recovered = await resumeAiJobFromLocalSource(job, false)
+      if (recovered.found) return
+    }
     setPendingAiJobAction({ job, mode })
     setAiProviderSelection((current) => ({ ...current, providerId: job.providerId, modelId: job.modelId }))
     setPdfAnalysisDepth(job.input?.depth === 'quick' ? 'quick' : 'deep')
@@ -312,6 +470,7 @@ export default function DmPrepAssistantPage() {
     setAiJobActionBusy(job.jobId)
     try {
       const cancelled = await cancelCampaignAiJob(campaignId, job.jobId, job.revision)
+      await pdfSourceRepository.deleteJobFiles(job.jobId).catch(() => undefined)
       setAiJobs((current) => current.map((candidate) => candidate.jobId === job.jobId ? cancelled : candidate))
       setPdfNotice('AI 任务已取消；已生成的其他分析草稿不受影响。')
     } catch (error) {
@@ -331,6 +490,7 @@ export default function DmPrepAssistantPage() {
     setAiJobActionBusy(job.jobId)
     try {
       await deleteCampaignAiJob(campaignId, job.jobId, job.revision)
+      await pdfSourceRepository.deleteJobFiles(job.jobId).catch(() => undefined)
       setAiJobs((current) => current.filter((candidate) => candidate.jobId !== job.jobId))
       setPendingAiJobAction((current) => current?.job.jobId === job.jobId ? null : current)
       if (activeAiJob?.jobId === job.jobId) {
@@ -338,6 +498,7 @@ export default function DmPrepAssistantPage() {
         setPdfAnalysisResult(null)
         setPdfAnalysisDirty(false)
         setPdfAnalysisEditorOpen(false)
+        setPdfAnalysisEditorTarget(undefined)
       }
       setAiJobDeleteConfirm(null)
       setPdfNotice('AI 任务记录已永久删除。原始 PDF 与其他任务不受影响。')
@@ -354,7 +515,8 @@ export default function DmPrepAssistantPage() {
     setAiCacheClearBusy(true)
     try {
       await clearPdfAnalysisCaches()
-      setPdfNotice('已清除本机分析断点；已完成分析所使用的原文证据缓存仍保留在此设备，服务器中的任务历史与草稿未删除。')
+      await pdfSourceRepository.clearJobFiles()
+      setPdfNotice('已清除本机分析断点和刷新恢复副本；已完成分析所使用的原文证据缓存仍保留在此设备，服务器中的任务历史与草稿未删除。')
     } catch {
       setPdfNotice('无法清除本机 AI 缓存，请检查浏览器是否允许使用 IndexedDB。')
     } finally {
@@ -373,9 +535,13 @@ export default function DmPrepAssistantPage() {
     URL.revokeObjectURL(url)
   }
 
-  const savePdfAnalysisDraft = async () => {
-    if (!pdfAnalysisResult || !activeAiJob || pdfSaveBusy) return
+  const persistPdfAnalysisDraft = useCallback(async (analysis: PdfCampaignAnalysisV2): Promise<boolean> => {
+    if (!activeAiJob || pdfSaveRunRef.current) return false
+    const normalized = normalizeDmEditedPdfCampaignAnalysisV2(analysis)
+    const editRevision = pdfEditRevisionRef.current
+    pdfSaveRunRef.current = true
     setPdfSaveBusy(true)
+    setPdfSaveFailed(false)
     try {
       const updated = await updateCampaignAiJobArtifact(
         campaignId,
@@ -384,21 +550,79 @@ export default function DmPrepAssistantPage() {
         {
           schemaVersion: 2,
           kind: 'pdf-campaign-analysis',
-          payload: pdfAnalysisResult,
+          payload: normalized,
         },
       )
       setActiveAiJob(updated)
-      setPdfAnalysisDirty(false)
+      setAiJobs((current) => [updated, ...current.filter((candidate) => candidate.jobId !== updated.jobId)])
+      if (editRevision === pdfEditRevisionRef.current) {
+        setPdfAnalysisResult(updated.artifact
+          ? materializePdfCampaignAnalysis(updated.artifact as PdfCampaignAnalysisArtifact)
+          : normalized)
+        setPdfAnalysisDirty(false)
+      }
+      setPdfLastSavedAt(Date.now())
       setPdfNotice('DM 修改已保存到账号战役，可在其他设备恢复。')
+      return true
     } catch (error) {
+      setPdfSaveFailed(true)
       setPdfNotice(aiJobApiErrorMessage(error))
+      return false
     } finally {
+      pdfSaveRunRef.current = false
       setPdfSaveBusy(false)
     }
+  }, [activeAiJob, campaignId])
+
+  const markPdfAnalysisDirty = useCallback(() => {
+    pdfEditRevisionRef.current += 1
+    setPdfSaveFailed(false)
+    setPdfAnalysisDirty(true)
+  }, [])
+
+  const openPdfAnalysisEditor = (target?: PdfCampaignAnalysisEditorTarget) => {
+    setPdfAnalysisEditorTarget(target)
+    setPdfAnalysisEditorOpen(true)
+  }
+
+  const closePdfAnalysisEditor = () => {
+    setPdfAnalysisEditorOpen(false)
+    setPdfAnalysisEditorTarget(undefined)
+  }
+
+  const openPdfMonsterInWorkshop = (entry: PdfMonsterCodexEntryV1) => {
+    const staged = stageDmWorkshopMonsterHandoff(campaignId, {
+      name: entry.name,
+      description: entry.description,
+      monsterStatBlockText: entry.monsterStatBlockText,
+      automation: entry.automation,
+      sourceLabels: [
+        ...entry.encounterNames,
+        ...entry.citations.map((citation) => `${citation.documentName} · 第 ${citation.page} 页`),
+      ],
+    })
+    if (!staged) {
+      setPdfNotice('无法把怪物资料交接给怪物工坊，请刷新页面后重试。')
+      return
+    }
+    navigate(`${campaignBasePath}/dm-tools/workshop`)
+  }
+
+  useEffect(() => {
+    if (!pdfAnalysisDirty || !pdfAnalysisResult || !activeAiJob || pdfAnalysisBusy || pdfSaveBusy || pdfSaveFailed) return
+    const timer = window.setTimeout(() => {
+      void persistPdfAnalysisDraft(pdfAnalysisResult)
+    }, 1_400)
+    return () => window.clearTimeout(timer)
+  }, [activeAiJob, pdfAnalysisBusy, pdfAnalysisDirty, pdfAnalysisResult, pdfSaveBusy, pdfSaveFailed, persistPdfAnalysisDraft])
+
+  const savePdfAnalysisDraft = async () => {
+    if (!pdfAnalysisResult) return
+    await persistPdfAnalysisDraft(pdfAnalysisResult)
   }
 
   const updatePdfPersonPortrait = (personName: string, portraitDataUrl: string) => {
-    setPdfAnalysisDirty(true)
+    markPdfAnalysisDirty()
     setPdfAnalysisResult((current) => current ? {
       ...current,
       people: current.people.map((person) => person.name === personName
@@ -420,12 +644,181 @@ export default function DmPrepAssistantPage() {
     }
   }
 
+  const persistSessionPrepPlan = useCallback(async (): Promise<boolean> => {
+    if (!sessionPrepDraft || sessionPrepLoadedCampaignId !== campaignId || !isAccountCampaignId(campaignId) || sessionPrepSaveRunRef.current) return false
+    const editRevision = sessionPrepEditRevisionRef.current
+    sessionPrepSaveRunRef.current = true
+    setSessionPrepSaveBusy(true)
+    setSessionPrepSaveFailed(false)
+    try {
+      const updated = await updateAccountCampaign(campaignId, {
+        prepPlan: sessionPrepDraft,
+        expectedPrepPlanRevision: sessionPrepPlan?.revision ?? 0,
+      })
+      if (!updated.prepPlan) throw new Error('campaign-prep-plan-missing')
+      setSessionPrepPlan(updated.prepPlan)
+      if (editRevision === sessionPrepEditRevisionRef.current) {
+        setSessionPrepDraft(campaignPrepPlanDraft(updated.prepPlan))
+        setSessionPrepDirty(false)
+      }
+      setSessionPrepLastSavedAt(updated.prepPlan.updatedAt)
+      return true
+    } catch (error) {
+      setSessionPrepSaveFailed(true)
+      setPdfNotice(accountApiErrorMessage(error))
+      return false
+    } finally {
+      sessionPrepSaveRunRef.current = false
+      setSessionPrepSaveBusy(false)
+    }
+  }, [campaignId, sessionPrepDraft, sessionPrepLoadedCampaignId, sessionPrepPlan])
+
+  const updateSessionPrepDraft = useCallback((update: AccountCampaignPrepPlanDraftV1 | ((current: AccountCampaignPrepPlanDraftV1) => AccountCampaignPrepPlanDraftV1)) => {
+    sessionPrepEditRevisionRef.current += 1
+    setSessionPrepLoadedCampaignId(campaignId)
+    if (sessionPrepLoadedCampaignId !== campaignId) setSessionPrepPlan(null)
+    setSessionPrepDraft((current) => {
+      const latest = sessionPrepLoadedCampaignId === campaignId && current
+        ? current
+        : createDefaultCampaignPrepPlan(pdfAnalysisResult)
+      return typeof update === 'function' ? update(latest) : update
+    })
+    setSessionPrepDirty(true)
+    setSessionPrepSaveFailed(false)
+  }, [campaignId, pdfAnalysisResult, sessionPrepLoadedCampaignId])
+
+  useEffect(() => {
+    if (sessionPrepLoadedCampaignId !== campaignId || !sessionPrepDirty || !sessionPrepDraft || sessionPrepSaveBusy || sessionPrepSaveFailed || !isAccountCampaignId(campaignId)) return
+    const timer = window.setTimeout(() => { void persistSessionPrepPlan() }, 1_200)
+    return () => window.clearTimeout(timer)
+  }, [campaignId, persistSessionPrepPlan, sessionPrepDirty, sessionPrepDraft, sessionPrepLoadedCampaignId, sessionPrepSaveBusy, sessionPrepSaveFailed])
+
+  const effectiveSessionPrepDraft = sessionPrepLoadedCampaignId === campaignId && sessionPrepDraft
+    ? sessionPrepDraft
+    : createDefaultCampaignPrepPlan(pdfAnalysisResult)
+
   return (
-    <div className="mx-auto max-w-7xl">
+    <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="备团助手"
         description="从模组 PDF 到可运行场景，再把语音、玩家行为和战斗记录沉淀为持续更新的战役档案。"
       />
+
+      <DmPrepWorkspaceShell
+        activeSection={workspaceSection}
+        onSectionChange={setWorkspaceSection}
+      >
+        {workspaceSection === 'session' && (
+          <>
+            <DmSessionLifecyclePanel
+              view="session"
+              analysis={pdfAnalysisResult}
+              plan={effectiveSessionPrepDraft}
+              journalEntries={journalConnected ? roomJournal.campaignEntries : []}
+              journalConnected={journalConnected}
+              communicationsHref={`${campaignBasePath}/communications`}
+              onPlanChange={updateSessionPrepDraft}
+            />
+            <DmSessionPrepDashboard
+              analysis={pdfAnalysisResult}
+              campaignBasePath={campaignBasePath}
+              plan={effectiveSessionPrepDraft}
+              onPlanChange={updateSessionPrepDraft}
+              onSave={() => { void persistSessionPrepPlan() }}
+              saving={sessionPrepSaveBusy}
+              persistenceEnabled={isAccountCampaignId(campaignId)}
+              onOpenReview={() => setWorkspaceSection('imports')}
+              onOpenStory={() => setWorkspaceSection('story')}
+            />
+          </>
+        )}
+
+        {(workspaceSection === 'story' || workspaceSection === 'world' || workspaceSection === 'resources') && (
+          pdfAnalysisResult ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/8 bg-black/15 px-4 py-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100">{workspaceSection === 'story' ? '剧情工作区' : workspaceSection === 'world' ? '世界资料库' : '战役资源库'}</h2>
+                  <p className="mt-1 text-[10px] text-slate-500">内容修改会自动保存到账号战役；原文证据仍可随时打开核对。</p>
+                </div>
+                <button type="button" onClick={() => openPdfAnalysisEditor()} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100"><PencilLine className="h-3.5 w-3.5" />编辑全部字段</button>
+              </div>
+              {workspaceSection === 'story' ? (
+                <DmStoryEventWorkspace
+                  analysis={pdfAnalysisResult}
+                  plan={effectiveSessionPrepDraft}
+                  onPlanChange={updateSessionPrepDraft}
+                  onOpenSourceWorkspace={(citation) => {
+                    setPdfSourceTarget({ documentId: citation.documentId, page: citation.page, quote: citation.quote })
+                    setWorkspaceSection('world')
+                  }}
+                />
+              ) : (
+                <PdfCampaignKnowledgeBase
+                  analysis={pdfAnalysisResult}
+                  section={workspaceSection}
+                  compactHeader
+                  mapHref={`${campaignBasePath}/maps`}
+                  onEdit={openPdfAnalysisEditor}
+                  onEditMonster={openPdfMonsterInWorkshop}
+                  onPortraitChange={updatePdfPersonPortrait}
+                  onTimelineEventsChange={(timelineEvents) => {
+                    setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                      ...current,
+                      timelineEvents: timelineEvents as unknown as PdfCampaignAnalysisV2['timelineEvents'],
+                    }) : current)
+                    markPdfAnalysisDirty()
+                  }}
+                  onTimelineEventsCommit={async (timelineEvents) => {
+                    if (!pdfAnalysisResult) return false
+                    const next = normalizeDmEditedPdfCampaignAnalysisV2({
+                      ...pdfAnalysisResult,
+                      timelineEvents: timelineEvents as unknown as PdfCampaignAnalysisV2['timelineEvents'],
+                    })
+                    setPdfAnalysisResult(next)
+                    markPdfAnalysisDirty()
+                    return persistPdfAnalysisDraft(next)
+                  }}
+                  onBookmarksChange={(bookmarks) => {
+                    setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                      ...current,
+                      bookmarks,
+                    }) : current)
+                    markPdfAnalysisDirty()
+                  }}
+                  sourceTarget={pdfSourceTarget}
+                />
+              )}
+              {workspaceSection === 'resources' && <DmMapAnalysisPanel aiProviderSelection={aiProviderSelection} />}
+            </div>
+          ) : (
+            <DmSessionPrepDashboard
+              analysis={null}
+              campaignBasePath={campaignBasePath}
+              plan={effectiveSessionPrepDraft}
+              onPlanChange={updateSessionPrepDraft}
+              onSave={() => { void persistSessionPrepPlan() }}
+              saving={sessionPrepSaveBusy}
+              persistenceEnabled={isAccountCampaignId(campaignId)}
+              onOpenReview={() => setWorkspaceSection('imports')}
+              onOpenStory={() => setWorkspaceSection('story')}
+            />
+          )
+        )}
+
+        {workspaceSection === 'recap' && (
+          <DmSessionLifecyclePanel
+            view="review"
+            analysis={pdfAnalysisResult}
+            plan={effectiveSessionPrepDraft}
+            journalEntries={journalConnected ? roomJournal.campaignEntries : []}
+            journalConnected={journalConnected}
+            communicationsHref={`${campaignBasePath}/communications`}
+            onPlanChange={updateSessionPrepDraft}
+          />
+        )}
+
+        {workspaceSection === 'imports' && <>
 
       <section className="mb-5 overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-500/[0.09] via-arcane-500/[0.035] to-transparent p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -464,13 +857,22 @@ export default function DmPrepAssistantPage() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => pdfInputRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"
-          >
-            <Upload className="h-4 w-4" />选择 PDF
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => requestPdfSplitView(pdfFiles[0] ? { file: pdfFiles[0] } : {})}
+              className="inline-flex items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/15"
+            >
+              <PanelLeftOpen className="h-4 w-4" />分屏阅读
+            </button>
+            <button
+              type="button"
+              onClick={() => pdfInputRef.current?.click()}
+              className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"
+            >
+              <Upload className="h-4 w-4" />选择 PDF
+            </button>
+          </div>
           <input
             ref={pdfInputRef}
             type="file"
@@ -495,7 +897,7 @@ export default function DmPrepAssistantPage() {
                 <History className="h-4 w-4 text-sky-300" />
                 <div>
                   <h3 className="text-xs font-semibold text-slate-200">战役 AI 任务 · {aiJobs.filter((job) => job.taskKind === 'campaign-analysis').length}</h3>
-                  <p className="mt-0.5 text-[10px] text-slate-600">任务状态保存在账号战役中；原始 PDF 不会上传，换设备或刷新后需重新选择原文件。</p>
+                  <p className="mt-0.5 text-[10px] text-slate-600">任务状态保存在账号战役中；原始 PDF 不会上传。当前设备刷新后会自动续跑，换设备时才需重新选择原文件。</p>
                 </div>
               </div>
               <div className="flex gap-1.5">
@@ -550,12 +952,12 @@ export default function DmPrepAssistantPage() {
                         </button>
                       )}
                       {resumable && (
-                        <button type="button" disabled={pdfAnalysisBusy} onClick={() => prepareAiJobAction(job, 'resume')} className="inline-flex items-center gap-1 rounded-lg border border-violet-400/20 px-2 py-1 text-[10px] text-violet-200 hover:bg-violet-500/10 disabled:cursor-not-allowed disabled:opacity-40">
-                          <RotateCcw className="h-3 w-3" />重新选择 PDF 并接管
+                        <button type="button" disabled={pdfAnalysisBusy} onClick={() => void prepareAiJobAction(job, 'resume')} className="inline-flex items-center gap-1 rounded-lg border border-violet-400/20 px-2 py-1 text-[10px] text-violet-200 hover:bg-violet-500/10 disabled:cursor-not-allowed disabled:opacity-40">
+                          <RotateCcw className="h-3 w-3" />恢复并接管
                         </button>
                       )}
                       {retryable && (
-                        <button type="button" onClick={() => prepareAiJobAction(job, 'retry')} className="inline-flex items-center gap-1 rounded-lg border border-sky-400/20 px-2 py-1 text-[10px] text-sky-200 hover:bg-sky-500/10">
+                        <button type="button" onClick={() => void prepareAiJobAction(job, 'retry')} className="inline-flex items-center gap-1 rounded-lg border border-sky-400/20 px-2 py-1 text-[10px] text-sky-200 hover:bg-sky-500/10">
                           <RotateCcw className="h-3 w-3" />重新分析
                         </button>
                       )}
@@ -659,6 +1061,9 @@ export default function DmPrepAssistantPage() {
                             : 'Astral Trace 云端任务队列'}
                       </span>
                     </div>
+                    <p className="mt-1.5 text-[10px] text-amber-200">
+                      预计 {pdfWorkload.estimatedCredits.toLocaleString()} 积分（约 ¥{pdfWorkload.estimatedCny.toFixed(2)}），执行前预留 {pdfWorkload.reservedCredits.toLocaleString()} 积分；完成后按实际 Token 结算并退还差额。
+                    </p>
                     <p className={`mt-1.5 text-[10px] leading-4 ${localWorkloadRecommendation === 'prefer-cloud'
                       ? 'text-amber-200'
                       : 'text-slate-500'}`}
@@ -717,7 +1122,7 @@ export default function DmPrepAssistantPage() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <ResultCard icon={GitBranch} title="人物关系图" description="人物、阵营、地点和事件之间的有向关系，并可追溯到原文页码。" count={pdfAnalysisResult?.relationships.length} />
+            <ResultCard icon={Bookmark} title="原文阅读与书签" description="在 APP 内逐页阅读原文，选中短引手动建书签，或确认 AI 识别的人物、地点、线索与事件书签。" count={pdfAnalysisResult ? (pdfAnalysisResult.bookmarks?.length ?? 0) : undefined} />
             <ResultCard icon={Users} title="人物形象与档案" description="立绘、外貌、性格、动机、秘密、说话方式与可能的剧情反应。" count={pdfAnalysisResult?.people.length} />
             <ResultCard icon={KeyRound} title="关键线索" description="线索来源、可发现地点、前置条件、失败补救和关联讲义。" count={pdfAnalysisResult?.clues.length} />
             <ResultCard icon={BookOpenText} title="章节与场景" description="按地点和事件拆成可编排场景，标记必要人物、怪物和地图。" count={pdfAnalysisResult?.scenes.length} />
@@ -743,7 +1148,7 @@ export default function DmPrepAssistantPage() {
                 {pdfAnalysisDirty && <p className="mt-1 text-[10px] text-amber-300">当前草稿包含尚未保存到战役的 DM 修改。</p>}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => setPdfAnalysisEditorOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
+                <button type="button" onClick={() => openPdfAnalysisEditor()} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
                   <PencilLine className="h-4 w-4" />审阅与编辑
                 </button>
                 <button
@@ -764,8 +1169,33 @@ export default function DmPrepAssistantPage() {
             <PdfCampaignKnowledgeBase
               analysis={pdfAnalysisResult}
               mapHref={`${campaignBasePath}/maps`}
-              onEdit={() => setPdfAnalysisEditorOpen(true)}
+              onEdit={openPdfAnalysisEditor}
+              onEditMonster={openPdfMonsterInWorkshop}
               onPortraitChange={updatePdfPersonPortrait}
+              onTimelineEventsChange={(timelineEvents) => {
+                setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                  ...current,
+                  timelineEvents: timelineEvents as unknown as PdfCampaignAnalysisV2['timelineEvents'],
+                }) : current)
+                markPdfAnalysisDirty()
+              }}
+              onTimelineEventsCommit={async (timelineEvents) => {
+                if (!pdfAnalysisResult) return false
+                const next = normalizeDmEditedPdfCampaignAnalysisV2({
+                  ...pdfAnalysisResult,
+                  timelineEvents: timelineEvents as unknown as PdfCampaignAnalysisV2['timelineEvents'],
+                })
+                setPdfAnalysisResult(next)
+                markPdfAnalysisDirty()
+                return persistPdfAnalysisDraft(next)
+              }}
+              onBookmarksChange={(bookmarks) => {
+                setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                  ...current,
+                  bookmarks,
+                }) : current)
+                markPdfAnalysisDirty()
+              }}
             />
 
             {pdfAnalysisResult.warnings.length > 0 && (
@@ -777,12 +1207,14 @@ export default function DmPrepAssistantPage() {
 
             {pdfAnalysisEditorOpen && (
               <PdfCampaignAnalysisEditor
+                key={`${pdfAnalysisEditorTarget?.tab ?? 'overview'}:${pdfAnalysisEditorTarget?.index ?? -1}`}
                 analysis={pdfAnalysisResult}
+                initialTarget={pdfAnalysisEditorTarget}
                 onChange={(next) => {
                   setPdfAnalysisResult(normalizeDmEditedPdfCampaignAnalysisV2(next as unknown as PdfCampaignAnalysisV2))
-                  setPdfAnalysisDirty(true)
+                  markPdfAnalysisDirty()
                 }}
-                onClose={() => setPdfAnalysisEditorOpen(false)}
+                onClose={closePdfAnalysisEditor}
                 onExport={downloadPdfAnalysis}
               />
             )}
@@ -896,6 +1328,21 @@ export default function DmPrepAssistantPage() {
           </p>
         )}
       </section>
+        </>}
+      </DmPrepWorkspaceShell>
+      {workspaceSection !== 'imports' && pdfAnalysisResult && pdfAnalysisEditorOpen && (
+        <PdfCampaignAnalysisEditor
+          key={`${pdfAnalysisEditorTarget?.tab ?? 'overview'}:${pdfAnalysisEditorTarget?.index ?? -1}`}
+          analysis={pdfAnalysisResult}
+          initialTarget={pdfAnalysisEditorTarget}
+          onChange={(next) => {
+            setPdfAnalysisResult(normalizeDmEditedPdfCampaignAnalysisV2(next as unknown as PdfCampaignAnalysisV2))
+            markPdfAnalysisDirty()
+          }}
+          onClose={closePdfAnalysisEditor}
+          onExport={downloadPdfAnalysis}
+        />
+      )}
     </div>
   )
 }

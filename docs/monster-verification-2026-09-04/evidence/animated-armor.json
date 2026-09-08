@@ -1,0 +1,128 @@
+{
+  "id": "srd-5.1:animated-armor",
+  "slug": "animated-armor",
+  "name": "活化护甲",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：反魔法易感特性原先被怪物自身 schema 拒绝；目录往返解析已通过。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "slam",
+      "name": "猛击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 24,
+      "slug": "animated-armor",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:15:02.905Z",
+      "name": "活化护甲",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-animated-armor-slam-1788556502959",
+      "combatId": "verify-ui-animated-armor-slam-1788556502959:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "活化护甲 使用猛击攻击 验证目标：猛击 → 验证目标 16+4=20 命中；共造成 8 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:15 PM\n结算\n\n活化护甲 使用猛击攻击 验证目标：猛击 → 验证目标 16+4=20 命中；共造成 8 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：猛击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 16；最终采用 16；调整值 +4。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 猛击（基础伤害·钝击）｜1d6 骰面：6 = 6｜固定加值 +2｜小计 8\n活化护甲｜消耗动作\n验证目标｜受到 8 点伤害｜HP 320 → 312",
+      "playerLog": "活化护甲 使用猛击攻击 验证目标：猛击 → 验证目标 16+4=20 命中；共造成 8 点伤害。",
+      "afterHp": 312,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:15:28.507Z",
+      "evidenceFile": "ui-cases/monsters/024-animated-armor.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "反魔法易感",
+      "automation": "dm-adjudication",
+      "rule": "antimagic-susceptibility",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.incapacitatedInsideAntimagic",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 4,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

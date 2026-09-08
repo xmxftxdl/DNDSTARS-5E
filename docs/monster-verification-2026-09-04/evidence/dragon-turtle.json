@@ -1,0 +1,272 @@
+{
+  "id": "srd-5.1:dragon-turtle",
+  "slug": "dragon-turtle",
+  "name": "龙龟",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].resistance.kind",
+        "attack.onHitEffects[].resistance.ability",
+        "attack.onHitEffects[].resistance.dc",
+        "attack.onHitEffects[].direction",
+        "attack.onHitEffects[].maximumDistanceFeet",
+        "attack.onHitEffects[].conditionOnFailedResistance",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "steam-breath",
+      "name": "蒸汽吐息",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.lengthFeet",
+        "rule.area.aimRangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-bite-and-tail",
+      "name": "多重攻击：啃咬 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 18,
+      "slug": "dragon-turtle",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:56:07.228Z",
+      "name": "龙龟",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "17",
+      "total": 334,
+      "mapId": "verify-ui-dragon-turtle-bite-1788566167275",
+      "combatId": "verify-ui-dragon-turtle-bite-1788566167275:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "龙龟 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+13=14 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:56 PM\n攻击\n\n龙龟 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+13=14 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 15 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 1；最终采用 1；调整值 +13。\n结果 · 14 vs AC 10：未命中。\n龙龟｜消耗动作",
+      "playerLog": "龙龟 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+13=14 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:56:27.786Z",
+      "evidenceFile": "ui-cases/monsters/018-dragon-turtle.json"
+    },
+    {
+      "index": 84,
+      "slug": "dragon-turtle",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:55:55.646Z",
+      "name": "龙龟",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-dragon-turtle-bite-1788558955719",
+      "combatId": "verify-ui-dragon-turtle-bite-1788558955719:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "龙龟 使用啃咬攻击 验证目标：啃咬 → 验证目标 12+13=25 命中；共造成 26 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:56 PM\n结算\n\n龙龟 使用啃咬攻击 验证目标：啃咬 → 验证目标 12+13=25 命中；共造成 26 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 15 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 12；最终采用 12；调整值 +13。\n结果 · 25 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜3d12 骰面：7 + 3 + 9 = 19｜固定加值 +7｜小计 26\n龙龟｜消耗动作\n验证目标｜受到 26 点伤害｜HP 320 → 294",
+      "playerLog": "龙龟 使用啃咬攻击 验证目标：啃咬 → 验证目标 12+13=25 命中；共造成 26 点伤害。",
+      "afterHp": 294,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:56:20.298Z",
+      "evidenceFile": "ui-cases/monsters/084-dragon-turtle.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 15,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -15,6 +15,7 @@ export type PdfAnalysisEntityCollection = 'people' | 'factions' | 'locations'
 export function emptyPdfPerson(): PdfPersonRecordV1 {
   return {
     name: '新人物',
+    aliases: [],
     description: '',
     role: '',
     appearance: '',
@@ -39,7 +40,28 @@ export function emptyPdfClue(): PdfClueRecordV1 {
 }
 
 export function emptyPdfScene(): PdfSceneRecordV1 {
-  return { name: '新场景', description: '', location: '', npcs: [], monsters: [], citations: [] }
+  return {
+    name: '新场景',
+    description: '',
+    location: '',
+    npcs: [],
+    monsters: [],
+    time: '时间未注明',
+    timelineOrder: 0,
+    timelineKind: 'current',
+    tags: [],
+    citations: [],
+  }
+}
+
+export function emptyPdfTimelineEvent(worldMinute?: number): PdfSceneRecordV1 {
+  return {
+    ...emptyPdfScene(),
+    name: '新时间节点',
+    ...(Number.isSafeInteger(worldMinute) && Number(worldMinute) >= 0
+      ? { gameTimeWorldMinute: Math.floor(Number(worldMinute)) }
+      : {}),
+  }
 }
 
 export function emptyPdfEncounter(): PdfEncounterRecordV1 {
@@ -47,7 +69,7 @@ export function emptyPdfEncounter(): PdfEncounterRecordV1 {
 }
 
 export function emptyPdfImportCandidate(): PdfImportCandidateV1 {
-  return { name: '新资源', description: '', kind: 'npc', automation: 'manual', citations: [] }
+  return { name: '新资源', description: '', kind: 'npc', automation: 'manual', monsterStatBlockText: '', citations: [] }
 }
 
 export function emptyPdfPrepTip(): PdfPrepTipV1 {
@@ -89,11 +111,19 @@ export function renamePdfAnalysisEntity(
       ...scene,
       npcs: replaceExact(scene.npcs, previousName, normalizedName),
     }))
+    next.timelineEvents = (analysis.timelineEvents ?? []).map((event) => ({
+      ...event,
+      npcs: replaceExact(event.npcs, previousName, normalizedName),
+    }))
   }
   if (collection === 'locations') {
     next.scenes = analysis.scenes.map((scene) => ({
       ...scene,
       location: scene.location === previousName ? normalizedName : scene.location,
+    }))
+    next.timelineEvents = (analysis.timelineEvents ?? []).map((event) => ({
+      ...event,
+      location: event.location === previousName ? normalizedName : event.location,
     }))
   }
   return next

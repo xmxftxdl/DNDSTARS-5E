@@ -68,6 +68,7 @@ export const COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS = Object.freeze([
   'shield',
   'lesser-restoration',
   'heal',
+  'harm',
   'mass-cure-wounds',
   'mass-heal',
   'mass-healing-word',
@@ -76,6 +77,9 @@ export const COMBAT_PRESENTATION_TARGET_EFFECT_SPELL_IDS = Object.freeze([
   'minor-illusion',
   'thaumaturgy',
   'shillelagh',
+  'expeditious-retreat',
+  'heat-metal',
+  'vampiric-touch',
 ])
 
 export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
@@ -92,9 +96,11 @@ export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
   'freezing-sphere': Object.freeze({ shape: 'circle', radiusFeet: 60 }),
   'meteor-swarm': Object.freeze({ shape: 'circle', radiusFeet: 40 }),
   'color-spray': Object.freeze({ shape: 'cone', lengthFeet: 15, widthFeet: 15 }),
+  'prismatic-spray': Object.freeze({ shape: 'cone', lengthFeet: 60, widthFeet: 60 }),
   'faerie-fire': Object.freeze({ shape: 'rect', widthFeet: 20, heightFeet: 20 }),
   sleep: Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   entangle: Object.freeze({ shape: 'rect', widthFeet: 20, heightFeet: 20 }),
+  web: Object.freeze({ shape: 'rect', widthFeet: 20, heightFeet: 20 }),
   grease: Object.freeze({ shape: 'rect', widthFeet: 10, heightFeet: 10 }),
   darkness: Object.freeze({ shape: 'circle', radiusFeet: 15 }),
   'flaming-sphere': Object.freeze({ shape: 'circle', radiusFeet: 5 }),
@@ -108,9 +114,19 @@ export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
   'call-lightning': Object.freeze({ shape: 'circle', radiusFeet: 60 }),
   'call-lightning-strike': Object.freeze({ shape: 'circle', radiusFeet: 5 }),
   'insect-plague': Object.freeze({ shape: 'circle', radiusFeet: 20 }),
+  'stinking-cloud': Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   cloudkill: Object.freeze({ shape: 'circle', radiusFeet: 20 }),
+  'fog-cloud': Object.freeze({ shape: 'circle', radiusFeet: 20 }),
+  silence: Object.freeze({ shape: 'circle', radiusFeet: 20 }),
+  'sleet-storm': Object.freeze({ shape: 'circle', radiusFeet: 40 }),
+  'wind-wall': Object.freeze({ shape: 'rect', widthFeet: 50, heightFeet: 5 }),
+  'wall-of-force': Object.freeze({ shape: 'rect', widthFeet: 100, heightFeet: 5 }),
+  'wall-of-stone': Object.freeze({ shape: 'rect', widthFeet: 100, heightFeet: 5 }),
+  'wall-of-ice': Object.freeze({ shape: 'rect', widthFeet: 100, heightFeet: 5 }),
+  'wall-of-thorns': Object.freeze({ shape: 'rect', widthFeet: 60, heightFeet: 5 }),
   'wall-of-fire': Object.freeze({ shape: 'rect', widthFeet: 60, heightFeet: 5 }),
   'blade-barrier': Object.freeze({ shape: 'rect', widthFeet: 100, heightFeet: 5 }),
+  sunbeam: Object.freeze({ shape: 'line', lengthFeet: 60, widthFeet: 5 }),
 })
 
 const PROJECTILE_SPELL_IDS = new Set(COMBAT_PRESENTATION_PROJECTILE_SPELL_IDS)

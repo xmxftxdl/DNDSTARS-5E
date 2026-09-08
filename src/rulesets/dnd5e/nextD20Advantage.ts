@@ -72,10 +72,11 @@ export function dnd5eNextD20AdvantageApplies(
 /** Death saves have no ability key, so they cannot use the normal save-mode helper. */
 export function dnd5eDeathSavingThrowMode(
   actor: Dnd5eNextD20AdvantageCarrier & { exhaustionLevel: number },
+  activeEffectAdvantage = false,
 ): D20RollMode {
   return resolveDnd5eRollMode({
     advantage: [{
-      active: dnd5eNextD20AdvantageApplies(actor, 'saving-throw'),
+      active: activeEffectAdvantage || dnd5eNextD20AdvantageApplies(actor, 'saving-throw'),
       reason: 'next-d20-advantage',
     }],
     disadvantage: [{

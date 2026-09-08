@@ -83,6 +83,33 @@ describe('combatInterruptQueue', () => {
     expect(isCombatInterruptExpired(findCombatInterrupt(rolling, 'i4')!, 151)).toBe(false)
   })
 
+  it('gives a public d20 reroll a recovery deadline and preserves recorded dice for settlement', () => {
+    const request = createCombatInterrupt({
+      id: 'reroll',
+      mapId: 'm1',
+      kind: 'roll-confirmation',
+      payload: { visibility: 'public' },
+      timeoutPolicy: 'rollback',
+      expiresAt: 150,
+      now: 100,
+    })
+    const rolling = markCombatInterruptRolling(
+      upsertCombatInterrupt(null, request, 100),
+      request.id,
+      undefined,
+      120,
+    )!
+    const active = findCombatInterrupt(rolling, request.id)!
+
+    expect(active).toMatchObject({ status: 'rolling', expiresAt: 10_120 })
+    expect(isCombatInterruptExpired(active, 10_119)).toBe(false)
+    expect(isCombatInterruptExpired(active, 10_120)).toBe(true)
+    expect(isCombatInterruptExpired({
+      ...active,
+      payload: { ...active.payload, rollOptions: { contributionId: 'choice', values: [7, 18] } },
+    }, 20_000)).toBe(false)
+  })
+
   it('locks a transaction until it is committed or rolled back', () => {
     const first = createCombatInterrupt({
       id: 'first', transactionId: 'action-1', mapId: 'm1', kind: 'shield-spell', payload: {}, now: 100,
@@ -98,12 +125,17 @@ describe('combatInterruptQueue', () => {
     expect(upsertCombatInterrupt(rolledBack, duplicate, 201).interrupts.map((entry) => entry.id)).toContain('duplicate')
   })
 
-  it('moves DM adjudication into an explicit non-expiring wait state', () => {
+  it('moves DM adjudication into an explicit non-expiring wait state that remains answerable', () => {
     const interrupt = createCombatInterrupt({
       id: 'dm', mapId: 'm1', kind: 'dm-adjudication', payload: {}, expiresAt: 150, now: 100,
     })
     const waiting = waitCombatInterruptForDm(upsertCombatInterrupt(null, interrupt), interrupt.id, 151)!
     expect(findCombatInterrupt(waiting, interrupt.id)).toMatchObject({ status: 'waiting-for-dm', expiresAt: undefined })
+    const answered = answerCombatInterrupt(waiting, interrupt.id, { decision: 'cancelled' }, 152)!
+    expect(findCombatInterrupt(answered, interrupt.id)).toMatchObject({
+      status: 'answered',
+      response: { decision: 'cancelled' },
+    })
   })
 
   it('collects player d20 replacement declarations without settling the roll', () => {

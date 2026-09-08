@@ -1,0 +1,130 @@
+{
+  "id": "srd-5.1:guard",
+  "slug": "guard",
+  "name": "守卫",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：长矛的近战／投掷与双手近战分支已拆成明确 Headless 动作。单手分支保留 5 尺触及、20/60 尺射程与 1d6 伤害；双手近战分支限定近战并使用 1d8，不再因选择字段而整体交给 DM。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "spear",
+      "name": "长矛",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangedDamage[].average",
+        "attack.rangedDamage[].count",
+        "attack.rangedDamage[].sides",
+        "attack.rangedDamage[].bonus",
+        "attack.rangedDamage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "spear-two-handed-melee",
+      "name": "长矛 (Two-Handed Melee)",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 155,
+      "slug": "guard",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:33:56.525Z",
+      "name": "守卫",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-guard-inspect-1788561236585",
+      "combatId": "verify-ui-guard-inspect-1788561236585:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-04T22:34:02.784Z",
+      "evidenceFile": "ui-cases/monsters/155-guard.json"
+    },
+    {
+      "slug": "guard",
+      "name": "守卫",
+      "actionId": "spear-two-handed-melee",
+      "actionName": "长矛 (Two-Handed Melee)",
+      "mapId": "monster-ui-catchup-guard-1788607367420",
+      "combatId": "monster-ui-catchup-guard-1788607367420:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "beforeHp": 320,
+      "startedAt": "2026-09-05T11:22:47.891Z",
+      "dmLog": "守卫 使用长矛 (Two-Handed Melee)攻击 验证目标：长矛 (Two-Handed Melee) → 验证目标 10+3=13 命中；共造成 2 点伤害。",
+      "playerLog": "守卫 使用长矛 (Two-Handed Melee)攻击 验证目标：长矛 (Two-Handed Melee) → 验证目标 10+3=13 命中；共造成 2 点伤害。",
+      "afterHp": 318,
+      "conditions": [],
+      "actionAvailable": 0,
+      "status": "passed",
+      "finishedAt": "2026-09-05T11:23:03.233Z",
+      "mode": "weapon-ui-catchup"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

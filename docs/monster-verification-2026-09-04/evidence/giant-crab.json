@@ -1,0 +1,102 @@
+{
+  "id": "srd-5.1:giant-crab",
+  "slug": "giant-crab",
+  "name": "巨蟹",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 118,
+      "slug": "giant-crab",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:14:39.404Z",
+      "name": "巨蟹",
+      "actionId": "claw",
+      "actionName": "爪击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-crab-claw-1788560079456",
+      "combatId": "verify-ui-giant-crab-claw-1788560079456:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨蟹 使用爪击攻击 验证目标：爪击 → 验证目标 20+3=23 命中；共造成 9 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:14 PM\n结算\n\n巨蟹 使用爪击攻击 验证目标：爪击 → 验证目标 20+3=23 命中；共造成 9 点伤害。\n\n查看 Headless 结算依据（11）\n怪物动作：爪击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 20；最终采用 20；调整值 +3。\n结果 · 23 vs AC 10：重击。\n伤害骰 · 爪击（基础伤害·钝击）｜2d6 骰面：6 + 2 = 8｜固定加值 +1｜小计 9\n巨蟹｜消耗动作\n验证目标｜受到 9 点伤害｜HP 320 → 311\n验证目标｜获得状态：擒抱｜来源：巨蟹\n验证目标｜效果生效：擒抱\n巨蟹｜monster:srd-5.1:giant-crab:claw:claw-grapple生效｜目标 验证目标",
+      "playerLog": "巨蟹 使用爪击攻击 验证目标：爪击 → 验证目标 20+3=23 命中；共造成 9 点伤害。",
+      "afterHp": 311,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:15:05.035Z",
+      "evidenceFile": "ui-cases/monsters/118-giant-crab.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

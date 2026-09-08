@@ -4,6 +4,7 @@ export const CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE = 8 * 60
 export const CAMPAIGN_TIME_TIMER_LIMIT = 256
 export const CAMPAIGN_TIME_ADVANCE_LIMIT = 512
 export const CAMPAIGN_TIME_MAX_ADVANCE_MINUTES = 365 * 24 * 60
+export const CAMPAIGN_TIME_MAX_TIMER_MINUTES = 366 * 24 * 60
 
 export type CampaignTimerKind = 'reminder' | 'concentration'
 export type CampaignTimerStatus = 'active' | 'expired' | 'dismissed' | 'cancelled'
@@ -48,6 +49,12 @@ export interface CampaignRestRecoveryReport {
   entries: CampaignRestRecoveryEntry[]
 }
 
+export interface CampaignRestFeatureD20Roll {
+  characterId: string
+  featureId: string
+  values: number[]
+}
+
 export interface CampaignTimeAdvance {
   id: string
   kind: 'advance' | 'short-rest' | 'long-rest'
@@ -60,6 +67,7 @@ export interface CampaignTimeAdvance {
   beneficiaryCharacterIds?: string[]
   ignoreLongRestCooldown?: boolean
   restRecoveryReports?: CampaignRestRecoveryReport[]
+  restFeatureD20Rolls?: CampaignRestFeatureD20Roll[]
   createdAt: number
 }
 
@@ -82,6 +90,7 @@ export type CampaignTimeMutation =
       beneficiaryCharacterIds?: string[]
       ignoreLongRestCooldown?: boolean
       restRecoveryReports?: CampaignRestRecoveryReport[]
+      restFeatureD20Rolls?: CampaignRestFeatureD20Roll[]
     }
   | {
       operation: 'set-time'
@@ -275,6 +284,19 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
   const restRecoveryReports = Array.isArray(value.restRecoveryReports)
     ? value.restRecoveryReports.map(normalizeRestRecoveryReport).filter((entry): entry is CampaignRestRecoveryReport => entry !== null).slice(0, 64)
     : undefined
+  const restFeatureD20Rolls = Array.isArray(value.restFeatureD20Rolls)
+    ? value.restFeatureD20Rolls.flatMap((entry) => {
+        if (!object(entry)) return []
+        const characterId = bounded(entry.characterId, 160)
+        const featureId = bounded(entry.featureId, 200)
+        const values = Array.isArray(entry.values)
+          ? entry.values.filter((roll) => integer(roll, 1, 20) != null).map(Number).slice(0, 8)
+          : []
+        return characterId && featureId && values.length > 0
+          ? [{ characterId, featureId, values }]
+          : []
+      }).slice(0, 128)
+    : undefined
   return {
     id,
     kind,
@@ -289,6 +311,7 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
       ? { ignoreLongRestCooldown: true }
       : {}),
     ...(restRecoveryReports ? { restRecoveryReports } : {}),
+    ...(restFeatureD20Rolls ? { restFeatureD20Rolls } : {}),
     createdAt,
   }
 }
@@ -347,6 +370,21 @@ export function validateSharedCampaignTime(value: unknown): boolean {
         entry.restRecoveryReports.some((report) => normalizeRestRecoveryReport(report) == null)
       ) return false
     }
+    if (entry.restFeatureD20Rolls != null) {
+      const rollKeys = Array.isArray(entry.restFeatureD20Rolls)
+        ? entry.restFeatureD20Rolls.map((roll) => object(roll)
+            ? `${bounded(roll.characterId, 160)}\u001f${bounded(roll.featureId, 200)}`
+            : '')
+        : []
+      if (
+        entry.kind !== 'long-rest' || !Array.isArray(entry.restFeatureD20Rolls) ||
+        entry.restFeatureD20Rolls.length > 128 || new Set(rollKeys).size !== rollKeys.length ||
+        entry.restFeatureD20Rolls.some((roll) => !object(roll) ||
+          !bounded(roll.characterId, 160) || !bounded(roll.featureId, 200) ||
+          !Array.isArray(roll.values) || roll.values.length < 1 || roll.values.length > 8 ||
+          roll.values.some((value) => integer(value, 1, 20) == null))
+      ) return false
+    }
     return entry.ignoreLongRestCooldown == null ||
       (entry.kind === 'long-rest' && entry.ignoreLongRestCooldown === true)
   })) return false
@@ -392,6 +430,36 @@ export function formatCampaignTime(clock: number | Pick<SharedCampaignTimeState,
   return `第 ${campaignDay(displayMinute)} 日 ${hour}:${minute}`
 }
 
+export interface CampaignDisplayTimeInput {
+  day?: number
+  date?: string
+  hour: number
+  minute: number
+}
+
+/** Converts a time written in the room's display calendar back to its authoritative world minute. */
+export function campaignWorldMinuteFromDisplay(
+  clock: Pick<SharedCampaignTimeState, 'displayMode' | 'displayMinuteOffset' | 'calendarEpochDate'>,
+  input: CampaignDisplayTimeInput,
+): number | undefined {
+  const hour = integer(input.hour, 0, 23)
+  const minute = integer(input.minute, 0, 59)
+  if (hour == null || minute == null) return undefined
+  let displayMinute: number | undefined
+  if (clock.displayMode === 'gregorian') {
+    const epochDay = clock.calendarEpochDate == null ? undefined : campaignGregorianDayNumber(clock.calendarEpochDate)
+    const targetDay = input.date == null ? undefined : campaignGregorianDayNumber(input.date)
+    if (epochDay == null || targetDay == null || targetDay < epochDay) return undefined
+    displayMinute = (targetDay - epochDay) * 1_440 + hour * 60 + minute
+  } else {
+    const day = integer(input.day, 1)
+    if (day == null) return undefined
+    displayMinute = (day - 1) * 1_440 + hour * 60 + minute
+  }
+  const worldMinute = displayMinute - clock.displayMinuteOffset
+  return Number.isSafeInteger(worldMinute) && worldMinute >= 0 ? worldMinute : undefined
+}
+
 export function formatCampaignDuration(minutes: number): string {
   const value = Math.max(0, Math.floor(minutes))
   const days = Math.floor(value / 1_440)
@@ -407,6 +475,62 @@ export function campaignDawnsCrossed(fromWorldMinute: number, toWorldMinute: num
   const from = Math.max(0, Math.floor(fromWorldMinute))
   const to = Math.max(from, Math.floor(toWorldMinute))
   return Math.max(0, Math.floor((to - 360) / 1_440) - Math.floor((from - 360) / 1_440))
+}
+
+/**
+ * Builds the exact authoritative snapshot for an ordinary forward time
+ * advance without publishing it. Long-running player actions use this to put
+ * the clock in the same atomic transaction as their character/map/ACK
+ * snapshots; publishing the clock first leaves an irreversible time advance
+ * behind when the action transaction later conflicts.
+ */
+export function advanceCampaignTimeSnapshot(input: {
+  state: SharedCampaignTimeState
+  minutes: number
+  reason: string
+  now: number
+  advanceId?: string
+}): SharedCampaignTimeState | undefined {
+  const base = normalizeSharedCampaignTime(input.state)
+  const minutes = Math.floor(input.minutes)
+  if (
+    !Number.isSafeInteger(input.minutes) ||
+    minutes < 1 ||
+    minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES
+  ) return undefined
+  const toWorldMinute = base.worldMinute + minutes
+  if (!Number.isSafeInteger(toWorldMinute)) return undefined
+  const expiredTimerIds: string[] = []
+  const timers = base.timers.map((timer) => {
+    if (timer.status !== 'active' || timer.expiresAtWorldMinute > toWorldMinute) return timer
+    expiredTimerIds.push(timer.id)
+    return {
+      ...timer,
+      status: 'expired' as const,
+      expiredAtWorldMinute: timer.expiresAtWorldMinute,
+    }
+  })
+  const advance: CampaignTimeAdvance = {
+    id: input.advanceId ?? (globalThis.crypto?.randomUUID
+      ? `campaign-time-${globalThis.crypto.randomUUID()}`
+      : `campaign-time-${input.now}-${Math.random().toString(36).slice(2)}`),
+    kind: 'advance',
+    fromWorldMinute: base.worldMinute,
+    toWorldMinute,
+    minutes,
+    reason: input.reason.slice(0, 160),
+    dawnsCrossed: campaignDawnsCrossed(base.worldMinute, toWorldMinute),
+    expiredTimerIds,
+    createdAt: input.now,
+  }
+  return {
+    ...base,
+    schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
+    worldMinute: toWorldMinute,
+    timers,
+    advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+    updatedAt: input.now,
+  }
 }
 
 export function canBenefitFromLongRest(lastLongRestWorldMinute: number | undefined, completionWorldMinute: number): boolean {

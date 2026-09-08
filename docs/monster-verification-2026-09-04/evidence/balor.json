@@ -1,0 +1,281 @@
+{
+  "id": "srd-5.1:balor",
+  "slug": "balor",
+  "name": "巴洛炎魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.criticalExtraDamage[].average",
+        "attack.criticalExtraDamage[].count",
+        "attack.criticalExtraDamage[].sides",
+        "attack.criticalExtraDamage[].bonus",
+        "attack.criticalExtraDamage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "whip",
+      "name": "长鞭",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].resistance.kind",
+        "attack.onHitEffects[].resistance.ability",
+        "attack.onHitEffects[].resistance.dc",
+        "attack.onHitEffects[].direction",
+        "attack.onHitEffects[].maximumDistanceFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "teleport",
+      "name": "传送",
+      "automation": "headless",
+      "rule": "teleport",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.target",
+        "rule.rangeFeet",
+        "rule.requiresVisibleDestination",
+        "rule.requiresUnoccupiedDestination"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 15,
+      "slug": "balor",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:54:42.115Z",
+      "name": "巴洛炎魔",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "19",
+      "total": 334,
+      "mapId": "verify-ui-balor-longsword-1788566082159",
+      "combatId": "verify-ui-balor-longsword-1788566082159:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巴洛炎魔 使用长剑攻击 验证目标：长剑 → 验证目标 4+14=18 命中；共造成 40 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:55 PM\n结算\n\n巴洛炎魔 使用长剑攻击 验证目标：长剑 → 验证目标 4+14=18 命中；共造成 40 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 4；最终采用 4；调整值 +14。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 长剑（基础伤害 1·挥砍）｜3d8 骰面：8 + 3 + 4 = 15｜固定加值 +8｜小计 23\n伤害骰 · 长剑（基础伤害 2·闪电）｜3d8 骰面：6 + 3 + 8 = 17｜固定加值 +0｜小计 17\n巴洛炎魔｜消耗动作\n验证目标｜受到 40 点伤害｜HP 320 → 280",
+      "playerLog": "巴洛炎魔 使用长剑攻击 验证目标：长剑 → 验证目标 4+14=18 命中；共造成 40 点伤害。",
+      "afterHp": 280,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:55:09.783Z",
+      "evidenceFile": "ui-cases/monsters/015-balor.json"
+    },
+    {
+      "index": 35,
+      "slug": "balor",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:20:41.594Z",
+      "name": "巴洛炎魔",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-balor-longsword-1788556841650",
+      "combatId": "verify-ui-balor-longsword-1788556841650:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巴洛炎魔 使用长剑攻击 验证目标：长剑 → 验证目标 7+14=21 命中；共造成 45 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:21 PM\n结算\n\n巴洛炎魔 使用长剑攻击 验证目标：长剑 → 验证目标 7+14=21 命中；共造成 45 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 7；最终采用 7；调整值 +14。\n结果 · 21 vs AC 10：命中。\n伤害骰 · 长剑（基础伤害 1·挥砍）｜3d8 骰面：4 + 8 + 2 = 14｜固定加值 +8｜小计 22\n伤害骰 · 长剑（基础伤害 2·闪电）｜3d8 骰面：7 + 8 + 8 = 23｜固定加值 +0｜小计 23\n巴洛炎魔｜消耗动作\n验证目标｜受到 45 点伤害｜HP 320 → 275",
+      "playerLog": "巴洛炎魔 使用长剑攻击 验证目标：长剑 → 验证目标 7+14=21 命中；共造成 45 点伤害。",
+      "afterHp": 275,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:21:10.221Z",
+      "evidenceFile": "ui-cases/monsters/035-balor.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "临死爆发",
+      "automation": "headless",
+      "rule": "death-area-saving-throw",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.ruleId",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "outside-radius",
+        "replay-rejected"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "火焰灵光",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 18,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

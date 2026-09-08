@@ -1,0 +1,56 @@
+# EAS builds this repository from the Git root because the mobile client
+# imports shared protocol and rules modules outside apps/player-mobile.
+# Keep shared source files, but do not upload desktop-only assets or local
+# development output to the iOS cloud builder.
+
+# Dependencies are installed by EAS.
+node_modules/
+**/node_modules/
+
+# Desktop VTT art is served by the game server and is not bundled into the
+# native player application. This directory is several gigabytes locally.
+public/
+
+# Generated build output.
+dist/
+dist-ssr/
+apps/player-mobile/dist/
+apps/player-mobile/dist-*/
+apps/player-mobile/web-build/
+apps/player-mobile/ios/
+apps/player-mobile/android/
+
+# Expo, test, cache and local runtime output.
+.expo/
+**/.expo/
+.cache/
+.codex/
+.codex-logs/
+.eslintcache
+playwright-report/
+test-results/
+artifacts/
+output/
+backups/
+tmp/
+local-content/
+.stars-shared/
+
+# Local configuration and credentials must never be uploaded.
+.env
+.env.*
+!.env*.example
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Logs and editor metadata.
+*.log
+*.out
+*.err
+.vscode/
+.idea/
+.DS_Store
+

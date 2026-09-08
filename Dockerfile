@@ -27,6 +27,7 @@ ARG STARS_BUILD_ID=docker
 ENV NODE_ENV=production \
     STARS_SECURITY_MODE=production \
     STARS_SHARED_ROOT=/data \
+    ASTRALTRACE_LOCAL_AI_CONFIG_DIR=/data/local-ai \
     STARS_ART_ASSET_ROOT=/art-assets \
     STARS_ART_ASSET_MANIFEST_PATH=/app/dist/runtime-assets/art-asset-pack.json \
     STARS_BUILD_ID=${STARS_BUILD_ID} \

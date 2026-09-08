@@ -44,6 +44,8 @@ export interface TurnEconomy {
   reactionAvailable: boolean
   objectInteractionAvailable?: boolean
   movementRemaining: number
+  /** Movement cost already spent this turn, independent of Dash grants. */
+  movementSpent?: number
 }
 
 export type TurnResource = 'action' | 'bonusAction' | 'reaction' | 'objectInteraction' | 'movement'

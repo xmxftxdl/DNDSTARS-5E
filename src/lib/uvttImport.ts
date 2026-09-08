@@ -58,6 +58,10 @@ export interface UvttImportResult {
   embeddedImageDataUrl?: string
 }
 
+export function isUvttMapFile(file: Pick<File, 'name' | 'type'>): boolean {
+  return /\.(?:uvtt|dd2vtt|df2vtt|json)$/i.test(file.name.trim()) || file.type === 'application/json'
+}
+
 function normalizeUvttEmbeddedImage(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
@@ -150,6 +154,7 @@ export function importUvttGeometry(value: unknown, options: UvttImportOptions): 
       lockState: 'unlocked',
       physicalState: 'intact',
       secret: false,
+      passageGapInches: 1,
       blocksVision: true,
       blocksMovement: true,
       blocksLineOfEffect: true,

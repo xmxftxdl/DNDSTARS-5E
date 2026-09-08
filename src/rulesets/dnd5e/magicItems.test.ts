@@ -7,6 +7,7 @@ import {
   DND5E_SRD_MAGIC_ITEM_CATALOG,
   DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES,
   DND5E_SRD_MAGIC_SHIELD_TEMPLATES,
+  DND5E_SRD_SPELL_SCROLL_TEMPLATES,
   DND5E_SRD_MAGIC_WEAPON_TEMPLATES,
 } from './magicItems'
 import { DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED } from './magicItemRulesZh.reviewed.generated'
@@ -96,6 +97,48 @@ describe('SRD 5.1 magic items', () => {
     expect(amulet?.rulesText).toContain('距你 15 尺内的每个生物和每件物件')
     expect(amulet?.rulesText).toContain('01–60')
     expect(amulet?.rulesText).toContain('61–100')
+  })
+
+  it('expands the abstract spell scroll into concrete, priced, usable spell scrolls', () => {
+    expect(DND5E_SRD_SPELL_SCROLL_TEMPLATES.length).toBeGreaterThan(100)
+    const fireball = DND5E_SRD_SPELL_SCROLL_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:spell-scroll:fireball',
+    )
+    expect(fireball).toMatchObject({
+      name: '火球术卷轴',
+      category: 'consumable',
+      icon: 'magic-scroll',
+      cost: { amount: 200, currency: 'gp' },
+      use: {
+        economy: 'action',
+        consumeQuantity: 1,
+        effect: {
+          kind: 'spell-cast', spellId: 'fireball', castAtLevel: 3,
+          spellSaveDc: 15, spellAttackBonus: 7, requiresComponents: false,
+          spellcastingClassIds: ['sorcerer', 'wizard'],
+        },
+      },
+      magicItem: { kind: 'scroll', rarity: 'uncommon', automation: 'headless' },
+    })
+    expect(fireball?.rulesText).toContain('具体效果')
+    expect(fireball?.rulesText).toContain('半径 20 尺球状区域')
+    expect(DND5E_SRD_SPELL_SCROLL_TEMPLATES).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'srd-5.1:spell-scroll:shield', icon: 'magic-scroll',
+        use: expect.objectContaining({ economy: 'none', effect: expect.objectContaining({ spellId: 'shield' }) }),
+      }),
+      expect.objectContaining({
+        id: 'srd-5.1:spell-scroll:counterspell', icon: 'magic-scroll',
+        use: expect.objectContaining({ economy: 'none', effect: expect.objectContaining({ spellId: 'counterspell' }) }),
+      }),
+      expect.objectContaining({
+        id: 'srd-5.1:spell-scroll:hellish-rebuke', icon: 'magic-scroll',
+        use: expect.objectContaining({ economy: 'none', effect: expect.objectContaining({ spellId: 'hellish-rebuke' }) }),
+      }),
+    ]))
+    expect(DND5E_SRD_ITEM_TEMPLATES.some(
+      (item) => item.id === 'srd-5.1:magic-item:spell-scroll',
+    )).toBe(false)
   })
 
   it('generates concrete +1 to +3 weapons with authoritative attack and damage bonuses', () => {

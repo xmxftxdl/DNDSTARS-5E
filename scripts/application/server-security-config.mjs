@@ -69,11 +69,19 @@ export function validateProductionSecurityConfig(env = process.env) {
 export function applySecurityHeaders(res, options = {}) {
   const env = options.env ?? process.env
   const production = options.production ?? productionSecurityEnabled(env)
+  const crossOriginResourcePolicy = options.crossOriginResourcePolicy === 'cross-origin'
+    ? 'cross-origin'
+    : options.crossOriginResourcePolicy === 'same-site'
+      ? 'same-site'
+      : 'same-origin'
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'no-referrer')
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()')
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
-  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+  // The static application shell stays same-origin. The shared API, however,
+  // is intentionally consumed by local player/spectator runtimes on other
+  // ports (for example 5274 -> 5273), so its caller opts into cross-origin.
+  res.setHeader('Cross-Origin-Resource-Policy', crossOriginResourcePolicy)
   // The 3D dice renderer is an application-owned iframe, so same-origin
   // framing must remain available while third-party framing stays blocked.
   res.setHeader('X-Frame-Options', 'SAMEORIGIN')

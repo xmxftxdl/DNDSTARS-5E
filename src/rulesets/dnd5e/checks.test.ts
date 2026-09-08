@@ -5,6 +5,7 @@ import {
   dnd5eAbilityCheckModifier,
   dnd5eSkillCheckModifier,
   dnd5eSkillCheckProficiencyRank,
+  dnd5eStoredCharacterInitiativeModifier,
   resolveDnd5eAbilityCheck,
   resolveDnd5eInitiative,
 } from './checks'
@@ -49,6 +50,17 @@ describe('SRD 5.1 ability checks', () => {
     expect(dnd5eSkillCheckModifier(bard, 'stealth')).toBe(5)
   })
 
+  it('includes a resurrection ordeal in ability, skill, and initiative modifiers', () => {
+    const affected = character({
+      dnd5eCombatState: { resurrectionPenalty: { value: -4, recoveryPerLongRest: 1 } },
+      skills: ['athletics'],
+    })
+    expect(dnd5eAbilityCheckModifier(affected, 'str')).toBe(-4)
+    expect(dnd5eSkillCheckModifier(affected, 'athletics')).toBe(-2)
+    expect(dnd5eStoredCharacterInitiativeModifier(affected)).toBe(-2)
+    expect(resolveDnd5eAbilityCheck({ character: affected, ability: 'str', rolls: [14] }).roll.total).toBe(10)
+  })
+
   it('grants Deception and Persuasion proficiency through Beguiling Influence', () => {
     const warlock = character({
       charClass: '邪术师', level: 2,
@@ -81,6 +93,25 @@ describe('SRD 5.1 ability checks', () => {
     const exhausted = { ...barbarian, exhaustionLevel: 1 }
     expect(dnd5eAbilityCheckMode(exhausted, { initiative: true })).toBe('normal')
     expect(resolveDnd5eInitiative({ character: exhausted, rolls: [9] }).roll.total).toBe(11)
+  })
+
+  it('applies active ability and skill check modes outside combat and cancels opposing sources', () => {
+    const perceptionDisadvantage = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:meld-into-stone', label: '融身入石', targetId: 'hero',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'meld-into-stone' },
+      modifiers: {
+        abilityCheckDisadvantages: ['wis'],
+        skillCheckDisadvantages: ['perception'],
+      },
+    })
+    const affected = character({ dnd5eCombatState: { activeEffects: [perceptionDisadvantage] } })
+
+    expect(dnd5eAbilityCheckMode(affected, { ability: 'wis', skill: 'perception' })).toBe('disadvantage')
+    expect(dnd5eAbilityCheckMode(affected, {
+      ability: 'wis',
+      skill: 'perception',
+      requestedMode: 'advantage',
+    })).toBe('normal')
   })
 
   it('uses the Strength score as the minimum total for Indomitable Might', () => {

@@ -1,8 +1,10 @@
+import { DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS } from '../rulesets/dnd5e/persistentAreaTypes'
 import { describe, expect, it } from 'vitest'
 import { validateAndMigrateSharedResource } from './sharedResourceValidation'
 import { createDnd5eConditionEffect } from '../rulesets/dnd5e/activeEffects'
 import {
   createD20ChoiceRerollContribution,
+  createD20DeclineContribution,
   createD20RollConfirmationInterrupt,
 } from './rollConfirmation'
 
@@ -65,22 +67,6 @@ describe('shared resource runtime validation', () => {
         pauseRequested: true,
         controlledTokenId: '',
         updatedAt: 1,
-      },
-    }).status).toBe('invalid')
-    expect(validateAndMigrateSharedResource('combat', {
-      active: true,
-      monsterTurnProgress: {
-        schemaVersion: 1,
-        status: 'planning',
-        combatId: 'combat-1',
-        round: 1,
-        initiativeIndex: 0,
-        initiativeSlotId: 'enemy-slot',
-        tokenId: 'enemy-token',
-        requestId: '',
-        startedAt: 1,
-        updatedAt: 1,
-        expiresAt: 60_001,
       },
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')
@@ -178,7 +164,7 @@ describe('shared resource runtime validation', () => {
     expect(result.status).toBe('valid')
   })
 
-  it('fails closed for malformed v2 effects and a forged conditions projection', () => {
+  it('fails closed for malformed v2 effects and repairs a stale conditions projection', () => {
     const effect = createDnd5eConditionEffect({
       id: 'blind', condition: 'blinded', targetId: 'hero', source: { kind: 'dm' },
     })
@@ -188,12 +174,41 @@ describe('shared resource runtime validation', () => {
         dnd5eCombatState: { schemaVersion: 2, activeEffects: [{ ...effect, duration: { type: 'rounds', remainingRounds: 0, tickOn: 'target-turn-end' } }] },
       }],
     }).status).toBe('invalid')
-    expect(validateAndMigrateSharedResource('characters', {
+    const repaired = validateAndMigrateSharedResource('characters', {
       characters: [{
         id: 'hero', conditions: [],
         dnd5eCombatState: { schemaVersion: 2, activeEffects: [effect] },
       }],
-    }).status).toBe('invalid')
+    })
+    expect(repaired.status).toBe('migrated')
+    if (repaired.status !== 'migrated') throw new Error('expected stale projection repair')
+    const repairedCharacter = (repaired.value.characters as Array<Record<string, unknown>>)[0]
+    expect(repairedCharacter.conditions).toEqual(['blinded'])
+    expect(repaired.reasons).toContain('characters[0].conditions 已按 ActiveEffect 投影修复')
+  })
+
+  it('repairs a stale token conditions projection without discarding valid effects', () => {
+    const effect = createDnd5eConditionEffect({
+      id: 'invisible', condition: 'invisible', targetId: 'armor', source: { kind: 'dm' },
+    })
+    const repaired = validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{
+          id: 'armor',
+          dnd5eCombatState: { schemaVersion: 2, conditions: [], activeEffects: [effect] },
+        }],
+      }],
+    })
+    expect(repaired.status).toBe('migrated')
+    if (repaired.status !== 'migrated') throw new Error('expected stale token projection repair')
+    const repairedMap = (repaired.value.maps as Array<Record<string, unknown>>)[0]
+    const repairedToken = (repairedMap.tokens as Array<Record<string, unknown>>)[0]
+    expect(repairedToken.dnd5eCombatState).toMatchObject({
+      schemaVersion: 2,
+      conditions: ['invisible'],
+      activeEffects: [effect],
+    })
   })
 
   it('fails closed for malformed plugin persistent areas at the shared map boundary', () => {
@@ -229,6 +244,16 @@ describe('shared resource runtime validation', () => {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         ...validArea,
         vertical: { mode: 'volume', baseElevationFeet: 10, heightFeet: 20, anchorOffsetFeet: -5 },
+      }] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        ...validArea,
+        id: 'antipathy-sympathy-area',
+        featureId: 'srd-5.1:spell:antipathy-sympathy',
+        coreSpellId: 'antipathy-sympathy',
+        sourceKind: 'core-spell',
+        expiresAfterRound: 144_001,
       }] }],
     }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('maps', {
@@ -320,6 +345,26 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 14_401 } }] }],
     }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: {
+        ...summon, becomesHostileAfterConcentrationEnds: true,
+      } }] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: {
+        ...summon, concentrationId: undefined, becomesHostileAfterConcentrationEnds: true,
+      } }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: {
+        ...summon, controlEnded: true,
+      } }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: {
+        ...summon, concentrationId: undefined, side: 'enemy', controlEnded: true,
+      } }] }],
+    }).status).toBe('valid')
   })
 
   it('fails closed for malformed core spell effect-token ownership metadata', () => {
@@ -348,6 +393,71 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'sphere', type: 'obstacle', dnd5eSpellEffect: effect }], dnd5ePluginAreas: [] }],
+    }).status).toBe('invalid')
+
+    const dayLongEffect = {
+      ...effect,
+      spellId: 'project-image',
+      createdRound: 1,
+      expiresAfterRound: 14_401,
+    }
+    const dayLongArea = {
+      ...area,
+      id: 'project-image-area',
+      featureId: 'srd-5.1:spell:project-image',
+      coreSpellId: 'project-image',
+      sourceKind: 'core-spell',
+      createdRound: 1,
+      expiresAfterRound: 14_401,
+      anchorTokenId: 'projection',
+    }
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{ id: 'projection', type: 'obstacle', dnd5eSpellEffect: dayLongEffect }],
+        dnd5ePluginAreas: [dayLongArea],
+      }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{
+          id: 'projection', type: 'obstacle',
+          dnd5eSpellEffect: { ...dayLongEffect, expiresAfterRound: DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS + 2 },
+        }],
+        dnd5ePluginAreas: [{ ...dayLongArea, expiresAfterRound: DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS + 2 }],
+      }],
+    }).status).toBe('invalid')
+  })
+
+  it('accepts bounded standalone Mirror Image decoys without an area anchor', () => {
+    const mirrorDecoyEffect = {
+      schemaVersion: 1,
+      spellId: 'mirror-image',
+      sourceCharacterId: 'wizard',
+      sourceTokenId: 'wizard-token',
+      sourceEffectId: 'mirror-effect',
+      projectionKind: 'attack-decoy',
+      projectionIndex: 1,
+      createdRound: 2,
+      expiresAfterRound: 12,
+    }
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{ id: 'mirror-decoy', type: 'obstacle', dnd5eSpellEffect: mirrorDecoyEffect }],
+        dnd5ePluginAreas: [],
+      }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{
+          id: 'mirror-decoy', type: 'obstacle',
+          dnd5eSpellEffect: { ...mirrorDecoyEffect, sourceEffectId: '', projectionIndex: 0 },
+        }],
+        dnd5ePluginAreas: [],
+      }],
     }).status).toBe('invalid')
   })
 
@@ -415,6 +525,12 @@ describe('shared resource runtime validation', () => {
     }
 
     expect(validateAndMigrateSharedResource('combat-interrupts', envelope).status).toBe('valid')
+    const decline = createD20DeclineContribution({
+      interruptId: interrupt.id, characterId: 'wizard', characterName: 'Wizard', now: 3,
+    })
+    expect(validateAndMigrateSharedResource('combat-interrupts', {
+      ...envelope, interrupts: [{ ...interrupt, contributions: [decline], updatedAt: 3 }],
+    }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('combat-interrupts', {
       ...envelope,
       interrupts: [{

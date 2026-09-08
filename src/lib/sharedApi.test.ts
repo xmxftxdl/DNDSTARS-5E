@@ -3,6 +3,7 @@ import {
   configuredApiBases,
   defaultSharedApiCandidates,
   loadSharedResource,
+  resetSharedResourceReadCacheForTests,
   saveSharedResourcesAtomically,
   saveSharedResourceWithResult,
   sharedEventApiCandidates,
@@ -26,8 +27,66 @@ function localStorageDouble() {
 // bases (file-backed, idempotent), while EVENTS go to a single canonical base (one SSE backlog).
 describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology)', () => {
   afterEach(() => {
+    vi.useRealTimers()
+    resetSharedResourceReadCacheForTests()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
+  })
+
+  it('coalesces concurrent reads for the same resource into one network request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ updatedAt: 1 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await Promise.all([
+      loadSharedResource('maps'),
+      loadSharedResource('maps'),
+      loadSharedResource('maps'),
+    ])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps cold resources in memory but continues to reload combat-hot resources', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ spells: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loadSharedResource('spellbook')
+    await loadSharedResource('spellbook')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await loadSharedResource('maps')
+    await loadSharedResource('maps')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('invalidates a cold read after an authoritative local write', async () => {
+    const resource = 'spellbook'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ spells: [], updatedAt: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 2 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '2' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ spells: [], updatedAt: 2 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '2' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await loadSharedResource(resource)
+    await saveSharedResourceWithResult(resource, { spells: [], updatedAt: 2 })
+    await loadSharedResource(resource)
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('configuredApiBases dedups, trims, and drops empty entries (order preserved)', () => {
@@ -87,6 +146,21 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     expect(sharedEventApiCandidates(true)).toEqual(['http://127.0.0.1:5273/api'])
   })
 
+  it('keeps alternate local QA ports on the same DM event authority', () => {
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'http://127.0.0.1:6474',
+        protocol: 'http:',
+        hostname: '127.0.0.1',
+        port: '6474',
+      },
+    })
+    vi.stubEnv('VITE_SHARED_API_BASES', '')
+
+    expect(sharedWriteApiCandidates(true)).toEqual(['http://127.0.0.1:6473/api'])
+    expect(sharedEventApiCandidates(true)).toEqual(['http://127.0.0.1:6473/api'])
+  })
+
   it('returns a saved ACK only after the authoritative PUT succeeds', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('', {
@@ -103,6 +177,26 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
       status: 'saved', revision: 1,
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts a stalled authoritative PUT so later shared writes cannot remain blocked forever', async () => {
+    vi.useFakeTimers()
+    const resource = `stalled-save-${Date.now()}`
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 404,
+        headers: { 'X-Stars-State-Revision': '0' },
+      }))
+      .mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+        }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const stalled = saveSharedResourceWithResult(resource, { updatedAt: 1 })
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    await expect(stalled).resolves.toEqual({ status: 'failed' })
   })
 
   it('reports a CAS conflict instead of treating the rejected snapshot as saved', async () => {

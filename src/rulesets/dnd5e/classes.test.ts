@@ -26,10 +26,12 @@ import {
   dnd5eThiefReflexesInitiative,
   dnd5eDruidWildShapeLimits,
   dnd5eEffectiveSavingThrowProficiencies,
+  dnd5eEffectiveWalkingSpeed,
   dnd5eSelfSavingThrowAuraBonus,
   dnd5eSpellSaveDc,
   dnd5eUnproficientAbilityCheckBonus,
 } from './classes'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 describe('SRD 5.1 class catalog', () => {
   it('contains exactly the twelve 2014 SRD classes with their only bundled subclasses', () => {
@@ -121,6 +123,19 @@ describe('SRD 5.1 class catalog', () => {
     expect(dnd5eWalkingSpeed({ charClass: '武僧', level: 18, speed: 30, equipment: { armor: { id: 'leather', name: '皮甲', slot: 'armor' } } })).toBe(30)
     expect(dnd5eWalkingSpeed({ charClass: '野蛮人', level: 5, speed: 30, exhaustionLevel: 2 })).toBe(20)
     expect(dnd5eWalkingSpeed({ charClass: '武僧', level: 18, speed: 30, exhaustionLevel: 5 })).toBe(0)
+  })
+
+  it('projects active speed multipliers into the character-map movement pool', () => {
+    const slow = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:slow', label: '缓慢术', targetId: 'druid',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'slow' },
+      duration: { type: 'concentration', sourceActorId: 'wizard', concentrationId: 'slow', remainingRounds: 10 },
+      modifiers: { speedMultiplier: 0.5 },
+    })
+    expect(dnd5eEffectiveWalkingSpeed({
+      charClass: '德鲁伊', level: 20, speed: 30,
+      dnd5eCombatState: { activeEffects: [slow] },
+    })).toBe(15)
   })
 
   it('exposes Thief movement, magic-item, and Reflexes rules to their owning systems', () => {

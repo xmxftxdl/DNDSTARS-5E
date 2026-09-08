@@ -1,0 +1,22 @@
+appId: com.astraltrace.vtt.player
+---
+- launchApp:
+    clearState: true
+- assertVisible: "星痕"
+- tapOn:
+    id: "auth-server-url"
+- eraseText
+- inputText: ${STARS_MOBILE_E2E_SERVER}
+- tapOn:
+    id: "auth-identifier"
+- inputText: ${STARS_MOBILE_E2E_USERNAME}
+- tapOn:
+    id: "auth-password"
+- inputText: ${STARS_MOBILE_E2E_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "auth-login"
+- extendedWaitUntil:
+    visible: "欢迎回来"
+    timeout: 20000
+- assertVisible: "加入房间"

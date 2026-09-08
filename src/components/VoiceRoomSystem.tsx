@@ -87,7 +87,9 @@ export default function VoiceRoomSystem() {
     <button
       type="button"
       aria-label={activeVoiceSlot ? `打开房间语音；当前 NPC：${activeVoiceSlot.npcName}` : '打开房间语音；可上下拖动'}
-      title={activeVoiceSlot ? `当前 NPC：${activeVoiceSlot.npcName}；拖动调整位置，点击打开语音` : '拖动调整位置；点击打开房间语音'}
+      title={activeVoiceSlot
+        ? `当前 NPC：${activeVoiceSlot.npcName}${activeVoiceSlot.performanceCue ? `\n表演提示：${activeVoiceSlot.performanceCue}` : ''}\n拖动调整位置，点击打开语音`
+        : '拖动调整位置；点击打开房间语音'}
       onClick={openVoicePage}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

@@ -4,6 +4,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   planPlayerActionAuthorityExecution,
   playerActionAuthorityRoute,
+  routePlayerSpellActionByAutomation,
 } from './playerActionAuthorityExecution'
 
 function token(): Token {
@@ -80,6 +81,7 @@ describe('player action authority execution plan', () => {
     expect(playerActionAuthorityRoute(action('dnd5e-item-use'))).toBe('dnd5e-item-use')
     expect(playerActionAuthorityRoute(action('dnd5e-ability-check'))).toBe('dnd5e-ability-check')
     expect(playerActionAuthorityRoute(action('dnd5e-spell-cast'))).toBe('dnd5e-spell-cast')
+    expect(playerActionAuthorityRoute(action('dnd5e-spell-whisper-reply'))).toBe('dnd5e-spell-whisper-reply')
     expect(playerActionAuthorityRoute(action('dnd5e-persistent-area-move'))).toBe('dnd5e-persistent-area-move')
     expect(playerActionAuthorityRoute(action('move-token'))).toBe('move-token')
   })
@@ -128,5 +130,42 @@ describe('player action authority execution plan', () => {
       recentActionKeys: new Map<string, number>(),
       now: 1000,
     })).toEqual({ status: 'accepted', route: 'move-token' })
+  })
+
+  it('downgrades a stale non-Headless spell request without changing its command identity', () => {
+    const submitted = {
+      ...action('dnd5e-spell-cast'),
+      targetTokenId: 'enemy',
+      targetTokenIds: ['enemy'],
+      dnd5eSpellCast: {
+        spellId: 'unsupported-spell',
+        castingClassId: 'wizard' as const,
+        slotLevel: 3,
+        targetTokenId: 'enemy',
+      },
+    }
+    expect(routePlayerSpellActionByAutomation(submitted, false)).toMatchObject({
+      id: submitted.id,
+      type: 'dnd5e-adjudicated-spell',
+      targetTokenId: undefined,
+      targetTokenIds: undefined,
+      dnd5eSpellCast: undefined,
+      dnd5eAdjudicatedSpell: {
+        spellId: 'unsupported-spell',
+        castingClassId: 'wizard',
+        slotLevel: 3,
+      },
+    })
+    expect(routePlayerSpellActionByAutomation(submitted, true)).toBe(submitted)
+    expect(routePlayerSpellActionByAutomation(submitted, true, true)).toMatchObject({
+      id: submitted.id,
+      type: 'dnd5e-adjudicated-spell',
+      dnd5eAdjudicatedSpell: {
+        spellId: 'unsupported-spell',
+        castingClassId: 'wizard',
+        slotLevel: 3,
+        narrativeOnly: true,
+      },
+    })
   })
 })

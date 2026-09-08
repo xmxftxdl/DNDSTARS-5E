@@ -1,0 +1,203 @@
+{
+  "id": "srd-5.1:chain-devil",
+  "slug": "chain-devil",
+  "name": "锁链魔",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：活化锁链会建立四个独立物体生物，各自拥有 AC、HP、抗性、免疫、擒抱和动作抑制，并动态扩展多重攻击；当前召唤与关系模型不能一次完整承载这些字段。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "chain",
+      "name": "锁链",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "animate-chains",
+      "name": "活化锁链",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "unnerving-mask",
+      "name": "扰心面具",
+      "automation": "headless",
+      "rule": "turn-start-saving-throw-reaction",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.duration",
+        "rule.magical",
+        "rule.requiresMutualVisualSight"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "Chain Devil Unnerving Mask Headless uses an inclusive 30-foot trigger boundary at 30 feet",
+        "Chain Devil Unnerving Mask Headless uses an inclusive 30-foot trigger boundary at 31 feet",
+        "Chain Devil Unnerving Mask Headless requires mutual line of sight when 'neither direction is blocked'",
+        "Chain Devil Unnerving Mask Headless requires mutual line of sight when 'the Chain Devil cannot see the target'",
+        "Chain Devil Unnerving Mask Headless requires mutual line of sight when 'the target cannot see the Chain Devil'",
+        "Chain Devil Unnerving Mask Headless requires mutual line of sight when 'both directions are blocked'",
+        "Chain Devil Unnerving Mask Headless spends the Chain Devil reaction even when the target saves",
+        "Chain Devil Unnerving Mask Headless frightens on a failed save only until the target turn ends",
+        "Chain Devil Unnerving Mask Headless does not offer the reaction against a frightened-immune target"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 60,
+      "slug": "chain-devil",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:36:57.632Z",
+      "name": "锁链魔",
+      "actionId": "chain",
+      "actionName": "锁链",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-chain-devil-chain-1788557817682",
+      "combatId": "verify-ui-chain-devil-chain-1788557817682:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "锁链魔 使用锁链攻击 验证目标：锁链 → 验证目标 10+8=18 命中；共造成 15 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:37 PM\n结算\n\n锁链魔 使用锁链攻击 验证目标：锁链 → 验证目标 10+8=18 命中；共造成 15 点伤害。\n\n查看 Headless 结算依据（13）\n怪物动作：锁链｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +8。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 锁链（基础伤害·挥砍）｜2d6 骰面：5 + 6 = 11｜固定加值 +4｜小计 15\n锁链魔｜消耗动作\n验证目标｜受到 15 点伤害｜HP 320 → 305\n验证目标｜获得状态：擒抱｜来源：锁链魔\n验证目标｜效果生效：擒抱\n锁链魔｜monster:srd-5.1:chain-devil:chain:chain-grapple生效｜目标 验证目标\n验证目标｜获得状态：束缚｜来源：锁链魔\n验证目标｜效果生效：束缚",
+      "playerLog": "锁链魔 使用锁链攻击 验证目标：锁链 → 验证目标 10+8=18 命中；共造成 15 点伤害。",
+      "afterHp": 305,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled",
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:37:40.387Z",
+      "evidenceFile": "ui-cases/monsters/060-chain-devil.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "魔鬼视界",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 15,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

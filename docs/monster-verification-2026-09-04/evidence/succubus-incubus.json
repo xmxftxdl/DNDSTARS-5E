@@ -1,0 +1,208 @@
+{
+  "id": "srd-5.1:succubus-incubus",
+  "slug": "succubus-incubus",
+  "name": "魅魔／梦魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：以太化现在通过与幽灵相同的自身位面切换事务自动结算，并保留其“魔法”来源字段。怪物控制栏提供无目标执行按钮，进入／返回都会消耗一次动作并同步地图状态。",
+    "已修复：吸命之吻现在验证 5 尺距离，以及“被同一来源魅惑或由 DM 明确确认自愿”的目标资格；随后自动完成 DC 15 体质豁免、5d10+5 心灵伤害、成功减半、按实际承受伤害降低生命上限、长休恢复记录，以及生命上限降至 0 时立即死亡。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw-fiend-form-only",
+      "name": "爪击（仅邪魔形态）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "charm",
+      "name": "魅惑",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiredTargetCreatureTypes[]",
+        "rule.durationRounds",
+        "rule.repeatSaveOnDamage.mode",
+        "rule.repeatSaveOnDamage.sourceFilter",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind",
+        "rule.sourceTargetLimit.maximum",
+        "rule.sourceTargetLimit.replaceOldest"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "wrong-target-type"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "draining-kiss",
+      "name": "吸能之吻",
+      "automation": "headless",
+      "rule": "saving-throw-damage-and-max-hp-reduction",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.requiredCondition",
+        "rule.requireSameSource",
+        "rule.allowWillingTarget",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave",
+        "rule.maximumHitPointReduction.basis",
+        "rule.maximumHitPointReduction.recovery",
+        "rule.maximumHitPointReduction.deathAtZero"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "structured monster Teleport and Invisibility settles Draining Kiss damage, half damage, maximum-HP loss, and target eligibility",
+        "structured monster Teleport and Invisibility kills when Draining Kiss reduces maximum HP to zero"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "etherealness",
+      "name": "以太化",
+      "automation": "headless",
+      "rule": "toggle-planar-phase",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.target",
+        "rule.plane",
+        "rule.magical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "structured monster Teleport and Invisibility publishes Ghost and Succubus/Incubus Etherealness as validated self toggles",
+        "structured monster Teleport and Invisibility toggles Etherealness atomically and blocks cross-plane attacks",
+        "structured monster Teleport and Invisibility prepares a no-target Etherealness map transaction for the manual UI route"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 124,
+      "slug": "succubus-incubus",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:33:56.146Z",
+      "name": "魅魔／梦魔",
+      "actionId": "claw-fiend-form-only",
+      "actionName": "爪击（仅邪魔形态）",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "4",
+      "total": 334,
+      "mapId": "verify-ui-succubus-incubus-claw-fiend-form-only-1788568436199",
+      "combatId": "verify-ui-succubus-incubus-claw-fiend-form-only-1788568436199:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "魅魔／梦魔 使用爪击（仅邪魔形态）攻击 验证目标：爪击（仅邪魔形态） → 验证目标 5+5=10 命中；共造成 8 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:34 PM\n结算\n\n魅魔／梦魔 使用爪击（仅邪魔形态）攻击 验证目标：爪击（仅邪魔形态） → 验证目标 5+5=10 命中；共造成 8 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：爪击（仅邪魔形态）｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 5；最终采用 5；调整值 +5。\n结果 · 10 vs AC 10：命中。\n伤害骰 · 爪击（仅邪魔形态）（基础伤害·挥砍）｜1d6 骰面：5 = 5｜固定加值 +3｜小计 8\n魅魔／梦魔｜消耗动作\n验证目标｜受到 8 点伤害｜HP 320 → 312",
+      "playerLog": "魅魔／梦魔 使用爪击（仅邪魔形态）攻击 验证目标：爪击（仅邪魔形态） → 验证目标 5+5=10 命中；共造成 8 点伤害。",
+      "afterHp": 312,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:34:20.689Z",
+      "evidenceFile": "ui-cases/monsters/124-succubus-incubus.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "心灵联结",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 14,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

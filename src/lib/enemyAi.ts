@@ -1,5 +1,6 @@
 import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
+import type { D20RollMode } from '../rulesets/contracts'
 import { abilityMod } from './dnd'
 import { getEnemyStatBlock, getPrimaryAttackAction, type MonsterAction } from './enemyStatBlocks'
 import {
@@ -68,6 +69,9 @@ export interface EnemyTurnResult {
    */
   attackTargetTokenIds?: readonly string[]
   actionIndex?: number
+  monsterResourceKind?: 'action' | 'bonus-action' | 'legendary-action'
+  /** DM takeover chooses the final d20 mode for this declared attack. */
+  manualAttackRollMode?: D20RollMode
   /** Internal Host orchestration for one committed occurrence of a Multiattack. */
   multiattackStep?: {
     mode: 'start' | 'continue'
@@ -155,7 +159,8 @@ function resolveTokenCharacterId(token: Token): string | undefined {
 function enemyRangedRangeCells(enemy: Token, map: BattleMap): number | null {
   if (!enemy.poolId) return null
   const block = getEnemyStatBlock(enemy.poolId)
-  const rangedAction = block?.actions.find((action) => /远程|射程|短弓|长弓|弩|标枪/.test(action.description))
+  const rangedAction = block?.actions.find((action) =>
+    action.automation === 'headless' && /远程|射程|短弓|长弓|弩|标枪/.test(action.description))
   if (!rangedAction) return null
   const match = rangedAction.description.match(/射程\s*(\d+)/)
   const feet = match ? Number(match[1]) : 80
@@ -174,10 +179,14 @@ function selectAttackAction(
 ): { action: MonsterAction; index: number } | undefined {
   if (!block) return undefined
   if (kind === 'ranged') {
-    const rangedIndex = block.actions.findIndex((a) => a.kind === 'ranged' && !!a.damageDice)
+    const rangedIndex = block.actions.findIndex((a) =>
+      a.automation === 'headless' && a.kind === 'ranged' && !!a.damageDice)
     if (rangedIndex >= 0) return { action: block.actions[rangedIndex], index: rangedIndex }
   }
-  const primary = getPrimaryAttackAction(block)
+  const primary = getPrimaryAttackAction({
+    ...block,
+    actions: block.actions.filter((action) => action.automation === 'headless'),
+  })
   if (!primary) return undefined
   const primaryIndex = block.actions.indexOf(primary)
   return { action: primary, index: Math.max(0, primaryIndex) }
@@ -198,9 +207,18 @@ function buildEnemyAttack(
   const block = enemy.poolId ? getEnemyStatBlock(enemy.poolId) : undefined
   const requestedAction = requestedActionIndex == null ? undefined : block?.actions[requestedActionIndex]
   const selectedAction =
-    requestedAction?.damageDice && requestedAction.kind === kind
+    requestedAction?.automation === 'headless' && requestedAction.damageDice && requestedAction.kind === kind
       ? { action: requestedAction, index: requestedActionIndex }
       : selectAttackAction(block, kind)
+  if (block && !selectedAction) {
+    return {
+      moved,
+      moveApSpent: moved ? 1 : 0,
+      newPosition: pos,
+      attacked: false,
+      message: `${enemy.label} 没有可由 Headless 安全结算的${kind === 'ranged' ? '远程' : '近战'}动作，等待 DM 裁定。`,
+    }
+  }
   const action = selectedAction?.action
   let sides: number
   let diceLabel: string
@@ -267,11 +285,74 @@ export function buildSelectedEnemyAttack(
   target: Token,
   actionIndex: number,
   attackTargetTokenIds?: readonly string[],
+  resourceKind: 'action' | 'bonus-action' | 'legendary-action' = 'action',
 ): EnemyTurnResult | undefined {
-  const action = enemy.poolId ? getEnemyStatBlock(enemy.poolId)?.actions[actionIndex] : undefined
+  const stats = enemy.poolId ? getEnemyStatBlock(enemy.poolId) : undefined
+  const action = resourceKind === 'bonus-action'
+    ? stats?.bonusActions?.[actionIndex]
+    : resourceKind === 'legendary-action'
+      ? stats?.legendaryActions?.[actionIndex]
+      : stats?.actions[actionIndex]
   const occurrenceTargetTokenIds = attackTargetTokenIds?.length
     ? [...attackTargetTokenIds]
     : [target.id]
+  const buildHeadlessAttackIntent = (input: {
+    actionName: string
+    selectedActionIndex: number
+    selectedResourceKind: 'action' | 'bonus-action' | 'legendary-action'
+  }): EnemyTurnResult => {
+    const result: EnemyTurnResult = {
+      moved: false,
+      attacked: true,
+      attackerTokenId: enemy.id,
+      targetTokenId: target.id,
+      attackTargetTokenIds: occurrenceTargetTokenIds,
+      actionIndex: input.selectedActionIndex,
+      monsterResourceKind: input.selectedResourceKind,
+      message: `${enemy.label} 使用${input.actionName}攻击 ${target.label}。`,
+    }
+    const targetCharacterId = resolveTokenCharacterId(target)
+    if (targetCharacterId) result.targetCharacterId = targetCharacterId
+    return result
+  }
+  if ((resourceKind === 'bonus-action' || resourceKind === 'legendary-action') && enemy.poolId) {
+    const monster =
+      getDnd5eSrdMonster(enemy.poolId) ??
+      getDnd5eSrdMonsterBySlug(enemy.poolId)
+    const resource = resourceKind === 'bonus-action'
+      ? monster?.bonusActions?.[actionIndex]
+      : monster?.legendaryActions?.[actionIndex]
+    if (!resource?.referencedActionId) return undefined
+    const referencedIndex = monster?.actions.findIndex((candidate) =>
+      candidate.id === resource.referencedActionId) ?? -1
+    const referenced = referencedIndex >= 0 ? stats?.actions[referencedIndex] : undefined
+    if (
+      referencedIndex < 0 || !referenced ||
+      (referenced.kind !== 'melee' && referenced.kind !== 'ranged') ||
+      resource.automation !== 'headless'
+    ) return undefined
+    if (!referenced.damageDice) {
+      return buildHeadlessAttackIntent({
+        actionName: `${resourceKind === 'legendary-action' ? '传奇动作' : '附赠动作'}${resource.name}`,
+        selectedActionIndex: actionIndex,
+        selectedResourceKind: resourceKind,
+      })
+    }
+    return {
+      ...buildEnemyAttack(
+        enemy,
+        target,
+        false,
+        undefined,
+        referenced.kind,
+        referencedIndex,
+      ),
+      actionIndex,
+      monsterResourceKind: resourceKind,
+      attackTargetTokenIds: occurrenceTargetTokenIds,
+      message: `${enemy.label} 使用${resourceKind === 'legendary-action' ? '传奇动作' : '附赠动作'}${resource.name}攻击 ${target.label}。`,
+    }
+  }
   if (
     action?.kind === 'multiattack' &&
     action.automation === 'headless' &&
@@ -326,27 +407,33 @@ export function buildSelectedEnemyAttack(
     // transaction does not need a legacy damage-roll preview, but it still
     // needs the parent action index and occurrence targets to survive the
     // transport layer.
-    const result: EnemyTurnResult = {
-      moved: false,
-      attacked: true,
-      attackerTokenId: enemy.id,
-      targetTokenId: target.id,
-      attackTargetTokenIds: occurrenceTargetTokenIds,
-      actionIndex,
-      message: `${enemy.label} 使用${action.name}攻击 ${target.label}。`,
-    }
-    const targetCharacterId = resolveTokenCharacterId(target)
-    if (targetCharacterId) result.targetCharacterId = targetCharacterId
-    return result
+    return buildHeadlessAttackIntent({
+      actionName: action.name,
+      selectedActionIndex: actionIndex,
+      selectedResourceKind: 'action',
+    })
   }
   if (
-    !action?.damageDice ||
+    !action ||
     (action.kind !== 'melee' && action.kind !== 'ranged') ||
     action.automation !== 'headless'
   ) return undefined
+  // A Headless weapon attack does not need to deal immediate damage. Roper's
+  // Tendril is the canonical case: the attack roll applies a source-linked
+  // grapple/restrained effect and therefore intentionally has no damage dice.
+  // Keep such actions as authoritative intents instead of inventing legacy
+  // 1d6 damage or rejecting the already validated monster schema.
+  if (!action.damageDice) {
+    return buildHeadlessAttackIntent({
+      actionName: action.name,
+      selectedActionIndex: actionIndex,
+      selectedResourceKind: 'action',
+    })
+  }
   return {
     ...buildEnemyAttack(enemy, target, false, undefined, action.kind, actionIndex),
     attackTargetTokenIds: occurrenceTargetTokenIds,
+    monsterResourceKind: 'action',
   }
 }
 
@@ -391,7 +478,8 @@ function buildBreathAttack(
 function findBreathAction(enemy: Token): MonsterAction | undefined {
   if (!enemy.poolId) return undefined
   const block = getEnemyStatBlock(enemy.poolId)
-  return block?.actions.find((a) => a.kind === 'aoe' && !!a.save)
+  return block?.actions.find((a) =>
+    a.automation === 'headless' && a.kind === 'aoe' && !!a.save)
 }
 
 export function planEnemyTurn(

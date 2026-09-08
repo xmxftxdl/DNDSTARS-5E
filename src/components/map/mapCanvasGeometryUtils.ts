@@ -16,6 +16,15 @@ export function isMapTokenNode(node: Konva.Node | null): boolean {
   return false
 }
 
+export function mapTokenIdFromNode(node: Konva.Node | null): string | undefined {
+  let n: Konva.Node | null = node
+  while (n) {
+    if (n.name() === 'map-token') return n.id() || undefined
+    n = n.parent
+  }
+  return undefined
+}
+
 
 
 /** Grid line positions: offset + n * step, covering [0, length]. */

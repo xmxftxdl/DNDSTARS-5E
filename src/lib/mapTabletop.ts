@@ -4,7 +4,8 @@ export const MAP_TABLETOP_CHANNEL = 'map-tabletop'
 export const MAP_PING_LIFETIME_MS = 3_200
 export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
 
-export type MapTabletopTool = 'none' | 'focus' | 'arrow' | 'circle'
+export type MapTabletopTool = 'none' | 'focus' | 'arrow' | 'circle' | 'freehand' | 'eraser'
+export type MapTabletopAnnotationShape = 'arrow' | 'circle' | 'freehand'
 
 export interface MapTabletopPoint {
   x: number
@@ -34,9 +35,10 @@ export interface MapTabletopFocus extends MapTabletopEventBase {
 
 export interface MapTabletopAnnotation extends MapTabletopEventBase {
   type: 'annotation'
-  shape: 'arrow' | 'circle'
+  shape: MapTabletopAnnotationShape
   from: MapTabletopPoint
   to: MapTabletopPoint
+  points?: MapTabletopPoint[]
   color: string
 }
 
@@ -44,10 +46,16 @@ export interface MapTabletopClear extends MapTabletopEventBase {
   type: 'clear-annotations'
 }
 
+export interface MapTabletopDelete extends MapTabletopEventBase {
+  type: 'delete-annotation'
+  annotationId: string
+}
+
 export type MapTabletopEvent =
   | MapTabletopPing
   | MapTabletopFocus
   | MapTabletopAnnotation
+  | MapTabletopDelete
   | MapTabletopClear
 
 export interface MapTabletopState {
@@ -87,12 +95,22 @@ export function parseMapTabletopEvent(value: unknown): MapTabletopEvent | null {
     return event as MapTabletopPing | MapTabletopFocus
   }
   if (event.type === 'annotation') {
+    const freehandPoints = event.shape === 'freehand' ? event.points : undefined
     if (
-      (event.shape !== 'arrow' && event.shape !== 'circle') ||
+      (event.shape !== 'arrow' && event.shape !== 'circle' && event.shape !== 'freehand') ||
       !validPoint(event.from) || !validPoint(event.to) ||
+      (event.shape === 'freehand' && (
+        !Array.isArray(freehandPoints) || freehandPoints.length < 2 || freehandPoints.length > 512 ||
+        !freehandPoints.every(validPoint)
+      )) ||
       typeof event.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(event.color)
     ) return null
     return event as MapTabletopAnnotation
+  }
+  if (event.type === 'delete-annotation') {
+    return typeof event.annotationId === 'string' && event.annotationId.length >= 8 && event.annotationId.length <= 160
+      ? event as MapTabletopDelete
+      : null
   }
   return event.type === 'clear-annotations' ? event as MapTabletopClear : null
 }
@@ -106,7 +124,14 @@ export function reduceMapTabletopState(
   const pings = current.pings.filter((ping) => ping.expiresAt > now)
   const annotations = current.annotations.filter((annotation) => annotation.expiresAt > now)
   const focus = current.focus?.expiresAt && current.focus.expiresAt > now ? current.focus : null
-  if (!event || event.expiresAt <= now) return { pings, annotations, focus }
+  if (!event || event.expiresAt <= now) {
+    if (
+      pings.length === current.pings.length
+      && annotations.length === current.annotations.length
+      && focus === current.focus
+    ) return current
+    return { pings, annotations, focus }
+  }
   if (event.type === 'ping') {
     return { pings: [...pings.filter((ping) => ping.id !== event.id), event].slice(-24), annotations, focus }
   }
@@ -114,11 +139,31 @@ export function reduceMapTabletopState(
   if (event.type === 'clear-annotations') {
     return { pings, annotations: annotations.filter((annotation) => annotation.mapId !== event.mapId), focus }
   }
+  if (event.type === 'delete-annotation') {
+    return {
+      pings,
+      annotations: annotations.filter((annotation) => !(
+        annotation.mapId === event.mapId && annotation.id === event.annotationId
+      )),
+      focus,
+    }
+  }
   return {
     pings,
     annotations: [...annotations.filter((annotation) => annotation.id !== event.id), event].slice(-120),
     focus,
   }
+}
+
+export function nextMapTabletopExpiration(state: MapTabletopState): number | undefined {
+  let next: number | undefined
+  const collect = (expiresAt: number) => {
+    if (next == null || expiresAt < next) next = expiresAt
+  }
+  state.pings.forEach((ping) => collect(ping.expiresAt))
+  state.annotations.forEach((annotation) => collect(annotation.expiresAt))
+  if (state.focus) collect(state.focus.expiresAt)
+  return next
 }
 
 export function mapTabletopForMap(state: MapTabletopState, mapId: string, now = Date.now()) {
@@ -139,9 +184,10 @@ export async function publishMapTabletopFocus(mapId: string, point: MapTabletopP
 
 export async function publishMapTabletopAnnotation(input: {
   mapId: string
-  shape: 'arrow' | 'circle'
+  shape: MapTabletopAnnotationShape
   from: MapTabletopPoint
   to: MapTabletopPoint
+  points?: MapTabletopPoint[]
   color?: string
 }): Promise<void> {
   await publishSharedEvent(MAP_TABLETOP_CHANNEL, {
@@ -150,8 +196,13 @@ export async function publishMapTabletopAnnotation(input: {
     shape: input.shape,
     from: input.from,
     to: input.to,
+    ...(input.shape === 'freehand' ? { points: input.points } : {}),
     color: input.color ?? '#fbbf24',
   })
+}
+
+export async function deleteMapTabletopAnnotation(mapId: string, annotationId: string): Promise<void> {
+  await publishSharedEvent(MAP_TABLETOP_CHANNEL, { type: 'delete-annotation', mapId, annotationId })
 }
 
 export async function clearMapTabletopAnnotations(mapId: string): Promise<void> {

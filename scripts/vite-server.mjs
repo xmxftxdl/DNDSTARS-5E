@@ -8,6 +8,11 @@ import {
 } from './shared-server-core.mjs'
 import { loadArtAssetPack, serveArtAsset } from './art-asset-server.mjs'
 import { createSharedServerContext } from './shared-server-context.mjs'
+import { createPlayerAiServiceFromPersistedConfig } from './player-ai-service.mjs'
+import {
+  applyLocalVoiceConfigToEnvironment,
+  loadLocalVoiceConfig,
+} from './local-voice-config-store.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -22,6 +27,11 @@ for (let i = 2; i < process.argv.length; i += 1) {
 const host = String(args.get('host') ?? '127.0.0.1')
 const port = Number(args.get('port') ?? 5273)
 const strictPort = args.has('strictPort') || args.get('strict-port') === true
+const localVoice = await loadLocalVoiceConfig().catch((error) => {
+  console.warn(`[voice] Saved local configuration could not be loaded: ${error?.message ?? 'unknown-error'}`)
+  return { found: false, config: null, files: { config: 'unavailable' } }
+})
+if (localVoice.found) applyLocalVoiceConfigToEnvironment(localVoice.config)
 const optionalString = (value) => typeof value === 'string' && value.trim()
   ? value.trim()
   : null
@@ -103,14 +113,22 @@ const sharedRoot = process.env.STARS_SHARED_ROOT
       'StarsApp',
       'shared',
     )
+const playerAi = await createPlayerAiServiceFromPersistedConfig()
 // /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只挂中间件。
 const apiCtx = createSharedServerContext({
   sharedRoot,
   legacyRoot: path.resolve(process.cwd(), '.stars-shared'),
   serverBuildId: process.env.STARS_BUILD_ID ?? 'vite-development',
+  playerAiService: playerAi.service,
 })
 const accountStorage = await initializeAccountStorage(apiCtx)
 console.log(`Account storage: ${accountStorage.backend}${accountStorage.databasePath ? ` (${accountStorage.databasePath})` : ''}`)
+console.log(playerAi.service
+  ? `Player AI: ready (${playerAi.files.playerUsage})`
+  : `Player AI: disabled; run npm run local-ai:configure (${playerAi.files.config})`)
+console.log(localVoice.found
+  ? `Voice: configured (${localVoice.config.serverUrl}; secrets=${localVoice.config.secretStorage})`
+  : `Voice: disabled; run npm run local-voice:configure (${localVoice.files.config})`)
 if (artAssetPack) {
   console.log(
     `[art-assets] ${artAssetPack.packId}@${artAssetPack.version}: ` +
@@ -126,11 +144,14 @@ const server = await createServer({
   // cache directory is shared per workspace, so two dependency optimizers can
   // invalidate each other's module graph and make otherwise valid dynamic
   // imports fail intermittently in the browser.
-  cacheDir: path.resolve(process.cwd(), 'node_modules', `.vite-${port}`),
+  cacheDir: process.env.STARS_VITE_CACHE_DIR
+    ? path.resolve(process.env.STARS_VITE_CACHE_DIR)
+    : path.resolve(process.cwd(), 'node_modules', `.vite-${port}`),
   server: {
     host,
     port,
     strictPort,
+    watch: { ignored: ['**/.codex-temp/**'] },
   },
 })
 
@@ -165,6 +186,10 @@ if (Array.isArray(server.middlewares.stack)) {
   server.middlewares.use(sharedApiMiddleware)
 }
 
+// Listening starts Vite's dependency optimizer. Warming imports before that
+// lifecycle boundary can wait indefinitely for dependency processing.
+await server.listen()
+
 // Do not advertise the dev server until the modules needed by the application
 // shell have been transformed. This closes the short startup window where the
 // browser can request a lazy module while dependency optimization is pending.
@@ -172,6 +197,12 @@ const warmupUrls = [
   '/src/main.tsx',
   '/src/components/Sidebar.tsx',
   '/src/rulesets/dnd5e/pluginLoader.ts',
+  // The map route is lazy, so the default index.html crawl cannot see its
+  // canvas dependencies. Finish transforming these modules before printing
+  // the server URL; the first click must not mutate Vite's dependency graph.
+  '/src/pages/MapsWorkspacePage.tsx',
+  '/src/presentation/maps/MapViewportLayer.tsx',
+  '/src/presentation/maps/MapWorkspacePanelsLayer.tsx',
 ]
 if (process.env.STARS_E2E_RELEASE_GATE === '1') {
   warmupUrls.push(
@@ -187,7 +218,21 @@ for (const url of warmupUrls) {
   await server.environments.client.warmupRequest(url)
 }
 
-await server.listen()
+// warmupRequest transforms the requested modules, but Vite's dependency
+// optimizer commits its cold-start graph asynchronously after the static
+// import crawl becomes idle. If the HTTP listener opens first, an already-open
+// DM/player tab can connect between those two moments and receive a full reload
+// (or briefly mix two React dependency hashes). Hold the port until the scan
+// and every dependency processing promise have committed.
+await server.environments.client.waitForRequestsIdle()
+const clientDepsOptimizer = server.environments.client.depsOptimizer
+await clientDepsOptimizer?.scanProcessing
+await Promise.all(
+  (clientDepsOptimizer?.metadata.depInfoList ?? [])
+    .map((dependency) => dependency.processing)
+    .filter((processing) => processing != null),
+)
+
 server.printUrls()
 
 let closing = false

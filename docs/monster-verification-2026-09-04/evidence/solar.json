@@ -1,0 +1,349 @@
+{
+  "id": "srd-5.1:solar",
+  "slug": "solar",
+  "name": "太阳神使",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：飞剑需要一个持续存在且可独立移动的剑实体、每轮奖励动作指令、可见性判断、以太阳神侍为来源的受击/效果代理，以及太阳神侍死亡时坠落。当前地图与怪物状态模型尚未同时表达这些字段，因此继续由 DM 裁定，避免只自动结算首次攻击后丢失后续生命周期。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greatsword",
+      "name": "巨剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "slaying-longbow",
+      "name": "屠戮长弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].magical",
+        "attack.onHitEffects[].maximumCurrentHitPoints",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "flying-sword",
+      "name": "飞剑",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "healing-touch",
+      "name": "治疗之触",
+      "automation": "headless",
+      "rule": "healing-touch",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.max",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.healing.count",
+        "rule.healing.sides",
+        "rule.healing.bonus",
+        "rule.removes[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "teleport",
+      "name": "传送",
+      "automation": "headless",
+      "rule": "teleport",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.target",
+        "rule.rangeFeet",
+        "rule.requiresVisibleDestination",
+        "rule.requiresUnoccupiedDestination"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "searing-burst-costs-2-actions",
+      "name": "灼热爆发（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.additionalDamage[].average",
+        "rule.additionalDamage[].count",
+        "rule.additionalDamage[].sides",
+        "rule.additionalDamage[].bonus",
+        "rule.additionalDamage[].type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "blinding-gaze-costs-3-actions",
+      "name": "致盲凝视（消耗 3 动作）",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 8,
+      "slug": "solar",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:51:31.789Z",
+      "name": "太阳神使",
+      "actionId": "greatsword",
+      "actionName": "巨剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "21",
+      "total": 334,
+      "mapId": "verify-ui-solar-greatsword-1788565891850",
+      "combatId": "verify-ui-solar-greatsword-1788565891850:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "太阳神使 使用巨剑攻击 验证目标：巨剑 → 验证目标 19+15=34 命中；共造成 54 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:51 PM\n结算\n\n太阳神使 使用巨剑攻击 验证目标：巨剑 → 验证目标 19+15=34 命中；共造成 54 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：巨剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +15。\n结果 · 34 vs AC 10：命中。\n伤害骰 · 巨剑（基础伤害 1·挥砍）｜4d6 骰面：6 + 4 + 3 + 5 = 18｜固定加值 +8｜小计 26\n伤害骰 · 巨剑（基础伤害 2·光耀）｜6d8 骰面：4 + 3 + 5 + 6 + 8 + 2 = 28｜固定加值 +0｜小计 28\n太阳神使｜消耗动作\n验证目标｜受到 54 点伤害｜HP 320 → 266",
+      "playerLog": "太阳神使 使用巨剑攻击 验证目标：巨剑 → 验证目标 19+15=34 命中；共造成 54 点伤害。",
+      "afterHp": 266,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:51:58.341Z",
+      "evidenceFile": "ui-cases/monsters/008-solar.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "天使武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "神圣感知",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 28,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

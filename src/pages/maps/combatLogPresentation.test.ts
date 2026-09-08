@@ -3,7 +3,15 @@ import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  combatLogEntryIsInitiativeResult,
+  dnd5eCounterspelledSpellOutcome,
+  dnd5eDamageDiceAuditPresentation,
+  dnd5eDelayedSpellDamageLogMessages,
+  dnd5eSpellDamageTypeLabel,
+  dnd5ePersistentAreaNotificationLogSuffix,
   dnd5eCharacterPresentationColors,
+  dnd5eSpellAttackAuditPresentation,
+  dnd5eStabilizationSpellOutcome,
   inferCombatLogActorTokenId,
   resolveCombatLogSubject,
   resolveHeadlessCombatLogActorTokenId,
@@ -55,6 +63,91 @@ const goblinToken = token({
 })
 
 describe('combat log subject presentation', () => {
+  it('makes mental and audible persistent-area alert delivery explicit', () => {
+    expect(dnd5ePersistentAreaNotificationLogSuffix({ delivery: 'mental-to-source' }))
+      .toBe('；向施法者发出心灵警报')
+    expect(dnd5ePersistentAreaNotificationLogSuffix({ delivery: 'audible', audibleRadiusFeet: 60 }))
+      .toBe('；发出声音警报（60 尺内可听）')
+    expect(dnd5ePersistentAreaNotificationLogSuffix({
+      delivery: 'audible', audibleRadiusFeet: 30, message: '前方有危险',
+    })).toBe('；发出声音（30 尺内可听）：“前方有危险”')
+  })
+
+  it('surfaces delayed spell damage committed at the target turn end', () => {
+    expect(dnd5eDelayedSpellDamageLogMessages([{
+      type: 'delayed-spell-damage-triggered', sourceId: wizardToken.id,
+      targetId: goblinToken.id, spellId: 'acid-arrow', amount: 5,
+    }], [wizardToken, goblinToken])).toEqual([
+      '法师 的强酸箭在 哥布林 的回合结束时触发，造成 5 点强酸伤害。',
+    ])
+  })
+
+  it('reports a successful counterspell before any spell-specific fallback effect', () => {
+    expect(dnd5eCounterspelledSpellOutcome([
+      { type: 'counterspell-resolved', success: true },
+    ], '虔诚护盾')).toBe('虔诚护盾被法术反制，未产生效果')
+    expect(dnd5eCounterspelledSpellOutcome([
+      { type: 'counterspell-resolved', success: false },
+    ], '虔诚护盾')).toBeUndefined()
+  })
+
+  it('reports stabilization instead of hiding it behind a zero-HP-change fallback', () => {
+    expect(dnd5eStabilizationSpellOutcome(
+      { effect: 'stabilize' },
+      '倒地法师',
+    )).toBe('倒地法师 伤势稳定；死亡豁免成功与失败均重置为 0')
+    expect(dnd5eStabilizationSpellOutcome(
+      { effect: 'automatic-damage' },
+      '倒地法师',
+    )).toBeUndefined()
+  })
+
+  it('preserves every rolled damage die in the authority audit text', () => {
+    expect(dnd5eDamageDiceAuditPresentation({ rolls: [8, 5, 3, 1], sides: 8 }))
+      .toBe('伤害掷骰：4d8 [8, 5, 3, 1] = 17')
+    expect(dnd5eDamageDiceAuditPresentation({ rolls: [4, 2], sides: 6, bonus: 3 }))
+      .toBe('伤害掷骰：2d6 [4, 2] = 6 + 3 = 9')
+    expect(dnd5eDamageDiceAuditPresentation({ rolls: [], sides: 8 })).toBeUndefined()
+  })
+
+  it('uses Headless damage types in a spell summary instead of a generic label', () => {
+    expect(dnd5eSpellDamageTypeLabel([
+      { type: 'damage-applied', damageTypes: ['necrotic'] },
+      { type: 'damage-applied', damageTypes: ['necrotic', 'fire'] },
+      { type: 'damage-applied', damageTypes: ['unknown'] },
+    ])).toBe('黯蚀、火焰')
+  })
+
+  it('uses a sustained spell attack own delivery and range in the audit log', () => {
+    expect(dnd5eSpellAttackAuditPresentation({
+      id: 'produce-flame',
+      name: '燃火术',
+      englishName: 'Produce Flame',
+      level: 0,
+      school: '咒法',
+      classes: ['druid'],
+      castingTime: 'action',
+      rangeFeet: 0,
+      target: 'ally',
+      effect: 'active-effect',
+      dice: { count: 0, sides: 8, bonus: 0 },
+      damageType: 'fire',
+      sustainedAttack: {
+        id: 'produce-flame',
+        economy: 'action',
+        origin: 'caster',
+        resolution: 'spell-attack',
+        spellAttackMode: 'ranged',
+        rangeFeet: 30,
+        endsAfterUse: true,
+        cantripScaling: true,
+        dice: { count: 1, sides: 8 },
+        damageType: 'fire',
+      },
+      description: '测试',
+    }, true)).toEqual({ deliveryLabel: '远程', rangeFeet: 30 })
+  })
+
   it('keeps the solid combat border, light status frame and glow as separate class colors', () => {
     expect(dnd5eCharacterPresentationColors(wizard)).toMatchObject({
       accentColor: '#3B82F6',
@@ -132,6 +225,28 @@ describe('combat log subject presentation', () => {
       currentTurnTokenId: goblinToken.id,
     })
     expect(subject).toMatchObject({
+      side: 'neutral',
+      resolution: 'neutral',
+    })
+    expect(subject.token).toBeUndefined()
+  })
+
+  it('keeps the shared initiative result neutral even when its details name combatants', () => {
+    const initiativeEntry = entry({
+      text: '先攻结果（由高到低）',
+      kind: 'system',
+      details: ['1. 哥布林：先攻 18', '2. 法师：先攻 12'],
+    })
+
+    expect(combatLogEntryIsInitiativeResult(initiativeEntry)).toBe(true)
+    const subject = resolveCombatLogSubject({
+      entry: initiativeEntry,
+      tokens: [goblinToken, wizardToken],
+      characters: [wizard],
+      currentTurnTokenId: goblinToken.id,
+    })
+    expect(subject).toMatchObject({
+      label: '先攻结果',
       side: 'neutral',
       resolution: 'neutral',
     })

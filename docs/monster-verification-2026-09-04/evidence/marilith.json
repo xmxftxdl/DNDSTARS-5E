@@ -1,0 +1,277 @@
+{
+  "id": "srd-5.1:marilith",
+  "slug": "marilith",
+  "name": "六臂蛇魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.attackAutomaticallyHitsLinkedTarget",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "teleport",
+      "name": "传送",
+      "automation": "headless",
+      "rule": "teleport",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.target",
+        "rule.rangeFeet",
+        "rule.requiresVisibleDestination",
+        "rule.requiresUnoccupiedDestination"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "parry",
+      "name": "招架",
+      "automation": "headless",
+      "rule": "parry",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.armorClassBonus",
+        "rule.requiresSight",
+        "rule.requiresWieldedMeleeWeapon"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster Parry in Headless combat applies the exact +5 AC reaction for 'marilith'"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 22,
+      "slug": "marilith",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:57:52.946Z",
+      "name": "六臂蛇魔",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "16",
+      "total": 334,
+      "mapId": "verify-ui-marilith-longsword-1788566273008",
+      "combatId": "verify-ui-marilith-longsword-1788566273008:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "六臂蛇魔 使用长剑攻击 验证目标：长剑 → 验证目标 7+9=16 命中；共造成 17 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:58 PM\n结算\n\n六臂蛇魔 使用长剑攻击 验证目标：长剑 → 验证目标 7+9=16 命中；共造成 17 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 7；最终采用 7；调整值 +9。\n结果 · 16 vs AC 10：命中。\n伤害骰 · 长剑（基础伤害·挥砍）｜2d8 骰面：5 + 8 = 13｜固定加值 +4｜小计 17\n六臂蛇魔｜消耗动作\n验证目标｜受到 17 点伤害｜HP 320 → 303",
+      "playerLog": "六臂蛇魔 使用长剑攻击 验证目标：长剑 → 验证目标 7+9=16 命中；共造成 17 点伤害。",
+      "afterHp": 303,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:58:16.401Z",
+      "evidenceFile": "ui-cases/monsters/022-marilith.json"
+    },
+    {
+      "index": 192,
+      "slug": "marilith",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:55:45.384Z",
+      "name": "六臂蛇魔",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-marilith-longsword-1788562545444",
+      "combatId": "verify-ui-marilith-longsword-1788562545444:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "六臂蛇魔 使用长剑攻击 验证目标：长剑 → 验证目标 4+9=13 命中；共造成 11 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:56 PM\n结算\n\n六臂蛇魔 使用长剑攻击 验证目标：长剑 → 验证目标 4+9=13 命中；共造成 11 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 4；最终采用 4；调整值 +9。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 长剑（基础伤害·挥砍）｜2d8 骰面：6 + 1 = 7｜固定加值 +4｜小计 11\n六臂蛇魔｜消耗动作\n验证目标｜受到 11 点伤害｜HP 320 → 309",
+      "playerLog": "六臂蛇魔 使用长剑攻击 验证目标：长剑 → 验证目标 4+9=13 命中；共造成 11 点伤害。",
+      "afterHp": 309,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:56:14.096Z",
+      "evidenceFile": "ui-cases/monsters/192-marilith.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "多重反应",
+      "automation": "headless",
+      "rule": "reactive",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.reactionRefresh"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster Parry in Headless combat lets Marilith use Reactive once on each different creature turn",
+        "SRD monster Parry in Headless combat shares one Reactive budget between an opportunity attack and Parry on the same turn"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 17,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_VOICE_CHANGER_SELECTION,
+  VOICE_PERSONA_PRESETS,
   isVoiceChangerBypassed,
+  loadVoiceChangerConfigWithFallback,
   normalizeVoiceChangerConfig,
   normalizeVoiceChangerSelection,
   toggleVoiceChangerShortcut,
@@ -19,7 +21,7 @@ describe('voiceChanger', () => {
       activeShortcut: 2,
       selection: { baseProfileId: 'feminine', effectPresetId: 'ghost' },
       slots: [
-        { shortcut: 2, npcTokenId: ' npc-2 ', npcName: ' 女爵 ', selection: { baseProfileId: 'feminine', effectPresetId: 'deep-lord' } },
+        { shortcut: 2, npcTokenId: ' npc-2 ', npcName: ' 女爵 ', personaPresetId: 'reserved-noble', performanceCue: ' 说话前停顿 ', selection: { baseProfileId: 'feminine', effectPresetId: 'deep-lord' } },
         { shortcut: 2, npcTokenId: 'duplicate', npcName: '重复', selection: DEFAULT_VOICE_CHANGER_SELECTION },
         { shortcut: 3, npcName: ' 无地图角色 ', selection: { baseProfileId: 'masculine', effectPresetId: 'aged-sage' } },
         { shortcut: 10, npcTokenId: 'invalid', npcName: '无效', selection: DEFAULT_VOICE_CHANGER_SELECTION },
@@ -28,9 +30,37 @@ describe('voiceChanger', () => {
       schemaVersion: 1,
       activeShortcut: 2,
       slots: [
-        { shortcut: 2, npcTokenId: 'npc-2', npcName: '女爵' },
+        { shortcut: 2, npcTokenId: 'npc-2', npcName: '女爵', personaPresetId: 'reserved-noble', performanceCue: '说话前停顿' },
         { shortcut: 3, npcName: '无地图角色' },
       ],
+    })
+  })
+
+  it('provides eight subtle humanlike persona presets with performance cues', () => {
+    expect(VOICE_PERSONA_PRESETS).toHaveLength(8)
+    expect(new Set(VOICE_PERSONA_PRESETS.map((preset) => preset.selection.effectPresetId)).size).toBeGreaterThan(3)
+    expect(VOICE_PERSONA_PRESETS.every((preset) => preset.performanceCue.includes('·'))).toBe(true)
+  })
+
+  it('loads a legacy room preset when the campaign preset does not exist', () => {
+    const values = new Map<string, string>([[
+      'legacy',
+      JSON.stringify({
+        selection: DEFAULT_VOICE_CHANGER_SELECTION,
+        slots: [{
+          shortcut: 4,
+          npcName: '旧房间角色',
+          personaPresetId: 'hushed-agent',
+          performanceCue: '音量偏低',
+          selection: { baseProfileId: 'original', effectPresetId: 'hushed-natural' },
+        }],
+      }),
+    ]])
+    const storage = { getItem: (key: string) => values.get(key) ?? null }
+    expect(loadVoiceChangerConfigWithFallback(storage, 'campaign', 'legacy').slots[0]).toMatchObject({
+      npcName: '旧房间角色',
+      personaPresetId: 'hushed-agent',
+      performanceCue: '音量偏低',
     })
   })
 

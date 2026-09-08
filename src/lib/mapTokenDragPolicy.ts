@@ -14,15 +14,13 @@ export interface MapTokenDragPolicyInput {
 }
 
 /**
- * Outside combat the DM can freely place any unlocked Token. During combat an
- * enemy Token is never draggable: the current manually controlled monster
- * moves through the click-to-move Headless transaction, and every other
- * monster must stay immobile until its own turn. A player may drag only an
- * explicitly authorized player Token; ownership is still revalidated by the
- * DM Host when the movement request is submitted.
+ * The DM may authoritatively place any unlocked Token both inside and outside
+ * combat. This is an override/scene-edit gesture; rules-valid turn movement
+ * still uses the click-to-move Headless transaction. A player may drag only an
+ * explicitly authorized player Token, and ownership is revalidated by the DM
+ * Host when the movement request is submitted.
  */
 export function canDragMapToken(input: MapTokenDragPolicyInput): boolean {
-  if (input.combatActive && input.token.type === 'enemy') return false
   const hasDragAuthority = input.isDm || (
     input.token.type === 'player' &&
     input.playerMovableTokenIds?.includes(input.token.id) === true
@@ -53,10 +51,10 @@ export function dmTokenPlacementBypassesMovementBlockers(input: {
 }
 
 /**
- * Most canvas drags use a cheap straight-line geometry check before mutating
- * the map. An authoritative Headless movement transaction must receive the
- * request first, because it owns pathfinding, movement resources, doors,
- * opportunity attacks and terrain hazards.
+ * DM placement bypasses movement blockers. Player movement also skips the
+ * canvas' cheap straight-line check because the room authority validates the
+ * complete path; rejecting the direct ray here would incorrectly reject a
+ * legal route that turns around a wall.
  */
 export function shouldValidateMapTokenMoveLocally(input: {
   isDm: boolean
@@ -64,6 +62,7 @@ export function shouldValidateMapTokenMoveLocally(input: {
   authoritativeMovementTokenIds?: readonly string[]
 }): boolean {
   if (dmTokenPlacementBypassesMovementBlockers(input)) return false
+  if (input.token.type === 'player') return false
   return input.authoritativeMovementTokenIds?.includes(input.token.id) !== true
 }
 

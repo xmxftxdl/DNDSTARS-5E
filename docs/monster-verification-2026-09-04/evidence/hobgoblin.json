@@ -1,0 +1,195 @@
+{
+  "id": "srd-5.1:hobgoblin",
+  "slug": "hobgoblin",
+  "name": "大地精",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：长剑原文的一手／双手伤害选择不再导致整项动作降级。两种握法现在是独立 Headless 动作，分别校验 1d8 与 1d10 伤害；半红龙老兵和老兵还提供只用长剑、双手长剑，以及带可选短剑的完整多重攻击分支。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longbow",
+      "name": "长弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword-two-handed",
+      "name": "长剑 (Two-Handed)",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 165,
+      "slug": "hobgoblin",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:41:04.556Z",
+      "name": "大地精",
+      "actionId": "longbow",
+      "actionName": "长弓",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-hobgoblin-longbow-1788561664608",
+      "combatId": "verify-ui-hobgoblin-longbow-1788561664608:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "大地精 使用长弓攻击 验证目标：长弓 → 验证目标 10+3=13 命中；共造成 7 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:41 PM\n结算\n\n大地精 使用长弓攻击 验证目标：长弓 → 验证目标 10+3=13 命中；共造成 7 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：长弓｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（射程 150/600 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n优劣势依据 · 劣势：远程攻击者 5 尺内有敌人。\n攻击骰 · 劣势（2d20 取低）；采用劣势的原因：远程攻击者 5 尺内有敌人；各骰面 10 / 12；最终采用 10；调整值 +3。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 长弓（基础伤害·穿刺）｜1d8 骰面：6 = 6｜固定加值 +1｜小计 7\n大地精｜消耗动作\n验证目标｜受到 7 点伤害｜HP 320 → 313",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/大地精 使用长弓攻击 验证目标：/)\nExpected: \u001b[32m\"大地精 使用长弓攻击 验证目标：长弓 → 验证目标 10+3=13 命中；共造成 7 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/大地精 使用长弓攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:41:41.292Z",
+      "evidenceFile": "ui-cases/monsters/165-hobgoblin.json"
+    },
+    {
+      "index": 227,
+      "slug": "hobgoblin",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:56:19.792Z",
+      "name": "大地精",
+      "actionId": "longbow",
+      "actionName": "长弓",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/2",
+      "total": 334,
+      "mapId": "verify-ui-hobgoblin-longbow-1788569779840",
+      "combatId": "verify-ui-hobgoblin-longbow-1788569779840:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "大地精 使用长弓攻击 验证目标：长弓 → 验证目标 8+3=11 命中；共造成 2 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:56 PM\n结算\n\n大地精 使用长弓攻击 验证目标：长弓 → 验证目标 8+3=11 命中；共造成 2 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：长弓｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（射程 150/600 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n优劣势依据 · 劣势：远程攻击者 5 尺内有敌人。\n攻击骰 · 劣势（2d20 取低）；采用劣势的原因：远程攻击者 5 尺内有敌人；各骰面 8 / 19；最终采用 8；调整值 +3。\n结果 · 11 vs AC 10：命中。\n伤害骰 · 长弓（基础伤害·穿刺）｜1d8 骰面：1 = 1｜固定加值 +1｜小计 2\n大地精｜消耗动作\n验证目标｜受到 2 点伤害｜HP 320 → 318",
+      "playerLog": "大地精 使用长弓攻击 验证目标：长弓 → 验证目标 8+3=11 命中；共造成 2 点伤害。",
+      "afterHp": 318,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:56:47.483Z",
+      "evidenceFile": "ui-cases/monsters/227-hobgoblin.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "武技优势",
+      "automation": "headless",
+      "rule": "martial-advantage",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.oncePerTurn",
+        "rule.allyDistanceFeet",
+        "rule.requiresAdjacentAlly",
+        "rule.extraDamage.average",
+        "rule.extraDamage.count",
+        "rule.extraDamage.sides",
+        "rule.extraDamage.bonus",
+        "rule.extraDamage.type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD precision attack traits in the Headless runtime 'Hobgoblin Martial Advantage' waits for the first actual hit and cannot be reused in the same turn"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 10,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

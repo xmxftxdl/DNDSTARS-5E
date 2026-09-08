@@ -172,4 +172,33 @@ describe('Dnd5eSpellModifierIntentV1', () => {
       'metamagic-empowered',
     ])
   })
+
+  it('allows a workshop evocation spell to combine Sculpt Spells and Overchannel', () => {
+    const result = resolveDnd5eSpellModifierIntents({
+      character: character({
+        charClass: '法师',
+        level: 14,
+        dnd5eClassLevels: { wizard: 14 },
+        dnd5eClassChoices: { classes: { wizard: { subclass: 'evocation', selections: {} } } },
+        classResources: {},
+      }),
+      castingClassId: 'wizard',
+      spellId: 'workshop:arcane-fireburst',
+      slotLevel: 3,
+      modifierIds: ['evocation-sculpt-spells', 'evocation-overchannel'],
+      pluginSpell: {
+        level: 3,
+        school: 'evocation',
+        castingTime: 'action',
+        hasDamage: true,
+        areaSavingThrow: true,
+      },
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      options: { sculptSpell: true, overchannel: true },
+      effectiveEconomy: 'action',
+      requiresTargetConfiguration: true,
+    })
+  })
 })

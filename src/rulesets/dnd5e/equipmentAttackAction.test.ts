@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { DND5E_CLUB, DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
+import { DND5E_CLUB, DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_HAND_CROSSBOW, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
 import {
   dnd5ePreparedEquipmentAttackMagicWeaponBonus,
+  dnd5ePreparedEquipmentAttackIsAutomaticCritical,
   dnd5eEquipmentClassDamageDefinitions,
   prepareDnd5eEquipmentAttack,
   previewDnd5eEquipmentAttack,
@@ -17,6 +18,8 @@ import {
   createDnd5eMechanicalEffect,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
 } from './activeEffects'
+import { registerDnd5eRulesPlugin } from './pluginApi'
+import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 
 function fighter(): Character {
   const base: Character = {
@@ -48,6 +51,26 @@ function fixture(targetX = 75) {
 }
 
 describe('D&D 5e equipment attack authority', () => {
+  it.each(['minotaur', 'berserker'])('rolls both player attack dice against an opted-in %s until its next turn', (slug) => {
+    const input = fixture()
+    input.targetToken.poolId = `srd-5.1:${slug}`
+    input.targetToken.hp = 76
+    input.targetToken.maxHp = 76
+    input.targetToken.dnd5eCombatState = { recklessAttackTurnKey: 'combat:1:enemy-token' }
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('advantage')
+    expect(prepared.prepared.attackModeResolution?.advantageReasons).toContain('目标的鲁莽攻击仍在持续')
+    expect(previewDnd5eEquipmentAttack(prepared.prepared, 1, 19)).toMatchObject({ roll: { d20: 19 }, hit: true })
+    const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: prepared.prepared, d20: 1, d20Second: 19, damageRolls: [5] })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', hit: true, d20: 19 }))
+    input.targetToken.dnd5eCombatState.recklessAttackTurnKey = undefined
+    const expired = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(expired.ok && expired.prepared.attackMode).toBe('normal')
+  })
+
   it('validates range and resolves equipment damage through the 5e headless engine', () => {
     const input = fixture()
     const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
@@ -58,6 +81,323 @@ describe('D&D 5e equipment attack authority', () => {
     const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: prepared.prepared, d20: 15, damageRolls: [5] })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(12)
+  })
+
+  it('lets an environmental capability suppress the player equipment underwater attack penalty', () => {
+    const input = fixture()
+    setMapGeometryRuntime([{
+      mapId: input.map.id,
+      walls: [],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'bright',
+      },
+      environment: 'underwater',
+      updatedAt: 1,
+    }])
+    try {
+      const penalized = prepareDnd5eEquipmentAttack({
+        ...input,
+        characters: [input.actor],
+        attacksUsed: 0,
+      })
+      expect(penalized.ok).toBe(true)
+      if (!penalized.ok) return
+      expect(penalized.prepared.attackModeResolution?.disadvantageReasons)
+        .toContain('水下武器攻击限制')
+
+      input.actor.dnd5eCombatState = {
+        schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+        activeEffects: [createDnd5eMechanicalEffect({
+          id: 'freedom-of-movement',
+          definitionId: 'srd-5.1:spell:freedom-of-movement',
+          label: '行动自如',
+          targetId: input.actor.id,
+          source: { kind: 'spell', actorId: input.actor.id, rulesId: 'freedom-of-movement' },
+          modifiers: {
+            environmentalCapabilities: { ignoreUnderwaterAttackPenalty: true },
+          },
+        })],
+      }
+      const protectedAttack = prepareDnd5eEquipmentAttack({
+        ...input,
+        characters: [input.actor],
+        attacksUsed: 0,
+      })
+      expect(protectedAttack.ok).toBe(true)
+      if (!protectedAttack.ok) return
+      expect(protectedAttack.prepared.attackModeResolution?.disadvantageReasons)
+        .not.toContain('水下武器攻击限制')
+    } finally {
+      setMapGeometryRuntime([])
+    }
+  })
+
+  it('accepts one Haste weapon attack after the ordinary action is spent', () => {
+    const input = fixture()
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activeEffects: [createDnd5eMechanicalEffect({
+        id: 'haste-effect',
+        definitionId: 'srd-5.1:spell:haste',
+        label: '加速术',
+        targetId: input.actor.id,
+        source: { kind: 'spell', actorId: input.actor.id, rulesId: 'haste' },
+        modifiers: {
+          restrictedExtraAction: {
+            allowedActions: ['weapon-attack', 'dash', 'disengage', 'hide', 'use-object'],
+            maximumWeaponAttacks: 1,
+          },
+        },
+      })],
+    }
+    const economy = createDnd5eTurnEconomyCounts('combat:1:fighter-token', 30)
+    economy.action.current = 0
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+      turnEconomy: economy,
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eEquipmentAttack({
+      prepared: prepared.prepared,
+      d20: 15,
+      damageRolls: [5],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.state.combatants['fighter-token'].classState.restrictedExtraActionUsesByEffect)
+      .toEqual({ 'haste-effect': 'combat:1:fighter-token' })
+  })
+
+  it('cancels mutual heavy-obscuration advantage and disadvantage with explicit reasons', () => {
+    const input = fixture()
+    input.map.dnd5ePluginAreas = [{
+      id: 'fog-cloud',
+      pluginId: 'srd-5.1',
+      featureId: 'spell:fog-cloud',
+      sourceKind: 'core-spell',
+      coreSpellId: 'fog-cloud',
+      label: '云雾术',
+      color: '#94a3b8',
+      sourceCharacterId: input.actor.id,
+      sourceTokenId: input.actorToken.id,
+      cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }],
+      anchorCell: { col: 0, row: 0 },
+      createdRound: 1,
+      expiresAfterRound: 600,
+      obscuration: { kind: 'heavy' },
+    }]
+    setMapGeometryRuntime([{
+      mapId: input.map.id,
+      walls: [],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+    try {
+      const prepared = prepareDnd5eEquipmentAttack({
+        ...input,
+        characters: [input.actor],
+        attacksUsed: 0,
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.attackMode).toBe('normal')
+      expect(prepared.prepared.attackModeResolution).toMatchObject({
+        advantageReasons: expect.arrayContaining(['目标看不见攻击者']),
+        disadvantageReasons: expect.arrayContaining(['攻击者看不见目标']),
+      })
+    } finally {
+      setMapGeometryRuntime([])
+    }
+  })
+
+  it('reports restrained as the attack disadvantage source instead of unseen target', () => {
+    const input = fixture()
+    const restrained = createDnd5eConditionEffect({
+      condition: 'restrained',
+      targetId: input.actorToken.id,
+      source: { kind: 'dm' },
+    })
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activeEffects: [restrained],
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('disadvantage')
+    expect(prepared.prepared.attackModeResolution?.disadvantageReasons).toContain(
+      '攻击者处于束缚状态',
+    )
+    expect(prepared.prepared.attackModeResolution?.disadvantageReasons).not.toContain(
+      '攻击者看不见目标',
+    )
+  })
+
+  it('grants advantage and doubles the damage pool against an unconscious target within 5 feet', () => {
+    const input = fixture()
+    const unconscious = createDnd5eConditionEffect({
+      condition: 'unconscious',
+      targetId: input.targetToken.id,
+      source: { kind: 'dm' },
+    })
+    input.targetToken.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      conditions: ['unconscious'],
+      activeEffects: [unconscious],
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    expect(prepared.prepared.attackMode).toBe('advantage')
+    expect(dnd5ePreparedEquipmentAttackIsAutomaticCritical(prepared.prepared)).toBe(true)
+    expect(previewDnd5eEquipmentAttack(prepared.prepared, 12, 4)).toMatchObject({
+      hit: true,
+      critical: true,
+      roll: { d20: 12, mode: 'advantage' },
+    })
+
+    const resolved = resolvePreparedDnd5eEquipmentAttack({
+      prepared: prepared.prepared,
+      d20: 12,
+      d20Second: 4,
+      damageRolls: [3, 5],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      critical: true,
+    }))
+    expect(resolved.application?.map.tokens.find((item) =>
+      item.id === input.targetToken.id)?.hp).toBe(9)
+  })
+
+  it('does not treat a failed roll against an unconscious target as an automatic hit', () => {
+    const input = fixture()
+    const unconscious = createDnd5eConditionEffect({
+      condition: 'unconscious',
+      targetId: input.targetToken.id,
+      source: { kind: 'dm' },
+    })
+    input.targetToken.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      conditions: ['unconscious'],
+      activeEffects: [unconscious],
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    expect(previewDnd5eEquipmentAttack(prepared.prepared, 2, 3)).toMatchObject({
+      hit: false,
+      critical: false,
+    })
+    const resolved = resolvePreparedDnd5eEquipmentAttack({
+      prepared: prepared.prepared,
+      d20: 2,
+      d20Second: 3,
+      damageRolls: [],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      hit: false,
+      critical: false,
+    }))
+  })
+
+  it('resolves an Alter Self natural-weapon attack while the caster is holding an arcane focus', () => {
+    const input = fixture()
+    const naturalWeapon = createDnd5eMechanicalEffect({
+      definitionId: 'adjudicated:alter-self:natural-weapon',
+      label: '变身术·天生武器（魔法爪；1d6挥砍；熟练；攻击与伤害+1）',
+      targetId: input.actor.id,
+      source: { kind: 'spell', actorId: input.actor.id, rulesId: 'alter-self', magical: true },
+      duration: {
+        type: 'concentration', sourceActorId: input.actor.id, concentrationId: 'alter-self', remainingRounds: 600,
+      },
+      tags: ['alter-self', 'alter-self-natural-weapon', 'alter-self-natural-weapon:slashing'],
+    })
+    input.actor.equipment = {
+      mainWeapon: { id: 'dnd5e-arcane-focus', name: '奥术法器', slot: 'mainWeapon' },
+    }
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activeEffects: [naturalWeapon],
+    }
+
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      profile: {
+        weaponName: '变身术·天生武器',
+        attackModifier: 7,
+        damage: { count: 1, sides: 6, bonus: 4, type: 'slashing' },
+      },
+      damageSource: {
+        weaponId: 'srd-5.1:spell:alter-self:natural-weapon',
+        magical: true,
+      },
+    })
+    const resolved = resolvePreparedDnd5eEquipmentAttack({
+      prepared: prepared.prepared,
+      d20: 20,
+      damageRolls: [4, 3],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(9)
+  })
+
+  it('rejects an ordinary ranged projectile that crosses Wind Wall', () => {
+    const input = fixture(225)
+    input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    input.map = {
+      ...input.map,
+      dnd5ePluginAreas: [{
+        id: 'wind-wall', sourceKind: 'core-spell', coreSpellId: 'wind-wall',
+        pluginId: 'srd-5.1', featureId: 'spell:wind-wall', color: '#ffffff',
+        label: '风墙术', sourceCharacterId: 'druid', sourceTokenId: 'druid-token',
+        slotLevel: 3, sourceSpellSaveDc: 15, createdRound: 1, expiresAfterRound: 11,
+        anchorMode: 'fixed', cells: [{ col: 2, row: 0 }],
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 15 },
+        blocking: { movement: true, movementMode: 'boundary' },
+      }],
+    }
+    expect(prepareDnd5eEquipmentAttack({
+      ...input, characters: [input.actor], attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'projectile-blocked-by-wind-wall' })
   })
 
   it('uses a versatile weapon one-handed and rejects a true two-handed weapon while maintaining a grapple', () => {
@@ -276,6 +616,120 @@ describe('D&D 5e equipment attack authority', () => {
     expect(actionSurgeShot.prepared).toMatchObject({ attacksAllowed: 2, spendsAction: true })
   })
 
+  it('derives Loading-property bypass from an equipped character feat snapshot', () => {
+    const pluginId = 'local.test.crossbow-expert-loading'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId,
+        name: 'Crossbow Expert loading test',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Tests',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeat({
+          id: 'crossbow-expert',
+          name: 'Crossbow Expert',
+          summary: 'Synthetic loading-property test feat.',
+          description: 'Synthetic loading-property test feat.',
+          automation: 'full',
+          staticModifiers: { ignoreLoadingWeaponProperty: true },
+        })
+      },
+    })
+    try {
+      const input = fixture(125)
+      input.actor.equipment = { mainWeapon: DND5E_LIGHT_CROSSBOW }
+      input.actor.dnd5eFeatIds = [`${pluginId}:crossbow-expert`]
+      input.actor = applyDnd5eInventoryMutation([input.actor], {
+        type: 'grant',
+        characterId: input.actor.id,
+        templateId: 'srd-5.1:item:crossbow-bolts',
+        quantity: 20,
+      }).characters[0]
+
+      const secondShot = prepareDnd5eEquipmentAttack({
+        ...input,
+        characters: [input.actor],
+        attacksUsed: 1,
+        attackActionsAvailable: 1,
+      })
+      expect(secondShot.ok).toBe(true)
+      if (!secondShot.ok) return
+      expect(secondShot.prepared).toMatchObject({
+        attacksAllowed: 2,
+        attackNumber: 2,
+        spendsAction: false,
+      })
+    } finally {
+      dispose()
+    }
+  })
+
+  it('rebuilds and consumes an Activity-granted off-hand hand-crossbow attack without two-weapon penalties', () => {
+    const input = fixture(125)
+    const offHandCrossbow = {
+      ...structuredClone(DND5E_HAND_CROSSBOW),
+      slot: 'offHand' as const,
+      allowedSlots: ['mainWeapon', 'offHand'] as const,
+    }
+    input.actor.equipment = { mainWeapon: DND5E_SHORTSWORD, offHand: offHandCrossbow }
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activityWeaponAttackGrants: {
+        'crossbow-expert-follow-up': {
+          schemaVersion: 1,
+          grantId: 'crossbow-expert-follow-up',
+          label: '弩术专家 · 手弩攻击',
+          sourceActivityId: 'crossbow-expert-follow-up-activity',
+          appliedTurnKey: 'combat:1:fighter-token',
+          economy: 'bonus-action',
+          weaponModes: ['ranged'],
+          weaponIds: ['dnd5e-hand-crossbow'],
+          weaponSlots: ['off-hand'],
+        },
+      },
+    }
+    input.actor = applyDnd5eInventoryMutation([input.actor], {
+      type: 'grant', characterId: input.actor.id,
+      templateId: 'srd-5.1:item:crossbow-bolts', quantity: 20,
+    }).characters[0]
+    input.action.dnd5eWeaponAttackOptions = {
+      activityWeaponAttackGrantId: 'crossbow-expert-follow-up',
+      activityWeaponAttackWeaponSlot: 'off-hand',
+    }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 1,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn'),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      spendsAction: false,
+      spendsBonusAction: true,
+      countsTowardAttackAction: false,
+      profile: {
+        weaponId: 'dnd5e-hand-crossbow',
+        baseWeaponId: 'dnd5e-hand-crossbow',
+        handsUsed: 1,
+        damage: { sides: 6, bonus: 1 },
+      },
+    })
+    const resolved = resolvePreparedDnd5eEquipmentAttack({
+      prepared: prepared.prepared,
+      d20: 15,
+      damageRolls: [4],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants['fighter-token'].turn.bonusActionAvailable).toBe(false)
+    expect(resolved.result.state.combatants['fighter-token'].classState.activityWeaponAttackGrants).toBeUndefined()
+  })
+
   it('grants half cover from an intervening creature and accepts a DM-only one-attack override', () => {
     const input = fixture(225)
     input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
@@ -385,6 +839,7 @@ describe('D&D 5e equipment attack authority', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared.attackMode).toBe('disadvantage')
+    expect(prepared.prepared.attackModeResolution?.disadvantageReasons).toContain('远程攻击者 5 尺内有敌人')
   })
 
   it('prepares the second d20 required when Blur imposes attack disadvantage', () => {

@@ -3,6 +3,7 @@ import {
   canBonusDieChangeFailure,
   DND5E_CORE_INSPIRATION_RESOURCE_KEY,
   dnd5eCoreInspirationChoiceRerollOption,
+  shouldOfferDnd5ePlayerD20ChoiceReroll,
   shouldOpenD20RollConfirmation,
 } from './d20InterruptPolicy'
 
@@ -31,6 +32,11 @@ describe('d20 interrupt policy', () => {
       outcome: 'failure',
       eligibleEnemyModifiers,
     })).toBe(false)
+    expect(shouldOpenD20RollConfirmation({
+      visibility: 'public',
+      outcome: 'failure',
+      eligibleEnemyModifiers: [{ ...eligibleEnemyModifiers[0], replacementValues: [17] }],
+    })).toBe(true)
   })
 
   it('keeps DM-only d20 rolls editable in every settlement mode', () => {
@@ -67,6 +73,8 @@ describe('d20 interrupt policy', () => {
       modifierKind: 'choice-reroll',
       sourceTokenId: 'hero-token',
       rerollScope: 'self-roll',
+      additionalDice: 1,
+      selectionPolicy: 'highest',
       resourceCosts: [{ resourceKey: DND5E_CORE_INSPIRATION_RESOURCE_KEY, amount: 1 }],
       decisionRequired: true,
     })
@@ -74,6 +82,41 @@ describe('d20 interrupt policy', () => {
       id: 'hero',
       inspiration: 0,
     })).toBeUndefined()
+    expect(dnd5eCoreInspirationChoiceRerollOption({
+      id: 'hero',
+      inspiration: 2,
+    }, 'hero-token', 'advantage')).toBeUndefined()
+    expect(dnd5eCoreInspirationChoiceRerollOption({
+      id: 'hero',
+      inspiration: 2,
+    }, 'hero-token', 'disadvantage')).toBeUndefined()
+  })
+
+  it('routes every identified player attack and save d20 into the shared choice bridge', () => {
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 1, sides: 20, rollKind: 'attack', rollMode: 'normal', rollerSide: 'player',
+    })).toBe(true)
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 1, sides: 20, rollKind: 'saving-throw', rollMode: 'normal', rollerSide: 'player',
+    })).toBe(true)
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 1, sides: 20, rollKind: 'ability-check', rollMode: 'normal', rollerSide: 'player',
+    })).toBe(true)
+  })
+
+  it('does not add an Inspiration die to monsters, damage pools, or an existing roll mode', () => {
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 1, sides: 20, rollKind: 'attack', rollMode: 'normal', rollerSide: 'enemy',
+    })).toBe(false)
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 1, sides: 20, rollerSide: 'player',
+    })).toBe(false)
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 2, sides: 20, rollKind: 'saving-throw', rollMode: 'advantage', rollerSide: 'player',
+    })).toBe(false)
+    expect(shouldOfferDnd5ePlayerD20ChoiceReroll({
+      count: 2, sides: 20, rollKind: 'saving-throw', rollMode: 'disadvantage', rollerSide: 'player',
+    })).toBe(false)
   })
 
   it('offers a bonus die only when the failed result can still reach the target', () => {

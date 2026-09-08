@@ -15,6 +15,8 @@ interface DiceBoxRollOverlayProps {
   values?: number[]
   requestId?: string
   flyIndex?: number
+  settledHoldMs?: number
+  layout?: 'center' | 'left-drawer'
   showHud?: boolean
   onComplete: (values: number[]) => void
 }
@@ -32,6 +34,8 @@ export default function DiceBoxRollOverlay({
   values: forcedValues,
   requestId: forcedRequestId,
   flyIndex,
+  settledHoldMs = 0,
+  layout = 'center',
   showHud: _showHud = false,
   onComplete,
 }: DiceBoxRollOverlayProps) {
@@ -82,7 +86,15 @@ export default function DiceBoxRollOverlay({
           ? forcedValues.slice(0, safeCount).map((value) => Math.max(1, Math.min(safeSides, Math.round(Number(value)))))
           : rolled.length > 0 ? rolled.slice(0, safeCount) : fallbackValues(safeCount, safeSides)
       log('finish', { finalValues })
-      const delay = Math.max(0, MIN_VISIBLE_ROLL_MS - (Date.now() - startedAt))
+      // The iframe posts its result only after arrangeSettledDice() has centered
+      // and leveled every die. Secret rolls keep that settled frame visible for
+      // a beat before their confirmation drawer is allowed to open.
+      const delay = Math.max(
+        0,
+        MIN_VISIBLE_ROLL_MS - (Date.now() - startedAt),
+        DICE_TIMING.ROLL_SETTLED_HOLD_MS,
+        Math.max(0, settledHoldMs),
+      )
       window.setTimeout(() => {
         onCompleteRef.current(finalValues)
       }, delay)
@@ -132,16 +144,16 @@ export default function DiceBoxRollOverlay({
       window.clearTimeout(fallback)
       window.removeEventListener('message', handleMessage)
     }
-  }, [count, forcedValues, requestId, sides])
+  }, [count, forcedValues, requestId, settledHoldMs, sides])
 
   return (
-    <DiceOverlayPortal>
+    <DiceOverlayPortal layer={layout === 'left-drawer' ? 'dice' : 'foreground'}>
       <div className="absolute inset-0">
         <iframe
           ref={iframeRef}
           title={`${sides}-sided dice roller`}
           src={`/dice-box-frame.html?badge=0&sides=${iframeSides}&qty=${safeCountForFrame}`}
-          className={`dice-box-damage-frame dice-box-roll-flight ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
+          className={`dice-box-damage-frame ${layout === 'left-drawer' ? 'dice-box-frame--left-drawer' : 'dice-box-roll-flight'} ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
           style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />

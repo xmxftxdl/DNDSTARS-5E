@@ -1,0 +1,88 @@
+{
+  "id": "srd-5.1:giant-poisonous-snake",
+  "slug": "giant-poisonous-snake",
+  "name": "巨型毒蛇",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 129,
+      "slug": "giant-poisonous-snake",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:20:16.546Z",
+      "name": "巨型毒蛇",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-poisonous-snake-bite-1788560416625",
+      "combatId": "verify-ui-giant-poisonous-snake-bite-1788560416625:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨型毒蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+6=19 命中；共造成 10 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:21 PM\n结算\n\n巨型毒蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+6=19 命中；共造成 10 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +6。\n结果 · 19 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d4 骰面：1 = 1｜固定加值 +4｜小计 5\n巨型毒蛇｜消耗动作\n验证目标｜体质豁免 d20 5 +10 = 15 vs DC 11｜成功\n验证目标｜受到 10 点伤害｜HP 320 → 310",
+      "playerLog": "巨型毒蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+6=19 命中；共造成 10 点伤害。",
+      "afterHp": 310,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:21:20.570Z",
+      "evidenceFile": "ui-cases/monsters/129-giant-poisonous-snake.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

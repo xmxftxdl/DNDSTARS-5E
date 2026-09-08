@@ -1,0 +1,318 @@
+{
+  "id": "srd-5.1:erinyes",
+  "slug": "erinyes",
+  "name": "欲魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longbow",
+      "name": "长弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "longbow-poisoned:apply",
+        "longbow-poisoned:save",
+        "longbow-poisoned:condition-immune"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword-two-handed",
+      "name": "长剑（双手）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-two-longswords-and-longbow",
+      "name": "多重攻击：长剑 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-longsword-and-two-longbows",
+      "name": "多重攻击：长剑 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-longbow",
+      "name": "多重攻击：长弓 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "parry",
+      "name": "招架",
+      "automation": "headless",
+      "rule": "parry",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.armorClassBonus",
+        "rule.requiresSight",
+        "rule.requiresWieldedMeleeWeapon"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster Parry in Headless combat applies the exact +4 AC reaction for 'erinyes'"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 41,
+      "slug": "erinyes",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:05:54.588Z",
+      "name": "欲魔",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "12",
+      "total": 334,
+      "mapId": "verify-ui-erinyes-longsword-1788566754648",
+      "combatId": "verify-ui-erinyes-longsword-1788566754648:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "欲魔 使用长剑攻击 验证目标：长剑 → 验证目标 3+8=11 命中；共造成 24 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:06 PM\n结算\n\n欲魔 使用长剑攻击 验证目标：长剑 → 验证目标 3+8=11 命中；共造成 24 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 3；最终采用 3；调整值 +8。\n结果 · 11 vs AC 10：命中。\n伤害骰 · 长剑（基础伤害 1·挥砍）｜1d8 骰面：8 = 8｜固定加值 +4｜小计 12\n伤害骰 · 长剑（基础伤害 2·毒素）｜3d8 骰面：6 + 2 + 4 = 12｜固定加值 +0｜小计 12\n欲魔｜消耗动作\n验证目标｜受到 24 点伤害｜HP 320 → 296",
+      "playerLog": "欲魔 使用长剑攻击 验证目标：长剑 → 验证目标 3+8=11 命中；共造成 24 点伤害。",
+      "afterHp": 296,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:06:22.057Z",
+      "evidenceFile": "ui-cases/monsters/041-erinyes.json"
+    },
+    {
+      "index": 97,
+      "slug": "erinyes",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:03:46.058Z",
+      "name": "欲魔",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-erinyes-longsword-1788559426101",
+      "combatId": "verify-ui-erinyes-longsword-1788559426101:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "failed",
+      "error": "Error: Timeout 5000ms exceeded while waiting on the predicate",
+      "finishedAt": "2026-09-04T22:03:58.372Z",
+      "evidenceFile": "ui-cases/monsters/097-erinyes.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "地狱武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 21,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

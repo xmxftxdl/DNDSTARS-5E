@@ -184,8 +184,21 @@ test('DM can click the current manually controlled monster and move it through H
   await expect(controlDock).toBeVisible({ timeout: 20_000 })
   await controlDock.locator('button').first().click()
   await expect(dm.getByTestId('manual-monster-movement-status')).toBeVisible({ timeout: 20_000 })
-  await controlDock.locator('button').first().click()
-  await clickMapPoint(dm, { x: 325, y: 325 })
+  const rollModeGroup = dm.getByRole('group', { name: '本次攻击命中掷骰模式' }).first()
+  await expect(rollModeGroup).toBeVisible()
+  await expect(rollModeGroup.getByRole('button', { name: '正常', exact: true }))
+    .toHaveAttribute('aria-pressed', 'true')
+  await rollModeGroup.getByRole('button', { name: '优势', exact: true }).click()
+  await expect(rollModeGroup.getByRole('button', { name: '优势', exact: true }))
+    .toHaveAttribute('aria-pressed', 'true')
+  await expect(controlDock.getByRole('button', { name: /选择目标.*优势/ }).first()).toBeVisible()
+  const moveButton = dm.getByTestId('manual-monster-move-move')
+  // Restored/new combats may still be committing the monster's first
+  // begin-turn boundary. Movement must stay disabled until that authority
+  // transaction is ready instead of opening a landing selector that is later
+  // rejected as stale.
+  await expect(moveButton).toBeEnabled({ timeout: 20_000 })
+  await moveButton.click()
   await expect(dm.getByTestId('manual-monster-move-targeting')).toBeVisible({ timeout: 10_000 })
 
   await clickMapPoint(dm, { x: 375, y: 325 })
@@ -242,6 +255,53 @@ test('DM can click the current manually controlled monster and move it through H
     }
     return state.dnd5eTurnEconomyByToken?.[monsterTokenId]?.movement?.current ?? null
   }, { timeout: 20_000 }).toBe(25)
+
+  await controlDock.locator('button').first().click()
+  const standingJumpButton = dm.getByTestId('manual-monster-move-standing-jump')
+  await expect(standingJumpButton).toBeEnabled({ timeout: 10_000 })
+  await expect(standingJumpButton).toHaveAttribute(
+    'title',
+    '无需助跑，最多跳 9 尺',
+  )
+  await standingJumpButton.click()
+  await expect(dm.getByTestId('manual-monster-move-targeting'))
+    .toContainText('剩余 9 尺')
+
+  await clickMapPoint(dm, { x: 425, y: 325 })
+  await expect(dm.getByTestId('manual-monster-move-targeting')).toBeHidden({ timeout: 10_000 })
+
+  await expect.poll(async () => {
+    const response = await request.get(`${DM}/api/state/maps?room=${room.roomId}`, {
+      headers: {
+        'X-Stars-Member': room.member.memberId,
+        'X-Stars-Room-Token': room.member.roomToken,
+      },
+    })
+    if (!response.ok()) return null
+    const state = await response.json() as {
+      maps?: Array<{
+        id: string
+        tokens: Array<{ id: string; x: number; y: number }>
+      }>
+    }
+    return state.maps
+      ?.find((map) => map.id === mapId)
+      ?.tokens.find((token) => token.id === monsterTokenId) ?? null
+  }, { timeout: 20_000 }).toMatchObject({ x: 425, y: 325 })
+
+  await expect.poll(async () => {
+    const response = await request.get(`${DM}/api/state/combat?room=${room.roomId}`, {
+      headers: {
+        'X-Stars-Member': room.member.memberId,
+        'X-Stars-Room-Token': room.member.roomToken,
+      },
+    })
+    if (!response.ok()) return null
+    const state = await response.json() as {
+      dnd5eTurnEconomyByToken?: Record<string, { movement?: { current?: number } }>
+    }
+    return state.dnd5eTurnEconomyByToken?.[monsterTokenId]?.movement?.current ?? null
+  }, { timeout: 20_000 }).toBe(20)
 
   await context.close()
 })

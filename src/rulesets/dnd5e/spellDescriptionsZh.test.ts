@@ -62,4 +62,20 @@ describe('release-cleared Chinese SRD 5.1 spell descriptions', () => {
     )
     expect(residual).toEqual([])
   })
+
+  it('将怪影杀手的重复豁免与伤害定位在目标回合结束', () => {
+    const description = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED.weird?.description ?? ''
+
+    expect(description).toContain('在每个受惊生物的回合结束时')
+    expect(description).not.toContain('在每个受惊生物的回合开始时')
+  })
+
+  it('正确描述高等幻影的移动范围和高环效果', () => {
+    const majorImage = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED['major-image']
+
+    expect(majorImage?.description).toContain('当你在此幻术的施法距离内时')
+    expect(majorImage?.description).not.toContain('只要你位于幻象射程内')
+    expect(majorImage?.higherLevels).toContain('使用 6 环或更高环法术位')
+    expect(majorImage?.higherLevels).toContain('且不需要专注')
+  })
 })

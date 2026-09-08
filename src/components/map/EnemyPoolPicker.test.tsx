@@ -30,5 +30,7 @@ describe('EnemyPoolPicker room monster integration', () => {
     expect(markup).toContain('房间怪物工坊')
     expect(markup).toContain('作为玩家友方添加')
     expect(markup).toContain('敌对怪物会将它视为敌人')
+    expect((markup.match(/data-enemy-pool-entry=/g) ?? []).length).toBe(40)
+    expect(markup).toContain('继续显示')
   })
 })

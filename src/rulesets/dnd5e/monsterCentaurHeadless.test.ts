@@ -108,42 +108,35 @@ describe('Centaur Headless action alternatives', () => {
     {
       clickedActionId: 'pike',
       targetX: 10,
-      parentActionId: 'multiattack',
-      expectedAttackIds: ['pike', 'hooves'],
+      expectedAttackIds: ['pike'],
       rolls: [
         { d20: 10, damageRolls: [[5]] },
-        { d20: 10, damageRolls: [[3, 4]] },
       ],
-      expectedRemainingHp: 80,
+      expectedRemainingHp: 91,
     },
     {
       clickedActionId: 'hooves',
       targetX: 10,
-      parentActionId: 'multiattack',
-      expectedAttackIds: ['pike', 'hooves'],
+      expectedAttackIds: ['hooves'],
       rolls: [
-        { d20: 10, damageRolls: [[5]] },
         { d20: 10, damageRolls: [[3, 4]] },
       ],
-      expectedRemainingHp: 80,
+      expectedRemainingHp: 89,
     },
     {
       clickedActionId: 'longbow',
       targetX: 60,
-      parentActionId: 'multiattack-longbow',
-      expectedAttackIds: ['longbow', 'longbow'],
+      expectedAttackIds: ['longbow'],
       rolls: [
         { d20: 10, damageRolls: [[4]] },
-        { d20: 10, damageRolls: [[4]] },
       ],
-      expectedRemainingHp: 88,
+      expectedRemainingHp: 94,
     },
   ])(
-    'upgrades a Host click on $clickedActionId to $parentActionId and resolves it atomically',
+    'preserves the explicitly selected $clickedActionId instead of spending a multiattack',
     ({
       clickedActionId,
       targetX,
-      parentActionId,
       expectedAttackIds,
       rolls,
       expectedRemainingHp,
@@ -183,8 +176,8 @@ describe('Centaur Headless action alternatives', () => {
       expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
       if (!prepared.ok) return
       expect(prepared.prepared.action).toMatchObject({
-        id: parentActionId,
-        kind: 'multiattack',
+        id: clickedActionId,
+        kind: 'weapon-attack',
         automation: 'headless',
       })
       expect(prepared.prepared.attacks.map((attack) => attack.id)).toEqual(expectedAttackIds)
@@ -197,7 +190,7 @@ describe('Centaur Headless action alternatives', () => {
       expect(resolved.result.events.filter((event) =>
         event.type === 'attack-resolved' &&
         event.actorId === actor.id &&
-        event.targetId === target.id)).toHaveLength(2)
+        event.targetId === target.id)).toHaveLength(1)
       expect(resolved.application?.characters[0]?.currentHp).toBe(expectedRemainingHp)
     },
   )

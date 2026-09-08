@@ -2,9 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   createDnd5eCombatant,
   dnd5eCombatantPairKey,
+  dnd5eEffectiveSpeed,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
 } from './headlessCombatEngine'
+import {
+  createDnd5eMechanicalEffect,
+  dnd5eActiveAutomaticEscapePlan,
+  dnd5eConditionsAfterAutomaticEscape,
+} from './activeEffects'
 import { getDnd5eSrdMonsterBySlug } from './monsters'
 
 const abilities = {
@@ -40,6 +46,77 @@ function combatant(
 }
 
 describe('source-linked automatic-hit attacks', () => {
+  it('keeps a mundane constrict relation on a target protected by Freedom of Movement', () => {
+    const monster = getDnd5eSrdMonsterBySlug('giant-constrictor-snake')!
+    const source = combatant('source', 20, {
+      controller: 'dm',
+      statBlockId: monster.id,
+      abilities: monster.abilities,
+      armorClass: monster.armorClass.value,
+      currentHp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+      sizeRank: 4,
+    })
+    const freedom = createDnd5eMechanicalEffect({
+      definitionId: 'activity:freedom-of-movement',
+      label: 'Freedom of Movement',
+      source: { kind: 'spell', actorId: 'target', magical: true },
+      targetId: 'target',
+      modifiers: {
+        conditionImmunitiesBySourceMagic: [{
+          conditions: ['paralyzed', 'restrained'],
+          sourceMagical: true,
+          suppressExisting: true,
+        }],
+        automaticEscape: {
+          conditions: ['grappled', 'restrained'],
+          movementCostFeet: 5,
+          sourceMagical: false,
+        },
+      },
+    })
+    const target = combatant('target', 10, {
+      armorClass: 10,
+      sizeRank: 2,
+      position: { x: 5, y: 0 },
+      classState: { activeEffects: [freedom] },
+    })
+    const state = startDnd5eHeadlessCombat(
+      'freedom-of-movement:mundane-constrict',
+      [source, target],
+    )
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(source.id, target.id)]: 5,
+    }
+
+    const linked = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: source.id,
+      actionId: 'constrict',
+      rolls: [{
+        targetId: target.id,
+        d20: 20,
+        damageRolls: [[1, 1, 1, 1]],
+        onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+      }],
+    })
+    expect(linked.ok, linked.ok ? undefined : linked.reason).toBe(true)
+    if (!linked.ok) return
+    expect(linked.state.combatants[target.id].conditions).toEqual(
+      expect.arrayContaining(['grappled', 'restrained']),
+    )
+    const restrainedTarget = linked.state.combatants[target.id]
+    expect(dnd5eActiveAutomaticEscapePlan(restrainedTarget.classState.activeEffects)).toMatchObject({
+      conditions: expect.arrayContaining(['grappled', 'restrained']),
+      movementCostFeet: 5,
+    })
+    expect(dnd5eConditionsAfterAutomaticEscape(
+      restrainedTarget.classState.activeEffects,
+      restrainedTarget.conditions,
+    )).not.toEqual(expect.arrayContaining(['grappled', 'restrained']))
+    expect(dnd5eEffectiveSpeed(restrainedTarget)).toBe(30)
+  })
+
   it.each([
     {
       slug: 'marilith',

@@ -82,6 +82,7 @@ export interface SharedOpportunityAttackPromptView {
   attackerChar: Character
   targetName: string
   trigger?: CombatInterruptByKind<'opportunity-attack'>['payload']['trigger']
+  featureName?: string
   expiresAt?: number
 }
 
@@ -106,6 +107,7 @@ export interface SharedDeflectMissilesPromptView {
 export interface SharedProtectionPromptView {
   id: string
   protectorChar: Character
+  featureName?: string
   attackerName: string
   targetName: string
   attackName: string
@@ -130,6 +132,7 @@ export interface SharedCounterspellPromptView {
   spellName: string
   spellLevel: number
   counterspellSlotLevel: number
+  counterspellSlotLevels: number[]
   abilityCheckDc?: number
   expiresAt?: number
 }
@@ -482,6 +485,7 @@ export function buildCombatInterruptPromptViews(
           attackerChar: opportunityAttack.character,
           targetName: opportunityAttack.interrupt.payload.targetName,
           trigger: opportunityAttack.interrupt.payload.trigger,
+          featureName: opportunityAttack.interrupt.payload.featureName,
           expiresAt: opportunityAttack.interrupt.expiresAt,
         }
       : undefined,
@@ -489,6 +493,7 @@ export function buildCombatInterruptPromptViews(
       ? {
           id: protection.interrupt.id,
           protectorChar: protection.character,
+          featureName: protection.interrupt.payload.featureName,
           attackerName: protection.interrupt.payload.attackerName,
           targetName: protection.interrupt.payload.targetName,
           attackName: protection.interrupt.payload.attackName,
@@ -515,6 +520,9 @@ export function buildCombatInterruptPromptViews(
           spellName: counterspell.interrupt.payload.spellName,
           spellLevel: counterspell.interrupt.payload.spellLevel,
           counterspellSlotLevel: counterspell.interrupt.payload.counterspellSlotLevel,
+          counterspellSlotLevels: counterspell.interrupt.payload.counterspellSlotLevels ?? [
+            counterspell.interrupt.payload.counterspellSlotLevel,
+          ],
           abilityCheckDc: counterspell.interrupt.payload.abilityCheckDc,
           expiresAt: counterspell.interrupt.expiresAt,
         }

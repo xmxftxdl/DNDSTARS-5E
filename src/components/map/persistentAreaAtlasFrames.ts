@@ -1,5 +1,13 @@
 const STABLE_PERSISTENT_ATLAS_PRESETS = new Set([
   'cloudkill',
+  'stinking-cloud',
+  'fog-cloud',
+  'sleet-storm',
+  'wind-wall',
+  'wall-of-force',
+  'wall-of-stone',
+  'wall-of-ice',
+  'wall-of-thorns',
   'darkness',
   'daylight',
   'entangle',

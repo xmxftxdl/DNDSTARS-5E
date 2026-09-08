@@ -1,7 +1,10 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { SharedSavingThrowRerollPromptView } from '../../lib/combatInterruptPrompts'
+import type {
+  SharedCounterspellPromptView,
+  SharedSavingThrowRerollPromptView,
+} from '../../lib/combatInterruptPrompts'
 import type { Character } from '../../types/character'
 import ReactionInterruptPanels from './ReactionInterruptPanels'
 
@@ -48,5 +51,22 @@ describe('战斗反应中断面板', () => {
     expect(html).toContain('豁免结果 8 未达到 DC 12')
     expect(html).toContain('使用不屈')
     expect(html).toContain('4s')
+  })
+
+  it('法术反制允许玩家在基础与升环法术位之间选择', () => {
+    const counterspellPrompt: SharedCounterspellPromptView = {
+      id: 'counterspell',
+      expiresAt: 5_000,
+      reactorChar: { name: '法师' } as Character,
+      casterName: '大法师',
+      spellName: '放逐术',
+      spellLevel: 4,
+      counterspellSlotLevel: 3,
+      counterspellSlotLevels: [3, 4],
+    }
+    const html = render({ counterspellPrompt })
+    expect(html).toContain('以 3 环施放（DC 14）')
+    expect(html).toContain('以 4 环施放（自动反制）')
+    expect(html).toContain('shared-counterspell-use-4')
   })
 })

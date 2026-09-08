@@ -31,6 +31,39 @@ describe('MapDiceRoller', () => {
 
     expect(html).toContain('data-testid="map-dice-roller-toggle"')
     expect(html).toContain('aria-label="自由掷骰"')
+    expect(html).toContain('z-[120]')
     expect(html).not.toContain('data-testid="map-dice-roller-panel"')
+  })
+
+  it('可以作为骰盘内部设置渲染，而不再创建第二个地图浮层入口', () => {
+    const html = renderToStaticMarkup(createElement(MapDiceRoller, {
+      embedded: true,
+      isDm: true,
+      character,
+      canCheck: true,
+      headlessCheck: true,
+      pending: false,
+      turnEconomy: {
+        turnKey: 'combat:1:hero', attacksUsed: 0,
+        action: { current: 1, max: 1 }, bonusAction: { current: 1, max: 1 }, reaction: { current: 1, max: 1 },
+        movement: { current: 30, max: 30 },
+      },
+      onRoll: async () => undefined,
+      onCheck: () => undefined,
+    }))
+
+    expect(html).toContain('data-testid="map-dice-roller-panel"')
+    expect(html).toContain('data-embedded="true"')
+    expect(html).toContain('data-testid="map-dice-roller-topbar"')
+    expect(html.indexOf('data-testid="map-dice-roller-topbar"'))
+      .toBeLessThan(html.indexOf('数量'))
+    expect(html).toContain('data-testid="map-dice-roller-quick-actions"')
+    expect(html).toContain('data-testid="map-dice-roller-quick-roll"')
+    expect(html).toContain('尚未添加骰子')
+    expect(html).toContain('点击添加 d20；右键移除')
+    expect(html).toContain('自由掷骰可见性')
+    expect(html).toContain('战斗投掷对玩家可见')
+    expect(html).toContain('作为属性／技能鉴定')
+    expect(html).not.toContain('data-testid="map-dice-roller-toggle"')
   })
 })

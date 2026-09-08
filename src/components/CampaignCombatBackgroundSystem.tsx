@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { browserSharedRoomService } from '../composition/browserSharedRoomService'
+import { useNavigate } from 'react-router-dom'
 import {
   COMBAT_PLAYBACK_EVENT_MAX_AGE_MS,
   shouldConsumeBackgroundPlayerActionAck,
@@ -16,6 +17,11 @@ import type {
 import type { RoomSession } from '../lib/roomSession'
 import { useCharacterStore } from '../store/characters'
 import { useMapStore } from '../store/maps'
+import {
+  isPlayerDiceRollRequestForClient,
+  rememberPendingPlayerDiceRollRequest,
+} from '../pages/maps/playerDiceRoll'
+import { getAssignedPlayerCharacterId, playerViewCharacters } from '../lib/playerView'
 
 export interface CampaignCombatBackgroundSystemProps {
   session: RoomSession
@@ -32,6 +38,7 @@ export default function CampaignCombatBackgroundSystem({
   session,
   active,
 }: CampaignCombatBackgroundSystemProps) {
+  const navigate = useNavigate()
   const mode: Mode = session.role === 'dm' ? 'dm' : 'player'
   const scope = combatPlaybackScope({
     roomId: session.roomId,
@@ -76,6 +83,30 @@ export default function CampaignCombatBackgroundSystem({
           !active || cancelled || !event?.requestId || event.sourceMode === mode ||
           Date.now() - event.updatedAt > COMBAT_PLAYBACK_EVENT_MAX_AGE_MS
         ) return
+        // Preserve an actionable request before routing its controlling client
+        // to the map. The map then opens the dice tray and returns the result.
+        if (event.delivery === 'player-roll-request') {
+          const assignedCharacterId = session.role === 'player'
+            ? getAssignedPlayerCharacterId(session.slot)
+            : null
+          const controlledCharacterIds = new Set([
+            ...(assignedCharacterId ? [assignedCharacterId] : []),
+            ...playerViewCharacters(useCharacterStore.getState().characters, {
+              slot: session.slot,
+              assignedCharacterId,
+            }).map((character) => character.id),
+          ])
+          if (isPlayerDiceRollRequestForClient({
+            event,
+            mode,
+            spectator: session.role === 'spectator',
+            controlledCharacterIds,
+          })) {
+            rememberPendingPlayerDiceRollRequest(event)
+            navigate(`/campaign/${session.campaignId ?? 'local'}/maps`)
+          }
+          return
+        }
         seenRollRequestIds.add(event.requestId)
       },
     )
@@ -91,7 +122,7 @@ export default function CampaignCombatBackgroundSystem({
       stopRollRequests()
       stopDice()
     }
-  }, [active, mode, scope])
+  }, [active, mode, navigate, scope, session])
 
   useEffect(() => {
     if (!active || mode !== 'player') return

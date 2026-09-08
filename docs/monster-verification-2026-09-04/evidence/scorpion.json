@@ -1,0 +1,89 @@
+{
+  "id": "srd-5.1:scorpion",
+  "slug": "scorpion",
+  "name": "蝎子",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "sting",
+      "name": "螫刺",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 329,
+      "slug": "scorpion",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:17:43.746Z",
+      "name": "蝎子",
+      "actionId": "sting",
+      "actionName": "螫刺",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "0",
+      "total": 334,
+      "mapId": "verify-ui-scorpion-sting-1788571063799",
+      "combatId": "verify-ui-scorpion-sting-1788571063799:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "蝎子 使用螫刺攻击 验证目标：螫刺 → 验证目标 16+2=18 命中；共造成 3 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:18 PM\n结算\n\n蝎子 使用螫刺攻击 验证目标：螫刺 → 验证目标 16+2=18 命中；共造成 3 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：螫刺｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 16；最终采用 16；调整值 +2。\n结果 · 18 vs AC 10：命中。\n蝎子｜消耗动作\n验证目标｜体质豁免 d20 8 +10 = 18 vs DC 9｜成功\n验证目标｜受到 3 点伤害｜HP 320 → 317",
+      "playerLog": "蝎子 使用螫刺攻击 验证目标：螫刺 → 验证目标 16+2=18 命中；共造成 3 点伤害。",
+      "afterHp": 317,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:18:10.399Z",
+      "evidenceFile": "ui-cases/monsters/329-scorpion.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

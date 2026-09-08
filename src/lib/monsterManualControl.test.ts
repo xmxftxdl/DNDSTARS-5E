@@ -2,9 +2,48 @@ import { describe, expect, it } from 'vitest'
 import type { Token } from '../store/maps'
 import {
   buildDnd5eManualMonsterContinuationAttack,
-  dnd5eMonsterAttackExecutionMode,
+  dnd5eManualMonsterActionIndexById,
+  dnd5eManualMonsterActionSelection,
+  dnd5eManualMonsterJumpMaximumFeet,
+  dnd5eManualMonsterMovementTargetingFeet,
   dnd5eManualMonsterMultiattackContinuation,
 } from './monsterManualControl'
+
+const giantScorpion: Token = {
+  id: 'giant-scorpion',
+  label: '巨蝎',
+  x: 0,
+  y: 0,
+  color: '#a855f7',
+  emoji: '🦂',
+  size: 2,
+  type: 'enemy',
+  poolId: 'srd-5.1:giant-scorpion',
+  hp: 52,
+  maxHp: 52,
+}
+
+describe('manual monster action identity', () => {
+  it('maps the clicked stable action id to the canonical SRD index', () => {
+    expect(dnd5eManualMonsterActionIndexById(
+      giantScorpion,
+      'sting',
+      // Reproduces a presentation list index that no longer matches the
+      // canonical [claw, multiattack, sting] order.
+      1,
+    )).toBe(2)
+    expect(dnd5eManualMonsterActionSelection(giantScorpion, 2)?.action.id)
+      .toBe('sting')
+  })
+
+  it('retains the rendered index for legacy actions without stable ids', () => {
+    expect(dnd5eManualMonsterActionIndexById(
+      giantScorpion,
+      undefined,
+      1,
+    )).toBe(1)
+  })
+})
 
 function owlbearWithContinuation(overrides: Partial<Token> = {}): Token {
   return {
@@ -49,24 +88,6 @@ const hero: Token = {
 }
 
 describe('manual monster Multiattack continuation', () => {
-  it('keeps a fresh DM-selected parent action out of the disabled AI loop', () => {
-    expect(dnd5eMonsterAttackExecutionMode({
-      actionKind: 'multiattack',
-      manualControl: true,
-      hasContinuationStep: false,
-    })).toBe('manual-full-multiattack')
-    expect(dnd5eMonsterAttackExecutionMode({
-      actionKind: 'multiattack',
-      manualControl: false,
-      hasContinuationStep: false,
-    })).toBe('automatic-sequential-multiattack')
-    expect(dnd5eMonsterAttackExecutionMode({
-      actionKind: 'weapon-attack',
-      manualControl: true,
-      hasContinuationStep: true,
-    })).toBe('single')
-  })
-
   it('projects the exact next occurrence from the Headless receipt', () => {
     expect(dnd5eManualMonsterMultiattackContinuation(owlbearWithContinuation()))
       .toMatchObject({
@@ -115,5 +136,61 @@ describe('manual monster Multiattack continuation', () => {
       target: hero,
       requested,
     })).toBeUndefined()
+  })
+})
+
+describe('manual staged monster actions', () => {
+  const sphinx = (remaining: number): Token => ({
+    id: 'androsphinx',
+    label: '雄性斯芬克斯',
+    x: 0,
+    y: 0,
+    color: '#f59e0b',
+    emoji: '🦁',
+    size: 3,
+    type: 'enemy',
+    poolId: 'srd-5.1:androsphinx',
+    hp: 199,
+    maxHp: 199,
+    dnd5eCombatState: {
+      monsterActionUsesByActionId: {
+        roar: { current: remaining, max: 3 },
+      },
+    },
+  })
+
+  it('selects the only legal Roar stage from the live per-day counter', () => {
+    expect(dnd5eManualMonsterActionSelection(sphinx(3), 2))
+      .toMatchObject({ areaVariantId: 'first-roar', areaEffect: { name: '第一次咆哮' } })
+    expect(dnd5eManualMonsterActionSelection(sphinx(2), 2))
+      .toMatchObject({ areaVariantId: 'second-roar', areaEffect: { name: '第二次咆哮' } })
+    expect(dnd5eManualMonsterActionSelection(sphinx(1), 2))
+      .toMatchObject({ areaVariantId: 'third-roar', areaEffect: { name: '第三次咆哮' } })
+  })
+})
+
+describe('manual monster jump targeting', () => {
+  it('limits a standing long jump to half the monster Strength score', () => {
+    expect(dnd5eManualMonsterJumpMaximumFeet('standing-jump', 8)).toBe(4)
+    expect(dnd5eManualMonsterMovementTargetingFeet({
+      kind: 'standing-jump',
+      movementRemainingFeet: 30,
+      strengthScore: 8,
+    })).toBe(4)
+  })
+
+  it('applies Jump spell multipliers without exceeding remaining movement', () => {
+    expect(dnd5eManualMonsterMovementTargetingFeet({
+      kind: 'standing-jump',
+      movementRemainingFeet: 30,
+      strengthScore: 8,
+      jumpDistanceMultiplier: 3,
+    })).toBe(12)
+    expect(dnd5eManualMonsterMovementTargetingFeet({
+      kind: 'standing-jump',
+      movementRemainingFeet: 10,
+      strengthScore: 8,
+      jumpDistanceMultiplier: 3,
+    })).toBe(10)
   })
 })

@@ -1,10 +1,17 @@
 import type { AbilityKey } from '../lib/dnd'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
 import type { DND5E_COMBAT_STATE_SCHEMA_VERSION } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eSpellAuthorityRecordV1 } from '../rulesets/dnd5e/spellAuthorityState'
 import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
 import type { CharacterEquipment } from './equipment'
 import type { Dnd5eInventory } from './inventory'
+import type { Dnd5eActivityWeaponAttackGrantV1 } from '../rulesets/dnd5e/activities/dnd5eActivityWeaponAttackGrant'
+import type { Dnd5eActivityBasicActionGrantV1 } from '../rulesets/dnd5e/activities/dnd5eActivityBasicActionGrant'
+import type { Dnd5eBuildGrantV1 } from '../rulesets/dnd5e/activities/dnd5eAdvancementContracts'
+import type { Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
+import type { Dnd5eConditionalDamageDefense } from '../rulesets/dnd5e/damageDefenses'
+import type { Dnd5eLimitedMagicImmunityRule } from '../rulesets/dnd5e/monsterGenericAbilities'
 
 export type Abilities = Record<AbilityKey, number>
 
@@ -40,6 +47,19 @@ export interface Dnd5eAdvancementSpellSelectionsV1 {
   wizardSpellbook?: string[]
 }
 
+/**
+ * Persisted Host receipt for data-only choices supplied by any content
+ * definition.  `resolvedGrants` is a snapshot, so the character does not lose
+ * proficiencies or spell access merely because a local room package is
+ * temporarily unavailable after refresh.
+ */
+export interface Dnd5eContentChoiceReceiptV1 {
+  schemaVersion: 1
+  contentId: string
+  selections: Record<string, string[]>
+  resolvedGrants: Dnd5eBuildGrantV1[]
+}
+
 export interface Dnd5eLevelAdvancementDecisionV1 {
   schemaVersion: 1
   classId: Dnd5eClassId
@@ -57,6 +77,8 @@ export interface Dnd5eLevelAdvancementDecisionV1 {
   >
   fighterSubclassSelections?: Record<string, string[]>
   spellSelections?: Dnd5eAdvancementSpellSelectionsV1
+  /** Full content id -> advancement id -> selected option ids. */
+  contentChoiceSelections?: Record<string, Record<string, string[]>>
 }
 
 export interface Dnd5eLevelAdvancementSnapshotV1 {
@@ -65,8 +87,11 @@ export interface Dnd5eLevelAdvancementSnapshotV1 {
   dnd5eClassContentBindings?: Character['dnd5eClassContentBindings']
   abilities: Abilities
   skills: string[]
+  /** Added in build-choice protocol v1; absent from legacy advancement snapshots. */
+  savingThrows?: AbilityKey[]
   dnd5eClassChoices?: Character['dnd5eClassChoices']
   dnd5eFeatIds?: string[]
+  dnd5eContentChoices?: Character['dnd5eContentChoices']
   hitPointMaximumMode?: 'fixed' | 'manual'
   hitPointRolls?: number[]
   hitPointDice?: Array<{ sides: number; current: number; max: number }>
@@ -108,7 +133,7 @@ export interface Character {
   name: string
   /** 创建该角色的房间；用于大厅成员名册，不参与 D&D 规则结算。 */
   roomId?: string
-  /** 创建该角色的房间成员 ID；DM 只读名册据此关联玩家与角色。 */
+  /** 当前房间中控制该角色的成员 ID；创建时为创建者，DM 可在房间名册中重新分配。 */
   roomMemberId?: string
   /** Stable account owner. Unlike roomMemberId this survives rooms, browsers and devices. */
   ownerAccountId?: string
@@ -147,6 +172,12 @@ export interface Character {
   dnd5eBackgroundId?: string
   /** 背景授予技能的存档快照；插件暂时未加载时仍可显示，房间兼容检查仍会阻止缺包结算。 */
   dnd5eBackgroundSkillProficiencies?: string[]
+  /** 背景固定及选择授予的工具熟练快照；只用于车卡持久化，不交给 Headless 猜测。 */
+  dnd5eBackgroundToolProficiencies?: string[]
+  /** 背景选择的额外语言快照。 */
+  dnd5eBackgroundLanguages?: string[]
+  /** 规则包中的背景变体本地 ID。 */
+  dnd5eBackgroundVariantId?: string
   alignment?: string // D&D 5e 2014 九大阵营
   experience: number // 经验值
   /** DM 战斗结算收据；用于防止同一 combatId 因重试或断线恢复而重复发放经验。 */
@@ -230,20 +261,56 @@ export interface Character {
   dnd5ePluginFeatureIds?: string[]
   /** Namespaced feats supplied by installed rules packages. */
   dnd5eFeatIds?: string[]
+  /** Generic selections and build grants supplied by feats, races, classes, backgrounds, items, or features. */
+  dnd5eContentChoices?: Record<string, Dnd5eContentChoiceReceiptV1>
   /**
    * 已确认的逐级升级事务。玩家不能改写既有记录；DM 可修订任意一次升级并重放后续记录。
    */
   dnd5eLevelAdvancements?: Dnd5eLevelAdvancementRecordV1[]
   /** 仅由 5e Headless 权威事务写入的战斗中职业状态。 */
   dnd5eCombatState?: {
+    activityExtraTurnGroup?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['activityExtraTurnGroup']
+    activityExtraTurnSuspension?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['activityExtraTurnSuspension']
+    slowDelayedSpell?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['slowDelayedSpell']
+    /** Host-projected Warding Bond material state; refreshed from inventory on every combat snapshot. */
+    wardingBondMaterialEquipped?: boolean
+    /** Stable character identity used by persisted Warding Bond effects across map-token ids. */
+    wardingBondParticipantCharacterId?: string
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
     /** 权威状态实例；旧 conditions 字符串仅作为兼容投影。 */
     activeEffects?: Dnd5eActiveEffectInstance[]
+    /** Host-authored long-lived spell state (clone vessels, planar links, and similar records). */
+    spellAuthorityRecords?: Record<string, Dnd5eSpellAuthorityRecordV1>
+    /** Host-only control delegation created by a durable spell authority record. */
+    spellControlledByActorId?: string
+    spellControlMentalAbilities?: Pick<Record<AbilityKey, number>, 'int' | 'wis' | 'cha'>
+    spellControlledBodyMentalAbilities?: Pick<Record<AbilityKey, number>, 'int' | 'wis' | 'cha'>
+    /** Host-derived directions selected through rotatable Activity templates. */
+    activityDirectionalCommands?: Record<string, {
+      schemaVersion: 1
+      commandKey: string
+      sourceActivityId: string
+      angleDegrees: number
+      updatedTurnKey: string
+    }>
     /** 铁蒺藜伤势造成的速度减值；恢复至少 1 点生命值时由 Headless 清除。 */
     caltropsSpeedPenaltyFeet?: number
     /** Stable per-turn attack count used by effects such as Slowing Breath. */
     attacksMadeTurnKey?: string
     attacksMadeThisTurn?: number
+    /** Per-effect turn credentials consumed by restricted extra actions such as Haste. */
+    restrictedExtraActionUsesByEffect?: Record<string, string>
+    /** Prevents Extra Attack continuations from escaping a one-weapon-attack restricted action. */
+    restrictedExtraActionAttackTurnKey?: string
+    meleeWeaponDamageRerollTurnKey?: string
+    /** Host-recorded melee attack targets for current-turn opportunity-attack suppression. */
+    meleeAttackTargetIdsThisTurn?: string[]
+    /** Stable turn key written by a committed Dash transaction. */
+    dashedTurnKey?: string
+    /** Consecutive on-foot movement immediately preceding a possible running jump. */
+    runningJumpApproachFeet?: number
+    /** Opportunity-attack movement stop keyed to the affected creature's active turn. */
+    movementStoppedTurnKey?: string
     raging?: boolean
     /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
     turnStartResolvedTurnKey?: string
@@ -265,8 +332,38 @@ export interface Character {
       ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
       dc: number
       condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious' | 'disease'
+      chargeFollowUp?: {
+        actionId: string
+        referencedActionId: string
+        requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+        turnKey: string
+      }
+    }
+    monsterTriggeredBonusAction?: {
+      schemaVersion: 1
+      combatId: string
+      round: number
+      turnKey: string
+      actionId: string
+      referencedActionId: string
+      targetId: string
+      requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
+    activeEffectDamageSavePendingModes?: Record<string, 'normal' | 'advantage'>
+    /** Authoritative death/body state retained across map snapshots. */
+    deathRound?: number
+    deathInitiativeIndex?: number
+    /** Host-confirmed cause used by resurrection magic that excludes death from old age. */
+    deathCause?: 'other' | 'old-age'
+    /** Host-confirmed state of the soul for magic that requires it to be free and willing. */
+    soulReturnStatus?: 'free-willing' | 'unwilling' | 'not-free'
+    bodyPresent?: boolean
+    missingBodyParts?: string[]
+    /** A missing essential body part or organ prevents revival that cannot restore parts. */
+    vitalBodyPartsMissing?: boolean
+    /** Universal d20 penalty from resurrection magic; recovers on long rests. */
+    resurrectionPenalty?: { value: number; recoveryPerLongRest: number }
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
     /** Recoverable maximum-HP reductions applied by authoritative combat. */
@@ -276,11 +373,14 @@ export interface Character {
       id: string
       ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
       amount: number
-      recovery: 'short-or-long-rest'
+      recovery: 'short-or-long-rest' | 'restoration-magic'
+      recoveryGroupId?: string
     }[]
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
+    /** Registered attack-retarget features this creature resisted until its next long rest. */
+    declarativeAttackRetargetImmunityFeatureIds?: string[]
     /** 大地结社“自然庇护”：攻击者对各德鲁伊目标的24小时成功豁免免疫。 */
     natureSanctuaryImmunityRoundsByTarget?: Record<string, number>
     /** 驱散亡灵：效果来源牧师的地图 Token ID。 */
@@ -338,6 +438,31 @@ export interface Character {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    declarativeWardPools?: Record<string, { current: number; max: number }>
+    /** Active target marks keyed by the registered mark feature id. */
+    declarativeMarkedTargets?: Record<string, { targetId: string; roundsRemaining: number }>
+    /** One-shot Host credentials for imported reaction weapon attacks. */
+    declarativeReactionWeaponAttackOpportunities?: Record<string, {
+      targetId: string
+      triggerActorId: string
+      round: number
+    }>
+    /** One-shot weapon attack credentials granted by unified Activities. */
+    activityWeaponAttackGrants?: Record<string, Dnd5eActivityWeaponAttackGrantV1>
+    activityBasicActionGrants?: Record<string, Dnd5eActivityBasicActionGrantV1>
+    /** Temporary structured spells granted by a Host-settled interception. */
+    declarativeSpellInterceptionGrants?: Record<string, {
+      spellId: string
+      sourceActorId: string
+      castingClassId: Dnd5eClassId
+      roundsRemaining: number
+    }>
+    /** Structured spells this creature is temporarily prohibited from casting. */
+    declarativeSpellInterceptionLocks?: Record<string, {
+      spellId: string
+      sourceActorId: string
+      roundsRemaining: number
+    }>
     droppedEquipmentIds?: string[]
     /** Equipment instance IDs linked by an imported feature (Host cap: two). */
     linkedEquipmentIds?: string[]
@@ -368,6 +493,8 @@ export interface Character {
       featureId: string
       rollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
     }
+    /** Host-generated long-rest d20 results, keyed by the fully namespaced feature id. */
+    declarativeStoredD20ByFeatureId?: Record<string, number[]>
     postSpellRandomTableCheck?: {
       featureId: string
       spellId: string
@@ -389,6 +516,16 @@ export interface Character {
     concentrationSpellLevel?: number
     concentrationTargetIds?: string[]
     concentrationRoundsRemaining?: number
+    /** Turn that created the current concentration; its own end must not consume a full round. */
+    concentrationStartedTurnKey?: string
+    /** Receipt for a bounded concentration duration that ended naturally. */
+    lastCompletedConcentration?: {
+      spellId: string
+      completedRound?: number
+      completedWorldMinute?: number
+    }
+    /** Source that imposed disadvantage on the next damage-triggered concentration save. */
+    concentrationCheckDisadvantagePendingSourceId?: string
     concentrationEffectsBySource?: Record<string, string>
     /** 恶言相加：下回合结束前的下一次攻击检定具有劣势。 */
     viciousMockeryAttackDisadvantage?: boolean
@@ -413,26 +550,48 @@ export interface Character {
     monsterBerserk?: boolean
     monsterDamageAversionActive?: boolean
     monsterDamageAversionSourceActorId?: string
+    /** Regeneration blockers taken since the monster's previous turn start. */
+    monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     hurlThroughHellReady?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number
     hurlThroughHellAppliedTurnKey?: string
     huntersMarkTargetId?: string
     wildShapeFormId?: string
+    /** Explicit profile prevents Polymorph from inheriting Wild Shape permissions. */
+    wildShapeMode?: 'wild-shape' | 'polymorph' | 'true-polymorph' | 'animal-shapes' | 'shapechange'
+    wildShapeSourceActorId?: string
+    wildShapeSourceActivityId?: string
+    wildShapeMaximumChallengeRating?: number
+    wildShapeMaximumSizeRank?: number
+    shapechangeEquipmentDisposition?: 'drop' | 'merge' | 'wear'
     wildShapeCurrentHp?: number
     wildShapeRoundsRemaining?: number
+    wildShapePermanent?: boolean
+    wildShapePermanentAfterConcentrationCompletes?: boolean
     wildShapeOriginalCurrentHp?: number
     wildShapeOriginalMaxHp?: number
     wildShapeOriginalArmorClass?: number
     wildShapeOriginalSpeed?: number
+    wildShapeOriginalMovementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number; hover?: boolean }
+    wildShapeOriginalSizeRank?: number
     wildShapeOriginalAbilities?: Abilities
     wildShapeOriginalSavingThrowBonuses?: Partial<Record<AbilityKey, number>>
+    wildShapeOriginalSavingThrowProficiencies?: AbilityKey[]
+    wildShapeOriginalSkillProficiencies?: string[]
+    wildShapeOriginalPassivePerception?: number
     wildShapeOriginalStatBlockId?: string
     wildShapeOriginalCreatureType?: string
-    wildShapeOriginalDamageVulnerabilities?: string[]
-    wildShapeOriginalDamageResistances?: string[]
-    wildShapeOriginalDamageImmunities?: string[]
+    wildShapeOriginalDamageVulnerabilities?: Dnd5eDamageType[]
+    wildShapeOriginalDamageResistances?: Dnd5eDamageType[]
+    wildShapeOriginalDamageImmunities?: Dnd5eDamageType[]
+    wildShapeOriginalDamageDefenseRules?: Dnd5eConditionalDamageDefense[]
+    wildShapeOriginalMagicResistance?: boolean
+    wildShapeOriginalLimitedMagicImmunity?: Dnd5eLimitedMagicImmunityRule
+    wildShapeOriginalWeaponAttacksMagical?: boolean
     wildShapeOriginalConditionImmunities?: string[]
+    /** Moonbeam areas whose light currently prevents another transformation. */
+    shapechangerReversionAreaIds?: string[]
   }
 
   ac: number

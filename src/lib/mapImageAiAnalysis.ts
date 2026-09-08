@@ -1,4 +1,5 @@
 import type { AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
+import { fixedBridgeModelIdForTask } from '../../shared/ai-model-policy.mjs'
 import { AiProviderRegistryV1, executeStructuredAiTask } from './aiProvider'
 import {
   createExternalAiBridgeRuntime,
@@ -158,7 +159,7 @@ export async function analyzeMapImageWithAi(input: {
     model.supportedTasks.includes('map-analysis') &&
     model.capabilities.includes('vision') &&
     model.capabilities.includes('structured-output'))
-  const selectedModel = eligible.find((model) => model.id === input.selection.modelId) ?? eligible[0]
+  const selectedModel = eligible.find((model) => model.id === fixedBridgeModelIdForTask('map-analysis'))
   if (!selectedModel) throw new Error('map-analysis-model-unavailable')
   const registry = new AiProviderRegistryV1()
   if (input.selection.providerId === 'local-bridge') registry.register(createLocalAiBridgeRuntime(bridge.models))
@@ -168,7 +169,7 @@ export async function analyzeMapImageWithAi(input: {
   const jobId = `map-analysis-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   const result = await executeStructuredAiTask({
     registry,
-    selection: { ...input.selection, modelId: selectedModel.id },
+    selection: { ...input.selection, providerId: 'external-account', modelId: selectedModel.id },
     request: {
       schemaVersion: 1,
       jobId,

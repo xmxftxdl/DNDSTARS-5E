@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eAvailableMonsterSpellSlotLevels,
+  dnd5eMonsterCoreSpellAreaTargetIds,
   prepareDnd5eMonsterCoreSpell,
   resolvePreparedDnd5eMonsterCoreSpell,
 } from './monsterCoreSpellAction'
@@ -23,7 +24,11 @@ import {
 } from './pluginAreaTransactions'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import { getDnd5eSrdCombatSpell } from './spells'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
+import {
+  dnd5eCombatantPairKey,
+  resolveDnd5eHeadlessAction,
+} from './headlessCombatEngine'
 
 function token(patch: Partial<Token>): Token {
   return {
@@ -149,6 +154,121 @@ describe('monster core spell map action', () => {
     }))
   })
 
+  it('spends legendary points instead of turn economy for an off-turn Sphinx spell', () => {
+    const sphinx = token({
+      id: 'sphinx',
+      label: '雄性斯芬克斯',
+      poolId: 'srd-5.1:androsphinx',
+      hp: 199,
+      maxHp: 199,
+      dnd5eCombatState: {
+        monsterLegendaryActionPoints: 3,
+        monsterSpellSlots: {
+          '1': { current: 4, max: 4 },
+          '2': { current: 3, max: 3 },
+          '3': { current: 3, max: 3 },
+          '4': { current: 3, max: 3 },
+          '5': { current: 2, max: 2 },
+          '6': { current: 1, max: 1 },
+        },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: '英雄',
+      type: 'player',
+      characterId: 'hero',
+      x: 35,
+    })
+    const map = battleMap([sphinx, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'legendary-sphinx-spell',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative([heroToken, sphinx]),
+      currentInitiativeIndex: 0,
+      actorTokenId: sphinx.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'sacred-flame',
+      slotLevel: 0,
+      legendaryActionId: 'cast-a-spell-costs-3-actions',
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: heroToken.id, d20: 1 }],
+        effectRolls: [[5, 6, 7]],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    const caster = resolved.result.state.combatants[sphinx.id]
+    expect(caster.classState.monsterLegendaryActionPoints).toBe(0)
+    expect(caster.turn.actionAvailable).toBe(true)
+    expect(resolved.result.events).toContainEqual({
+      type: 'monster-legendary-action-used',
+      actorId: sphinx.id,
+      actionId: 'cast-a-spell-costs-3-actions',
+      cost: 3,
+      remaining: 0,
+    })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-core-spell-resolved',
+      spellId: 'sacred-flame',
+    }))
+  })
+
+  it('lets a Mummy Lord resolve Harm through the same maximum-HP authority', () => {
+    const mummyLord = token({
+      id: 'mummy-lord',
+      label: 'Mummy Lord',
+      poolId: 'srd-5.1:mummy-lord',
+      hp: 97,
+      maxHp: 97,
+      dnd5eCombatState: {
+        monsterSpellSlots: { 6: { current: 1, max: 1 } },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: 'Hero',
+      type: 'player',
+      characterId: 'hero',
+      hp: 20,
+      maxHp: 80,
+      x: 35,
+    })
+    const map = battleMap([mummyLord, heroToken])
+    const hero = { ...character(), currentHp: 20, maxHp: 80 }
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'monster-harm',
+      map,
+      characters: [hero],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mummyLord.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'harm',
+      slotLevel: 6,
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: heroToken.id, d20: 1 }],
+        effectRolls: [Array(14).fill(4)],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0]).toMatchObject({ currentHp: 1, maxHp: 24 })
+    expect(resolved.application?.characters[0].dnd5eCombatState?.hitPointMaximumReductionLedger)
+      .toMatchObject({ entries: [{ amount: 56, remainingRounds: 600 }] })
+  })
+
   it('derives an adult black dragon breath target set from map cells and rejects a partial client submission', () => {
     const dragon = token({
       id: 'dragon', label: '成年黑龙', poolId: 'srd-5.1:adult-black-dragon',
@@ -247,6 +367,46 @@ describe('monster core spell map action', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(28)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id)
       ?.dnd5eCombatState?.monsterSpellSlots?.['1'].current).toBe(0)
+  })
+
+  it('shares the authoritative area target declaration with manual DM spell placement', () => {
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: {
+        monsterSpellSlots: { 3: { current: 1, max: 3 } },
+      },
+    })
+    const first = token({
+      id: 'first', type: 'player', characterId: 'first-character', x: 55, y: 5,
+    })
+    const second = token({
+      id: 'second', type: 'player', characterId: 'second-character', x: 65, y: 5,
+    })
+    const map = battleMap([mage, first, second])
+    const targetTokenIds = dnd5eMonsterCoreSpellAreaTargetIds({
+      map,
+      actorTokenId: mage.id,
+      spellId: 'fireball',
+      areaTargetCell: { col: 5, row: 0 },
+    })
+
+    expect(targetTokenIds).toEqual(expect.arrayContaining([first.id, second.id]))
+    expect(prepareDnd5eMonsterCoreSpell({
+      combatId: 'manual-monster-fireball',
+      map,
+      characters: [
+        { ...character(), id: 'first-character' },
+        { ...character(), id: 'second-character' },
+      ],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: targetTokenIds ?? [],
+      areaTargetCell: { col: 5, row: 0 },
+      spellId: 'fireball',
+      slotLevel: 3,
+    })).toMatchObject({ ok: true })
   })
 
   it('prepares and resolves a monster Misty Step into a visible unoccupied cell', () => {
@@ -564,6 +724,8 @@ describe('monster core spell map action', () => {
     ['druid', 'longstrider'],
     ['mage', 'mage-armor'],
     ['couatl', 'protection-from-poison'],
+    ['dryad', 'shillelagh'],
+    ['druid', 'shillelagh'],
   ] as const)('casts %s %s through a mechanical monster active-effect transaction', (slug, spellId) => {
     const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
     const listedSpell = monster.spellcasting!.spells!.find((spell) => spell.id === spellId)!
@@ -603,6 +765,18 @@ describe('monster core spell map action', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
 
+    if (spellId === 'shillelagh') {
+      prepared.prepared.state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(actor.id, heroToken.id)]: 5,
+      }
+      expect(resolveDnd5eHeadlessAction(prepared.prepared.state, {
+        type: 'monster-action',
+        actorId: actor.id,
+        actionId: slug === 'dryad' ? 'club-shillelagh' : 'quarterstaff-shillelagh',
+        rolls: [{ targetId: heroToken.id, d20: 10, damageRolls: [[1]] }],
+      })).toMatchObject({ ok: false, reason: 'class-resource-unavailable' })
+    }
+
     const resolved = resolvePreparedDnd5eMonsterCoreSpell({
       prepared: prepared.prepared,
       resolution: { effectRolls: [] },
@@ -624,6 +798,32 @@ describe('monster core spell map action', () => {
     }
     if (spellId === 'fly') expect(effect?.modifiers?.flySpeedFeet).toBe(60)
     if (spellId === 'longstrider') expect(effect?.modifiers?.speedBonusFeet).toBe(10)
+    if (spellId === 'shillelagh') {
+      expect(effect).toMatchObject({
+        definitionId: 'srd-5.1:spell:shillelagh',
+        modifiers: {
+          shillelagh: {
+            weaponId: slug === 'dryad' ? 'club' : 'quarterstaff',
+            spellcastingAbility: slug === 'dryad' ? 'cha' : 'wis',
+          },
+        },
+      })
+      if (!resolved.result.ok) return
+      resolved.result.state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(actor.id, heroToken.id)]: 5,
+      }
+      const attack = resolveDnd5eHeadlessAction(resolved.result.state, {
+        type: 'monster-action',
+        actorId: actor.id,
+        actionId: slug === 'dryad' ? 'club-shillelagh' : 'quarterstaff-shillelagh',
+        rolls: [{
+          targetId: heroToken.id,
+          d20: 10,
+          damageRolls: [[1]],
+        }],
+      })
+      expect(attack.ok, attack.ok ? undefined : attack.reason).toBe(true)
+    }
     if (listedSpell.usage?.kind !== 'at-will' && listedSpell.level > 0) {
       if (listedSpell.usage?.kind === 'per-day') {
         expect(combatState?.monsterSpellUsesBySpellId?.[spellId]?.current).toBe(0)
@@ -1162,6 +1362,63 @@ describe('monster core spell map action', () => {
         source: expect.objectContaining({ actorId: fanatic.id, rulesId: 'hold-person' }),
         repeatSave: expect.objectContaining({ ability: 'wis', timing: 'target-turn-end' }),
       }))
+  })
+
+  it('lets Freedom of Movement prevent monster Hold Person without starting concentration', () => {
+    const fanatic = token({
+      id: 'fanatic',
+      label: 'Cult Fanatic',
+      poolId: 'srd-5.1:cult-fanatic',
+      dnd5eCombatState: { monsterSpellSlots: { 2: { current: 1, max: 1 } } },
+    })
+    const heroToken = token({
+      id: 'hero-token', label: 'Hero', type: 'player', characterId: 'hero', x: 35,
+    })
+    const freedom = createDnd5eMechanicalEffect({
+      definitionId: 'activity:freedom-of-movement',
+      label: 'Freedom of Movement',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'freedom-of-movement', magical: true },
+      targetId: heroToken.id,
+      modifiers: {
+        conditionImmunitiesBySourceMagic: [{
+          conditions: ['paralyzed', 'restrained'], sourceMagical: true, suppressExisting: true,
+        }],
+      },
+    })
+    const hero = {
+      ...character(),
+      dnd5eCombatState: { schemaVersion: 2 as const, activeEffects: [freedom] },
+    }
+    const map = battleMap([fanatic, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'monster-hold-person-freedom',
+      map,
+      characters: [hero],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: fanatic.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'hold-person',
+      slotLevel: 2,
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{ targetId: heroToken.id, d20: 1 }],
+        effectRolls: [],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.state.combatants.fanatic.classState).toMatchObject({
+      monsterSpellSlots: { 2: { current: 0, max: 1 } },
+    })
+    expect(resolved.result.state.combatants.fanatic.classState.concentrationSpellId).toBeUndefined()
+    expect(resolved.result.state.combatants[heroToken.id].conditions).not.toContain('paralyzed')
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'condition-attempted', targetId: heroToken.id, condition: 'paralyzed', prevented: true,
+    }))
   })
 
   it('rejects Hold Person against a non-humanoid before spending its slot', () => {

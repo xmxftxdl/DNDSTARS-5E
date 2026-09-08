@@ -30,7 +30,7 @@ export default function CombatDialogOverlay({
         ? 'bg-rose-500/25 text-rose-100 hover:bg-rose-500/35'
         : 'bg-sky-500/25 text-sky-100 hover:bg-sky-500/35'
   return (
-    <div className="absolute inset-0 z-[65] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+    <div className="absolute inset-0 z-[140] flex items-center justify-center bg-black/55 backdrop-blur-sm">
       <div
         role="dialog"
         aria-labelledby="combat-dialog-title"

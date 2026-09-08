@@ -36,11 +36,14 @@ export function resolveDnd5ePluginFeatureDamageReduction(input: {
   combatant: {
     currentHp: number
     maxHp: number
+    wearingHeavyArmor?: boolean
     pluginFeaturePassiveEffects?: readonly Dnd5ePluginFeaturePassiveEffectSnapshot[]
     classState: { declarativeUsedTurnKeys?: Record<string, string> }
   }
   amount: number
   damageTypes: readonly Dnd5eDamageType[]
+  damageAmountsByType?: Partial<Record<Dnd5eDamageType, number>>
+  damageSource?: { delivery: 'weapon-attack' | 'spell' | 'other'; magical: boolean }
   turnKey: string
 }): {
   amount: number
@@ -48,6 +51,12 @@ export function resolveDnd5ePluginFeatureDamageReduction(input: {
 } {
   const incomingAmount = Math.max(0, Math.floor(input.amount))
   let amount = incomingAmount
+  const remainingDamageByType = input.damageAmountsByType
+    ? Object.fromEntries(Object.entries(input.damageAmountsByType).map(([type, value]) => [
+      type,
+      Math.max(0, Math.floor(value ?? 0)),
+    ])) as Partial<Record<Dnd5eDamageType, number>>
+    : undefined
   const applications: Dnd5ePluginFeaturePassiveEffectApplication[] = []
   const snapshots = [...(input.combatant.pluginFeaturePassiveEffects ?? [])]
     .sort((left, right) => `${left.featureId}:${left.effectId}`.localeCompare(`${right.featureId}:${right.effectId}`))
@@ -59,6 +68,13 @@ export function resolveDnd5ePluginFeatureDamageReduction(input: {
       effect.damageTypes?.length &&
       !effect.damageTypes.some((damageType) => input.damageTypes.includes(damageType))
     ) continue
+    if (effect.requiresHeavyArmor && input.combatant.wearingHeavyArmor !== true) continue
+    if (effect.deliveries?.length && (
+      !input.damageSource || !effect.deliveries.includes(input.damageSource.delivery)
+    )) continue
+    if (effect.magical != null && (
+      !input.damageSource || input.damageSource.magical !== effect.magical
+    )) continue
     if (effect.minimumIncomingDamage != null && incomingAmount < effect.minimumIncomingDamage) continue
     if (
       effect.maximumCurrentHitPointPercent != null &&
@@ -74,9 +90,22 @@ export function resolveDnd5ePluginFeatureDamageReduction(input: {
       input.combatant.classState.declarativeUsedTurnKeys?.[ledgerKey] === input.turnKey
     ) continue
 
-    const reduction = Math.min(amount, effect.amount)
+    const matchingDamageAmount = effect.damageTypes?.length && remainingDamageByType
+      ? effect.damageTypes.reduce((sum, damageType) => sum + (remainingDamageByType[damageType] ?? 0), 0)
+      : amount
+    const reduction = Math.min(amount, effect.amount, matchingDamageAmount)
     if (reduction <= 0) continue
     amount -= reduction
+    if (effect.damageTypes?.length && remainingDamageByType) {
+      let remainingReduction = reduction
+      for (const damageType of effect.damageTypes) {
+        if (remainingReduction <= 0) break
+        const available = remainingDamageByType[damageType] ?? 0
+        const consumed = Math.min(available, remainingReduction)
+        remainingDamageByType[damageType] = available - consumed
+        remainingReduction -= consumed
+      }
+    }
     if (effect.oncePerTurn) {
       input.combatant.classState.declarativeUsedTurnKeys = {
         ...input.combatant.classState.declarativeUsedTurnKeys,

@@ -1,0 +1,54 @@
+{
+  "id": "srd-5.1:sea-horse",
+  "slug": "sea-horse",
+  "name": "海马",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [],
+  "ui": [
+    {
+      "index": 308,
+      "slug": "sea-horse",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:14:56.634Z",
+      "name": "海马",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "challengeRating": "0",
+      "total": 334,
+      "mapId": "verify-ui-sea-horse-inspect-1788570896687",
+      "combatId": "verify-ui-sea-horse-inspect-1788570896687:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-05T01:15:02.964Z",
+      "evidenceFile": "ui-cases/monsters/308-sea-horse.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "水下呼吸",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 0,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

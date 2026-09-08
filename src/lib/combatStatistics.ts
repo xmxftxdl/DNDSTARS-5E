@@ -156,6 +156,23 @@ export interface Dnd5eCombatStatisticsObservation {
   characterIdByCombatantId?: Readonly<Record<string, string>>
 }
 
+/**
+ * Restores just one encounter after an optimistic Headless resolution fails to
+ * reach the authority server.  Other encounters may continue recording in the
+ * same store, so rolling back the complete sessions array would discard valid
+ * observations from unrelated maps.
+ */
+export function restoreCombatStatisticsSession(
+  sessions: readonly CombatStatisticsSession[],
+  combatId: string,
+  snapshot: CombatStatisticsSession | undefined,
+): CombatStatisticsSession[] {
+  return [
+    ...sessions.filter((session) => session.combatId !== combatId),
+    ...(snapshot ? [snapshot] : []),
+  ].slice(-COMBAT_STATISTICS_MAX_SESSIONS)
+}
+
 export function emptyD20FaceCounts(): number[] {
   return Array.from({ length: D20_FACE_COUNT }, () => 0)
 }

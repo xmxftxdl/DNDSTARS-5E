@@ -18,6 +18,8 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonkUnarmedStrikeProfile, type Dnd5eUnarmedStrikeProfile } from './equipment'
+import { dnd5eActiveAttackProfileRewrite } from './activeEffects'
+import type { Dnd5eDamageType } from './damageTypes'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
@@ -49,7 +51,9 @@ import {
 } from './airborneFallActionResolution'
 import {
   createDnd5eMapCombatSnapshot,
+  dnd5eRequestedInitiativeActorIndex,
   planDnd5eMapResultApplication,
+  prepareDnd5eExplorationActor,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
@@ -63,6 +67,7 @@ import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5eRageFeatureForCombatant } from './rageFeature'
 import { dnd5eMartialSpellSynergyForCombatant } from './martialSpellSynergy'
+import { dnd5ePluginCreatureFormControlForCharacter } from './pluginApi'
 
 export type Dnd5eClassFeatureRejectReason =
   | 'invalid-action'
@@ -120,11 +125,18 @@ export interface PreparedDnd5eClassFeature {
     mode: 'normal' | 'advantage' | 'disadvantage'
     passivePerceptionDc?: number
   }
+  creatureFormHealing?: {
+    count: number
+    sides: number
+    label: string
+  }
 }
 
 export interface PreparedDnd5eMonkBonusAttack {
   mode: 'martial-arts' | 'flurry'
   profile: Dnd5eUnarmedStrikeProfile
+  reachFeet: number
+  damageType: Dnd5eDamageType
   blessed: boolean
   baned: boolean
   targets: readonly {
@@ -257,6 +269,7 @@ const FEATURE_LABELS: Record<Dnd5eClassFeaturePayload['feature'], string> = {
   'monk-stillness-of-mind': '心如止水',
   'monk-empty-body': '空灵体',
   'druid-wild-shape': '荒野变形',
+  'druid-creature-form-heal': '形态内治疗',
   'druid-end-wild-shape': '恢复原形',
   'warlock-hurl-through-hell-ready': '坠入地狱',
   'linked-equipment-recall': '召回联结武器',
@@ -275,7 +288,7 @@ function featureClassRequirement(payload: Dnd5eClassFeaturePayload): {
   classId: 'barbarian' | 'bard' | 'paladin' | 'monk' | 'cleric' | 'rogue' | 'ranger' | 'sorcerer' | 'druid' | 'warlock' | 'fighter'
   minimumLevel: number
   subclassId?: string
-} {
+} | undefined {
   switch (payload.feature) {
     case 'barbarian-rage': return { classId: 'barbarian', minimumLevel: 1 }
     case 'feature-rage-bonus-dash': return { classId: 'barbarian', minimumLevel: 1 }
@@ -320,8 +333,10 @@ function featureClassRequirement(payload: Dnd5eClassFeaturePayload): {
     case 'monk-empty-body':
       return { classId: 'monk', minimumLevel: 18 }
     case 'druid-wild-shape':
-    case 'druid-end-wild-shape':
+    case 'druid-creature-form-heal':
       return { classId: 'druid', minimumLevel: 2 }
+    case 'druid-end-wild-shape':
+      return undefined
     case 'warlock-hurl-through-hell-ready':
       return { classId: 'warlock', minimumLevel: 14, subclassId: 'fiend' }
     case 'linked-equipment-recall':
@@ -405,6 +420,8 @@ function buildHeadlessAction(
           sides: monkBonusAttack.profile.damage.sides,
           bonus: monkBonusAttack.profile.damage.bonus,
         },
+        reachFeet: monkBonusAttack.reachFeet,
+        damageType: monkBonusAttack.damageType,
         attacks: monkBonusAttack.targets.map((target) => ({
           targetId: target.token.id,
           d20: 1,
@@ -480,6 +497,9 @@ function buildHeadlessAction(
       return { type: payload.feature, actorId: actorTokenId }
     case 'druid-wild-shape':
       return { type: payload.feature, actorId: actorTokenId, formId: payload.formId }
+    case 'druid-creature-form-heal':
+      if (!Number.isInteger(payload.slotLevel) || payload.slotLevel < 1 || payload.slotLevel > 9) return undefined
+      return { type: payload.feature, actorId: actorTokenId, slotLevel: payload.slotLevel, healingRolls: [] }
     case 'druid-end-wild-shape':
       return { type: payload.feature, actorId: actorTokenId }
     case 'warlock-hurl-through-hell-ready':
@@ -511,6 +531,9 @@ export function prepareDnd5eClassFeature(input: {
   const { action } = input
   const payload = action.dnd5eClassFeature
   if (action.type !== 'dnd5e-class-feature' || !payload) return { ok: false, reason: 'invalid-action' }
+  if (!action.combatId && payload.feature !== 'druid-end-wild-shape') {
+    return { ok: false, reason: 'invalid-action' }
+  }
 
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
@@ -524,17 +547,24 @@ export function prepareDnd5eClassFeature(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  if (!action.combatId) prepareDnd5eExplorationActor(snapshot.state, actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    action.initiativeIndex,
+  )
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
 
   const requirement = featureClassRequirement(payload)
-  if (actorCombatant.classId !== requirement.classId) return { ok: false, reason: 'wrong-class' }
-  if (
-    dnd5eCombatantClassLevel(actorCombatant, requirement.classId) < requirement.minimumLevel ||
-    (requirement.subclassId && !dnd5eCombatantHasSubclass(actorCombatant, requirement.classId, requirement.subclassId))
-  ) {
-    return { ok: false, reason: 'feature-locked' }
+  if (requirement) {
+    if (actorCombatant.classId !== requirement.classId) return { ok: false, reason: 'wrong-class' }
+    if (
+      dnd5eCombatantClassLevel(actorCombatant, requirement.classId) < requirement.minimumLevel ||
+      (requirement.subclassId && !dnd5eCombatantHasSubclass(actorCombatant, requirement.classId, requirement.subclassId))
+    ) {
+      return { ok: false, reason: 'feature-locked' }
+    }
   }
   if (
     payload.feature === 'feature-rage-bonus-dash' &&
@@ -588,6 +618,7 @@ export function prepareDnd5eClassFeature(input: {
   let intimidatingPresence: PreparedDnd5eClassFeature['intimidatingPresence']
   let turnUndead: PreparedDnd5eClassFeature['turnUndead']
   let rogueAbilityCheck: PreparedDnd5eClassFeature['rogueAbilityCheck']
+  let creatureFormHealing: PreparedDnd5eClassFeature['creatureFormHealing']
   let extraActionTeleport: {
     to: { x: number; y: number }
     distanceFeet: number
@@ -677,6 +708,12 @@ export function prepareDnd5eClassFeature(input: {
     if (payload.targetTokenIds.length !== expectedTargets) return { ok: false, reason: 'invalid-action' }
     const profile = dnd5eMonkUnarmedStrikeProfile(actor)
     if (!profile) return { ok: false, reason: 'wrong-class' }
+    const attackProfileRewrite = dnd5eActiveAttackProfileRewrite(
+      actor.dnd5eCombatState?.activeEffects,
+      'unarmed',
+    )
+    const unarmedReachFeet = 5 + attackProfileRewrite.reachBonusFeet
+    const unarmedDamageType = attackProfileRewrite.damageTypeOverride ?? profile.damage.type
     const monkLevel = dnd5eCharacterClassLevel(actor, 'monk')
     if (payload.stunningStrike && monkLevel < 5) return { ok: false, reason: 'feature-locked' }
     if (
@@ -701,7 +738,7 @@ export function prepareDnd5eClassFeature(input: {
       const targetToken = input.map.tokens.find((token) => token.id === tokenId)
       const targetCombatant = targetToken ? snapshot.state.combatants[targetToken.id] : undefined
       if (!targetToken || !targetCombatant || !areOpposedCombatTokens(actorToken, targetToken)) return { ok: false, reason: 'invalid-target' }
-      if (targetDistanceFeet(actorToken, targetToken, input.map) > 5) return { ok: false, reason: 'target-out-of-range' }
+      if (targetDistanceFeet(actorToken, targetToken, input.map) > unarmedReachFeet) return { ok: false, reason: 'target-out-of-range' }
       const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
       const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
       const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
@@ -762,6 +799,8 @@ export function prepareDnd5eClassFeature(input: {
     monkBonusAttack = {
       mode: payload.mode,
       profile,
+      reachFeet: unarmedReachFeet,
+      damageType: unarmedDamageType,
       targets,
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
       baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
@@ -786,6 +825,19 @@ export function prepareDnd5eClassFeature(input: {
   }
   if (payload.feature === 'monk-quivering-palm-end' && !actorCombatant.classState.quiveringPalmTargetId) {
     return { ok: false, reason: 'invalid-action' }
+  }
+  if (payload.feature === 'druid-creature-form-heal') {
+    const control = dnd5ePluginCreatureFormControlForCharacter(actor)?.inFormHealing
+    const slot = actorCombatant.classResources[`dnd5e-spell-slot-${payload.slotLevel}`]
+    if (
+      !control || !actorCombatant.classState.wildShapeFormId ||
+      payload.slotLevel > (control.maximumResourceLevel ?? 9) || !slot || slot.current < 1
+    ) return { ok: false, reason: 'feature-locked' }
+    creatureFormHealing = {
+      count: control.dicePerResourceLevel.count * payload.slotLevel,
+      sides: control.dicePerResourceLevel.sides,
+      label: `${payload.slotLevel} 环形态治疗`,
+    }
   }
   if (payload.feature === 'paladin-cleansing-touch') {
     const targetToken = input.map.tokens.find((token) => token.id === payload.targetTokenId && token.type !== 'obstacle')
@@ -895,6 +947,7 @@ export function prepareDnd5eClassFeature(input: {
       intimidatingPresence,
       turnUndead,
       rogueAbilityCheck,
+      creatureFormHealing,
     },
   }
 }
@@ -936,6 +989,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
   hideAllowed?: boolean
   divineInterventionD100?: number
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+  attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -999,6 +1053,8 @@ export function resolvePreparedDnd5eClassFeature(input: {
             d20: input.abilityCheckD20,
             d20Second: input.abilityCheckD20Second,
           }
+    : prepared.headlessAction.type === 'druid-creature-form-heal'
+      ? { ...prepared.headlessAction, healingRolls: input.effectRolls ?? [] }
     : prepared.headlessAction.type === 'cleric-turn-undead' || prepared.headlessAction.type === 'paladin-turn-the-unholy'
       ? {
           ...prepared.headlessAction,
@@ -1030,7 +1086,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
       : prepared.headlessAction
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(
     prepared.state,
-    headlessAction,
+    { ...headlessAction, attackDecoyRolls: input.attackDecoyRolls },
     input.airborneFallDamageRollsByCombatantId,
   )
   if (!result.ok) return { result, airborneFalls }
@@ -1042,6 +1098,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

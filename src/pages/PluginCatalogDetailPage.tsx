@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { formatMarketplacePrice } from '../../shared/marketplace-publication.mjs'
+import { dnd5ePluginContentCategoryLabel } from '../../shared/plugin-content-category.mjs'
 import {
   activeMarketplaceEntitlement,
   type MarketplaceEntitlementV1,
@@ -138,7 +139,7 @@ export default function PluginCatalogDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title={plugin.name} description={`${plugin.contentCategory} · v${version.version}`} actions={<Link to="/app/extensions" className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">返回扩展市场</Link>} />
+      <PageHeader title={plugin.name} description={`${dnd5ePluginContentCategoryLabel(plugin.contentCategory)} · v${version.version}`} actions={<Link to="/app/extensions" className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">返回扩展市场</Link>} />
       {error && <p className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">{error}</p>}
       {notice && <p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">{notice}</p>}
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">

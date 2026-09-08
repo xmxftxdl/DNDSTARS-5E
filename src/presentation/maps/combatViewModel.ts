@@ -1,6 +1,7 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { resolveInitiativePortraitImageId } from '../../lib/portraitPresentation'
 
 export interface CombatInitiativeProjectionPorts {
   resolvePortrait: (character: Character | undefined, token: Token | undefined) => string | undefined
@@ -28,7 +29,7 @@ export function projectCombatInitiativeOrder(
       token.emoji === entry.emoji &&
       token.label === entry.label &&
       portrait === entry.portrait &&
-      token.portraitImageId === entry.portraitImageId &&
+      resolveInitiativePortraitImageId(token) === entry.portraitImageId &&
       color === entry.color &&
       color === entry.turnGlowColor
     )) return entry
@@ -37,7 +38,7 @@ export function projectCombatInitiativeOrder(
       emoji: token.emoji,
       label: token.label,
       portrait,
-      portraitImageId: token.portraitImageId,
+      portraitImageId: resolveInitiativePortraitImageId(token),
       color,
       turnGlowColor: color,
     }
@@ -51,7 +52,14 @@ export interface CombatHotbarSelectionViewModel {
   item?: { characterId: string; instanceId: string } | null
   moveActive?: boolean
   playerCanControlTurn?: boolean
-  weapon?: { characterId: string; featureBonusWeaponAttack?: boolean } | null
+  weapon?: {
+    characterId: string
+    featureBonusWeaponAttack?: boolean
+    featureBonusWeaponAttackId?: string
+    activityWeaponAttackGrantId?: string
+    creatureFormId?: string
+    wildShapeActionIndex?: number
+  } | null
   teleport?: { characterId: string } | null
   persistentArea?: { characterId: string; areaId: string } | null
 }
@@ -69,7 +77,13 @@ export function combatHotbarActiveActionId(view: CombatHotbarSelectionViewModel)
   if (item && item.characterId === view.activeCharacterId) result = `item:${item.instanceId}`
   if (view.moveActive && view.playerCanControlTurn) result = 'system:move'
   if (weapon && weapon.characterId === view.activeCharacterId) {
-    result = weapon.featureBonusWeaponAttack
+    result = weapon.creatureFormId != null && weapon.wildShapeActionIndex != null
+      ? `creature-form:${weapon.creatureFormId}:attack:${weapon.wildShapeActionIndex}`
+      : weapon.activityWeaponAttackGrantId
+      ? `feature:activity-weapon-attack:${weapon.activityWeaponAttackGrantId}`
+      : weapon.featureBonusWeaponAttackId
+      ? `feature:generic-bonus-weapon-attack:${weapon.featureBonusWeaponAttackId}`
+      : weapon.featureBonusWeaponAttack
       ? 'feature:martial-spell-synergy-cantrip-then-bonus-attack-attack'
       : 'system:weapon-attack'
   }

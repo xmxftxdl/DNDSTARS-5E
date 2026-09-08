@@ -7,6 +7,7 @@ import type {
   AiProviderRuntimeV1,
   AiStructuredGenerationResultV1,
 } from './aiProvider'
+import type { AiBillingRecordV1 } from '../../shared/ai-model-policy.mjs'
 import type { PdfOcrProviderV1 } from './pdfCampaignAnalysisV2'
 
 export const LOCAL_AI_BRIDGE_API_VERSION = 1
@@ -46,6 +47,12 @@ export interface LocalAiPortraitGenerationResult {
   modelId: string
   quality?: 'low' | 'medium' | 'high'
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  billing?: AiBillingRecordV1
+}
+
+export interface LocalAiUsageSnapshot {
+  creditsPerCny: number
+  records: AiBillingRecordV1[]
 }
 
 function configuredBridgeUrl(): string {
@@ -316,6 +323,7 @@ export async function generateLocalAiPortrait(
     modelId: string
     quality?: LocalAiPortraitGenerationResult['quality']
     mimeType: LocalAiPortraitGenerationResult['mimeType']
+    billing?: AiBillingRecordV1
   }>('/api/generate-image', {
     method: 'POST',
     body: JSON.stringify({
@@ -337,9 +345,24 @@ export async function generateLocalAiPortrait(
   return result
 }
 
+export async function loadLocalAiUsage(limit = 20): Promise<LocalAiUsageSnapshot> {
+  const response = await bridgeRequest<{
+    schemaVersion: number
+    creditsPerCny: number
+    records?: AiBillingRecordV1[]
+  }>(`/api/usage?limit=${Math.max(1, Math.min(200, Math.floor(limit)))}`)
+  if (response.schemaVersion !== LOCAL_AI_BRIDGE_API_VERSION || !Number.isFinite(response.creditsPerCny)) {
+    throw new LocalAiBridgeError('invalid-usage-audit-response')
+  }
+  return {
+    creditsPerCny: response.creditsPerCny,
+    records: Array.isArray(response.records) ? response.records : [],
+  }
+}
+
 export function localAiPortraitErrorMessage(error: unknown): string {
   const code = error instanceof LocalAiBridgeError ? error.code : error instanceof Error ? error.message : ''
-  if (code.includes('image-model-unconfigured')) return '尚未配置图片模型。请为 Local AI Bridge 设置 ASTRALTRACE_IMAGE_MODEL_ID，并重启 Bridge。'
+  if (code.includes('image-model-unconfigured')) return '尚未配置图片模型。请运行 npm run local-ai:configure，然后重启 Local AI Bridge。'
   if (code.includes('image-generation-busy')) return '图片模型正在生成另一张立绘，请稍后再试。'
   if (code.includes('invalid-image-prompt')) return '立绘提示词需为 20–4000 个字符。'
   if (code.includes('bridge-authorization-required')) return 'Local AI Bridge 配对已失效，请重新配对。'

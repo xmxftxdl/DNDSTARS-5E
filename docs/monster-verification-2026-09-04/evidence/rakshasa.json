@@ -1,0 +1,143 @@
+{
+  "id": "srd-5.1:rakshasa",
+  "slug": "rakshasa",
+  "name": "罗刹",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].magical",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "claw-rest-curse:apply"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 35,
+      "slug": "rakshasa",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:03:33.897Z",
+      "name": "罗刹",
+      "actionId": "claw",
+      "actionName": "爪击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "13",
+      "total": 334,
+      "mapId": "verify-ui-rakshasa-claw-1788566613951",
+      "combatId": "verify-ui-rakshasa-claw-1788566613951:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "罗刹 使用爪击攻击 验证目标：爪击 → 验证目标 10+7=17 命中；共造成 9 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:03 PM\n结算\n\n罗刹 使用爪击攻击 验证目标：爪击 → 验证目标 10+7=17 命中；共造成 9 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：爪击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +7。\n结果 · 17 vs AC 10：命中。\n伤害骰 · 爪击（基础伤害·挥砍）｜2d6 骰面：6 + 1 = 7｜固定加值 +2｜小计 9\n罗刹｜消耗动作\n验证目标｜受到 9 点伤害｜HP 320 → 311\n验证目标｜效果生效：srd-5.1:monster:rakshasa:claw-rest-curse",
+      "playerLog": "罗刹 使用爪击攻击 验证目标：爪击 → 验证目标 10+7=17 命中；共造成 9 点伤害。",
+      "afterHp": 311,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "curse"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:03:57.506Z",
+      "evidenceFile": "ui-cases/monsters/035-rakshasa.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "有限魔法免疫",
+      "automation": "headless",
+      "rule": "limited-magic-immunity",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumSpellLevel",
+        "rule.advantageAboveMaximum",
+        "rule.allowsWilling"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "spell-level-6",
+        "spell-level-7",
+        "willing-ally"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 8,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

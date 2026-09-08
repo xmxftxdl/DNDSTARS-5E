@@ -13,6 +13,7 @@ import type { Dnd5eInventoryTargeting } from '../../types/inventory'
 export interface Dnd5eItemAreaTargetingSession {
   characterId: string
   instanceId: string
+  useActionId?: string
   itemName: string
   targeting: Extract<Dnd5eInventoryTargeting, { kind: 'map-area' }>
 }
@@ -23,13 +24,26 @@ export interface Dnd5ePluginAreaTargetingSession {
   featureId: string
   featureName: string
   targeting: Extract<Dnd5ePluginTargeting, { kind: 'area' }>
+  persistentAreaId?: string
+  activeEffectId?: string
+  activityChoices?: Record<string, string>
 }
 
 export interface Dnd5eItemCreatureTargetingSession {
   characterId: string
   instanceId: string
+  useActionId?: string
   itemName: string
   targeting: Extract<Dnd5eInventoryTargeting, { kind: 'creature' }>
+}
+
+export interface Dnd5ePersistentAreaActivityTargetingSession {
+  characterId: string
+  areaId?: string
+  effectId?: string
+  featureId: string
+  label: string
+  activityChoices?: Record<string, string>
 }
 
 /** Browser-only targeting and preview state. No authoritative combat facts live here. */
@@ -42,6 +56,8 @@ export function useCombatInteraction() {
   const [dnd5ePluginAreaTargeting, setDnd5ePluginAreaTargeting] = useState<Dnd5ePluginAreaTargetingSession | null>(null)
   const [dnd5eExtraActionTeleportTargeting, setDnd5eExtraActionTeleportTargeting] = useState<{ characterId: string } | null>(null)
   const [dnd5eItemCreatureTargeting, setDnd5eItemCreatureTargeting] = useState<Dnd5eItemCreatureTargetingSession | null>(null)
+  const [dnd5ePersistentAreaActivityTargeting, setDnd5ePersistentAreaActivityTargeting] =
+    useState<Dnd5ePersistentAreaActivityTargetingSession | null>(null)
   const [aoePreviewCell, setAoePreviewCell] = useState<GridCell | null>(null)
   const [aoeRectRotation, setAoeRectRotation] = useState(0)
 
@@ -60,6 +76,8 @@ export function useCombatInteraction() {
     setDnd5eExtraActionTeleportTargeting,
     dnd5eItemCreatureTargeting,
     setDnd5eItemCreatureTargeting,
+    dnd5ePersistentAreaActivityTargeting,
+    setDnd5ePersistentAreaActivityTargeting,
     aoePreviewCell,
     setAoePreviewCell,
     aoeRectRotation,

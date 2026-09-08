@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   dnd5eMonsterCoreSpellCompatibility,
   dnd5eMonsterShapechangeFormIds,
+  dnd5eMonsterShapechangeTrueFormId,
 } from './monsterAdvancedAbilities'
 import { getDnd5eSrdCombatSpell } from './spells'
 
@@ -23,6 +24,13 @@ describe('advanced monster Headless declarations', () => {
       'srd-5.1:werewolf-human',
       'srd-5.1:werewolf-hybrid',
     ])
+    expect(dnd5eMonsterShapechangeTrueFormId('srd-5.1:werewolf-hybrid'))
+      .toBe('srd-5.1:werewolf-human')
+    expect(dnd5eMonsterShapechangeTrueFormId('srd-5.1:werebear-bear'))
+      .toBe('srd-5.1:werebear-human')
+    expect(dnd5eMonsterShapechangeTrueFormId('srd-5.1:vampire-mist'))
+      .toBe('srd-5.1:vampire-vampire')
+    expect(dnd5eMonsterShapechangeTrueFormId('srd-5.1:doppelganger')).toBeUndefined()
   })
 
   it('reports only safely supported monster spell effects as fully automated', () => {
@@ -44,7 +52,7 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('enlarge-reduce')!))
       .toMatchObject({ automation: 'manual' })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('shillelagh')!))
-      .toMatchObject({ automation: 'manual' })
+      .toEqual({ automation: 'full' })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fireball')!)).toMatchObject({
       automation: 'full',
     })
@@ -72,7 +80,9 @@ describe('advanced monster Headless declarations', () => {
       'entangle',
       'hold-person',
       'lesser-restoration',
+      'ray-of-frost',
       'sleep',
+      'slow',
       'thunderwave',
     ]) {
       expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toEqual({
@@ -97,7 +107,11 @@ describe('advanced monster Headless declarations', () => {
         automation: 'manual',
       })
     }
-    for (const spellId of ['cloudkill', 'darkness', 'spirit-guardians', 'wall-of-fire']) {
+    for (const spellId of [
+      'cloudkill', 'darkness', 'spirit-guardians', 'wall-of-fire',
+      'fog-cloud', 'web', 'silence', 'sleet-storm', 'stinking-cloud', 'wind-wall',
+      'wall-of-force', 'wall-of-stone', 'wall-of-ice', 'wall-of-thorns',
+    ]) {
       expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell(spellId)!)).toEqual({
         automation: 'full',
       })

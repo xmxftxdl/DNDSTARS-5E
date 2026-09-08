@@ -1,7 +1,30 @@
 import type { FogTool } from '../../lib/fogOfWar'
-import type { GridCell } from '../../lib/gridCombat'
+import { clampGridSize, type GridCell } from '../../lib/gridCombat'
 import type { MapGeometryTool } from '../../lib/mapGeometry'
 import type { MapTabletopTool } from '../../lib/mapTabletop'
+
+export interface MapCanvasViewportDatasetTarget {
+  dataset: {
+    viewportX?: string
+    viewportY?: string
+    viewportScale?: string
+  }
+}
+
+/**
+ * Publishes Konva's live viewport transform without forcing a React render.
+ * DOM overlays can read this during a drag instead of waiting for the final
+ * state commit on pointer release.
+ */
+export function syncMapCanvasViewportDataset(
+  target: MapCanvasViewportDatasetTarget | null,
+  viewport: { x: number; y: number; scale: number },
+): void {
+  if (!target) return
+  target.dataset.viewportX = String(viewport.x)
+  target.dataset.viewportY = String(viewport.y)
+  target.dataset.viewportScale = String(viewport.scale)
+}
 
 export function mapCanvasAoeGridCell(
   point: { x: number; y: number },
@@ -16,7 +39,9 @@ export function mapCanvasAoeGridCell(
 
 export function mapCanvasTokenClickAction(
   areaTargeting: boolean,
-): 'consume-area-click' | 'select-token' {
+  movementTargeting = false,
+): 'consume-area-click' | 'select-movement-destination' | 'select-token' {
+  if (movementTargeting) return 'select-movement-destination'
   return areaTargeting ? 'consume-area-click' : 'select-token'
 }
 
@@ -58,6 +83,70 @@ export function mapCanvasGeometryDrawShouldStart(
   openingAttachedToWall: boolean,
 ): boolean {
   return (tool !== 'door' && tool !== 'window') || openingAttachedToWall
+}
+
+/**
+ * Geometry visibility is independent from geometry interaction. Players must
+ * always see the server-projected walls, doors, and windows even when their
+ * current mode does not allow clicking those entities.
+ */
+export function mapCanvasGeometryOverlayVisible(input: {
+  isDM: boolean
+  hasGeometry: boolean
+  hasDraft: boolean
+}): boolean {
+  return input.isDM || input.hasGeometry || input.hasDraft
+}
+
+/**
+ * Geometry tools reserve the primary button for selecting and drawing. Holding
+ * the secondary button temporarily switches the canvas to viewport panning,
+ * without changing the selected entity or the active geometry tool.
+ */
+export function mapCanvasGeometryRightButtonPanShouldStart(input: {
+  button: number
+  geometryEditMode: boolean
+}): boolean {
+  return input.geometryEditMode && input.button === 2
+}
+
+/** Grid calibration re-snaps authoritative Token coordinates on every step. */
+export function mapCanvasTokenUsesInstantPosition(input: {
+  gridAdjustMode: boolean
+  gridSizePreview: boolean
+  hasDragPreview: boolean
+}): boolean {
+  return input.gridAdjustMode || input.gridSizePreview || input.hasDragPreview
+}
+
+/**
+ * Wheel events can arrive faster than React can echo the controlled map prop.
+ * Always accumulate them from the imperative interaction value instead of the
+ * last rendered value, otherwise several notches collapse into one and appear
+ * to bounce backwards.
+ */
+export function mapCanvasGridSizeAfterWheel(input: {
+  currentGridSize: number
+  mapWidth: number
+  deltaY: number
+  shiftKey: boolean
+}): number {
+  const step = input.shiftKey ? 3 : 1
+  const delta = input.deltaY > 0 ? -step : step
+  return clampGridSize(input.currentGridSize + delta, { width: input.mapWidth })
+}
+
+/** Grid calibration hotkeys must not steal arrows from native form controls. */
+export function mapCanvasGridHotkeyUsesEditableTarget(target: EventTarget | null): boolean {
+  const candidate = target as {
+    tagName?: string
+    isContentEditable?: boolean
+  } | null
+  const tagName = candidate?.tagName?.toLowerCase()
+  return candidate?.isContentEditable === true ||
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    tagName === 'select'
 }
 
 export function mapCanvasStageCanPan(input: {

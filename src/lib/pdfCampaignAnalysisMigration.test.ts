@@ -17,7 +17,10 @@ const legacy: PdfCampaignAnalysisV1 = {
   }],
   relationships: [{ from: '艾琳', to: '暮钟旅馆', type: '调查', description: '', citations: [{ documentName: '模组.pdf', page: 2 }] }],
   locations: [{ name: '暮钟旅馆', description: '旧旅馆', citations: [{ documentName: '模组.pdf', page: 2 }] }],
-  factions: [], clues: [], scenes: [], encounters: [], importCandidates: [], prepTips: [],
+  factions: [], clues: [], timelineEvents: [{
+    name: '到达旅馆', description: '', location: '暮钟旅馆', npcs: ['艾琳'], monsters: [],
+    gameTimeWorldMinute: 540, citations: [],
+  }], scenes: [], encounters: [], importCandidates: [], prepTips: [],
   warnings: ['旧版警告'], analyzedChunks: 2,
 }
 
@@ -29,6 +32,7 @@ describe('PDF 分析 V1/V2 迁移', () => {
     expect(migrated.warnings).toEqual(['旧版警告'])
     expect(migrated.evidence.every((entry) => entry.verification === 'legacy')).toBe(true)
     expect(migrated.relationships[0]).toMatchObject({ fromEntityId: migrated.people[0]?.id, toEntityId: migrated.locations[0]?.id })
+    expect(migrated.timelineEvents?.[0]?.gameTimeWorldMinute).toBe(540)
   })
 
   it('迁移和物化具有确定性，V2 投影仍供旧 UI 使用', () => {
@@ -48,5 +52,24 @@ describe('PDF 分析 V1/V2 迁移', () => {
     const first = normalizeDmEditedPdfCampaignAnalysisV2(migrated)
     const second = normalizeDmEditedPdfCampaignAnalysisV2(first)
     expect(second).toEqual(first)
+  })
+
+  it('载入旧 V2 战役时自动合并重复场景与遭遇', () => {
+    const migrated = migratePdfCampaignAnalysisV1ToV2(legacy)
+    const scene = {
+      ...migrated.timelineEvents![0]!,
+      name: '黑桦弯伏击', location: '黑桦弯', npcs: [], monsters: ['伏击者'],
+    }
+    const encounter = {
+      ...migrated.timelineEvents![0]!,
+      name: '黑桦弯伏击战', creatures: ['伏击者'], notes: '从两侧包围玩家。',
+    }
+    migrated.scenes = [scene, { ...scene, name: '黑桦弯伏击战' }]
+    migrated.encounters = [encounter, { ...encounter, name: '黑桦弯伏击' }]
+
+    const restored = materializePdfCampaignAnalysis(migrated)
+
+    expect(restored.scenes).toHaveLength(1)
+    expect(restored.encounters).toHaveLength(1)
   })
 })

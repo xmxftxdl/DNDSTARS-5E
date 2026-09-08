@@ -3,6 +3,8 @@ import { cellsForAoe, canPlaceAoe } from '../../lib/skillTargeting'
 import type { Dnd5eSpellTargetingSession } from '../../presentation/maps/useCombatInteraction'
 import { cellKey } from '../../lib/gridCombat'
 import {
+  dnd5eSpellUsesThinWallCells,
+  dnd5eThinWallCells,
   dnd5eWallOfFireCells,
   dnd5eWallOfFireDamageCells,
 } from '../../rulesets/dnd5e/wallOfFireGeometry'
@@ -14,7 +16,17 @@ export function wallOfFireTargetingCells(
   anchor: GridCell,
   map: BattleMap,
 ): GridCell[] | undefined {
-  if (targeting?.spellId !== 'wall-of-fire' && targeting?.spellId !== 'blade-barrier') return undefined
+  if (!targeting) return undefined
+  if (targeting.spellId !== 'wall-of-fire' && targeting.spellId !== 'blade-barrier') {
+    if (!dnd5eSpellUsesThinWallCells(targeting.spellId) || targeting.area?.shape !== 'rect') return undefined
+    return dnd5eThinWallCells({
+      anchor,
+      angleDegrees: targeting.areaTargetAngleDegrees ?? 0,
+      lengthFeet: targeting.areaTargetWidthFeet ?? targeting.area.widthFeet,
+      maximumLengthFeet: targeting.area.widthFeet,
+      map,
+    })
+  }
   const blade = targeting.spellId === 'blade-barrier'
   return dnd5eWallOfFireCells({
     anchor,
@@ -40,6 +52,9 @@ export function wallOfFireTargetingPreview(input: {
     input.caster,
     input.caster,
   )
+  if (input.targeting.spellId !== 'wall-of-fire' && input.targeting.spellId !== 'blade-barrier') {
+    return { cells, hazardCells: [], rangeCells, valid, variant: 'attack' as const, areaPolygon: undefined }
+  }
   if (input.targeting.spellId === 'blade-barrier') {
     return { cells, hazardCells: [], rangeCells, valid, variant: 'attack' as const, areaPolygon: undefined }
   }

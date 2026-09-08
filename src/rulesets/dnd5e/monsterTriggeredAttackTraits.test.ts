@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { createDnd5eConditionEffect } from './activeEffects'
 import {
   createDnd5eCombatant,
   resolveDnd5eHeadlessAction,
@@ -295,7 +296,7 @@ describe('SRD triggered attack trait catalog mappings', () => {
         automation: 'headless',
         rule: {
           kind: 'reckless',
-          activation: 'turn-start-tactical-default',
+          activation: 'optional-on-turn',
           outgoing: {
             delivery: 'weapon-attack',
             mode: 'melee',
@@ -489,8 +490,46 @@ describe('Bugbear and Doppelganger Surprise Attack settlement', () => {
 })
 
 describe('Berserker and Minotaur Reckless lifecycle', () => {
+  it.each(['berserker', 'minotaur'])('%s attacks normally when the optional choice is omitted', (slug) => {
+    const actor = catalogCombatant(slug, 20, 'actor')
+    const target = combatant('target', 10)
+    const state = startDnd5eHeadlessCombat(`normal-${slug}`, [actor, target])
+    const weapon = meleeWeaponAction(slug)
+    const result = expectSuccess(resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action', actorId: actor.id, actionId: weapon.action.id,
+      rolls: [{ targetId: target.id, d20: 1, damageRolls: damageRolls(weapon.attack) }],
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 1, hit: false }))
+    expect(result.state.combatants.actor.classState.recklessAttackTurnKey).toBeUndefined()
+    const lateChoice = resolveDnd5eHeadlessAction(result.state, { type: 'monster-reckless', actorId: actor.id })
+    expect(lateChoice).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+    expect(lateChoice.state).toEqual(result.state)
+    const { prepared } = prepareHostAttack({ slug, actionId: weapon.action.id })
+    expect(prepared.attackModes).toEqual(['normal'])
+  })
+
+  it('rejects unsupported, incapacitated, repeated and off-turn Reckless choices atomically', () => {
+    const actor = catalogCombatant('minotaur', 20, 'actor')
+    const target = catalogCombatant('goblin', 10, 'target')
+    const state = startDnd5eHeadlessCombat('reckless-invalid', [actor, target])
+    const offTurn = resolveDnd5eHeadlessAction(state, { type: 'monster-reckless', actorId: target.id })
+    expect(offTurn).toMatchObject({ ok: false, reason: 'stale-turn' })
+    expect(offTurn.state).toEqual(state)
+    const active = expectSuccess(resolveDnd5eHeadlessAction(state, { type: 'monster-reckless', actorId: actor.id }))
+    const repeated = resolveDnd5eHeadlessAction(active.state, { type: 'monster-reckless', actorId: actor.id })
+    expect(repeated.ok).toBe(false)
+    expect(repeated.state).toEqual(active.state)
+    const goblinTurn = expectSuccess(resolveDnd5eHeadlessAction(state, { type: 'end-turn', actorId: actor.id }))
+    expect(resolveDnd5eHeadlessAction(goblinTurn.state, { type: 'monster-reckless', actorId: target.id }).ok).toBe(false)
+    const incapacitated = structuredClone(state)
+    incapacitated.combatants.actor.classState.activeEffects = [createDnd5eConditionEffect({
+      condition: 'incapacitated', targetId: actor.id, source: { kind: 'dm' },
+    })]
+    expect(resolveDnd5eHeadlessAction(incapacitated, { type: 'monster-reckless', actorId: actor.id }).ok).toBe(false)
+  })
+
   it.each(['berserker', 'minotaur'])(
-    'activates %s at turn start and grants outgoing and incoming advantage',
+    'activates %s only by choice and grants outgoing and incoming advantage',
     (slug) => {
       const combatId = `reckless-${slug}`
       const reckless = catalogCombatant(slug, 20, 'reckless')
@@ -508,15 +547,21 @@ describe('Berserker and Minotaur Reckless lifecycle', () => {
         actorId: reckless.id,
         turnSlotId: 'reckless-slot',
       }))
-      expect(begun.state.combatants.reckless.classState.recklessAttackTurnKey)
+      expect(begun.state.combatants.reckless.classState.recklessAttackTurnKey).toBeUndefined()
+      expect(begun.events).not.toContainEqual(expect.objectContaining({ type: 'monster-reckless-activated' }))
+      const activated = expectSuccess(resolveDnd5eHeadlessAction(begun.state, {
+        type: 'monster-reckless', actorId: reckless.id,
+      }))
+      expect(activated.state.combatants.reckless.turn).toEqual(begun.state.combatants.reckless.turn)
+      expect(activated.state.combatants.reckless.classState.recklessAttackTurnKey)
         .toBe(`${combatId}:1:reckless-slot`)
-      expect(begun.events).toContainEqual({
+      expect(activated.events).toContainEqual({
         type: 'monster-reckless-activated',
         actorId: reckless.id,
       })
 
       const recklessWeapon = meleeWeaponAction(slug)
-      const outgoing = expectSuccess(resolveDnd5eHeadlessAction(begun.state, {
+      const outgoing = expectSuccess(resolveDnd5eHeadlessAction(activated.state, {
         type: 'monster-action',
         actorId: reckless.id,
         actionId: recklessWeapon.action.id,
@@ -568,11 +613,8 @@ describe('Berserker and Minotaur Reckless lifecycle', () => {
       }))
       expect(nextRound.state.round).toBe(2)
       expect(nextRound.state.combatants.reckless.classState.recklessAttackTurnKey)
-        .toBe(`${combatId}:2:reckless-slot`)
-      expect(nextRound.events).toContainEqual({
-        type: 'monster-reckless-activated',
-        actorId: reckless.id,
-      })
+        .toBeUndefined()
+      expect(nextRound.events).not.toContainEqual(expect.objectContaining({ type: 'monster-reckless-activated' }))
     },
   )
 

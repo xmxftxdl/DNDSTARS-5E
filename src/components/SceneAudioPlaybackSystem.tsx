@@ -3,7 +3,11 @@ import { Music2, Play, Volume2, VolumeX } from 'lucide-react'
 import { sceneAudioPositionAt } from '../lib/sceneAudioLibrary'
 import { useSceneAudioStore } from '../store/sceneAudio'
 
-export default function SceneAudioPlaybackSystem() {
+interface SceneAudioPlaybackSystemProps {
+  active: boolean
+}
+
+export default function SceneAudioPlaybackSystem({ active }: SceneAudioPlaybackSystemProps) {
   const library = useSceneAudioStore((state) => state.library)
   const playback = useSceneAudioStore((state) => state.playback)
   const clockOffsetMs = useSceneAudioStore((state) => state.clockOffsetMs)
@@ -13,7 +17,28 @@ export default function SceneAudioPlaybackSystem() {
   const [source, setSource] = useState<{ assetId: string; url: string }>()
   const [blocked, setBlocked] = useState(false)
   const [locallyMuted, setLocallyMuted] = useState(false)
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden')
   const asset = library.assets.find((candidate) => candidate.id === playback.assetId)
+  const playbackEnabled = active && pageVisible
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      const visible = document.visibilityState !== 'hidden'
+      if (!visible) audioRef.current?.pause()
+      setPageVisible(visible)
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    return () => {
+      if (!audio) return
+      audio.pause()
+      audio.removeAttribute('src')
+    }
+  }, [])
 
   useEffect(() => {
     if (!playback.assetId) return
@@ -33,13 +58,17 @@ export default function SceneAudioPlaybackSystem() {
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
+    let cancelled = false
     window.clearTimeout(startTimerRef.current)
     audio.loop = playback.loop
     audio.volume = locallyMuted ? 0 : playback.volume
-    if (playback.status === 'stopped' || !asset || source?.assetId !== asset.id) {
+    if (!playbackEnabled || playback.status === 'stopped' || !asset || source?.assetId !== asset.id) {
       audio.pause()
       if (playback.status === 'stopped') audio.removeAttribute('src')
-      return
+      return () => {
+        cancelled = true
+        window.clearTimeout(startTimerRef.current)
+      }
     }
     if (audio.src !== source.url) {
       audio.src = source.url
@@ -49,6 +78,7 @@ export default function SceneAudioPlaybackSystem() {
       if (audio.readyState < HTMLMediaElement.HAVE_METADATA) {
         await new Promise<void>((resolve) => audio.addEventListener('loadedmetadata', () => resolve(), { once: true }))
       }
+      if (cancelled) return
       const serverNow = Date.now() + clockOffsetMs
       const target = sceneAudioPositionAt(playback, serverNow, asset.durationSeconds)
       if (Number.isFinite(target) && Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target
@@ -58,16 +88,22 @@ export default function SceneAudioPlaybackSystem() {
         return
       }
       const delayMs = Math.max(0, playback.anchorServerMs - serverNow)
-      const play = () => void audio.play().then(() => setBlocked(false)).catch(() => setBlocked(true))
+      const play = () => {
+        if (cancelled || document.visibilityState === 'hidden') return
+        void audio.play().then(() => setBlocked(false)).catch(() => setBlocked(true))
+      }
       if (delayMs > 10) startTimerRef.current = window.setTimeout(play, delayMs)
       else play()
     }
     void synchronize()
-    return () => window.clearTimeout(startTimerRef.current)
-  }, [asset, clockOffsetMs, locallyMuted, playback, source])
+    return () => {
+      cancelled = true
+      window.clearTimeout(startTimerRef.current)
+    }
+  }, [asset, clockOffsetMs, locallyMuted, playback, playbackEnabled, source])
 
   useEffect(() => {
-    if (playback.status !== 'playing' || !asset) return
+    if (!playbackEnabled || playback.status !== 'playing' || !asset) return
     const timer = window.setInterval(() => {
       const audio = audioRef.current
       if (!audio || audio.paused) return
@@ -75,13 +111,13 @@ export default function SceneAudioPlaybackSystem() {
       if (Math.abs(audio.currentTime - expected) > 0.4) audio.currentTime = expected
     }, 3_000)
     return () => window.clearInterval(timer)
-  }, [asset, clockOffsetMs, playback])
+  }, [asset, clockOffsetMs, playback, playbackEnabled])
 
-  const active = playback.status !== 'stopped' && !!asset
+  const showPlayback = playbackEnabled && playback.status !== 'stopped' && !!asset
   return (
     <>
       <audio ref={audioRef} preload="auto" aria-hidden="true" />
-      {active && (
+      {showPlayback && (
         <div className="fixed bottom-5 right-5 z-[135] flex max-w-sm items-center gap-3 rounded-2xl border border-violet-300/20 bg-void-950/94 px-3 py-2.5 shadow-2xl backdrop-blur-xl">
           <span className="rounded-xl bg-violet-400/12 p-2 text-violet-200"><Music2 className="h-4 w-4" /></span>
           <span className="min-w-0 flex-1">
@@ -93,7 +129,7 @@ export default function SceneAudioPlaybackSystem() {
           </button>
         </div>
       )}
-      {active && blocked && playback.status === 'playing' && (
+      {showPlayback && blocked && playback.status === 'playing' && (
         <button
           type="button"
           onClick={() => void audioRef.current?.play().then(() => setBlocked(false))}

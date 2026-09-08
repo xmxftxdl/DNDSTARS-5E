@@ -80,6 +80,7 @@ function output(page: number): PdfCampaignChunkAnalysisV1 {
     locations: [],
     factions: [],
     clues: [],
+    timelineEvents: [],
     scenes: [],
     encounters: [],
     importCandidates: [],
@@ -96,6 +97,27 @@ function outputForSchema(page: number, schema: unknown): PdfCampaignChunkAnalysi
     'importCandidates', 'prepTips', 'warnings',
   ] as const) {
     if (properties[key]?.maxItems === 0) result[key] = [] as never
+  }
+  if (properties.timelineEvents && properties.timelineEvents.maxItems !== 0) {
+    result.timelineEvents = [{
+      name: '王冠失踪',
+      description: '王冠失踪后，王室调查员开始调查。',
+      aliases: [],
+      location: '王城',
+      npcs: ['艾琳'],
+      monsters: [],
+      time: '故事开始前',
+      timelineOrder: 10,
+      timelineKind: 'history',
+      tags: ['主线'],
+      causedBy: [],
+      causalBranches: [],
+      causalExplanation: '',
+      branchCondition: '',
+      branchPerson: '',
+      branchPersonState: 'unspecified',
+      citations: [{ documentName: '冒险.pdf', page }],
+    }]
   }
   return result
 }
@@ -133,6 +155,9 @@ describe('PDF 战役分析', () => {
     expect(properties.relationships.maxItems).toBe(40)
     expect(properties.scenes.maxItems).toBe(10)
     expect(properties.warnings.maxItems).toBe(8)
+    const importItems = properties.importCandidates.items as { required?: string[]; properties?: Record<string, unknown> }
+    expect(importItems.required).toContain('monsterStatBlockText')
+    expect(importItems.properties).toHaveProperty('monsterStatBlockText')
   })
 
   it('按分析阶段关闭无关字段，并给长文档提供非强制的模型建议', () => {
@@ -141,9 +166,9 @@ describe('PDF 战役分析', () => {
     const relationshipProperties = pdfAnalysisSchemaForPass({ pass: 'relationships', documentName: '冒险.pdf', pageStart: 1, pageEnd: 2 })
       .properties as Record<string, { maxItems?: number }>
     const adventureProperties = pdfAnalysisSchemaForPass({ pass: 'adventure', documentName: '冒险.pdf', pageStart: 1, pageEnd: 2 })
-      .properties as Record<string, { maxItems?: number }>
+      .properties as Record<string, { maxItems?: number; items?: { required?: string[] } }>
     const synthesisProperties = pdfAnalysisSchemaForPass({ pass: 'synthesis' })
-      .properties as Record<string, { maxItems?: number }>
+      .properties as Record<string, { maxItems?: number; items?: { required?: string[] } }>
     expect(entityProperties.people.maxItems).toBeGreaterThan(0)
     expect(entityProperties.relationships.maxItems).toBe(0)
     expect(entityProperties.scenes.maxItems).toBe(0)
@@ -152,11 +177,22 @@ describe('PDF 战役分析', () => {
     expect(relationshipProperties.scenes.maxItems).toBe(0)
     expect(adventureProperties.people.maxItems).toBe(0)
     expect(adventureProperties.scenes.maxItems).toBeGreaterThan(0)
+    expect(adventureProperties.timelineEvents.maxItems).toBe(0)
     expect(synthesisProperties.people.maxItems).toBe(0)
     expect(synthesisProperties.relationships.maxItems).toBeGreaterThan(0)
+    expect(synthesisProperties.scenes.maxItems).toBe(0)
+    expect(synthesisProperties.timelineEvents.maxItems).toBe(36)
+    expect(synthesisProperties.timelineEvents.items?.required).toEqual(expect.arrayContaining([
+      'time', 'timelineOrder', 'timelineKind', 'tags',
+      'causedBy', 'causalBranches', 'causalExplanation', 'branchCondition', 'branchPerson', 'branchPersonState',
+    ]))
     expect(estimatePdfAnalysisWorkload(8, 'deep').recommendation).toBe('local-ready')
     expect(estimatePdfAnalysisWorkload(20, 'deep').recommendation).toBe('prefer-quick')
     expect(estimatePdfAnalysisWorkload(40, 'quick').recommendation).toBe('prefer-cloud')
+    const billed = estimatePdfAnalysisWorkload(20, 'deep')
+    expect(billed.estimatedCredits).toBeGreaterThan(0)
+    expect(billed.reservedCredits).toBeGreaterThanOrEqual(billed.estimatedCredits)
+    expect(billed.reservedCredits % 500).toBe(0)
   })
 
   it('本地按参数量路由，外部 API 按显式角色路由', () => {
@@ -453,6 +489,31 @@ describe('PDF 战役分析', () => {
   it('Host 拒绝缺少页码引用或结构不完整的模型输出', () => {
     expect(validatePdfCampaignChunkAnalysis(output(1))).toBe(true)
     expect(validatePdfCampaignChunkAnalysis({ ...output(1), people: [{ name: '无引用' }] })).toBe(false)
+    const scheduled = output(1)
+    scheduled.timelineEvents = [{
+      name: '抵达王城', description: '', location: '王城', npcs: [], monsters: [],
+      gameTimeWorldMinute: 600, citations: [{ documentName: '冒险.pdf', page: 1 }],
+    }]
+    expect(validatePdfCampaignChunkAnalysis(scheduled)).toBe(true)
+    expect(validatePdfCampaignChunkAnalysis({
+      ...scheduled,
+      timelineEvents: [{ ...scheduled.timelineEvents[0]!, gameTimeWorldMinute: -1 }],
+    })).toBe(false)
+  })
+
+  it('怪物候选必须携带新的完整属性块字段，从而使旧分段缓存自动失效', () => {
+    const legacy = output(1)
+    legacy.importCandidates = [{
+      name: '潮汐祭司', description: '旧缓存只有基础说明。', kind: 'monster', automation: 'partial',
+      citations: [{ documentName: '冒险.pdf', page: 1 }],
+    }]
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(false)
+    legacy.importCandidates[0]!.monsterStatBlockText = '潮汐祭司\nAC 14\nHP 45\n动作\n潮汐打击。近战武器攻击。'
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(true)
+    legacy.importCandidates[0] = { ...legacy.importCandidates[0]!, kind: 'item', monsterStatBlockText: '不应附在物品上的怪物文本' }
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(false)
+    legacy.importCandidates[0] = { ...legacy.importCandidates[0]!, kind: 'monster', automation: 'full', monsterStatBlockText: '' }
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(false)
   })
 
   it('模型返回非法结构时终止任务而不是写入半成品', async () => {
@@ -714,9 +775,9 @@ describe('PDF 战役分析', () => {
 
   it('本地模型命中结构化输出上限时自动扩容重试', async () => {
     const registry = new AiProviderRegistryV1()
-    const requests: Array<{ maxOutputTokens?: number; userPrompt: string }> = []
+    const requests: Array<{ maxOutputTokens?: number; userPrompt: string; outputSchema: unknown }> = []
     registry.register(runtime(async (request) => {
-      requests.push({ maxOutputTokens: request.maxOutputTokens, userPrompt: request.userPrompt })
+      requests.push({ maxOutputTokens: request.maxOutputTokens, userPrompt: request.userPrompt, outputSchema: request.outputSchema })
       if (requests.length === 1) throw new Error('structured-output-truncated')
       return {
         schemaVersion: 1,
@@ -735,10 +796,12 @@ describe('PDF 战役分析', () => {
       onProgress: progress,
     })
 
-    expect(requests.map(({ maxOutputTokens }) => maxOutputTokens)).toEqual([2_200, 4_400])
+    expect(requests.map(({ maxOutputTokens }) => maxOutputTokens)).toEqual([5_000, 6_144])
     expect(requests[1]?.userPrompt).toContain('上一次输出达到长度上限')
+    const retryImportSchema = ((requests[1]?.outputSchema as { properties?: Record<string, { items?: { properties?: Record<string, { maxLength?: number }> } }> }).properties?.importCandidates?.items?.properties)
+    expect(retryImportSchema?.monsterStatBlockText?.maxLength).toBe(24_000)
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringContaining('第 1 次扩容重试（4400 tokens）'),
+      message: expect.stringContaining('第 1 次扩容重试（6144 tokens）'),
     }))
     expect(result.people).toHaveLength(1)
   })
@@ -830,13 +893,44 @@ describe('PDF 战役分析', () => {
 
   it('深度分析分离实体与剧情抽取，并在最后执行全书级综合', async () => {
     const registry = new AiProviderRegistryV1()
-    const generate = vi.fn<AiProviderRuntimeV1['generateStructured']>(async (request) => ({
-      schemaVersion: 1,
-      jobId: request.jobId,
-      providerId: descriptor.id,
-      modelId: model.id,
-      output: outputForSchema(request.documents?.[0]?.pageStart ?? 1, request.outputSchema),
-    }))
+    const generate = vi.fn<AiProviderRuntimeV1['generateStructured']>(async (request) => {
+      const generated = outputForSchema(request.documents?.[0]?.pageStart ?? 1, request.outputSchema)
+      if (request.task === 'campaign-analysis') {
+        generated.timelineEvents = Array.from({ length: 13 }, (_, index) => ({
+          name: `关键事件 ${index + 1}`,
+          description: '原文明确区分的独立重大事件。',
+          aliases: [],
+          location: '王城',
+          npcs: ['艾琳'],
+          monsters: [],
+          time: `第 ${index + 1} 阶段`,
+          timelineOrder: (index + 1) * 10,
+          timelineKind: 'current',
+          tags: ['主线'],
+          causedBy: index === 0 ? [] : [`关键事件 ${index}`],
+          causalBranches: index === 0 ? [] : [{
+            sourceEvent: `关键事件 ${index}`,
+            label: '进入下一阶段',
+            condition: '',
+            explanation: '前一关键事件直接开启当前阶段。',
+            branchPerson: '',
+            branchPersonState: 'unspecified',
+          }],
+          causalExplanation: index === 0 ? '' : '前一关键事件直接开启当前阶段。',
+          branchCondition: '',
+          branchPerson: '',
+          branchPersonState: 'unspecified',
+          citations: [{ documentName: '冒险.pdf', page: 1 }],
+        }))
+      }
+      return {
+        schemaVersion: 1,
+        jobId: request.jobId,
+        providerId: descriptor.id,
+        modelId: model.id,
+        output: generated,
+      }
+    })
     registry.register(runtime(generate))
     const progress = vi.fn()
 
@@ -851,13 +945,15 @@ describe('PDF 战役分析', () => {
     expect(generate).toHaveBeenCalledTimes(7)
     expect(generate.mock.calls.filter(([request]) => request.task === 'pdf-extraction')).toHaveLength(6)
     expect(generate.mock.calls.slice(0, 6).map(([request]) => request.maxOutputTokens)).toEqual([
-      1_400, 1_200, 1_600,
-      1_400, 1_200, 1_600,
+      1_400, 1_200, 5_000,
+      1_400, 1_200, 5_000,
     ])
-    expect(generate.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(2_200)
+    expect(generate.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(12_000)
     expect(generate.mock.calls.at(-1)?.[0].task).toBe('campaign-analysis')
     expect(progress).toHaveBeenLastCalledWith({ stage: 'complete', current: 7, total: 7, message: 'PDF 分析完成' })
     expect(result.people).toHaveLength(1)
+    expect(result.timelineEvents).toHaveLength(13)
+    expect(result.scenes).toHaveLength(0)
     expect(result).toMatchObject({ analyzedChunks: 2, analysisDepth: 'deep', analysisPasses: 7 })
   })
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  normalizeDnd5ePersistentAreaBlocking,
+  normalizeDnd5ePersistentAreaTurnLifecycle,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
@@ -30,6 +32,34 @@ describe('persistent area vertical snapshots', () => {
   })
 })
 
+describe('persistent area staged wind and target policy', () => {
+  it('normalizes closed fog dispersal stages and rejects object damage targets', () => {
+    expect(normalizeDnd5ePersistentAreaTurnLifecycle({
+      timing: 'source-turn-start',
+      stages: [{ atAdvance: 4, dispersesFogAndMist: true }],
+    })).toMatchObject({
+      stages: [{ atAdvance: 4, dispersesFogAndMist: true }],
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      id: 'acid-rain', label: '酸雨', timing: 'source-turn-start',
+      targetKinds: ['creature', 'object'],
+      damage: { count: 1, sides: 6, type: 'acid' },
+    })).toBeUndefined()
+  })
+
+  it('rejects executable wind stages and non-damaging object triggers', () => {
+    expect(normalizeDnd5ePersistentAreaTurnLifecycle({
+      timing: 'source-turn-start',
+      stages: [{ atAdvance: 4, dispersesFogAndMist: true, run: 'eval()' }],
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      id: 'object-notice', label: '物体通知', timing: 'on-create',
+      targetKinds: ['object'],
+      notification: { delivery: 'mental-to-source', message: 'seen' },
+    })).toBeUndefined()
+  })
+})
+
 describe('persistent area visual declarations', () => {
   it('normalizes the bounded toxic-cloud renderer declaration', () => {
     expect(normalizeDnd5ePersistentAreaVisual({ preset: 'toxic-cloud' })).toEqual({
@@ -57,7 +87,10 @@ describe('persistent area visual declarations', () => {
   })
 
   it('accepts dedicated material presets for persistent spell visuals', () => {
-    for (const preset of ['mage-hand', 'insect-plague', 'blade-barrier'] as const) {
+    for (const preset of [
+      'mage-hand', 'insect-plague', 'blade-barrier', 'silent-image', 'unseen-servant', 'mislead',
+      'project-image',
+    ] as const) {
       expect(normalizeDnd5ePersistentAreaVisual({ preset })).toEqual({
         preset,
         intensity: 'normal',
@@ -117,6 +150,140 @@ describe('persistent area visual declarations', () => {
     expect(normalizeDnd5ePersistentAreaTriggerSnapshot(base)).toBeUndefined()
     expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
       ...base, movementIntervalFeet: 0,
+    })).toBeUndefined()
+  })
+
+  it('normalizes data-only mental and audible notifications without accepting executable metadata', () => {
+    const base = {
+      id: 'alarm-enter', label: '警报', timing: 'on-enter', oncePerRound: false,
+    }
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...base, notification: { delivery: 'mental-to-source' },
+    })).toMatchObject({ notification: { delivery: 'mental-to-source' } })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...base, notification: { delivery: 'audible', audibleRadiusFeet: 60 },
+    })).toMatchObject({ notification: { delivery: 'audible', audibleRadiusFeet: 60 } })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...base, notification: { delivery: 'audible' },
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...base, notification: { delivery: 'mental-to-source', run: 'eval()' },
+    })).toBeUndefined()
+  })
+
+  it('accepts save-only lifetime triggers for zone-style knowledge effects', () => {
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      id: 'truth-save', label: '诚实之域豁免', timing: 'on-enter',
+      oncePerTarget: true,
+      savingThrow: { ability: 'cha', dc: 15, onSuccess: 'none', magical: true },
+    })).toMatchObject({
+      oncePerRound: false, oncePerTurn: false, oncePerTarget: true,
+      savingThrow: { ability: 'cha', dc: 15 },
+    })
+  })
+
+  it('accepts only bounded source-turn target choices', () => {
+    const trigger = {
+      id: 'storm-choice', label: '第三轮闪电', timing: 'source-turn-start',
+      maximumTotalUses: 6, sourceChoosesTargets: true,
+      damage: { count: 10, sides: 6, modifier: 0, type: 'lightning' },
+    }
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)).toMatchObject({
+      timing: 'source-turn-start', maximumTotalUses: 6, sourceChoosesTargets: true,
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...trigger, timing: 'turn-start',
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...trigger, maximumTotalUses: undefined,
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...trigger, sourceChoosesTargets: 'yes',
+    })).toBeUndefined()
+  })
+
+  it('normalizes concentration-ending Constitution saves and rejects malformed variants', () => {
+    const trigger = {
+      id: 'sleet-storm-concentration-turn-start',
+      label: '雪雨暴·专注干扰',
+      timing: 'turn-start',
+      oncePerTurn: true,
+      savingThrow: { ability: 'con', dc: 15, onSuccess: 'none' },
+      endTargetConcentrationOnFailedSave: true,
+    }
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)).toMatchObject({
+      savingThrow: { ability: 'con', dc: 15 },
+      endTargetConcentrationOnFailedSave: true,
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...trigger,
+      savingThrow: { ability: 'dex', dc: 15, onSuccess: 'none' },
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      ...trigger,
+      endTargetConcentrationOnFailedSave: 'yes',
+    })).toBeUndefined()
+  })
+})
+
+describe('persistent area boundary permissions', () => {
+  it('normalizes Host-derived occupant entry and directional ray policies', () => {
+    expect(normalizeDnd5ePersistentAreaBlocking({
+      movement: true,
+      movementMode: 'enter',
+      entryPermission: 'occupants-at-creation',
+      authorizedTokenIds: ['caster-token', 'ally-token'],
+      blocksTeleportationEntry: true,
+      vision: true,
+      visionMode: 'outside-in',
+      lineOfEffect: true,
+      lineOfEffectMode: 'boundary',
+    })).toEqual({
+      movement: true,
+      movementMode: 'enter',
+      includedCreatureTypes: undefined,
+      excludedCreatureTypes: undefined,
+      excludeSourceToken: false,
+      entryPermission: 'occupants-at-creation',
+      authorizedTokenIds: ['caster-token', 'ally-token'],
+      blocksTeleportationEntry: true,
+      blocksTeleportationExit: false,
+      teleportationExitSavingThrow: undefined,
+      vision: true,
+      visionMode: 'outside-in',
+      lineOfEffect: true,
+      lineOfEffectMode: 'boundary',
+    })
+  })
+
+  it('rejects client-supplied authorization without the bounded policy and executable metadata', () => {
+    expect(normalizeDnd5ePersistentAreaBlocking({
+      movement: true,
+      authorizedTokenIds: ['intruder'],
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaBlocking({
+      movement: true,
+      entryPermission: 'occupants-at-creation',
+      authorizedTokenIds: ['caster'],
+      authorize: 'eval()',
+    })).toBeUndefined()
+  })
+
+  it('normalizes only bounded teleport-exit saves attached to an exit ward', () => {
+    expect(normalizeDnd5ePersistentAreaBlocking({
+      blocksTeleportationExit: true,
+      teleportationExitSavingThrow: { ability: 'cha', dc: 17 },
+    })).toMatchObject({
+      blocksTeleportationExit: true,
+      teleportationExitSavingThrow: { ability: 'cha', dc: 17 },
+    })
+    expect(normalizeDnd5ePersistentAreaBlocking({
+      movement: true,
+      teleportationExitSavingThrow: { ability: 'cha', dc: 17 },
+    })).toBeUndefined()
+    expect(normalizeDnd5ePersistentAreaBlocking({
+      blocksTeleportationExit: true,
+      teleportationExitSavingThrow: { ability: 'cha', dc: 'eval()' },
     })).toBeUndefined()
   })
 })

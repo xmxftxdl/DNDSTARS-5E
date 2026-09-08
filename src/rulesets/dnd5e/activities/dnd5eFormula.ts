@@ -13,6 +13,9 @@ export interface Dnd5eFormulaActorSnapshot {
   spellAttackBonus?: number
   spellSaveDc?: number
   spellcastingAbilityModifier?: number
+  /** Host-captured source save DCs for effects currently carried by this actor. */
+  activeEffectSourceSpellSaveDcs?: readonly { definitionId: string; sourceSpellSaveDc: number }[]
+  speed?: number
 }
 
 export type Dnd5eFormulaReferenceV1 =
@@ -22,6 +25,8 @@ export type Dnd5eFormulaReferenceV1 =
   | { kind: 'actor-class-level'; classId: string }
   | { kind: 'actor-spell-attack-bonus' }
   | { kind: 'actor-spell-save-dc' }
+  | { kind: 'actor-active-effect-source-spell-save-dc'; effectId: string }
+  | { kind: 'target-active-effect-source-spell-save-dc'; effectId: string }
   | { kind: 'actor-spellcasting-ability-modifier' }
   | { kind: 'actor-current-hp' }
   | { kind: 'actor-max-hp' }
@@ -30,6 +35,8 @@ export type Dnd5eFormulaReferenceV1 =
   | { kind: 'target-ability-modifier'; ability: AbilityKey }
   | { kind: 'target-current-hp' }
   | { kind: 'target-max-hp' }
+  | { kind: 'actor-speed' }
+  | { kind: 'target-speed' }
   | { kind: 'cast-level' }
   | { kind: 'slot-delta'; baseLevel: number }
   | { kind: 'resource'; subject: 'actor' | 'target'; resourceId: string; field: 'current' | 'maximum' }
@@ -53,6 +60,15 @@ export interface Dnd5eFormulaEvaluationContext {
   rolls: Readonly<Record<string, Dnd5eFormulaRollResult>>
   /** Critical-hit or other Host-owned dice multiplication by stable roll id. */
   diceMultiplierByRollId?: Readonly<Record<string, number>>
+  /**
+   * A validated multi-target attack may carry the critical-sized dice pool
+   * even while a non-critical target consumes only the leading base dice.
+   */
+  maximumDiceMultiplierByRollId?: Readonly<Record<string, number>>
+  /** Audited die-floor transforms, such as Elemental Adept's 1 -> 2 rule. */
+  minimumDieValueByRollId?: Readonly<Record<string, number>>
+  /** Audited effects such as Beacon of Hope maximize only the named dice components. */
+  maximizeDiceRollIds?: readonly string[]
 }
 
 export interface Dnd5eFormulaRollDeclaration {
@@ -96,6 +112,15 @@ function validateReference(reference: unknown, label: string, errors: string[]):
     }
     return
   }
+  if (
+    reference.kind === 'actor-active-effect-source-spell-save-dc' ||
+    reference.kind === 'target-active-effect-source-spell-save-dc'
+  ) {
+    if (typeof reference.effectId !== 'string' || !ID_PATTERN.test(reference.effectId)) {
+      errors.push(`${label}.effectId is invalid`)
+    }
+    return
+  }
   if (reference.kind === 'slot-delta') {
     if (!finiteInteger(reference.baseLevel, 0, 9)) errors.push(`${label}.baseLevel is invalid`)
     return
@@ -111,7 +136,8 @@ function validateReference(reference: unknown, label: string, errors: string[]):
   if (![
     'actor-level', 'actor-proficiency-bonus', 'actor-current-hp', 'actor-max-hp',
     'actor-spell-attack-bonus', 'actor-spell-save-dc', 'actor-spellcasting-ability-modifier',
-    'target-level', 'target-proficiency-bonus', 'target-current-hp', 'target-max-hp', 'cast-level',
+    'target-level', 'target-proficiency-bonus', 'target-current-hp', 'target-max-hp',
+    'actor-speed', 'target-speed', 'cast-level',
   ].includes(reference.kind)) errors.push(`${label}.kind is invalid`)
 }
 
@@ -214,6 +240,22 @@ function referenceValue(
     if (context.actor.spellSaveDc == null) throw new Dnd5eFormulaEvaluationError('spell save DC is unavailable')
     return context.actor.spellSaveDc
   }
+  if (reference.kind === 'actor-active-effect-source-spell-save-dc') {
+    const entry = context.actor.activeEffectSourceSpellSaveDcs?.find((effect) =>
+      effect.definitionId === reference.effectId ||
+      effect.definitionId.endsWith(`:${reference.effectId}`) ||
+      effect.definitionId.includes(`:${reference.effectId}:`))
+    if (!entry) throw new Dnd5eFormulaEvaluationError(`active effect source spell save DC is unavailable: ${reference.effectId}`)
+    return entry.sourceSpellSaveDc
+  }
+  if (reference.kind === 'target-active-effect-source-spell-save-dc') {
+    const entry = context.target?.activeEffectSourceSpellSaveDcs?.find((effect) =>
+      effect.definitionId === reference.effectId ||
+      effect.definitionId.endsWith(`:${reference.effectId}`) ||
+      effect.definitionId.includes(`:${reference.effectId}:`))
+    if (!entry) throw new Dnd5eFormulaEvaluationError(`target active effect source spell save DC is unavailable: ${reference.effectId}`)
+    return entry.sourceSpellSaveDc
+  }
   if (reference.kind === 'actor-spellcasting-ability-modifier') {
     if (context.actor.spellcastingAbilityModifier == null) {
       throw new Dnd5eFormulaEvaluationError('spellcasting ability modifier is unavailable')
@@ -222,6 +264,10 @@ function referenceValue(
   }
   if (reference.kind === 'actor-current-hp') return actorReferenceValue(context.actor, 'currentHp', reference.kind)
   if (reference.kind === 'actor-max-hp') return actorReferenceValue(context.actor, 'maxHp', reference.kind)
+  if (reference.kind === 'actor-speed') {
+    if (!Number.isFinite(context.actor.speed)) throw new Dnd5eFormulaEvaluationError('actor speed is unavailable')
+    return context.actor.speed!
+  }
   if (reference.kind === 'target-level') return actorReferenceValue(context.target, 'level', reference.kind)
   if (reference.kind === 'target-proficiency-bonus') {
     return actorReferenceValue(context.target, 'proficiencyBonus', reference.kind)
@@ -232,6 +278,10 @@ function referenceValue(
   }
   if (reference.kind === 'target-current-hp') return actorReferenceValue(context.target, 'currentHp', reference.kind)
   if (reference.kind === 'target-max-hp') return actorReferenceValue(context.target, 'maxHp', reference.kind)
+  if (reference.kind === 'target-speed') {
+    if (!Number.isFinite(context.target?.speed)) throw new Dnd5eFormulaEvaluationError('target speed is unavailable')
+    return context.target!.speed!
+  }
   if (reference.kind === 'cast-level') {
     if (!finiteInteger(context.castLevel, 0, 9)) throw new Dnd5eFormulaEvaluationError('cast level is unavailable')
     return context.castLevel
@@ -256,12 +306,22 @@ export function evaluateDnd5eFormulaV1(
     const multiplier = context.diceMultiplierByRollId?.[formula.rollId] ?? 1
     if (!finiteInteger(multiplier, 1, 10)) throw new Dnd5eFormulaEvaluationError(`invalid dice multiplier: ${formula.rollId}`)
     const requiredCount = formula.count * multiplier
+    const maximumMultiplier = context.maximumDiceMultiplierByRollId?.[formula.rollId] ?? multiplier
+    if (!finiteInteger(maximumMultiplier, multiplier, 10)) {
+      throw new Dnd5eFormulaEvaluationError(`invalid maximum dice multiplier: ${formula.rollId}`)
+    }
+    const submittedCount = formula.count * maximumMultiplier
     const roll = context.rolls[formula.rollId]
     if (
-      !roll || roll.values.length !== requiredCount ||
+      !roll || roll.values.length !== submittedCount ||
       roll.values.some((value) => !finiteInteger(value, 1, formula.sides))
     ) throw new Dnd5eFormulaEvaluationError(`invalid dice result: ${formula.rollId}`)
-    return roll.values.reduce((total, value) => total + value, 0)
+    const minimum = context.minimumDieValueByRollId?.[formula.rollId] ?? 1
+    if (!finiteInteger(minimum, 1, formula.sides)) {
+      throw new Dnd5eFormulaEvaluationError(`invalid minimum die value: ${formula.rollId}`)
+    }
+    if (context.maximizeDiceRollIds?.includes(formula.rollId)) return requiredCount * formula.sides
+    return roll.values.slice(0, requiredCount).reduce((total, value) => total + Math.max(minimum, value), 0)
   }
   if (formula.kind === 'add') {
     return formula.values.reduce((total, value) => total + evaluateDnd5eFormulaV1(value, context), 0)

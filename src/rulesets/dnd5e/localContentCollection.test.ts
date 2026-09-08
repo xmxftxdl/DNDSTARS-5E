@@ -8,7 +8,29 @@ import {
   compileDnd5eLocalContentCollection,
   prepareDnd5eLocalContentJson,
 } from './localContentCollection'
-import { parseDnd5eContentPackageV2 } from './contentPackageV2'
+import {
+  dnd5eRoomRuntimeProjectionBytesV2,
+  dnd5eRulesPluginFromContentPackageV2,
+  parseDnd5eContentPackageV2,
+} from './contentPackageV2'
+import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
+import {
+  dnd5ePluginSpellDefinition,
+  dnd5ePluginBackgroundDefinition,
+  dnd5ePluginSubclassSpellIds,
+  dnd5ePluginFeatureDefinition,
+  dnd5ePluginFeatureRuntimeSourceV1,
+  dnd5ePluginFeatDefinition,
+  dnd5ePluginItemDefinition,
+  registerDnd5eRulesPlugin,
+} from './pluginApi'
+import { dnd5ePluginHeadlessActionDefinition } from './plugins/pluginHeadlessRuntimeRegistry'
+import { DND5E_SRD_SPELL_CATALOG } from './spellCatalog'
+import {
+  defaultDnd5eStartingEquipmentSelection,
+  dnd5eStartingEquipmentPlan,
+  resolveDnd5eStartingEquipment,
+} from './startingEquipment'
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -154,6 +176,86 @@ describe('本地房间内容合集', () => {
     expect(new TextDecoder().decode(prepared.bytes)).not.toContain('private generation prompt')
   })
 
+  it('keeps unified Activity templates when compiling a local collection', async () => {
+    const prepared = await prepareDnd5eLocalContentJson(JSON.stringify({
+      format: DND5E_LOCAL_CONTENT_COLLECTION_FORMAT,
+      schemaVersion: DND5E_LOCAL_CONTENT_COLLECTION_SCHEMA_VERSION,
+      manifest: {
+        id: 'local.example.activity-template',
+        name: 'Activity template collection',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Local test',
+        license: 'Private local use',
+        contentCategory: 'rules',
+      },
+      content: {
+        features: [{
+          id: 'restorative-pulse',
+          name: 'Restorative pulse',
+          summary: 'A reusable Activity source.',
+          description: 'A local test feature backed by a unified Activity.',
+          automation: 'full',
+        }],
+        activities: [{
+          schemaVersion: 1,
+          id: 'restorative-pulse-activity',
+          name: 'Restorative pulse',
+          activation: { kind: 'action', cost: 1 },
+          invocation: { kind: 'active', confirmation: 'actor-choice' },
+          target: { kind: 'self' },
+          consumption: [{
+            kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve',
+          }],
+          outcomes: [{
+            id: 'restore', when: { kind: 'always' }, operations: [{
+              id: 'healing', kind: 'healing', target: 'actor', amount: { kind: 'constant', value: 1 },
+            }],
+          }],
+          automation: {
+            schemaVersion: 1,
+            level: 'full',
+            supportedPhases: ['eligibility', 'cost', 'targeting', 'healing', 'persistence'],
+            manualPhases: [],
+            limitations: [],
+          },
+          legacySource: { kind: 'feature', id: 'restorative-pulse' },
+        }],
+      },
+    }))
+
+    expect(prepared.package.content.activities).toEqual([
+      expect.objectContaining({
+        id: 'restorative-pulse-activity',
+        legacySource: { kind: 'feature', id: 'restorative-pulse' },
+      }),
+    ])
+    expect(dnd5eContentPackageActivityProjectionV1(prepared.package).entries).toContainEqual(
+      expect.objectContaining({
+        sourceKind: 'feature',
+        sourceId: 'restorative-pulse',
+        activityId: 'restorative-pulse-activity',
+        mode: 'adapted',
+      }),
+    )
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(prepared.package))
+    try {
+      expect(dnd5ePluginFeatureDefinition('local.example.activity-template:restorative-pulse')?.action)
+        .toMatchObject({
+          id: 'restorative-pulse-activity',
+          economy: 'action',
+          targeting: { kind: 'self' },
+        })
+      expect(dnd5ePluginHeadlessActionDefinition(
+        'local.example.activity-template',
+        'restorative-pulse-activity',
+      )).toMatchObject({ execution: 'trusted' })
+    } finally {
+      dispose()
+    }
+  })
+
   it('accepts a previously compiled room-ephemeral V2 JSON as a single file', async () => {
     const compiled = await prepareDnd5eLocalContentJson(JSON.stringify({
       name: 'Round trip rules',
@@ -234,9 +336,14 @@ describe('本地房间内容合集', () => {
   it.runIf(existsSync(LOCAL_PHB_COLLECTION_DIRECTORY))(
     'compiles the ignored private PHB directory through its single root manifest',
     async () => {
+      const localManifest = JSON.parse(readFileSync(
+        path.join(LOCAL_PHB_COLLECTION_DIRECTORY, 'collection.json'),
+        'utf8',
+      )) as { expected: { activities: { count: number } } }
       const result = await compileDnd5eLocalContentCollection(
         localCollectionFiles(LOCAL_PHB_COLLECTION_DIRECTORY),
       )
+      expect(() => dnd5eRoomRuntimeProjectionBytesV2(result.bytes)).not.toThrow()
       const parsed = parseDnd5eContentPackageV2(result.bytes)
       expect(result.audit.complete).toBe(true)
       expect(parsed?.manifest).toMatchObject({
@@ -269,7 +376,293 @@ describe('本地房间内容合集', () => {
           expect.objectContaining({ id: 'totem-warrior-2014' }),
         ]),
       })
+      const projection = dnd5eContentPackageActivityProjectionV1(parsed!)
+      const subclassEntries = projection.entries.filter((entry) => entry.sourceKind === 'subclass-ability')
+      expect(subclassEntries.filter((entry) => entry.mode === 'legacy-fallback')).toEqual([])
+      expect({
+        total: subclassEntries.length,
+        adapted: subclassEntries.filter((entry) => entry.mode === 'adapted').length,
+        dmAdjudication: subclassEntries.filter((entry) => entry.mode === 'dm-adjudication').length,
+        legacyFallback: subclassEntries.filter((entry) => entry.mode === 'legacy-fallback').length,
+      }).toEqual({ total: 169, adapted: 128, dmAdjudication: 41, legacyFallback: 0 })
+      expect(projection.activities.filter((activity) =>
+        activity.legacySource?.kind === 'subclass-ability' && activity.authorityBinding,
+      )).toHaveLength(92)
+      expect(projection.activities.find((activity) =>
+        activity.legacySource?.id === 'trickery-domain-2014:invoke-duplicity',
+      )).toMatchObject({
+        target: { kind: 'area', origin: 'point', shape: 'rect', placeRangeFeet: 30 },
+        outcomes: [{ operations: [expect.objectContaining({
+          kind: 'create-persistent-area', utilityProjectionId: 'invoke-duplicity',
+          movement: {
+            economy: 'bonus-action', maximumFeet: 30, maximumDistanceFromSourceFeet: 120,
+          },
+        })] }],
+      })
+      const subclassAbilities = parsed!.content.subclasses.flatMap((subclass) =>
+        subclass.abilities.map((ability) => ({ subclassId: subclass.id, ability })))
+      expect(subclassAbilities).toHaveLength(169)
+      expect(subclassAbilities.every(({ ability }) => Boolean(ability.iconAssetId))).toBe(true)
+      expect(new Set(subclassAbilities.map(({ ability }) => ability.iconAssetId)).size).toBe(169)
+      expect(subclassAbilities.filter(({ ability }) => ability.automation === 'partial').map(
+        ({ subclassId, ability }) => `${subclassId}:${ability.id}`,
+      )).toEqual([
+        'wild-magic-2014:wild-magic-surge',
+        'knowledge-domain-2014:blessings-of-knowledge',
+        'knowledge-domain-2014:knowledge-of-the-ages',
+        'knowledge-domain-2014:read-thoughts',
+        'nature-domain-2014:master-of-nature',
+        'moon-circle-2014:thousand-forms',
+        'four-elements-2014:elemental-attunement',
+        'conjuration-school-2014:minor-conjuration',
+        'illusion-school-2014:malleable-illusions',
+        'illusion-school-2014:illusory-reality',
+        'transmutation-school-2014:master-transmuter',
+      ])
+      expect(subclassAbilities.filter(({ ability }) =>
+        ability.automation === 'manual' && ability.effects.length > 0,
+      )).toEqual([])
+      expect(parsed?.content.spells).toHaveLength(42)
+      expect(parsed?.content.spells.every((spell) => Boolean(spell.iconAssetId))).toBe(true)
+      expect(new Set(parsed?.content.spells.map((spell) => spell.id)).size).toBe(42)
+      expect(parsed?.content.spells.filter((spell) =>
+        DND5E_SRD_SPELL_CATALOG.some((entry) => entry.id === spell.id),
+      )).toEqual([])
+      expect(parsed?.content.spells.map((spell) => spell.id)).toEqual([
+        'blade-ward', 'friends', 'thorn-whip',
+        'armor-of-agathys', 'arms-of-hadar', 'chromatic-orb', 'compelled-duel',
+        'dissonant-whispers', 'ensnaring-strike', 'hail-of-thorns', 'hex',
+        'ray-of-sickness', 'searing-smite', 'thunderous-smite', 'witch-bolt',
+        'wrathful-smite', 'beast-sense', 'cloud-of-daggers', 'cordon-of-arrows',
+        'crown-of-madness', 'phantasmal-force', 'aura-of-vitality', 'blinding-smite',
+        'conjure-barrage', 'crusaders-mantle', 'elemental-weapon', 'feign-death',
+        'hunger-of-hadar', 'lightning-arrow', 'aura-of-life', 'aura-of-purity',
+        'grasping-vine', 'staggering-smite', 'banishing-smite', 'circle-of-power',
+        'conjure-volley', 'destructive-wave', 'swift-quiver', 'arcane-gate',
+        'telepathy', 'tsunami', 'power-word-heal',
+      ])
+      expect(parsed?.content.feats).toHaveLength(41)
+      expect(parsed?.content.feats.every((feat) => Boolean(feat.iconAssetId))).toBe(true)
+      expect(parsed?.content.features).toHaveLength(13)
+      expect(parsed?.content.features.every((feature) => Boolean(feature.iconAssetId))).toBe(true)
+      expect(parsed?.assets).toHaveLength(265)
+      expect(result.audit.visuals).toEqual({
+        declaredImages: 265,
+        aiGeneratedImages: 265,
+        boundTargets: 265,
+      })
+      const combatFeatCoverage = JSON.parse(readFileSync(
+        path.join(LOCAL_PHB_COLLECTION_DIRECTORY, 'feats/combat-coverage.json'),
+        'utf8',
+      )) as { entries: Array<{ id: string; status: string; primitives: string[]; pending: string[] }> }
+      expect(new Set(combatFeatCoverage.entries.map((entry) => entry.id)).size)
+        .toBe(combatFeatCoverage.entries.length)
+      for (const entry of combatFeatCoverage.entries) {
+        expect(parsed?.content.feats.find((feat) => feat.id === entry.id)?.automation, entry.id)
+          .toBe(entry.status)
+        expect(entry.primitives.length + entry.pending.length, entry.id).toBeGreaterThan(0)
+      }
+      expect(parsed?.content.activities).toHaveLength(localManifest.expected.activities.count)
+      expect(parsed?.content.activities).toContainEqual(expect.objectContaining({
+        id: 'polearm-master-butt-attack-activity',
+        requirements: expect.arrayContaining([expect.objectContaining({ kind: 'attack-weapon' })]),
+        outcomes: [expect.objectContaining({ operations: [expect.objectContaining({
+          kind: 'grant-weapon-attack', damageDice: { count: 1, sides: 4 }, damageType: 'bludgeoning',
+        })] })],
+      }))
+      expect(parsed?.content.items).toHaveLength(108)
+      expect(parsed?.content.classes).toEqual([])
+      expect(parsed?.content.monsters).toEqual([])
+      expect(parsed?.content.abilityGenerationMethods).toEqual([])
+      const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(parsed!))
+      try {
+        for (const subclass of parsed!.content.subclasses) {
+          for (const ability of subclass.abilities) {
+            expect(
+              dnd5ePluginFeatureRuntimeSourceV1(
+                `local.doco.phb-2014-room:${subclass.id}.${ability.id}`,
+              ),
+              `${subclass.id}:${ability.id}`,
+            ).toBe('unified-content')
+          }
+        }
+        expect(dnd5ePluginBackgroundDefinition('local.doco.phb-2014-room:soldier')).toMatchObject({
+          toolProficiencies: ['陆上载具'],
+          toolProficiencyChoices: [expect.objectContaining({ id: 'gaming-set', count: 1 })],
+          startingEquipment: expect.objectContaining({ fixedGrants: expect.any(Array) }),
+        })
+        const soldierEquipmentPlan = dnd5eStartingEquipmentPlan(
+          '战士',
+          'local.doco.phb-2014-room:soldier',
+        )
+        expect(soldierEquipmentPlan.groups.some((group) => group.source === 'background')).toBe(true)
+        const soldierEquipment = resolveDnd5eStartingEquipment(
+          'soldier-test',
+          soldierEquipmentPlan,
+          defaultDnd5eStartingEquipmentSelection(soldierEquipmentPlan),
+        )
+        expect(soldierEquipment.inventory.entries.some((entry) =>
+          entry.templateId === 'local.doco.phb-2014-room:background-insignia',
+        )).toBe(true)
+        expect(soldierEquipment.inventory.entries.some((entry) =>
+          entry.templateId === 'local.doco.phb-2014-room:dice-set',
+        )).toBe(true)
+        for (const background of parsed!.content.backgrounds) {
+          const plan = dnd5eStartingEquipmentPlan('战士', `local.doco.phb-2014-room:${background.id}`)
+          expect(
+            plan.fixedGrants.length > 0 || plan.groups.some((group) => group.source === 'background'),
+            background.id,
+          ).toBe(true)
+          expect(() => resolveDnd5eStartingEquipment(
+            `background-${background.id}`,
+            plan,
+            defaultDnd5eStartingEquipmentSelection(plan),
+          )).not.toThrow()
+        }
+        expect(dnd5ePluginBackgroundDefinition('local.doco.phb-2014-room:criminal')?.variants)
+          .toContainEqual(expect.objectContaining({ id: 'spy' }))
+        expect(dnd5ePluginBackgroundDefinition('local.doco.phb-2014-room:noble')?.variants)
+          .toContainEqual(expect.objectContaining({ id: 'knight' }))
+        expect(dnd5ePluginFeatDefinition('local.doco.phb-2014-room:lucky')).toMatchObject({
+          automation: 'full',
+          declarativeAbility: { mechanic: { kind: 'd20-choice-reroll' } },
+        })
+        const feat = (id: string) => dnd5ePluginFeatDefinition(`local.doco.phb-2014-room:${id}`)
+        expect(feat('athlete')).toMatchObject({
+          automation: 'full',
+          staticModifiers: {
+            climbWithoutSpeedCostMultiplier: 1,
+            runningJumpMinimumApproachFeet: 5,
+            standFromProneMovementCostFeet: 5,
+          },
+        })
+        expect(feat('skulker')).toMatchObject({
+          automation: 'partial',
+          staticModifiers: { retainHiddenOnRangedWeaponMiss: true },
+        })
+        expect(feat('crossbow-expert')).toMatchObject({
+          automation: 'full',
+          staticModifiers: {
+            ignoreNearbyHostileRangedAttackDisadvantage: true,
+            ignoreLoadingWeaponProperty: true,
+          },
+        })
+        expect(feat('dual-wielder')).toMatchObject({
+          automation: 'partial',
+          staticModifiers: { dualWieldMeleeArmorClassBonus: 1, allowNonLightTwoWeaponFighting: true },
+        })
+        expect(feat('durable')).toMatchObject({
+          automation: 'full',
+          staticModifiers: { minimumHitDieHealingConstitutionMultiplier: 2 },
+        })
+        expect(feat('great-weapon-master')).toMatchObject({
+          automation: 'full',
+          declarativeAbility: { mechanic: { kind: 'attack-tradeoff', attackRollModifier: -5, damageBonus: 10 } },
+        })
+        expect(feat('heavy-armor-master')).toMatchObject({
+          automation: 'full',
+          passiveEffects: [expect.objectContaining({ kind: 'damage-reduction', amount: 3, requiresHeavyArmor: true })],
+        })
+        expect(feat('medium-armor-master')).toMatchObject({
+          automation: 'full',
+          staticModifiers: { mediumArmorDexterityCapBonus: 1, ignoreMediumArmorStealthDisadvantage: true },
+        })
+        expect(feat('polearm-master')).toMatchObject({
+          automation: 'full',
+          staticModifiers: { opportunityAttacksOnEnterReachWeaponIds: expect.arrayContaining(['dnd5e-quarterstaff']) },
+        })
+        expect(feat('sentinel')).toMatchObject({
+          automation: 'full',
+          staticModifiers: { opportunityAttacksIgnoreDisengage: true, opportunityAttackHitStopsMovement: true },
+          declarativeAbility: { mechanic: { kind: 'reaction-weapon-attack', event: 'enemy-attacks-other' } },
+        })
+        expect(feat('mage-slayer')).toMatchObject({
+          automation: 'full',
+          staticModifiers: {
+            spellSavingThrowAdvantageWithinFeet: 5,
+            imposeConcentrationCheckDisadvantageOnDamage: true,
+          },
+          declarativeAbility: { mechanic: { kind: 'reaction-weapon-attack', event: 'nearby-creature-casts-spell' } },
+        })
+        expect(feat('mounted-combatant')).toMatchObject({
+          automation: 'full',
+          staticModifiers: {
+            mountedMeleeAdvantageAgainstSmallerUnmounted: true,
+            redirectMountedCreatureAttacksToRider: true,
+            grantMountedCreatureDexterityEvasion: true,
+          },
+        })
+        expect(feat('mobile')).toMatchObject({
+          automation: 'full',
+          staticModifiers: {
+            speedBonusFeet: 10,
+            preventOpportunityAttacksFromMeleeAttackTargets: true,
+            ignoreDifficultTerrainWhileDashing: true,
+          },
+        })
+        expect(feat('observant')).toMatchObject({
+          automation: 'partial', staticModifiers: { passivePerceptionBonus: 5 },
+        })
+        expect(feat('sharpshooter')).toMatchObject({
+          automation: 'full',
+          staticModifiers: { ignoreLongRangeRangedWeaponDisadvantage: true, ignoreRangedWeaponCoverBonus: true },
+          declarativeAbility: { mechanic: { kind: 'attack-tradeoff', attackRollModifier: -5, damageBonus: 10 } },
+        })
+        expect(feat('spell-sniper')).toMatchObject({
+          automation: 'full',
+          staticModifiers: { spellAttackRangeMultiplier: 2, ignoreSpellAttackCoverBonus: true },
+        })
+        expect(feat('war-caster')).toMatchObject({
+          automation: 'full',
+          staticModifiers: {
+            ignoreOccupiedHandsForSomaticComponents: true,
+            opportunityAttackSpellReplacement: true,
+          },
+          declarativeAbility: { mechanic: { kind: 'passive-defense', concentrationCheckAdvantage: true } },
+        })
+        expect(dnd5ePluginItemDefinition('local.doco.phb-2014-room:plate-armor')).toMatchObject({
+          category: 'equipment',
+          equipment: { dnd5e: { kind: 'armor', baseArmorClass: 18 } },
+        })
+        expect(dnd5ePluginItemDefinition('local.doco.phb-2014-room:barrel')).toMatchObject({
+          category: 'container', containerCapacityWeightLb: 400,
+        })
+        expect(dnd5ePluginSubclassSpellIds(
+          'local.doco.phb-2014-room:nature-domain-2014',
+          7,
+          'always-prepared',
+        )).toContain('local.doco.phb-2014-room:grasping-vine')
+        expect(dnd5ePluginSpellDefinition('local.doco.phb-2014-room:grasping-vine'))
+          .toMatchObject({
+            name: '抓握藤蔓',
+            automation: { mode: 'headless-action', actionId: 'grasping-vine-activity' },
+          })
+        expect(dnd5ePluginHeadlessActionDefinition(
+          'local.doco.phb-2014-room',
+          'grasping-vine-control-activity',
+        )).toMatchObject({ execution: 'trusted' })
+        expect(dnd5ePluginFeatureDefinition(
+          'local.doco.phb-2014-room:area-control.grasping-vine-control-activity',
+        )?.action).toMatchObject({
+          id: 'grasping-vine-control-activity',
+          economy: 'bonusAction',
+          targeting: { kind: 'single-creature', rangeFeet: 30 },
+        })
+        expect(dnd5ePluginSubclassSpellIds(
+          'local.doco.phb-2014-room:great-old-one-2014',
+          1,
+          'expanded-list',
+        )).toContain('hideous-laughter')
+        expect(dnd5ePluginSubclassSpellIds(
+          'local.doco.phb-2014-room:great-old-one-2014',
+          7,
+          'expanded-list',
+        )).toContain('black-tentacles')
+      } finally {
+        dispose()
+      }
     },
+    120_000,
   )
 
   it('在浏览器内合并 CSV 并将 AI 图片绑定到稳定条目 ID', async () => {

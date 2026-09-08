@@ -17,16 +17,17 @@ export const PLAYER_ACTION_COMBAT_BANNER_ROUTES = {
   'dnd5e-item-use': 'action',
   'dnd5e-ability-check': 'action',
   'dnd5e-spell-cast': 'spell',
+  'dnd5e-spell-whisper-reply': 'none',
   'dnd5e-persistent-area-move': 'action',
   'dnd5e-adjudicated-spell': 'spell',
-  'dnd5e-map-interaction': 'action',
+  'dnd5e-map-interaction': 'none',
   'move-token': 'none',
   disengage: 'action',
   dodge: 'action',
   'dnd5e-basic-action': 'action',
 } as const satisfies Record<SharedPlayerActionState['type'], CombatBannerRoute>
 
-const BASIC_ACTION_LABELS: Readonly<Record<NonNullable<SharedPlayerActionState['dnd5eBasicAction']>['kind'], string>> = {
+const BASIC_ACTION_LABELS: Readonly<Record<NonNullable<SharedPlayerActionState['dnd5eBasicAction']>['kind'], string | null>> = {
   dash: '疾走',
   hide: '躲藏',
   help: '协助',
@@ -34,12 +35,17 @@ const BASIC_ACTION_LABELS: Readonly<Record<NonNullable<SharedPlayerActionState['
   'use-object': '使用物件',
   grapple: '擒抱',
   shove: '推撞',
-  'release-grapple': '释放擒抱',
-  'escape-grapple': '挣脱擒抱',
-  'escape-effect': '挣脱效果',
-  wake: '唤醒',
-  'other-action': '自定义动作',
-  'other-bonus-action': '自定义附赠动作',
+  'release-grapple': null,
+  'escape-grapple': null,
+  'escape-effect': null,
+  'dismiss-effect': null,
+  'set-flame-blade-manifestation': null,
+  'dismiss-warding-bond': null,
+  wake: null,
+  'command-animate-dead': '操纵死尸·心灵命令',
+  'command-animate-objects': '活化物件·心灵命令',
+  'other-action': null,
+  'other-bonus-action': null,
 }
 
 function readableContentId(value: string | undefined, fallback: string): string {
@@ -48,7 +54,10 @@ function readableContentId(value: string | undefined, fallback: string): string 
   return tail.replace(/[-_]+/g, ' ').trim() || fallback
 }
 
-export function playerActionCombatBannerName(action: SharedPlayerActionState): string | null {
+export function playerActionCombatBannerName(
+  action: SharedPlayerActionState,
+  options?: { pluginFeatureName?: (featureId: string) => string | undefined },
+): string | null {
   if (PLAYER_ACTION_COMBAT_BANNER_ROUTES[action.type] !== 'action') return null
   if (action.type === 'dnd5e-death-save') return '死亡豁免'
   if (action.type === 'disengage') return '撤离'
@@ -64,16 +73,16 @@ export function playerActionCombatBannerName(action: SharedPlayerActionState): s
   }
   if (action.type === 'dnd5e-racial-action') return '龙裔吐息'
   if (action.type === 'dnd5e-plugin-action') {
-    return readableContentId(action.dnd5ePluginAction?.featureId, '自定义特性')
+    const featureId = action.dnd5ePluginAction?.featureId
+    const registeredName = featureId ? options?.pluginFeatureName?.(featureId)?.trim() : undefined
+    return registeredName || readableContentId(featureId, '自定义特性')
   }
   if (action.type === 'dnd5e-item-use') return '使用物品'
   if (action.type === 'dnd5e-ability-check') return '属性检定'
   if (action.type === 'dnd5e-persistent-area-move') return '操控持续法术'
-  if (action.type === 'dnd5e-map-interaction') return '场景互动'
   if (action.type === 'dnd5e-basic-action') {
     const kind = action.dnd5eBasicAction?.kind
     return kind ? BASIC_ACTION_LABELS[kind] : '基础动作'
   }
   return '动作'
 }
-

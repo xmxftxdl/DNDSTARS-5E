@@ -41,6 +41,46 @@ describe('D&D 5e structured formulas', () => {
     })).toThrow('invalid dice result: strike')
   })
 
+  it('reads a triggering effect caster DC from the Host-captured effect source', () => {
+    const formula: Dnd5eFormulaV1 = {
+      kind: 'reference',
+      reference: { kind: 'actor-active-effect-source-spell-save-dc', effectId: 'holy-aura' },
+    }
+    expect(validateDnd5eFormulaV1(formula)).toEqual([])
+    expect(evaluateDnd5eFormulaV1(formula, {
+      actor: {
+        level: 8, proficiencyBonus: 3, abilities,
+        activeEffectSourceSpellSaveDcs: [{
+          definitionId: 'activity:spell:holy-aura:holy-aura:modifiers:0',
+          sourceSpellSaveDc: 17,
+        }],
+      },
+      rolls: {},
+    })).toBe(17)
+  })
+
+  it('reads the inspected target effect caster DC from the Host snapshot', () => {
+    const formula: Dnd5eFormulaV1 = {
+      kind: 'reference',
+      reference: {
+        kind: 'target-active-effect-source-spell-save-dc',
+        effectId: 'disguise-self-appearance',
+      },
+    }
+    expect(validateDnd5eFormulaV1(formula)).toEqual([])
+    expect(evaluateDnd5eFormulaV1(formula, {
+      actor: { level: 1, proficiencyBonus: 2, abilities },
+      target: {
+        level: 20, proficiencyBonus: 6, abilities,
+        activeEffectSourceSpellSaveDcs: [{
+          definitionId: 'activity:spell:disguise-self:disguise-self-appearance:modifiers:0',
+          sourceSpellSaveDc: 19,
+        }],
+      },
+      rolls: {},
+    })).toBe(19)
+  })
+
   it('rejects arbitrary paths and executable-looking nodes', () => {
     expect(validateDnd5eFormulaV1({
       kind: 'reference',

@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { Dnd5eSpellTargetingSession } from '../../presentation/maps/useCombatInteraction'
 import { normalizeWallOfFireAngle } from '../../rulesets/dnd5e/wallOfFireGeometry'
+import { moveEarthSquareTargetingPatch } from './moveEarthTargeting'
 
 interface Props {
   targeting: Dnd5eSpellTargetingSession | null
@@ -13,13 +14,15 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
   const bladeActive = targeting?.spellId === 'blade-barrier' && targeting.area && !targeting.areaTargetSelected
   const genericRectActive = targeting?.spellId !== 'wall-of-fire' && targeting?.area?.shape === 'rect' &&
     targeting.area.rotatable === true && !targeting.areaTargetSelected
+  const moveEarthActive = targeting?.spellId === 'move-earth' && targeting.area?.shape === 'rect' &&
+    !targeting.areaTargetSelected
   const adjustableAreaActive = targeting?.spellId !== 'wall-of-fire' && targeting?.spellId !== 'blade-barrier' && !!targeting?.area && !targeting.areaTargetSelected && (
     ('minimumRadiusFeet' in targeting.area && targeting.area.minimumRadiusFeet != null) ||
     ('minimumWidthFeet' in targeting.area && targeting.area.minimumWidthFeet != null) ||
     ('minimumHeightFeet' in targeting.area && targeting.area.minimumHeightFeet != null) ||
     ('minimumLengthFeet' in targeting.area && targeting.area.minimumLengthFeet != null)
   )
-  const active = wallActive || bladeActive || genericRectActive || adjustableAreaActive
+  const active = wallActive || bladeActive || moveEarthActive || genericRectActive || adjustableAreaActive
   const shape = targeting?.wallOfFireShape ?? 'line'
   const angle = wallActive
     ? targeting?.wallOfFireAngleDegrees ?? 0
@@ -33,12 +36,12 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     ? targeting.area.placeRangeFeet ?? 120
     : 120
   const patch = useCallback((values: Partial<Dnd5eSpellTargetingSession>) => setTargeting((current) =>
-    current?.area?.shape === 'rect' && current.area.rotatable && !current.areaTargetSelected
+    current?.area && !current.areaTargetSelected
       ? { ...current, ...values }
       : current), [setTargeting])
 
   useEffect(() => {
-    if (!active || (wallActive && shape !== 'line')) return
+    if (!active || moveEarthActive || (wallActive && shape !== 'line')) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (!['q', 'e'].includes(event.key.toLowerCase())) return
       event.preventDefault()
@@ -47,7 +50,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [active, angle, bladeActive, patch, shape, wallActive])
+  }, [active, angle, bladeActive, moveEarthActive, patch, shape, wallActive])
 
   if (!active) return null
   if (bladeActive) {
@@ -65,6 +68,42 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
       </> : <label className="flex items-center gap-2">直径<input aria-label="剑刃障壁环形直径" type="range" min="5" max="60" step="5" value={bladeDiameter} onChange={(event) => patch({ bladeBarrierDiameterFeet: Number(event.target.value) })} className="w-32 accent-sky-400" /><output className="w-14">{bladeDiameter} 尺</output></label>}
       <span className="text-slate-400">Q / E 微调 5° · 移动鼠标预览，点击地图确认</span>
     </div>
+  }
+  if (moveEarthActive && targeting?.area?.shape === 'rect') {
+    const side = moveEarthSquareTargetingPatch(
+      targeting.areaTargetWidthFeet ?? targeting.areaTargetHeightFeet ?? 40,
+    ).areaTargetWidthFeet
+    return (
+      <div data-testid="move-earth-area-size-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,760px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-amber-300/55 bg-void-950/95 px-3 py-2 text-xs text-amber-50 shadow-2xl backdrop-blur-sm">
+        <strong className="text-amber-200">地动术区域</strong>
+        <label className="flex items-center gap-2">正方形边长
+          <button
+            type="button"
+            aria-label="减小地动术区域边长"
+            onClick={() => patch(moveEarthSquareTargetingPatch(side - 5))}
+            className="rounded border border-amber-300/30 bg-white/5 px-1.5 py-0.5 hover:bg-amber-400/20"
+          >−</button>
+          <input
+            aria-label="地动术区域边长"
+            type="range"
+            min="5"
+            max="40"
+            step="5"
+            value={side}
+            onChange={(event) => patch(moveEarthSquareTargetingPatch(Number(event.target.value)))}
+            className="w-44 accent-amber-400"
+          />
+          <button
+            type="button"
+            aria-label="增大地动术区域边长"
+            onClick={() => patch(moveEarthSquareTargetingPatch(side + 5))}
+            className="rounded border border-amber-300/30 bg-white/5 px-1.5 py-0.5 hover:bg-amber-400/20"
+          >+</button>
+          <output className="w-24 tabular-nums">{side} × {side} 尺</output>
+        </label>
+        <span className="text-slate-400">拖动滑块调整边长，移动鼠标预览，点击地图确认。</span>
+      </div>
+    )
   }
   if (adjustableAreaActive && targeting?.area) {
     const controls: Array<{ key: 'areaTargetRadiusFeet' | 'areaTargetWidthFeet' | 'areaTargetHeightFeet' | 'areaTargetLengthFeet'; label: string; min: number; max: number; value: number }> = []
@@ -87,10 +126,25 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     return (
       <div data-testid="adjustable-area-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,900px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-void-950/95 px-3 py-2 text-xs text-cyan-50 shadow-2xl backdrop-blur-sm">
         <strong className="text-cyan-200">调整法术范围</strong>
-        {controls.map((control) => <label key={control.key} className="flex items-center gap-2">{control.label}
-          <input aria-label={`法术范围${control.label}`} type="range" min={control.min} max={control.max} step="5" value={control.value} onChange={(event) => patch({ [control.key]: Number(event.target.value) })} className="w-36 accent-cyan-400" />
+        {controls.map((control) => {
+          const stepFeet = control.min % 5 !== 0 ? 2.5 : 5
+          return <label key={control.key} className="flex items-center gap-2">{control.label}
+          <button
+            type="button"
+            aria-label={`减小法术范围${control.label}`}
+            onClick={() => patch({ [control.key]: Math.max(control.min, control.value - stepFeet) })}
+            className="rounded border border-cyan-300/30 bg-white/5 px-1.5 py-0.5 hover:bg-cyan-400/20"
+          >−</button>
+          <input aria-label={`法术范围${control.label}`} type="range" min={control.min} max={control.max} step={stepFeet} value={control.value} onChange={(event) => patch({ [control.key]: Number(event.target.value) })} className="w-36 accent-cyan-400" />
+          <button
+            type="button"
+            aria-label={`增大法术范围${control.label}`}
+            onClick={() => patch({ [control.key]: Math.min(control.max, control.value + stepFeet) })}
+            className="rounded border border-cyan-300/30 bg-white/5 px-1.5 py-0.5 hover:bg-cyan-400/20"
+          >+</button>
           <output className="w-12 tabular-nums">{control.value} 尺</output>
-        </label>)}
+        </label>
+        })}
         {targeting.area.shape === 'rect' && targeting.area.rotatable ? <label className="flex items-center gap-2">角度
           <input aria-label="法术范围角度" type="range" min="0" max="359" step="1" value={angle} onChange={(event) => patch({ areaTargetAngleDegrees: Number(event.target.value) })} className="w-40 accent-cyan-400" />
           <output className="w-11 tabular-nums">{Math.round(angle)}°</output>

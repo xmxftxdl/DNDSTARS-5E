@@ -233,9 +233,8 @@ describe('catalog combat-gap action batch', () => {
       .toHaveLength(1)
   })
 
-  it('keeps the Gnoll Spear usable as one stable melee-or-thrown attack', () => {
-    const action = catalogAction('gnoll', 'spear')
-    expect(action).toMatchObject({
+  it('exposes both Gnoll Spear grip branches as explicit Headless attacks', () => {
+    expect(catalogAction('gnoll', 'spear')).toMatchObject({
       kind: 'weapon-attack',
       automation: 'headless',
       attack: {
@@ -244,6 +243,14 @@ describe('catalog combat-gap action batch', () => {
         rangeFeet: { normal: 20, long: 60 },
         damage: [{ count: 1, sides: 6, bonus: 2, type: 'piercing' }],
         rangedDamage: [{ count: 1, sides: 6, bonus: 2, type: 'piercing' }],
+      },
+    })
+    expect(catalogAction('gnoll', 'spear-two-handed-melee')).toMatchObject({
+      kind: 'weapon-attack',
+      automation: 'headless',
+      attack: {
+        mode: 'melee',
+        damage: [{ count: 1, sides: 8, bonus: 2, type: 'piercing' }],
       },
     })
   })
@@ -274,7 +281,7 @@ describe('catalog combat-gap action batch', () => {
       .toEqual({ 'steam-breath': false })
   })
 
-  it('declares all nine migrated source actions as structured Headless actions', () => {
+  it('retains all nine structured source actions as Headless', () => {
     const migrated = [
       ['gnoll', 'spear'],
       ['guardian-naga', 'spit-poison'],

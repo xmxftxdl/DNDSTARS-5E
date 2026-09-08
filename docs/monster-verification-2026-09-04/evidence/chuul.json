@@ -1,0 +1,192 @@
+{
+  "id": "srd-5.1:chuul",
+  "slug": "chuul",
+  "name": "楚尔异怪",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "pincer",
+      "name": "螯击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tentacles",
+      "name": "触手群攻",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.durationRounds",
+        "rule.repeatSaveAtEndOfTargetTurn",
+        "rule.additionalConditionsOnFailedSave[].condition",
+        "rule.additionalConditionsOnFailedSave[].durationRounds",
+        "rule.additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "rule.additionalConditionsOnFailedSave[].dependsOnCondition",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-pincers-and-tentacles",
+      "name": "多重攻击：螯击 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 62,
+      "slug": "chuul",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:38:09.091Z",
+      "name": "楚尔异怪",
+      "actionId": "pincer",
+      "actionName": "螯击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-chuul-pincer-1788557889149",
+      "combatId": "verify-ui-chuul-pincer-1788557889149:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "楚尔异怪 使用螯击攻击 验证目标：螯击 → 验证目标 20+6=26 命中；共造成 17 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:38 PM\n结算\n\n楚尔异怪 使用螯击攻击 验证目标：螯击 → 验证目标 20+6=26 命中；共造成 17 点伤害。\n\n查看 Headless 结算依据（11）\n怪物动作：螯击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 20；最终采用 20；调整值 +6。\n结果 · 26 vs AC 10：重击。\n伤害骰 · 螯击（基础伤害·钝击）｜4d6 骰面：4 + 5 + 1 + 3 = 13｜固定加值 +4｜小计 17\n楚尔异怪｜消耗动作\n验证目标｜受到 17 点伤害｜HP 320 → 303\n验证目标｜获得状态：擒抱｜来源：楚尔异怪\n验证目标｜效果生效：擒抱\n楚尔异怪｜monster:srd-5.1:chuul:pincer:pincer-grapple生效｜目标 验证目标",
+      "playerLog": "楚尔异怪 使用螯击攻击 验证目标：螯击 → 验证目标 20+6=26 命中；共造成 17 点伤害。",
+      "afterHp": 303,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:38:51.890Z",
+      "evidenceFile": "ui-cases/monsters/062-chuul.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "感知魔法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 9,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -7,7 +7,7 @@ import {
   dnd5ePactSlotLevel,
   type Dnd5eClassId,
 } from './classes'
-import { registeredDnd5ePluginSpells } from './pluginApi'
+import { dnd5ePluginSubclassSpellIds, registeredDnd5ePluginSpells } from './pluginApi'
 import {
   dnd5eSpellbookEntriesWithPlugins,
   type Dnd5eSpellbookEntry,
@@ -131,8 +131,14 @@ export function buildDnd5eSpellAdvancementPlanFromSelections(
     input.subclassId,
   )
   const catalog = dnd5eSpellbookEntriesWithPlugins([], registeredDnd5ePluginSpells())
+  const expandedSubclassSpells = new Set(dnd5ePluginSubclassSpellIds(
+    input.subclassId,
+    toClassLevel,
+    'expanded-list',
+  ))
   const classOptions = catalog.filter((spell) =>
-    (spell.classes as readonly string[]).includes(source.spellListClassId))
+    (spell.classes as readonly string[]).includes(source.spellListClassId) ||
+    expandedSubclassSpells.has(spell.id))
   const cantripOptions = classOptions.filter((spell) => spell.level === 0)
   const spellOptions = classOptions.filter((spell) =>
     spell.level > 0 && spell.level <= targetHighestSpellLevel)

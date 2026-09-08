@@ -9,6 +9,9 @@ import type {
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import type { Dnd5eDamageType } from './damageTypes'
 import { dnd5eInventoryEntryIsActive, normalizeDnd5eInventory } from './items'
+import { dnd5eClassDefinition } from './classes'
+import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
+import { evaluateDnd5eWorkshopDamageFormula, normalizeDnd5eWorkshopFormulaClassLevels } from './workshopDamageFormula'
 
 export interface Dnd5eInventoryEffectApplication {
   instanceId: string
@@ -29,6 +32,30 @@ export interface Dnd5eOnHitBonusDamageRequirement {
   sides: number
   bonus: number
   damageType: 'inherit' | Dnd5eDamageType
+}
+
+function workshopModifierForCombatant(
+  combatant: Dnd5eCombatant,
+  formula: Dnd5eOnHitBonusDamageEffect['damage']['modifierFormula'],
+): number {
+  if (!formula) return 0
+  const classDefinition = combatant.classId ? dnd5eClassDefinition(combatant.classId) : undefined
+  const spellcastingAbility = classDefinition?.spellcasting?.ability
+  return evaluateDnd5eWorkshopDamageFormula(formula, {
+    level: combatant.level,
+    proficiencyBonus: combatant.proficiencyBonus,
+    abilities: combatant.abilities,
+    classLevels: normalizeDnd5eWorkshopFormulaClassLevels(combatant.classLevels),
+    currentHp: combatant.currentHp,
+    maxHp: combatant.maxHp,
+    resources: Object.fromEntries(Object.entries(combatant.classResources).map(([id, resource]) => [id, {
+      current: resource.current,
+      maximum: resource.max,
+    }])),
+    ...(spellcastingAbility ? {
+      spellcastingAbilityModifier: rules.abilityModifier(combatant.abilities[spellcastingAbility]),
+    } : {}),
+  })
 }
 
 export interface Dnd5eOnHitBonusDamageResolution {
@@ -194,7 +221,7 @@ export function dnd5eOnHitBonusDamageRequirements(input: {
       itemName: snapshot.itemName,
       count,
       sides: effect.damage.sides,
-      bonus: effect.damage.bonus,
+      bonus: effect.damage.bonus + workshopModifierForCombatant(input.combatant, effect.damage.modifierFormula),
       damageType: effect.damageType,
     })
   }

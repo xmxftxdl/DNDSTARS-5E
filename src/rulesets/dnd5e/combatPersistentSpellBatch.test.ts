@@ -60,7 +60,7 @@ describe('combat-impacting persistent spell batch', () => {
     const spellbook = new Map(dnd5eSpellbookEntries([]).map((entry) => [entry.id, entry]))
     for (const spellId of ['insect-plague', 'cloudkill', 'blade-barrier']) {
       expect(spellbook.get(spellId)).toMatchObject({
-        headless: true,
+        headless: false,
         automationLevel: 'partial',
         catalogOnly: false,
       })
@@ -311,6 +311,64 @@ describe('combat-impacting persistent spell batch', () => {
     }))
     expect(resolved.application?.map.tokens.find((entry) => entry.id === targetToken.id)?.hp).toBe(84)
     expect(resolved.application?.map.dnd5ePluginAreas?.[0].triggerReceipts).toHaveLength(1)
+  })
+
+  it('treats a structured-partial core spell area as a spell for Magic Resistance', () => {
+    const area = createDnd5eCoreSpellArea({
+      declaration: getDnd5eCoreSpellAreaDeclaration('wall-of-thorns')!,
+      actionId: 'wall-of-thorns-cast', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 6, sourceSaveDc: 19, round: 1,
+      cells: [{ col: 1, row: 0 }], anchorCell: { col: 1, row: 0 }, baseElevationFeet: 0,
+    })
+    const casterToken = token({ id: 'caster-token', characterId: 'caster', x: 25, y: 25 })
+    const balorToken = token({
+      id: 'balor-token', label: '巴洛炎魔', type: 'enemy', characterId: undefined,
+      poolId: 'srd-5.1:balor', x: 75, y: 25, hp: 262, maxHp: 262,
+    })
+    const map: BattleMap = {
+      id: 'wall-of-thorns-map', name: 'Wall of Thorns Map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [casterToken, balorToken], dnd5ePluginAreas: [area],
+    }
+    const candidate = collectDnd5ePersistentAreaTriggers({
+      map, timing: 'on-create', round: 1, areaId: area.id, turnKey: '1:caster-token',
+    }).find((entry) => entry.targetToken.id === balorToken.id)
+    expect(candidate).toBeDefined()
+    if (!candidate) return
+
+    const prepared = prepareDnd5ePersistentAreaTrigger({
+      combatId: 'wall-of-thorns-combat', round: 1, map,
+      characters: [character({
+        id: 'caster', concentrating: true,
+        dnd5eCombatState: { concentrationSpellId: 'wall-of-thorns', concentrationSpellLevel: 6 },
+      })],
+      initiativeOrder: [
+        { tokenId: casterToken.id, roll: 15, label: '施法者', emoji: '', color: '#fff', slotId: 'caster-slot' },
+        { tokenId: balorToken.id, roll: 10, label: '巴洛炎魔', emoji: '', color: '#fff', slotId: 'balor-slot' },
+      ],
+      candidate,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.save?.mode).toBe('advantage')
+    expect(resolvePreparedDnd5ePersistentAreaTrigger({
+      prepared: prepared.prepared,
+      d20: 2,
+      damageRolls: [8, 8, 8, 8, 8, 8, 8],
+    }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+
+    const resolved = resolvePreparedDnd5ePersistentAreaTrigger({
+      prepared: prepared.prepared,
+      d20: 2,
+      d20Second: 20,
+      damageRolls: [8, 8, 8, 8, 8, 8, 8],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'persistent-area-triggered', triggerId: 'wall-of-thorns-create',
+      saveSuccess: true, damage: 28,
+    }))
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === balorToken.id)?.hp).toBe(234)
   })
 
   it('automatically settles 2d6 Flaming Sphere damage when a character ends its turn within 5 feet', () => {

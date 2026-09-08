@@ -16,6 +16,93 @@ const battleMap = (patch: Partial<BattleMap> = {}): BattleMap => ({
 const geometry = (): MapGeometryState => createEmptyMapGeometry('map', 1)
 
 describe('map geometry pathfinding', () => {
+  it('lets qualified forms use ordinary door cracks while explicit airtight barriers still block them', () => {
+    const map = battleMap({ height: 50 })
+    const state = geometry()
+    state.doors.push({
+      id: 'sealed-door', kind: 'door', label: '有门缝的密闭门',
+      points: [{ x: 75, y: 0 }, { x: 75, y: 50 }],
+      state: 'locked', openState: 'closed', lockState: 'locked', physicalState: 'intact',
+      secret: false, passageGapInches: 1,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+    })).toBeUndefined()
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      minimumPassageGapInches: 1,
+    })).toMatchObject({ cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }] })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      minimumPassageGapInches: 2,
+    })).toBeUndefined()
+
+    delete state.doors[0].passageGapInches
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      minimumPassageGapInches: 1,
+    })).toBeDefined()
+    state.doors[0].passageGapInches = 0
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      minimumPassageGapInches: 1,
+    })).toBeUndefined()
+
+    state.doors[0] = {
+      ...state.doors[0], passageGapInches: undefined,
+      state: 'closed', openState: 'closed', lockState: 'unlocked',
+    }
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      minimumPassageGapInches: 1, allowOpenUnlockedDoors: true,
+    })).toMatchObject({ doorsToOpen: [] })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      allowOpenUnlockedDoors: true,
+    })).toMatchObject({ doorsToOpen: ['sealed-door'] })
+
+    state.doors.length = 0
+    state.walls.push({
+      id: 'solid-wall', kind: 'wall', label: '实体墙',
+      points: [{ x: 75, y: 0 }, { x: 75, y: 50 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+    })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      minimumPassageGapInches: 1,
+    })).toBeUndefined()
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      ignoreGeometryCollision: true,
+    })).toMatchObject({
+      cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }],
+      doorsToOpen: [],
+    })
+  })
+
+  it('can traverse declared creature spaces but never end inside them', () => {
+    const blocker = token({ id: 'large-creature', type: 'enemy', x: 75, y: 25, size: 1 })
+    const map = battleMap({ height: 50, tokens: [token(), blocker] })
+    expect(findMapGeometryPath({
+      map, token: map.tokens[0], to: { x: 125, y: 25 },
+    })).toBeUndefined()
+    expect(findMapGeometryPath({
+      map, token: map.tokens[0], to: { x: 125, y: 25 },
+      passThroughTokenIds: [blocker.id],
+    })).toMatchObject({ cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }] })
+    expect(findMapGeometryPath({
+      map, token: map.tokens[0], to: blocker,
+      passThroughTokenIds: [blocker.id],
+    })).toBeUndefined()
+    expect(createMapGeometryPathTree({
+      map, token: map.tokens[0], passThroughTokenIds: [blocker.id],
+    }).pathTo(blocker)).toBeUndefined()
+  })
+
   it('finds a legal polyline around walls and charges every grid step', () => {
     const map = battleMap()
     const state = geometry()
@@ -50,10 +137,19 @@ describe('map geometry pathfinding', () => {
       map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
       additionalSpeedCostMultiplier: () => 2,
     })).toMatchObject({ distanceFeet: 10, movementCostFeet: 30 })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      ignoreDifficultTerrain: true,
+      additionalDifficultTerrainMultiplier: () => 2,
+      additionalSpeedCostMultiplier: () => 2,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 20 })
 
     state.obstacles[0] = { ...state.obstacles[0], terrainCostMultiplier: 1, traversal: 'climb' }
     expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 } }))
       .toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 }, ignoreDifficultTerrain: true,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
     expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 }, canClimb: true }))
       .toMatchObject({ distanceFeet: 10, movementCostFeet: 10 })
 

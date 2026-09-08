@@ -1,0 +1,221 @@
+{
+  "id": "srd-5.1:deva",
+  "slug": "deva",
+  "name": "提婆",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "mace",
+      "name": "硬头锤",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "healing-touch",
+      "name": "治疗之触",
+      "automation": "headless",
+      "rule": "healing-touch",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.max",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.healing.count",
+        "rule.healing.sides",
+        "rule.healing.bonus",
+        "rule.removes[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "change-shape",
+      "name": "改变形态",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 54,
+      "slug": "deva",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:11:43.063Z",
+      "name": "提婆",
+      "actionId": "mace",
+      "actionName": "硬头锤",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "10",
+      "total": 334,
+      "mapId": "verify-ui-deva-mace-1788567103107",
+      "combatId": "verify-ui-deva-mace-1788567103107:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "提婆 使用硬头锤攻击 验证目标：硬头锤 → 验证目标 12+8=20 命中；共造成 24 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:12 PM\n结算\n\n提婆 使用硬头锤攻击 验证目标：硬头锤 → 验证目标 12+8=20 命中；共造成 24 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：硬头锤｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 12；最终采用 12；调整值 +8。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 硬头锤（基础伤害 1·钝击）｜1d6 骰面：3 = 3｜固定加值 +4｜小计 7\n伤害骰 · 硬头锤（基础伤害 2·光耀）｜4d8 骰面：5 + 3 + 5 + 4 = 17｜固定加值 +0｜小计 17\n提婆｜消耗动作\n验证目标｜受到 24 点伤害｜HP 320 → 296",
+      "playerLog": "提婆 使用硬头锤攻击 验证目标：硬头锤 → 验证目标 12+8=20 命中；共造成 24 点伤害。",
+      "afterHp": 296,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:12:09.853Z",
+      "evidenceFile": "ui-cases/monsters/054-deva.json"
+    },
+    {
+      "index": 79,
+      "slug": "deva",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:52:22.357Z",
+      "name": "提婆",
+      "actionId": "mace",
+      "actionName": "硬头锤",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-deva-mace-1788558742458",
+      "combatId": "verify-ui-deva-mace-1788558742458:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "failed",
+      "error": "Error: Timeout 5000ms exceeded while waiting on the predicate",
+      "finishedAt": "2026-09-04T21:52:52.427Z",
+      "evidenceFile": "ui-cases/monsters/079-deva.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "天使武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 12,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

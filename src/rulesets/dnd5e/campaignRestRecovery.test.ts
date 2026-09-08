@@ -151,6 +151,34 @@ describe('D&D 5e rest recovery report', () => {
     ]))
   })
 
+  it('reports unlimited level-20 resources without leaking the internal sentinel value', () => {
+    const druid: Character = {
+      ...fighter('archdruid'),
+      name: '大德鲁伊',
+      charClass: '德鲁伊',
+      level: 20,
+      dnd5eClassLevels: { druid: 20 },
+      classResources: {
+        'dnd5e-wild-shape': { current: 2, max: Number.MAX_SAFE_INTEGER },
+      },
+    }
+    const [report] = buildDnd5eRestRecoveryReports({
+      characters: [druid],
+      restKind: 'long-rest',
+      beneficiaryCharacterIds: ['archdruid'],
+      currentWorldMinute: 480,
+      completionWorldMinute: 960,
+    })
+
+    expect(report.entries).toContainEqual({
+      category: 'feature-resource',
+      label: '荒野形态',
+      outcome: 'restored',
+      detail: '短休或长休恢复；恢复后为无限次',
+    })
+    expect(JSON.stringify(report)).not.toContain(String(Number.MAX_SAFE_INTEGER))
+  })
+
   it('offers Arcane Recovery after a wizard finishes a short rest', () => {
     const [report] = buildDnd5eRestRecoveryReports({
       characters: [wizard('mage')],

@@ -1,0 +1,404 @@
+{
+  "id": "srd-5.1:adult-silver-dragon",
+  "slug": "adult-silver-dragon",
+  "name": "成年银龙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复入口：传奇侦测不再错误要求 DM 手工裁定；检定骰、修正值与传奇动作点走 Headless。真实 UI 专项已验证按钮、窗口、点数消耗及双端日志。",
+    "已修复运行时与入口：传奇移动使用当前窗口内的一次可选额度，不再累加到普通移动池；翼击限定飞行。已覆盖超距、模式错误、重复和过期请求；真实 UI 专项已覆盖取消移动与完成移动。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "frightful-presence",
+      "name": "骇人威仪",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.frightfulPresenceImmunityRounds"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "breath-weapons",
+      "name": "吐息武器",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.variants[].id",
+        "rule.variants[].name",
+        "rule.variants[].area.shape",
+        "rule.variants[].area.origin",
+        "rule.variants[].area.lengthFeet",
+        "rule.variants[].area.aimRangeFeet",
+        "rule.variants[].target",
+        "rule.variants[].ability",
+        "rule.variants[].dc",
+        "rule.variants[].damage.average",
+        "rule.variants[].damage.count",
+        "rule.variants[].damage.sides",
+        "rule.variants[].damage.bonus",
+        "rule.variants[].damage.type",
+        "rule.variants[].damageOnSuccessfulSave",
+        "rule.variants[].conditionOnFailedSave.condition",
+        "rule.variants[].conditionOnFailedSave.durationRounds",
+        "rule.variants[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-weapons-only",
+      "name": "多重攻击: Weapons Only",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "detect",
+      "name": "侦测",
+      "automation": "headless",
+      "rule": "ability-check",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.ability",
+        "rule.skillKey"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "tail-attack",
+      "name": "尾击攻击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "referencedActionId",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "wing-attack-costs-2-actions",
+      "name": "翼击（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "legendary-wing-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave",
+        "rule.conditionOnFailedSave",
+        "rule.followUpMovement.kind",
+        "rule.followUpMovement.maximumSpeedFraction"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "no-points",
+        "out-of-range",
+        "behind-wall",
+        "invalid-dice",
+        "move",
+        "move-too-far",
+        "wrong-mode",
+        "window-expired"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 10,
+      "slug": "adult-silver-dragon",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:07:14.019Z",
+      "name": "成年银龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-adult-silver-dragon-bite-1788556034080",
+      "combatId": "verify-ui-adult-silver-dragon-bite-1788556034080:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/成年银龙 使用啃咬攻击 验证目标：/)\nExpected: visible\nTimeout: 60000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 60000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/成年银龙 使用啃咬攻击 验证目标：/)\u001b[22m\n\u001b[2m    - waiting for\" http://127.0.0.1:6973/campaign/local/maps\" navigation to finish...\u001b[22m\n\u001b[2m    - navigated to \"http://127.0.0.1:6973/campaign/local/maps\"\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:08:29.596Z",
+      "evidenceFile": "ui-cases/monsters/010-adult-silver-dragon.json"
+    },
+    {
+      "index": 21,
+      "slug": "adult-silver-dragon",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:57:27.272Z",
+      "name": "成年银龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "16",
+      "total": 334,
+      "mapId": "verify-ui-adult-silver-dragon-bite-1788566247323",
+      "combatId": "verify-ui-adult-silver-dragon-bite-1788566247323:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "成年银龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 19+13=32 命中；共造成 19 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:57 PM\n结算\n\n成年银龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 19+13=32 命中；共造成 19 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +13。\n结果 · 32 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜2d10 骰面：1 + 10 = 11｜固定加值 +8｜小计 19\n成年银龙｜消耗动作\n验证目标｜受到 19 点伤害｜HP 320 → 301",
+      "playerLog": "成年银龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 19+13=32 命中；共造成 19 点伤害。",
+      "afterHp": 301,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:57:50.847Z",
+      "evidenceFile": "ui-cases/monsters/021-adult-silver-dragon.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "传奇抗性",
+      "automation": "headless",
+      "rule": "legendary-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumUses"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "choose",
+        "decline",
+        "exhausted"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 41,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

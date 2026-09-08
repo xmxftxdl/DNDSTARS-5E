@@ -175,6 +175,7 @@ describe('Flaming Sphere concentration damage transaction', () => {
       targetToken.label,
       {
         rollKind: 'saving-throw',
+        rollerTokenId: targetToken.id,
         rollerCharacterId: 'target',
         targetCharacterId: 'target',
       },

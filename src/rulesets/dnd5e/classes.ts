@@ -1,7 +1,14 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import { dnd5eEquippedEffectTotal } from './equipmentEffects'
-import { dnd5eActiveSpeedBonus, dnd5eActiveSpeedPenalty } from './activeEffects'
+import {
+  dnd5eActiveSpeedBonus,
+  dnd5eActiveSpeedMaximum,
+  dnd5eActiveSpeedMinimum,
+  dnd5eActiveSpeedMultiplier,
+  dnd5eActiveSpeedOverride,
+  dnd5eActiveSpeedPenalty,
+} from './activeEffects'
 import { fighterProgression, fighterRemarkableAthleteRunningLongJumpBonus } from './fighter'
 import {
   declarativeClassAttacksPerActionV1,
@@ -976,13 +983,20 @@ export function dnd5eWalkingSpeed(
 export function dnd5eEffectiveWalkingSpeed(
   character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel' | 'dnd5eCombatState'>,
 ): number {
-  return Math.max(
+  const effects = character.dnd5eCombatState?.activeEffects
+  const override = dnd5eActiveSpeedOverride(effects)
+  if (override != null) return Math.max(0, Math.floor(override))
+  const adjusted = Math.max(
     0,
     dnd5eWalkingSpeed(character) -
-      dnd5eActiveSpeedPenalty(character.dnd5eCombatState?.activeEffects) -
+      dnd5eActiveSpeedPenalty(effects) -
       Math.max(0, character.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) +
-      dnd5eActiveSpeedBonus(character.dnd5eCombatState?.activeEffects),
+      dnd5eActiveSpeedBonus(effects),
   )
+  const multiplied = Math.max(0, Math.floor(adjusted * dnd5eActiveSpeedMultiplier(effects)))
+  const minimum = dnd5eActiveSpeedMinimum(effects)
+  const maximum = dnd5eActiveSpeedMaximum(effects)
+  return Math.max(minimum, maximum == null ? multiplied : Math.min(maximum, multiplied))
 }
 
 function isSrdThief(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>, minimumLevel: number): boolean {

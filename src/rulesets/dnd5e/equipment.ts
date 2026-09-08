@@ -7,13 +7,54 @@ import {
   dnd5eBarbarianRageDamage,
   dnd5eClassDefinitionForCharacter,
   dnd5eMonkMartialArtsDie,
-  type Dnd5eClassId,
 } from './classes'
 import { dnd5eEquippedEffectTotal, dnd5eWeaponEffectTotal } from './equipmentEffects'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
-import { dnd5ePluginRaceDefinition } from './pluginApi'
+import { dnd5ePluginRegistryStore } from './plugins/pluginRegistryStore'
 import { dnd5eCoreRaceMechanics } from './coreRaceMechanics'
-import { normalizeDnd5eActiveEffects } from './activeEffects'
+import { effectiveDnd5eActiveEffects, normalizeDnd5eActiveEffects } from './activeEffects'
+import type { Dnd5eDamageType } from './damageTypes'
+import {
+  dnd5eBaseArmorProficiencies,
+  type Dnd5eArmorProficiency,
+} from './characterCapabilities'
+import { dnd5eCharacterBuildFeatureIdsV1, dnd5eCharacterBuildProficienciesV1 } from './buildChoices'
+export type { Dnd5eArmorProficiency } from './characterCapabilities'
+
+function equipmentPluginRaceDefinition(character: Character) {
+  const idOrName = character.dnd5eRaceId ?? character.race
+  return dnd5ePluginRegistryStore.races.get(idOrName) ??
+    [...dnd5ePluginRegistryStore.races.values()].find((candidate) => candidate.name === idOrName)
+}
+
+/**
+ * Equipment authority only needs closed boolean modifiers. Keep this lookup on
+ * the lean registry boundary so importing the static equipment catalog cannot
+ * initialize the Activity/Headless runtime recursively.
+ */
+function equipmentPluginBooleanStaticModifierForCharacter(
+  character: Character,
+  key: 'allowNonLightTwoWeaponFighting' | 'ignoreOccupiedHandsForSomaticComponents',
+): boolean {
+  const buildFeatureIds = new Set(dnd5eCharacterBuildFeatureIdsV1(character))
+  const directFeatureIds = new Set(character.dnd5ePluginFeatureIds ?? [])
+  const featIds = new Set(character.dnd5eFeatIds ?? [])
+  const race = equipmentPluginRaceDefinition(character)
+  const raceFeatureIds = new Set(race?.grantedFeatureIds ?? [])
+  return [...dnd5ePluginRegistryStore.features.values()].some((feature) => {
+    if (feature.automation === 'manual' || feature.staticModifiers?.[key] !== true) return false
+    if (buildFeatureIds.has(feature.id) || directFeatureIds.has(feature.id) || raceFeatureIds.has(feature.id)) return true
+    if (feature.sourceFeatId && featIds.has(feature.sourceFeatId)) return true
+    if (!feature.sourceClassId) return false
+    const classLevel = dnd5eCharacterClassLevel(character, feature.sourceClassId)
+    if (classLevel < (feature.minimumLevel ?? 1)) return false
+    if (!feature.sourceSubclassId) return feature.grantedBySubclass === true
+    const selectedSubclassId = feature.sourceClassId === 'fighter'
+      ? character.dnd5eClassChoices?.fighter?.subclass
+      : character.dnd5eClassChoices?.classes?.[feature.sourceClassId]?.subclass
+    return selectedSubclassId === feature.sourceSubclassId
+  })
+}
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -197,6 +238,8 @@ const DND5E_STARTING_EQUIPMENT: Readonly<Record<string, CharacterEquipment>> = {
 
 export interface Dnd5eWeaponAttackProfile {
   weaponId: string
+  /** Stable catalog id; weaponId may be a room inventory instance id. */
+  baseWeaponId: string
   weaponName: string
   mode: 'melee' | 'ranged'
   attackAbility: AbilityKey
@@ -206,7 +249,8 @@ export interface Dnd5eWeaponAttackProfile {
   criticalThreshold: number
   greatWeaponFighting: boolean
   properties: readonly string[]
-  damage: { count: number; sides: number; bonus: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
+  damage: { count: number; sides: number; bonus: number; type: Dnd5eDamageType }
+  handsUsed: 1 | 2
   reachFeet?: number
   rangeFeet?: { normal: number; long: number }
 }
@@ -286,7 +330,7 @@ export function defaultEquipmentForDnd5eCharacter(character: Pick<Character, 'ch
   return equipment ? Object.fromEntries(Object.entries(equipment).map(([slot, item]) => [slot, item ? { ...item } : item])) : undefined
 }
 
-/** 丢弃旧项目的纯显示装备，只保留带有 D&D 5e 或声明式法器规则的物品。 */
+/** 丢弃旧项目的纯显示装备，只保留结构完整的 D&D 5e 装备投影。 */
 export function normalizeDnd5eCharacterEquipment(
   character: Pick<Character, 'charClass' | 'equipment'>,
 ): CharacterEquipment | undefined {
@@ -298,7 +342,13 @@ export function normalizeDnd5eCharacterEquipment(
   ]
   for (const slot of slots) {
     const item = character.equipment?.[slot]
-    const selected = item?.dnd5e || item?.effects || (item?.spellcastingFocusClassIds?.length ?? 0) > 0
+    const declaredInventoryEquipment = !!item &&
+      typeof item.id === 'string' && item.id.trim().length > 0 &&
+      typeof item.name === 'string' && item.name.trim().length > 0 &&
+      slots.includes(item.slot) &&
+      (item.slot === slot || item.allowedSlots?.includes(slot) === true)
+    const selected = item?.dnd5e || item?.effects ||
+      (item?.spellcastingFocusClassIds?.length ?? 0) > 0 || declaredInventoryEquipment
       ? item
       : useLegacyDefaults ? defaults?.[slot] : undefined
     if (!selected) continue
@@ -327,7 +377,21 @@ export function normalizeDnd5eCharacterEquipment(
       dnd5e,
     }
   }
-  return Object.keys(result).length > 0 ? result : undefined
+  if (Object.keys(result).length > 0) return result
+  // An explicit empty loadout is authoritative. Preserve it across snapshots
+  // so a later normalization pass cannot mistake it for a legacy save and
+  // silently restore the class's default weapons, shield, or armor.
+  return useLegacyDefaults ? undefined : result
+}
+
+export const DND5E_ALTER_SELF_NATURAL_WEAPON_ID = 'srd-5.1:spell:alter-self:natural-weapon'
+
+export function dnd5eVirtualWeaponDamageSource(
+  weaponId: string,
+): Dnd5eWeaponDamageSource | undefined {
+  return weaponId === DND5E_ALTER_SELF_NATURAL_WEAPON_ID
+    ? { weaponId, magical: true }
+    : undefined
 }
 
 export function dnd5eKnownEquipmentForClass(character: Pick<Character, 'charClass'>): EquipmentItem[] {
@@ -344,38 +408,6 @@ export function dnd5eKnownEquipmentForClass(character: Pick<Character, 'charClas
   return [...new Map([...starting, ...martialChoices].map((item) => [item.id, item])).values()]
 }
 
-export type Dnd5eArmorProficiency = 'light' | 'medium' | 'heavy' | 'shield'
-
-const DND5E_STARTING_ARMOR_PROFICIENCIES: Readonly<Record<Dnd5eClassId, readonly Dnd5eArmorProficiency[]>> = {
-  barbarian: ['light', 'medium', 'shield'],
-  bard: ['light'],
-  cleric: ['light', 'medium', 'shield'],
-  druid: ['light', 'medium', 'shield'],
-  fighter: ['light', 'medium', 'heavy', 'shield'],
-  monk: [],
-  paladin: ['light', 'medium', 'heavy', 'shield'],
-  ranger: ['light', 'medium', 'shield'],
-  rogue: ['light'],
-  sorcerer: [],
-  warlock: ['light'],
-  wizard: [],
-}
-
-const DND5E_MULTICLASS_ARMOR_PROFICIENCIES: Readonly<Record<Dnd5eClassId, readonly Dnd5eArmorProficiency[]>> = {
-  barbarian: ['shield'],
-  bard: ['light'],
-  cleric: ['light', 'medium', 'shield'],
-  druid: ['light', 'medium', 'shield'],
-  fighter: ['light', 'medium', 'shield'],
-  monk: [],
-  paladin: ['light', 'medium', 'shield'],
-  ranger: ['light', 'medium', 'shield'],
-  rogue: ['light'],
-  sorcerer: [],
-  warlock: ['light'],
-  wizard: [],
-}
-
 /**
  * Returns the character's effective armor proficiencies.
  *
@@ -384,24 +416,15 @@ const DND5E_MULTICLASS_ARMOR_PROFICIENCIES: Readonly<Record<Dnd5eClassId, readon
  * resulting penalties during authoritative resolution.
  */
 export function dnd5eArmorProficiencies(character: Character): ReadonlySet<Dnd5eArmorProficiency> {
-  const classLevels = normalizeDnd5eClassLevels(character)
-  const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id
-  const proficiencies = new Set<Dnd5eArmorProficiency>()
-  for (const classId of Object.keys(classLevels) as Dnd5eClassId[]) {
-    const granted = classId === primaryClassId
-      ? DND5E_STARTING_ARMOR_PROFICIENCIES[classId]
-      : DND5E_MULTICLASS_ARMOR_PROFICIENCIES[classId]
-    for (const proficiency of granted) proficiencies.add(proficiency)
-  }
-  if (
-    dnd5eCharacterClassLevel(character, 'cleric') >= 1 &&
-    character.dnd5eClassChoices?.classes?.cleric?.subclass === 'life'
-  ) {
-    proficiencies.add('heavy')
-  }
-  for (const proficiency of dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+  const proficiencies = new Set(dnd5eBaseArmorProficiencies(character))
+  for (const proficiency of equipmentPluginRaceDefinition(character)
     ?.armorProficiencies ?? []) {
     proficiencies.add(proficiency)
+  }
+  for (const proficiency of dnd5eCharacterBuildProficienciesV1(character, 'armor')) {
+    if (['light', 'medium', 'heavy', 'shield'].includes(proficiency)) {
+      proficiencies.add(proficiency as Dnd5eArmorProficiency)
+    }
   }
   return proficiencies
 }
@@ -497,17 +520,67 @@ export function dnd5eWeaponAttackProfile(
     shillelaghAbility?: 'str' | 'spellcasting'
     /** A maintained grapple occupies one hand, so versatile weapons use one hand and true two-handed weapons cannot attack. */
     forceOneHanded?: boolean
+    /** A granted attack may use either equipped hand without invoking two-weapon-fighting damage rules. */
+    weaponSlot?: 'mainWeapon' | 'offHand'
   },
 ): Dnd5eWeaponAttackProfile | undefined {
-  const weapon = character.equipment?.mainWeapon
+  const weaponSlot = options?.weaponSlot ?? 'mainWeapon'
+  const otherWeaponSlot = weaponSlot === 'mainWeapon' ? 'offHand' : 'mainWeapon'
+  const alterSelfNaturalWeaponDamageType = weaponSlot === 'mainWeapon'
+    ? effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects).flatMap<'bludgeoning' | 'piercing' | 'slashing'>((effect) => {
+        if (!effect.tags?.includes('alter-self-natural-weapon')) return []
+        const damageTag = effect.tags.find((tag) => tag.startsWith('alter-self-natural-weapon:'))
+        const damageType = damageTag?.slice('alter-self-natural-weapon:'.length)
+        return damageType === 'bludgeoning' || damageType === 'piercing' || damageType === 'slashing'
+          ? [damageType]
+          : []
+      })[0]
+    : undefined
+  if (alterSelfNaturalWeaponDamageType) {
+    const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
+    const proficiency = rules.proficiencyBonus(Math.min(20, Math.max(1, character.level)))
+    const armor = character.equipment?.armor?.dnd5e
+    const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
+    const barbarianLevel = dnd5eCharacterClassLevel(character, 'barbarian')
+    const rageBonus = barbarianLevel >= 1 &&
+      character.dnd5eCombatState?.raging === true &&
+      !wearingHeavyArmor
+      ? dnd5eBarbarianRageDamage(barbarianLevel)
+      : 0
+    return {
+      weaponId: DND5E_ALTER_SELF_NATURAL_WEAPON_ID,
+      baseWeaponId: DND5E_ALTER_SELF_NATURAL_WEAPON_ID,
+      weaponName: '变身术·天生武器',
+      mode: 'melee',
+      attackAbility: 'str',
+      finesse: false,
+      proficient: true,
+      attackModifier: strengthModifier + proficiency + 1,
+      criticalThreshold: fighterCriticalThreshold({
+        ...character,
+        level: dnd5eCharacterClassLevel(character, 'fighter'),
+      }),
+      greatWeaponFighting: false,
+      properties: ['徒手打击', '魔法'],
+      damage: {
+        count: 1,
+        sides: 6,
+        bonus: strengthModifier + 1 + rageBonus,
+        type: alterSelfNaturalWeaponDamageType,
+      },
+      handsUsed: 1,
+      reachFeet: 5,
+    }
+  }
+  const weapon = character.equipment?.[weaponSlot]
   const data = weapon?.dnd5e
   if (!weapon || !data || data.kind !== 'weapon') return undefined
   const properties = data.properties ?? []
-  if (properties.some((property) => property.includes('双手')) && character.equipment?.offHand) return undefined
+  if (properties.some((property) => property.includes('双手')) && character.equipment?.[otherWeaponSlot]) return undefined
   if (options?.forceOneHanded && properties.some((property) => property.includes('双手'))) return undefined
   const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
-  const shillelagh = dnd5eShillelaghAttackChoice(character)
+  const shillelagh = weaponSlot === 'mainWeapon' ? dnd5eShillelaghAttackChoice(character) : undefined
   const useSpellcastingAbility = shillelagh && options?.shillelaghAbility === 'spellcasting'
   const ability: AbilityKey = useSpellcastingAbility
     ? shillelagh.spellcastingAbility
@@ -528,10 +601,10 @@ export function dnd5eWeaponAttackProfile(
   const versatileSides = Number(versatileProperty?.match(/1d(\d+)/i)?.[1] ?? 0)
   const usesTwoHands = !options?.forceOneHanded && (
     properties.some((property) => property.includes('双手')) ||
-    (!!versatileProperty && !character.equipment?.offHand)
+    (!!versatileProperty && !character.equipment?.[otherWeaponSlot])
   )
   const attackStyleBonus = data.mode === 'ranged' && styles.includes('archery') ? 2 : 0
-  const duelingBonus = data.mode === 'melee' && !usesTwoHands && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
+  const duelingBonus = data.mode === 'melee' && !usesTwoHands && styles.includes('dueling') && character.equipment?.[otherWeaponSlot]?.dnd5e?.kind !== 'weapon' ? 2 : 0
   const armor = character.equipment?.armor?.dnd5e
   const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
   const barbarianLevel = dnd5eCharacterClassLevel(character, 'barbarian')
@@ -546,10 +619,11 @@ export function dnd5eWeaponAttackProfile(
     (character.dnd5eCombatState?.sacredWeaponTurnsRemaining ?? 0) > 0
     ? Math.max(1, rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.cha))))
     : 0
-  const equipmentAttackBonus = dnd5eWeaponEffectTotal(character, 'mainWeapon', 'weaponAttackBonus')
-  const equipmentDamageBonus = dnd5eWeaponEffectTotal(character, 'mainWeapon', 'weaponDamageBonus')
+  const equipmentAttackBonus = dnd5eWeaponEffectTotal(character, weaponSlot, 'weaponAttackBonus')
+  const equipmentDamageBonus = dnd5eWeaponEffectTotal(character, weaponSlot, 'weaponDamageBonus')
   return {
     weaponId: weapon.id,
+    baseWeaponId: weapon.baseEquipmentId ?? weapon.id,
     weaponName: weapon.name,
     mode: data.mode,
     attackAbility: ability,
@@ -567,6 +641,7 @@ export function dnd5eWeaponAttackProfile(
       sides: shillelagh ? 8 : versatileSides > 0 && usesTwoHands ? versatileSides : data.damage.sides,
       bonus: abilityModifier + duelingBonus + rageBonus + equipmentDamageBonus,
     },
+    handsUsed: usesTwoHands ? 2 : 1,
     reachFeet: data.reachFeet,
     rangeFeet: data.rangeFeet,
   }
@@ -579,8 +654,10 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
   if (
     !weapon || !data || data.kind !== 'weapon' || data.mode !== 'melee' ||
     !mainData || mainData.kind !== 'weapon' || mainData.mode !== 'melee' ||
-    !mainData.properties?.some((property) => property.includes('轻型')) ||
-    !data.properties?.some((property) => property.includes('轻型'))
+    (!equipmentPluginBooleanStaticModifierForCharacter(character, 'allowNonLightTwoWeaponFighting') && (
+      !mainData.properties?.some((property) => property.includes('轻型')) ||
+      !data.properties?.some((property) => property.includes('轻型'))
+    ))
   ) return undefined
   const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
@@ -602,6 +679,7 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
   const equipmentDamageBonus = dnd5eWeaponEffectTotal(character, 'offHand', 'weaponDamageBonus')
   return {
     weaponId: weapon.id,
+    baseWeaponId: weapon.baseEquipmentId ?? weapon.id,
     weaponName: weapon.name,
     mode: 'melee',
     attackAbility: ability,
@@ -618,6 +696,7 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
       ...data.damage,
       bonus: (styles.includes('two-weapon-fighting') ? abilityModifier : 0) + rageBonus + equipmentDamageBonus,
     },
+    handsUsed: 1,
     reachFeet: data.reachFeet ?? 5,
   }
 }
@@ -638,11 +717,28 @@ export function dnd5eWeaponRangeFeet(profile: Dnd5eWeaponAttackProfile): number 
   return profile.mode === 'melee' ? (profile.reachFeet ?? 5) : (profile.rangeFeet?.long ?? profile.rangeFeet?.normal ?? 0)
 }
 
+/** Stable property ids used by Activity predicates and plugin mechanics. */
+export function dnd5eWeaponPropertyIds(properties: readonly string[] | undefined): readonly string[] {
+  const aliases: readonly (readonly [string, string])[] = [
+    ['灵巧', 'finesse'], ['轻型', 'light'], ['重型', 'heavy'], ['装填', 'loading'],
+    ['双手', 'two-handed'], ['弹药', 'ammunition'], ['触及', 'reach'], ['投掷', 'thrown'],
+    ['多才多艺', 'versatile'], ['特殊', 'special'],
+  ]
+  return [...new Set((properties ?? []).flatMap((property) => {
+    const normalized = property.trim().toLocaleLowerCase()
+    const alias = aliases.find(([label]) => normalized.includes(label))?.[1]
+    if (alias) return [alias]
+    return /^[a-z0-9][a-z0-9._:-]{0,159}$/.test(normalized) ? [normalized] : []
+  }))]
+}
+
 export function dnd5eWeaponProficient(character: Character, weapon: EquipmentItem): boolean {
   const data = weapon.dnd5e
   if (!data || data.kind !== 'weapon') return false
   const weaponId = (weapon.baseEquipmentId ?? weapon.id).replace(/-offhand$/, '')
-  const pluginRace = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+  const buildProficiencies = dnd5eCharacterBuildProficienciesV1(character, 'weapon')
+  if (buildProficiencies.has(weaponId) || buildProficiencies.has(data.category)) return true
+  const pluginRace = equipmentPluginRaceDefinition(character)
   if (dnd5eCoreRaceMechanics(
     character.race,
     pluginRace?.coreRaceMechanicsId ?? character.dnd5eRaceId,

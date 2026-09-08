@@ -1,0 +1,212 @@
+{
+  "id": "srd-5.1:assassin",
+  "slug": "assassin",
+  "name": "刺客",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "shortsword",
+      "name": "短剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "light-crossbow",
+      "name": "轻弩",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 28,
+      "slug": "assassin",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:17:21.806Z",
+      "name": "刺客",
+      "actionId": "shortsword",
+      "actionName": "短剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-assassin-shortsword-1788556641875",
+      "combatId": "verify-ui-assassin-shortsword-1788556641875:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "刺客 使用短剑攻击 验证目标：短剑 → 验证目标 12+6=18 命中；共造成 34 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:18 PM\n结算\n\n刺客 使用短剑攻击 验证目标：短剑 → 验证目标 12+6=18 命中；共造成 34 点伤害。\n\n查看 Headless 结算依据（11）\n怪物动作：短剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n优劣势依据 · 优势：怪物攻击特性提供优势。\n攻击骰 · 优势（2d20 取高）；采用优势的原因：怪物攻击特性提供优势；各骰面 8 / 12；最终采用 12；调整值 +6。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 短剑（基础伤害·穿刺）｜1d6 骰面：5 = 5｜固定加值 +3｜小计 8\n伤害骰 · 短剑（偷袭（每回合 1 次）附伤·穿刺）｜4d6 骰面：6 + 3 + 3 + 2 = 14｜固定加值 +0｜小计 14\n刺客｜消耗动作\n验证目标｜体质豁免 d20 6 +10 = 16 vs DC 15｜成功\n验证目标｜受到 34 点伤害｜HP 320 → 286",
+      "playerLog": "刺客 使用短剑攻击 验证目标：短剑 → 验证目标 12+6=18 命中；共造成 34 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:18:05.016Z",
+      "evidenceFile": "ui-cases/monsters/028-assassin.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "刺杀",
+      "automation": "headless",
+      "rule": "assassinate",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.requiredRound",
+        "rule.advantageAgainst",
+        "rule.automaticCriticalAgainst"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD precision attack traits in the Headless runtime gives Assassin advantage against a target that has not taken a turn",
+        "SRD precision attack traits in the Headless runtime turns an Assassin hit against a currently surprised target into a critical hit"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "闪避",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "偷袭（每回合 1 次）",
+      "automation": "headless",
+      "rule": "sneak-attack",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.oncePerTurn",
+        "rule.allyDistanceFeet",
+        "rule.requireNoDisadvantage",
+        "rule.advantageOrAdjacentAlly",
+        "rule.extraDamage.average",
+        "rule.extraDamage.count",
+        "rule.extraDamage.sides",
+        "rule.extraDamage.bonus",
+        "rule.extraDamage.type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "shortsword: hit (Sneak Attack damage included in asserted HP delta)",
+        "shortsword: critical (Sneak Attack damage included in asserted HP delta)",
+        "light-crossbow: hit (Sneak Attack damage included in asserted HP delta)",
+        "light-crossbow: critical (Sneak Attack damage included in asserted HP delta)"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 13,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

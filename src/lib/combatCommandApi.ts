@@ -170,6 +170,11 @@ export class CombatCommandTimeoutError extends Error {
   }
 }
 
+/** A pending receipt means the Host accepted the command and is still resolving an interactive step. */
+export function combatCommandIsWaitingForAuthority(error: unknown): boolean {
+  return error instanceof CombatCommandTimeoutError && error.lastReceipt?.status === 'pending'
+}
+
 export class CombatCommandAbortedError extends Error {
   readonly commandId: string
 

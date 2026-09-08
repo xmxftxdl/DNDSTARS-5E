@@ -37,5 +37,30 @@ describe('dnd5ePersistentAreaPresentationVisual', () => {
       coreSpellId: 'blade-barrier',
       visual: { preset: 'arcane', intensity: 'strong' },
     })).toEqual({ preset: 'blade-barrier', intensity: 'strong' })
+    expect(dnd5ePersistentAreaPresentationVisual({
+      sourceKind: 'core-spell',
+      coreSpellId: 'silent-image',
+      visual: { preset: 'arcane', intensity: 'subtle' },
+    })).toEqual({ preset: 'silent-image', intensity: 'strong' })
+    expect(dnd5ePersistentAreaPresentationVisual({
+      sourceKind: 'core-spell',
+      coreSpellId: 'major-image',
+      visual: { preset: 'arcane', intensity: 'subtle' },
+    })).toEqual({ preset: 'major-image', intensity: 'strong' })
+    expect(dnd5ePersistentAreaPresentationVisual({
+      sourceKind: 'core-spell',
+      coreSpellId: 'unseen-servant',
+      visual: { preset: 'arcane', intensity: 'subtle' },
+    })).toEqual({ preset: 'unseen-servant', intensity: 'strong' })
+    expect(dnd5ePersistentAreaPresentationVisual({
+      sourceKind: 'core-spell',
+      coreSpellId: 'mislead',
+      visual: { preset: 'arcane', intensity: 'subtle' },
+    })).toEqual({ preset: 'mislead', intensity: 'strong' })
+    expect(dnd5ePersistentAreaPresentationVisual({
+      sourceKind: 'core-spell',
+      coreSpellId: 'project-image',
+      visual: { preset: 'arcane', intensity: 'subtle' },
+    })).toEqual({ preset: 'project-image', intensity: 'strong' })
   })
 })

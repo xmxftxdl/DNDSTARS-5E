@@ -33,6 +33,7 @@ export default function CharacterCreationAdvancementFlow({
     state.characters.find((candidate) => candidate.id === characterId),
   )
   const update = useCharacterStore((state) => state.update)
+  const saveSharedNow = useCharacterStore((state) => state.saveSharedNow)
   const classDefinitions = availableDnd5eClassDefinitions()
   const primaryClassId = classDefinitions.find(
     (definition) => definition.name === character?.charClass,
@@ -54,8 +55,9 @@ export default function CharacterCreationAdvancementFlow({
         classId={selectedClassId}
         levelsGained={1}
         onCancel={() => setSettling(false)}
-        onConfirm={(nextCharacter) => {
+        onConfirm={async (nextCharacter) => {
           update(characterId, nextCharacter)
+          await saveSharedNow()
           if (nextCharacter.level >= targetLevel) onComplete()
           else setSettling(false)
         }}

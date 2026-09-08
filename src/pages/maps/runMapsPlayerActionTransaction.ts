@@ -18,6 +18,20 @@ export interface RunMapsPlayerActionTransactionInput {
 }
 
 /**
+ * Keep the durable ACK reason bounded and diagnostic without copying arbitrary
+ * exception text (URLs, response bodies, or browser details) into the room log.
+ */
+export function mapsPlayerActionAuthorityFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : ''
+  const diagnostic = message.match(
+    /(?:combat-command|state-transaction|shared-state-transaction|authoritative-resource-save-rejected)[a-z0-9:._-]*/i,
+  )?.[0]
+  return diagnostic
+    ? `authority-commit-failed:${diagnostic.toLowerCase()}`
+    : 'authority-commit-failed'
+}
+
+/**
  * MapsPage 的唯一 DM 玩家行动入口。这里统一串行化、CombatTransaction
  * 生命周期、共享快照提交等待和异常恢复，具体规则分支只负责 prepare/resolve。
  */

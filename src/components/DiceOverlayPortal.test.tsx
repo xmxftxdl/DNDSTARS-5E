@@ -15,6 +15,21 @@ describe('DiceOverlayPortal', () => {
     expect(DICE_OVERLAY_ROOT_CLASS_NAME).toContain('fixed')
     expect(DICE_OVERLAY_ROOT_CLASS_NAME).toContain('isolate')
     expect(html).toContain('data-testid="dice-overlay-top-layer"')
+    expect(html).toContain('data-dice-overlay-layer="foreground"')
     expect(html).toContain('z-index:2147483647')
+  })
+
+  it('keeps the tray text above the 3D dice and its leather backdrop', () => {
+    const backdrop = renderToStaticMarkup(
+      <DiceOverlayPortal layer="backdrop"><span>tray</span></DiceOverlayPortal>,
+    )
+    const dice = renderToStaticMarkup(
+      <DiceOverlayPortal layer="dice"><span>dice</span></DiceOverlayPortal>,
+    )
+
+    expect(backdrop).toContain('data-dice-overlay-layer="backdrop"')
+    expect(backdrop).toContain(`z-index:${DICE_OVERLAY_Z_INDEX - 2}`)
+    expect(dice).toContain('data-dice-overlay-layer="dice"')
+    expect(dice).toContain(`z-index:${DICE_OVERLAY_Z_INDEX - 1}`)
   })
 })

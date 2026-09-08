@@ -1,0 +1,135 @@
+{
+  "id": "srd-5.1:swarm-of-quippers",
+  "slug": "swarm-of-quippers",
+  "name": "食人鱼群",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bites",
+      "name": "群体啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.damageAtHalfHp[].average",
+        "attack.damageAtHalfHp[].count",
+        "attack.damageAtHalfHp[].sides",
+        "attack.damageAtHalfHp[].bonus",
+        "attack.damageAtHalfHp[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "half-hp"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 212,
+      "slug": "swarm-of-quippers",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:52:46.282Z",
+      "name": "食人鱼群",
+      "actionId": "bites",
+      "actionName": "群体啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1",
+      "total": 334,
+      "mapId": "verify-ui-swarm-of-quippers-bites-1788569566325",
+      "combatId": "verify-ui-swarm-of-quippers-bites-1788569566325:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "食人鱼群 使用群体啃咬攻击 验证目标：群体啃咬 → 验证目标 13+5=18 命中；共造成 16 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:53 PM\n结算\n\n食人鱼群 使用群体啃咬攻击 验证目标：群体啃咬 → 验证目标 13+5=18 命中；共造成 16 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：群体啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 0 尺（触及 0 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +5。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 群体啃咬（基础伤害·穿刺）｜4d6 骰面：5 + 5 + 4 + 2 = 16｜固定加值 +0｜小计 16\n食人鱼群｜消耗动作\n验证目标｜受到 16 点伤害｜HP 320 → 304",
+      "playerLog": "食人鱼群 使用群体啃咬攻击 验证目标：群体啃咬 → 验证目标 13+5=18 命中；共造成 16 点伤害。",
+      "afterHp": 304,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:53:09.094Z",
+      "evidenceFile": "ui-cases/monsters/212-swarm-of-quippers.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "嗜血狂暴",
+      "automation": "headless",
+      "rule": "blood-frenzy",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.attackMode",
+        "rule.targetHitPoints"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "full-target-hp",
+        "wounded-target"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "群集",
+      "automation": "headless",
+      "rule": "swarm",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.cannotRegainHitPoints",
+        "rule.cannotGainTemporaryHitPoints"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "healing",
+        "temporary-hit-points"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "水下呼吸",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 8,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

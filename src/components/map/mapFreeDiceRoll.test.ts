@@ -1,7 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { buildMapFreeDiceRollPresentation, mapFreeDiceKeepSuffix, resolveMapFreeDiceRoll } from './mapFreeDiceRoll'
+import {
+  addMapFreeDie,
+  buildMapFreeDiceRollPresentation,
+  mapFreeDiceKeepSuffix,
+  mapFreeDiceSelectionFormula,
+  removeMapFreeDie,
+  resolveMapFreeDiceRoll,
+} from './mapFreeDiceRoll'
 
 describe('map free dice roll resolution', () => {
+  it('adds repeated die clicks to the tray and allows right-click removal', () => {
+    const first = addMapFreeDie({ count: 0, sides: 20 }, 10)
+    const second = addMapFreeDie(first, 10)
+
+    expect(first).toEqual({ count: 1, sides: 10 })
+    expect(second).toEqual({ count: 2, sides: 10 })
+    expect(mapFreeDiceSelectionFormula(second)).toBe('2d10')
+    expect(removeMapFreeDie(second, 10)).toEqual({ count: 1, sides: 10 })
+  })
+
+  it('starts a fresh pool when a different die type is clicked', () => {
+    expect(addMapFreeDie({ count: 3, sides: 6 }, 20)).toEqual({ count: 1, sides: 20 })
+    expect(mapFreeDiceSelectionFormula({ count: 0, sides: 20 })).toBe('尚未添加骰子')
+  })
+
   it('keeps the higher d20 for an out-of-combat advantage check', () => {
     expect(resolveMapFreeDiceRoll([4, 17], 3, { keep: 'highest', dc: 15 })).toEqual({
       subtotal: 17,

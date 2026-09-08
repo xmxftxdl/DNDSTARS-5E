@@ -76,6 +76,14 @@ export function dnd5eMonsterRegenerationRule(
     Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined
 }
 
+export function dnd5eMonsterHasAntimagicSusceptibility(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.rule?.kind === 'antimagic-susceptibility' &&
+    trait.rule.incapacitatedInsideAntimagic) === true
+}
+
 export type Dnd5eMonsterFlybyRule = Extract<
   NonNullable<Dnd5eMonsterTrait['rule']>,
   { kind: 'flyby' }
@@ -178,6 +186,12 @@ export interface Dnd5eMonsterAttackTraitContext {
   usedTurnKeys?: Readonly<Record<string, string>>
   /** Set only after the authoritative turn-start lifecycle activates Reckless. */
   actorRecklessActive?: boolean
+  /** Concrete child action used for this attack occurrence. */
+  actionId?: string
+  /** Host-derived voluntary movement evidence for this turn. */
+  movementDistanceFeet?: number
+  movementWasStraight?: boolean
+  movementTowardTarget?: boolean
 }
 
 function dnd5eMonsterTargetIsCurrentlySurprised(
@@ -246,9 +260,26 @@ export function dnd5eMonsterAssassinateAutomaticCritical(
 }
 
 export interface Dnd5eMonsterTraitDamageDefinition {
-  traitId: 'sneak-attack' | 'martial-advantage'
+  traitId: 'sneak-attack' | 'martial-advantage' | 'charge-damage'
   traitName: string
   damage: Dnd5eMonsterDamage
+}
+
+export function dnd5eMonsterChargeTrait(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  context: Dnd5eMonsterAttackTraitContext,
+): Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'charge-damage' }> | undefined {
+  if (
+    !monster || !context.turnKey || !context.actionId ||
+    context.usedTurnKeys?.['monster-trait:charge-damage'] === context.turnKey ||
+    context.movementWasStraight !== true || context.movementTowardTarget !== true
+  ) return undefined
+  return monster.traits.find((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'charge-damage' &&
+    trait.rule.actionId === context.actionId &&
+    (context.movementDistanceFeet ?? 0) >= trait.rule.minimumStraightMovementFeet
+  )?.rule as Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'charge-damage' }> | undefined
 }
 
 /**
@@ -263,18 +294,32 @@ export function dnd5eMonsterTraitDamageDefinitions(
 ): readonly Dnd5eMonsterTraitDamageDefinition[] {
   const inheritedType = attack.damage[0]?.type
   if (!monster || !inheritedType || !context.turnKey) return []
-  return monster.traits.flatMap((trait) => {
+  const definitions: Dnd5eMonsterTraitDamageDefinition[] = []
+  for (const trait of monster.traits) {
+    if (
+      trait.automation === 'headless' &&
+      trait.rule?.kind === 'charge-damage' &&
+      trait.rule.extraDamage != null &&
+      dnd5eMonsterChargeTrait(monster, context) === trait.rule
+    ) {
+      definitions.push({
+        traitId: 'charge-damage' as const,
+        traitName: trait.name,
+        damage: trait.rule.extraDamage,
+      })
+      continue
+    }
     if (
       trait.automation !== 'headless' ||
       (
         trait.rule?.kind !== 'sneak-attack' &&
         trait.rule?.kind !== 'martial-advantage'
       )
-    ) return []
+    ) continue
     const rule = trait.rule
     const traitId = rule.kind
     if (context.usedTurnKeys?.[`monster-trait:${traitId}`] === context.turnKey) {
-      return []
+      continue
     }
     const qualifies = rule.kind === 'martial-advantage'
       ? context.adjacentActiveAllyNearTarget === true
@@ -283,8 +328,8 @@ export function dnd5eMonsterTraitDamageDefinitions(
           context.effectiveRollMode === 'advantage' ||
           context.adjacentActiveAllyNearTarget === true
         )
-    if (!qualifies) return []
-    return [{
+    if (!qualifies) continue
+    definitions.push({
       traitId,
       traitName: trait.name,
       damage: {
@@ -294,8 +339,9 @@ export function dnd5eMonsterTraitDamageDefinitions(
         bonus: rule.extraDamage.bonus,
         type: inheritedType,
       },
-    }]
-  })
+    })
+  }
+  return definitions
 }
 
 /**
@@ -308,32 +354,67 @@ export function dnd5eMonsterWeaponAttackWithTriggeredTraits(
   attack: Dnd5eMonsterWeaponAttack,
   context: Dnd5eMonsterAttackTraitContext,
 ): Dnd5eMonsterWeaponAttack {
-  if (
-    !monster ||
-    context.round !== 1 ||
-    !dnd5eMonsterTargetIsCurrentlySurprised(context)
-  ) return attack
-  const rules = monster.traits.flatMap((trait) =>
-    trait.automation === 'headless' &&
-    trait.rule?.kind === 'surprise-attack' &&
-    context.round === trait.rule.requiredRound
-      ? [trait.rule]
-      : [])
-  if (rules.length === 0) return attack
+  if (!monster) return attack
   const inheritedType = attack.damage[0]?.type
-  if (!inheritedType) return attack
+  const surpriseRules = context.round === 1 &&
+    dnd5eMonsterTargetIsCurrentlySurprised(context)
+    ? monster.traits.flatMap((trait) =>
+        trait.automation === 'headless' &&
+        trait.rule?.kind === 'surprise-attack' &&
+        context.round === trait.rule.requiredRound
+          ? [trait.rule]
+          : [])
+    : []
+  const charge = dnd5eMonsterChargeTrait(monster, context)
+  if (
+    surpriseRules.length === 0 &&
+    !charge?.savingThrowOnHit &&
+    !charge?.forcedMovementOnHit
+  ) return attack
   return {
     ...attack,
-    damage: [
-      ...attack.damage,
-      ...rules.map((rule) => ({
-        average: rule.extraDamage.average,
-        count: rule.extraDamage.count,
-        sides: rule.extraDamage.sides,
-        bonus: rule.extraDamage.bonus,
-        type: inheritedType,
-      })),
-    ],
+    ...(inheritedType && surpriseRules.length > 0 ? {
+      damage: [
+        ...attack.damage,
+        ...surpriseRules.map((rule) => ({
+          average: rule.extraDamage.average,
+          count: rule.extraDamage.count,
+          sides: rule.extraDamage.sides,
+          bonus: rule.extraDamage.bonus,
+          type: inheritedType,
+        })),
+      ],
+    } : {}),
+    ...(charge?.savingThrowOnHit ? {
+      onHitRule: {
+        kind: 'saving-throw-condition' as const,
+        ability: charge.savingThrowOnHit.ability,
+        dc: charge.savingThrowOnHit.dc,
+        condition: charge.savingThrowOnHit.conditionOnFailedSave,
+      },
+    } : {}),
+    ...(charge?.forcedMovementOnHit ? {
+      onHitEffects: [
+        ...(attack.onHitEffects ?? []),
+        {
+          id: `charge:${context.actionId ?? charge.actionId}:forced-movement`,
+          kind: 'forced-movement' as const,
+          resistance: {
+            kind: 'saving-throw' as const,
+            ability: charge.forcedMovementOnHit.ability,
+            dc: charge.forcedMovementOnHit.dc,
+          },
+          direction: charge.forcedMovementOnHit.direction,
+          maximumDistanceFeet: charge.forcedMovementOnHit.maximumDistanceFeet,
+          ...(charge.forcedMovementOnHit.targetMaxSizeRank == null
+            ? {}
+            : { targetMaxSizeRank: charge.forcedMovementOnHit.targetMaxSizeRank }),
+          ...(charge.forcedMovementOnHit.conditionOnFailedSave == null
+            ? {}
+            : { conditionOnFailedResistance: charge.forcedMovementOnHit.conditionOnFailedSave }),
+        },
+      ],
+    } : {}),
   }
 }
 

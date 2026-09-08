@@ -1,0 +1,544 @@
+{
+  "id": "srd-5.1:vampire-bat",
+  "slug": "vampire-bat",
+  "name": "吸血鬼（蝙蝠形态）",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "已修复：目录原先从本体复制了当前形态不允许的传奇攻击。雾化形态不再提供传奇动作；蝙蝠形态保留移动与啃咬，移除传奇徒手打击。已验证旧动作 ID 在权威入口被拒绝，且不扣点、不伤害目标。",
+    "保留边界：夜之子需要户外且非日光环境、两种不同召唤表、1d4 轮延迟到达、持续一小时／来源死亡结束和奖励动作遣散；现有召唤规则只支持单一怪物类型与固定出现时机，因此继续由 DM 裁定。",
+    "已修复运行时与入口：传奇移动使用当前窗口内的一次可选额度，不再累加到普通移动池；翼击限定飞行。已覆盖超距、模式错误、重复和过期请求；真实 UI 专项已覆盖取消移动与完成移动。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].damageBasis.kind",
+        "attack.onHitEffects[].damageBasis.damageType",
+        "attack.onHitEffects[].recovery",
+        "attack.onHitEffects[].healSourceByAmount",
+        "automation",
+        "targetEligibility.kind",
+        "targetEligibility.predicates[].kind",
+        "targetEligibility.predicates[].relationKind",
+        "targetEligibility.predicates[].condition",
+        "targetEligibility.dmAdjudicationAlternatives[].kind"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "charm",
+      "name": "魅惑",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource",
+        "rule.requiredTargetCreatureTypes[]",
+        "rule.durationRounds",
+        "rule.repeatSaveOnDamage.mode",
+        "rule.repeatSaveOnDamage.sourceFilter"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded",
+        "wrong-target-type"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "children-of-the-night",
+      "name": "夜之子嗣",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "move",
+      "name": "移动",
+      "automation": "headless",
+      "rule": "grant-movement",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.maximumSpeedFraction",
+        "rule.provokesOpportunityAttacks"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "no-points",
+        "move",
+        "move-too-far",
+        "window-expired"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "legendary-bite-costs-2-actions",
+      "name": "啃咬（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 38,
+      "slug": "vampire-bat",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:04:50.911Z",
+      "name": "吸血鬼（蝙蝠形态）",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "13",
+      "total": 334,
+      "mapId": "verify-ui-vampire-bat-bite-1788566690966",
+      "combatId": "verify-ui-vampire-bat-bite-1788566690966:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "吸血鬼（蝙蝠形态） 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+9=27 命中；共造成 21 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:05 PM\n结算\n\n吸血鬼（蝙蝠形态） 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+9=27 命中；共造成 21 点伤害。\n\n查看 Headless 结算依据（11）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n优劣势依据 · 优势：目标处于束缚状态。\n攻击骰 · 优势（2d20 取高）；采用优势的原因：目标处于束缚状态；各骰面 18 / 6；最终采用 18；调整值 +9。\n结果 · 27 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜1d6 骰面：5 = 5｜固定加值 +4｜小计 9\n伤害骰 · 啃咬（基础伤害 2·黯蚀）｜3d6 骰面：2 + 5 + 5 = 12｜固定加值 +0｜小计 12\n吸血鬼（蝙蝠形态）｜消耗动作\n验证目标｜受到 21 点伤害｜HP 320 → 299\n吸血鬼（蝙蝠形态）｜恢复 0 点生命值｜HP 144 → 144",
+      "playerLog": "吸血鬼（蝙蝠形态） 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+9=27 命中；共造成 21 点伤害。",
+      "afterHp": 299,
+      "afterMaximumHp": 308,
+      "conditions": [
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:05:22.725Z",
+      "evidenceFile": "ui-cases/monsters/038-vampire-bat.json"
+    },
+    {
+      "index": 4,
+      "mode": "specials",
+      "startedAt": "2026-09-04T23:46:30.336Z",
+      "slug": "vampire-bat",
+      "name": "吸血鬼（蝙蝠形态）",
+      "actionId": "move",
+      "actionName": "移动",
+      "legendary": true,
+      "movement": "move",
+      "fixtureActionId": "bite",
+      "section": "legendaryActions",
+      "total": 7,
+      "mapId": "verify-ui-vampire-bat-move-1788565591865",
+      "combatId": "verify-ui-vampire-bat-move-1788565591865:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "before": {
+        "maps": [
+          {
+            "id": "verify-ui-vampire-bat-move-1788565591865",
+            "name": "怪物验证 · 吸血鬼（蝙蝠形态）",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "吸血鬼（蝙蝠形态）",
+                "x": 175,
+                "y": 245,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "enemy",
+                "poolId": "srd-5.1:vampire-bat",
+                "hp": 144,
+                "maxHp": 144,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-vampire-bat-move-1788565591865:combat:1:actor",
+                  "legendaryResistanceUses": 3,
+                  "monsterLegendaryActionPoints": 3,
+                  "monsterActionUsesByActionId": {}
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 245,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 320,
+                "maxHp": 320
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "monsterActionUsesByActionId": {}
+                }
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-vampire-bat-move-1788565591865",
+        "updatedAt": 1788565596306,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 715,
+          "writerId": "client:2aa9065e-55c3-4807-9b9f-5f003f0654e0",
+          "writtenAt": 1788565597071
+        }
+      },
+      "window": "传奇动作时机\n\n验证目标 的回合即将结束。使用一次传奇动作，或跳过后继续推进先攻。\n\n传奇动作点\n\n3 / 3\n\n移动\n消耗 1 点\n\n吸血鬼（蝙蝠形态）可以移动至多等于其速度的距离，且不会引发借机攻击。\n\n啃咬（消耗 2 动作）\n消耗 2 点\n\n吸血鬼（蝙蝠形态）发动一次啃咬攻击。\n\n跳过并继续\n使用传奇动作",
+      "movementPrompt": "为“移动 · 可选移动 30 尺（取消则留在原地）”选择移动终点（0/1）。\n取消本次 Activity",
+      "afterPurchase": {
+        "id": "actor",
+        "label": "吸血鬼（蝙蝠形态）",
+        "x": 175,
+        "y": 245,
+        "color": "#ef4444",
+        "emoji": "M",
+        "size": 1,
+        "creatureSize": "中型",
+        "type": "enemy",
+        "poolId": "srd-5.1:vampire-bat",
+        "hp": 144,
+        "maxHp": 144,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "turnStartResolvedTurnKey": "verify-ui-vampire-bat-move-1788565591865:combat:1:actor",
+          "legendaryResistanceUses": 3,
+          "monsterLegendaryActionPoints": 2,
+          "monsterLegendaryMovement": {
+            "schemaVersion": 1,
+            "actionId": "move",
+            "boundaryKey": "verify-ui-vampire-bat-move-1788565591865:combat:1:target",
+            "maximumFeet": 30,
+            "traversalMode": "any",
+            "provokesOpportunityAttacks": false
+          },
+          "monsterActionUsesByActionId": {}
+        },
+        "dnd5eWorldTimeAppliedMinute": 480
+      },
+      "after": {
+        "maps": [
+          {
+            "id": "verify-ui-vampire-bat-move-1788565591865",
+            "name": "怪物验证 · 吸血鬼（蝙蝠形态）",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "吸血鬼（蝙蝠形态）",
+                "x": 175,
+                "y": 175,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "enemy",
+                "poolId": "srd-5.1:vampire-bat",
+                "hp": 144,
+                "maxHp": 144,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-vampire-bat-move-1788565591865:combat:1:actor",
+                  "monsterMechanicMovementTurnKey": "verify-ui-vampire-bat-move-1788565591865:combat:1:target",
+                  "monsterMechanicMovementFeet": 5,
+                  "monsterMechanicMovementOrigin": {
+                    "x": 175,
+                    "y": 245
+                  },
+                  "monsterMechanicMovementLast": {
+                    "x": 175,
+                    "y": 175
+                  },
+                  "monsterMechanicMovementStraight": true,
+                  "legendaryResistanceUses": 3,
+                  "monsterLegendaryActionPoints": 2,
+                  "monsterActionUsesByActionId": {}
+                },
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "movementAnimation": {
+                  "id": "monster-move:verify-ui-vampire-bat-move-1788565591865:combat:1:actor:1788565604765",
+                  "points": [
+                    {
+                      "x": 175,
+                      "y": 245
+                    },
+                    {
+                      "x": 175,
+                      "y": 175
+                    }
+                  ],
+                  "durationMs": 245,
+                  "issuedAt": 1788565604865
+                }
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 245,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 320,
+                "maxHp": 320
+              },
+              {
+                "id": "witness",
+                "label": "旁观卫兵",
+                "x": 945,
+                "y": 525,
+                "color": "#666",
+                "emoji": "W",
+                "size": 1,
+                "type": "enemy",
+                "poolId": "srd-5.1:commoner",
+                "hp": 4,
+                "maxHp": 4,
+                "dnd5eWorldTimeAppliedMinute": 480,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2,
+                  "turnStartResolvedTurnKey": "verify-ui-vampire-bat-move-1788565591865:combat:1:witness",
+                  "monsterActionUsesByActionId": {}
+                }
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-vampire-bat-move-1788565591865",
+        "updatedAt": 1788565606418,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 718,
+          "writerId": "client:2aa9065e-55c3-4807-9b9f-5f003f0654e0",
+          "writtenAt": 1788565606558
+        }
+      },
+      "dmLog": "吸血鬼（蝙蝠形态）使用传奇动作移动。",
+      "playerLog": "吸血鬼（蝙蝠形态）使用传奇动作移动。",
+      "afterHp": 320,
+      "conditions": [
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:46:54.081Z",
+      "evidenceFile": "ui-cases/specials/04.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "传奇抗性",
+      "automation": "headless",
+      "rule": "legendary-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumUses"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "choose",
+        "decline",
+        "exhausted"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "雾化逃脱",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "再生",
+      "automation": "headless",
+      "rule": "regeneration",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.amount",
+        "rule.requiresPositiveHp",
+        "rule.diesAtZeroWhenSuppressed"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "injured",
+        "full-hp",
+        "suppressed"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "吸血鬼弱点",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 26,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

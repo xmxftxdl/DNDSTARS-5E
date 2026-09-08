@@ -1,4 +1,5 @@
 import type { AiModelDescriptorV1, AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
+import { fixedBridgeModelIdForTask } from '../../shared/ai-model-policy.mjs'
 
 export interface ResourceStructuringModelRouteEntryV1 {
   modelId: string
@@ -58,6 +59,7 @@ export function selectResourceStructuringModelRouting(
     model.providerId === selection.providerId && supportsResourceStructuring(model))
   if (providerModels.length === 0) return null
 
+  const fixed = providerModels.find((model) => model.id === fixedBridgeModelIdForTask('resource-structuring'))
   const selected = providerModels.find((model) => model.id === selection.modelId)
   if (selection.providerId !== 'external-account') {
     const primary = selected ?? providerModels[0]
@@ -69,15 +71,12 @@ export function selectResourceStructuringModelRouting(
     }
   }
 
-  const luna = preferredTierModel(providerModels, 'luna', selection.modelId)
-  const terra = preferredTierModel(providerModels, 'terra', selection.modelId)
-  const primary = luna ?? selected ?? terra ?? providerModels[0]
-  const fallback = terra?.id !== primary.id ? terra : undefined
+  const luna = preferredTierModel(providerModels, 'luna', fixed?.id ?? selection.modelId)
+  const primary = fixed ?? luna ?? selected ?? providerModels[0]
   return {
     schemaVersion: 1,
     providerId: selection.providerId,
     primary: routeEntry(primary),
-    ...(fallback ? { fallback: routeEntry(fallback) } : {}),
-    automatic: modelTier(primary) === 'luna' && modelTier(fallback ?? primary) === 'terra' && !!fallback,
+    automatic: fixed != null,
   }
 }

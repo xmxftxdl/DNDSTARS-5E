@@ -1,0 +1,19 @@
+{
+  "slug": "guard",
+  "name": "守卫",
+  "actionId": "spear-two-handed-melee",
+  "actionName": "长矛 (Two-Handed Melee)",
+  "mapId": "monster-ui-catchup-guard-1788607367420",
+  "combatId": "monster-ui-catchup-guard-1788607367420:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "beforeHp": 320,
+  "startedAt": "2026-09-05T11:22:47.891Z",
+  "dmLog": "守卫 使用长矛 (Two-Handed Melee)攻击 验证目标：长矛 (Two-Handed Melee) → 验证目标 10+3=13 命中；共造成 2 点伤害。",
+  "playerLog": "守卫 使用长矛 (Two-Handed Melee)攻击 验证目标：长矛 (Two-Handed Melee) → 验证目标 10+3=13 命中；共造成 2 点伤害。",
+  "afterHp": 318,
+  "conditions": [],
+  "actionAvailable": 0,
+  "status": "passed",
+  "finishedAt": "2026-09-05T11:23:03.233Z"
+}

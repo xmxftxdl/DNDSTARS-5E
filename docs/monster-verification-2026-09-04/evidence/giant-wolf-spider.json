@@ -1,0 +1,158 @@
+{
+  "id": "srd-5.1:giant-wolf-spider",
+  "slug": "giant-wolf-spider",
+  "name": "巨型狼蛛",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave",
+        "attack.onHitEffects[].onEffectDamageReducesTargetToZero.stabilize",
+        "attack.onHitEffects[].onEffectDamageReducesTargetToZero.conditions[].condition",
+        "attack.onHitEffects[].onEffectDamageReducesTargetToZero.conditions[].durationRounds",
+        "attack.onHitEffects[].onEffectDamageReducesTargetToZero.conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 140,
+      "slug": "giant-wolf-spider",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:26:53.681Z",
+      "name": "巨型狼蛛",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-wolf-spider-bite-1788560813777",
+      "combatId": "verify-ui-giant-wolf-spider-bite-1788560813777:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "status": "failed",
+      "error": "TimeoutError: locator.click: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: '知道了', exact: true })\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:27:47.724Z",
+      "evidenceFile": "ui-cases/monsters/140-giant-wolf-spider.json"
+    },
+    {
+      "index": 268,
+      "slug": "giant-wolf-spider",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:06:18.996Z",
+      "name": "巨型狼蛛",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/4",
+      "total": 334,
+      "mapId": "verify-ui-giant-wolf-spider-bite-1788570379045",
+      "combatId": "verify-ui-giant-wolf-spider-bite-1788570379045:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨型狼蛛 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+3=14 命中；共造成 12 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:06 PM\n结算\n\n巨型狼蛛 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+3=14 命中；共造成 12 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 11；最终采用 11；调整值 +3。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：6 = 6｜固定加值 +1｜小计 7\n巨型狼蛛｜消耗动作\n验证目标｜体质豁免 d20 9 +10 = 19 vs DC 11｜成功\n验证目标｜受到 12 点伤害｜HP 320 → 308",
+      "playerLog": "巨型狼蛛 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+3=14 命中；共造成 12 点伤害。",
+      "afterHp": 308,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:06:51.633Z",
+      "evidenceFile": "ui-cases/monsters/268-giant-wolf-spider.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛛网感知",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛛网行者",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

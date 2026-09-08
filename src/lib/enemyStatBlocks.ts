@@ -13,18 +13,29 @@ export interface MonsterTrait {
   name: string
   description: string
   automation?: 'headless' | 'dm-adjudication'
+  automationReason?: string
 }
 
 export interface MonsterAction {
+  id?: string
   name: string
   description: string
   toHit?: number
   damageDice?: string
   damageType?: string
   range?: number
-  kind?: 'melee' | 'ranged' | 'aoe' | 'multiattack'
+  kind?: 'melee' | 'ranged' | 'aoe' | 'multiattack' | 'targeted-condition' | 'targeted-special' | 'self-special'
   save?: { ability: AbilityKey; dc: number }
+  actorLanding?: boolean
+  usage?:
+    | { kind: 'recharge'; dieSides: number; minimum: number }
+    | { kind: 'per-day'; max: number }
+  sharedUsageActionId?: string
   automation?: 'headless' | 'dm-adjudication' | 'invalid'
+  automationReason?: string
+  legendaryCost?: number
+  requiredActiveEffectDefinitionId?: string
+  forbiddenActiveEffectDefinitionId?: string
 }
 
 export interface MonsterSkillNote {
@@ -48,6 +59,7 @@ export interface EnemyStatBlock {
   bonusActions?: MonsterAction[]
   reactions?: MonsterAction[]
   legendaryActions?: MonsterAction[]
+  legendaryActionPoints?: number
   lairActions?: MonsterAction[]
   spellcasting?: string
   source?: string
@@ -80,7 +92,12 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
   const convertAction = (action: Dnd5eMonsterStatBlock['actions'][number]): MonsterAction => {
     const attack = action.attack
     const primaryDamage = attack?.damage[0]
+    const hasAreaRule = action.rule?.kind === 'area-saving-throw'
+    const areaRule = action.rule?.kind === 'area-saving-throw' && !action.rule.variants
+      ? action.rule
+      : undefined
     return {
+      id: action.id,
       name: action.name,
       description: action.description,
       toHit: attack?.toHit,
@@ -89,10 +106,34 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
       range: attack?.rangeFeet?.normal ?? attack?.reachFeet,
       kind: action.kind === 'multiattack'
         ? 'multiattack'
+        : hasAreaRule
+          ? 'aoe'
+        : action.rule?.kind === 'saving-throw-condition'
+          ? 'targeted-condition'
+        : action.rule?.kind === 'saving-throw-damage-and-max-hp-reduction'
+          ? 'targeted-special'
+        : action.rule?.kind === 'toggle-planar-phase' || action.rule?.kind === 'teleport'
+          ? 'self-special'
         : attack
           ? (attack.mode === 'ranged' ? 'ranged' : 'melee')
           : undefined,
+      save: areaRule ? { ability: areaRule.ability, dc: areaRule.dc } : undefined,
+      actorLanding: areaRule?.actorLanding != null || undefined,
+      usage: action.usage?.kind === 'recharge'
+        ? {
+            kind: 'recharge',
+            dieSides: action.usage.dieSides,
+            minimum: action.usage.minimum,
+          }
+        : action.usage?.kind === 'per-day'
+          ? { kind: 'per-day', max: action.usage.max }
+          : undefined,
+      sharedUsageActionId: action.sharedUsageActionId,
       automation: dnd5eMonsterActionAutomation(action),
+      automationReason: action.automationReason,
+      legendaryCost: action.legendaryCost,
+      requiredActiveEffectDefinitionId: action.requiredActiveEffectDefinitionId,
+      forbiddenActiveEffectDefinitionId: action.forbiddenActiveEffectDefinitionId,
     }
   }
   return {
@@ -112,6 +153,7 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
     bonusActions: monster.bonusActions?.map(convertAction),
     reactions: monster.reactions?.map(convertAction),
     legendaryActions: monster.legendaryActions?.map(convertAction),
+    legendaryActionPoints: monster.legendaryActionPoints,
     lairActions: monster.lairActions?.map(convertAction),
     spellcasting: monster.spellcasting?.description,
     source: monster.source,

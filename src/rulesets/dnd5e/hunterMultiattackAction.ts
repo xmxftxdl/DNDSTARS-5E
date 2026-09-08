@@ -15,6 +15,7 @@ import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eMonkMartialArtsEligible,
   dnd5eWeaponAttackProfile,
+  dnd5eWeaponPropertyIds,
   dnd5eWeaponRangeFeet,
   dnd5eWearingUnproficientArmor,
   type Dnd5eWeaponAttackProfile,
@@ -43,7 +44,7 @@ import {
   type Dnd5eAirborneFallDamageRolls,
   type Dnd5eAirborneFallPreview,
 } from './airborneFallActionResolution'
-import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, dnd5eRequestedInitiativeActorIndex, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 
 export type Dnd5eHunterMultiattackFeature = 'volley' | 'whirlwind-attack'
@@ -148,7 +149,11 @@ export function prepareDnd5eHunterMultiattack(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
   syncTurnEconomy(snapshot.state, input.turnEconomyByToken)
@@ -217,6 +222,8 @@ export function prepareDnd5eHunterMultiattack(input: {
         normalRangeFeet: profile.rangeFeet?.normal,
         longRangeFeet: profile.rangeFeet?.long,
         weaponId: profile.weaponId,
+        weaponProperties: [...dnd5eWeaponPropertyIds(profile.properties)],
+        proficient: profile.proficient,
         finesse: profile.finesse,
         strengthBased: profile.attackAbility === 'str',
         monkMartialArtsEligible: dnd5eMonkMartialArtsEligible(actor),
@@ -320,6 +327,7 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
   prepared: PreparedDnd5eHunterMultiattack
   rolls: readonly Dnd5eHunterMultiattackResolutionRoll[]
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+  attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -332,6 +340,7 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'ranger-hunter-multiattack',
     actorId: prepared.actorToken.id,
+    attackDecoyRolls: input.attackDecoyRolls,
     feature: prepared.feature,
     weaponMode: prepared.profile.mode,
     attackModifier: prepared.profile.attackModifier,
@@ -369,6 +378,7 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

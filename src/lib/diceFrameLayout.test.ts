@@ -35,6 +35,12 @@ describe('dice frame layout', () => {
       .toBe(8)
   })
 
+  it('gathers a single secret die at the exact center', () => {
+    expect(settledDiceGrid(1, 680, 420)).toEqual([
+      { columnOffset: 0, rowOffset: 0 },
+    ])
+  })
+
   it('centers the final short row instead of leaving a diagonal tail', () => {
     const points = settledDiceGrid(6, 680, 420)
     const lastRow = points.filter((point) => point.rowOffset === 0.5)

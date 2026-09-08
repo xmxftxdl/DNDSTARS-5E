@@ -1,10 +1,12 @@
 import { Circle, Group, Image as KonvaImage } from 'react-konva'
 import type { TokenStatusTooltipPoint } from './tokenStatusTooltip'
+import type { MapTokenStatusInstance } from './mapTokenStatusInstance'
 
 export const DND5E_CONCENTRATION_TOKEN_IMAGE_SRC =
   '/assets/icons/concentration-status-token.png'
 
 export interface ConcentrationTokenMark {
+  instance: MapTokenStatusInstance
   tokenId: string
   spellId: string
   backgroundHighlightColor: string
@@ -20,11 +22,13 @@ export interface Dnd5eConcentrationTokenBadgeProps {
   size: number
   image?: HTMLImageElement
   mark: ConcentrationTokenMark
+  onClick?: () => void
   onTooltipChange?: (point?: TokenStatusTooltipPoint) => void
 }
 
 /**
- * Non-interactive concentration marker used by both player and monster Tokens.
+ * Concentration marker used by both player and monster Tokens. The optional
+ * click handler opens the DM's per-instance rule details.
  * The badge is a generated raster asset rather than a Konva vector glyph. Its
  * lifecycle remains driven by the concentrating actor's authoritative state.
  */
@@ -34,6 +38,7 @@ export default function Dnd5eConcentrationTokenBadge({
   size,
   image,
   mark,
+  onClick,
   onTooltipChange,
 }: Dnd5eConcentrationTokenBadgeProps) {
   if (!image) return null
@@ -44,7 +49,17 @@ export default function Dnd5eConcentrationTokenBadge({
       name="dnd5e-concentration-token-mark"
       x={x}
       y={y}
-      listening={!!onTooltipChange}
+      listening={!!onClick || !!onTooltipChange}
+      onClick={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onTap={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
       onMouseEnter={(event) => onTooltipChange?.({
         clientX: event.evt.clientX,
         clientY: event.evt.clientY,
@@ -82,7 +97,7 @@ export default function Dnd5eConcentrationTokenBadge({
         height={size}
         shadowBlur={Math.max(2, size * 0.16)}
         shadowColor={mark.glowColor}
-        listening={!!onTooltipChange}
+        listening={!!onClick || !!onTooltipChange}
       />
     </Group>
   )

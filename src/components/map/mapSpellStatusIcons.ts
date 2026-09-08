@@ -241,4 +241,14 @@ export const MAP_SPELL_STATUS_ICONS: Readonly<Record<MapSpellStatusId, Dnd5eActi
     runeIndex: 2,
     textureRotation: 18,
   },
+  'monster-regeneration-suppressed': {
+    key: 'monster-regeneration-suppressed',
+    motif: 'fire',
+    background: '#713f12',
+    backgroundDeep: '#1c1003',
+    accent: '#fde68a',
+    glow: '#f59e0b',
+    runeIndex: 1,
+    textureRotation: 8,
+  },
 }

@@ -8,7 +8,7 @@ export interface InitiativeEntry {
   slotId?: string
   /** The scheduler removes this slot after the first combat round wraps. */
   firstRoundOnly?: boolean
-  turnKind?: 'thief-reflexes'
+  turnKind?: 'thief-reflexes' | 'source-companion' | 'activity-extra-turn'
   tokenId: string
   label: string
   emoji: string
@@ -21,6 +21,13 @@ export interface InitiativeEntry {
   /** Current-turn flowing border color, normally sourced from the actor's class palette. */
   turnGlowColor?: string
   roll: number
+  /** The authoritative dice and modifier used to produce the initiative total. */
+  initiativeCalculation?: {
+    rolls: number[]
+    d20: number
+    modifier: number
+    mode: 'normal' | 'advantage' | 'disadvantage'
+  }
 }
 
 const VISIBLE_MAX = 7
@@ -83,8 +90,6 @@ interface InitiativeTrackerProps {
   round?: number
   hpByToken?: Record<string, { hp: number; max: number; temp?: number }>
   defeatedTokenIds?: string[]
-  /** DM-authoritative active monster whose Headless plan is still pending. */
-  monsterThinkingTokenId?: string
   onScroll: (offset: number) => void
   onSelect: (tokenId: string) => void
 }
@@ -96,7 +101,6 @@ export default function InitiativeTracker({
   round,
   hpByToken,
   defeatedTokenIds = [],
-  monsterThinkingTokenId,
   onScroll,
   onSelect,
 }: InitiativeTrackerProps) {
@@ -134,7 +138,6 @@ export default function InitiativeTracker({
           const globalIndex = clampedScroll + i
           const isActive = globalIndex === activeIndex
           const defeated = defeatedTokenIds.includes(entry.tokenId)
-          const monsterThinking = isActive && !defeated && monsterThinkingTokenId === entry.tokenId
           const hp = hpByToken?.[entry.tokenId]
           const tempHp = Math.max(0, hp?.temp ?? 0)
           const hpDenominator = hp ? Math.max(1, hp.max + tempHp) : 1
@@ -195,17 +198,6 @@ export default function InitiativeTracker({
                 >
                   {entry.roll}
                 </span>
-                {monsterThinking && (
-                  <span
-                    data-testid={`initiative-thinking-${entry.tokenId}`}
-                    className="pointer-events-none absolute bottom-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border border-violet-200/60 bg-violet-950/90 px-2 py-1 text-[10px] font-semibold text-violet-100 shadow-[0_3px_10px_rgba(0,0,0,0.8)] backdrop-blur-sm"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-300" aria-hidden="true" />
-                    AI 思考中…
-                  </span>
-                )}
               </div>
               <div
                 data-testid={`initiative-health-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}

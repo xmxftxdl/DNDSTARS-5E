@@ -1,0 +1,123 @@
+{
+  "id": "srd-5.1:brass-dragon-wyrmling",
+  "slug": "brass-dragon-wyrmling",
+  "name": "黄铜龙雏龙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "breath-weapons",
+      "name": "吐息武器",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.variants[].id",
+        "rule.variants[].name",
+        "rule.variants[].area.shape",
+        "rule.variants[].area.origin",
+        "rule.variants[].area.lengthFeet",
+        "rule.variants[].area.widthFeet",
+        "rule.variants[].area.aimRangeFeet",
+        "rule.variants[].target",
+        "rule.variants[].ability",
+        "rule.variants[].dc",
+        "rule.variants[].damage.average",
+        "rule.variants[].damage.count",
+        "rule.variants[].damage.sides",
+        "rule.variants[].damage.bonus",
+        "rule.variants[].damage.type",
+        "rule.variants[].damageOnSuccessfulSave",
+        "rule.variants[].conditionOnFailedSave.condition",
+        "rule.variants[].conditionOnFailedSave.durationRounds",
+        "rule.variants[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.variants[].conditionOnFailedSave.breakOnDamage"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 52,
+      "slug": "brass-dragon-wyrmling",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:32:42.527Z",
+      "name": "黄铜龙雏龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-brass-dragon-wyrmling-bite-1788557562588",
+      "combatId": "verify-ui-brass-dragon-wyrmling-bite-1788557562588:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "黄铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+4=22 命中；共造成 5 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:33 PM\n结算\n\n黄铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+4=22 命中；共造成 5 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +4。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d10 骰面：3 = 3｜固定加值 +2｜小计 5\n黄铜龙雏龙｜消耗动作\n验证目标｜受到 5 点伤害｜HP 320 → 315",
+      "playerLog": "黄铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+4=22 命中；共造成 5 点伤害。",
+      "afterHp": 315,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:33:09.204Z",
+      "evidenceFile": "ui-cases/monsters/052-brass-dragon-wyrmling.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 11,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

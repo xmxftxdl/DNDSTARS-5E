@@ -3,6 +3,33 @@ export interface MapFreeDiceResolution {
   dc?: number
 }
 
+export interface MapFreeDiceSelection {
+  count: number
+  sides: number
+}
+
+export function addMapFreeDie(
+  selection: MapFreeDiceSelection,
+  sides: number,
+): MapFreeDiceSelection {
+  const safeSides = Math.max(2, Math.min(100, Math.round(sides)))
+  return selection.sides === safeSides && selection.count > 0
+    ? { sides: safeSides, count: Math.min(12, selection.count + 1) }
+    : { sides: safeSides, count: 1 }
+}
+
+export function removeMapFreeDie(
+  selection: MapFreeDiceSelection,
+  sides: number,
+): MapFreeDiceSelection {
+  if (selection.sides !== sides || selection.count < 1) return selection
+  return { ...selection, count: Math.max(0, selection.count - 1) }
+}
+
+export function mapFreeDiceSelectionFormula(selection: MapFreeDiceSelection): string {
+  return selection.count > 0 ? `${selection.count}d${selection.sides}` : '尚未添加骰子'
+}
+
 export interface ResolvedMapFreeDiceRoll {
   subtotal: number
   total: number

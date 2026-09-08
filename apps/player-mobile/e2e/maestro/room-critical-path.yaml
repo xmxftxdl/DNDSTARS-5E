@@ -1,0 +1,28 @@
+appId: com.astraltrace.vtt.player
+---
+- runFlow: login-smoke.yaml
+- tapOn:
+    id: "lobby-room-id"
+- inputText: ${STARS_MOBILE_E2E_ROOM}
+- tapOn:
+    id: "lobby-room-password"
+- inputText: ${STARS_MOBILE_E2E_ROOM_PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "lobby-join"
+- extendedWaitUntil:
+    id: "tab-home"
+    timeout: 25000
+- tapOn:
+    id: "tab-character"
+- assertVisible: "人物卡"
+- tapOn:
+    id: "tab-chat"
+- assertVisible: "通讯与日志"
+- tapOn:
+    id: "tab-settings"
+- assertVisible: "玩家端设置"
+- tapOn:
+    id: "tab-map"
+- assertVisible:
+    id: "tab-map"

@@ -9,13 +9,14 @@ import {
   createDnd5eCustomMonsterAreaActionDraftFromTrait,
   createDnd5eCustomMonsterMechanicDraft,
   createDnd5eCustomMonsterTraitDraft,
+  restoreDnd5eCustomMonsterDraft,
   createDnd5eCustomMonsterDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
   validateDnd5eCustomMonsterAreaActionDraft,
   validateDnd5eCustomMonsterSummonActionDraft,
   type Dnd5eCustomMonsterDraft,
 } from '../../rulesets/dnd5e/customMonsterWorkshop'
-import type { AbilityKey } from '../../lib/dnd'
+import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import { DND5E_SRD_MONSTERS, type Dnd5eMonsterSize, type Dnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsters'
 import { parseDnd5eMonsterStatBlock } from '../../rulesets/dnd5e/monsterSchema'
 import { DND5E_MONSTER_TARGET_PRIORITY_OPTIONS } from '../../rulesets/dnd5e/monsterAutomation'
@@ -60,28 +61,43 @@ import {
 import {
   applyDnd5eMonsterAbilityTemplate,
   DND5E_MONSTER_ABILITY_TEMPLATES,
+  dnd5eMonsterWorkshopDefaultSaveDc,
   type Dnd5eMonsterAbilityTemplate,
   type Dnd5eMonsterAbilityTemplateSection,
 } from '../../rulesets/dnd5e/monsterWorkshopAbilityTemplates'
+import Dnd5eDamageFormulaEditor from '../rules/Dnd5eDamageFormulaEditor'
+import { dnd5eTokenStatusMarkerStyle } from './dnd5eTokenStatusMarkerPresentation'
+import {
+  DND5E_TACTICAL_TOKEN_STATUS_MARKER_DEFINITIONS,
+  dnd5eTokenStatusMarkerDefinition,
+  type Dnd5eTokenStatusMarkerId,
+} from '../../rulesets/dnd5e/tokenStatusMarkers'
 
 const ABILITY_LABELS: readonly [AbilityKey, string][] = [
   ['str', '力量'], ['dex', '敏捷'], ['con', '体质'], ['int', '智力'], ['wis', '感知'], ['cha', '魅力'],
 ]
+const ABILITY_LABEL_BY_KEY = new Map(ABILITY_LABELS)
+const SKILL_BY_KEY = new Map(SKILLS.map((skill) => [skill.key, skill]))
 const SIZES: Dnd5eMonsterSize[] = ['微型', '小型', '中型', '大型', '超大型', '巨型']
 const SPELL_CATALOG_BY_ID = new Map(DND5E_SRD_SPELL_CATALOG.map((spell) => [spell.id, spell]))
 const SPELL_CATALOG_BY_LEVEL = Array.from({ length: 10 }, (_, level) =>
   DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.level === level))
 const MECHANIC_TRIGGERS = [
-  ['turn-start', '回合开始'], ['turn-end', '回合结束'], ['after-hit', '攻击命中后'],
-  ['after-miss', '攻击未命中时'], ['when-hit', '被命中时'], ['after-damaged', '受到伤害后'],
+  ['turn-start', '回合开始'], ['turn-end', '回合结束'], ['before-damaged', '受到伤害前'],
+  ['after-hit', '攻击命中后'], ['after-move-hit', '移动后命中'],
+  ['after-miss', '攻击未命中时'], ['when-hit', '被命中时'], ['target-killed', '击杀目标后'],
+  ['after-damaged', '受到伤害后'],
   ['after-dealt-damage', '造成伤害后（攻击／法术／其他伤害）'],
   ['saving-throw-magic', '对抗魔法的豁免时'], ['saving-throw-physical', '对抗物理的豁免时'],
   ['movement', '移动指定距离时'], ['phase-transition', '阶段转换'],
 ] as const
 const MECHANIC_EFFECTS = [
-  ['healing', '恢复生命'], ['temporary-hit-points', '获得临时生命'], ['damage', '造成伤害'],
+  ['healing', '恢复生命'], ['temporary-hit-points', '获得临时生命'], ['damage', '追加伤害'],
+  ['damage-replacement', '替换／减免本次伤害'],
   ['roll-modifier', '获得加值／优势／劣势'], ['attack', '发动一次攻击'],
-  ['standard-condition', '施加标准状态'], ['remove-standard-condition', '移除标准状态'],
+  ['action-grant', '授予动作资源'], ['equipment-modifier', '修改装备'],
+  ['standard-condition', '施加标准状态'], ['tactical-status', '触发 Token 状态'],
+  ['remove-standard-condition', '移除标准状态'],
   ['summon', '召唤生物'], ['area-attack', '范围攻击'],
 ] as const
 
@@ -96,6 +112,48 @@ function downloadJson(filename: string, value: unknown): void {
 
 function inputClass(): string {
   return 'w-full rounded-lg border border-white/10 bg-void-950/80 px-2.5 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500'
+}
+
+function WorkshopTokenMarkerPreview({ markerId }: { markerId: Dnd5eTokenStatusMarkerId }) {
+  const definition = dnd5eTokenStatusMarkerDefinition(markerId)
+  const style = dnd5eTokenStatusMarkerStyle(markerId)
+  return (
+    <div
+      className="col-span-2 flex items-center gap-2 rounded-lg border border-sky-300/15 bg-sky-500/[0.06] px-2.5 py-2 text-[11px] text-sky-100 lg:col-span-4"
+      data-testid={`monster-workshop-token-marker-${markerId}`}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
+        style={{
+          backgroundColor: style.fill,
+          color: style.text,
+          boxShadow: `inset 0 0 0 1px ${style.stroke}`,
+        }}
+      >
+        {style.icon
+          ? <img src={style.icon} alt="" className="h-3.5 w-3.5" />
+          : style.glyph}
+      </span>
+      <span>
+        Token 状态标记：结算成功后自动显示「{definition.label}」；规则状态与 DM 手动地图标记分开管理。
+      </span>
+    </div>
+  )
+}
+
+function workshopDiceFromText(value: string): { count: number; sides: number; fixedModifier: number } {
+  const match = /^\s*(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?\s*$/i.exec(value)
+  if (!match) return { count: 1, sides: 6, fixedModifier: 0 }
+  return {
+    count: Number(match[1]),
+    sides: Number(match[2]),
+    fixedModifier: match[3] === '-' ? -Number(match[4] ?? 0) : Number(match[4] ?? 0),
+  }
+}
+
+function workshopDiceText(value: { count: number; sides: number; fixedModifier: number }): string {
+  return `${value.count}d${value.sides}${value.fixedModifier === 0 ? '' : value.fixedModifier > 0 ? `+${value.fixedModifier}` : value.fixedModifier}`
 }
 
 function monsterCatalogSourceLabel(monster: Dnd5eMonsterStatBlock): string {
@@ -243,7 +301,7 @@ function readMonsterWorkshopDraft(storageKey: string): SavedMonsterWorkshopDraft
     if (!parsed || parsed.schemaVersion !== 1 || !parsed.draft || typeof parsed.draft !== 'object') return null
     return {
       schemaVersion: 1,
-      draft: parsed.draft as Dnd5eCustomMonsterDraft,
+      draft: restoreDnd5eCustomMonsterDraft(parsed.draft as Partial<Dnd5eCustomMonsterDraft>),
       selectedId: typeof parsed.selectedId === 'string' ? parsed.selectedId : null,
       aiReview: parsed.aiReview,
       updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
@@ -278,6 +336,7 @@ interface Props {
   draftStorageScope?: string
   knownCustomSpells?: readonly Dnd5eMonsterContentSpellReference[]
   onCreateCustomSpellDraft?: (request: Dnd5eMonsterWorkshopCustomSpellDraftRequest) => void
+  onMonsterSaved?: (monster: Dnd5eMonsterStatBlock) => void | Promise<void>
 }
 
 export default function Dnd5eMonsterWorkshopDialog({
@@ -290,6 +349,7 @@ export default function Dnd5eMonsterWorkshopDialog({
   draftStorageScope = 'local',
   knownCustomSpells = [],
   onCreateCustomSpellDraft,
+  onMonsterSaved,
 }: Props) {
   const roomMonsters = useCustomMonsterStore((state) => state.monsters)
   const upsertRoomMonster = useCustomMonsterStore((state) => state.upsertMonster)
@@ -483,7 +543,7 @@ export default function Dnd5eMonsterWorkshopDialog({
       const dependencyNotice = applied.addedActionIds.length + applied.addedMultiattackIds.length > 1
         ? `，并带入 ${applied.addedActionIds.length + applied.addedMultiattackIds.length - 1} 个依赖动作`
         : ''
-      setMessage(`已从“${template.sourceMonsterName}”复制“${template.name}”${dependencyNotice}；所有规则均为当前怪物的独立副本。`)
+      setMessage(`已加入${template.sourceCount > 1 ? `由 ${template.sourceCount} 个图鉴来源归并的通用` : `来自“${template.sourceMonsterName}”的`}“${template.name}”模板${dependencyNotice}；【名称】已替换为当前怪物，所有规则均为独立副本。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     }
@@ -700,6 +760,7 @@ export default function Dnd5eMonsterWorkshopDialog({
         onPluginMonstersChange: onMonstersChange,
         upsertRoomMonster,
       })
+      await onMonsterSaved?.(monster)
       setSelectedId(monster.id)
       setDraft(dnd5eCustomMonsterDraftFromStatBlock(monster))
       setMessage(commit.savedToPluginDraft && commit.savedToCurrentRoom
@@ -1146,10 +1207,146 @@ export default function Dnd5eMonsterWorkshopDialog({
                   })}
                 </div>
               </div>
+              <div className="mt-3 rounded-xl border border-sky-300/15 bg-sky-500/[0.035] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold text-sky-100">特殊 Token 状态能力</p>
+                    <p className="mt-0.5 text-[10px] leading-4 text-slate-500">建立怪物的状态能力目录，并约束只能给予自身或其他目标。可选择纯地图标记，或可被 Headless／DM 触发的 ActiveEffect。</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!DND5E_TACTICAL_TOKEN_STATUS_MARKER_DEFINITIONS.some((definition) =>
+                      !draft.tokenStatusMarkerGrants.some((grant) =>
+                        grant.statusId === definition.id && grant.target === 'other'))}
+                    onClick={() => {
+                      const definition = DND5E_TACTICAL_TOKEN_STATUS_MARKER_DEFINITIONS.find((candidate) =>
+                        !draft.tokenStatusMarkerGrants.some((grant) =>
+                          grant.statusId === candidate.id && grant.target === 'other'))
+                      if (!definition) return
+                      patchDraft('tokenStatusMarkerGrants', [...draft.tokenStatusMarkerGrants, {
+                        statusId: definition.id,
+                        target: 'other',
+                        application: 'marker',
+                      }])
+                    }}
+                    className="shrink-0 text-xs text-sky-200 disabled:cursor-not-allowed disabled:text-slate-600"
+                  >
+                    + 添加能力
+                  </button>
+                </div>
+                {draft.tokenStatusMarkerGrants.length > 0 ? (
+                  <div className="mt-2 space-y-2">
+                    {draft.tokenStatusMarkerGrants.map((grant, index) => (
+                      <div key={`${grant.statusId}:${grant.target}:${grant.application ?? 'marker'}:${index}`} className="grid grid-cols-[minmax(0,1fr)_120px_130px_auto] gap-2">
+                        <select
+                          aria-label={`特殊 Token 标记 ${index + 1}`}
+                          value={grant.statusId}
+                          onChange={(event) => patchDraft('tokenStatusMarkerGrants', draft.tokenStatusMarkerGrants.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, statusId: event.target.value as typeof entry.statusId } : entry))}
+                          className={inputClass()}
+                        >
+                          {DND5E_TACTICAL_TOKEN_STATUS_MARKER_DEFINITIONS.map((definition) => (
+                            <option
+                              key={definition.id}
+                              value={definition.id}
+                              disabled={draft.tokenStatusMarkerGrants.some((entry, entryIndex) =>
+                                entryIndex !== index && entry.statusId === definition.id && entry.target === grant.target)}
+                            >
+                              {definition.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          aria-label={`特殊 Token 标记目标 ${index + 1}`}
+                          value={grant.target}
+                          onChange={(event) => patchDraft('tokenStatusMarkerGrants', draft.tokenStatusMarkerGrants.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, target: event.target.value as typeof entry.target } : entry))}
+                          className={inputClass()}
+                        >
+                          <option value="self">仅给予自身</option>
+                          <option value="other">给予其他目标</option>
+                        </select>
+                        <select
+                          aria-label={`特殊 Token 标记用途 ${index + 1}`}
+                          value={grant.application ?? 'marker'}
+                          onChange={(event) => patchDraft('tokenStatusMarkerGrants', draft.tokenStatusMarkerGrants.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, application: event.target.value as NonNullable<typeof entry.application> } : entry))}
+                          className={inputClass()}
+                        >
+                          <option value="marker">仅地图标记</option>
+                          <option value="active-effect">可触发状态</option>
+                        </select>
+                        <button type="button" aria-label="移除特殊 Token 标记能力" onClick={() => patchDraft('tokenStatusMarkerGrants', draft.tokenStatusMarkerGrants.filter((_, entryIndex) => entryIndex !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[10px] text-slate-600">当前没有额外特殊标记能力。</p>
+                )}
+              </div>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
                 <div>
-                  <div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">技能</p><button type="button" onClick={() => patchDraft('skills', [...draft.skills, { id: `skill-${Date.now()}`, key: '', name: '', bonus: 0 }])} className="text-xs text-arcane-200">+ 添加</button></div>
-                  <div className="mt-2 space-y-2">{draft.skills.map((skill, index) => <div key={skill.id} className="grid grid-cols-[1fr_1fr_80px_auto] gap-2"><input value={skill.key} onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, key: event.target.value } : entry))} placeholder="stealth" className={inputClass()} /><input value={skill.name} onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, name: event.target.value } : entry))} placeholder="隐匿" className={inputClass()} /><input type="number" value={skill.bonus} onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, bonus: Number(event.target.value) } : entry))} className={inputClass()} /><button type="button" onClick={() => patchDraft('skills', draft.skills.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                  <div className="flex items-center justify-between">
+                    <div><p className="text-xs font-semibold text-slate-300">技能</p><p className="mt-0.5 text-[10px] text-slate-500">选择技能并填写最终加值；内部使用稳定规则 ID。</p></div>
+                    <button
+                      type="button"
+                      disabled={!SKILLS.some((candidate) => !draft.skills.some((skill) => skill.key === candidate.key))}
+                      onClick={() => {
+                        const next = SKILLS.find((candidate) => !draft.skills.some((skill) => skill.key === candidate.key))
+                        if (!next) return
+                        patchDraft('skills', [...draft.skills, {
+                          id: `skill-${Date.now()}`,
+                          key: next.key,
+                          name: next.label,
+                          bonus: 0,
+                        }])
+                      }}
+                      className="text-xs text-arcane-200 disabled:cursor-not-allowed disabled:text-slate-600"
+                    >
+                      + 添加
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-2">{draft.skills.map((skill, index) => {
+                    const definition = SKILL_BY_KEY.get(skill.key)
+                    return (
+                      <div key={skill.id} className="grid grid-cols-[minmax(0,1fr)_90px_auto] gap-2">
+                        <select
+                          aria-label={`技能 ${index + 1}`}
+                          value={skill.key}
+                          onChange={(event) => {
+                            const next = SKILL_BY_KEY.get(event.target.value)
+                            patchDraft('skills', draft.skills.map((entry, i) => i === index
+                              ? { ...entry, key: event.target.value, name: next?.label ?? entry.name }
+                              : entry))
+                          }}
+                          className={inputClass()}
+                        >
+                          {!skill.key && <option value="" disabled>请选择技能</option>}
+                          {!definition && skill.key && <option value={skill.key}>{skill.name || skill.key}（旧数据）</option>}
+                          {SKILLS.map((option) => (
+                            <option
+                              key={option.key}
+                              value={option.key}
+                              disabled={draft.skills.some((entry, otherIndex) => otherIndex !== index && entry.key === option.key)}
+                            >
+                              {option.label}（{ABILITY_LABEL_BY_KEY.get(option.ability)}）
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          aria-label={`${(definition?.label ?? skill.name) || '技能'}加值`}
+                          type="number"
+                          min={-100}
+                          max={100}
+                          value={skill.bonus}
+                          onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, bonus: Number(event.target.value) } : entry))}
+                          title="技能最终加值"
+                          className={inputClass()}
+                        />
+                        <button type="button" aria-label={`移除${(definition?.label ?? skill.name) || '技能'}`} onClick={() => patchDraft('skills', draft.skills.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    )
+                  })}</div>
                 </div>
                 <div>
                   <div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">特殊感官</p><button type="button" onClick={() => patchDraft('senses', [...draft.senses, { id: `sense-${Date.now()}`, name: '黑暗视觉', distanceFeet: 60 }])} className="text-xs text-arcane-200">+ 添加</button></div>
@@ -1262,8 +1459,8 @@ export default function Dnd5eMonsterWorkshopDialog({
                     ...(mechanic.trigger === 'phase-transition' ? ['阶段即时切换仍需要阈值穿越事务'] : []),
                     ...(mechanic.effectKind === 'summon' ? ['需要 DM 指定合法召唤落点'] : []),
                     ...(mechanic.effectKind === 'area-attack' ? ['需要 DM 确认方向、范围格与目标'] : []),
-                    ...(['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && mechanic.effectTarget === 'trigger-target' && !['after-hit', 'after-miss', 'when-hit', 'after-dealt-damage'].includes(mechanic.trigger) ? ['该触发时机没有可绑定的目标'] : []),
-                    ...(['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && mechanic.effectTarget === 'damage-source' && mechanic.trigger !== 'after-damaged' ? ['伤害来源只存在于受到伤害后的事件'] : []),
+                    ...(['damage', 'damage-replacement', 'standard-condition', 'tactical-status', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.effectTarget === 'trigger-target' && !['after-hit', 'after-move-hit', 'after-miss', 'when-hit', 'target-killed', 'after-dealt-damage'].includes(mechanic.trigger) ? ['该触发时机没有可绑定的目标'] : []),
+                    ...(['damage', 'damage-replacement', 'standard-condition', 'tactical-status', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.effectTarget === 'damage-source' && !['before-damaged', 'after-damaged'].includes(mechanic.trigger) ? ['伤害来源只存在于受到伤害前后的事件'] : []),
                     ...preservedCompatibilityReasons,
                   ]
                   const validationErrors = [
@@ -1274,10 +1471,16 @@ export default function Dnd5eMonsterWorkshopDialog({
                     ...(mechanic.damageType === 'inherit-trigger' && !['after-dealt-damage', 'after-damaged'].includes(mechanic.trigger) ? ['继承伤害类型只能用于造成伤害后或受到伤害后'] : []),
                     ...(mechanic.triggerSubject !== 'self' && (!Number.isFinite(mechanic.triggerRadiusFeet) || mechanic.triggerRadiusFeet < 5) ? ['监听半径至少为 5 尺'] : []),
                     ...(mechanic.triggerSubject === 'self' && mechanic.effectTarget === 'selected-subject' ? ['监听自身时请将效果目标直接选择为“怪物自身”'] : []),
-                    ...(mechanic.trigger === 'movement' && (!Number.isFinite(mechanic.movementFeet) || mechanic.movementFeet < 0) ? ['移动距离不能小于 0 尺'] : []),
+                    ...(['movement', 'after-move-hit'].includes(mechanic.trigger) && (!Number.isFinite(mechanic.movementFeet) || mechanic.movementFeet < 0) ? ['移动距离不能小于 0 尺'] : []),
+                    ...(mechanic.trigger === 'before-damaged' && mechanic.effectKind !== 'damage-replacement' ? ['受到伤害前只能配置确定性的伤害替换效果'] : []),
+                    ...(mechanic.trigger !== 'before-damaged' && mechanic.effectKind === 'damage-replacement' ? ['伤害替换只能在受到伤害前触发'] : []),
+                    ...(mechanic.effectKind === 'damage-replacement' && !['self', 'selected-subject'].includes(mechanic.effectTarget) ? ['伤害替换目标必须是监听对象或怪物自身'] : []),
+                    ...(['saving-throw-magic', 'saving-throw-physical'].includes(mechanic.trigger) && mechanic.savingThrowTiming === 'before' && (mechanic.effectKind !== 'roll-modifier' || mechanic.modifierRoll !== 'saving-throw') ? ['豁免前触发只能直接修改本次豁免；其他效果请选择“得出结果后”'] : []),
+                    ...(mechanic.effectKind === 'damage-replacement' && ['reduce-by', 'set-to'].includes(mechanic.damageReplacementOperation) && (!Number.isFinite(mechanic.damageReplacementAmount) || mechanic.damageReplacementAmount < 0) ? ['伤害替换点数不能小于 0'] : []),
                     ...((['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) || (mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'dice')) && !/^\d+d\d+(?:\s*[+\-−]\s*\d+)?$/i.test(mechanic.healingDice) ? ['效果骰格式应为 2d6 或 1d8+2'] : []),
                     ...(mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'fixed' && (!Number.isFinite(mechanic.attackFixedDamage) || mechanic.attackFixedDamage < 0) ? ['固定伤害不能小于 0'] : []),
-                    ...(mechanic.effectKind === 'standard-condition' && mechanic.durationKind === 'rounds' && mechanic.durationRounds < 1 ? ['状态持续轮数至少为 1'] : []),
+                    ...(['standard-condition', 'tactical-status', 'equipment-modifier'].includes(mechanic.effectKind) && mechanic.durationKind === 'rounds' && mechanic.durationRounds < 1 ? ['持续轮数至少为 1'] : []),
+                    ...(mechanic.effectKind === 'equipment-modifier' && mechanic.equipmentModifierOperation === 'magic-weapon-bonus' && (mechanic.equipmentModifierBonus < 1 || mechanic.equipmentModifierBonus > 3) ? ['魔法武器加值必须为 +1、+2 或 +3'] : []),
                     ...(mechanic.effectKind === 'summon' && !/^(?:srd-5\.1|room-monster):[a-z0-9][a-z0-9-]{0,95}$/.test(mechanic.summonMonsterId) ? ['召唤怪物 ID 必须使用合法命名空间'] : []),
                     ...(mechanic.effectKind === 'summon' && (mechanic.summonCount < 1 || mechanic.summonCount > 20 || mechanic.summonDurationRounds < 1) ? ['召唤数量或持续轮数无效'] : []),
                     ...(mechanic.effectKind === 'area-attack' && (mechanic.areaRangeFeet < 0 || mechanic.areaSizeFeet < 5) ? ['范围距离或尺寸无效'] : []),
@@ -1289,26 +1492,34 @@ export default function Dnd5eMonsterWorkshopDialog({
                     <div className="grid grid-cols-2 gap-2 lg:grid-cols-[minmax(150px,1fr),140px,140px,105px,105px,150px,130px,auto]">
                       <label className="text-xs text-slate-400">机制名称<input value={mechanic.name} onChange={(event) => update({ name: event.target.value })} className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">监听对象<select value={mechanic.triggerSubject} onChange={(event) => update({ triggerSubject: event.target.value as typeof mechanic.triggerSubject })} className={`mt-1 ${inputClass()}`}><option value="self">自身</option><option value="ally-within">指定范围内友方</option><option value="hostile-within">指定范围内敌方</option></select></label>
-                      <label className="text-xs text-slate-400">触发时机<select value={mechanic.trigger} onChange={(event) => update({ trigger: event.target.value as typeof mechanic.trigger })} className={`mt-1 ${inputClass()}`}>{MECHANIC_TRIGGERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                      <label className="text-xs text-slate-400">触发时机<select value={mechanic.trigger} onChange={(event) => { const trigger = event.target.value as typeof mechanic.trigger; update({ trigger, ...(['saving-throw-magic', 'saving-throw-physical'].includes(trigger) ? { savingThrowTiming: mechanic.effectKind === 'roll-modifier' && mechanic.modifierRoll === 'saving-throw' ? 'before' : 'after' } : {}) }) }} className={`mt-1 ${inputClass()}`}>{MECHANIC_TRIGGERS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                       <label className="text-xs text-slate-400">HP ≤（%）<input type="number" min={0} max={100} value={mechanic.hpPercentageAtOrBelow ?? ''} onChange={(event) => update({ hpPercentageAtOrBelow: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">HP ≥（%）<input type="number" min={0} max={100} value={mechanic.hpPercentageAtOrAbove ?? ''} onChange={(event) => update({ hpPercentageAtOrAbove: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">当前 HP ＜<input type="number" min={0} value={mechanic.hpBelow ?? ''} onChange={(event) => update({ hpBelow: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">当前 HP ≤<input type="number" min={0} value={mechanic.hpAtOrBelow ?? ''} onChange={(event) => update({ hpAtOrBelow: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="不限" className={`mt-1 ${inputClass()}`} /></label>
-                      <label className="text-xs text-slate-400">效果<select value={mechanic.effectKind} onChange={(event) => update({ effectKind: event.target.value as typeof mechanic.effectKind })} className={`mt-1 ${inputClass()}`}>{MECHANIC_EFFECTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                      <label className="text-xs text-slate-400">效果<select value={mechanic.effectKind} onChange={(event) => { const effectKind = event.target.value as typeof mechanic.effectKind; update({ effectKind, ...(['saving-throw-magic', 'saving-throw-physical'].includes(mechanic.trigger) && effectKind !== 'roll-modifier' ? { savingThrowTiming: 'after' as const } : {}) }) }} className={`mt-1 ${inputClass()}`}>{MECHANIC_EFFECTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                       <label className="text-xs text-slate-400">期望自动化<select value={mechanic.automation} onChange={(event) => update({ automation: event.target.value as typeof mechanic.automation })} className={`mt-1 ${inputClass()}`}><option value="full">完全自动</option><option value="partial">半自动</option><option value="manual">DM 裁定</option></select></label>
                       <button type="button" title="删除机制" onClick={() => patchDraft('headlessMechanics', draft.headlessMechanics.filter((_, entryIndex) => entryIndex !== index))} className="self-end rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-5">
                       {mechanic.triggerSubject !== 'self' && <label className="text-xs text-slate-400">监听半径（尺）<input type="number" min={5} step={5} value={mechanic.triggerRadiusFeet} onChange={(event) => update({ triggerRadiusFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
-                      {mechanic.trigger === 'movement' && <><label className="text-xs text-slate-400">移动条件<select value={mechanic.movementComparison} onChange={(event) => update({ movementComparison: event.target.value as typeof mechanic.movementComparison })} className={`mt-1 ${inputClass()}`}><option value="at-least">至少</option><option value="at-most">至多</option></select></label><label className="text-xs text-slate-400">移动距离（尺）<input type="number" min={0} step={5} value={mechanic.movementFeet} onChange={(event) => update({ movementFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}
+                      {['movement', 'after-move-hit'].includes(mechanic.trigger) && <><label className="text-xs text-slate-400">移动条件<select value={mechanic.movementComparison} onChange={(event) => update({ movementComparison: event.target.value as typeof mechanic.movementComparison })} className={`mt-1 ${inputClass()}`}><option value="at-least">至少</option><option value="at-most">至多</option></select></label><label className="text-xs text-slate-400">本回合累计移动（尺）<input type="number" min={0} step={5} value={mechanic.movementFeet} onChange={(event) => update({ movementFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}
+                      {['after-hit', 'after-move-hit', 'after-miss', 'when-hit'].includes(mechanic.trigger) && <label className="text-xs text-slate-400">攻击类型<select value={mechanic.triggerAttackMode} onChange={(event) => update({ triggerAttackMode: event.target.value as typeof mechanic.triggerAttackMode })} className={`mt-1 ${inputClass()}`}><option value="any">任意攻击</option><option value="melee">近战攻击</option><option value="ranged">远程攻击</option><option value="spell">法术攻击</option><option value="unarmed">徒手攻击</option></select></label>}
+                      {['before-damaged', 'after-damaged', 'after-dealt-damage'].includes(mechanic.trigger) && <label className="col-span-2 text-xs text-slate-400 lg:col-span-3">限定伤害类型（不选即任意）<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ triggerDamageTypes: mechanic.triggerDamageTypes.includes(type) ? mechanic.triggerDamageTypes.filter((entry) => entry !== type) : [...mechanic.triggerDamageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${mechanic.triggerDamageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{DND5E_DAMAGE_TYPE_LABELS[type]}</button>)}</div></label>}
+                      {['saving-throw-magic', 'saving-throw-physical'].includes(mechanic.trigger) && <><label className="text-xs text-slate-400">豁免时机<select value={mechanic.savingThrowTiming} onChange={(event) => update({ savingThrowTiming: event.target.value as typeof mechanic.savingThrowTiming })} className={`mt-1 ${inputClass()}`}><option value="before">投骰前</option><option value="after">得出结果后</option></select></label>{mechanic.savingThrowTiming === 'after' && <label className="text-xs text-slate-400">豁免结果<select value={mechanic.savingThrowOutcome} onChange={(event) => update({ savingThrowOutcome: event.target.value as typeof mechanic.savingThrowOutcome })} className={`mt-1 ${inputClass()}`}><option value="any">无论成功失败</option><option value="success">仅成功</option><option value="failure">仅失败</option></select></label>}</>}
                       {mechanic.effectKind === 'attack' && <label className="text-xs text-slate-400">伤害填写方式<select value={mechanic.attackDamageMode} onChange={(event) => update({ attackDamageMode: event.target.value as typeof mechanic.attackDamageMode })} className={`mt-1 ${inputClass()}`}><option value="dice">伤害骰</option><option value="fixed">固定点数</option></select></label>}
                       {(['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) || (mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'dice')) && <label className="text-xs text-slate-400">{mechanic.effectKind === 'attack' ? '攻击伤害骰' : '效果骰'}<input value={mechanic.healingDice} onChange={(event) => update({ healingDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>}
                       {mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'fixed' && <label className="text-xs text-slate-400">固定伤害点数<input type="number" min={0} value={mechanic.attackFixedDamage} onChange={(event) => update({ attackFixedDamage: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
-                      {['damage', 'standard-condition', 'remove-standard-condition', 'roll-modifier', 'attack'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">效果目标<select value={mechanic.effectTarget} onChange={(event) => update({ effectTarget: event.target.value as typeof mechanic.effectTarget })} className={`mt-1 ${inputClass()}`}><option value="selected-subject">前一步监听到的对象</option><option value="self">怪物自身</option><option value="trigger-target">命中／触发目标</option><option value="damage-source">伤害来源</option></select></label>}
+                      {['damage', 'damage-replacement', 'standard-condition', 'tactical-status', 'remove-standard-condition', 'roll-modifier', 'attack', 'action-grant', 'equipment-modifier'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">效果目标<select value={mechanic.effectTarget} onChange={(event) => update({ effectTarget: event.target.value as typeof mechanic.effectTarget })} className={`mt-1 ${inputClass()}`}><option value="selected-subject">前一步监听到的对象</option><option value="self">怪物自身</option><option value="trigger-target">命中／击杀目标</option><option value="damage-source">伤害来源</option></select></label>}
                       {['damage', 'area-attack', 'attack'].includes(mechanic.effectKind) && <label className="text-xs text-slate-400">伤害类型<select value={mechanic.damageType} onChange={(event) => update({ damageType: event.target.value as typeof mechanic.damageType })} className={`mt-1 ${inputClass()}`}>{mechanic.effectKind === 'damage' && <option value="inherit-trigger">继承本次伤害类型</option>}{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>}
                       {mechanic.effectKind === 'roll-modifier' && <><label className="text-xs text-slate-400">修正投骰<select value={mechanic.modifierRoll} onChange={(event) => update({ modifierRoll: event.target.value as typeof mechanic.modifierRoll })} className={`mt-1 ${inputClass()}`}><option value="attack">攻击投骰</option><option value="damage">伤害投骰</option><option value="saving-throw">豁免检定</option></select></label><label className="text-xs text-slate-400">修正方式<select value={mechanic.modifierMode} onChange={(event) => update({ modifierMode: event.target.value as typeof mechanic.modifierMode })} className={`mt-1 ${inputClass()}`}><option value="bonus">数值加值</option><option value="advantage">优势</option><option value="disadvantage">劣势</option></select></label>{mechanic.modifierMode === 'bonus' && <label className="text-xs text-slate-400">加值<input type="number" value={mechanic.modifierBonus} onChange={(event) => update({ modifierBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
                       {mechanic.effectKind === 'attack' && <><label className="text-xs text-slate-400">攻击加值<input type="number" value={mechanic.attackToHit} onChange={(event) => update({ attackToHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">动作资源<select value={mechanic.attackEconomy} onChange={(event) => update({ attackEconomy: event.target.value as typeof mechanic.attackEconomy })} className={`mt-1 ${inputClass()}`}><option value="reaction">消耗反应</option><option value="none">不消耗动作资源</option></select></label></>}
+                      {mechanic.effectKind === 'damage-replacement' && <><label className="text-xs text-slate-400">替换方式<select value={mechanic.damageReplacementOperation} onChange={(event) => update({ damageReplacementOperation: event.target.value as typeof mechanic.damageReplacementOperation })} className={`mt-1 ${inputClass()}`}><option value="negate">伤害归零</option><option value="halve">伤害减半</option><option value="reduce-by">减少固定点数</option><option value="set-to">改为固定点数</option><option value="convert-to-healing">转化为治疗</option></select></label>{['reduce-by', 'set-to'].includes(mechanic.damageReplacementOperation) && <label className="text-xs text-slate-400">固定点数<input type="number" min={0} value={mechanic.damageReplacementAmount} onChange={(event) => update({ damageReplacementAmount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
+                      {mechanic.effectKind === 'action-grant' && <label className="text-xs text-slate-400">授予资源<select value={mechanic.actionGrantResource} onChange={(event) => update({ actionGrantResource: event.target.value as typeof mechanic.actionGrantResource })} className={`mt-1 ${inputClass()}`}><option value="action">动作</option><option value="bonus-action">附赠动作</option><option value="reaction">反应</option></select></label>}
+                      {mechanic.effectKind === 'equipment-modifier' && <><label className="text-xs text-slate-400">装备类型<select value={mechanic.equipmentModifierEquipment} onChange={(event) => { const equipment = event.target.value as typeof mechanic.equipmentModifierEquipment; update({ equipmentModifierEquipment: equipment, equipmentModifierOperation: equipment === 'armor' ? 'armor-class-bonus' : 'magic-weapon-bonus' }) }} className={`mt-1 ${inputClass()}`}><option value="armor">护甲</option><option value="main-weapon">主手武器</option></select></label><label className="text-xs text-slate-400">修改效果<select value={mechanic.equipmentModifierOperation} onChange={(event) => update({ equipmentModifierOperation: event.target.value as typeof mechanic.equipmentModifierOperation })} className={`mt-1 ${inputClass()}`}><option value={mechanic.equipmentModifierEquipment === 'armor' ? 'armor-class-bonus' : 'magic-weapon-bonus'}>{mechanic.equipmentModifierEquipment === 'armor' ? 'AC 加值' : '魔法武器命中／伤害加值'}</option></select></label><label className="text-xs text-slate-400">加值<input type="number" min={mechanic.equipmentModifierEquipment === 'main-weapon' ? 1 : -20} max={mechanic.equipmentModifierEquipment === 'main-weapon' ? 3 : 20} value={mechanic.equipmentModifierBonus} onChange={(event) => update({ equipmentModifierBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>{mechanic.equipmentModifierEquipment === 'main-weapon' && <label className="text-xs text-slate-400">稳定装备 ID（可选）<input value={mechanic.equipmentModifierEquipmentId} onChange={(event) => update({ equipmentModifierEquipmentId: event.target.value })} placeholder="默认当前主手武器" className={`mt-1 ${inputClass()}`} /></label>}<label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
                       {mechanic.effectKind === 'standard-condition' && <><label className="text-xs text-slate-400">标准状态<select value={mechanic.condition} onChange={(event) => update({ condition: event.target.value as typeof mechanic.condition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label><label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
+                      {mechanic.effectKind === 'standard-condition' && <WorkshopTokenMarkerPreview markerId={mechanic.condition} />}
+                      {mechanic.effectKind === 'tactical-status' && <><label className="text-xs text-slate-400">Token 状态<select value={mechanic.statusMarkerId} onChange={(event) => update({ statusMarkerId: event.target.value as typeof mechanic.statusMarkerId })} className={`mt-1 ${inputClass()}`}>{DND5E_TACTICAL_TOKEN_STATUS_MARKER_DEFINITIONS.map((definition) => <option key={definition.id} value={definition.id}>{definition.label}</option>)}</select></label><label className="text-xs text-slate-400">持续时间<select value={mechanic.durationKind} onChange={(event) => update({ durationKind: event.target.value as typeof mechanic.durationKind })} className={`mt-1 ${inputClass()}`}><option value="rounds">固定轮数</option><option value="until-target-turn-start">至目标回合开始</option><option value="until-source-turn-start">至来源回合开始</option><option value="permanent">永久</option></select></label>{mechanic.durationKind === 'rounds' && <label className="text-xs text-slate-400">轮数<input type="number" min={1} value={mechanic.durationRounds} onChange={(event) => update({ durationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}<WorkshopTokenMarkerPreview markerId={mechanic.statusMarkerId} /></>}
                       {mechanic.effectKind === 'remove-standard-condition' && <label className="text-xs text-slate-400">移除状态<select value={mechanic.condition} onChange={(event) => update({ condition: event.target.value as typeof mechanic.condition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label>}
                       {mechanic.effectKind === 'summon' && <><label className="text-xs text-slate-400">怪物 ID<input value={mechanic.summonMonsterId} onChange={(event) => update({ summonMonsterId: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">数量<input type="number" min={1} max={20} value={mechanic.summonCount} onChange={(event) => update({ summonCount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">持续轮数<input type="number" min={1} value={mechanic.summonDurationRounds} onChange={(event) => update({ summonDurationRounds: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}
                       {mechanic.effectKind === 'area-attack' && <><label className="text-xs text-slate-400">范围形状<select value={mechanic.areaShape} onChange={(event) => update({ areaShape: event.target.value as typeof mechanic.areaShape })} className={`mt-1 ${inputClass()}`}><option value="circle">圆形</option><option value="cone">锥形</option><option value="line">线形</option></select></label><label className="text-xs text-slate-400">施放距离<input type="number" min={0} value={mechanic.areaRangeFeet} onChange={(event) => update({ areaRangeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">范围尺寸<input type="number" min={5} value={mechanic.areaSizeFeet} onChange={(event) => update({ areaSizeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}
@@ -1330,7 +1541,7 @@ export default function Dnd5eMonsterWorkshopDialog({
               <div className="space-y-2">
                 {draft.traits.map((trait, index) => {
                   const update = (patch: Partial<typeof trait>) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
-                  const headlessPreset = trait.preservedTrait?.automation === 'headless' || ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(trait.ruleKind)
+                  const headlessPreset = trait.preservedTrait?.automation === 'headless' || ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus', 'charge-damage', 'relentless', 'sneak-attack', 'surprise-attack', 'stench'].includes(trait.ruleKind)
                   const coveredByFullMechanic = dnd5eMonsterTraitCoveredByFullMechanic(draft, trait)
                   const collapsed = collapsedTraitIndexes.has(index)
                   return <div id={dnd5eMonsterTraitReviewTarget(index)} key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -1345,11 +1556,11 @@ export default function Dnd5eMonsterWorkshopDialog({
                         ruleKind,
                         preservedTrait: undefined,
                         templateSource: undefined,
-                        automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus'].includes(ruleKind)
+                        automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus', 'charge-damage', 'relentless', 'sneak-attack', 'surprise-attack', 'stench'].includes(ruleKind)
                           ? 'headless'
                           : 'dm-adjudication',
                       })
-                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset || coveredByFullMechanic ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">{coveredByFullMechanic ? '同名机制接管' : 'Headless'}</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => removeTrait(index)} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="relentless">坚韧不屈</option><option value="sneak-attack">偷袭</option><option value="surprise-attack">突袭攻击</option><option value="stench">恶臭</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset || coveredByFullMechanic ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">{coveredByFullMechanic ? '同名机制接管' : 'Headless'}</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => removeTrait(index)} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
                     {(trait.ruleKind === 'regeneration' || trait.ruleKind === 'undead-fortitude') && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       {trait.ruleKind === 'regeneration' ? <label className="text-xs text-slate-400">每回合恢复<input type="number" min={1} value={trait.amount} onChange={(event) => update({ amount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <label className="text-xs text-slate-400">DC 基数<input type="number" min={1} value={trait.dcBase} onChange={(event) => update({ dcBase: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
                       <label className="col-span-2 text-xs text-slate-400">{trait.ruleKind === 'regeneration' ? '压制再生的伤害类型' : '不能触发的伤害类型'}<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ damageTypes: trait.damageTypes.includes(type) ? trait.damageTypes.filter((entry) => entry !== type) : [...trait.damageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.damageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{DND5E_DAMAGE_TYPE_LABELS[type]}</button>)}</div></label>
@@ -1357,17 +1568,41 @@ export default function Dnd5eMonsterWorkshopDialog({
                     </div>}
                     {trait.ruleKind === 'keen-sense' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       <label className="text-xs text-slate-400">感官<select value={trait.keenSense} onChange={(event) => update({ keenSense: event.target.value as typeof trait.keenSense })} className={`mt-1 ${inputClass()}`}><option value="smell">嗅觉</option><option value="hearing">听觉</option><option value="sight">视觉</option></select></label>
-                      <label className="text-xs text-slate-400">关联技能<input value={trait.keenSenseSkillKey} onChange={(event) => update({ keenSenseSkillKey: event.target.value })} placeholder="perception" className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="text-xs text-slate-400">关联技能<select value={trait.keenSenseSkillKey} onChange={(event) => update({ keenSenseSkillKey: event.target.value })} className={`mt-1 ${inputClass()}`}>{!SKILL_BY_KEY.has(trait.keenSenseSkillKey) && <option value={trait.keenSenseSkillKey}>{trait.keenSenseSkillKey || '请选择技能'}（旧数据）</option>}{SKILLS.map((skill) => <option key={skill.key} value={skill.key}>{skill.label}（{ABILITY_LABEL_BY_KEY.get(skill.ability)}）</option>)}</select></label>
                       <label className="text-xs text-slate-400">相关检定加值<input type="number" min={-100} max={100} value={trait.keenSenseCheckBonus} onChange={(event) => update({ keenSenseCheckBonus: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">附带盲视（尺）<input type="number" min={0} value={trait.keenSenseBlindsightFeet} onChange={(event) => update({ keenSenseBlindsightFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                     </div>}
                     {trait.ruleKind === 'ambusher' && <p className="mt-2 rounded-lg border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-100">仅在该怪物实际发动突袭时获得先攻优势；当前由 DM 确认突袭成立，结构会完整写入 Stat Block。</p>}
+                    {trait.ruleKind === 'relentless' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">单次伤害上限<input type="number" min={1} value={trait.relentlessMaximumDamage} onChange={(event) => update({ relentlessMaximumDamage: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-3">不超过该数值的一次伤害原本会使怪物降至 0 HP 时，Headless 改为保留 1 HP。</p>
+                    </div>}
+                    {trait.ruleKind === 'sneak-attack' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">偷袭额外伤害<input value={trait.sneakAttackDamageDice} onChange={(event) => update({ sneakAttackDamageDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-3">每回合一次；攻击具有优势，或目标 5 尺内存在未失能盟友且攻击不具有劣势时触发。</p>
+                    </div>}
+                    {trait.ruleKind === 'surprise-attack' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">突袭额外伤害<input value={trait.surpriseAttackDamageDice} onChange={(event) => update({ surpriseAttackDamageDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-3">仅在战斗第一轮命中仍处于受惊状态的目标时触发。</p>
+                    </div>}
+                    {trait.ruleKind === 'stench' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">灵光半径（尺）<input type="number" min={5} step={5} value={trait.stenchRangeFeet} onChange={(event) => update({ stenchRangeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="text-xs text-slate-400">体质豁免 DC<input type="number" min={1} max={100} value={trait.stenchSaveDc} onChange={(event) => update({ stenchSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /><button type="button" onClick={() => update({ stenchSaveDc: dnd5eMonsterWorkshopDefaultSaveDc(draft, 'con') })} className="mt-1 text-[10px] text-violet-300 hover:text-violet-200">按体质自动计算：{dnd5eMonsterWorkshopDefaultSaveDc(draft, 'con')}</button></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200">范围内开始回合时进行体质豁免；失败中毒至下回合开始，成功后对该来源免疫 24 小时。</p>
+                    </div>}
                     {trait.ruleKind === 'charge-damage' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       <label className="text-xs text-slate-400">至少直线移动（尺）<input type="number" min={5} value={trait.chargeMinimumFeet} onChange={(event) => update({ chargeMinimumFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">随后命中的攻击<select value={trait.chargeActionId} onChange={(event) => update({ chargeActionId: event.target.value })} className={`mt-1 ${inputClass()}`}><option value="">请选择攻击</option>{draft.actions.filter((action) => action.category === 'action' && action.kind === 'weapon-attack').map((action) => <option key={action.id} value={action.id}>{action.name || action.id}</option>)}</select></label>
                       <label className="text-xs text-slate-400">追加伤害骰<input value={trait.chargeDamageDice} onChange={(event) => update({ chargeDamageDice: event.target.value })} placeholder="2d10" className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">追加伤害类型<select value={trait.chargeDamageType} onChange={(event) => update({ chargeDamageType: event.target.value as typeof trait.chargeDamageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>
-                      <p className="col-span-2 text-[11px] leading-relaxed text-amber-200 lg:col-span-4">Headless 尚未持久化整段移动路径，无法可靠证明“直线移动后立即攻击”；基础攻击仍自动结算，追加伤害保持结构化并交由 DM 确认。</p>
+                      <label className="col-span-2 flex items-center gap-2 text-xs text-slate-300 lg:col-span-4"><input type="checkbox" checked={trait.chargeSaveEnabled} onChange={(event) => update({ chargeSaveEnabled: event.target.checked })} />命中后要求豁免，失败施加状态</label>
+                      {trait.chargeSaveEnabled && <>
+                        <label className="text-xs text-slate-400">豁免属性<select value={trait.chargeSaveAbility} onChange={(event) => update({ chargeSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                        <label className="text-xs text-slate-400">豁免 DC<input type="number" min={1} max={100} value={trait.chargeSaveDc} onChange={(event) => update({ chargeSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                        <label className="col-span-2 text-xs text-slate-400">失败施加状态<select value={trait.chargeSaveCondition} onChange={(event) => update({ chargeSaveCondition: event.target.value as typeof trait.chargeSaveCondition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label>
+                        <WorkshopTokenMarkerPreview markerId={trait.chargeSaveCondition} />
+                      </>}
+                      <p className="col-span-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-4">Headless 会使用本回合已提交的移动事务验证直线、距离与朝向；满足条件且指定攻击命中后，自动结算追加伤害与可选豁免。</p>
                     </div>}
                     {trait.ruleKind === 'magic-resistance' && <p className="mt-2 rounded-lg border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-100">对抗法术和标记为魔法来源的效果时，Headless 豁免自动获得优势。</p>}
                     {trait.ruleKind === 'limited-magic-immunity' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-3">
@@ -1469,14 +1704,54 @@ export default function Dnd5eMonsterWorkshopDialog({
                         <label className="text-xs text-slate-400">范围形状<select aria-label={`${action.name}范围形状`} value={action.areaShape} onChange={(event) => update({ areaShape: event.target.value as typeof action.areaShape })} className={`mt-1 ${inputClass()}`}><option value="cone">锥形</option><option value="line">线形</option><option value="circle">以自身为中心的圆形</option></select></label>
                         <label className="text-xs text-slate-400">{action.areaShape === 'circle' ? '半径（尺）' : '长度（尺）'}<input aria-label={`${action.name}${action.areaShape === 'circle' ? '半径' : '长度'}`} type="number" min={1} step={5} value={action.areaSizeFeet} onChange={(event) => update({ areaSizeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                         {action.areaShape === 'line' && <label className="text-xs text-slate-400">宽度（尺）<input aria-label={`${action.name}宽度`} type="number" min={1} step={5} value={action.areaWidthFeet} onChange={(event) => update({ areaWidthFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
-                        <label className="text-xs text-slate-400">豁免属性<select aria-label={`${action.name}豁免属性`} value={action.areaSaveAbility} onChange={(event) => update({ areaSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                        <label className="text-xs text-slate-400">豁免方式<select aria-label={`${action.name}豁免方式`} value={(action.areaSaveAbilityChoices?.length ?? 0) >= 2 ? 'target-choice' : 'fixed'} onChange={(event) => {
+                          if (event.target.value === 'fixed') {
+                            update({ areaSaveAbilityChoices: [] })
+                            return
+                          }
+                          const fallback = ABILITY_LABELS.find(([key]) => key !== action.areaSaveAbility)?.[0] ?? 'str'
+                          update({ areaSaveAbilityChoices: [action.areaSaveAbility, fallback] })
+                        }} className={`mt-1 ${inputClass()}`}><option value="fixed">固定属性</option><option value="target-choice">由目标选择</option></select></label>
+                        <label className="text-xs text-slate-400">{(action.areaSaveAbilityChoices?.length ?? 0) >= 2 ? '默认豁免属性' : '豁免属性'}<select aria-label={`${action.name}豁免属性`} value={action.areaSaveAbility} onChange={(event) => {
+                          const areaSaveAbility = event.target.value as AbilityKey
+                          update({
+                            areaSaveAbility,
+                            ...((action.areaSaveAbilityChoices?.length ?? 0) >= 2 && !action.areaSaveAbilityChoices?.includes(areaSaveAbility)
+                              ? { areaSaveAbilityChoices: [...(action.areaSaveAbilityChoices ?? []), areaSaveAbility] }
+                              : {}),
+                          })
+                        }} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
                         <label className="text-xs text-slate-400">豁免 DC<input aria-label={`${action.name}豁免 DC`} type="number" min={1} max={100} value={action.areaSaveDc} onChange={(event) => update({ areaSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
-                        <label className="text-xs text-slate-400">伤害骰<input aria-label={`${action.name}伤害骰`} value={action.areaDamageDice} onChange={(event) => update({ areaDamageDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>
                         <label className="text-xs text-slate-400">伤害类型<select data-review-focus={!action.areaDamageType ? true : undefined} aria-label={`${action.name}伤害类型`} value={action.areaDamageType} onChange={(event) => update({ areaDamageType: event.target.value as typeof action.areaDamageType })} className={`mt-1 ${inputClass()}`}><option value="">请选择（必填）</option>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label>
                         <label className="text-xs text-slate-400">成功豁免<select aria-label={`${action.name}成功豁免`} value={action.areaDamageOnSuccessfulSave} onChange={(event) => update({ areaDamageOnSuccessfulSave: event.target.value as typeof action.areaDamageOnSuccessfulSave })} className={`mt-1 ${inputClass()}`}><option value="half">伤害减半</option><option value="none">不受伤害</option></select></label>
                         <label className="text-xs text-slate-400">范围目标<select aria-label={`${action.name}范围目标`} value={action.areaTarget} onChange={(event) => update({ areaTarget: event.target.value as typeof action.areaTarget })} className={`mt-1 ${inputClass()}`}><option value="all-creatures-except-self">除自身外所有生物</option><option value="hostile">仅敌对生物</option></select></label>
                         <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={action.areaMagical} onChange={(event) => update({ areaMagical: event.target.checked })} />魔法效果</label>
                       </div>
+                      {(action.areaSaveAbilityChoices?.length ?? 0) >= 2 && <fieldset className="mt-3 rounded-lg border border-cyan-300/10 bg-black/10 p-2.5">
+                        <legend className="px-1 text-[11px] font-semibold text-cyan-100">目标可以选择的豁免属性</legend>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {ABILITY_LABELS.map(([key, label]) => {
+                            const selected = action.areaSaveAbilityChoices?.includes(key) === true
+                            const isDefault = key === action.areaSaveAbility
+                            return <label key={key} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${selected ? 'border-cyan-300/30 bg-cyan-500/10 text-cyan-50' : 'border-white/10 bg-black/10 text-slate-400'}`}>
+                              <input type="checkbox" checked={selected} disabled={isDefault} onChange={(event) => update({
+                                areaSaveAbilityChoices: event.target.checked
+                                  ? [...new Set([...(action.areaSaveAbilityChoices ?? []), key])]
+                                  : (action.areaSaveAbilityChoices ?? []).filter((ability) => ability !== key),
+                              })} />
+                              {label}{isDefault ? '（默认）' : ''}
+                            </label>
+                          })}
+                        </div>
+                        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">每个受影响目标分别选择；10 秒超时或 AI 模拟时使用对该目标最有利的合法豁免。</p>
+                      </fieldset>}
+                      <Dnd5eDamageFormulaEditor
+                        className="mt-3"
+                        value={{ ...workshopDiceFromText(action.areaDamageDice), modifierFormula: action.areaDamageModifierFormula }}
+                        onChange={(formula) => update({ areaDamageDice: workshopDiceText(formula), areaDamageModifierFormula: formula.modifierFormula })}
+                        allowSpellcastingModifier={false}
+                        allowLevelTerms={false}
+                      />
                       <div data-testid={`monster-area-action-validation-${index}`} aria-live="polite" className={`mt-2 rounded-lg border px-2.5 py-2 text-[11px] ${areaValidationErrors.length > 0 ? 'border-amber-400/20 bg-amber-500/5 text-amber-100' : 'border-emerald-400/20 bg-emerald-500/5 text-emerald-100'}`}>
                         <span>{areaValidationErrors.length > 0 ? `尚未接入 Headless：${areaValidationErrors.join('；')}` : 'Headless 验证通过：Host 将校验范围、目标、豁免、伤害与使用次数。'}</span>
                       </div>
@@ -1507,15 +1782,32 @@ export default function Dnd5eMonsterWorkshopDialog({
                         {summonValidationErrors.length > 0 ? `尚未接入 Headless：${summonValidationErrors.join('；')}` : `Headless 验证通过：${action.summonTiming === 'immediate' ? '立即生成召唤事件' : '输出“召唤者下回合开始时出现”的权威配方'}；持续时间从真正出现后才开始计算。`}
                       </div>
                     </div>}
-                    {action.kind === 'weapon-attack' && <div className="mt-2 grid grid-cols-3 gap-2 lg:grid-cols-8"><label className="text-xs text-slate-400">命中加值<input type="number" value={action.toHit} onChange={(event) => update({ toHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">重击阈值<input type="number" min={2} max={20} value={action.criticalThreshold} onChange={(event) => update({ criticalThreshold: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">触及<input type="number" min={0} value={action.reachFeet} onChange={(event) => update({ reachFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">正常射程<input type="number" min={0} value={action.rangeNormal} onChange={(event) => update({ rangeNormal: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">最远射程<input type="number" min={0} value={action.rangeLong} onChange={(event) => update({ rangeLong: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">伤害骰<input value={action.damageDice} onChange={(event) => update({ damageDice: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">伤害类型<select value={action.damageType} onChange={(event) => update({ damageType: event.target.value as typeof action.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label></div>}
+                    {action.kind === 'weapon-attack' && <div className="mt-2 space-y-3">
+                      <div className="grid grid-cols-3 gap-2 lg:grid-cols-7"><label className="text-xs text-slate-400">命中加值<input type="number" value={action.toHit} onChange={(event) => update({ toHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">重击阈值<input type="number" min={2} max={20} value={action.criticalThreshold} onChange={(event) => update({ criticalThreshold: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">触及<input type="number" min={0} value={action.reachFeet} onChange={(event) => update({ reachFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">正常射程<input type="number" min={0} value={action.rangeNormal} onChange={(event) => update({ rangeNormal: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">最远射程<input type="number" min={0} value={action.rangeLong} onChange={(event) => update({ rangeLong: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">伤害类型<select value={action.damageType} onChange={(event) => update({ damageType: event.target.value as typeof action.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select></label></div>
+                      <Dnd5eDamageFormulaEditor
+                        value={{ ...workshopDiceFromText(action.damageDice), modifierFormula: action.damageModifierFormula }}
+                        onChange={(formula) => update({ damageDice: workshopDiceText(formula), damageModifierFormula: formula.modifierFormula })}
+                        allowSpellcastingModifier={false}
+                        allowLevelTerms={false}
+                      />
+                    </div>}
                     {action.kind === 'weapon-attack' && <div className="mt-2 rounded-lg border border-white/8 bg-black/10 p-2">
                       <div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">附加伤害组件</p><button type="button" onClick={() => update({ additionalDamage: [...action.additionalDamage, { id: `damage-${Date.now()}`, dice: '1d6', damageType: 'fire' }] })} className="text-[11px] text-arcane-200">+ 添加</button></div>
-                      <div className="mt-1 space-y-1">{action.additionalDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select><button type="button" onClick={() => update({ additionalDamage: action.additionalDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                      <div className="mt-2 space-y-2">{action.additionalDamage.map((component, damageIndex) => <div key={component.id} className="rounded-lg border border-white/[0.06] bg-black/15 p-2">
+                        <div className="mb-2 flex items-center gap-2"><select value={component.damageType} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select><button type="button" aria-label={`删除附加伤害 ${damageIndex + 1}`} onClick={() => update({ additionalDamage: action.additionalDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>
+                        <Dnd5eDamageFormulaEditor
+                          compact
+                          value={{ ...workshopDiceFromText(component.dice), modifierFormula: component.modifierFormula }}
+                          onChange={(formula) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: workshopDiceText(formula), modifierFormula: formula.modifierFormula } : entry) })}
+                          allowSpellcastingModifier={false}
+                          allowLevelTerms={false}
+                        />
+                      </div>)}</div>
                       <div className="mt-2 flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">仅重击追加伤害（不会再次翻倍）</p><button type="button" onClick={() => update({ criticalExtraDamage: [...action.criticalExtraDamage, { id: `critical-damage-${Date.now()}`, dice: '1d6', damageType: 'slashing' }] })} className="text-[11px] text-arcane-200">+ 添加</button></div>
                       <div className="mt-1 space-y-1">{action.criticalExtraDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ criticalExtraDamage: action.criticalExtraDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ criticalExtraDamage: action.criticalExtraDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type} value={type}>{DND5E_DAMAGE_TYPE_LABELS[type]}</option>)}</select><button type="button" onClick={() => update({ criticalExtraDamage: action.criticalExtraDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
                       <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-5">
                         <label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={action.onHitSaveEnabled} onChange={(event) => update({ onHitSaveEnabled: event.target.checked })} />命中后要求豁免</label>
-                        {action.onHitSaveEnabled && <><label className="text-xs text-slate-400">豁免属性<select value={action.onHitSaveAbility} onChange={(event) => update({ onHitSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-slate-400">DC<input type="number" min={1} value={action.onHitSaveDc} onChange={(event) => update({ onHitSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">失败施加状态<select value={action.onHitCondition} onChange={(event) => update({ onHitCondition: event.target.value as typeof action.onHitCondition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label></>}
+                        {action.onHitSaveEnabled && <><label className="text-xs text-slate-400">豁免属性<select value={action.onHitSaveAbility} onChange={(event) => update({ onHitSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-slate-400">DC<input type="number" min={1} value={action.onHitSaveDc} onChange={(event) => update({ onHitSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">失败施加状态<select value={action.onHitCondition} onChange={(event) => update({ onHitCondition: event.target.value as typeof action.onHitCondition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label><WorkshopTokenMarkerPreview markerId={action.onHitCondition === 'disease' ? 'diseased' : action.onHitCondition} /></>}
                       </div>
                     </div>}
                     <div className="mt-2 grid grid-cols-[minmax(0,1fr),auto] gap-2"><textarea rows={2} value={action.description} onChange={(event) => update({ description: event.target.value })} placeholder={action.kind === 'weapon-attack' ? '可留空，系统会生成基础攻击描述；附带效果必须完整填写。' : '填写完整规则描述'} className={`${inputClass()} resize-y`} /><button type="button" onClick={() => { patchDraft('actions', draft.actions.filter((_, entryIndex) => entryIndex !== index)); setCollapsedActionIds((current) => { const next = new Set(current); next.delete(action.id); return next }) }} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>

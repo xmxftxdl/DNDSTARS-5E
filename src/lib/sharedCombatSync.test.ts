@@ -5,7 +5,6 @@ import {
   reconcileDnd5eTurnEconomy,
   resolveSharedCombatStateApply,
 } from './sharedCombatSync'
-import { createDnd5eMonsterTurnProgress } from './monsterTurnProgress'
 
 function makeState(patch: Partial<SharedCombatState> = {}): SharedCombatState {
   return {
@@ -43,6 +42,7 @@ describe('shared combat sync', () => {
   it('shares D&D turn economy and filters removed tokens', () => {
     const economy = {
       turnKey: 'combat-1:2:hero-token',
+      usedOncePerTurnKeys: ['tree-stride-teleport'],
       attacksUsed: 1,
       action: { current: 0, max: 1 },
       bonusAction: { current: 1, max: 1 },
@@ -80,7 +80,7 @@ describe('shared combat sync', () => {
       expect(decision.settlementMode).toBe('automatic')
       expect(decision.monsterControl).toMatchObject({
         schemaVersion: 1,
-        mode: 'automatic',
+        mode: 'manual',
         pauseRequested: false,
       })
       expect(decision.flowPause).toBeUndefined()
@@ -126,7 +126,7 @@ describe('shared combat sync', () => {
     if (malformed.status === 'apply') expect(malformed.flowPause).toBeUndefined()
   })
 
-  it('keeps a requested takeover automatic until the current event settles', () => {
+  it('migrates a legacy automatic monster-control snapshot to permanent DM control', () => {
     const decision = resolveSharedCombatStateApply({
       state: makeState({
         monsterControl: {
@@ -150,60 +150,11 @@ describe('shared combat sync', () => {
     expect(decision.status).toBe('apply')
     if (decision.status === 'apply') {
       expect(decision.monsterControl).toMatchObject({
-        mode: 'automatic',
-        pauseRequested: true,
+        mode: 'manual',
+        pauseRequested: false,
         controlledTokenId: 'enemy-token',
       })
     }
-  })
-
-  it('projects only a live progress lease owned by the current initiative slot', () => {
-    const progress = createDnd5eMonsterTurnProgress({
-      identity: {
-        combatId: 'combat-1',
-        round: 2,
-        initiativeIndex: 1,
-        initiativeSlotId: 'enemy-token',
-        tokenId: 'enemy-token',
-      },
-      requestId: 'end-turn-1',
-      now: 1_000,
-    })
-    const state = makeState({ initiativeIndex: 1, monsterTurnProgress: progress })
-    const resolve = (now: number, patch: Partial<SharedCombatState> = {}) =>
-      resolveSharedCombatStateApply({
-        state: { ...state, ...patch },
-        mapId: 'map-1',
-        validTokenIds: ['hero-token', 'enemy-token'],
-        currentCombatId: 'combat-1',
-        lastAppliedCombatId: '',
-        lastAppliedUpdatedAt: 0,
-        lastSnapshot: '',
-        isDm: false,
-        now,
-      })
-
-    const current = resolve(2_000)
-    expect(current.status).toBe('apply')
-    if (current.status === 'apply') expect(current.monsterTurnProgress).toEqual(progress)
-
-    const wrongTurn = resolve(2_000, { initiativeIndex: 0 })
-    expect(wrongTurn.status).toBe('apply')
-    if (wrongTurn.status === 'apply') expect(wrongTurn.monsterTurnProgress).toBeUndefined()
-
-    const expired = resolveSharedCombatStateApply({
-      state,
-      mapId: 'map-1',
-      validTokenIds: ['hero-token', 'enemy-token'],
-      currentCombatId: 'combat-1',
-      lastAppliedCombatId: 'combat-1',
-      lastAppliedUpdatedAt: state.updatedAt,
-      lastSnapshot: current.status === 'apply' ? current.snapshot : '',
-      isDm: false,
-      now: progress.expiresAt,
-    })
-    expect(expired.status).toBe('apply')
-    if (expired.status === 'apply') expect(expired.monsterTurnProgress).toBeUndefined()
   })
 
   it('keeps player initiative slots when a projected edge token is temporarily absent', () => {
@@ -328,6 +279,45 @@ describe('shared combat sync', () => {
     }
   })
 
+  it('treats an atomic combat recovery snapshot as an authority rollback', () => {
+    const decision = resolveSharedCombatStateApply({
+      state: makeState({
+        updatedAt: 100,
+        dnd5eTurnEconomyByToken: {
+          'hero-token': {
+            turnKey: 'combat-1:1:hero-token',
+            attacksUsed: 0,
+            action: { current: 1, max: 1 },
+            bonusAction: { current: 1, max: 1 },
+            reaction: { current: 1, max: 1 },
+            objectInteraction: { current: 1, max: 1 },
+            movement: { current: 30, max: 30 },
+          },
+        },
+        _sync: {
+          schemaVersion: 1,
+          revision: 12,
+          writerId: 'dm-combat-recovery:transaction-7',
+          writtenAt: 2_000,
+        },
+      }),
+      mapId: 'map-1',
+      validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: 'combat-1',
+      lastAppliedRevision: 11,
+      lastAppliedUpdatedAt: 1_000,
+      lastSnapshot: '',
+      isDm: false,
+    })
+
+    expect(decision.status).toBe('apply')
+    if (decision.status === 'apply') {
+      expect(decision.dnd5eTurnEconomyByToken['hero-token'].action.current).toBe(1)
+      expect(decision.authorityRollback).toBe(true)
+    }
+  })
+
   it('does not mark an ordinary newer authority snapshot as a rollback', () => {
     const decision = resolveSharedCombatStateApply({
       state: makeState({
@@ -382,6 +372,35 @@ describe('shared combat sync', () => {
       expect(decision.active).toBe(false)
       expect(decision.shouldResetPlayerActionState).toBe(true)
       expect(decision.playerCombatEndedLocked).toBe(true)
+    }
+  })
+
+  it('preserves the active slot when a deleted map token appeared earlier in initiative', () => {
+    const decision = resolveSharedCombatStateApply({
+      state: makeState({
+        initiativeIndex: 2,
+        initiativeOrder: [
+          { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+          { tokenId: 'deleted-token', label: 'Deleted', emoji: '', color: '', roll: 18 },
+          { tokenId: 'enemy-token', label: 'Enemy', emoji: '', color: '', roll: 16 },
+        ],
+      }),
+      mapId: 'map-1',
+      validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: '',
+      lastAppliedUpdatedAt: 0,
+      lastSnapshot: '',
+      isDm: true,
+    })
+
+    expect(decision.status).toBe('apply')
+    if (decision.status === 'apply') {
+      expect(decision.initiativeOrder.map((entry) => entry.tokenId)).toEqual([
+        'hero-token',
+        'enemy-token',
+      ])
+      expect(decision.initiativeOrder[decision.initiativeIndex]?.tokenId).toBe('enemy-token')
     }
   })
 })

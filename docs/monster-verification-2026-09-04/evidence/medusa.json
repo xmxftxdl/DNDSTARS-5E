@@ -1,0 +1,211 @@
+{
+  "id": "srd-5.1:medusa",
+  "slug": "medusa",
+  "name": "美杜莎",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "snake-hair",
+      "name": "蛇发",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "shortsword",
+      "name": "短剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longbow",
+      "name": "长弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-longbow",
+      "name": "多重攻击：长弓 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 194,
+      "slug": "medusa",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:56:48.793Z",
+      "name": "美杜莎",
+      "actionId": "snake-hair",
+      "actionName": "蛇发",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-medusa-snake-hair-1788562608858",
+      "combatId": "verify-ui-medusa-snake-hair-1788562608858:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "美杜莎 使用蛇发攻击 验证目标：蛇发 → 验证目标 17+5=22 命中；共造成 16 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:57 PM\n结算\n\n美杜莎 使用蛇发攻击 验证目标：蛇发 → 验证目标 17+5=22 命中；共造成 16 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：蛇发｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 17；最终采用 17；调整值 +5。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 蛇发（基础伤害 1·穿刺）｜1d4 骰面：4 = 4｜固定加值 +2｜小计 6\n伤害骰 · 蛇发（基础伤害 2·毒素）｜4d6 骰面：4 + 1 + 3 + 2 = 10｜固定加值 +0｜小计 10\n美杜莎｜消耗动作\n验证目标｜受到 16 点伤害｜HP 320 → 304",
+      "playerLog": "美杜莎 使用蛇发攻击 验证目标：蛇发 → 验证目标 17+5=22 命中；共造成 16 点伤害。",
+      "afterHp": 304,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:57:22.649Z",
+      "evidenceFile": "ui-cases/monsters/194-medusa.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "石化凝视",
+      "automation": "headless",
+      "rule": "turn-start-gaze",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.ruleId",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.allowAvertEyes",
+        "rule.requiresMutualVisualSight",
+        "rule.initialCondition",
+        "rule.failureCondition",
+        "rule.immediateFailureMargin"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "successful-save",
+        "failed-save",
+        "severe-failure",
+        "outside-range",
+        "avert-eyes"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 16,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

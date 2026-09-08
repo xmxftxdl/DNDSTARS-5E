@@ -5,6 +5,7 @@ import type { Dnd5eContentPackageV2 } from '../contentPackageV2'
 import type {
   Dnd5ePluginFeatureDefinition,
   Dnd5ePluginItemDefinition,
+  Dnd5ePluginRacialSavingThrowAdvantages,
   Dnd5ePluginStaticCombatModifiers,
 } from '../pluginApi'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
@@ -12,6 +13,8 @@ import type { Dnd5eAdvancementDefinitionV1 } from './dnd5eAdvancementContracts'
 import { dnd5eContentPackageActivityProjectionV1 } from './dnd5eContentPackageActivityProjection'
 import type { Dnd5eEffectDefinitionV1, Dnd5eEffectModifierV1 } from './dnd5eEffectContracts'
 import type { Dnd5eFormulaV1 } from './dnd5eFormula'
+import { dnd5eWorkshopDamageFormulaAsFormulaV1, type Dnd5eWorkshopDamageFormulaV1 } from '../workshopDamageFormula'
+import { dnd5eCombinedAutomationCapabilityV1 } from '../plugins/pluginMechanicsRegistry'
 
 const CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 
@@ -27,36 +30,65 @@ function permanentEffect(
   id: string,
   name: string,
   staticModifiers: Dnd5ePluginStaticCombatModifiers | undefined,
+  racialRules?: {
+    naturalOneReroll?: boolean
+    savingThrowAdvantages?: Dnd5ePluginRacialSavingThrowAdvantages
+  },
 ): Dnd5eEffectDefinitionV1 | undefined {
-  if (!staticModifiers) return undefined
   const modifiers: Dnd5eEffectModifierV1[] = []
-  if (staticModifiers.armorClassBonus) modifiers.push({ kind: 'armor-class', mode: 'add', value: { kind: 'constant', value: staticModifiers.armorClassBonus } })
-  if (staticModifiers.speedBonusFeet) modifiers.push({ kind: 'speed', mode: 'add', value: { kind: 'constant', value: staticModifiers.speedBonusFeet } })
-  if (staticModifiers.savingThrowBonus) modifiers.push({ kind: 'saving-throw', mode: 'add', value: { kind: 'constant', value: staticModifiers.savingThrowBonus } })
-  staticModifiers.damageResistances?.forEach((damageType) => modifiers.push({ kind: 'damage-resistance', damageType }))
-  staticModifiers.damageImmunities?.forEach((damageType) => modifiers.push({ kind: 'damage-immunity', damageType }))
-  staticModifiers.conditionImmunities?.forEach((condition) => {
+  if (staticModifiers?.armorClassBonus) modifiers.push({ kind: 'armor-class', mode: 'add', value: { kind: 'constant', value: staticModifiers.armorClassBonus } })
+  if (staticModifiers?.speedBonusFeet) modifiers.push({ kind: 'speed', mode: 'add', value: { kind: 'constant', value: staticModifiers.speedBonusFeet } })
+  if (staticModifiers?.savingThrowBonus) modifiers.push({ kind: 'saving-throw', mode: 'add', value: { kind: 'constant', value: staticModifiers.savingThrowBonus } })
+  if (staticModifiers?.darkvisionRangeFeet) modifiers.push({ kind: 'darkvision', rangeFeet: staticModifiers.darkvisionRangeFeet })
+  staticModifiers?.damageResistances?.forEach((damageType) => modifiers.push({ kind: 'damage-resistance', damageType }))
+  staticModifiers?.damageImmunities?.forEach((damageType) => modifiers.push({ kind: 'damage-immunity', damageType }))
+  staticModifiers?.conditionImmunities?.forEach((condition) => {
     if (CONDITIONS.has(condition)) modifiers.push({ kind: 'condition-immunity', condition: condition as Dnd5eStandardConditionId })
   })
-  const grants = [
-    ...(staticModifiers.initiativeBonus ? [`initiative-bonus:${staticModifiers.initiativeBonus}`] : []),
-    ...(staticModifiers.darkvisionRangeFeet ? [`darkvision-feet:${staticModifiers.darkvisionRangeFeet}`] : []),
-  ]
-  if (!modifiers.length && !grants.length) return undefined
+  const nativeStaticKeys = new Set([
+    'armorClassBonus', 'speedBonusFeet', 'savingThrowBonus', 'darkvisionRangeFeet',
+    'damageResistances', 'damageImmunities', 'conditionImmunities',
+  ])
+  for (const [capability, rawValue] of Object.entries(staticModifiers ?? {})) {
+    if (nativeStaticKeys.has(capability) || rawValue == null || rawValue === false || rawValue === 0) continue
+    const value = Array.isArray(rawValue) ? [...rawValue] : rawValue
+    if (Array.isArray(value) && value.length === 0) continue
+    modifiers.push({
+      kind: 'character-capability',
+      capability: capability as Extract<Dnd5eEffectModifierV1, { kind: 'character-capability' }>['capability'],
+      value: value as boolean | number | readonly string[],
+    })
+  }
+  if (racialRules?.naturalOneReroll) {
+    modifiers.push({ kind: 'character-capability', capability: 'naturalOneReroll', value: true })
+  }
+  const saveAdvantage = racialRules?.savingThrowAdvantages
+  if (saveAdvantage && (
+    saveAdvantage.conditions?.length || saveAdvantage.damageTypes?.length || saveAdvantage.magicAbilities?.length
+  )) modifiers.push({
+    kind: 'racial-saving-throw-advantage',
+    conditions: saveAdvantage.conditions ? [...saveAdvantage.conditions] : undefined,
+    damageTypes: saveAdvantage.damageTypes ? [...saveAdvantage.damageTypes] : undefined,
+    magicAbilities: saveAdvantage.magicAbilities ? [...saveAdvantage.magicAbilities] : undefined,
+  })
+  if (!modifiers.length) return undefined
   return {
     schemaVersion: 1,
     id: `${id}.static`,
     name,
     duration: { kind: 'permanent' },
     modifiers,
-    grants,
     stacking: 'unique-by-source',
   }
 }
 
-function diceFormula(id: string, dice: { count: number; sides: number; bonus: number }): Dnd5eFormulaV1 {
+function diceFormula(id: string, dice: { count: number; sides: number; bonus: number; modifierFormula?: Dnd5eWorkshopDamageFormulaV1 }): Dnd5eFormulaV1 {
   const rolled: Dnd5eFormulaV1 = { kind: 'dice', rollId: id, count: dice.count, sides: dice.sides }
-  return dice.bonus === 0 ? rolled : { kind: 'add', values: [rolled, { kind: 'constant', value: dice.bonus }] }
+  const values: Dnd5eFormulaV1[] = [rolled]
+  if (dice.bonus !== 0) values.push({ kind: 'constant', value: dice.bonus })
+  const dynamicModifier = dnd5eWorkshopDamageFormulaAsFormulaV1(dice.modifierFormula)
+  if (dynamicModifier) values.push(dynamicModifier)
+  return values.length === 1 ? rolled : { kind: 'add', values }
 }
 
 function featurePassiveEffects(
@@ -78,6 +110,9 @@ function featurePassiveEffects(
         minimumIncomingDamage: passive.minimumIncomingDamage,
         maximumCurrentHitPointPercent: passive.maximumCurrentHitPointPercent,
         oncePerTurn: passive.oncePerTurn,
+        deliveries: passive.deliveries,
+        magical: passive.magical,
+        requiresHeavyArmor: passive.requiresHeavyArmor,
       }],
       triggers: [{
         id: `${id}.trigger`, event: 'before-damage', effectId: id, decision: 'automatic',
@@ -169,14 +204,11 @@ function itemEffectDefinitions(
   return effects
 }
 
-function combinedCapability(activities: readonly Dnd5eActivityDefinitionV1[]): AutomationCapability {
-  if (!activities.length) return automationCapabilityFromLegacyStatus('reference-only')
-  if (activities.every((activity) => activity.automation.level === 'full')) return automationCapabilityFromLegacyStatus('full')
-  const limitations = activities.flatMap((activity) => activity.automation.limitations)
-  if (activities.every((activity) => activity.automation.level === 'display-only')) {
-    return automationCapabilityFromLegacyStatus('reference-only', limitations)
-  }
-  return automationCapabilityFromLegacyStatus('partial', limitations.length ? limitations : ['部分 Activity 仍使用兼容执行器或 DM 裁定。'])
+function combinedCapability(
+  activities: readonly Dnd5eActivityDefinitionV1[],
+  effects: readonly Dnd5eEffectDefinitionV1[] = [],
+): AutomationCapability {
+  return dnd5eCombinedAutomationCapabilityV1({ activities, effects })
 }
 
 function definition(
@@ -227,14 +259,21 @@ export function dnd5eContentDefinitionsFromPackageV2(
   for (const race of value.content.races) {
     const activities = activitiesBySource.get(`race:${race.id}`) ?? []
     const id = definitionId('race', race.id)
-    const effect = permanentEffect(id, race.name, race.staticModifiers)
+    const effect = permanentEffect(id, race.name, {
+      ...race.staticModifiers,
+      ...(race.hitPointsPerLevelBonus ? { hitPointsPerLevelBonus: race.hitPointsPerLevelBonus } : {}),
+    }, {
+      naturalOneReroll: race.naturalOneReroll,
+      savingThrowAdvantages: race.savingThrowAdvantages,
+    })
+    const effects = effect ? [effect] : []
     const advancements: Dnd5eAdvancementDefinitionV1[] = race.grantedFeatureIds?.length ? [{
       schemaVersion: 1, id: `${id}.features`, level: 1, kind: 'grant',
       grants: race.grantedFeatureIds.map((featureId) => ({ namespace: value.manifest.id, id: definitionId('feature', featureId) })),
     }] : []
     definitions.push(definition(value, 'race', race.id, race.name, race,
-      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(race.automation ?? 'full', race.automationReasons), {
-        description: race.description, activities, effects: effect ? [effect] : [], advancements,
+      activities.length || effects.length ? combinedCapability(activities, effects) : automationCapabilityFromLegacyStatus(race.automation ?? 'full', race.automationReasons), {
+        description: race.description, activities, effects, advancements,
       }))
   }
   for (const background of value.content.backgrounds) {
@@ -245,7 +284,9 @@ export function dnd5eContentDefinitionsFromPackageV2(
       category: 'skill', choices: background.skillProficiencies, count: background.skillProficiencies.length,
     }] : []
     definitions.push(definition(value, 'background', background.id, background.name, background,
-      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus('full'), {
+      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus('partial', [
+        '技能熟练可在建卡时应用；工具、语言选择与叙事背景特性仍需人物卡或 DM 流程确认',
+      ]), {
         description: background.description, activities, advancements,
       }))
   }
@@ -254,9 +295,10 @@ export function dnd5eContentDefinitionsFromPackageV2(
     const id = definitionId('feature', feature.id)
     const effect = permanentEffect(id, feature.name, feature.staticModifiers)
     const passiveEffects = featurePassiveEffects(id, feature.name, feature)
+    const effects = [...(effect ? [effect] : []), ...passiveEffects]
     definitions.push(definition(value, 'feature', feature.id, feature.name, feature,
-      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(feature.automation), {
-        description: feature.description, activities, effects: [...(effect ? [effect] : []), ...passiveEffects],
+      activities.length || effects.length ? combinedCapability(activities, effects) : automationCapabilityFromLegacyStatus(feature.automation), {
+        description: feature.description, activities, effects,
       }))
   }
   for (const feat of value.content.feats) {
@@ -264,9 +306,13 @@ export function dnd5eContentDefinitionsFromPackageV2(
     const id = definitionId('feat', feat.id)
     const effect = permanentEffect(id, feat.name, feat.staticModifiers)
     const passiveEffects = featurePassiveEffects(id, feat.name, feat)
+    const effects = [...(effect ? [effect] : []), ...passiveEffects]
     definitions.push(definition(value, 'feat', feat.id, feat.name, feat,
-      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(feat.automation), {
-        description: feat.description, activities, effects: [...(effect ? [effect] : []), ...passiveEffects],
+      activities.length || effects.length ? combinedCapability(activities, effects) : automationCapabilityFromLegacyStatus(feat.automation), {
+        description: feat.description,
+        activities,
+        effects,
+        advancements: feat.advancements,
       }))
   }
   for (const spell of value.content.spells) {
@@ -281,7 +327,7 @@ export function dnd5eContentDefinitionsFromPackageV2(
       ? 'manual' as const
       : activities.length || item.equipment ? 'full' as const : 'reference-only' as const
     definitions.push(definition(value, 'item', item.id, item.name, item,
-      activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(status), {
+      activities.length || effects.length ? combinedCapability(activities, effects) : automationCapabilityFromLegacyStatus(status), {
         description: item.description, activities, effects,
       }))
   }
@@ -395,7 +441,14 @@ export function dnd5eContentDefinitionsFromPackageV2(
     const directMonsterActivities = activitiesBySource.get(`monster:${monster.id}`) ?? []
     definitions.push(definition(value, 'monster', monster.slug, monster.name, monster,
       combinedCapability([...monsterActivities, ...directMonsterActivities]), {
-        description: monster.description, activities: [...monsterActivities, ...directMonsterActivities],
+        // An action Activity is owned by the dedicated monster-action
+        // definition below. Repeating it on the parent monster definition
+        // gives one package two executable contributions with the same stable
+        // Activity id, which correctly fails the unified registry's global-id
+        // integrity check. The parent keeps only Activities explicitly bound
+        // to the monster itself; its aggregate automation capability can still
+        // describe all child actions without registering them twice.
+        description: monster.description, activities: directMonsterActivities,
       }))
     for (const activity of monsterActivities) {
       const sourceId = activity.legacySource?.id?.split(':').at(-1) ?? activity.id

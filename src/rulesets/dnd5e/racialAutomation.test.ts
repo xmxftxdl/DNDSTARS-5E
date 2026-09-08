@@ -9,6 +9,8 @@ import {
 import {
   DND5E_DRAGONBORN_ANCESTRIES,
   DND5E_RACIAL_RESOURCE_KEYS,
+  dnd5eIndependentSpellRulesForCharacter,
+  dnd5eRacialResourceDefinitions,
   dnd5eRacialRulesForCharacter,
   type Dnd5eRacialRulesSnapshot,
 } from './racialAutomation'
@@ -53,6 +55,32 @@ function combatant(
 }
 
 describe('D&D 5e racial Headless automation', () => {
+  it('projects build-granted spells into the independent Host resource path', () => {
+    const character = {
+      rulesetId: 'dnd5e-2014-srd-5.1' as const,
+      race: '人类', level: 4,
+      dnd5eContentChoices: {
+        'local.test:magic-initiate': {
+          schemaVersion: 1 as const,
+          contentId: 'local.test:magic-initiate',
+          selections: {},
+          resolvedGrants: [
+            { kind: 'spell' as const, spellId: 'fire-bolt', mode: 'cantrip' as const, ability: 'int' as const },
+            { kind: 'spell' as const, spellId: 'magic-missile', mode: 'once-per-long-rest' as const, ability: 'int' as const, castAtLevel: 1 },
+            { kind: 'spell' as const, spellId: 'alarm', mode: 'ritual-book' as const, ability: 'int' as const },
+          ],
+        },
+      },
+    }
+    expect(dnd5eIndependentSpellRulesForCharacter(character).innateSpells).toEqual([
+      expect.objectContaining({ spellId: 'fire-bolt', castAtLevel: 0, resetOn: 'at-will', requiresComponents: true }),
+      expect.objectContaining({ spellId: 'magic-missile', castAtLevel: 1, resetOn: 'long-rest', requiresComponents: true }),
+    ])
+    expect(dnd5eRacialResourceDefinitions(character as never)).toContainEqual(
+      expect.objectContaining({ key: DND5E_RACIAL_RESOURCE_KEYS.innateSpell('magic-missile'), resetOn: 'long-rest' }),
+    )
+  })
+
   it('projects level-gated innate spells from registered race data', () => {
     const pluginId = 'local.test.racial-grants'
     const dispose = registerDnd5eRulesPlugin({

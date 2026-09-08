@@ -1,0 +1,132 @@
+{
+  "id": "srd-5.1:wraith",
+  "slug": "wraith",
+  "name": "缚灵",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：制造幽魂需要确认 10 尺内人形尸体在一分钟内暴死，在尸体位置或最近空位生成幽魂，并把来源控制上限维持在七只；尸体时间账本虽已存在，召唤放置和来源控制容量还没有合并为一个原子事务。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "life-drain",
+      "name": "生命吸取",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].damageBasis.kind",
+        "attack.onHitEffects[].damageBasis.damageType",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].recovery",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "create-specter",
+      "name": "创造幽魂",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 92,
+      "slug": "wraith",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:24:32.952Z",
+      "name": "缚灵",
+      "actionId": "life-drain",
+      "actionName": "生命吸取",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "5",
+      "total": 334,
+      "mapId": "verify-ui-wraith-life-drain-1788567873012",
+      "combatId": "verify-ui-wraith-life-drain-1788567873012:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "缚灵 使用生命吸取攻击 验证目标：生命吸取 → 验证目标 4+6=10 命中；共造成 14 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:24 PM\n结算\n\n缚灵 使用生命吸取攻击 验证目标：生命吸取 → 验证目标 4+6=10 命中；共造成 14 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：生命吸取｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 4；最终采用 4；调整值 +6。\n结果 · 10 vs AC 10：命中。\n伤害骰 · 生命吸取（基础伤害·黯蚀）｜4d8 骰面：6 + 1 + 2 + 2 = 11｜固定加值 +3｜小计 14\n缚灵｜消耗动作\n验证目标｜体质豁免 d20 20 +10 = 30 vs DC 14｜成功\n验证目标｜受到 14 点伤害｜HP 320 → 306",
+      "playerLog": "缚灵 使用生命吸取攻击 验证目标：生命吸取 → 验证目标 4+6=10 命中；共造成 14 点伤害。",
+      "afterHp": 306,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:25:00.643Z",
+      "evidenceFile": "ui-cases/monsters/092-wraith.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "虚体移动",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "阳光敏感",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -26,9 +26,10 @@ import {
   dnd5eDruidWildShapeLimits,
   dnd5eWizardArcaneRecoveryLevels,
   dnd5eAvailableWildShapeForms,
+  dnd5ePluginCreatureFormEligibleForCharacter,
   dnd5eMonsterSpeedText,
   dnd5eWarlockMysticArcanumOptions,
-  getDnd5eSrdCombatSpell,
+  dnd5eSrdSpellHasFullHeadlessAutomation,
   applyDnd5eEldritchMaster,
   dnd5eWildShapeDurationHours,
   DND5E_WILD_SHAPE_KNOWN_FORMS_KEY,
@@ -41,8 +42,6 @@ import {
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
-import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
-import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import ClassResourceSummary from './ClassResourceSummary'
 import Dnd5eSpellSlotRecoverySummary from './Dnd5eSpellSlotRecoverySummary'
 
@@ -138,7 +137,11 @@ export default function Dnd5eClassProgressionPanel({
     ? (definition.subclass.spellLists ?? []).filter((list) => !list.choiceOptionId || (stored.selections?.['land-terrain'] ?? []).includes(list.choiceOptionId))
     : []
   const availableCombatSpells = dnd5eAvailableCombatSpells(character)
-  const availableWildShapeForms = dnd5eAvailableWildShapeForms(character)
+  const availableWildShapeForms = dnd5eAvailableWildShapeForms(
+    character,
+    undefined,
+    (form) => dnd5ePluginCreatureFormEligibleForCharacter(character, form),
+  )
 
   const setClassChoices = (next: typeof stored, skills?: string[]) => {
     onChange({
@@ -402,10 +405,10 @@ export default function Dnd5eClassProgressionPanel({
                   >
                     <option value="">尚未选择</option>
                     {options.map((spell) => {
-                      const combatSpell = getDnd5eSrdCombatSpell(spell.id)
+                      const fullHeadless = dnd5eSrdSpellHasFullHeadlessAutomation(spell.id)
                       const usedElsewhere = ordinary.has(spell.id) || core.includes(spell.id) || lore.includes(spell.id)
                       return <option key={spell.id} value={spell.id} disabled={usedElsewhere && spell.id !== value}>
-                        {spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.name}{combatSpell ? ' · Headless' : ' · DM裁定'}
+                        {spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.name}{fullHeadless ? ' · Headless' : ' · DM裁定'}
                       </option>
                     })}
                   </select>
@@ -446,7 +449,7 @@ export default function Dnd5eClassProgressionPanel({
               const key = `mystic-arcanum-${spellLevel}`
               const selected = stored.selections?.[key]?.[0] ?? ''
               const options = dnd5eWarlockMysticArcanumOptions(spellLevel)
-              const ready = selected ? !!getDnd5eSrdCombatSpell(selected) : false
+              const ready = selected ? dnd5eSrdSpellHasFullHeadlessAutomation(selected) : false
               return <label key={spellLevel} className="text-xs text-slate-400">秘法奥秘 · {spellLevel}环
                 <select
                   value={selected}
@@ -455,7 +458,7 @@ export default function Dnd5eClassProgressionPanel({
                 >
                   <option value="">尚未选择</option>
                   {options.map((spell) => <option key={spell.id} value={spell.id}>
-                    {spell.name}（{spell.englishName}）{getDnd5eSrdCombatSpell(spell.id) ? ' · Headless' : ' · DM裁定'}
+                    {spell.name}（{spell.englishName}）{dnd5eSrdSpellHasFullHeadlessAutomation(spell.id) ? ' · Headless' : ' · DM裁定'}
                   </option>)}
                 </select>
                 {selected ? <span className={`mt-1 block text-[10px] ${ready ? 'text-emerald-300' : 'text-amber-300'}`}>
@@ -595,16 +598,7 @@ export default function Dnd5eClassProgressionPanel({
                 </div>
                 <div className="mt-2 space-y-2">
                   {features.map((feature) => (
-                    <div key={feature.id} className="flex items-start gap-3">
-                      <Dnd5eActionIcon
-                        spec={dnd5eClassFeatureActionIcon({
-                          id: feature.id,
-                          name: feature.name,
-                          classId: definition.id,
-                        })}
-                        className="h-12 w-12 shrink-0"
-                        level={entry.level}
-                      />
+                    <div key={feature.id} className="border-l border-white/[0.08] pl-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
                           {feature.name}

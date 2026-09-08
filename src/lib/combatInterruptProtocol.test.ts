@@ -4,6 +4,7 @@ import type { Character } from '../types/character'
 import { createCombatInterrupt } from './combatInterruptQueue'
 import {
   defaultCombatInterruptResponse,
+  isAssistedDmBoundaryChoice,
   isCombatInterruptKind,
   resolveCombatInterruptAnswerCandidate,
 } from './combatInterruptProtocol'
@@ -45,6 +46,19 @@ const baseCharacter = (patch: Partial<Character> & { id: string; name?: string }
 }
 
 describe('combatInterruptProtocol', () => {
+  it('recognizes only the reserved fail-closed DM boundary handshake', () => {
+    const options = [
+      { id: 'dm-apply', label: '批准安全子集' },
+      { id: 'dm-cancel', label: '取消' },
+    ]
+    expect(isAssistedDmBoundaryChoice({ audience: 'dm', options })).toBe(true)
+    expect(isAssistedDmBoundaryChoice({ audience: 'actor', options })).toBe(false)
+    expect(isAssistedDmBoundaryChoice({
+      audience: 'dm',
+      options: [{ id: 'apply', label: '普通选择' }],
+    })).toBe(false)
+  })
+
   it('returns timeout-safe default responses by kind', () => {
     expect(defaultCombatInterruptResponse('dodge')).toEqual({ wantsDodge: false })
     expect(defaultCombatInterruptResponse('stable-mind')).toEqual({ useStableMind: false })
@@ -315,6 +329,56 @@ describe('combatInterruptProtocol', () => {
     })
     expect(resolveCombatInterruptAnswerCandidate(interrupt, {
       characters: [target], visibleCharacters: [], assignedCharacterId: target.id,
+    }).canAnswer).toBe(true)
+  })
+
+  it("does not route a DM-controlled monster's Bardic Inspiration decision to its linked player", () => {
+    const linked = baseCharacter({
+      id: 'linked-monster-character',
+      roomMemberId: 'member-player',
+      dmNotes: 'private',
+    })
+    const monsterToken: Token = {
+      id: 'sphinx-token',
+      label: '斯芬克斯',
+      type: 'enemy',
+      characterId: linked.id,
+      poolId: 'srd-5.1:gynosphinx',
+      x: 0,
+      y: 0,
+      size: 2,
+      color: '#fff',
+      emoji: 'S',
+    }
+    const interrupt = createCombatInterrupt({
+      id: 'monster-bardic-1',
+      mapId: 'map',
+      kind: 'bardic-inspiration',
+      targetCharId: linked.id,
+      payload: {
+        targetName: monsterToken.label,
+        rollerTokenId: monsterToken.id,
+        dieSides: 8,
+        rollType: '攻击检定' as const,
+        total: 14,
+        targetNumber: 16,
+      },
+      now: 100,
+    })
+
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [linked],
+      visibleCharacters: [linked],
+      assignedCharacterId: linked.id,
+      roomMemberId: 'member-player',
+      tokens: [monsterToken],
+      authority: 'player',
+    }).canAnswer).toBe(false)
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [linked],
+      visibleCharacters: [linked],
+      tokens: [monsterToken],
+      authority: 'dm',
     }).canAnswer).toBe(true)
   })
 

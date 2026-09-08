@@ -1,0 +1,183 @@
+{
+  "id": "srd-5.1:knight",
+  "slug": "knight",
+  "name": "骑士",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greatsword",
+      "name": "巨剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "heavy-crossbow",
+      "name": "重弩",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "leadership",
+      "name": "领导力",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "parry",
+      "name": "招架",
+      "automation": "headless",
+      "rule": "parry",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.armorClassBonus",
+        "rule.requiresSight",
+        "rule.requiresWieldedMeleeWeapon"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster Parry in Headless combat applies the exact +2 AC reaction for 'knight'"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 178,
+      "slug": "knight",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:48:40.529Z",
+      "name": "骑士",
+      "actionId": "greatsword",
+      "actionName": "巨剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-knight-greatsword-1788562120590",
+      "combatId": "verify-ui-knight-greatsword-1788562120590:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "骑士 使用巨剑攻击 验证目标：巨剑 → 验证目标 4+5=9 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:48 PM\n攻击\n\n骑士 使用巨剑攻击 验证目标：巨剑 → 验证目标 4+5=9 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：巨剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 4；最终采用 4；调整值 +5。\n结果 · 9 vs AC 10：未命中。\n骑士｜消耗动作",
+      "playerLog": "骑士 使用巨剑攻击 验证目标：巨剑 → 验证目标 4+5=9 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:49:03.090Z",
+      "evidenceFile": "ui-cases/monsters/178-knight.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "勇敢",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 8,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

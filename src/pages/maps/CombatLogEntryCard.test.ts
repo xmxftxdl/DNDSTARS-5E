@@ -92,6 +92,29 @@ describe('CombatLogEntryCard identity border', () => {
     expect(html).not.toContain('data-subject-token-id="monster-token"')
   })
 
+  it('renders the shared initiative order as a neutral expandable log', () => {
+    const html = renderToStaticMarkup(createElement(CombatLogEntryCard, {
+      entry: {
+        ...entry,
+        text: '先攻结果（由高到低）',
+        kind: 'system',
+        actorTokenId: undefined,
+        details: [
+          '1. 怪物：d20 16 + 先攻调整值（+2） = 18',
+          '2. 法师：d20 8 + 先攻调整值（+4） = 12',
+        ],
+      },
+      tokens: [monsterToken, wizardToken],
+      characters: [wizard],
+      currentTurnTokenId: monsterToken.id,
+    }))
+
+    expect(html).toContain('先攻结果（由高到低）')
+    expect(html).toContain('查看先攻顺序（2）')
+    expect(html).not.toContain('查看 Headless 结算依据')
+    expect(html).not.toContain('data-testid="combat-log-subject-token"')
+  })
+
   it('does not expose timeline rollback actions in the combat log', () => {
     const html = renderToStaticMarkup(createElement(CombatLogEntryCard, {
       entry,

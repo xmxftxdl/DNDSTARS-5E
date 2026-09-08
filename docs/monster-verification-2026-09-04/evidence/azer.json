@@ -1,0 +1,146 @@
+{
+  "id": "srd-5.1:azer",
+  "slug": "azer",
+  "name": "艾泽",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "warhammer",
+      "name": "战锤",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "warhammer-two-handed",
+      "name": "战锤 (Two-Handed)",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 32,
+      "slug": "azer",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:19:21.482Z",
+      "name": "艾泽",
+      "actionId": "warhammer",
+      "actionName": "战锤",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-azer-warhammer-1788556761534",
+      "combatId": "verify-ui-azer-warhammer-1788556761534:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "艾泽 使用战锤攻击 验证目标：战锤 → 验证目标 18+5=23 命中；共造成 11 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:19 PM\n结算\n\n艾泽 使用战锤攻击 验证目标：战锤 → 验证目标 18+5=23 命中；共造成 11 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：战锤｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +5。\n结果 · 23 vs AC 10：命中。\n伤害骰 · 战锤（基础伤害 1·钝击）｜1d8 骰面：7 = 7｜固定加值 +3｜小计 10\n伤害骰 · 战锤（基础伤害 2·火焰）｜1d6 骰面：1 = 1｜固定加值 +0｜小计 1\n艾泽｜消耗动作\n验证目标｜受到 11 点伤害｜HP 320 → 309",
+      "playerLog": "艾泽 使用战锤攻击 验证目标：战锤 → 验证目标 18+5=23 命中；共造成 11 点伤害。",
+      "afterHp": 309,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:19:50.225Z",
+      "evidenceFile": "ui-cases/monsters/032-azer.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "灼热躯体",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "灼热武器",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "照明",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

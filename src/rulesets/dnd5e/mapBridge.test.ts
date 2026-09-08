@@ -4,26 +4,39 @@ import type { Character } from '../../types/character'
 import {
   dnd5eBestGrappleDefense,
   dnd5eCombatantCanSee,
+  dnd5eDirectedCombatantPairKey,
   dnd5eEffectiveFlySpeed,
   dnd5eTargetArmorClassForAttack,
+  dnd5eWeaponClassDamageDefinitions,
   resolveDnd5eHeadlessAction,
   type Dnd5eCombatEvent,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication } from './mapBridge'
+import {
+  createDnd5eMapCombatSnapshot,
+  dnd5eRequestedInitiativeActorIndex,
+  planDnd5eMapResultApplication,
+} from './mapBridge'
 import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
+  dnd5eActiveSpellTargetingImmunitySchools,
+  dnd5eActiveTargetLinkedAttackRollFlags,
   dnd5eConditionsFromActiveEffects,
 } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
-import { setDnd5eRoomMonsterCatalog } from './monsters'
+import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
+import { createDnd5eMonsterInstanceOverride } from './monsterInstanceOverride'
 import {
   DND5E_LONGSWORD,
   DND5E_OFFHAND_SHORTSWORD,
   DND5E_SHORTSWORD,
 } from './equipment'
+import { registerDnd5eRulesPlugin } from './pluginApi'
+import { dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated, dnd5eSavingThrowMode } from './passiveDefenses'
+import { dnd5eCombatantCanHearSource } from './audibility'
+import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -47,6 +60,619 @@ describe('D&D 5e map bridge', () => {
   afterEach(() => {
     setMapGeometryRuntime([])
     setDnd5eRoomMonsterCatalog([])
+  })
+
+  it('preserves the requested duplicate initiative slot for one-shot extra turns', () => {
+    const state = { initiativeOrder: ['enemy', 'wizard', 'wizard', 'wizard'] }
+    expect(dnd5eRequestedInitiativeActorIndex(state, 'wizard', 3)).toBe(3)
+    expect(dnd5eRequestedInitiativeActorIndex(state, 'wizard', 0)).toBe(1)
+  })
+
+  it('persists a monster corpse ledger across map projection and rehydration', () => {
+    const enemy = token({ id: 'disintegrated-enemy', label: '化灰目标' })
+    const map: BattleMap = {
+      id: 'corpse-map', name: 'Corpse map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [enemy],
+    }
+    const initiativeOrder = [{
+      tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 10,
+    }]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'corpse-combat', map, characters: [], initiativeOrder,
+    })
+    snapshot.state.combatants[enemy.id].classState.deathRound = 7
+    snapshot.state.combatants[enemy.id].classState.deathInitiativeIndex = 2
+    snapshot.state.combatants[enemy.id].classState.deathCause = 'other'
+    snapshot.state.combatants[enemy.id].classState.soulReturnStatus = 'free-willing'
+    snapshot.state.combatants[enemy.id].classState.bodyPresent = false
+    snapshot.state.combatants[enemy.id].classState.missingBodyParts = ['全身']
+    snapshot.state.combatants[enemy.id].classState.vitalBodyPartsMissing = true
+
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.map.tokens[0].dnd5eCombatState).toMatchObject({
+      deathRound: 7,
+      deathInitiativeIndex: 2,
+      deathCause: 'other',
+      soulReturnStatus: 'free-willing',
+      bodyPresent: false,
+      missingBodyParts: ['全身'],
+      vitalBodyPartsMissing: true,
+    })
+
+    const rehydrated = createDnd5eMapCombatSnapshot({
+      combatId: 'corpse-combat-2', map: plan.map, characters: [], initiativeOrder,
+    })
+    expect(rehydrated.state.combatants[enemy.id].classState).toMatchObject({
+      deathRound: 7,
+      deathInitiativeIndex: 2,
+      deathCause: 'other',
+      soulReturnStatus: 'free-willing',
+      bodyPresent: false,
+      missingBodyParts: ['全身'],
+      vitalBodyPartsMissing: true,
+    })
+  })
+
+  it('rebinds a persisted self-concentration effect to the current map token', () => {
+    const oldTokenId = 'old-map-token'
+    const heroToken = token({
+      id: 'current-map-token', label: 'Hero', type: 'player', characterId: 'char',
+    })
+    const magicWeapon = createDnd5eMechanicalEffect({
+      id: 'persisted-magic-weapon',
+      definitionId: 'srd-5.1:spell:magic-weapon',
+      label: 'Magic Weapon',
+      source: { kind: 'spell', actorId: oldTokenId, actorName: 'Hero', rulesId: 'magic-weapon' },
+      targetId: oldTokenId,
+      duration: {
+        type: 'concentration', sourceActorId: oldTokenId,
+        concentrationId: 'magic-weapon', remainingRounds: 600,
+      },
+      modifiers: { magicWeapon: { weaponId: 'quarterstaff', bonus: 3 } },
+    })
+    const hero: Character = {
+      ...character(),
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [magicWeapon],
+        concentrationSpellId: 'magic-weapon',
+        concentrationTargetIds: [oldTokenId],
+        concentrationRoundsRemaining: 600,
+      },
+    }
+    const map: BattleMap = {
+      id: 'current-map', name: 'Current map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [heroToken],
+    }
+
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'current-combat', map, characters: [hero],
+      initiativeOrder: [{
+        tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 20,
+      }],
+    })
+    const combatant = snapshot.state.combatants[heroToken.id]
+    const effect = combatant.classState.activeEffects?.[0]
+
+    expect(snapshot.state.active).toBe(true)
+    expect(combatant.classState.concentrationTargetIds).toEqual([heroToken.id])
+    expect(effect).toMatchObject({
+      targetId: heroToken.id,
+      source: { actorId: heroToken.id },
+      duration: { type: 'concentration', sourceActorId: heroToken.id, concentrationId: 'magic-weapon' },
+    })
+  })
+
+  it('rebinds Activity concentration without a duration id and removes an orphaned prior spell', () => {
+    const oldCurrentTokenId = 'old-current-token'
+    const orphanedTokenId = 'orphaned-token'
+    const heroToken = token({
+      id: 'current-map-token', label: 'Hero', type: 'player', characterId: 'char',
+    })
+    const effect = (input: {
+      id: string
+      spellId: string
+      sourceActorId: string
+    }) => createDnd5eMechanicalEffect({
+      id: input.id,
+      definitionId: `activity:${input.spellId}:${input.spellId}:modifiers:0`,
+      label: input.spellId,
+      source: {
+        kind: 'spell', actorId: input.sourceActorId, actorName: 'Hero',
+        characterId: 'char', rulesId: input.spellId,
+      },
+      targetId: input.sourceActorId,
+      duration: {
+        type: 'concentration', sourceActorId: input.sourceActorId, remainingRounds: 10,
+      },
+      modifiers: {},
+    })
+    const hero: Character = {
+      ...character(),
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [
+          effect({
+            id: 'orphaned-detect-poison', spellId: 'detect-poison-and-disease',
+            sourceActorId: orphanedTokenId,
+          }),
+          effect({
+            id: 'current-dispel-evil', spellId: 'dispel-evil-and-good',
+            sourceActorId: oldCurrentTokenId,
+          }),
+        ],
+        concentrationSpellId: 'dispel-evil-and-good',
+        concentrationEffectsBySource: {
+          [orphanedTokenId]: 'detect-poison-and-disease',
+          [oldCurrentTokenId]: 'dispel-evil-and-good',
+        },
+        concentrationTargetIds: [oldCurrentTokenId],
+        concentrationRoundsRemaining: 10,
+      },
+    }
+    const map: BattleMap = {
+      id: 'current-map', name: 'Current map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [heroToken],
+    }
+
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'current-combat', map, characters: [hero],
+      initiativeOrder: [{
+        tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 20,
+      }],
+    })
+    const combatant = snapshot.state.combatants[heroToken.id]
+
+    expect(combatant.classState.activeEffects).toHaveLength(1)
+    expect(combatant.classState.activeEffects?.[0]).toMatchObject({
+      id: 'current-dispel-evil',
+      targetId: heroToken.id,
+      source: { actorId: heroToken.id, characterId: 'char', rulesId: 'dispel-evil-and-good' },
+      duration: { type: 'concentration', sourceActorId: heroToken.id },
+    })
+    expect(combatant.classState.concentrationEffectsBySource).toEqual({
+      [heroToken.id]: 'dispel-evil-and-good',
+    })
+    expect(combatant.classState.concentrationTargetIds).toEqual([heroToken.id])
+  })
+
+  it('rehydrates Activity extra-turn tracker slots as one-shot initiative slots', () => {
+    const heroToken = token({
+      id: 'time-stop-caster', label: 'Caster', type: 'player', characterId: 'char',
+    })
+    const enemy = token({ id: 'time-stop-enemy', label: 'Enemy', type: 'enemy', x: 20 })
+    const extraSlotIds = [
+      'activity-extra-turns:combat:1:caster:time-stop:1',
+      'activity-extra-turns:combat:1:caster:time-stop:2',
+    ]
+    const hero: Character = {
+      ...character(),
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activityExtraTurnGroup: {
+          groupId: 'time-stop-group',
+          slotIds: extraSlotIds,
+          endOnAffectOther: true,
+        },
+      },
+    }
+    const map: BattleMap = {
+      id: 'time-stop-map', name: 'Time Stop', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [heroToken, enemy],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'time-stop-combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: heroToken.id, slotId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 20 },
+        ...extraSlotIds.map((slotId) => ({
+          tokenId: heroToken.id, slotId, label: heroToken.label, emoji: '', color: '', roll: 20,
+        })),
+        { tokenId: enemy.id, slotId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 10 },
+      ],
+    })
+
+    expect(snapshot.state.initiativeSlotIds).toEqual([
+      heroToken.id,
+      ...extraSlotIds,
+      enemy.id,
+    ])
+    expect(snapshot.state.oneShotInitiativeSlotIds).toEqual(extraSlotIds)
+
+    snapshot.state.initiativeIndex = 1
+    const ended = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'end-turn',
+      actorId: heroToken.id,
+    })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    expect(ended.state.initiativeSlotIds).toEqual([
+      heroToken.id,
+      extraSlotIds[1],
+      enemy.id,
+    ])
+    expect(ended.state.oneShotInitiativeSlotIds).toEqual([extraSlotIds[1]])
+    expect(ended.state.initiativeIndex).toBe(1)
+  })
+
+  it('projects an authoritative summoned-creature walking-speed override', () => {
+    const hero = token({ id: 'hero-token', type: 'player', characterId: 'char', x: 0, y: 0 })
+    const steed = token({
+      id: 'phantom-steed-token', label: '魅影驹', poolId: 'srd-5.1:riding-horse', x: 50, y: 0,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'srd-5.1', featureId: 'spell:phantom-steed',
+        sourceCharacterId: 'char', sourceTokenId: hero.id, createdRound: 1, expiresAfterRound: 600,
+        side: 'player', walkingSpeedFeet: 100, dismissAfterDamageRounds: 10,
+      },
+    })
+    const map: BattleMap = {
+      id: 'phantom-steed-map', name: 'Phantom Steed', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [hero, steed],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'phantom-steed-combat', map, characters: [character()], round: 1,
+      initiativeOrder: [hero, steed].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+    })
+    expect(snapshot.state.combatants[steed.id]).toMatchObject({
+      speed: 100,
+      movementSpeeds: { walk: 100 },
+    })
+  })
+
+  it('projects persistent-area weapon riders only to current eligible occupants', () => {
+    const sourceCharacter = { ...character(), id: 'mantle-source-character', name: 'Source' }
+    const allyCharacter = { ...character(), id: 'mantle-ally-character', name: 'Ally' }
+    const outsideCharacter = { ...character(), id: 'mantle-outside-character', name: 'Outside' }
+    const source = token({
+      id: 'mantle-source', type: 'player', characterId: sourceCharacter.id, x: 0, y: 0,
+    })
+    const ally = token({
+      id: 'mantle-ally', type: 'player', characterId: allyCharacter.id, x: 10, y: 0,
+    })
+    const outside = token({
+      id: 'mantle-outside', type: 'player', characterId: outsideCharacter.id, x: 50, y: 0,
+    })
+    const enemy = token({ id: 'mantle-enemy', type: 'enemy', x: 20, y: 0 })
+    const map: BattleMap = {
+      id: 'persistent-area-rider-map', name: 'Persistent area rider', width: 100, height: 50,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, ally, outside, enemy],
+      dnd5ePluginAreas: [{
+        id: 'mantle-area', pluginId: 'test', featureId: 'mantle', label: 'Mantle', color: '#facc15',
+        sourceCharacterId: sourceCharacter.id, sourceTokenId: source.id,
+        cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }],
+        createdRound: 1, expiresAfterRound: 10, relation: 'ally', includeSelf: true,
+        weaponHitBonusDamage: { count: 1, sides: 4, type: 'radiant', magical: true },
+      }],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'persistent-area-rider-combat', map,
+      characters: [sourceCharacter, allyCharacter, outsideCharacter], round: 1,
+      initiativeOrder: [source, ally, outside, enemy].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+    })
+    expect(snapshot.state.combatants[source.id].persistentAreaWeaponHitBonusDamage).toHaveLength(1)
+    expect(snapshot.state.combatants[ally.id].persistentAreaWeaponHitBonusDamage).toHaveLength(1)
+    expect(snapshot.state.combatants[outside.id].persistentAreaWeaponHitBonusDamage).toBeUndefined()
+    expect(snapshot.state.combatants[enemy.id].persistentAreaWeaponHitBonusDamage).toBeUndefined()
+    expect(dnd5eWeaponClassDamageDefinitions({
+      state: snapshot.state,
+      actorId: ally.id,
+      targetId: enemy.id,
+      context: {
+        mode: 'melee', finesse: false, strengthBased: true,
+        weaponDamageSides: 8, damageType: 'slashing', adjacentEnemyOfTarget: false,
+      },
+      critical: true,
+    })).toContainEqual(expect.objectContaining({
+      source: 'persistent-area-rider', count: 1, sides: 4, type: 'radiant',
+      magical: true, doubleOnCritical: true,
+    }))
+  })
+
+  it('projects Silence as transient Host audibility state', () => {
+    const sourceCharacter = { ...character(), id: 'silent-source-character' }
+    const listenerCharacter = { ...character(), id: 'listener-character' }
+    const source = token({
+      id: 'silent-source', type: 'player', characterId: sourceCharacter.id, x: 0, y: 0,
+    })
+    const listener = token({
+      id: 'listener', type: 'player', characterId: listenerCharacter.id, x: 20, y: 0,
+    })
+    const map: BattleMap = {
+      id: 'silence-audibility-map', name: 'Silence', width: 100, height: 50,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, listener],
+      dnd5ePluginAreas: [{
+        id: 'silence-area', pluginId: 'srd-5.1', featureId: 'silence', label: 'Silence',
+        color: '#818cf8', sourceCharacterId: listenerCharacter.id, sourceTokenId: listener.id,
+        cells: [{ col: 0, row: 0 }], createdRound: 1, expiresAfterRound: 10,
+        relation: 'any', includeSelf: true,
+        occupantModifiers: { containment: 'intersects', preventsVerbalComponents: true },
+      }],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'silence-audibility-combat', map,
+      characters: [sourceCharacter, listenerCharacter], round: 1,
+      initiativeOrder: [source, listener].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+    })
+    expect(snapshot.state.combatants[source.id].soundSuppressed).toBe(true)
+    expect(snapshot.state.combatants[listener.id].soundSuppressed).toBe(false)
+    expect(dnd5eCombatantCanHearSource(
+      snapshot.state.combatants[listener.id], snapshot.state.combatants[source.id],
+    )).toBe(false)
+  })
+
+  it('projects antimagic as transient spellcasting and magical-Effect suppression without persisting it', () => {
+    const magicalEffect = createDnd5eMechanicalEffect({
+      definitionId: 'spell:test-buff', label: 'Magical buff',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'test-buff', magical: true },
+      targetId: 'char', modifiers: { armorClassBonus: 2 },
+    })
+    const hero: Character = {
+      ...character(),
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [magicalEffect] },
+    }
+    const heroToken = token({
+      id: 'hero-token', type: 'player', characterId: hero.id, x: 25, y: 25,
+    })
+    const area = {
+      id: 'antimagic', pluginId: 'srd-5.1', featureId: 'spell:antimagic-field',
+      label: '反魔法力场', color: '#8b5cf6', sourceCharacterId: hero.id,
+      sourceTokenId: heroToken.id, cells: [{ col: 0, row: 0 }],
+      createdRound: 1, expiresAfterRound: 100, relation: 'any' as const, includeSelf: true,
+      occupantModifiers: { suppressesMagic: true },
+    }
+    const map: BattleMap = {
+      id: 'antimagic-map', name: 'Antimagic', width: 100, height: 100,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [heroToken], dnd5ePluginAreas: [area],
+    }
+    const initiativeOrder = [{
+      tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 20,
+    }]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'antimagic', map, characters: [hero], initiativeOrder,
+    })
+    expect(snapshot.state.combatants[heroToken.id].magicSuppressed).toBe(true)
+    expect(snapshot.state.combatants[heroToken.id].classState.activeEffects?.[0].suspendedBy)
+      .toContain('persistent-area:antimagic')
+
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state, map, characters: [hero],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.characters[0].dnd5eCombatState?.activeEffects?.[0].suspendedBy).toBeUndefined()
+    const outside = createDnd5eMapCombatSnapshot({
+      combatId: 'antimagic',
+      map: { ...plan.map, tokens: [{ ...heroToken, x: 75, y: 75 }] },
+      characters: plan.characters,
+      initiativeOrder,
+    })
+    expect(outside.state.combatants[heroToken.id].magicSuppressed).not.toBe(true)
+    expect(outside.state.combatants[heroToken.id].classState.activeEffects?.[0].suspendedBy)
+      .toBeUndefined()
+  })
+
+  it('incapacitates Antimagic Susceptibility monsters only while they occupy an antimagic area', () => {
+    const susceptibleIds = [
+      'srd-5.1:animated-armor',
+      'srd-5.1:flying-sword',
+      'srd-5.1:rug-of-smothering',
+    ]
+    const susceptibleTokens = susceptibleIds.map((poolId, index) => token({
+      id: `susceptible-${index}`, poolId, x: 25 + index * 50, y: 25,
+    }))
+    const goblin = token({
+      id: 'ordinary-monster', poolId: 'srd-5.1:goblin', x: 175, y: 25,
+    })
+    const map: BattleMap = {
+      id: 'antimagic-susceptibility-map', name: 'Antimagic susceptibility',
+      width: 250, height: 100, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, feetPerCell: 5, tokens: [...susceptibleTokens, goblin],
+      dnd5ePluginAreas: [{
+        id: 'antimagic', pluginId: 'srd-5.1', featureId: 'spell:antimagic-field',
+        sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token',
+        label: '反魔法力场', color: '#8b5cf6', cells: [
+          { col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }, { col: 3, row: 0 },
+        ], createdRound: 1, expiresAfterRound: 100, relation: 'any', includeSelf: true,
+        occupantModifiers: { suppressesMagic: true },
+      }],
+    }
+    const initiativeOrder = map.tokens.map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'antimagic-susceptibility', map, characters: [], initiativeOrder,
+    })
+    for (const susceptible of susceptibleTokens) {
+      const combatant = snapshot.state.combatants[susceptible.id]
+      expect(combatant.incapacitatedByAntimagicSusceptibility).toBe(true)
+      expect(dnd5eIsIncapacitated(combatant)).toBe(true)
+    }
+    expect(snapshot.state.combatants[goblin.id].magicSuppressed).toBe(true)
+    expect(dnd5eIsIncapacitated(snapshot.state.combatants[goblin.id])).toBe(false)
+
+    const outside = createDnd5eMapCombatSnapshot({
+      combatId: 'antimagic-susceptibility',
+      map: {
+        ...map,
+        tokens: map.tokens.map((entry) => entry.id === susceptibleTokens[0].id
+          ? { ...entry, x: 225, y: 75 }
+          : entry),
+      },
+      characters: [], initiativeOrder,
+    })
+    expect(outside.state.combatants[susceptibleTokens[0].id]
+      .incapacitatedByAntimagicSusceptibility).not.toBe(true)
+    expect(dnd5eIsIncapacitated(outside.state.combatants[susceptibleTokens[0].id])).toBe(false)
+  })
+
+  it('projects Magic Circle typed protection only to current area occupants', () => {
+    const protectedCharacter = { ...character(), id: 'protected-character' }
+    const sourceCharacter = { ...character(), id: 'circle-caster-character' }
+    const protectedToken = token({
+      id: 'protected-token', type: 'player', characterId: protectedCharacter.id, x: 25, y: 25,
+    })
+    const casterToken = token({
+      id: 'circle-caster-token', type: 'player', characterId: sourceCharacter.id, x: 75, y: 25,
+    })
+    const fiendToken = token({ id: 'fiend-token', type: 'enemy', x: 75, y: 75 })
+    const map: BattleMap = {
+      id: 'magic-circle-typed-map', name: 'Magic Circle', width: 150, height: 150,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [protectedToken, casterToken, fiendToken],
+      dnd5ePluginAreas: [{
+        id: 'magic-circle-area', pluginId: 'srd-5.1', featureId: 'spell:magic-circle',
+        label: '魔法阵', color: '#8b5cf6', sourceCharacterId: sourceCharacter.id,
+        sourceTokenId: casterToken.id, cells: [{ col: 0, row: 0 }],
+        createdRound: 1, expiresAfterRound: 10, relation: 'any', includeSelf: true,
+        occupantModifiers: {
+          attacksAgainstOccupantDisadvantageCreatureTypes: ['fiend'],
+          conditionImmunitiesBySourceCreatureType: [{
+            conditions: ['charmed', 'frightened', 'possessed'], sourceCreatureTypes: ['fiend'],
+          }],
+          savingThrowAdvantagesBySourceCreatureType: [{
+            conditions: ['any'], sourceCreatureTypes: ['fiend'],
+          }],
+        },
+      }],
+    }
+    const initiativeOrder = [protectedToken, casterToken, fiendToken].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'magic-circle-typed', map,
+      characters: [protectedCharacter, sourceCharacter], initiativeOrder,
+    })
+    const protectedCombatant = snapshot.state.combatants[protectedToken.id]
+    const fiend = snapshot.state.combatants[fiendToken.id]
+    fiend.creatureType = 'fiend'
+    expect(dnd5eActiveTargetLinkedAttackRollFlags(
+      protectedCombatant.classState.activeEffects, fiend.id, fiend.creatureType,
+    ).disadvantage).toBe(true)
+    expect(dnd5eSavingThrowMode(protectedCombatant, 'dex', {
+      sourceCreatureType: fiend.creatureType, sourceIsMagical: true,
+    })).toBe('advantage')
+    expect(dnd5eConditionImmuneFromSource(
+      protectedCombatant, 'charmed', fiend, { sourceMagical: true },
+    )).toBe(true)
+    expect(snapshot.state.combatants[casterToken.id].classState.activeEffects).toBeUndefined()
+
+    const persisted = planDnd5eMapResultApplication({
+      state: snapshot.state, map, characters: [protectedCharacter, sourceCharacter],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(persisted.characters.find((entry) => entry.id === protectedCharacter.id)
+      ?.dnd5eCombatState?.activeEffects ?? []).toHaveLength(0)
+  })
+
+  it('projects Nondetection divination targeting immunity only inside its protected place', () => {
+    const protectedCharacter = { ...character(), id: 'nondetection-protected-character' }
+    const sourceCharacter = { ...character(), id: 'nondetection-caster-character' }
+    const protectedToken = token({
+      id: 'nondetection-protected-token', type: 'player',
+      characterId: protectedCharacter.id, x: 25, y: 25,
+    })
+    const casterToken = token({
+      id: 'nondetection-caster-token', type: 'player',
+      characterId: sourceCharacter.id, x: 75, y: 25,
+    })
+    const map: BattleMap = {
+      id: 'nondetection-place-map', name: 'Nondetection place',
+      width: 150, height: 100, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, feetPerCell: 5, tokens: [protectedToken, casterToken],
+      dnd5ePluginAreas: [{
+        id: 'nondetection-place-area', pluginId: 'srd-5.1',
+        featureId: 'spell:nondetection', label: '回避侦测·受保护地点／物件',
+        color: '#4338ca', sourceCharacterId: sourceCharacter.id,
+        sourceTokenId: casterToken.id, cells: [{ col: 0, row: 0 }],
+        createdRound: 1, expiresAfterRound: 4_800,
+        relation: 'any', includeSelf: true,
+        occupantModifiers: { spellTargetingImmunitySchools: ['divination'] },
+      }],
+    }
+    const initiativeOrder = [protectedToken, casterToken].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const inside = createDnd5eMapCombatSnapshot({
+      combatId: 'nondetection-place', map,
+      characters: [protectedCharacter, sourceCharacter], initiativeOrder,
+    })
+    expect(dnd5eActiveSpellTargetingImmunitySchools(
+      inside.state.combatants[protectedToken.id].classState.activeEffects,
+    )).toEqual(['divination'])
+    expect(dnd5eActiveSpellTargetingImmunitySchools(
+      inside.state.combatants[casterToken.id].classState.activeEffects,
+    )).toEqual([])
+
+    const outside = createDnd5eMapCombatSnapshot({
+      combatId: 'nondetection-place',
+      map: { ...map, tokens: [{ ...protectedToken, x: 125, y: 75 }, casterToken] },
+      characters: [protectedCharacter, sourceCharacter], initiativeOrder,
+    })
+    expect(dnd5eActiveSpellTargetingImmunitySchools(
+      outside.state.combatants[protectedToken.id].classState.activeEffects,
+    )).toEqual([])
+  })
+
+  it('projects generic spell-save disadvantage auras by opposition, range, and damage type', () => {
+    const aura = createDnd5eMechanicalEffect({
+      definitionId: 'test:spell-save-pressure-aura',
+      label: 'Spell-save pressure aura',
+      targetId: 'aura-source-token',
+      source: { kind: 'feature', actorId: 'aura-source-token', rulesId: 'test:aura' },
+      modifiers: {
+        spellSaveDisadvantageAura: { radiusFeet: 60, damageTypes: ['fire', 'radiant'], spellcastingClassIds: ['paladin'] },
+      },
+    })
+    const hero: Character = {
+      ...character(),
+      id: 'aura-source-character',
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [aura] },
+    }
+    const source = token({
+      id: 'aura-source-token', type: 'player', characterId: hero.id, x: 10, y: 10,
+    })
+    const nearbyEnemy = token({ id: 'aura-nearby-enemy', type: 'enemy', x: 110, y: 10 })
+    const distantEnemy = token({ id: 'aura-distant-enemy', type: 'enemy', x: 210, y: 10 })
+    const map: BattleMap = {
+      id: 'generic-spell-save-aura-map', name: 'Generic aura', width: 300, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, nearbyEnemy, distantEnemy],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'generic-spell-save-aura-combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: source.id, label: source.label, emoji: '', color: '', roll: 20 },
+        { tokenId: nearbyEnemy.id, label: nearbyEnemy.label, emoji: '', color: '', roll: 15 },
+        { tokenId: distantEnemy.id, label: distantEnemy.label, emoji: '', color: '', roll: 10 },
+      ],
+    })
+    const nearby = snapshot.state.combatants[nearbyEnemy.id]
+    const distant = snapshot.state.combatants[distantEnemy.id]
+    expect(dnd5eSavingThrowMode(nearby, 'dex', { sourceIsSpell: true, damageType: 'fire' }))
+      .toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(nearby, 'dex', { sourceIsSpell: true, damageType: 'cold' }))
+      .toBe('normal')
+    expect(dnd5eSavingThrowMode(nearby, 'wis', { sourceIsSpell: true, sourceSpellcastingClassId: 'paladin' }))
+      .toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(distant, 'dex', { sourceIsSpell: true, damageType: 'fire' }))
+      .toBe('normal')
   })
 
   it('fails closed when a player token references a character that has not synchronized', () => {
@@ -344,6 +970,80 @@ describe('D&D 5e map bridge', () => {
     })
   })
 
+  it('projects a persisted summon combat profile into the authoritative companion snapshot', () => {
+    const base = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const monster = {
+      ...base,
+      id: 'room-monster:companion-profile',
+      armorClass: { value: 12, note: 'natural armor' },
+      savingThrows: { dex: 2 },
+      skills: [{ key: 'perception', name: '察觉', bonus: 2 }],
+    }
+    setDnd5eRoomMonsterCatalog([monster])
+    const companion = token({
+      id: 'companion', poolId: monster.id, hp: 40, maxHp: 40,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'test', featureId: 'test:companion',
+        sourceCharacterId: 'owner', sourceTokenId: 'owner-token',
+        createdRound: 1, expiresAfterRound: 14_400, side: 'player', persistent: true,
+        armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
+        savingThrowBonus: 3, proficientSkillCheckBonus: 3,
+        weaponAttacksMagical: true, attacksPerAction: 2,
+        cannotAttack: true,
+      },
+    })
+    const map: BattleMap = {
+      id: 'companion-profile-map', name: 'Companion profile', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [companion],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'companion-profile-combat', map, characters: [],
+      initiativeOrder: [{ tokenId: companion.id, label: companion.label, emoji: '', color: '', roll: 10 }],
+    })
+    expect(snapshot.state.combatants.companion).toMatchObject({
+      armorClass: 15,
+      savingThrowBonuses: { dex: 5 },
+      passivePerception: 15,
+      weaponAttacksMagical: true,
+      summonedWeaponAttackBonus: 3,
+      summonedWeaponDamageBonus: 3,
+      summonedProficientSkillCheckBonus: 3,
+      summonedAttacksPerAction: 2,
+      summonedCannotAttack: true,
+    })
+  })
+
+  it('keeps a permanent True Polymorph creature friendly while ending player control', () => {
+    const companion = token({
+      id: 'permanent-polymorph', poolId: 'srd-5.1:brown-bear', hp: 34, maxHp: 34,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'srd-5.1', featureId: 'spell:true-polymorph',
+        sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token',
+        createdRound: 1, expiresAfterRound: 600, side: 'player',
+        persistent: true, controlEnded: true,
+      },
+    })
+    const map: BattleMap = {
+      id: 'permanent-polymorph-map', name: 'Permanent polymorph', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [companion],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'permanent-polymorph-combat', map, characters: [],
+      initiativeOrder: [{
+        tokenId: companion.id, label: companion.label, emoji: '', color: '', roll: 10,
+      }],
+    })
+
+    expect(dnd5eCombatTokenSide(companion)).toBe('player')
+    expect(snapshot.state.combatants[companion.id]).toMatchObject({
+      controller: 'dm',
+      summonedPersistent: true,
+    })
+    expect(snapshot.state.combatants[companion.id].summonedSourceCombatantId).toBeUndefined()
+  })
+
   it('initializes and persists custom per-day action uses and legendary points', () => {
     const draft = createDnd5eCustomMonsterDraft()
     draft.actions[0].usageKind = 'per-day'
@@ -412,6 +1112,70 @@ describe('D&D 5e map bridge', () => {
       monsterReactiveAvailableTurnKey: 'custom-resources:1:other',
       monsterReactiveUsedTurnKey: 'custom-resources:1:other',
     })
+  })
+
+  it('projects DM instance overrides into the authoritative Headless snapshot', () => {
+    const goblin = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const monster = createDnd5eMonsterInstanceOverride({
+      monster: goblin,
+      tokenId: 'edited-goblin',
+      scope: 'instance',
+    })
+    monster.armorClass = { value: 19, note: 'DM override' }
+    monster.abilities = { ...monster.abilities, str: 18, dex: 16 }
+    monster.savingThrows = { ...monster.savingThrows, str: 7 }
+    monster.skills = [
+      ...(monster.skills ?? []).filter((skill) => skill.key !== 'athletics'),
+      { key: 'athletics', name: '运动', bonus: 7 },
+    ]
+    monster.speed = { ...monster.speed, walk: 45 }
+    monster.actions = monster.actions.map((action, index) => index === 0
+      ? { ...action, name: 'DM 强化攻击' }
+      : action)
+    setDnd5eRoomMonsterCatalog([monster])
+
+    const monsterToken = token({
+      id: 'edited-goblin',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'dm-monster-override',
+      name: 'DM monster override',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'dm-monster-override',
+      map,
+      characters: [],
+      initiativeOrder: [{
+        tokenId: monsterToken.id,
+        label: monsterToken.label,
+        emoji: '',
+        color: '',
+        roll: 10,
+      }],
+    })
+
+    expect(snapshot.state.combatants[monsterToken.id]).toMatchObject({
+      statBlockId: monster.id,
+      armorClass: 19,
+      abilities: { str: 18, dex: 16 },
+      savingThrowBonuses: { str: 7 },
+      skillProficiencies: expect.arrayContaining(['athletics']),
+      speed: 45,
+      movementSpeeds: { walk: 45 },
+    })
+    expect(getDnd5eSrdMonster(snapshot.state.combatants[monsterToken.id].statBlockId!)?.actions[0]?.name)
+      .toBe('DM 强化攻击')
   })
 
   it('projects monster hover and authoritative terrain-relative airborne state', () => {
@@ -571,6 +1335,26 @@ describe('D&D 5e map bridge', () => {
     })
     expect(snapshot.state.combatants[drow.id].conditionImmunities)
       .toEqual(expect.arrayContaining(['magical-sleep', '魔法睡眠']))
+    expect(snapshot.state.combatants[drow.id].racialSavingThrowAdvantages)
+      .toEqual({ conditions: ['charmed', '魅惑'] })
+  })
+
+  it('projects localized monster condition immunities as canonical Headless ids', () => {
+    const flyingSword = token({
+      id: 'flying-sword-token', poolId: 'srd-5.1:flying-sword', hp: 17, maxHp: 17,
+    })
+    const map: BattleMap = {
+      id: 'condition-immunity-map', name: 'Condition Immunity', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [flyingSword],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'condition-immunity', map, characters: [],
+      initiativeOrder: [{ tokenId: flyingSword.id, label: flyingSword.label, emoji: '', color: '', roll: 10 }],
+    })
+
+    expect(snapshot.state.combatants[flyingSword.id].conditionImmunities)
+      .toEqual(expect.arrayContaining(['charmed', '魅惑']))
   })
 
   it('projects effective Headless size and elevation back to the map token', () => {
@@ -789,6 +1573,9 @@ describe('D&D 5e map bridge', () => {
       characters: [hero],
       initiativeOrder,
     })
+    expect(snapshot.state.ordinaryDarknessByCombatantPair?.[
+      dnd5eDirectedCombatantPairKey(heroToken.id, enemy.id)
+    ]).toBe(true)
     expect(dnd5eCombatantCanSee(snapshot.state, heroToken.id, enemy.id)).toBe(true)
   })
 
@@ -898,6 +1685,106 @@ describe('D&D 5e map bridge', () => {
     })
     expect(reconnected.state.combatants[heroToken.id].classState.activeEffects).toEqual(heroEffects)
     expect(reconnected.state.combatants[enemy.id].classState.activeEffects).toEqual(enemyEffects)
+  })
+
+  it('clears a stale map-state mirror after removing an effect from a character token', () => {
+    const charmedHero = characterWithConditions(character(), ['charmed'])
+    const mirroredState = structuredClone(charmedHero.dnd5eCombatState!)
+    const heroToken = token({
+      id: 'hero-token', type: 'player', characterId: charmedHero.id,
+      hp: 20, maxHp: 20, dnd5eCombatState: mirroredState,
+    })
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [heroToken],
+    }
+    const initiativeOrder = [{
+      tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 20,
+    }]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'combat', map, characters: [charmedHero], initiativeOrder,
+    })
+    snapshot.state.combatants[heroToken.id].conditions = []
+    snapshot.state.combatants[heroToken.id].classState.activeEffects = undefined
+
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [charmedHero],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+
+    expect(plan.characters[0].conditions).toEqual([])
+    expect(plan.characters[0].dnd5eCombatState?.activeEffects).toBeUndefined()
+    expect(plan.map.tokens[0].dnd5eCombatState).toBeUndefined()
+    expect(plan.changedCharacterIds).toContain(charmedHero.id)
+    expect(plan.changedTokenIds).toContain(heroToken.id)
+  })
+
+  it('round-trips cumulative failed-save progress on a monster effect', () => {
+    const caster = token({ id: 'caster-token', label: 'Caster', type: 'player' })
+    const disease = createDnd5eMechanicalEffect({
+      id: 'contagion-slimy-doom',
+      definitionId: 'srd-5.1:spell:contagion:slimy-doom',
+      label: '疫病术·黏液厄运',
+      source: {
+        kind: 'spell', actorId: caster.id, actorName: caster.label,
+        rulesId: 'contagion', spellLevel: 6, spellSaveDc: 19,
+      },
+      targetId: 'mammoth-token',
+      duration: { type: 'rounds', remainingRounds: 100_800, tickOn: 'target-turn-end' },
+      repeatSave: {
+        ability: 'con', dc: 19, timing: 'target-turn-end', onSuccess: 'remove',
+        successesRequired: 3, failuresRequired: 3,
+        onFailureTransition: { outcome: 'retain-effect' },
+      },
+      modifiers: { abilityCheckDisadvantages: ['con'], savingThrowDisadvantages: ['con'] },
+      onDamageCondition: { condition: 'stunned', duration: 'until-target-next-turn-end' },
+      tags: ['disease'],
+    })
+    const mammoth = token({
+      id: 'mammoth-token', label: 'Mammoth',
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [disease] },
+    })
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [caster, mammoth],
+    }
+    const initiativeOrder = [
+      { tokenId: caster.id, label: caster.label, emoji: '', color: '', roll: 20 },
+      { tokenId: mammoth.id, label: mammoth.label, emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'combat', map, characters: [], initiativeOrder,
+    })
+    const casterEnded = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'end-turn', actorId: caster.id,
+    })
+    expect(casterEnded.ok).toBe(true)
+    if (!casterEnded.ok) return
+    const targetEnded = resolveDnd5eHeadlessAction(casterEnded.state, {
+      type: 'end-turn', actorId: mammoth.id,
+      activeEffectSavingThrows: [{ effectId: disease.id, d20: 2, d20Second: 11 }],
+    })
+    expect(targetEnded.ok).toBe(true)
+    if (!targetEnded.ok) return
+    const plan = planDnd5eMapResultApplication({
+      state: targetEnded.state, map, characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    const persisted = plan.map.tokens.find((entry) => entry.id === mammoth.id)
+      ?.dnd5eCombatState?.activeEffects?.find((effect) => effect.id === disease.id)
+    expect(persisted).toMatchObject({
+      repeatSave: { successes: 0, failures: 1, successesRequired: 3, failuresRequired: 3 },
+    })
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'combat', map: plan.map, characters: [], initiativeOrder,
+    })
+    expect(reconnected.state.combatants[mammoth.id].classState.activeEffects)
+      .toContainEqual(expect.objectContaining({
+        id: disease.id,
+        repeatSave: expect.objectContaining({ failures: 1 }),
+      }))
   })
 
   it('round-trips a dragged relation and reports both moved map tokens', () => {
@@ -1292,6 +2179,7 @@ describe('D&D 5e map bridge', () => {
       ...character(),
       dnd5eCombatState: {
         activeEffectDamageSavePendingIds: ['hero-effect'],
+        activeEffectDamageSavePendingModes: { 'hero-effect': 'advantage' },
         monsterOnHitSavePending: {
           sourceId: 'zombie-token', actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
         },
@@ -1302,6 +2190,7 @@ describe('D&D 5e map bridge', () => {
       id: 'zombie-token', poolId: 'srd-5.1:zombie', hp: 0, maxHp: 22,
       dnd5eCombatState: {
         activeEffectDamageSavePendingIds: ['zombie-effect'],
+        activeEffectDamageSavePendingModes: { 'zombie-effect': 'normal' },
         undeadFortitudePending: { dc: 12, damage: 7, sourceId: heroToken.id },
       },
     })
@@ -1322,6 +2211,8 @@ describe('D&D 5e map bridge', () => {
       sourceId: zombie.id, actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
     })
     expect(first.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect'])
+    expect(first.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingModes)
+      .toEqual({ 'hero-effect': 'advantage' })
     const plan = planDnd5eMapResultApplication({
       state: first.state, map, characters: [hero], characterIdByCombatantId: first.characterIdByCombatantId,
     })
@@ -1329,6 +2220,8 @@ describe('D&D 5e map bridge', () => {
       .toEqual({ dc: 12, damage: 7, sourceId: heroToken.id })
     expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.activeEffectDamageSavePendingIds)
       .toEqual(['zombie-effect'])
+    expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.activeEffectDamageSavePendingModes)
+      .toEqual({ 'zombie-effect': 'normal' })
     expect(plan.characters[0].dnd5eCombatState?.monsterOnHitSavePending).toMatchObject({
       sourceId: zombie.id, actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
     })
@@ -1340,6 +2233,63 @@ describe('D&D 5e map bridge', () => {
     expect(reconnected.state.combatants[heroToken.id].classState.monsterOnHitSavePending?.dc).toBe(11)
     expect(reconnected.state.combatants[zombie.id].classState.activeEffectDamageSavePendingIds).toEqual(['zombie-effect'])
     expect(reconnected.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect'])
+    expect(reconnected.state.combatants[zombie.id].classState.activeEffectDamageSavePendingModes)
+      .toEqual({ 'zombie-effect': 'normal' })
+    expect(reconnected.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingModes)
+      .toEqual({ 'hero-effect': 'advantage' })
+  })
+
+  it('persists linked ability-score reductions and reapplies them exactly once after reconnect', () => {
+    const hero: Character = {
+      ...character(),
+      abilities: { ...character().abilities, int: 16, cha: 14 },
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        abilityScoreReductionLedger: [
+          { id: 'feeblemind-int', ability: 'int', amount: 15, recovery: 'restoration-magic', recoveryGroupId: 'spell.feeblemind' },
+          { id: 'feeblemind-cha', ability: 'cha', amount: 13, recovery: 'restoration-magic', recoveryGroupId: 'spell.feeblemind' },
+        ],
+      },
+    }
+    const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, hp: 20, maxHp: 20 })
+    const monster = token({
+      id: 'monster-token', hp: 10, maxHp: 10,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        abilityScoreReductionLedger: [{
+          id: 'strength-drain', ability: 'str', amount: 4, recovery: 'short-or-long-rest',
+        }],
+      },
+    })
+    const map: BattleMap = {
+      id: 'ability-reduction-map', name: 'Ability reductions', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [heroToken, monster],
+    }
+    const initiativeOrder = [heroToken, monster].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const first = createDnd5eMapCombatSnapshot({
+      combatId: 'ability-reduction', map, characters: [hero], initiativeOrder,
+    })
+    expect(first.state.combatants[heroToken.id].abilities).toMatchObject({ int: 1, cha: 1 })
+    expect(first.state.combatants[monster.id].abilities.str).toBe(6)
+
+    const plan = planDnd5eMapResultApplication({
+      state: first.state, map, characters: [hero],
+      characterIdByCombatantId: first.characterIdByCombatantId,
+    })
+    expect(plan.characters[0].dnd5eCombatState?.abilityScoreReductionLedger).toHaveLength(2)
+    expect(plan.map.tokens.find((entry) => entry.id === monster.id)?.dnd5eCombatState
+      ?.abilityScoreReductionLedger).toHaveLength(1)
+
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'ability-reduction', map: plan.map, characters: plan.characters, initiativeOrder,
+    })
+    expect(reconnected.state.combatants[heroToken.id].abilities).toMatchObject({ int: 1, cha: 1 })
+    expect(reconnected.state.combatants[monster.id].abilities.str).toBe(6)
+    expect(reconnected.state.combatants[heroToken.id].classState.abilityScoreReductionLedger).toHaveLength(2)
+    expect(reconnected.state.combatants[monster.id].classState.abilityScoreReductionLedger).toHaveLength(1)
   })
 
   it('creates combatants keyed by token and applies authoritative HP/position only', () => {
@@ -1542,7 +2492,62 @@ describe('D&D 5e map bridge', () => {
       str: 7, dex: 6, con: 6, int: 4, wis: 4, cha: 4,
     })
     expect(snapshot.state.combatants[paladinToken.id].savingThrowBonuses.cha).toBe(11)
-    expect(snapshot.state.combatants[enemy.id].savingThrowBonuses.dex).toBeUndefined()
+    expect(snapshot.state.combatants[enemy.id].savingThrowBonuses.dex).toBe(2)
+  })
+
+  it('derives a declarative spell-damage resistance aura for the paladin and nearby allies', () => {
+    const pluginId = 'com.example.warding-aura'
+    const subclassId = `${pluginId}:ancients`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Warding Aura Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerDeclarativeSubclass({
+          schemaVersion: 1, id: 'ancients', classId: 'paladin', name: 'Ancients', summary: 'Fixture.',
+          abilities: [{
+            schemaVersion: 1, id: 'aura-of-warding', name: 'Aura of Warding', description: 'Resists spell damage.', level: 7,
+            trigger: { kind: 'before-damage-taken' },
+            targeting: {
+              kind: 'multiple-creatures', relation: 'ally', rangeFeet: 10,
+              maximumTargets: 32, includeSelf: true,
+            },
+            effects: [], mechanic: {
+              kind: 'spell-damage-resistance-aura', radiusFeet: 10,
+              expandedRadius: { level: 18, radiusFeet: 30 },
+            }, automation: 'full',
+          }],
+        })
+      },
+    })
+    try {
+      const paladin: Character = {
+        ...character(), id: 'paladin', rulesetId: 'dnd5e-2014-srd-5.1', charClass: '圣武士', level: 7,
+        dnd5eClassLevels: { paladin: 7 },
+        dnd5eClassChoices: { classes: { paladin: { subclass: subclassId } } },
+      }
+      const ally: Character = { ...character(), id: 'ally', rulesetId: 'dnd5e-2014-srd-5.1' }
+      const paladinToken = token({ id: 'paladin-token', type: 'player', characterId: paladin.id, x: 25, y: 25 })
+      const allyToken = token({ id: 'ally-token', type: 'player', characterId: ally.id, x: 75, y: 25 })
+      const enemy = token({ id: 'enemy-token', poolId: 'srd-5.1:goblin', x: 75, y: 75 })
+      const map: BattleMap = {
+        id: 'map', name: 'Map', width: 500, height: 500, gridSize: 50,
+        gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+        tokens: [paladinToken, allyToken, enemy],
+      }
+      const initiativeOrder = [paladinToken, allyToken, enemy].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      }))
+      const snapshot = createDnd5eMapCombatSnapshot({
+        combatId: 'combat', map, characters: [paladin, ally], initiativeOrder,
+      })
+      expect(snapshot.state.combatants[paladinToken.id].spellDamageResistance).toBe(true)
+      expect(snapshot.state.combatants[allyToken.id].spellDamageResistance).toBe(true)
+      expect(snapshot.state.combatants[enemy.id].spellDamageResistance).toBeUndefined()
+    } finally {
+      dispose()
+    }
   })
 
   it('derives Holy Nimbus enemy sources from opposition and 30-foot map distance', () => {
@@ -1728,9 +2733,314 @@ describe('D&D 5e map bridge', () => {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
     })
     expect(plan.characters[0].currentHp).toBe(17)
+    expect(plan.characters[0].maxHp).toBe(20)
     expect(plan.characters[0].dnd5eCombatState).toMatchObject({
       wildShapeFormId: 'srd-5.1:wolf', wildShapeCurrentHp: 11, wildShapeOriginalCurrentHp: 17,
     })
     expect(plan.map.tokens.find((entry) => entry.id === druidToken.id)).toMatchObject({ hp: 11, maxHp: 11 })
+  })
+
+  it('keeps a Large polymorph form footprint after a movement snapshot is projected', () => {
+    const polymorphed: Character = {
+      ...character(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      dnd5eCombatState: {
+        wildShapeFormId: 'srd-5.1:brown-bear',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'caster-token',
+        wildShapeSourceActivityId: 'spell:polymorph',
+        wildShapeMaximumChallengeRating: 1,
+        wildShapeCurrentHp: 34,
+        wildShapeRoundsRemaining: 10,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 20,
+        wildShapeOriginalArmorClass: 16,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalSizeRank: 2,
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 },
+        wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 0, cha: 0 },
+        wildShapeOriginalSavingThrowProficiencies: [],
+        wildShapeOriginalSkillProficiencies: [],
+        wildShapeOriginalPassivePerception: 10,
+      },
+    }
+    const playerToken = token({
+      id: 'polymorphed-player',
+      type: 'player',
+      characterId: polymorphed.id,
+      size: 2,
+      hp: 34,
+      maxHp: 34,
+    })
+    const map: BattleMap = {
+      id: 'polymorph-size-map', name: 'Polymorph size', width: 200, height: 200,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [playerToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'polymorph-size-combat',
+      map,
+      characters: [polymorphed],
+      initiativeOrder: [{ tokenId: playerToken.id, label: playerToken.label, emoji: '', color: '', roll: 20 }],
+    })
+
+    expect(snapshot.state.combatants[playerToken.id].sizeRank).toBe(3)
+    snapshot.state.combatants[playerToken.id].position = { x: 100, y: 100 }
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [polymorphed],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.map.tokens[0]).toMatchObject({ x: 100, y: 100, size: 2 })
+  })
+
+  it('rehydrates a transformed unlinked monster token from its persisted form ledger', () => {
+    const caster = token({ id: 'caster-token', type: 'player', characterId: 'char', hp: 20, maxHp: 20 })
+    const transformed = token({
+      id: 'transformed-token',
+      label: '变形后的地精',
+      poolId: 'srd-5.1:wolf',
+      x: 50,
+      hp: 7,
+      maxHp: 11,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: caster.id,
+        wildShapeSourceActivityId: 'spell:polymorph',
+        wildShapeMaximumChallengeRating: 1 / 4,
+        wildShapeCurrentHp: 7,
+        wildShapeRoundsRemaining: 10,
+        wildShapeOriginalCurrentHp: 6,
+        wildShapeOriginalMaxHp: 7,
+        wildShapeOriginalArmorClass: 15,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalSizeRank: 1,
+        wildShapeOriginalAbilities: { str: 8, dex: 14, con: 10, int: 10, wis: 8, cha: 8 },
+        wildShapeOriginalSavingThrowBonuses: { str: -1, dex: 2, con: 0, int: 0, wis: -1, cha: -1 },
+        wildShapeOriginalSavingThrowProficiencies: [],
+        wildShapeOriginalSkillProficiencies: ['stealth'],
+        wildShapeOriginalPassivePerception: 9,
+        wildShapeOriginalStatBlockId: 'srd-5.1:goblin',
+        wildShapeOriginalCreatureType: '类人生物',
+        wildShapeOriginalDamageVulnerabilities: [],
+        wildShapeOriginalDamageResistances: [],
+        wildShapeOriginalDamageImmunities: [],
+        wildShapeOriginalDamageDefenseRules: [],
+        wildShapeOriginalConditionImmunities: [],
+      },
+    })
+    const casterCharacter: Character = {
+      ...character(),
+      concentrating: true,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        concentrationSpellId: 'spell:polymorph',
+        concentrationTargetIds: [transformed.id],
+      },
+    }
+    const map: BattleMap = {
+      id: 'polymorph-refresh-map', name: 'Polymorph refresh', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [caster, transformed],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'polymorph-refresh',
+      map,
+      characters: [casterCharacter],
+      initiativeOrder: [
+        { tokenId: caster.id, label: caster.label, emoji: '', color: '', roll: 20 },
+        { tokenId: transformed.id, label: transformed.label, emoji: '', color: '', roll: 10 },
+      ],
+    })
+    expect(snapshot.state.combatants[transformed.id]).toMatchObject({
+      currentHp: 7,
+      maxHp: 11,
+      armorClass: 13,
+      speed: 40,
+      statBlockId: 'srd-5.1:wolf',
+      abilities: { str: 12, dex: 15, con: 12, int: 3, wis: 12, cha: 6 },
+      classState: {
+        wildShapeMode: 'polymorph',
+        wildShapeOriginalStatBlockId: 'srd-5.1:goblin',
+      },
+    })
+  })
+
+  it('projects Moonbeam forced true form to the token label and releases the form lock after exit', () => {
+    const hybridDefinition = getDnd5eSrdMonster('srd-5.1:werewolf-hybrid')!
+    const humanDefinition = getDnd5eSrdMonster('srd-5.1:werewolf-human')!
+    const caster = token({
+      id: 'moonbeam-caster', label: 'Caster', type: 'enemy', poolId: 'srd-5.1:bandit',
+      x: 125, y: 25,
+    })
+    const werewolf = token({
+      id: 'moonbeam-werewolf', label: hybridDefinition.name, type: 'enemy',
+      poolId: hybridDefinition.id, x: 25, y: 25, hp: 51, maxHp: 58,
+    })
+    const map: BattleMap = {
+      id: 'moonbeam-shapechange-map', name: 'Moonbeam shapechange', width: 200, height: 100,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [caster, werewolf],
+      dnd5ePluginAreas: [{
+        id: 'moonbeam-area', pluginId: 'srd-5.1', featureId: 'spell:moonbeam',
+        sourceKind: 'core-spell', coreSpellId: 'moonbeam', label: '月华之光', color: '#c4b5fd',
+        sourceCharacterId: '', sourceTokenId: caster.id, cells: [{ col: 0, row: 0 }],
+        createdRound: 1, expiresAfterRound: 10, relation: 'enemy',
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 40 },
+      }],
+    }
+    const initiativeOrder = [caster, werewolf].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'moonbeam-shapechange', map, characters: [], initiativeOrder,
+    })
+    const combatant = snapshot.state.combatants[werewolf.id]
+    combatant.statBlockId = humanDefinition.id
+    combatant.classState.shapechangerReversionAreaIds = ['moonbeam-area']
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state, map, characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.map.tokens.find((entry) => entry.id === werewolf.id)).toMatchObject({
+      poolId: humanDefinition.id,
+      label: humanDefinition.name,
+      dnd5eCombatState: { shapechangerReversionAreaIds: ['moonbeam-area'] },
+    })
+
+    const inside = createDnd5eMapCombatSnapshot({
+      combatId: 'moonbeam-shapechange', map: plan.map, characters: [], initiativeOrder,
+    })
+    expect(inside.state.combatants[werewolf.id].classState.shapechangerReversionAreaIds)
+      .toEqual(['moonbeam-area'])
+    const outsideMap = {
+      ...plan.map,
+      tokens: plan.map.tokens.map((entry) => entry.id === werewolf.id
+        ? { ...entry, x: 125, y: 75 }
+        : entry),
+    }
+    const outside = createDnd5eMapCombatSnapshot({
+      combatId: 'moonbeam-shapechange', map: outsideMap, characters: [], initiativeOrder,
+    })
+    expect(outside.state.combatants[werewolf.id].classState.shapechangerReversionAreaIds)
+      .toBeUndefined()
+  })
+
+  it('melts a simulacrum token when a Headless result reaches 0 HP', () => {
+    const subject = { ...character(), id: 'sim-subject', name: 'Wizard', level: 8 }
+    const source = token({
+      id: 'sim-source', label: subject.name, type: 'player', characterId: subject.id,
+      hp: 20, maxHp: 20,
+    })
+    const simulacrum = token({
+      id: 'activity-simulacrum:sim-source', label: 'Wizard·拟像', type: 'player',
+      characterId: subject.id, hp: 10, maxHp: 10, x: 50,
+      dnd5eSimulacrum: {
+        schemaVersion: 1,
+        sourceTokenId: source.id,
+        subjectTokenId: source.id,
+        sourceCharacterId: subject.id,
+        sourceActivityId: 'simulacrum',
+        createdRound: 1,
+        level: 8,
+        proficiencyBonus: 3,
+        abilities: { ...subject.abilities },
+        armorClass: 12,
+        maximumHitPoints: 10,
+        speed: 30,
+        sizeRank: 2,
+        creatureType: 'humanoid',
+        classResources: { 'dnd5e-spell-slot-1': { current: 2, maximum: 4 } },
+        cannotIncreaseLevel: true,
+        cannotRegainSpellSlots: true,
+        cannotRegainHitPoints: true,
+      },
+    })
+    const map: BattleMap = {
+      id: 'simulacrum-melt-map', name: 'Simulacrum melt', width: 100, height: 100,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [source, simulacrum],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'simulacrum-melt-combat', map, characters: [subject],
+      initiativeOrder: [
+        { tokenId: source.id, label: source.label, emoji: '', color: '', roll: 15 },
+        { tokenId: simulacrum.id, label: simulacrum.label, emoji: '', color: '', roll: 15, turnKind: 'source-companion' },
+      ],
+    })
+    snapshot.state.combatants[simulacrum.id].currentHp = 0
+
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [subject],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.map.tokens.map((entry) => entry.id)).toEqual([source.id])
+    expect(plan.changedTokenIds).toContain(simulacrum.id)
+    expect(plan.tokenPatches?.[simulacrum.id]).toBeUndefined()
+    expect(plan.characters[0].currentHp).toBe(subject.currentHp)
+  })
+
+  it('persists a simulacrum spell-slot-only change to the map token snapshot', () => {
+    const subject = { ...character(), id: 'slot-subject', name: 'Wizard', level: 8 }
+    const source = token({
+      id: 'slot-source', label: subject.name, type: 'player', characterId: subject.id,
+      hp: 20, maxHp: 20,
+    })
+    const simulacrum = token({
+      id: 'activity-simulacrum:slot-source', label: 'Wizard·拟像', type: 'player',
+      characterId: subject.id, hp: 10, maxHp: 10, x: 50,
+      dnd5eSimulacrum: {
+        schemaVersion: 1,
+        sourceTokenId: source.id,
+        subjectTokenId: source.id,
+        sourceCharacterId: subject.id,
+        sourceActivityId: 'simulacrum',
+        createdRound: 1,
+        level: 8,
+        proficiencyBonus: 3,
+        abilities: { ...subject.abilities },
+        armorClass: 12,
+        maximumHitPoints: 10,
+        speed: 30,
+        sizeRank: 2,
+        creatureType: 'humanoid',
+        classResources: { 'dnd5e-spell-slot-1': { current: 2, maximum: 4 } },
+        cannotIncreaseLevel: true,
+        cannotRegainSpellSlots: true,
+        cannotRegainHitPoints: true,
+      },
+    })
+    const map: BattleMap = {
+      id: 'simulacrum-slot-map', name: 'Simulacrum slot', width: 100, height: 100,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [source, simulacrum],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'simulacrum-slot-combat', map, characters: [subject],
+      initiativeOrder: [
+        { tokenId: source.id, label: source.label, emoji: '', color: '', roll: 15 },
+        { tokenId: simulacrum.id, label: simulacrum.label, emoji: '', color: '', roll: 15, turnKind: 'source-companion' },
+      ],
+    })
+    snapshot.state.combatants[simulacrum.id].classResources['dnd5e-spell-slot-1'].current = 1
+
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [subject],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.map.tokens.find((entry) => entry.id === simulacrum.id)?.dnd5eSimulacrum?.classResources)
+      .toMatchObject({ 'dnd5e-spell-slot-1': { current: 1, maximum: 4 } })
+    expect(plan.changedTokenIds).toContain(simulacrum.id)
+    expect(plan.tokenPatches?.[simulacrum.id]?.dnd5eSimulacrum?.classResources)
+      .toMatchObject({ 'dnd5e-spell-slot-1': { current: 1, maximum: 4 } })
   })
 })

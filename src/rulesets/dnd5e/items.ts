@@ -23,12 +23,18 @@ import {
   type CombatTransaction,
 } from '../../lib/combatTransaction'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
-import { DND5E_SRD_MAGIC_ITEM_TEMPLATES } from './magicItems'
+import {
+  DND5E_MAGIC_ITEM_RARITY_LABELS,
+  DND5E_SRD_MAGIC_ITEM_TEMPLATES,
+} from './magicItems'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
 import { DND5E_SRD_CLASS_DEFINITIONS, dnd5eClassDefinition, dnd5eIgnoresMagicItemRequirements } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 import { projectDnd5eActiveEffectState } from './activeEffects'
 import { dnd5eRageFeatureCarryingCapacityMultiplier } from './rageFeature'
+import { DND5E_SRD_SPELL_MATERIAL_ITEM_TEMPLATES } from './spellMaterials'
+import type { Dnd5eActivityCapabilityProposal } from './activities/dnd5eActivityExecutor'
+import { dnd5eLinkedPlanarObjectAuthorityRecordId } from './spellAuthorityState'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 const EMPTY_CURRENCY: Dnd5eCurrencyWallet = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 }
@@ -62,8 +68,19 @@ const AMMUNITION_KIND_BY_WEAPON_ID: Readonly<Record<string, Dnd5eAmmunitionKind>
 function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
   const focusText = equipmentSpellcastingFocusText(item)
-  if (!rules) return `该装备不替换基础武器或护甲公式。${equipmentEffectsText(item) || '具体规则由当前规则包或 DM 裁定。'}${focusText}`
-  if (item.id === 'dnd5e-net') return '射程 5/15 尺；命中大型或更小生物时使其受束缚。挣脱、破坏捕网以及每次只能进行一次捕网攻击由 Headless/DM 按 SRD 5.1 裁定。'
+  if (!rules) {
+    const effects = equipmentEffectsText(item)
+    return effects
+      ? `该装备不会替换基础武器伤害或护甲公式。${effects}${focusText}`
+      : `该装备占用${equipmentSlotLabel(item.slot)}栏位，但没有声明攻击、护甲或数值加成。${focusText || '装备后仅作为所穿戴或持用的物件记录。'}`
+  }
+  if (item.id === 'dnd5e-net') {
+    return [
+      '军用远程武器，射程 5/15 尺。投掷：5 尺以内属于普通射程，5–15 尺属于远射程，超过 15 尺无法攻击。特殊：使用捕网进行攻击时，无论你通常能进行多少次攻击，该动作、附赠动作或反应中都只能进行一次捕网攻击。',
+      '命中大型或更小且并非无定形的生物时，目标陷入束缚；捕网不会造成伤害。被束缚的生物或其触及范围内的另一生物可以使用一个动作进行 DC 10 力量检定，成功便挣脱。',
+      '捕网的 AC 为 10；对其造成 5 点挥砍伤害也会摧毁捕网并释放目标，超出的伤害不会传递给目标。由于通常在 5 尺内进行远程攻击会具有劣势，而超过 5 尺又属于远射程，捕网攻击通常会具有劣势。',
+    ].join('\n\n')
+  }
   if (rules.kind === 'shield') return `盾牌。持用时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}${focusText}`
   if (rules.kind === 'armor') {
     const category = rules.category === 'light' ? '轻甲' : rules.category === 'medium' ? '中甲' : '重甲'
@@ -72,14 +89,53 @@ function equipmentRulesText(item: EquipmentItem): string {
       : rules.dexterityBonus === 'max-2'
         ? '加上至多 +2 的敏捷调整值'
         : '不加敏捷调整值'
-    return `${category}。护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}${focusText}`
+    return `${category}。穿戴并生效时，你的护甲等级为 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}${focusText}`
   }
   const category = rules.category === 'simple' ? '简易武器' : '军用武器'
   const range = rules.mode === 'ranged' && rules.rangeFeet
     ? `，射程 ${rules.rangeFeet.normal}/${rules.rangeFeet.long} 尺`
     : `，触及 ${rules.reachFeet ?? 5} 尺`
-  const properties = rules.properties?.length ? `；属性：${rules.properties.join('、')}` : ''
-  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}${focusText}`
+  const properties = rules.properties?.length
+    ? `\n\n武器属性：\n${rules.properties.map((property) =>
+        `• ${weaponPropertyExplanation(item, property)}`,
+      ).join('\n')}`
+    : ''
+  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}。${equipmentEffectsText(item)}${focusText}${properties}`
+}
+
+function weaponPropertyExplanation(item: EquipmentItem, property: string): string {
+  const rules = item.dnd5e
+  if (!rules || rules.kind !== 'weapon') return property
+  if (property.includes('多才多艺')) {
+    const versatileDie = property.match(/1d\d+/i)?.[0] ?? `${rules.damage.count}d${rules.damage.sides}`
+    return `多才多艺：单手攻击使用 ${rules.damage.count}d${rules.damage.sides} 伤害骰；双手攻击改用 ${versatileDie}。系统会根据副手占用、强制单手和擒抱状态自动选择。`
+  }
+  if (property.startsWith('投掷')) {
+    const range = property.match(/(\d+)\/(\d+)/)
+    const rangeText = range ? `${range[1]} 尺以内为普通射程，${range[1]}–${range[2]} 尺为远射程` : '使用装备列出的普通与远射程'
+    return `投掷：可以把该武器投出进行远程武器攻击，并继续使用近战攻击所用的属性调整值计算命中和伤害；${rangeText}，在远射程攻击具有劣势，超过远射程无法攻击。`
+  }
+  if (property === '灵巧') return '灵巧：每次攻击时可选择力量或敏捷调整值计算命中与伤害，但同一次攻击的两项掷骰必须使用同一属性。'
+  if (property === '轻型') return '轻型：适合双武器战斗；当另一只手也持有轻型近战武器时，可按双武器战斗规则用附赠动作进行副手攻击。'
+  if (property === '重型') return '重型：小型或微型生物使用该武器攻击时具有劣势，因为其尺寸和重量难以有效操控。'
+  if (property === '双手') return '双手：进行攻击时必须用双手持用；仅仅拿着或携带该武器时不要求两只手持续占用。'
+  if (property === '触及') return '触及：使用该武器攻击时，触及范围增加 5 尺；使用它发动借机攻击时也采用增加后的触及范围。'
+  if (property === '弹药') return '弹药：每次攻击必须消耗一枚与武器匹配的弹药；弹药从箭袋、弩矢盒等容器中取出属于攻击的一部分。战斗结束后花费 1 分钟搜索战场，可以回收已用弹药的一半。'
+  if (property === '装填') return '装填：由于装填所需时间，无论角色通常能进行多少次攻击，每次使用一个动作、附赠动作或反应射击该武器时都只能发射一枚弹药。'
+  if (property === '特殊' && item.id === 'dnd5e-lance') return '特殊：当目标位于 5 尺内时，骑枪攻击具有劣势；未骑乘时使用骑枪需要双手，骑乘时可以单手使用。'
+  if (property === '特殊') return '特殊：该武器具有独立规则；具体限制已在本物品的规则正文中完整列出。'
+  return `${property}：该属性的数值和使用条件已由当前装备定义记录。`
+}
+
+function equipmentSlotLabel(slot: EquipmentSlot): string {
+  if (slot === 'mainWeapon') return '主手'
+  if (slot === 'offHand') return '副手'
+  if (slot === 'armor') return '护甲'
+  if (slot === 'helmet') return '头盔'
+  if (slot === 'shoes') return '鞋靴'
+  if (slot === 'ring' || slot === 'ring2') return '戒指'
+  if (slot === 'belt') return '腰带'
+  return '项链'
 }
 
 function equipmentSpellcastingFocusText(item: EquipmentItem): string {
@@ -160,22 +216,28 @@ const EQUIPMENT_DETAILS: Readonly<Record<string, { englishName: string; weightLb
   'dnd5e-leather-armor': { englishName: 'Leather armor', weightLb: 10, amount: 10, currency: 'gp' },
 }
 
+/** SRD equipment whose ordinary physical form is longer than six feet. */
+const EQUIPMENT_LONGEST_DIMENSION_FEET: Readonly<Record<string, number>> = {
+  'dnd5e-glaive': 8,
+  'dnd5e-halberd': 8,
+  'dnd5e-lance': 10,
+  'dnd5e-pike': 10,
+}
+
 export const DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] =
   DND5E_SRD_EQUIPMENT_CATALOG.map((equipment) => {
     const detail = EQUIPMENT_DETAILS[equipment.id]
+    const rulesText = equipmentRulesText(equipment)
     return {
       id: `srd-5.1:equipment:${equipment.id}`,
       name: equipment.name,
       englishName: detail?.englishName,
       category: 'equipment',
       icon: equipmentIcon(equipment),
-      description: equipment.dnd5e?.kind === 'weapon'
-        ? '可装备的 SRD 5.1 武器。'
-        : equipment.dnd5e?.kind === 'shield'
-          ? '持用后提高护甲等级的防具。'
-          : '决定基础护甲等级的防具。',
-      rulesText: equipmentRulesText(equipment),
+      description: rulesText,
+      rulesText,
       weightLb: detail?.weightLb,
+      longestDimensionFeet: EQUIPMENT_LONGEST_DIMENSION_FEET[equipment.id],
       cost: detail ? { amount: detail.amount, currency: detail.currency } : undefined,
       stackable: false,
       equipment: { ...equipment },
@@ -202,35 +264,35 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('hammer', '锤子', 'Hammer', 'adventuring-gear', 'generic', 3, 1, 'gp', '用于钉入岩钉或处理一般营地工作。'),
   gear('piton', '岩钉', 'Piton', 'adventuring-gear', 'generic', 0.25, 5, 'cp', '攀爬和固定绳索使用的金属钉。'),
   gear('candle', '蜡烛', 'Candle', 'adventuring-gear', 'generic', 0, 1, 'cp', '燃烧 1 小时，发出 5 尺明亮光照和其外 5 尺微光。'),
-  gear('string-10-feet', '细绳（10 尺）', 'String (10 feet)', 'adventuring-gear', 'generic', 0, 1, 'sp', '十尺长的普通细绳。'),
+  gear('string-10-feet', '细绳（10 尺）', 'String (10 feet)', 'adventuring-gear', 'string', 0, 1, 'sp', '十尺长的普通细绳。'),
   gear('bell', '铃铛', 'Bell', 'adventuring-gear', 'generic', 0, 1, 'gp', '可配合细绳制作简易警报。'),
   gear('hooded-lantern', '附盖提灯', 'Lantern, hooded', 'adventuring-gear', 'generic', 2, 5, 'gp', '燃烧油料时提供可调节的光照。'),
   gear('lamp', '油灯', 'Lamp', 'adventuring-gear', 'generic', 1, 5, 'sp', '燃烧油料时提供光照。'),
-  gear('oil-flask', '油（瓶）', 'Oil (flask)', 'consumable', 'generic', 1, 1, 'sp', '可作为灯具燃料，泼洒或点燃时由 DM 裁定。'),
+  gear('oil-flask', '油（瓶）', 'Oil (flask)', 'consumable', 'oil-flask', 1, 1, 'sp', '可作为灯具燃料，泼洒或点燃时由 DM 裁定。'),
   gear('chest', '箱子', 'Chest', 'container', 'generic', 25, 5, 'gp', '可容纳 12 立方尺或 300 磅物品。'),
   gear('map-scroll-case', '地图或卷轴匣', 'Case, map or scroll', 'container', 'generic', 1, 1, 'gp', '用于保护地图和卷轴。'),
-  gear('fine-clothes', '优质服装', 'Clothes, fine', 'adventuring-gear', 'generic', 6, 15, 'gp', '适合正式场合的优质服装。'),
-  gear('common-clothes', '普通服装', 'Clothes, common', 'adventuring-gear', 'generic', 3, 5, 'sp', '一套普通服装。'),
+  gear('fine-clothes', '优质服装', 'Clothes, fine', 'adventuring-gear', 'clothing', 6, 15, 'gp', '适合正式场合的优质服装。'),
+  gear('common-clothes', '普通服装', 'Clothes, common', 'adventuring-gear', 'clothing', 3, 5, 'sp', '一套普通服装。'),
   gear('ink-bottle', '墨水（1 盎司瓶）', 'Ink (1 ounce bottle)', 'adventuring-gear', 'generic', 0, 10, 'gp', '书写用墨水。'),
   gear('ink-pen', '墨水笔', 'Ink pen', 'adventuring-gear', 'generic', 0, 2, 'cp', '蘸取墨水书写。'),
   gear('paper-sheet', '纸张', 'Paper (one sheet)', 'adventuring-gear', 'generic', 0, 2, 'sp', '一张书写用纸。'),
   gear('parchment-sheet', '羊皮纸', 'Parchment (one sheet)', 'adventuring-gear', 'generic', 0, 1, 'sp', '一张书写用羊皮纸。'),
-  gear('perfume-vial', '香水（小瓶）', 'Perfume (vial)', 'adventuring-gear', 'generic', 0, 5, 'gp', '一小瓶香水。'),
+  gear('perfume-vial', '香水（小瓶）', 'Perfume (vial)', 'adventuring-gear', 'perfume', 0, 5, 'gp', '一小瓶香水。'),
   gear('sealing-wax', '封蜡', 'Sealing wax', 'adventuring-gear', 'generic', 0, 5, 'sp', '用于封缄信件。'),
   gear('soap', '肥皂', 'Soap', 'adventuring-gear', 'generic', 0, 2, 'cp', '清洁用品。'),
-  gear('costume', '戏服', 'Costume clothes', 'adventuring-gear', 'generic', 4, 5, 'gp', '表演使用的服装。'),
+  gear('costume', '戏服', 'Costume clothes', 'adventuring-gear', 'clothing', 4, 5, 'gp', '表演使用的服装。'),
   gear('disguise-kit', '易容工具', 'Disguise kit', 'tool', 'generic', 3, 25, 'gp', '用于改变外貌的化妆品、染料和小道具。'),
   gear('blanket', '毛毯', 'Blanket', 'adventuring-gear', 'generic', 3, 5, 'sp', '旅行休息使用的毛毯。'),
   gear('alms-box', '布施盒', 'Alms box', 'container', 'generic', 0, 0, 'cp', '祭司套组中的布施盒。'),
   gear('incense-block', '熏香块', 'Block of incense', 'adventuring-gear', 'generic', 0, 0, 'cp', '宗教仪式使用的熏香。'),
   gear('censer', '香炉', 'Censer', 'adventuring-gear', 'generic', 0, 0, 'cp', '燃烧熏香的仪式器具。'),
-  gear('vestments', '祭服', 'Vestments', 'adventuring-gear', 'generic', 0, 0, 'cp', '宗教仪式使用的服装。'),
+  gear('vestments', '祭服', 'Vestments', 'adventuring-gear', 'clothing', 0, 0, 'cp', '宗教仪式使用的服装。'),
   gear('lore-book', '学识书籍', 'Book of lore', 'adventuring-gear', 'generic', 5, 25, 'gp', '有关特定学识的书籍。'),
   gear('sand-bag', '小袋沙', 'Little bag of sand', 'adventuring-gear', 'generic', 0, 0, 'cp', '学者套组中的吸墨沙。'),
-  gear('small-knife', '小刀', 'Small knife', 'adventuring-gear', 'generic', 0, 0, 'cp', '学者套组中的小刀；不作为战斗武器。'),
+  gear('small-knife', '小刀', 'Small knife', 'adventuring-gear', 'small-knife', 0, 0, 'cp', '学者套组中的小刀；不作为战斗武器。'),
   gear('arrows', '箭', 'Arrows', 'adventuring-gear', 'generic', 0.05, 5, 'cp', '短弓和长弓使用的弹药。'),
   gear('crossbow-bolts', '弩矢', 'Crossbow bolts', 'adventuring-gear', 'generic', 0.075, 5, 'cp', '轻弩等弩类武器使用的弹药。'),
-  gear('sling-bullets', '投石索弹丸', 'Sling bullets', 'adventuring-gear', 'generic', 0.075, 4, 'cp', '投石索使用的铅制弹丸。'),
+  gear('sling-bullets', '投石索弹丸', 'Sling bullets', 'adventuring-gear', 'sling-bullets', 0.075, 4, 'cp', '投石索使用的铅制弹丸。'),
   gear('blowgun-needles', '吹箭针', 'Blowgun needles', 'adventuring-gear', 'generic', 0.02, 2, 'cp', '吹箭筒使用的细针。'),
   gear('component-pouch', '材料包', 'Component pouch', 'container', 'generic', 2, 25, 'gp', '存放施展法术所需、未标明价格且不会被消耗的材料成分。'),
   gear('arcane-focus', '奥术法器', 'Arcane focus', 'adventuring-gear', 'spellcasting-focus', 1, 10, 'gp', '奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。', undefined, handheldFocus('arcane-focus', '奥术法器')),
@@ -240,7 +302,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('thieves-tools', '盗贼工具', "Thieves' tools", 'tool', 'generic', 1, 25, 'gp', '开锁与拆除陷阱使用的专用工具。'),
   gear('bagpipes', '风笛', 'Bagpipes', 'tool', 'generic', 6, 30, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('bagpipes', '风笛')),
   gear('drum', '鼓', 'Drum', 'tool', 'generic', 3, 6, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('drum', '鼓')),
-  gear('dulcimer', '扬琴', 'Dulcimer', 'tool', 'generic', 10, 25, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('dulcimer', '扬琴')),
+  gear('dulcimer', '扬琴', 'Dulcimer', 'tool', 'dulcimer', 10, 25, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('dulcimer', '扬琴')),
   gear('lute', '鲁特琴', 'Lute', 'tool', 'generic', 2, 35, 'gp', '吟游诗人常用的乐器；作为施法法器时必须持用。', undefined, handheldFocus('lute', '鲁特琴')),
   gear('flute', '长笛', 'Flute', 'tool', 'generic', 1, 2, 'gp', '一种便携乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('flute', '长笛')),
   gear('horn', '号角', 'Horn', 'tool', 'generic', 2, 3, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('horn', '号角')),
@@ -277,7 +339,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   }),
   gear('holy-water-flask', '圣水（瓶）', 'Holy water (flask)', 'consumable', 'holy-water', 1, 25, 'gp', '泼洒至 5 尺内或投掷至 20 尺。以临时武器远程攻击命中邪魔或亡灵时，造成 2d6 光耀伤害。', {
     economy: 'action', consumeQuantity: 1, targeting: { kind: 'creature', rangeFeet: 20 }, effect: { kind: 'dm-adjudication', adjudication: '选择泼洒或投掷目标；仅对邪魔或亡灵结算 2d6 光耀伤害。' },
-  }),
+  }, undefined, { tags: ['holy-water'], unitValueGp: 25 }),
   gear('antitoxin-vial', '抗毒剂（瓶）', 'Antitoxin (vial)', 'consumable', 'antitoxin', 0, 50, 'gp', '饮用后 1 小时内，对抗毒素的豁免检定具有优势；构装生物与亡灵无法获得该增益。', {
     economy: 'action', consumeQuantity: 1, effect: { kind: 'dm-adjudication', adjudication: '为饮用者添加持续 1 小时的抗毒优势；构装生物与亡灵不生效。' },
   }),
@@ -290,8 +352,8 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
     englishName: 'Potion of healing',
     category: 'consumable',
     icon: 'healing-potion',
-    description: '装有红色液体的常见魔法药水。摇晃时液体会闪烁微光。',
-    rulesText: '饮用者恢复 2d4 + 2 点生命值。饮用或给另一名生物服用药水需要一个动作。',
+    description: '饮用或给另一名生物服用需要一个动作并消耗此药水；饮用者恢复 2d4 + 2 点生命值。该恢复不能使当前生命值超过生命值上限。',
+    rulesText: '饮用或给另一名生物服用需要一个动作并消耗此药水；饮用者恢复 2d4 + 2 点生命值。该恢复不能使当前生命值超过生命值上限。',
     weightLb: 0.5,
     cost: { amount: 50, currency: 'gp' },
     stackable: true,
@@ -299,6 +361,39 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
     magicItem: { kind: 'potion', rarity: 'common', attunement: 'none', automation: 'headless' },
     source: SRD_SOURCE,
   },
+  {
+    id: 'srd-5.1:item:goodberry',
+    name: '神莓', englishName: 'Goodberry', category: 'consumable', icon: 'rations',
+    description: '由神莓术生成。使用一个动作食用并恢复 1 点生命值；生成后 24 小时失效。',
+    rulesText: '使用一个动作食用一枚神莓，恢复 1 点生命值。库存按战役时间自动移除过期神莓。',
+    weightLb: 0, stackable: true,
+    use: {
+      economy: 'action', consumeQuantity: 1,
+      effect: { kind: 'healing', dice: { count: 0, sides: 1, bonus: 1 } },
+    },
+    source: SRD_SOURCE,
+  },
+  {
+    id: 'srd-5.1:item:conjured-food-portion',
+    name: '魔法生成的食物（1 人日份）', englishName: 'Conjured food portion',
+    category: 'consumable', icon: 'rations',
+    description: '由造粮术生成的一人日份食物；生成后 24 小时变质。',
+    rulesText: '提供一名类人生物一天所需食物；战役时间达到过期时刻后由 Host 自动移除。',
+    weightLb: 3, stackable: true,
+    use: { economy: 'none', consumeQuantity: 1, effect: { kind: 'dm-adjudication', adjudication: '记录一名生物当天获得充足食物。' } },
+    source: SRD_SOURCE,
+  },
+  {
+    id: 'srd-5.1:item:conjured-water-gallon',
+    name: '魔法生成的清水（1 加仑）', englishName: 'Conjured water (1 gallon)',
+    category: 'consumable', icon: 'waterskin',
+    description: '由造粮术生成的一加仑清洁饮水；不会随法术生成的食物一起变质。',
+    rulesText: '一加仑清水；可转移或消耗，旅行饮水需求由启用的旅行规则结算。',
+    weightLb: 8.34, stackable: true,
+    use: { economy: 'none', consumeQuantity: 1, effect: { kind: 'dm-adjudication', adjudication: '记录一加仑饮水的分配或消耗。' } },
+    source: SRD_SOURCE,
+  },
+  ...DND5E_SRD_SPELL_MATERIAL_ITEM_TEMPLATES,
 ] as const
 
 export const DND5E_SRD_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
@@ -320,6 +415,17 @@ export function dnd5eInventoryItemTemplate(templateId: string): Dnd5eInventoryIt
   return ITEM_TEMPLATE_BY_ID.get(templateId) ?? dnd5ePluginItemDefinition(templateId)
 }
 
+/**
+ * 当前规则运行时可用的完整物品目录。商店、奖励和 DM 工具通过这个入口同时
+ * 看见 SRD 核心物品与已激活工坊插件贡献的物品，不需要为插件另建一套库存池。
+ */
+export function listDnd5eInventoryItemTemplates(): readonly Dnd5eInventoryItemTemplate[] {
+  const byId = new Map<string, Dnd5eInventoryItemTemplate>()
+  for (const item of DND5E_SRD_ITEM_TEMPLATES) byId.set(item.id, item)
+  for (const item of registeredDnd5ePluginItems()) byId.set(item.id, item)
+  return [...byId.values()]
+}
+
 export function dnd5eInventoryItemTemplateForEquipment(equipmentId: string): Dnd5eInventoryItemTemplate | undefined {
   return DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES.find((item) => item.equipment?.id === equipmentId) ??
     registeredDnd5ePluginItems().find((item) => item.equipment?.id === equipmentId)
@@ -330,6 +436,12 @@ function inventoryTemplateForStoredEntry(entry: Dnd5eInventoryEntry): Dnd5eInven
     return ITEM_TEMPLATE_BY_ID.get(CANONICAL_ARCANE_FOCUS_TEMPLATE_ID) ?? entry.item
   }
   return dnd5eInventoryItemTemplate(entry.templateId) ?? entry.item
+}
+
+function isProjectedUnidentifiedMagicItem(entry: Dnd5eInventoryEntry): boolean {
+  return entry.identified === false &&
+    entry.item.category === 'magic-item' &&
+    entry.templateId.startsWith('unidentified:')
 }
 
 export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id' | 'equipment'>): Dnd5eInventory {
@@ -383,9 +495,32 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
         quantity,
         resources,
         equippedSlot: isEquipmentSlot(entry.equippedSlot) ? entry.equippedSlot : undefined,
-        identified: item.magicItem ? (raw?.schemaVersion === 3 ? entry.identified !== false : true) : true,
+        identified: item.magicItem
+          ? (raw?.schemaVersion === 3 ? entry.identified !== false : true)
+          : isProjectedUnidentifiedMagicItem(entry) ? false : true,
         remainingCharges: undefined,
         acquiredAt: Number.isFinite(entry.acquiredAt) ? entry.acquiredAt : 0,
+        expiresAtWorldMinute: Number.isSafeInteger(entry.expiresAtWorldMinute) &&
+          Number(entry.expiresAtWorldMinute) >= 0
+          ? Number(entry.expiresAtWorldMinute)
+          : undefined,
+        generatedByRulesId: typeof entry.generatedByRulesId === 'string' &&
+          /^[a-z0-9][a-z0-9._:-]{0,199}$/.test(entry.generatedByRulesId)
+          ? entry.generatedByRulesId
+          : undefined,
+        contaminants: [...new Set((entry.contaminants ?? []).filter(
+          (value): value is 'poison' | 'disease' => value === 'poison' || value === 'disease',
+        ))],
+        planarState: entry.planarState === 'ethereal' ? 'ethereal' :
+          entry.planarState === 'material' ? 'material' : undefined,
+        linkedSpellAuthorityRecordId: typeof entry.linkedSpellAuthorityRecordId === 'string' &&
+          /^[a-z0-9][a-z0-9._:-]{0,255}$/.test(entry.linkedSpellAuthorityRecordId)
+          ? entry.linkedSpellAuthorityRecordId
+          : undefined,
+        linkedSpellFocusAuthorityRecordId: typeof entry.linkedSpellFocusAuthorityRecordId === 'string' &&
+          /^[a-z0-9][a-z0-9._:-]{0,255}$/.test(entry.linkedSpellFocusAuthorityRecordId)
+          ? entry.linkedSpellFocusAuthorityRecordId
+          : undefined,
       }
     })
 
@@ -705,6 +840,7 @@ export function dnd5eAttunedItemCount(character: Character): number {
 }
 
 export function dnd5eInventoryEntryIsActive(entry: Dnd5eInventoryEntry): boolean {
+  if (entry.planarState === 'ethereal') return false
   if (entry.item.magicItem && entry.identified === false) return false
   return entry.item.magicItem?.attunement !== 'required' || entry.attuned === true
 }
@@ -724,9 +860,12 @@ export function resolveDnd5eAttunementAfterShortRest(character: Character, now =
   return { ...character, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
 
-export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate): number[] {
-  if (item.use?.effect.kind !== 'healing') return []
-  const { count, sides } = item.use.effect.dice
+export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate, useActionId?: string): number[] {
+  const use = useActionId == null
+    ? item.use
+    : item.useActions?.find((action) => action.id === useActionId)
+  if (use?.effect.kind !== 'healing') return []
+  const { count, sides } = use.effect.dice
   return Array.from({ length: count }, () => secureDie(sides))
 }
 
@@ -735,14 +874,27 @@ export function applyDnd5eInventoryMutation(
   mutation: Dnd5eInventoryMutation,
   options: { turnEconomy?: Dnd5eTurnEconomyCounts; transaction?: CombatTransaction } = {},
 ): Dnd5eInventoryMutationResult & { transaction?: CombatTransaction } {
-  const result = applyDnd5eInventoryMutationInternal(characters, mutation, { turnEconomy: options.turnEconomy })
+  const mutationResult = applyDnd5eInventoryMutationInternal(characters, mutation, { turnEconomy: options.turnEconomy })
+  const result = mutationResult.ok
+    ? {
+        ...mutationResult,
+        characters: reconcileDnd5eContingencyInventory(
+          reconcileDnd5eWardingBondInventory(mutationResult.characters),
+        ),
+      }
+    : mutationResult
   let transaction = options.transaction
   if (!transaction) return result
 
   if (mutation.type === 'use' && mutation.healingRolls?.length) {
     const character = characters.find((candidate) => candidate.id === mutation.characterId)
-    const entry = character?.dnd5eInventory?.entries.find((candidate) => candidate.instanceId === mutation.instanceId)
-    const dice = entry?.item.use?.effect.kind === 'healing' ? entry.item.use.effect.dice : undefined
+    const entry = character
+      ? normalizeDnd5eInventory(character).entries.find((candidate) => candidate.instanceId === mutation.instanceId)
+      : undefined
+    const use = entry
+      ? dnd5eInventoryEntryUseAction(entry, mutation.useActionId)
+      : undefined
+    const dice = use?.effect.kind === 'healing' ? use.effect.dice : undefined
     if (
       dice && mutation.healingRolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= dice.sides) &&
       !transaction.rollLedger.entries.some((candidate) => candidate.id === `${transaction!.id}:item-healing`)
@@ -808,6 +960,13 @@ export function applyDnd5eInventoryGrantBundle(
   }))
   if (validated.some((entry) => !entry.quantity)) return failed(characters, 'invalid-quantity')
   if (validated.some((entry) => !entry.template)) return failed(characters, 'template-not-found')
+  if (validated.some(({ grant }) =>
+    (grant.expiresAtWorldMinute != null && (
+      !Number.isSafeInteger(grant.expiresAtWorldMinute) || grant.expiresAtWorldMinute < 0
+    )) ||
+    (grant.generatedByRulesId != null &&
+      !/^[a-z0-9][a-z0-9._:-]{0,199}$/.test(grant.generatedByRulesId)),
+  )) return failed(characters, 'invalid-quantity')
   const currencyGrants = (input.currencyGrants ?? []).map((grant) => ({
     currency: grant.currency,
     amount: Number(grant.amount),
@@ -823,6 +982,8 @@ export function applyDnd5eInventoryGrantBundle(
   for (const entry of validated) {
     next = addItem(next, entry.template!, entry.quantity!, {
       identified: entry.grant.identified ?? true,
+      expiresAtWorldMinute: entry.grant.expiresAtWorldMinute,
+      generatedByRulesId: entry.grant.generatedByRulesId,
     })
   }
   const inventory = normalizeDnd5eInventory(next)
@@ -858,6 +1019,488 @@ export function applyDnd5eInventoryGrantBundle(
   )
 }
 
+/** Identify only offers magic-item instances whose properties are still hidden. */
+export function dnd5eInventoryEntryIsUnidentifiedMagicItem(
+  entry: Dnd5eInventoryEntry,
+): boolean {
+  return entry.quantity > 0 && entry.identified === false && (
+    entry.item.magicItem != null || isProjectedUnidentifiedMagicItem(entry)
+  )
+}
+
+/** Stable player-facing label for selecting one concrete unidentified instance. */
+export function dnd5eInventoryIdentificationOptionLabel(
+  entry: Dnd5eInventoryEntry,
+): string {
+  const rarity = entry.item.magicItem?.rarity ?? entry.unidentifiedMagicItemRarity
+  return rarity
+    ? `${entry.item.name}（${DND5E_MAGIC_ITEM_RARITY_LABELS[rarity]}）`
+    : `${entry.item.name}（稀有度未知）`
+}
+
+export interface Dnd5eInventoryIdentificationCandidate {
+  characterId: string
+  characterName: string
+  inventoryRevision: number
+  entry: Dnd5eInventoryEntry
+  label: string
+}
+
+/**
+ * Room-wide Identify candidates. Other players' inventories may be a
+ * server-redacted projection containing only unidentified placeholders; this
+ * helper deliberately depends only on those safe fields.
+ */
+export function dnd5eInventoryIdentificationCandidates(
+  characters: readonly Character[],
+): Dnd5eInventoryIdentificationCandidate[] {
+  return characters.flatMap((character) => {
+    if (character.visibleToPlayers === false) return []
+    const inventory = normalizeDnd5eInventory(character)
+    return inventory.entries
+      .filter(dnd5eInventoryEntryIsUnidentifiedMagicItem)
+      .map((entry) => {
+        const rarity = entry.item.magicItem?.rarity ?? entry.unidentifiedMagicItemRarity
+        const rarityLabel = rarity ? DND5E_MAGIC_ITEM_RARITY_LABELS[rarity] : '稀有度未知'
+        return {
+          characterId: character.id,
+          characterName: character.name,
+          inventoryRevision: inventory.revision ?? 0,
+          entry,
+          label: `${character.name} - ${entry.item.name} - ${rarityLabel}`,
+        }
+      })
+  })
+}
+
+export function dnd5eInventoryEntryIsNonmagicalFoodOrDrink(
+  entry: Dnd5eInventoryEntry,
+): boolean {
+  if (entry.item.magicItem || entry.generatedByRulesId === 'goodberry') return false
+  return entry.item.icon === 'rations' || entry.item.icon === 'waterskin'
+}
+
+type Dnd5eLinkedSpellAuthorityEstablishment = Extract<
+  Dnd5eActivityCapabilityProposal,
+  { kind: 'establish-spell-authority' }
+>
+
+type Dnd5eLinkedSpellAuthorityTransition = Extract<
+  Dnd5eActivityCapabilityProposal,
+  { kind: 'transition-spell-authority' }
+>
+
+export type Dnd5eLinkedSpellAuthorityInventoryFailure =
+  | 'inventory-context-required'
+  | 'stale-inventory-revision'
+  | 'material-component-unavailable'
+  | 'invalid-receipt'
+
+export type Dnd5eLinkedSpellAuthorityInventoryResult =
+  | {
+      ok: true
+      characters: Character[]
+      message: string
+      holderCharacterId?: string
+      holderName?: string
+      linkedItemName?: string
+      recalled?: boolean
+      deduplicated?: boolean
+    }
+  | {
+      ok: false
+      characters: Character[]
+      reason: Dnd5eLinkedSpellAuthorityInventoryFailure
+    }
+
+/**
+ * Commits the inventory half of a long-lived spell authority transaction.
+ * Combat records live in Headless state, while concrete item ownership,
+ * planar location and trigger materials live in character inventory.
+ */
+export function applyDnd5eLinkedSpellAuthorityInventoryHandoff(
+  characters: readonly Character[],
+  input: {
+    sourceCharacterId: string
+    sourceActorAuthorityId: string
+    receiptId: string
+    establishments?: readonly Dnd5eLinkedSpellAuthorityEstablishment[]
+    transitions?: readonly Dnd5eLinkedSpellAuthorityTransition[]
+    expectedInventoryRevision?: number
+  },
+): Dnd5eLinkedSpellAuthorityInventoryResult {
+  const receiptId = input.receiptId.trim()
+  if (!validAuthorityReceiptId(receiptId)) {
+    return { ok: false, characters: [...characters], reason: 'invalid-receipt' }
+  }
+  if (characters.some((character) =>
+    normalizeDnd5eInventory(character).authorityUseReceipts?.includes(receiptId))) {
+    return {
+      ok: true,
+      characters: [...characters],
+      message: '该长期法术物品事务已经结算，不会重复应用。',
+      deduplicated: true,
+    }
+  }
+  const sourceIndex = characters.findIndex((character) => character.id === input.sourceCharacterId)
+  if (sourceIndex < 0) {
+    return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+  }
+  const establishments = (input.establishments ?? []).filter((proposal) =>
+    proposal.recordKind === 'linked-planar-object')
+  const transitions = (input.transitions ?? []).filter((proposal) =>
+    proposal.recordKind === 'linked-planar-object')
+  if (establishments.length + transitions.length !== 1) {
+    return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+  }
+
+  const establishment = establishments[0]
+  if (establishment) {
+    const profile = establishment.linkedObjectProfile
+    const source = withNormalizedInventory(characters[sourceIndex])
+    const inventory = normalizeDnd5eInventory(source)
+    if (
+      establishment.sourceActorId !== input.sourceActorAuthorityId ||
+      !profile || !establishment.inventoryInstanceId ||
+      input.expectedInventoryRevision == null
+    ) {
+      return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+    }
+    if (inventory.revision !== input.expectedInventoryRevision) {
+      return { ok: false, characters: [...characters], reason: 'stale-inventory-revision' }
+    }
+    const linked = inventory.entries.find((entry) =>
+      entry.instanceId === establishment.inventoryInstanceId)
+    if (!linked) {
+      return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+    }
+    if (profile === 'instant-summons' && (
+      (linked.item.weightLb ?? 0) > 10 ||
+      (linked.item.longestDimensionFeet ?? 0) > 6 ||
+      linked.linkedSpellAuthorityRecordId != null
+    )) {
+      return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+    }
+    const recordId = dnd5eLinkedPlanarObjectAuthorityRecordId(
+      profile,
+      input.sourceActorAuthorityId,
+      linked.instanceId,
+    )
+    const planarState = profile === 'secret-chest' ? 'ethereal' as const : 'material' as const
+    let nextEntries = inventory.entries.map((entry) => ({
+      ...entry,
+      linkedSpellAuthorityRecordId: entry.linkedSpellAuthorityRecordId === recordId
+        ? undefined
+        : entry.linkedSpellAuthorityRecordId,
+      linkedSpellFocusAuthorityRecordId: entry.linkedSpellFocusAuthorityRecordId === recordId
+        ? undefined
+        : entry.linkedSpellFocusAuthorityRecordId,
+    }))
+    if (profile === 'instant-summons') {
+      const sapphire = nextEntries.find((entry) =>
+        entry.instanceId !== linked.instanceId && entry.quantity > 0 &&
+        entry.linkedSpellFocusAuthorityRecordId == null &&
+        entry.item.spellcastingMaterial?.tags.includes('sapphire') === true &&
+        (entry.item.spellcastingMaterial.unitValueGp ?? 0) >= 1_000)
+      if (!sapphire) {
+        return { ok: false, characters: [...characters], reason: 'material-component-unavailable' }
+      }
+      if (sapphire.quantity === 1) {
+        nextEntries = nextEntries.map((entry) => entry.instanceId === sapphire.instanceId
+          ? { ...entry, linkedSpellFocusAuthorityRecordId: recordId }
+          : entry)
+      } else {
+        const remainingQuantity = sapphire.quantity - 1
+        nextEntries = [
+          ...nextEntries.map((entry) => entry.instanceId === sapphire.instanceId
+            ? {
+                ...entry,
+                quantity: remainingQuantity,
+                resources: resizeInventoryResources(
+                  entry.resources,
+                  inventoryResourceDefinitions(entry.item),
+                  remainingQuantity,
+                ),
+              }
+            : entry),
+          {
+            ...sapphire,
+            instanceId: inventoryId(),
+            quantity: 1,
+            resources: resizeInventoryResources(
+              sapphire.resources,
+              inventoryResourceDefinitions(sapphire.item),
+              1,
+            ),
+            equippedSlot: undefined,
+            containerInstanceId: undefined,
+            linkedSpellFocusAuthorityRecordId: recordId,
+          },
+        ]
+      }
+    }
+    const nextInventory = inventoryWithEntries(inventory, nextEntries.map((entry) =>
+      entry.instanceId === linked.instanceId
+        ? {
+            ...entry,
+            planarState,
+            linkedSpellAuthorityRecordId: recordId,
+            equippedSlot: planarState === 'ethereal' ? undefined : entry.equippedSlot,
+          }
+        : entry))
+    const nextSource: Character = {
+      ...source,
+      dnd5eInventory: {
+        ...nextInventory,
+        authorityUseReceipts: [...(nextInventory.authorityUseReceipts ?? []), receiptId].slice(-512),
+      },
+    }
+    return {
+      ok: true,
+      characters: replaceAt(characters, sourceIndex, nextSource),
+      message: `${linked.item.name} 已建立${profile === 'instant-summons' ? '瞬间召唤' : '秘法箱'}的长期法术连结。`,
+      holderCharacterId: source.id,
+      holderName: source.name,
+      linkedItemName: linked.item.name,
+      recalled: false,
+    }
+  }
+
+  const transition = transitions[0]!
+  const profile = transition.linkedObjectProfile
+  if (transition.sourceActorId !== input.sourceActorAuthorityId || !profile) {
+    return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+  }
+  const requestedRecordId = transition.authorityRecordId
+  const sourceRecords = characters[sourceIndex].dnd5eCombatState?.spellAuthorityRecords ?? {}
+  const recordId = requestedRecordId ?? Object.values(sourceRecords).find((record) =>
+    record.kind === 'linked-planar-object' && record.profile === profile &&
+    record.sourceActorId === input.sourceActorAuthorityId)?.id ??
+    `linked-planar-object:${profile}:${input.sourceActorAuthorityId}`
+  const holderIndex = characters.findIndex((character) =>
+    normalizeDnd5eInventory(character).entries.some((entry) =>
+      entry.linkedSpellAuthorityRecordId === recordId))
+  if (holderIndex < 0) {
+    return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+  }
+  const holder = withNormalizedInventory(characters[holderIndex])
+  const linked = normalizeDnd5eInventory(holder).entries.find((entry) =>
+    entry.linkedSpellAuthorityRecordId === recordId)!
+  const nextCharacters = [...characters]
+
+  if (profile === 'instant-summons') {
+    if (transition.transition !== 'recall-to-source') {
+      return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+    }
+    let source = withNormalizedInventory(nextCharacters[sourceIndex])
+    const sourceInventory = normalizeDnd5eInventory(source)
+    const sapphire = sourceInventory.entries.find((entry) =>
+      entry.instanceId !== linked.instanceId && entry.quantity > 0 &&
+      entry.linkedSpellFocusAuthorityRecordId === recordId &&
+      entry.item.spellcastingMaterial?.tags.includes('sapphire') === true &&
+      (entry.item.spellcastingMaterial.unitValueGp ?? 0) >= 1_000)
+    if (!sapphire) {
+      return { ok: false, characters: [...characters], reason: 'material-component-unavailable' }
+    }
+    source = removeItem(source, sapphire, 1)
+    nextCharacters[sourceIndex] = source
+  } else if (
+    transition.transition !== 'recall-to-source' &&
+    transition.transition !== 'send-to-ethereal'
+  ) {
+    return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+  }
+
+  const currentHolder = withNormalizedInventory(nextCharacters[holderIndex])
+  const holderInventory = normalizeDnd5eInventory(currentHolder)
+  const nextPlanarState = transition.transition === 'send-to-ethereal'
+    ? 'ethereal' as const
+    : 'material' as const
+  const clearLink = profile === 'instant-summons' && transition.transition === 'recall-to-source'
+  const nextHolderInventory = inventoryWithEntries(holderInventory, holderInventory.entries.map((entry) =>
+    entry.instanceId === linked.instanceId
+      ? {
+          ...entry,
+          planarState: nextPlanarState,
+          linkedSpellAuthorityRecordId: clearLink ? undefined : recordId,
+          equippedSlot: nextPlanarState === 'ethereal' ? undefined : entry.equippedSlot,
+        }
+      : entry))
+  nextCharacters[holderIndex] = {
+    ...currentHolder,
+    dnd5eInventory: {
+      ...nextHolderInventory,
+      authorityUseReceipts: [
+        ...(nextHolderInventory.authorityUseReceipts ?? []),
+        receiptId,
+      ].slice(-512),
+    },
+  }
+  if (profile === 'instant-summons') {
+    const nextSource = nextCharacters[sourceIndex]
+    const hasRemainingLink = Object.values(
+      nextSource.dnd5eCombatState?.spellAuthorityRecords ?? {},
+    ).some((record) =>
+      record.kind === 'linked-planar-object' && record.profile === 'instant-summons')
+    if (!hasRemainingLink) {
+      const activeEffects = (nextSource.dnd5eCombatState?.activeEffects ?? []).filter((effect) => !(
+        effect.source.actorId === input.sourceActorAuthorityId &&
+        effect.source.rulesId === 'instant-summons' &&
+        effect.grantedActivities?.includes('spell:instant-summons:recall')
+      ))
+      nextCharacters[sourceIndex] = {
+        ...nextSource,
+        dnd5eCombatState: {
+          ...(nextSource.dnd5eCombatState ?? { schemaVersion: 2 as const }),
+          activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+        },
+      }
+    }
+  }
+  const holderIsSource = holder.id === input.sourceCharacterId
+  return {
+    ok: true,
+    characters: nextCharacters,
+    message: profile === 'instant-summons'
+      ? holderIsSource
+        ? `${characters[sourceIndex].name} 捏碎并消耗一枚价值至少 1,000 gp 的蓝宝石；${linked.item.name} 出现在施法者手中，长期连结结束。`
+        : `${characters[sourceIndex].name} 捏碎并消耗一枚价值至少 1,000 gp 的蓝宝石；${linked.item.name} 正由 ${holder.name} 持有，因此没有转移，只揭示持有者与大致位置。`
+      : `${linked.item.name} 已${nextPlanarState === 'ethereal' ? '送往以太位面' : '召回物质位面'}。`,
+    holderCharacterId: holder.id,
+    holderName: holder.name,
+    linkedItemName: linked.item.name,
+    recalled: profile === 'instant-summons' ? holderIsSource : nextPlanarState === 'material',
+  }
+}
+
+export interface Dnd5eInstantSummonsSapphireDispelTarget {
+  recordId: string
+  sapphireInstanceId: string
+  sapphireName: string
+  holderCharacterId: string
+  sourceCharacterId: string
+  sourceActorAuthorityId: string
+  linkedItemName?: string
+  controllerEffectIds: readonly string[]
+  controllerSpellLevel: number
+}
+
+/**
+ * Resolves an inventory instance to the exact sapphire anchoring an active
+ * Instant Summons link. The marker is Host-owned and instance-bound, so a
+ * player cannot turn an arbitrary sapphire into a Dispel Magic target.
+ */
+export function dnd5eInstantSummonsSapphireDispelTarget(
+  characters: readonly Character[],
+  sapphireInstanceId: string | undefined,
+): Dnd5eInstantSummonsSapphireDispelTarget | undefined {
+  if (!sapphireInstanceId) return undefined
+  for (const holder of characters) {
+    const sapphire = normalizeDnd5eInventory(holder).entries.find((entry) =>
+      entry.instanceId === sapphireInstanceId && entry.quantity === 1 &&
+      entry.item.spellcastingMaterial?.tags.includes('sapphire') === true &&
+      (entry.item.spellcastingMaterial.unitValueGp ?? 0) >= 1_000 &&
+      entry.linkedSpellFocusAuthorityRecordId != null)
+    const recordId = sapphire?.linkedSpellFocusAuthorityRecordId
+    if (!sapphire || !recordId) continue
+    const source = characters.find((character) => {
+      const record = character.dnd5eCombatState?.spellAuthorityRecords?.[recordId]
+      return record?.kind === 'linked-planar-object' && record.profile === 'instant-summons'
+    })
+    const record = source?.dnd5eCombatState?.spellAuthorityRecords?.[recordId]
+    if (!source || !record || record.kind !== 'linked-planar-object' || record.profile !== 'instant-summons') {
+      continue
+    }
+    const linkedItem = characters.flatMap((character) =>
+      normalizeDnd5eInventory(character).entries,
+    ).find((entry) => entry.linkedSpellAuthorityRecordId === recordId)
+    const controllerEffects = (source.dnd5eCombatState?.activeEffects ?? [])
+      .filter((effect) =>
+        effect.source.actorId === record.sourceActorId &&
+        effect.source.rulesId === 'instant-summons' &&
+        effect.grantedActivities?.includes('spell:instant-summons:recall'))
+    if (controllerEffects.length < 1) continue
+    return {
+      recordId,
+      sapphireInstanceId: sapphire.instanceId,
+      sapphireName: sapphire.item.name,
+      holderCharacterId: holder.id,
+      sourceCharacterId: source.id,
+      sourceActorAuthorityId: record.sourceActorId,
+      linkedItemName: linkedItem?.item.name,
+      controllerEffectIds: controllerEffects.map((effect) => effect.id),
+      controllerSpellLevel: record.spellLevel ??
+        Math.max(...controllerEffects.map((effect) => effect.source.spellLevel ?? 6)),
+    }
+  }
+  return undefined
+}
+
+/** Ends the long-lived link without consuming the sapphire. */
+export function applyDnd5eInstantSummonsSapphireDispel(
+  characters: readonly Character[],
+  target: Dnd5eInstantSummonsSapphireDispelTarget,
+): { ok: true; characters: Character[]; message: string } | {
+  ok: false
+  characters: Character[]
+  reason: 'inventory-context-required'
+} {
+  const authoritative = dnd5eInstantSummonsSapphireDispelTarget(
+    characters,
+    target.sapphireInstanceId,
+  )
+  if (!authoritative || authoritative.recordId !== target.recordId) {
+    return { ok: false, characters: [...characters], reason: 'inventory-context-required' }
+  }
+  const controllerIds = new Set(authoritative.controllerEffectIds)
+  const nextCharacters = characters.map((character) => {
+    const inventory = normalizeDnd5eInventory(character)
+    const inventoryChanged = inventory.entries.some((entry) =>
+      entry.linkedSpellAuthorityRecordId === authoritative.recordId ||
+      entry.linkedSpellFocusAuthorityRecordId === authoritative.recordId)
+    const nextInventory = inventoryChanged
+      ? inventoryWithEntries(inventory, inventory.entries.map((entry) => ({
+          ...entry,
+          linkedSpellAuthorityRecordId: entry.linkedSpellAuthorityRecordId === authoritative.recordId
+            ? undefined
+            : entry.linkedSpellAuthorityRecordId,
+          linkedSpellFocusAuthorityRecordId: entry.linkedSpellFocusAuthorityRecordId === authoritative.recordId
+            ? undefined
+            : entry.linkedSpellFocusAuthorityRecordId,
+          planarState: entry.linkedSpellAuthorityRecordId === authoritative.recordId
+            ? 'material'
+            : entry.planarState,
+        })))
+      : inventory
+    if (character.id !== authoritative.sourceCharacterId) {
+      return inventoryChanged ? { ...character, dnd5eInventory: nextInventory } : character
+    }
+    const records = Object.fromEntries(Object.entries(
+      character.dnd5eCombatState?.spellAuthorityRecords ?? {},
+    ).filter(([recordId]) => recordId !== authoritative.recordId))
+    const hasRemainingLink = Object.values(records).some((record) =>
+      record.kind === 'linked-planar-object' && record.profile === 'instant-summons')
+    const activeEffects = hasRemainingLink
+      ? (character.dnd5eCombatState?.activeEffects ?? [])
+      : (character.dnd5eCombatState?.activeEffects ?? [])
+          .filter((effect) => !controllerIds.has(effect.id))
+    return {
+      ...character,
+      dnd5eInventory: nextInventory,
+      dnd5eCombatState: {
+        ...(character.dnd5eCombatState ?? { schemaVersion: 2 as const }),
+        spellAuthorityRecords: Object.keys(records).length > 0 ? records : undefined,
+        activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+      },
+    }
+  })
+  return {
+    ok: true,
+    characters: nextCharacters,
+    message: `解除魔法以 ${authoritative.sapphireName} 为目标；${authoritative.linkedItemName ?? '连结物品'} 的瞬间召唤长期连结结束，蓝宝石未被消耗。`,
+  }
+}
+
 function applyDnd5eInventoryMutationInternal(
   characters: readonly Character[],
   mutation: Dnd5eInventoryMutation,
@@ -867,7 +1510,10 @@ function applyDnd5eInventoryMutationInternal(
   if (sourceIndex < 0) return failed(characters, 'character-not-found')
   const source = withNormalizedInventory(characters[sourceIndex])
 
-  if (mutation.type === 'use') {
+  if (
+    mutation.type === 'use' || mutation.type === 'identify' ||
+    mutation.type === 'break-cursed-attunement' || mutation.type === 'purify-consumable'
+  ) {
     const inventory = normalizeDnd5eInventory(source)
     if (mutation.receiptId != null && !validAuthorityReceiptId(mutation.receiptId)) {
       return failed(characters, 'invalid-receipt')
@@ -927,8 +1573,38 @@ function applyDnd5eInventoryMutationInternal(
     if (!quantity) return failed(characters, 'invalid-quantity')
     if (quantity > entry.quantity) return failed(characters, 'insufficient-quantity')
     const target = withNormalizedInventory(characters[targetIndex])
+    if (entry.linkedSpellAuthorityRecordId || entry.linkedSpellFocusAuthorityRecordId) {
+      // A spell link belongs to one physical object, never to a duplicated or
+      // merged template stack. Preserve its stable instance and Host markers.
+      if (quantity !== entry.quantity) return failed(characters, 'invalid-quantity')
+      const targetInventory = normalizeDnd5eInventory(target)
+      if (targetInventory.entries.some((candidate) => candidate.instanceId === entry.instanceId)) {
+        return failed(characters, 'invalid-target')
+      }
+      const nextSource = removeItem(source, entry, quantity)
+      const nextTarget = {
+        ...target,
+        dnd5eInventory: inventoryWithEntries(targetInventory, [
+          ...targetInventory.entries,
+          {
+            ...entry,
+            equippedSlot: undefined,
+            containerInstanceId: undefined,
+          },
+        ]),
+      }
+      const afterSource = replaceAt(characters, sourceIndex, nextSource)
+      return succeeded(
+        replaceAt(afterSource, targetIndex, nextTarget),
+        `${source.name} 将 ${entry.item.name} ×${quantity} 转交给 ${target.name}；长期法术${entry.linkedSpellAuthorityRecordId ? '连结' : '锚点'}随同一物品实例保留。`,
+      )
+    }
     const nextSource = removeItem(source, entry, quantity)
-    const nextTarget = addItem(target, entry.item, quantity, { identified: entry.identified !== false })
+    const nextTarget = addItem(target, entry.item, quantity, {
+      identified: entry.identified !== false,
+      expiresAtWorldMinute: entry.expiresAtWorldMinute,
+      generatedByRulesId: entry.generatedByRulesId,
+    })
     const afterSource = replaceAt(characters, sourceIndex, nextSource)
     return succeeded(replaceAt(afterSource, targetIndex, nextTarget), `${source.name} 将 ${entry.item.name} ×${quantity} 转交给 ${target.name}。`)
   }
@@ -936,7 +1612,12 @@ function applyDnd5eInventoryMutationInternal(
   if (mutation.type === 'equip') {
     if (!entry.item.equipment) return failed(characters, 'not-equipment')
     if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
-    const requestedSlot = mutation.slot ?? defaultEquipmentDestination(source, entry.item.equipment)
+    // Replayed room commands must be idempotent. If the same equip request is
+    // delivered again after the first acknowledgement, keep the instance in
+    // its current slot instead of treating both hands as occupied and moving
+    // the same physical item into a second projection slot.
+    const requestedSlot = mutation.slot ?? entry.equippedSlot ??
+      defaultEquipmentDestination(source, entry.item.equipment)
     if (!isEquipmentSlot(requestedSlot) || !equipmentSlotAcceptsItemSlot(
       requestedSlot,
       entry.item.equipment.slot,
@@ -995,16 +1676,86 @@ function applyDnd5eInventoryMutationInternal(
   }
 
   if (mutation.type === 'identify') {
-    if (!entry.item.magicItem) return failed(characters, 'not-magic-item')
-    if (entry.identified !== false) return succeeded(characters, `${entry.item.name} 已经完成鉴定。`)
+    if (!dnd5eInventoryEntryIsUnidentifiedMagicItem(entry)) {
+      return failed(characters, 'invalid-target')
+    }
     const inventory = normalizeDnd5eInventory(source)
-    const entries = inventory.entries.map((candidate) => candidate.instanceId === entry.instanceId
-      ? { ...candidate, identified: true }
-      : candidate)
-    return succeeded(replaceAt(characters, sourceIndex, {
+    const identified = {
       ...source,
-      dnd5eInventory: inventoryWithEntries(inventory, entries),
-    }), `${source.name} 鉴定了 ${entry.item.name}。`)
+      dnd5eInventory: inventoryWithEntries(inventory, inventory.entries.map((candidate) =>
+        candidate.instanceId === entry.instanceId ? { ...candidate, identified: true } : candidate)),
+    }
+    const next = recordDnd5eInventoryUseReceipt(identified, mutation.receiptId)
+    return succeeded(
+      replaceAt(characters, sourceIndex, next),
+      `${source.name} 鉴定了 ${entry.item.name}。`,
+    )
+  }
+
+  if (mutation.type === 'break-cursed-attunement') {
+    if (!entry.item.magicItem?.cursed) return failed(characters, 'invalid-target')
+    const inventory = normalizeDnd5eInventory(source)
+    const released = {
+      ...source,
+      dnd5eInventory: inventoryWithEntries(inventory, inventory.entries.map((candidate) =>
+        candidate.instanceId === entry.instanceId
+          ? {
+              ...candidate,
+              attuned: undefined,
+              attunementPending: undefined,
+              attunedAt: undefined,
+            }
+          : candidate)),
+    }
+    const next = recordDnd5eInventoryUseReceipt(released, mutation.receiptId)
+    return succeeded(
+      replaceAt(characters, sourceIndex, next),
+      entry.attuned || entry.attunementPending
+        ? `${source.name} 与 ${entry.item.name} 的同调已被解除；物品诅咒仍然存在。`
+        : `${entry.item.name} 未与 ${source.name} 同调；物品诅咒仍然存在。`,
+    )
+  }
+
+  if (mutation.type === 'purify-consumable') {
+    const inventory = normalizeDnd5eInventory(source)
+    const purified = {
+      ...source,
+      dnd5eInventory: inventoryWithEntries(inventory, inventory.entries.map((candidate) =>
+        candidate.instanceId === entry.instanceId
+          ? { ...candidate, contaminants: undefined }
+          : candidate)),
+    }
+    const next = recordDnd5eInventoryUseReceipt(purified, mutation.receiptId)
+    return succeeded(
+      replaceAt(characters, sourceIndex, next),
+      entry.contaminants?.length
+        ? `${entry.item.name} 的毒素与疾病污染已被清除。`
+        : `${entry.item.name} 没有可清除的毒素或疾病污染。`,
+    )
+  }
+
+  if (mutation.type === 'set-consumable-contaminants') {
+    if (!dnd5eInventoryEntryIsNonmagicalFoodOrDrink(entry)) return failed(characters, 'invalid-target')
+    const contaminants = [...new Set(mutation.contaminants)]
+    if (
+      contaminants.length > 2 ||
+      contaminants.some((contaminant) => contaminant !== 'poison' && contaminant !== 'disease')
+    ) return failed(characters, 'invalid-target')
+    const inventory = normalizeDnd5eInventory(source)
+    const next = {
+      ...source,
+      dnd5eInventory: inventoryWithEntries(inventory, inventory.entries.map((candidate) =>
+        candidate.instanceId === entry.instanceId
+          ? { ...candidate, contaminants: contaminants.length > 0 ? contaminants : undefined }
+          : candidate)),
+    }
+    const label = contaminants.length > 0
+      ? contaminants.map((contaminant) => contaminant === 'poison' ? '毒素' : '疾病').join('、')
+      : '无'
+    return succeeded(
+      replaceAt(characters, sourceIndex, next),
+      `${source.name} 的 ${entry.item.name} 场景污染已更新：${label}。`,
+    )
   }
 
   if (mutation.type === 'set-container') {
@@ -1029,7 +1780,7 @@ function applyDnd5eInventoryMutationInternal(
     }), target ? `${entry.item.name} 已放入 ${target.item.name}。` : `${entry.item.name} 已从容器取出。`)
   }
 
-  const use = entry.item.use
+  const use = dnd5eInventoryEntryUseAction(entry, mutation.type === 'use' ? mutation.useActionId : undefined)
   if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
   if (!dnd5eInventoryEntryIsActive(entry)) return failed(characters, 'item-inactive')
   if (!use) return failed(characters, 'not-usable')
@@ -1146,15 +1897,19 @@ function gear(
   rulesText: string,
   use?: Dnd5eInventoryItemTemplate['use'],
   equipment?: EquipmentItem,
+  spellcastingMaterial?: Dnd5eInventoryItemTemplate['spellcastingMaterial'],
 ): Dnd5eInventoryItemTemplate {
+  const detailedRulesText = rulesText.trim().length >= 24
+    ? rulesText
+    : `${rulesText} 这是普通非魔法物品，不会自动提供攻击、伤害、AC、豁免或技能检定加值；只有角色实际使用它且场景满足用途时，才作为相应行动的工具、材料或凭据。`
   return {
     id: `srd-5.1:item:${id}`,
     name,
     englishName,
     category,
     icon,
-    description: 'SRD 5.1 冒险装备。',
-    rulesText,
+    description: detailedRulesText,
+    rulesText: detailedRulesText,
     weightLb,
     cost: { amount, currency },
     stackable: equipment ? false : category !== 'container',
@@ -1162,6 +1917,7 @@ function gear(
     ammunitionKind: AMMUNITION_KIND_BY_ITEM_ID[id],
     use,
     equipment,
+    spellcastingMaterial,
     source: SRD_SOURCE,
   }
 }
@@ -1188,13 +1944,14 @@ function damageTypeLabel(type: string): string {
 }
 
 function fallbackEquipmentTemplate(equipment: EquipmentItem): Dnd5eInventoryItemTemplate {
+  const rulesText = equipmentRulesText(equipment)
   return {
     id: `character-equipment:${equipment.id}`,
     name: equipment.name,
     category: 'equipment',
     icon: equipmentIcon(equipment),
-    description: '由角色存档或扩展规则提供的装备。',
-    rulesText: equipmentRulesText(equipment),
+    description: rulesText,
+    rulesText,
     stackable: false,
     equipment: { ...equipment },
     source: { book: '角色存档', license: '由提供者声明' },
@@ -1205,6 +1962,10 @@ function cloneItemTemplate(item: Dnd5eInventoryItemTemplate): Dnd5eInventoryItem
   return {
     ...item,
     cost: item.cost ? { ...item.cost } : undefined,
+    spellcastingMaterial: item.spellcastingMaterial ? {
+      ...item.spellcastingMaterial,
+      tags: [...item.spellcastingMaterial.tags],
+    } : undefined,
     equipment: item.equipment ? {
       ...item.equipment,
       allowedSlots: item.equipment.allowedSlots ? [...item.equipment.allowedSlots] : undefined,
@@ -1235,13 +1996,17 @@ function addItem(
   character: Character,
   item: Dnd5eInventoryItemTemplate,
   quantity: number,
-  options: { identified?: boolean } = {},
+  options: { identified?: boolean; expiresAtWorldMinute?: number; generatedByRulesId?: string } = {},
 ): Character {
   const inventory = normalizeDnd5eInventory(character)
   const entries = [...inventory.entries]
   if (item.stackable) {
     const identified = item.magicItem ? options.identified !== false : true
-    const existingIndex = entries.findIndex((entry) => entry.templateId === item.id && !entry.equippedSlot && !entry.containerInstanceId && (entry.identified !== false) === identified)
+    const existingIndex = entries.findIndex((entry) =>
+      entry.templateId === item.id && !entry.equippedSlot && !entry.containerInstanceId &&
+      (entry.identified !== false) === identified &&
+      entry.expiresAtWorldMinute === options.expiresAtWorldMinute &&
+      entry.generatedByRulesId === options.generatedByRulesId)
     if (existingIndex >= 0) {
       const existing = entries[existingIndex]
       entries[existingIndex] = {
@@ -1250,10 +2015,12 @@ function addItem(
         resources: addInventoryResourceCapacity(existing.resources, inventoryResourceDefinitions(item), quantity),
       }
     } else {
-      entries.push(newEntry(item, quantity, identified))
+      entries.push(newEntry(item, quantity, identified, options))
     }
   } else {
-    for (let index = 0; index < quantity; index += 1) entries.push(newEntry(item, 1, item.magicItem ? options.identified !== false : true))
+    for (let index = 0; index < quantity; index += 1) {
+      entries.push(newEntry(item, 1, item.magicItem ? options.identified !== false : true, options))
+    }
   }
   return { ...character, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
@@ -1330,6 +2097,9 @@ function defaultEquipmentDestination(character: Character, item: EquipmentItem):
 function equipEntry(character: Character, entry: Dnd5eInventoryEntry, slot: EquipmentSlot): Character {
   const equipment = entry.item.equipment!
   const inventory = normalizeDnd5eInventory(character)
+  const previousSlot = inventory.entries.find((candidate) =>
+    candidate.instanceId === entry.instanceId,
+  )?.equippedSlot
   const entries = inventory.entries.map((candidate) => ({
     ...candidate,
     equippedSlot: candidate.instanceId === entry.instanceId
@@ -1338,10 +2108,26 @@ function equipEntry(character: Character, entry: Dnd5eInventoryEntry, slot: Equi
         ? undefined
         : candidate.equippedSlot,
   }))
-  const nextCharacter: Character = {
+  const projectedEquipment: CharacterEquipment = { ...(character.equipment ?? {}) }
+  if (
+    previousSlot && previousSlot !== slot &&
+    projectedEquipment[previousSlot]?.id === equipment.id
+  ) delete projectedEquipment[previousSlot]
+  projectedEquipment[slot] = { ...equipment }
+  let nextCharacter: Character = {
     ...character,
-    equipment: { ...(character.equipment ?? {}), [slot]: { ...equipment } },
+    equipment: projectedEquipment,
     dnd5eInventory: inventoryWithEntries(inventory, entries),
+  }
+  // Shillelagh is bound to the physical club or quarterstaff held when the
+  // spell is cast. Moving that item out of the main hand, or replacing it
+  // with another inventory instance (even one with the same equipment id),
+  // ends the spell immediately.
+  if (
+    (previousSlot === 'mainWeapon' && slot !== 'mainWeapon') ||
+    (slot === 'mainWeapon' && previousSlot !== 'mainWeapon')
+  ) {
+    nextCharacter = withoutDnd5eShillelaghEffect(nextCharacter)
   }
   if (equipment.dnd5e?.kind !== 'armor' || !character.dnd5eCombatState?.activeEffects) {
     return nextCharacter
@@ -1371,10 +2157,111 @@ function unequipEntry(character: Character, entry: Dnd5eInventoryEntry): Charact
     : candidate)
   const equipment: CharacterEquipment = { ...(character.equipment ?? {}) }
   if (equipment[slot]?.id === entry.item.equipment?.id) delete equipment[slot]
-  return { ...character, equipment, dnd5eInventory: inventoryWithEntries(inventory, entries) }
+  const nextCharacter = { ...character, equipment, dnd5eInventory: inventoryWithEntries(inventory, entries) }
+  return slot === 'mainWeapon' ? withoutDnd5eShillelaghEffect(nextCharacter) : nextCharacter
 }
 
-function newEntry(item: Dnd5eInventoryItemTemplate, quantity: number, identified = true): Dnd5eInventoryEntry {
+function withoutDnd5eShillelaghEffect(character: Character): Character {
+  const effects = character.dnd5eCombatState?.activeEffects
+  if (!effects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:shillelagh' &&
+    effect.source.rulesId === 'shillelagh'
+  )) return character
+  const projected = projectDnd5eActiveEffectState(effects.filter((effect) => !(
+    effect.definitionId === 'srd-5.1:spell:shillelagh' &&
+    effect.source.rulesId === 'shillelagh'
+  )))
+  return {
+    ...character,
+    conditions: projected.conditions,
+    dnd5eCombatState: {
+      ...character.dnd5eCombatState,
+      activeEffects: projected.activeEffects,
+    },
+  }
+}
+
+const DND5E_WARDING_BOND_DEFINITION_ID = 'srd-5.1:spell:warding-bond'
+const DND5E_CONTINGENCY_EFFECT_TAG = 'contingency'
+
+function dnd5eCharacterCarriesContingencyStatuette(character: Character): boolean {
+  return normalizeDnd5eInventory(character).entries.some((entry) =>
+    entry.quantity > 0 &&
+    entry.identified !== false &&
+    entry.planarState !== 'ethereal' &&
+    entry.item.spellcastingMaterial?.tags.includes('contingency-statuette') === true &&
+    (entry.item.spellcastingMaterial.unitValueGp ?? 0) >= 1_500,
+  )
+}
+
+function reconcileDnd5eContingencyInventory(characters: readonly Character[]): Character[] {
+  return characters.map((character) => {
+    const effects = character.dnd5eCombatState?.activeEffects
+    if (
+      !effects?.some((effect) => effect.tags?.includes(DND5E_CONTINGENCY_EFFECT_TAG)) ||
+      dnd5eCharacterCarriesContingencyStatuette(character)
+    ) return character
+    const projected = projectDnd5eActiveEffectState(effects.filter((effect) =>
+      !effect.tags?.includes(DND5E_CONTINGENCY_EFFECT_TAG)))
+    return {
+      ...character,
+      dnd5eCombatState: {
+        ...character.dnd5eCombatState,
+        activeEffects: projected.activeEffects,
+        conditions: projected.conditions,
+      },
+    }
+  })
+}
+
+function dnd5eCharacterWearsWardingBondRing(character: Character): boolean {
+  return normalizeDnd5eInventory(character).entries.some((entry) =>
+    entry.quantity > 0 &&
+    entry.identified !== false &&
+    entry.equippedSlot != null &&
+    entry.item.spellcastingMaterial?.tags.includes('platinum-ring') === true &&
+    (entry.item.spellcastingMaterial.unitValueGp ?? 0) >= 50,
+  )
+}
+
+function reconcileDnd5eWardingBondInventory(characters: readonly Character[]): Character[] {
+  if (!characters.some((character) => character.dnd5eCombatState?.activeEffects?.some((effect) =>
+    effect.definitionId === DND5E_WARDING_BOND_DEFINITION_ID,
+  ))) return [...characters]
+
+  const characterById = new Map(characters.map((character) => [character.id, character]))
+  return characters.map((character) => {
+    const effects = character.dnd5eCombatState?.activeEffects
+    if (!effects?.some((effect) => effect.definitionId === DND5E_WARDING_BOND_DEFINITION_ID)) {
+      return character
+    }
+    const targetWearsRing = dnd5eCharacterWearsWardingBondRing(character)
+    const retained = effects.filter((effect) => {
+      if (effect.definitionId !== DND5E_WARDING_BOND_DEFINITION_ID) return true
+      if (!targetWearsRing) return false
+      const source = (effect.source.characterId && characterById.get(effect.source.characterId)) ||
+        (effect.source.actorId && characterById.get(effect.source.actorId)) ||
+        characters.find((candidate) => candidate.name === effect.source.actorName)
+      return source == null || dnd5eCharacterWearsWardingBondRing(source)
+    })
+    if (retained.length === effects.length) return character
+    const projected = projectDnd5eActiveEffectState(retained)
+    return {
+      ...character,
+      dnd5eCombatState: {
+        ...character.dnd5eCombatState,
+        activeEffects: projected.activeEffects,
+      },
+    }
+  })
+}
+
+function newEntry(
+  item: Dnd5eInventoryItemTemplate,
+  quantity: number,
+  identified = true,
+  options: { expiresAtWorldMinute?: number; generatedByRulesId?: string } = {},
+): Dnd5eInventoryEntry {
   return {
     instanceId: inventoryId(),
     templateId: item.id,
@@ -1383,6 +2270,28 @@ function newEntry(item: Dnd5eInventoryItemTemplate, quantity: number, identified
     resources: createInventoryResources(item, quantity),
     identified,
     acquiredAt: Date.now(),
+    expiresAtWorldMinute: options.expiresAtWorldMinute,
+    generatedByRulesId: options.generatedByRulesId,
+  }
+}
+
+/** Removes Host-generated inventory entries at their exact campaign-clock boundary. */
+export function expireDnd5eInventoryItemsAtWorldMinute(
+  character: Character,
+  worldMinute: number,
+): Character {
+  if (!Number.isSafeInteger(worldMinute) || worldMinute < 0) return character
+  const inventory = normalizeDnd5eInventory(character)
+  const entries = inventory.entries.filter((entry) =>
+    entry.expiresAtWorldMinute == null || entry.expiresAtWorldMinute > worldMinute)
+  if (entries.length === inventory.entries.length) return character
+  const liveIds = new Set(entries.map((entry) => entry.instanceId))
+  return {
+    ...character,
+    dnd5eInventory: inventoryWithEntries(inventory, entries.map((entry) =>
+      entry.containerInstanceId && !liveIds.has(entry.containerInstanceId)
+        ? { ...entry, containerInstanceId: undefined }
+        : entry)),
   }
 }
 

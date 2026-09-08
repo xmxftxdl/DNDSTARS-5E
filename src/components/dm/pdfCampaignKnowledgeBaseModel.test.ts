@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PdfCampaignAnalysisV1 } from '../../lib/pdfCampaignAnalysis'
 import {
+  buildPdfEventIndex,
   buildPdfMapIndex,
   buildPdfMonsterCodex,
   buildPdfPersonPortraitPrompt,
@@ -22,7 +23,7 @@ function analysis(): PdfCampaignAnalysisV1 {
     scenes: [{ name: '灯塔决战', description: '阻止仪式。', location: '失落灯塔', npcs: ['艾琳'], monsters: ['潮汐祭司'], citations: [citation] }],
     encounters: [{ name: '灯塔守卫', description: '守卫入口。', creatures: ['潮汐祭司', '巨蟹'], notes: '', citations: [citation] }],
     importCandidates: [
-      { name: '潮汐祭司', description: '施法怪物。', kind: 'monster', automation: 'partial', citations: [citation] },
+      { name: '潮汐祭司', description: '施法怪物。', kind: 'monster', automation: 'partial', monsterStatBlockText: '潮汐祭司\nAC 14\n动作\n潮汐打击。近战武器攻击。', citations: [citation] },
       { name: '失落灯塔', description: '战术地图。', kind: 'map', automation: 'manual', citations: [citation] },
     ],
     prepTips: [],
@@ -33,15 +34,36 @@ function analysis(): PdfCampaignAnalysisV1 {
 }
 
 describe('PDF 战役知识库模型', () => {
+  it('把同一剧情节点的场景与遭遇合并为一条事件', () => {
+    const fixture = analysis()
+    fixture.scenes = [{
+      name: '黑桦弯伏击', description: '玩家在黑桦弯遭到伏击。', location: '黑桦弯', npcs: ['瑟维迪尔'], monsters: ['伏击者'], citations: [citation],
+    }]
+    fixture.encounters = [{
+      name: '黑桦弯伏击战', description: '伏击者发动攻击。', creatures: ['伏击者'], notes: '允许玩家提前察觉。', citations: [citation],
+    }]
+
+    const result = buildPdfEventIndex(fixture)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ name: '黑桦弯伏击', kind: 'scene-encounter', location: '黑桦弯' })
+    expect(result[0]?.npcs).toEqual(['瑟维迪尔'])
+    expect(result[0]?.creatures).toEqual(['伏击者'])
+    expect(result[0]?.notes).toContain('提前察觉')
+  })
+
   it('把结构化怪物和遭遇引用合并为图鉴，并保留自动化状态', () => {
     const entries = buildPdfMonsterCodex(analysis())
 
     expect(entries).toHaveLength(2)
     expect(entries.find((entry) => entry.name === '潮汐祭司')).toMatchObject({
       automation: 'partial',
+      monsterStatBlockText: expect.stringContaining('潮汐打击'),
+      importCandidateIndex: 0,
+      encounterIndexes: [0],
       encounterNames: ['灯塔守卫'],
     })
-    expect(entries.find((entry) => entry.name === '巨蟹')?.automation).toBe('unreviewed')
+    expect(entries.find((entry) => entry.name === '巨蟹')).toMatchObject({ automation: 'unreviewed', encounterIndexes: [0] })
   })
 
   it('把地图候选、地点和关联场景合并为地图索引', () => {
@@ -56,7 +78,7 @@ describe('PDF 战役知识库模型', () => {
 
     expect(pdfKnowledgeMatches('银发', fixture.people[0].appearance)).toBe(true)
     expect(pdfKnowledgeMatches('不存在', fixture.people[0].appearance)).toBe(false)
-    expect(pdfKnowledgeTabCounts(fixture)).toMatchObject({ people: 1, maps: 1, monsters: 2, relationships: 1 })
+    expect(pdfKnowledgeTabCounts(fixture)).toMatchObject({ people: 1, maps: 1, monsters: 2, bookmarks: 0 })
   })
 
   it('用原文外貌、身份和性格生成可编辑立绘提示词', () => {

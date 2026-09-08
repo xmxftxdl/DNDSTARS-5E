@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eCombatant,
   dnd5eCombatantPairKey,
@@ -9,6 +9,14 @@ import {
   type Dnd5eMonsterActionRoll,
 } from './headlessCombatEngine'
 import { getDnd5eSrdMonsterBySlug } from './monsters'
+
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
+
+const mechanicFixtures = new Map([['kraken', monsterMechanicFixture('kraken', ["tentacle","fling","multiattack","multiattack-two-tentacles-and-fling","multiattack-tentacle-and-two-flings","multiattack-flings","legendary-fling","legendary-tentacle-attack"])]])
+beforeEach(() => setDnd5eRoomMonsterCatalog([...mechanicFixtures.values()]))
+afterEach(() => setDnd5eRoomMonsterCatalog([]))
+const getMechanicMonster = (slug: string) => mechanicFixtures.get(slug) ?? getDnd5eSrdMonsterBySlug(slug)
 
 const ABILITIES = {
   str: 10,
@@ -55,7 +63,7 @@ function encounter(
     sizeRank?: number
   }[] = [{ id: 'hero', x: 5 }],
 ): Dnd5eHeadlessCombatState {
-  const monster = getDnd5eSrdMonsterBySlug(slug)!
+  const monster = getMechanicMonster(slug)!
   const source = combatant({
     id: 'monster',
     controller: 'dm',
@@ -89,7 +97,7 @@ function minimumDamageRolls(
   slug: string,
   actionId: string,
 ): readonly (readonly number[])[] {
-  const attack = getDnd5eSrdMonsterBySlug(slug)?.actions.find(
+  const attack = getMechanicMonster(slug)?.actions.find(
     (action) => action.id === actionId,
   )?.attack
   expect(attack, `${slug}/${actionId}`).toBeDefined()
@@ -127,7 +135,7 @@ function sourceRelationTargets(
         : []))
 }
 
-describe('conditional composite Multiattack children', () => {
+describe('conditional composite sub-rules in isolated fixtures', () => {
   it('keeps two missed Kraken Tentacles and marks the now-unusable Fling unused', () => {
     const result = resolveDnd5eHeadlessAction(encounter('kraken'), {
       type: 'monster-multiattack-composite',
@@ -425,4 +433,10 @@ describe('conditional composite Multiattack children', () => {
       skippedActionIds: ['blinding-spittle'],
     }))
   })
+})
+
+vi.mock('./monsterMultiattackConstraints', async importOriginal => {
+  const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
+  const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
+  return monsterMechanicConstraints(original)
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createDnd5eMechanicalEffect,
   dnd5eActiveEffectId,
   type Dnd5eActiveEffectInstance,
 } from './activeEffects'
@@ -147,6 +148,88 @@ function putActorOnTurn(
 }
 
 describe('conditional catalog weapon riders', () => {
+  it('redirects a Drow hand-crossbow hit to Mirror Image before poison or damage', () => {
+    const attacker = catalogMonster('drow')
+    const target = combatant('target', 20, {
+      armorClass: 16,
+      savingThrowBonuses: { con: 0 },
+    })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'mirror-image-effect',
+      definitionId: 'activity:spell:mirror-image:mirror-image',
+      label: 'Mirror Image',
+      source: {
+        kind: 'spell',
+        actorId: target.id,
+        rulesId: 'mirror-image',
+        magical: true,
+      },
+      targetId: target.id,
+      duration: {
+        type: 'rounds',
+        remainingRounds: 10,
+        tickOn: 'target-turn-end',
+      },
+      modifiers: {
+        attackDecoys: {
+          remaining: 3,
+          redirectMinimumD20: [11, 8, 6],
+          armorClassBase: 10,
+          armorClassAbility: 'dex',
+          requiresOrdinarySight: true,
+        },
+      },
+    })]
+    const state = startDnd5eHeadlessCombat(
+      'drow-hand-crossbow-mirror-image',
+      [attacker, target],
+    )
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(attacker.id, target.id)]: 10,
+    }
+
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: attacker.id,
+      actionId: 'hand-crossbow',
+      attackDecoyRolls: [{
+        occurrenceId: `monster-action:hand-crossbow:0:${target.id}`,
+        effectId: 'mirror-image-effect',
+        redirectD20: 6,
+      }],
+      rolls: [{
+        targetId: target.id,
+        d20: 12,
+        damageRolls: [[6]],
+        onHitEffectRolls: [{
+          effectId: 'crossbow-poisoned-unconscious',
+          d20: 1,
+        }],
+      }],
+    })
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[target.id].currentHp).toBe(20)
+    expect(result.state.combatants[target.id].conditions).not.toContain('poisoned')
+    expect(result.state.combatants[target.id].conditions).not.toContain('unconscious')
+    expect(result.state.combatants[target.id].classState.activeEffects?.[0]
+      .modifiers?.attackDecoys?.remaining).toBe(2)
+    expect(result.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'attack-decoy-resolved',
+        redirected: true,
+        decoyHit: true,
+      }),
+    ]))
+    expect(result.events.some((event) =>
+      event.type === 'saving-throw-resolved' && event.targetId === target.id,
+    )).toBe(false)
+    expect(result.events.some((event) =>
+      event.type === 'damage-applied' && event.targetId === target.id,
+    )).toBe(false)
+  })
+
   it('applies only Drow poison when the Constitution save fails by less than five', () => {
     const { attacker, target, result } = attackWithConditionalSave({
       slug: 'drow',

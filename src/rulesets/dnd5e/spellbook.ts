@@ -5,6 +5,8 @@ import { DND5E_SRD_COMBAT_SPELLS, type Dnd5eSrdSpellDefinition } from './spells'
 import { DND5E_SRD_SPELL_CATALOG } from './spellCatalog'
 import type { Dnd5eSpellVisibilityRequirement } from './spellVisibility'
 import { parseDnd5eSpellMechanics, type Dnd5eSpellMechanicsDefinition } from './spellMechanics'
+import { dnd5eSrdAuditedSpellDecisionV1 } from './activities/dnd5eSrdAuditedSpellDecisions'
+import type { Dnd5eSpellMaterialRequirement } from './spellMaterials'
 
 export const DND5E_SPELL_IMPORT_FORMAT = 'dndstars5e-spells'
 export const DND5E_SPELL_IMPORT_SCHEMA_VERSION = 2
@@ -74,6 +76,8 @@ export interface Dnd5eImportedSpell {
     materialText?: string
     materialCostGp?: number
     materialConsumed?: boolean
+    /** Optional exact inventory recipe for room and plugin spells. */
+    materialRequirement?: Dnd5eSpellMaterialRequirement
   }
   duration: {
     type: 'instantaneous' | 'timed' | 'until-dispelled' | 'special'
@@ -128,21 +132,16 @@ const DND5E_PARTIAL_CORE_SPELL_REASONS: Readonly<Record<string, string>> = {
   'spike-growth': '困难地形与移动伤害已自动化；未目睹施法者的主动察觉识别流程仍需 DM 或地图层处理。',
   'see-invisibility': '识破隐形已自动化；看入以太位面的地图语义仍需 DM 裁定。',
   'faerie-fire': '生物豁免、显形和攻击优势已自动化；区域内物体的描边效果仍需地图层处理。',
-  shillelagh: '武器伤害骰和施法属性选择已自动化；武器离手时结束等完整生命周期仍需地图层处理。',
+  shillelagh: '武器伤害骰、施法属性选择、重施、持续时间及权威物品栏中的武器离手生命周期已自动化；临时地图物件或叙事性放手仍需 DM 处理。',
   'produce-flame': '投掷火焰的攻击与伤害已自动化；手持火焰的照明、熄灭和持续时间仍需地图层处理。',
-  'fire-bolt': '生物目标的攻击与伤害已自动化；点燃未被穿戴或携带的易燃物仍需 DM 裁定。',
-  'burning-hands': '范围豁免、伤害与升环已自动化；点燃区域内未被穿戴或携带的易燃物仍需 DM 裁定。',
-  shatter: '生物目标的范围豁免、伤害与升环已自动化；非魔法物体伤害及无机生物的豁免劣势仍需 DM 裁定。',
-  fireball: '范围豁免、伤害与升环已自动化；点燃区域内未被穿戴或携带的易燃物仍需 DM 裁定。',
-  'meteor-swarm': '四个不同落点、重叠目标去重、敏捷豁免及火焰/钝击伤害已自动化；物体伤害与点燃仍需 DM 裁定。',
-  'lightning-bolt': '范围豁免、伤害与升环已自动化；点燃线内未被穿戴或携带的易燃物仍需 DM 裁定。',
-  'cone-of-cold': '范围豁免、伤害与升环已自动化；被法术杀死的生物形成冰冻塑像仍需 DM 或地图层处理。',
-  'dancing-lights': '施法时分别放置 1 至 4 个光源及其照明已自动化；施法后的逐个移动与四光合并仍需要地图层或 DM 处理。',
-  'minor-illusion': '幻象内容、交互方式与识破结果仍需要 DM 裁定。',
+  // Fire Bolt, Burning Hands, Fireball, Lightning Bolt, and Meteor Swarm have
+  // complete creature-facing combat transactions. Scenery damage/ignition is
+  // an optional DM-authored map state and does not demote them from full Headless.
   thaumaturgy: '环境与叙事效果仍需要 DM 裁定。',
   'enlarge-reduce': '生物目标已自动化；物件目标仍需要 DM 裁定。',
-  'call-lightning': '伤害与持续发动已自动化；室内空间和暴风天气加骰仍需要 DM 裁定。',
-  slow: '速度、AC、敏捷豁免、反应、攻击次数与行动经济已自动化；施法动作延迟的 d20 判定仍需要 DM 裁定。',
+  'call-lightning': '伤害、持续发动、权威高空空间限制及既有暴风雨额外伤害骰均已自动化。',
+  'calm-emotions': '范围、类人生物筛选、魅力豁免、自愿友方失败、状态压制/恢复及有界漠然均已自动化；更细的社会态度仍可由语音叙事补充。',
+  slow: '速度、AC、敏捷豁免、反应、攻击次数、行动经济及核心 1 动作法术的施法动作延迟均已自动化；插件、怪物专用及地图实体法术的延迟完成仍保留 DM 裁定边界。',
   banishment: '战斗状态已自动化；异界生物维持满时长后的位面归返仍需要 DM 裁定。',
   'freezing-sphere': '立即发射已自动化；延迟发射与冻结水面仍需要 DM 裁定。',
   'finger-of-death': '伤害已自动化；击杀人形生物后的僵尸生成与控制仍需要 DM 裁定。',
@@ -150,6 +149,19 @@ const DND5E_PARTIAL_CORE_SPELL_REASONS: Readonly<Record<string, string>> = {
   'insect-plague': '初始范围伤害、升环、进入与回合结束触发、困难地形和垂直范围已自动化；轻度遮蔽与精确球面边界仍需地图层或 DM 处理。',
   cloudkill: '进入与回合开始伤害、升环和垂直范围已自动化；重度遮蔽、毒雾自动移动、下沉与强风驱散仍需地图层或 DM 处理。',
   'blade-barrier': '可调长度的直墙、环形墙、进入与回合开始伤害、困难地形和垂直范围已自动化；墙后的四分之三掩护仍需地图层或 DM 处理。',
+  // Fog Cloud's cast transaction is complete: placement, slot-scaled radius,
+  // heavy obscuration, concentration and duration are deterministic. Wind is
+  // an external scene event, like scenery ignition for Fire Bolt, and should
+  // not prevent the spell itself from entering map targeting.
+  web: '轻度遮蔽、困难地形、进入/回合开始豁免、束缚与力量挣脱已自动化；支撑条件、坠落和燃烧蛛网仍由 DM 裁定。',
+  silence: '区域内言语成分禁用和雷鸣伤害免疫已自动化；声音传播、耳聋叙事与边界争议仍由 DM 裁定。',
+  'sleet-storm': '重度遮蔽、困难地形、倒地豁免及施法专注检定已自动化；裸露火焰熄灭仍由 DM 裁定。',
+  'stinking-cloud': '重度遮蔽和回合开始体质豁免失败失去动作已自动化；无需呼吸者及强风驱散等特殊情况仍由 DM 裁定。',
+  'wind-wall': '可旋转直墙、初始力量豁免与伤害、驱散重叠雾气、普通飞射物阻挡、小型飞行生物与气化形体穿越限制已自动化；任意曲线路径和松散轻质材料仍由 DM 裁定。',
+  'wall-of-force': '可旋转直墙的移动与效应线阻挡已自动化；球体/穹顶、夹住生物时的推向和解离术互动仍由 DM 裁定。',
+  'wall-of-stone': '可旋转直墙的移动、视线、效应线阻挡及维持完整持续时间后的永久化已自动化；独立墙板生命、复杂造型与围困反应仍由 DM 裁定。',
+  'wall-of-ice': '可旋转直墙、初始豁免伤害、升环及移动/视线/效应线阻挡已自动化；墙段生命、破坏后寒气与复杂造型仍由 DM 裁定。',
+  'wall-of-thorns': '可旋转直墙、初始及进入/回合结束伤害、升环、移动成本和视线阻挡已自动化；环形造型与植被细节仍由 DM 裁定。',
 }
 
 function dnd5eCoreSpellAutomation(
@@ -161,6 +173,207 @@ function dnd5eCoreSpellAutomation(
   return automationReason
     ? { automationLevel: 'partial', automationReason }
     : { automationLevel: 'full' }
+}
+
+function dnd5eAuditedCatalogSpellAutomation(
+  spellId: string,
+): Pick<Dnd5eSpellbookEntry, 'headless' | 'automationLevel' | 'automationReason' | 'catalogOnly'> | undefined {
+  const decision = dnd5eSrdAuditedSpellDecisionV1(spellId)
+  if (!decision || decision.target === 'manual') return undefined
+  if (decision.target === 'full') return {
+    headless: true,
+    automationLevel: 'full',
+    catalogOnly: false,
+  }
+  return {
+    headless: false,
+    automationLevel: 'partial',
+    automationReason: `Host 管理确定性施法事务；${decision.codes.join('、')}在共享 DM 裁定边界暂停。`,
+    catalogOnly: false,
+  }
+}
+
+/**
+ * Runtime automation fails closed: an entry is executable by Headless only
+ * when the spell audit says every declared rule branch is covered.
+ */
+export function dnd5eSpellbookEntryHasFullHeadlessAutomation(
+  spell: Pick<Dnd5eSpellbookEntry, 'headless' | 'automationLevel'> | undefined,
+): boolean {
+  return spell?.headless === true && spell.automationLevel === 'full'
+}
+
+const DND5E_STRUCTURED_PARTIAL_CAST_SPELL_IDS = new Set([
+  // The fixed 15-foot magical-darkness volume, concentration lifecycle and
+  // vision suppression are deterministic map transactions. Object anchoring,
+  // covering the source and following a carried object remain explicit map
+  // boundaries, but they must not make the ordinary point-cast route (or a
+  // concrete Darkness scroll) unreachable from the real UI.
+  'darkness',
+  // The fixed point-centered bright/dim-light volume and spell-level conflict
+  // transaction are deterministic. Attaching the light to an object, moving
+  // that object and covering it remain narration/DM boundaries, but those
+  // object branches must not hide the ordinary point-cast route.
+  'daylight',
+  // Creature-category detection, the 30-foot range and the concentration
+  // lifecycle are deterministic. Consecrated/desecrated places and objects,
+  // plus the spell's material-specific barrier thicknesses, remain explicit
+  // map/DM boundaries. Keep the implemented creature-sense transaction
+  // reachable without claiming those environmental branches are automated.
+  'detect-evil-and-good',
+  // Spell effects, concentration and carried/worn magic items are projected
+  // into a closed Host detection transaction. Independent magical map
+  // objects and the material-specific barrier thresholds remain explicit
+  // scene boundaries, so keep the live Activity without claiming `full`.
+  'detect-magic',
+  // Poisoned conditions, disease effects and poisonous SRD creature payloads
+  // are closed Host inputs. Independent poison objects, exact poison-kind
+  // metadata and material-specific barrier thresholds remain scene/DM facts,
+  // so preserve the implemented 30-foot detection cast without claiming full.
+  'detect-poison-and-disease',
+  // Creating and moving the projection are deterministic map transactions.
+  // The later choice of which scenery object to manipulate remains an
+  // explicit DM boundary and therefore must not promote the whole spell to
+  // `full` automation.
+  'mage-hand',
+  // The ten-minute casting process still needs an explicit DM confirmation,
+  // but target validation, one shared healing roll, upcasting, slot spending,
+  // and the undead/construct exclusion are deterministic Host transactions.
+  'prayer-of-healing',
+  // Creating the fixed storm cloud, resolving the initial five-foot strike,
+  // preserving concentration and authorizing later action strikes with the
+  // original slot-scaled damage are deterministic combat/map transactions.
+  // Indoor clearance and the extra die from a pre-existing outdoor storm stay
+  // in the authoritative map geometry and must remain reachable from the real
+  // casting UI together with every strike and upcast branch.
+  'call-lightning',
+  // The affected humanoids, Charisma saves, voluntary allied failures,
+  // concentration, condition suspension and bounded indifference groups are
+  // deterministic. Voice remains available for conversational consequences,
+  // but prose-only routing would skip every combat-facing rule.
+  'calm-emotions',
+  // Holding the flame and the later ranged spell attack are deterministic
+  // combat transactions. Only the emitted light and scenery interaction stay
+  // at the map/DM boundary, so routing the whole spell to prose adjudication
+  // would make its audited sustained attack unreachable from the real UI.
+  'produce-flame',
+  // The cast transaction binds the currently held club or quarterstaff and
+  // records the caster's authoritative attack-ability choice. Weapon attacks
+  // then consume that structured effect, including its d8 damage die. Routing
+  // this spell to prose adjudication would spend the bonus action without ever
+  // creating the implemented weapon modifier.
+  'shillelagh',
+  // The fixed 20-foot ground hazard, concentration lifecycle, difficult
+  // terrain, and 2d4 piercing damage per five feet are deterministic map
+  // transactions. Only the pre-entry Perception check for creatures that did
+  // not witness the cast remains manual. Prose adjudication cannot create the
+  // implemented persistent area, so it must not hide the structured route.
+  'spike-growth',
+  // The fixed 20-foot cube, concentration lifecycle, difficult terrain,
+  // light obscuration, entry/turn-start Dexterity saves, restrained condition,
+  // and Strength action escape are deterministic map transactions. Support,
+  // collapse and burning remain explicit scene boundaries, but prose-only
+  // adjudication cannot create the implemented web area or reach its triggers.
+  'web',
+  // The fixed 20-foot silence volume, concentration lifecycle, verbal-component
+  // suppression, and thunder immunity are deterministic map transactions. Only
+  // sound propagation, deafness narration, and disputed boundary cases remain
+  // manual. Prose adjudication cannot create the implemented persistent area,
+  // which would make every audited mechanical branch unreachable from the UI.
+  'silence',
+  // The fixed 40-foot-radius, 20-foot-high storm, difficult terrain,
+  // obscuration, prone saves and concentration disruption are deterministic
+  // map transactions. Only extinguishing exposed scenery flames remains a DM
+  // boundary, so prose adjudication must not hide the implemented area route.
+  'sleet-storm',
+  // The fixed 20-foot-radius, 40-foot-high cloud, concentration lifecycle,
+  // heavy obscuration and turn-start Constitution save/action loss are
+  // deterministic map transactions. Breathless creatures and wind dispersal
+  // remain explicit DM boundaries, but prose adjudication cannot create the
+  // implemented persistent area or reach its turn-start trigger.
+  'stinking-cloud',
+  // The fixed 20-foot-radius, 40-foot-high poison cloud, concentration
+  // lifecycle, enter/turn-start Constitution saves, half damage, poison
+  // immunity and one-extra-d8-per-higher-slot scaling are deterministic map
+  // transactions. Automatic drifting/sinking and strong-wind dispersal remain
+  // explicit map/DM boundaries, but prose adjudication cannot create the
+  // implemented area or reach any of its audited damage triggers.
+  'cloudkill',
+  // The straight 50-foot wall, 120-foot placement range, initial Strength
+  // saves/3d8 bludgeoning damage, concentration lifecycle and vertical volume
+  // are deterministic map transactions. Curved paths and the later projectile,
+  // gas and flying-creature interactions remain explicit map/DM boundaries,
+  // but prose adjudication cannot create or resolve the implemented wall.
+  'wind-wall',
+  // The point-cast straight wall, 120-foot placement range, ten-minute
+  // concentration lifecycle, movement blocking and line-of-effect blocking
+  // are deterministic map transactions. Dome/sphere geometry, choosing the
+  // side for an intersected creature, and Disintegrate remain explicit DM
+  // boundaries, but prose adjudication cannot create the implemented wall.
+  'wall-of-force',
+  // The straight stone wall, 120-foot placement range, concentration
+  // lifecycle and movement/vision/line-of-effect blocking are deterministic
+  // map transactions. Individual panel HP, free-form construction, enclosure
+  // reactions remain explicit DM boundaries, while a completed ten-minute
+  // concentration automatically makes the wall permanent. Those boundaries
+  // must not
+  // make the implemented wall placement route unreachable from the real UI.
+  'wall-of-stone',
+  // The straight ten-panel ice wall, on-create Dexterity save and cold
+  // damage (including slot scaling), concentration lifecycle and map
+  // blocking are deterministic transactions. Section HP/fire vulnerability,
+  // destroyed-section chill and dome/sphere geometry remain explicit DM
+  // boundaries, but they must not hide the implemented wall route.
+  'wall-of-ice',
+  // The straight thorn wall, initial Dexterity save/piercing damage, later
+  // entry and turn-end slashing damage, slot scaling, fourfold movement cost,
+  // vision blocking and concentration lifecycle are deterministic map
+  // transactions. Circular geometry and scenery/vegetation details remain DM
+  // boundaries, but prose adjudication cannot create the implemented hazard.
+  'wall-of-thorns',
+  // Slow's initial target selection, Wisdom saves, concentration duration,
+  // speed/AC/Dex-save/reaction/attack/action-economy penalties and repeat save
+  // are deterministic combat transactions. The later one-action spell delay
+  // is a separate boundary and must not hide all of those implemented fields
+  // behind the prose-only adjudication route.
+  'slow',
+  // Seeing ordinary invisible creatures and objects is a deterministic
+  // 600-round self effect. Only the additional ethereal-plane presentation is
+  // manual; prose adjudication cannot encode the seeInvisible modifier and
+  // would otherwise make the implemented sight mechanics unreachable.
+  'see-invisibility',
+])
+
+/**
+ * A deliberately narrow bridge for partial spells whose cast transaction is
+ * safe to run before their later, explicitly manual rule branches occur.
+ * This is separate from the full-automation audit so UI routing never has to
+ * lie about the remaining DM boundary.
+ */
+export function dnd5eSpellbookEntryCanUseStructuredCastRoute(
+  spell: Pick<Dnd5eSpellbookEntry, 'id' | 'sourceKind' | 'automationLevel' | 'combat'> | undefined,
+): boolean {
+  return spell?.sourceKind === 'srd-core' && spell.automationLevel === 'partial' &&
+    DND5E_STRUCTURED_PARTIAL_CAST_SPELL_IDS.has(spell.id)
+}
+
+/**
+ * Partial legacy-core spells execute through their native combat definition;
+ * audited catalog-only partial spells instead keep their installed plugin
+ * Activity. Both are structured, but choosing the wrong executor makes the
+ * latter fall through to “spell definition unavailable” in the real map UI.
+ */
+export function dnd5eSpellbookEntryUsesLegacyCoreStructuredCastRoute(
+  spell: Pick<Dnd5eSpellbookEntry, 'id' | 'sourceKind' | 'automationLevel' | 'combat'> | undefined,
+): boolean {
+  return dnd5eSpellbookEntryCanUseStructuredCastRoute(spell) && spell?.combat != null
+}
+
+export function dnd5eSrdSpellHasFullHeadlessAutomation(spellId: string): boolean {
+  if (DND5E_SRD_COMBAT_SPELLS.some((spell) => spell.id === spellId)) {
+    return DND5E_PARTIAL_CORE_SPELL_REASONS[spellId] == null
+  }
+  return dnd5eSrdAuditedSpellDecisionV1(spellId)?.target === 'full'
 }
 
 export interface Dnd5ePluginSpellbookReference extends Omit<Dnd5eImportedSpell, 'automation'> {
@@ -221,6 +434,73 @@ function nonNegativeNumber(value: unknown, label: string, problems: string[], in
 function booleanValue(value: unknown, label: string, problems: string[]): boolean {
   if (typeof value !== 'boolean') problems.push(`${label}必须是布尔值`)
   return value === true
+}
+
+function parseMaterialRequirement(
+  value: unknown,
+  prefix: string,
+  problems: string[],
+): Dnd5eSpellMaterialRequirement | undefined {
+  if (value == null) return undefined
+  if (!objectValue(value)) {
+    problems.push(`${prefix}必须是对象`)
+    return undefined
+  }
+  const label = boundedString(value.label, `${prefix}.label`, problems, 500) ?? ''
+  if (!Array.isArray(value.options) || value.options.length < 1 || value.options.length > 8) {
+    problems.push(`${prefix}.options 必须包含 1 到 8 个选项`)
+    return undefined
+  }
+  const options = value.options.flatMap((candidate, optionIndex) => {
+    const optionPrefix = `${prefix}.options[${optionIndex}]`
+    if (!objectValue(candidate)) {
+      problems.push(`${optionPrefix}必须是对象`)
+      return []
+    }
+    const optionLabel = boundedString(candidate.label, `${optionPrefix}.label`, problems, 300) ?? ''
+    if (!Array.isArray(candidate.components) || candidate.components.length < 1 || candidate.components.length > 8) {
+      problems.push(`${optionPrefix}.components 必须包含 1 到 8 种材料`)
+      return []
+    }
+    const components = candidate.components.flatMap((rawComponent, componentIndex) => {
+      const componentPrefix = `${optionPrefix}.components[${componentIndex}]`
+      if (!objectValue(rawComponent)) {
+        problems.push(`${componentPrefix}必须是对象`)
+        return []
+      }
+      const tag = boundedString(rawComponent.tag, `${componentPrefix}.tag`, problems, 160) ?? ''
+      if (tag && !/^[a-z0-9][a-z0-9._:-]{0,159}$/.test(tag)) {
+        problems.push(`${componentPrefix}.tag 必须是稳定的小写规则 ID`)
+      }
+      const componentLabel = boundedString(rawComponent.label, `${componentPrefix}.label`, problems, 300) ?? ''
+      const consumed = booleanValue(rawComponent.consumed, `${componentPrefix}.consumed`, problems)
+      const quantity = rawComponent.quantity == null
+        ? undefined
+        : nonNegativeNumber(rawComponent.quantity, `${componentPrefix}.quantity`, problems, true)
+      if (quantity != null && (quantity < 1 || quantity > 1_000_000)) {
+        problems.push(`${componentPrefix}.quantity 必须在 1 到 1000000 之间`)
+      }
+      const minimumUnitValueGp = rawComponent.minimumUnitValueGp == null
+        ? undefined
+        : nonNegativeNumber(rawComponent.minimumUnitValueGp, `${componentPrefix}.minimumUnitValueGp`, problems)
+      const minimumTotalValueGp = rawComponent.minimumTotalValueGp == null
+        ? undefined
+        : nonNegativeNumber(rawComponent.minimumTotalValueGp, `${componentPrefix}.minimumTotalValueGp`, problems)
+      if ((minimumUnitValueGp ?? 0) > 1_000_000_000 || (minimumTotalValueGp ?? 0) > 1_000_000_000) {
+        problems.push(`${componentPrefix}的材料价值不能超过 1000000000 gp`)
+      }
+      return [{
+        tag,
+        label: componentLabel,
+        consumed,
+        ...(quantity != null ? { quantity } : {}),
+        ...(minimumUnitValueGp != null ? { minimumUnitValueGp } : {}),
+        ...(minimumTotalValueGp != null ? { minimumTotalValueGp } : {}),
+      }]
+    })
+    return [{ label: optionLabel, components }]
+  })
+  return { label, options }
 }
 
 function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell; problems: string[] } {
@@ -304,6 +584,14 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
   const materialConsumed = componentsInput.materialConsumed == null
     ? undefined
     : booleanValue(componentsInput.materialConsumed, `${prefix}.components.materialConsumed`, problems)
+  const materialRequirement = parseMaterialRequirement(
+    componentsInput.materialRequirement,
+    `${prefix}.components.materialRequirement`,
+    problems,
+  )
+  if (materialRequirement && !material) {
+    problems.push(`${prefix}.components.materialRequirement 只能用于包含材料成分的法术`)
+  }
 
   const durationInput = objectValue(value.duration) ? value.duration : {}
   if (!objectValue(value.duration)) problems.push(`${prefix}.duration 必须是对象`)
@@ -382,6 +670,7 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
         ...(materialText ? { materialText } : {}),
         ...(materialCostGp != null ? { materialCostGp } : {}),
         ...(materialConsumed != null ? { materialConsumed } : {}),
+        ...(materialRequirement ? { materialRequirement } : {}),
       },
       duration: {
         type: durationType,
@@ -450,6 +739,8 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
   const combatById = new Map(DND5E_SRD_COMBAT_SPELLS.map((spell) => [spell.id, spell]))
   const core = DND5E_SRD_SPELL_CATALOG.map((catalog): Dnd5eSpellbookEntry => {
     const combat = combatById.get(catalog.id)
+    const audited = !combat ? dnd5eAuditedCatalogSpellAutomation(catalog.id) : undefined
+    const automation = audited ?? dnd5eCoreSpellAutomation(catalog.id, !!combat)
     const reviewedReference = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED[catalog.id]
     const reference = reviewedReference
       ? {
@@ -465,9 +756,9 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
       level: catalog.level,
       classes: catalog.classes as readonly Dnd5eSpellcastingClassId[],
       sourceKind: 'srd-core',
-      headless: !!combat,
-      ...dnd5eCoreSpellAutomation(catalog.id, !!combat),
-      catalogOnly: !combat,
+      headless: automation.automationLevel === 'full',
+      ...automation,
+      catalogOnly: audited?.catalogOnly ?? !combat,
       visibilityRequirement: catalog.visibilityRequirement,
       translationStatus: reviewedReference ? 'context-reviewed' : 'pending-srd-translation',
       ...(reference ? { reference } : {}),
@@ -498,14 +789,25 @@ export function dnd5eSpellbookEntriesWithPlugins(
   const iconAssets = new Map(pluginSpells.flatMap((spell) =>
     spell.iconAssetId ? [[spell.id, spell.iconAssetId] as const] : []))
   const pluginIds = new Set(pluginSpells.map((spell) => spell.id))
-  const references: Dnd5eImportedSpell[] = pluginSpells.map((spell) => ({
-    ...spell,
-    automation: { mode: 'reference-only' },
-  }))
+  // Built-in audited SRD spells enrich the existing catalog entry; they must
+  // not be appended again as room imports. A duplicate room entry sorts next
+  // to the SRD entry and can win a later id map, silently promoting partial
+  // spells to full automation in the player hotbar.
+  const references: Dnd5eImportedSpell[] = pluginSpells
+    .filter((spell) => !coreSpellIds.has(spell.id))
+    .map((spell) => ({
+      ...spell,
+      automation: { mode: 'reference-only' },
+    }))
   return dnd5eSpellbookEntries([...imported.filter((spell) => !pluginIds.has(spell.id)), ...references]).map((entry) => {
     const iconAssetId = iconAssets.get(entry.id)
     const withAutomation = automation.get(entry.id)?.mode === 'headless-action'
-      ? { ...entry, headless: true, automationLevel: 'full' as const, catalogOnly: false }
+      ? entry.sourceKind === 'srd-core'
+        // Preserve the SRD audit's full/partial/manual classification. The
+        // active package only proves that the declared deterministic route is
+        // installed; it does not erase environmental or semantic gaps.
+        ? { ...entry, catalogOnly: false }
+        : { ...entry, headless: true, automationLevel: 'full' as const, catalogOnly: false }
       : entry
     return iconAssetId ? { ...withAutomation, iconAssetId } : withAutomation
   })

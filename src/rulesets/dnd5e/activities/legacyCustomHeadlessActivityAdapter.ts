@@ -7,15 +7,18 @@ import type { Dnd5ePluginEffectDuration } from '../persistentAreaTypes'
 import type { Dnd5eActivityDefinitionV1, Dnd5eActivityOperationV1 } from './dnd5eActivityContracts'
 import type { Dnd5eEffectDurationV1 } from './dnd5eEffectContracts'
 import type { Dnd5eFormulaV1 } from './dnd5eFormula'
+import { dnd5eWorkshopDamageFormulaAsFormulaV1 } from '../workshopDamageFormula'
 
 function diceFormula(
   rollId: string,
   dice: Dnd5eCustomHeadlessDiceFormula,
 ): Dnd5eFormulaV1 {
   const rolled: Dnd5eFormulaV1 = { kind: 'dice', rollId, count: dice.count, sides: dice.sides }
-  return dice.modifier
-    ? { kind: 'add', values: [rolled, { kind: 'constant', value: dice.modifier }] }
-    : rolled
+  const values: Dnd5eFormulaV1[] = [rolled]
+  if (dice.modifier) values.push({ kind: 'constant', value: dice.modifier })
+  const dynamicModifier = dnd5eWorkshopDamageFormulaAsFormulaV1(dice.modifierFormula)
+  if (dynamicModifier) values.push(dynamicModifier)
+  return values.length === 1 ? rolled : { kind: 'add', values }
 }
 
 function effectDuration(duration: Dnd5ePluginEffectDuration): Dnd5eEffectDurationV1 {
@@ -48,24 +51,35 @@ export function dnd5eActivityFromCustomHeadlessAction(
     if (effect.kind === 'damage') return {
       id,
       kind: 'damage',
-      target: 'all-targets',
+      target: 'target',
       amount: diceFormula(id, effect.dice),
       damageType: effect.damageType,
     }
     if (effect.kind === 'healing') return {
       id,
       kind: 'healing',
-      target: 'all-targets',
+      target: 'target',
       amount: diceFormula(id, effect.dice),
     }
     return {
       id,
       kind: 'apply-standard-condition',
-      target: 'all-targets',
+      target: 'target',
       condition: effect.condition,
       duration: effectDuration(effect.duration),
     }
   })
+  const savingThrow = definition.savingThrow
+  const successOperations: Dnd5eActivityOperationV1[] = savingThrow?.onSuccess === 'half'
+    ? operations.flatMap((operation) => operation.kind === 'damage' ? [{
+        ...operation,
+        id: `${operation.id}-half`,
+        amount: {
+          kind: 'floor' as const,
+          value: { kind: 'multiply' as const, values: [operation.amount, { kind: 'constant' as const, value: 0.5 }] },
+        },
+      }] : [])
+    : []
   return {
     schemaVersion: 1,
     id: definition.id,
@@ -76,7 +90,25 @@ export function dnd5eActivityFromCustomHeadlessAction(
     requirements: definition.requiredInterruptOptionId
       ? [{ kind: 'choice', choiceId: 'interrupt', optionId: definition.requiredInterruptOptionId }]
       : undefined,
-    outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations }],
+    checks: savingThrow ? [{
+      id: 'target-save',
+      kind: 'saving-throw',
+      rollId: 'target-save-d20',
+      ability: savingThrow.ability,
+      dc: savingThrow.dc === 'source-save-dc'
+        ? { kind: 'reference', reference: { kind: 'actor-spell-save-dc' } }
+        : { kind: 'constant', value: savingThrow.dc },
+      rollMode: 'normal',
+      scope: 'per-target',
+    }] : undefined,
+    outcomes: savingThrow ? [
+      { id: 'failed-save', when: { kind: 'check', checkId: 'target-save', result: 'failure' }, operations },
+      ...(successOperations.length > 0 ? [{
+        id: 'successful-save',
+        when: { kind: 'check' as const, checkId: 'target-save', result: 'success' as const },
+        operations: successOperations,
+      }] : []),
+    ] : [{ id: 'resolve', when: { kind: 'always' }, operations }],
     automation: automationCapabilityFromLegacyStatus('full'),
     legacySource: { kind: 'custom-headless-action', id: definition.id },
   }
