@@ -48,6 +48,7 @@
     "test": "vitest run",
     "test:postgres": "node scripts/postgres-storage.integration.mjs",
     "test:combat-scenarios": "vitest run src/rulesets/dnd5e/combatScenarioRegression.test.ts",
+    "test:maps-regression": "vitest run src/pages/maps/mapsWorkspaceRenderIsolation.test.ts src/pages/maps/dnd5eRollInterruptPipeline.test.ts src/pages/maps/spellSculptTokenSelection.test.ts src/pages/maps/spellAoeHighlight.test.ts src/pages/maps/opportunityAttackD20Ownership.test.ts src/pages/maps/monsterAttackDamageLog.test.ts src/pages/maps/dicePresentationGate.test.ts src/pages/maps/settleDnd5eCombatResult.test.ts src/rulesets/dnd5e/characterMovement.test.ts src/rulesets/dnd5e/verticalCombatGeometry.test.ts src/rulesets/dnd5e/activities/dnd5eActivityAutomaticRolls.test.ts src/presentation/maps/DicePresentationDrawer.test.ts",
     "test:mobile-demo": "node --test scripts/mobile-demo-server.test.mjs",
     "test:desktop": "node --test desktop/client-update.test.mjs desktop/plugin-package-store.test.mjs",
     "desktop:start": "electron .",

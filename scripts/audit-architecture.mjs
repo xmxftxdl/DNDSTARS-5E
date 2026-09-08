@@ -4,11 +4,36 @@ import process from 'node:process'
 
 const root = process.cwd()
 const failures = []
+const ratchetNotes = []
+const ratchetDebt = []
 
 const source = async (relativePath) => readFile(path.join(root, relativePath), 'utf8')
 const lineCount = (value) => value.split(/\r?\n/).length
 const imports = (value) => [...value.matchAll(/(?:from\s*|import\s*\()\s*['"]([^'"]+)['"]/g)]
   .map((match) => match[1])
+const architectureRatchet = JSON.parse(await source('scripts/architecture-ratchet.json'))
+const budget = (key) => architectureRatchet.budgets[key]
+const enforceRatchet = (key, label, actual) => {
+  const entry = budget(key)
+  if (!entry || !Number.isFinite(entry.maximum) || !Number.isFinite(entry.target)) {
+    failures.push(`architecture ratchet entry ${key} is missing or invalid`)
+    return
+  }
+  if (entry.target > entry.maximum) {
+    failures.push(`architecture ratchet entry ${key} has target ${entry.target} above maximum ${entry.maximum}`)
+    return
+  }
+  if (actual > entry.maximum) {
+    failures.push(`${label} budget exceeded: ${actual} > ${entry.maximum}`)
+    return
+  }
+  if (actual < entry.maximum && entry.maximum > entry.target) {
+    ratchetNotes.push(`${label} improved to ${actual}; lower maximum from ${entry.maximum}`)
+  }
+  if (actual > entry.target) {
+    ratchetDebt.push(`${label}: ${actual} (target ${entry.target})`)
+  }
+}
 
 async function sourceFiles(relativeDirectory) {
   const directory = path.join(root, relativeDirectory)
@@ -127,63 +152,40 @@ const mapPersistentAreaLayers = await source('src/components/map/MapPersistentAr
 const serverCore = await source('scripts/shared-server-core.mjs')
 const pluginApi = await source('src/rulesets/dnd5e/pluginApi.ts')
 const monsterTurnPlanner = await source('src/rulesets/dnd5e/monsterTurnPlanner.ts')
-const mapsPageLimits = {
-  // This is a ratchet, not an allowance. Any new MapsPage work must first
-  // move at least the same amount of code behind an application/presentation
-  // boundary instead of consuming a small remaining line budget.
-  lines: 24,
-  rulesetImports: 2,
-  storeImports: 10,
-  libImports: 70,
-}
 const prefixImportCount = (prefix) => imports(mapsWorkspacePage).filter((specifier) => specifier.startsWith(prefix)).length
 
-if (lineCount(mapsPage) > mapsPageLimits.lines) {
-  failures.push(`MapsPage.tsx line budget exceeded: ${lineCount(mapsPage)} > ${mapsPageLimits.lines}`)
-}
-if (lineCount(mapsWorkspacePage) > 28_557) {
-  failures.push(`MapsWorkspacePage.tsx line budget exceeded: ${lineCount(mapsWorkspacePage)} > 28557`)
-}
-for (const [label, prefix, maximum] of [
-  ['ruleset', '../rulesets/', 3],
-  ['store', '../store/', mapsPageLimits.storeImports],
-  ['lib', '../lib/', mapsPageLimits.libImports],
+enforceRatchet('mapsPageLines', 'MapsPage.tsx line', lineCount(mapsPage))
+enforceRatchet('mapsWorkspacePageLines', 'MapsWorkspacePage.tsx line', lineCount(mapsWorkspacePage))
+for (const [key, label, prefix] of [
+  ['mapsPageRulesetImports', 'MapsWorkspacePage.tsx ruleset dependency', '../rulesets/'],
+  ['mapsPageStoreImports', 'MapsWorkspacePage.tsx store dependency', '../store/'],
+  ['mapsPageLibImports', 'MapsWorkspacePage.tsx lib dependency', '../lib/'],
 ]) {
   const count = prefixImportCount(prefix)
-  if (count > maximum) failures.push(`MapsPage.tsx ${label} dependency budget exceeded: ${count} > ${maximum}`)
+  enforceRatchet(key, label, count)
 }
-if (lineCount(serverCore) > 12_951) {
-  failures.push(`shared-server-core.mjs line budget exceeded: ${lineCount(serverCore)} > 12951`)
-}
-if (lineCount(mapCanvas) > 2_867) {
-  failures.push(`MapCanvas.tsx line budget exceeded: ${lineCount(mapCanvas)} > 2867`)
-}
-for (const [file, maximum] of [
-  ['src/components/map/MapCombatEffects.tsx', 413],
-  ['src/components/map/MapEffectPrimitives.tsx', 647],
-  ['src/components/map/MapCantripEffects.tsx', 2_073],
-  ['src/components/map/MapLeveledSpellEffects.tsx', 1_646],
-  ['src/components/map/MapTokenNode.tsx', 1_438],
-  ['src/components/map/mapCanvasContracts.ts', 85],
-  ['src/components/map/MapVisibilityLayers.tsx', 431],
-  ['src/components/map/MapGeometryLayers.tsx', 500],
-  ['src/components/map/mapCanvasGeometryUtils.ts', 33],
-  ['src/components/map/MapPersistentAreaLayers.tsx', 991],
-  ['src/pages/maps/mapInteractionActionProcessor.ts', 532],
+enforceRatchet('sharedServerCoreLines', 'shared-server-core.mjs line', lineCount(serverCore))
+enforceRatchet('mapCanvasLines', 'MapCanvas.tsx line', lineCount(mapCanvas))
+for (const [key, file] of [
+  ['mapCombatEffectsLines', 'src/components/map/MapCombatEffects.tsx'],
+  ['mapEffectPrimitivesLines', 'src/components/map/MapEffectPrimitives.tsx'],
+  ['mapCantripEffectsLines', 'src/components/map/MapCantripEffects.tsx'],
+  ['mapLeveledSpellEffectsLines', 'src/components/map/MapLeveledSpellEffects.tsx'],
+  ['mapTokenNodeLines', 'src/components/map/MapTokenNode.tsx'],
+  ['mapCanvasContractsLines', 'src/components/map/mapCanvasContracts.ts'],
+  ['mapVisibilityLayersLines', 'src/components/map/MapVisibilityLayers.tsx'],
+  ['mapGeometryLayersLines', 'src/components/map/MapGeometryLayers.tsx'],
+  ['mapCanvasGeometryUtilsLines', 'src/components/map/mapCanvasGeometryUtils.ts'],
+  ['mapPersistentAreaLayersLines', 'src/components/map/MapPersistentAreaLayers.tsx'],
+  ['mapInteractionActionProcessorLines', 'src/pages/maps/mapInteractionActionProcessor.ts'],
 ]) {
   const count = lineCount(await source(file))
-  if (count > maximum) failures.push(`${file} line budget exceeded: ${count} > ${maximum}`)
+  enforceRatchet(key, `${file} line`, count)
 }
-if (lineCount(pluginApi) > 2_844) {
-  failures.push(`pluginApi.ts line budget exceeded: ${lineCount(pluginApi)} > 2844`)
-}
-if (lineCount(monsterTurnPlanner) > 4_146) {
-  failures.push(`monsterTurnPlanner.ts line budget exceeded: ${lineCount(monsterTurnPlanner)} > 4146`)
-}
+enforceRatchet('pluginApiLines', 'pluginApi.ts line', lineCount(pluginApi))
+enforceRatchet('monsterTurnPlannerLines', 'monsterTurnPlanner.ts line', lineCount(monsterTurnPlanner))
 const mapCanvasLayerCount = [...mapCanvas.matchAll(/<Layer(?:\s|>)/g)].length
-if (mapCanvasLayerCount > 5) {
-  failures.push(`MapCanvas.tsx layer budget exceeded: ${mapCanvasLayerCount} > 5`)
-}
+enforceRatchet('mapCanvasLayerCount', 'MapCanvas.tsx layer', mapCanvasLayerCount)
 if (mapCanvas.includes('useCampaignTimeStore') || !mapCanvas.includes('worldMinute?: number')) {
   failures.push('MapCanvas.tsx must receive the campaign clock as a projection prop')
 }
@@ -249,6 +251,15 @@ if (failures.length > 0) {
   console.error('Architecture audit failed:')
   for (const failure of failures) console.error(`- ${failure}`)
   process.exit(1)
+}
+
+if (ratchetNotes.length > 0) {
+  console.warn('Architecture ratchet can be tightened:')
+  for (const note of ratchetNotes) console.warn(`- ${note}`)
+}
+
+if (ratchetDebt.length > 0) {
+  console.log(`Architecture debt remains registered in scripts/architecture-ratchet.json (${ratchetDebt.length} budgets above target).`)
 }
 
 console.log(

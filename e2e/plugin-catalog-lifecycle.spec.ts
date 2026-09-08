@@ -79,6 +79,7 @@ test('账号插件可发布到公开目录、由另一账号保存并原子启�
       version,
       apiVersion: 2,
       rulesetId: 'dnd5e-2014-srd-5.1',
+      pluginKind: 'content-package',
       stateSchemaVersion: 1,
       manifestSchemaVersion: 1,
       minimumGameProtocolVersion: 5,
@@ -96,7 +97,13 @@ test('账号插件可发布到公开目录、由另一账号保存并原子启�
       manifest: { id: pluginId },
       races: [],
       backgrounds: [],
-      features: [],
+      features: [{
+        id: 'catalog-lifecycle-marker',
+        name: '目录生命周期标记',
+        summary: '验证公开目录安装流程。',
+        description: '仅用于端到端测试的手动规则特性。',
+        automation: 'manual',
+      }],
       spells: [],
       items: [],
       abilityGenerationMethods: [],
@@ -166,8 +173,8 @@ test('账号插件可发布到公开目录、由另一账号保存并原子启�
   const dmPage = await dmContext.newPage()
   await dmPage.goto(`${DM}/plugins`, { waitUntil: 'domcontentloaded' })
   await dmPage.getByRole('button', { name: '扩展市场' }).click()
-  await dmPage.getByRole('textbox', { name: '搜索插件' }).fill(pluginId)
-  await dmPage.getByRole('button', { name: '搜索', exact: true }).click()
+  await dmPage.getByRole('textbox', { name: '搜索扩展内容' }).fill(pluginId)
+  await dmPage.getByRole('button', { name: '查看内容', exact: true }).click()
   const catalogVersion = dmPage.locator('article').filter({ hasText: pluginId })
   await expect(catalogVersion).toContainText(pluginName)
   await catalogVersion.getByRole('button', { name: '安装并激活' }).click()

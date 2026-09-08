@@ -24,6 +24,9 @@ jobs:
       - name: Type-check (tsc -b)
         run: npx tsc -b
 
+      - name: Maps workspace refactor regression guardrails
+        run: npm run test:maps-regression
+
       - name: Unit tests (vitest, environment:node, no external deps)
         run: npx vitest run
 

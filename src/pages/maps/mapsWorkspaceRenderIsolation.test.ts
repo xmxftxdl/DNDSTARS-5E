@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 const workspaceSource = readFileSync(
   new URL('../MapsWorkspacePage.tsx', import.meta.url),
   'utf8',
-)
+).replace(/\r\n/g, '\n')
 const mapCanvasSource = readFileSync(
   new URL('../../components/map/MapCanvas.tsx', import.meta.url),
   'utf8',

@@ -1,0 +1,4 @@
+{
+  "comment": "Temporary no-new-errors baseline for the oversized MapsWorkspacePage profile. Lower this value whenever one of the five existing errors is fixed; never raise it.",
+  "maxErrors": 5
+}
