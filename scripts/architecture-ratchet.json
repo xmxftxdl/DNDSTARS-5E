@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "baseline": "origin/main@065c1debcbce677cfba2180698b19967c74568dd",
+  "description": "Maximum is the checked-in no-growth ceiling. Target preserves the intended post-refactor budget and must not be raised to hide new debt.",
+  "budgets": {
+    "mapsPageLines": { "maximum": 24, "target": 24 },
+    "mapsWorkspacePageLines": { "maximum": 41294, "target": 28557 },
+    "mapsPageRulesetImports": { "maximum": 3, "target": 3 },
+    "mapsPageStoreImports": { "maximum": 10, "target": 10 },
+    "mapsPageLibImports": { "maximum": 72, "target": 70 },
+    "sharedServerCoreLines": { "maximum": 14989, "target": 12951 },
+    "mapCanvasLines": { "maximum": 3418, "target": 2867 },
+    "mapCombatEffectsLines": { "maximum": 413, "target": 413 },
+    "mapEffectPrimitivesLines": { "maximum": 647, "target": 647 },
+    "mapCantripEffectsLines": { "maximum": 2187, "target": 2073 },
+    "mapLeveledSpellEffectsLines": { "maximum": 1997, "target": 1646 },
+    "mapTokenNodeLines": { "maximum": 1761, "target": 1438 },
+    "mapCanvasContractsLines": { "maximum": 85, "target": 85 },
+    "mapVisibilityLayersLines": { "maximum": 431, "target": 431 },
+    "mapGeometryLayersLines": { "maximum": 500, "target": 500 },
+    "mapCanvasGeometryUtilsLines": { "maximum": 42, "target": 33 },
+    "mapPersistentAreaLayersLines": { "maximum": 1803, "target": 991 },
+    "mapInteractionActionProcessorLines": { "maximum": 563, "target": 532 },
+    "pluginApiLines": { "maximum": 3227, "target": 2844 },
+    "monsterTurnPlannerLines": { "maximum": 4205, "target": 4146 },
+    "mapCanvasLayerCount": { "maximum": 6, "target": 5 }
+  }
+}

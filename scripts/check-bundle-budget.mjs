@@ -17,8 +17,8 @@ if (mainBytes > mainBudgetBytes) {
 const indexHtml = await readFile(path.join(distDir, 'index.html'), 'utf8')
 for (const deferredChunk of [
   'MapsPage-',
+  'MapViewportLayer-',
   'monsterTurnPlanner-',
-  'SceneCanvas-',
   'diceFrame-',
 ]) {
   if (indexHtml.includes(deferredChunk)) {
@@ -28,11 +28,8 @@ for (const deferredChunk of [
 
 for (const expectedChunk of [
   'MapsPage-',
+  'MapViewportLayer-',
   'monsterTurnPlanner-',
-  'SceneCanvas-',
-  'dnd5e-plugin-protocol-',
-  'dnd5e-plugin-registry-',
-  'dnd5e-plugin-headless-runtime-',
   'dnd5e-plugin-compiler-',
   'diceFrame-',
 ]) {
