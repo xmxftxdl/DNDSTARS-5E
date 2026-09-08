@@ -50,8 +50,16 @@ export default function Dnd5eConcentrationTokenBadge({
       x={x}
       y={y}
       listening={!!onClick || !!onTooltipChange}
-      onClick={(event) => { event.cancelBubble = true; onClick?.() }}
-      onTap={(event) => { event.cancelBubble = true; onClick?.() }}
+      onClick={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
+      onTap={(event) => {
+        if (!onClick) return
+        event.cancelBubble = true
+        onClick()
+      }}
       onMouseEnter={(event) => onTooltipChange?.({
         clientX: event.evt.clientX,
         clientY: event.evt.clientY,

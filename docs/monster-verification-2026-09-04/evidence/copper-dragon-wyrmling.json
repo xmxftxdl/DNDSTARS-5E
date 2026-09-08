@@ -1,0 +1,157 @@
+{
+  "id": "srd-5.1:copper-dragon-wyrmling",
+  "slug": "copper-dragon-wyrmling",
+  "name": "赤铜龙雏龙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "breath-weapons",
+      "name": "吐息武器",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.variants[].id",
+        "rule.variants[].name",
+        "rule.variants[].area.shape",
+        "rule.variants[].area.origin",
+        "rule.variants[].area.lengthFeet",
+        "rule.variants[].area.widthFeet",
+        "rule.variants[].area.aimRangeFeet",
+        "rule.variants[].target",
+        "rule.variants[].ability",
+        "rule.variants[].dc",
+        "rule.variants[].damage.average",
+        "rule.variants[].damage.count",
+        "rule.variants[].damage.sides",
+        "rule.variants[].damage.bonus",
+        "rule.variants[].damage.type",
+        "rule.variants[].damageOnSuccessfulSave",
+        "rule.variants[].activeEffectOnFailedSave.id",
+        "rule.variants[].activeEffectOnFailedSave.label",
+        "rule.variants[].activeEffectOnFailedSave.durationRounds",
+        "rule.variants[].activeEffectOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.variants[].activeEffectOnFailedSave.modifiers.speedMultiplier",
+        "rule.variants[].activeEffectOnFailedSave.modifiers.preventReactions",
+        "rule.variants[].activeEffectOnFailedSave.modifiers.maximumAttacksPerTurn",
+        "rule.variants[].activeEffectOnFailedSave.modifiers.actionOrBonusActionOnly"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 69,
+      "slug": "copper-dragon-wyrmling",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:42:21.735Z",
+      "name": "赤铜龙雏龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-copper-dragon-wyrmling-bite-1788558141796",
+      "combatId": "verify-ui-copper-dragon-wyrmling-bite-1788558141796:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "赤铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+4=15 命中；共造成 7 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:43 PM\n结算\n\n赤铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+4=15 命中；共造成 7 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 11；最终采用 11；调整值 +4。\n结果 · 15 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d10 骰面：5 = 5｜固定加值 +2｜小计 7\n赤铜龙雏龙｜消耗动作\n验证目标｜受到 7 点伤害｜HP 320 → 313",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/赤铜龙雏龙 使用啃咬攻击 验证目标：/)\nExpected: \u001b[32m\"赤铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+4=15 命中；共造成 7 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/赤铜龙雏龙 使用啃咬攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:43:22.646Z",
+      "evidenceFile": "ui-cases/monsters/069-copper-dragon-wyrmling.json"
+    },
+    {
+      "index": 196,
+      "slug": "copper-dragon-wyrmling",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:49:57.153Z",
+      "name": "赤铜龙雏龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1",
+      "total": 334,
+      "mapId": "verify-ui-copper-dragon-wyrmling-bite-1788569397214",
+      "combatId": "verify-ui-copper-dragon-wyrmling-bite-1788569397214:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "赤铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+4=15 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:50 PM\n结算\n\n赤铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+4=15 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 11；最终采用 11；调整值 +4。\n结果 · 15 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d10 骰面：2 = 2｜固定加值 +2｜小计 4\n赤铜龙雏龙｜消耗动作\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "playerLog": "赤铜龙雏龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 11+4=15 命中；共造成 4 点伤害。",
+      "afterHp": 316,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:50:21.800Z",
+      "evidenceFile": "ui-cases/monsters/196-copper-dragon-wyrmling.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 11,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

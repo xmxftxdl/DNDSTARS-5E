@@ -1,0 +1,172 @@
+{
+  "id": "srd-5.1:bulette",
+  "slug": "bulette",
+  "name": "掘地鲨",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "deadly-leap",
+      "name": "致命飞跃",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.area.placeRangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.targetAbilityChoices[]",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.additionalDamage[].average",
+        "rule.additionalDamage[].count",
+        "rule.additionalDamage[].sides",
+        "rule.additionalDamage[].bonus",
+        "rule.additionalDamage[].type",
+        "rule.damageOnSuccessfulSave",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.forcedMovementOnSuccessfulSave.direction",
+        "rule.forcedMovementOnSuccessfulSave.maximumDistanceFeet",
+        "rule.forcedMovementOnSuccessfulSave.conditionWhenNoDestination",
+        "rule.actorLanding.kind",
+        "rule.actorLanding.minimumDistanceFeet",
+        "rule.actorLanding.traversalMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "successful-save-blocked-exit"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 56,
+      "slug": "bulette",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:34:28.496Z",
+      "name": "掘地鲨",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-bulette-bite-1788557668559",
+      "combatId": "verify-ui-bulette-bite-1788557668559:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "掘地鲨 使用啃咬攻击 验证目标：啃咬 → 验证目标 7+7=14 命中；共造成 40 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:34 PM\n结算\n\n掘地鲨 使用啃咬攻击 验证目标：啃咬 → 验证目标 7+7=14 命中；共造成 40 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 7；最终采用 7；调整值 +7。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜4d12 骰面：9 + 5 + 12 + 10 = 36｜固定加值 +4｜小计 40\n掘地鲨｜消耗动作\n验证目标｜受到 40 点伤害｜HP 320 → 280",
+      "playerLog": "掘地鲨 使用啃咬攻击 验证目标：啃咬 → 验证目标 7+7=14 命中；共造成 40 点伤害。",
+      "status": "failed",
+      "error": "TimeoutError: apiRequestContext.get: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - → GET http://127.0.0.1:6973/api/state/characters\u001b[22m\n\u001b[2m    - user-agent: Playwright/1.61.1 (x64; windows 10.0) node/24.16\u001b[22m\n\u001b[2m    - accept: */*\u001b[22m\n\u001b[2m    - accept-encoding: gzip,deflate,br\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:35:18.170Z",
+      "evidenceFile": "ui-cases/monsters/056-bulette.json"
+    },
+    {
+      "index": 99,
+      "slug": "bulette",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:25:51.997Z",
+      "name": "掘地鲨",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "5",
+      "total": 334,
+      "mapId": "verify-ui-bulette-bite-1788567952056",
+      "combatId": "verify-ui-bulette-bite-1788567952056:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "掘地鲨 使用啃咬攻击 验证目标：啃咬 → 验证目标 7+7=14 命中；共造成 25 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:26 PM\n结算\n\n掘地鲨 使用啃咬攻击 验证目标：啃咬 → 验证目标 7+7=14 命中；共造成 25 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 7；最终采用 7；调整值 +7。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜4d12 骰面：6 + 6 + 4 + 5 = 21｜固定加值 +4｜小计 25\n掘地鲨｜消耗动作\n验证目标｜受到 25 点伤害｜HP 320 → 295",
+      "playerLog": "掘地鲨 使用啃咬攻击 验证目标：啃咬 → 验证目标 7+7=14 命中；共造成 25 点伤害。",
+      "afterHp": 295,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:26:16.501Z",
+      "evidenceFile": "ui-cases/monsters/099-bulette.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "立定跳跃",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

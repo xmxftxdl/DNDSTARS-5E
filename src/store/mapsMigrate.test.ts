@@ -6,6 +6,25 @@ import { migrateMapsState, MAPS_PERSIST_VERSION } from './maps'
 // 被规整为可直接渲染的当前 BattleMap 形状，且 version 已落定。
 
 describe('T10/AC3 — maps store version + migrate', () => {
+  it('retains valid viewport notes while normalizing unsafe coordinates', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map-with-note',
+        name: '便签地图',
+        tokens: [],
+        viewportNotes: [{
+          id: 'viewport-note:clue', kind: 'text', text: '别碰雕像',
+          x: 9, y: -4, width: 280, height: 190, zIndex: 1,
+          createdAt: 1, updatedAt: 1,
+        }],
+      }],
+      selectedId: 'map-with-note',
+    })
+    expect(result.maps[0].viewportNotes).toEqual([
+      expect.objectContaining({ id: 'viewport-note:clue', text: '别碰雕像', x: 1, y: 0 }),
+    ])
+  })
+
   it('exposes a non-zero persist version', () => {
     expect(MAPS_PERSIST_VERSION).toBeGreaterThan(0)
   })
@@ -105,6 +124,23 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens.find((token) => token.id === 'friendly')?.dnd5eSide).toBe('player')
     expect(result.maps[0].tokens.find((token) => token.id === 'hostile')?.dnd5eSide).toBe('enemy')
     expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.dnd5eSide).toBeUndefined()
+  })
+
+  it('keeps bounded merchant bindings only on NPC tokens', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'market', name: '市集', width: 100, height: 100,
+        tokens: [
+          { id: 'merchant', type: 'npc', merchantShopId: 'shop-market-1' },
+          { id: 'enemy', type: 'enemy', merchantShopId: 'shop-enemy' },
+          { id: 'unsafe', type: 'npc', merchantShopId: '../private/shop' },
+        ],
+      }],
+    })
+
+    expect(result.maps[0].tokens.find((token) => token.id === 'merchant')?.merchantShopId).toBe('shop-market-1')
+    expect(result.maps[0].tokens.find((token) => token.id === 'enemy')?.merchantShopId).toBeUndefined()
+    expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.merchantShopId).toBeUndefined()
   })
 
   it('normalizes presentation-only Token status markers without creating combat conditions', () => {
@@ -288,6 +324,29 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].dnd5ePluginAreas?.[1].visual).toBeUndefined()
   })
 
+  it('round-trips bounded summon combat overrides and delayed dismissal state', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: 'Map', width: 500, height: 500,
+        tokens: [{
+          id: 'steed', label: 'Phantom Steed', x: 25, y: 25, color: '#fff', emoji: 'H',
+          size: 2, type: 'enemy', poolId: 'srd-5.1:riding-horse',
+          dnd5eSummon: {
+            schemaVersion: 1, pluginId: 'srd-5.1', featureId: 'spell:phantom-steed',
+            sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token',
+            createdRound: 1, expiresAfterRound: 600, side: 'player',
+            walkingSpeedFeet: 100, dismissAfterDamageRounds: 10, dismissAtRound: 14,
+            cannotAttack: true,
+          },
+        }],
+      }],
+    })
+    expect(result.maps[0].tokens[0].dnd5eSummon).toMatchObject({
+      walkingSpeedFeet: 100, dismissAfterDamageRounds: 10, dismissAtRound: 14,
+      cannotAttack: true,
+    })
+  })
+
   it('migrates bounded core-spell anchor and movement metadata while rejecting incomplete core sources', () => {
     const base = {
       pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:test', label: '核心区域', color: '#8b5cf6',
@@ -376,6 +435,45 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].dnd5ePluginAreas?.[1].vertical).toEqual({ mode: 'ground' })
     expect(result.maps[0].dnd5ePluginAreas?.[2].vertical).toEqual({
       mode: 'volume', baseElevationFeet: 20, heightFeet: 30, anchorOffsetFeet: -5,
+    })
+  })
+
+  it('round-trips bounded occupant permissions and source-exit lifecycle metadata', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: 'Map', width: 500, height: 500,
+        dnd5ePluginAreas: [{
+          id: 'tiny-hut', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:tiny-hut',
+          sourceKind: 'core-spell', coreSpellId: 'tiny-hut', label: 'Tiny Hut', color: '#8b5cf6',
+          sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token',
+          cells: [{ col: 1, row: 1 }], createdRound: 1, expiresAfterRound: 4_800,
+          anchorMode: 'fixed', anchorCell: { col: 1, row: 1 },
+          sourceExitBehavior: 'remove-area',
+          sourceOverlapBehavior: 'remove-area',
+          blocking: {
+            movement: true, movementMode: 'enter',
+            entryPermission: 'occupants-at-creation',
+            authorizedTokenIds: ['wizard-token', 'ally-token'],
+            blocksTeleportationEntry: true,
+            blocksTeleportationExit: true,
+            teleportationExitSavingThrow: { ability: 'cha', dc: 17 },
+            vision: true, visionMode: 'outside-in',
+            lineOfEffect: true, lineOfEffectMode: 'boundary',
+          },
+        }],
+      }],
+    })
+    expect(result.maps[0].dnd5ePluginAreas?.[0]).toMatchObject({
+      sourceExitBehavior: 'remove-area',
+      sourceOverlapBehavior: 'remove-area',
+      blocking: {
+        entryPermission: 'occupants-at-creation',
+        authorizedTokenIds: ['wizard-token', 'ally-token'],
+        blocksTeleportationExit: true,
+        teleportationExitSavingThrow: { ability: 'cha', dc: 17 },
+        visionMode: 'outside-in',
+        lineOfEffectMode: 'boundary',
+      },
     })
   })
 

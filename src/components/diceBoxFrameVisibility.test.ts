@@ -18,4 +18,11 @@ describe('dice iframe visibility handshake', () => {
     expect(css).toMatch(/\.dice-box-frame--pending\s*{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0\s*!important;/s)
     expect(css).toMatch(/\.dice-box-frame--ready\s*{[^}]*visibility:\s*visible;/s)
   })
+
+  it('can hold a settled secret result before opening its confirmation UI', () => {
+    for (const source of [d20Source, rollSource]) {
+      expect(source).toContain('settledHoldMs = 0')
+      expect(source).toContain('Math.max(0, settledHoldMs)')
+    }
+  })
 })

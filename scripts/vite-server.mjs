@@ -144,11 +144,14 @@ const server = await createServer({
   // cache directory is shared per workspace, so two dependency optimizers can
   // invalidate each other's module graph and make otherwise valid dynamic
   // imports fail intermittently in the browser.
-  cacheDir: path.resolve(process.cwd(), 'node_modules', `.vite-${port}`),
+  cacheDir: process.env.STARS_VITE_CACHE_DIR
+    ? path.resolve(process.env.STARS_VITE_CACHE_DIR)
+    : path.resolve(process.cwd(), 'node_modules', `.vite-${port}`),
   server: {
     host,
     port,
     strictPort,
+    watch: { ignored: ['**/.codex-temp/**'] },
   },
 })
 
@@ -182,6 +185,10 @@ if (Array.isArray(server.middlewares.stack)) {
   server.middlewares.use(artAssetMiddleware)
   server.middlewares.use(sharedApiMiddleware)
 }
+
+// Listening starts Vite's dependency optimizer. Warming imports before that
+// lifecycle boundary can wait indefinitely for dependency processing.
+await server.listen()
 
 // Do not advertise the dev server until the modules needed by the application
 // shell have been transformed. This closes the short startup window where the
@@ -226,7 +233,6 @@ await Promise.all(
     .filter((processing) => processing != null),
 )
 
-await server.listen()
 server.printUrls()
 
 let closing = false

@@ -74,4 +74,27 @@ describe('monster on-hit forced movement validation', () => {
       },
     })).toBe(false)
   })
+
+  it('derives the push axis from occupied footprints for a large source', () => {
+    expect(dnd5eMonsterForcedMovementPayloadIsValid({
+      source: { x: 375, y: 450 },
+      target: { x: 337.5, y: 437.5 },
+      direction: 'away-from-source',
+      maximumDistanceFeet: 10,
+      resisted: false,
+      gridDistance: {
+        cellUnits: 25,
+        feetPerCell: 5,
+        sourceFootprintCells: 2,
+        targetFootprintCells: 1,
+      },
+      movement: {
+        to: { x: 287.5, y: 437.5 },
+        distanceFeet: 10,
+        toElevationFeet: 0,
+        toGroundElevationFeet: 0,
+        fallingDamageRolls: [],
+      },
+    })).toBe(true)
+  })
 })

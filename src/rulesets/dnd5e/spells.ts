@@ -14,8 +14,9 @@ import {
   dnd5eEffectiveSpellcastingSources,
   dnd5eEffectiveSpellSelections,
 } from './subclassSpellcasting'
-import { dnd5ePluginSubclassSpellIds } from './pluginApi'
+import { dnd5ePluginSubclassSpellIdsV1 } from './plugins/pluginSubclassSpellIds'
 import { dnd5eCharacterBuildSpellGrantsV1 } from './buildChoices'
+import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
@@ -109,6 +110,8 @@ export interface Dnd5eSrdSpellDefinition {
   allowsGuessedTargetCell?: boolean
   /** The SRD text explicitly requires the caster to see each selected target. */
   requiresVisibleTarget?: boolean | 'primary' | 'placement'
+  /** Every selected target must be able to hear the caster. */
+  requiresTargetCanHearSource?: boolean
   saveAbility?: AbilityKey
   /** 仅敌对（即不自愿）目标进行该豁免；友方目标视为自愿。 */
   unwillingSaveAbility?: AbilityKey
@@ -204,6 +207,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'sanctuary'
     | 'guidance'
     | 'resistance'
+    | 'calm-emotions'
   /** 法术持续期间授予的重复攻击。Host 会从 ActiveEffect 中恢复原始施法环位。 */
   sustainedAttack?: Dnd5eSustainedSpellAttackDefinition
   enlargeReduceOptions?: readonly ('enlarge' | 'reduce')[]
@@ -486,7 +490,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60,
     target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 600, maximumTargets: 100, areaIncludesSelf: true,
-    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, gridAligned: true },
     description: '在射程内创造20尺立方蛛网区域，持续至多1小时并需要专注。区域轻度遮蔽且属于困难地形；进入或在其中开始回合的生物进行敏捷豁免，失败被束缚，并可用动作进行力量检定挣脱。蛛网支撑与燃烧由DM裁定。',
   },
   {
@@ -503,7 +507,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
     area: { shape: 'circle', origin: 'point', radiusFeet: 40, placeRangeFeet: 150 },
-    description: '创造半径40尺、高20尺的重度遮蔽冻雨区域，持续至多1分钟并需要专注。地面为困难地形；进入或在其中开始回合的生物敏捷豁免失败则倒地。暴露火焰及额外专注检定保留给DM。',
+    description: '创造半径40尺、高20尺的重度遮蔽冻雨区域，持续至多1分钟并需要专注。地面为困难地形；进入或在其中开始回合的生物敏捷豁免失败则倒地。在区域内开始回合且正在专注的生物进行体质豁免，失败则失去专注；暴露火焰熄灭仍由DM处理。',
   },
   {
     id: 'stinking-cloud', name: '臭云术', englishName: 'Stinking Cloud', level: 3, school: '咒法',
@@ -536,7 +540,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
     area: { shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 5, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
-    description: '创造由墙板构成的石墙，持续至多10分钟并需要专注。Headless 使用可旋转直墙阻挡移动、视线与效应线；墙板生命、复杂造型、围困反应和永久化由DM处理。',
+    description: '创造由墙板构成的石墙，持续至多10分钟并需要专注。Headless 使用可旋转直墙阻挡移动、视线与效应线，并在维持完整持续时间后自动永久化；墙板生命、复杂造型和围困反应由DM处理。',
   },
   {
     id: 'wall-of-ice', name: '冰墙术', englishName: 'Wall of Ice', level: 6, school: '塑能',
@@ -561,7 +565,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['wizard'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'persistent-area',
     dice: { count: 0, sides: 4, bonus: 0 }, effectDurationRounds: 10,
     maximumTargets: 100, areaIncludesSelf: true,
-    area: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60 },
+    area: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60, gridAligned: true },
     description: '滑腻油脂覆盖射程内一点为中心的10尺方形地面，持续1分钟。区域成为困难地形。油脂出现时，站在区域内的每个生物必须进行敏捷豁免，失败则倒地。生物进入区域或在其中结束回合时，也必须进行同样的豁免。',
   },
   {
@@ -569,7 +573,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['druid'], castingTime: 'action', rangeFeet: 90, target: 'area', effect: 'persistent-area',
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 100, areaIncludesSelf: true,
-    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90, gridAligned: true },
     description: '射程内一点起始的20尺方形地面长出缠绕植物，持续至多1分钟并需要专注。区域成为困难地形。施法时位于区域内的生物进行力量豁免，失败则被束缚。被束缚的生物可以用一个动作进行力量检定，对抗你的法术豁免DC，成功则挣脱。',
   },
   {
@@ -629,6 +633,17 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '在你正上方唤出半径60尺、高10尺的风暴云，持续至多10分钟并需要专注。施法时以及之后每个你的回合中，你可以用动作选择云下方一点；该点5尺内的每个生物进行敏捷豁免，失败受到3d10闪电伤害，成功减半。每使用高于3环一环的法术位，伤害增加1d10。室内空间限制与室外暴风天气的额外1d10伤害由DM依据场景裁定。',
   },
   {
+    id: 'calm-emotions', name: '安定心神', englishName: 'Calm Emotions', level: 2, school: '附魔',
+    classes: ['bard', 'cleric'], castingTime: 'action', rangeFeet: 60,
+    target: 'area', effect: 'active-effect', unwillingSaveAbility: 'cha',
+    dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 60 },
+    appliedEffect: 'calm-emotions',
+    description: '选择60尺内一点，其周围20尺半径内的类人生物进行魅力豁免；自愿者可以失败。失败目标由施法者选择压制现有魅惑/恐慌，或对指定一组生物变得漠然。需要专注，持续至多1分钟；压制效果会在法术结束后恢复，漠然会在目标受到攻击、被法术伤害或目睹朋友受伤时提前结束。',
+  },
+  {
     id: 'faerie-fire', name: '妖火', englishName: 'Faerie Fire', level: 1, school: '塑能',
     classes: ['bard', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'saving-throw', saveAbility: 'dex',
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
@@ -675,7 +690,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     dice: { count: 0, sides: 6, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 100, areaIncludesSelf: true,
-    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90, gridAligned: true },
     description: '乌黑触手充满射程内20尺见方地面，持续至多1分钟并需要专注。区域为困难地形。生物每回合首次进入或在其中开始回合时进行敏捷豁免；失败受到3d6钝击伤害并被束缚。已被本法术束缚者在区域内开始回合时自动受到3d6钝击伤害。目标可用动作进行力量或敏捷检定对抗施法豁免DC，成功则挣脱。',
   },
   {
@@ -729,7 +744,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'charm-person', name: '魅惑人类', englishName: 'Charm Person', level: 1, school: '附魔',
     classes: ['bard', 'druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action',
-    rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
+    rangeFeet: 30, target: 'creature', effect: 'saving-throw', saveAbility: 'wis', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 },
     maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
     onFailedSaveEffect: 'charm-person', effectDurationRounds: 600,
@@ -808,7 +823,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
     appliedEffect: 'longstrider', effectDurationRounds: 600,
     maximumTargets: 1, additionalTargetsPerHigherSlot: 1,
-    description: '触碰一个生物，使其速度增加10尺，持续1小时。使用高于1环的法术位时，每高一环可额外指定一个生物。',
+    description: '速度增加10尺，持续1小时。',
   },
   {
     id: 'death-ward', name: '防死结界', englishName: 'Death Ward', level: 4, school: '防护',
@@ -872,19 +887,19 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'prayer-of-healing', name: '治疗祷言', englishName: 'Prayer of Healing', level: 2, school: '塑能',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 30, target: 'ally', effect: 'healing', requiresVisibleTarget: true,
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 30, target: 'creature', effect: 'healing', requiresVisibleTarget: true,
     dice: { count: 2, sides: 8, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
     description: '完成10分钟祷告后，射程内至多六名可见生物各恢复2d8＋施法属性调整值的生命；每升一环增加1d8治疗。对构装生物和亡灵无效。Headless 负责目标与治疗结算，施法时间推进仍由 DM 确认。',
   },
   {
     id: 'mass-healing-word', name: '群体治愈真言', englishName: 'Mass Healing Word', level: 3, school: '塑能',
-    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing', requiresVisibleTarget: true,
+    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'creature', effect: 'healing', requiresVisibleTarget: true,
     dice: { count: 1, sides: 4, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
     description: '以附赠动作使射程内至多六名生物各恢复1d4＋施法属性调整值的生命。每升一环增加1d4治疗。对构装生物和亡灵无效。',
   },
   {
     id: 'mass-cure-wounds', name: '群体疗伤术', englishName: 'Mass Cure Wounds', level: 5, school: '塑能',
-    classes: ['bard', 'cleric', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'healing',
+    classes: ['bard', 'cleric', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'creature', effect: 'healing',
     dice: { count: 3, sides: 8, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
     area: { shape: 'circle', origin: 'point', radiusFeet: 30, placeRangeFeet: 60 }, areaIncludesSelf: true,
     description: '在60尺内选择一点，并选择以该点为中心30尺半径内至多六名生物；每个目标恢复3d8＋施法属性调整值的生命。每升一环增加1d8治疗。对构装生物和亡灵无效。',
@@ -948,14 +963,14 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'mass-heal', name: '群体医疗术', englishName: 'Mass Heal', level: 9, school: '塑能',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'healing-pool', requiresVisibleTarget: true,
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'creature', effect: 'healing-pool', requiresVisibleTarget: true,
     dice: { count: 0, sides: 4, bonus: 0 }, healingPool: 700, maximumTargets: 100,
     description: '将700点治疗分配给射程内可见的生物；每个目标恢复分配到的数值，并结束影响它的所有疾病、目盲与耳聋。对构装生物和亡灵无效。',
   },
   {
     id: 'acid-splash', name: '酸液飞溅', englishName: 'Acid Splash', level: 0, school: '咒法',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
-    allowsGuessedTargetCell: true,
+    requiresVisibleTarget: true,
     dice: { count: 1, sides: 6, bonus: 0 }, damageType: 'acid', cantripScaling: true,
     maximumTargets: 2, maximumTargetSeparationFeet: 5,
     description: '选择射程内一个生物，或选择射程内彼此相距不超过5尺的两个生物。目标分别进行敏捷豁免；失败受到酸蚀伤害，成功不受伤害。伤害骰在5、11、17级增加。',
@@ -1031,6 +1046,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     id: 'vicious-mockery', name: '恶言相加', englishName: 'Vicious Mockery', level: 0, school: '附魔',
     classes: ['bard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
     requiresVisibleTarget: true,
+    requiresTargetCanHearSource: true,
     dice: { count: 1, sides: 4, bonus: 0 }, damageType: 'psychic', cantripScaling: true,
     onFailedSaveEffect: 'vicious-mockery',
     description: '目标进行感知豁免；失败受到心灵伤害，并在其下回合结束前进行的下一次攻击检定中具有劣势。成功则不受影响。伤害骰在5、11、17级增加。',
@@ -1241,6 +1257,11 @@ export function getDnd5eSrdCombatSpell(id: string): Dnd5eSrdSpellDefinition | un
   return spellsById.get(id)
 }
 
+/** Audited SRD ritual metadata shared by the Host bridge and Headless engine. */
+export function dnd5eSrdSpellIsRitual(id: string): boolean {
+  return DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED[id]?.ritual === true
+}
+
 export function dnd5eSpellAreaAtSlot(
   spell: Pick<Dnd5eSrdSpellDefinition, 'level' | 'area' | 'areaRadiusFeetPerHigherSlot'>,
   slotLevel: number,
@@ -1292,7 +1313,8 @@ export function dnd5eSustainedSpellAttackDiceCount(
   if (attack.cantripScaling && spell.level === 0) {
     return attack.dice.count * dnd5eCantripDiceMultiplier(casterLevel)
   }
-  const interval = Math.max(1, Math.floor(attack.dice.additionalDieEverySlotLevels ?? 1))
+  if (attack.dice.additionalDieEverySlotLevels == null) return attack.dice.count
+  const interval = Math.max(1, Math.floor(attack.dice.additionalDieEverySlotLevels))
   return attack.dice.count + Math.floor(Math.max(0, slotLevel - spell.level) / interval)
 }
 
@@ -1459,7 +1481,7 @@ export function dnd5eSelectedSpellIdsForClass(character: Character, classId: Dnd
   const subclassId = classId === 'fighter'
     ? character.dnd5eClassChoices?.fighter?.subclass
     : character.dnd5eClassChoices?.classes?.[classId]?.subclass
-  const subclassSpells = dnd5ePluginSubclassSpellIds(
+  const subclassSpells = dnd5ePluginSubclassSpellIdsV1(
     subclassId,
     dnd5eCharacterClassLevel(character, classId),
     'always-prepared',
@@ -1487,7 +1509,7 @@ export function dnd5eSubclassSpellIdsForClass(
   const subclassId = classId === 'fighter'
     ? character.dnd5eClassChoices?.fighter?.subclass
     : character.dnd5eClassChoices?.classes?.[classId]?.subclass
-  return dnd5ePluginSubclassSpellIds(
+  return dnd5ePluginSubclassSpellIdsV1(
     subclassId,
     dnd5eCharacterClassLevel(character, classId),
     mode,
@@ -1668,10 +1690,53 @@ export function dnd5eSpellSpecificSavingThrowMode(input: {
   spellId: string
   mode: D20RollMode
   casterAndTargetAreFighting: boolean
+  targetStatBlockId?: string
+  targetName?: string
+  targetCreatureType?: string
 }): D20RollMode {
-  return input.spellId === 'charm-person' && input.casterAndTargetAreFighting
-    ? imposeDnd5eRollAdvantage(input.mode, 'charm-person-combat').mode
-    : input.mode
+  if (input.spellId === 'charm-person' && input.casterAndTargetAreFighting) {
+    return imposeDnd5eRollAdvantage(input.mode, 'charm-person-combat').mode
+  }
+  if (input.spellId === 'shatter' && dnd5eShatterTargetMadeOfInorganicMaterial(input)) {
+    return imposeDnd5eRollDisadvantage(input.mode, 'shatter-inorganic-material').mode
+  }
+  const creatureType = (input.targetCreatureType ?? '').trim().toLowerCase()
+  if (
+    (input.spellId === 'sunbeam' || input.spellId === 'sunburst') &&
+    (
+      creatureType === 'undead' || creatureType.includes('亡灵') ||
+      creatureType === 'ooze' || creatureType.includes('泥怪')
+    )
+  ) {
+    return imposeDnd5eRollDisadvantage(input.mode, `${input.spellId}-undead-ooze`).mode
+  }
+  return input.mode
+}
+
+const DND5E_SHATTER_INORGANIC_SRD_SLUGS = new Set([
+  'animated-armor',
+  'clay-golem',
+  'earth-elemental',
+  'flying-sword',
+  'gargoyle',
+  'iron-golem',
+  'shield-guardian',
+  'stone-golem',
+])
+
+/**
+ * Closed SRD classification for Shatter's stone/crystal/metal save clause.
+ * Names are only used for un-namespaced SRD fixtures; arbitrary custom names
+ * never silently acquire a mechanical disadvantage.
+ */
+export function dnd5eShatterTargetMadeOfInorganicMaterial(input: {
+  targetStatBlockId?: string
+  targetName?: string
+}): boolean {
+  const statBlockSlug = input.targetStatBlockId?.trim().toLowerCase().split(':').at(-1)
+  if (statBlockSlug && DND5E_SHATTER_INORGANIC_SRD_SLUGS.has(statBlockSlug)) return true
+  const targetName = input.targetName?.trim().toLowerCase()
+  return targetName != null && DND5E_SHATTER_INORGANIC_SRD_SLUGS.has(targetName)
 }
 
 export function dnd5eCharmPersonEligibleCreatureType(creatureType: string | undefined): boolean {

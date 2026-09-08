@@ -1,0 +1,119 @@
+{
+  "id": "srd-5.1:dire-wolf",
+  "slug": "dire-wolf",
+  "name": "恐狼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitRule.kind",
+        "attack.onHitRule.ability",
+        "attack.onHitRule.dc",
+        "attack.onHitRule.condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 80,
+      "slug": "dire-wolf",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:53:07.227Z",
+      "name": "恐狼",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-dire-wolf-bite-1788558787338",
+      "combatId": "verify-ui-dire-wolf-bite-1788558787338:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "恐狼 使用啃咬攻击 验证目标：啃咬 → 验证目标 9+5=14 命中；共造成 9 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:53 PM\n结算\n\n恐狼 使用啃咬攻击 验证目标：啃咬 → 验证目标 9+5=14 命中；共造成 9 点伤害。\n\n查看 Headless 结算依据（12）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +5。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜2d6 骰面：2 + 4 = 6｜固定加值 +3｜小计 9\n恐狼｜消耗动作\n验证目标｜受到 9 点伤害｜HP 320 → 311\n验证目标｜力量豁免 d20 1 +0 = 1 vs DC 13｜失败\n验证目标｜获得状态：倒地｜来源：恐狼\n验证目标｜效果生效：倒地\n恐狼｜monster:srd-5.1:dire-wolf:bite生效｜目标 验证目标",
+      "playerLog": "恐狼 使用啃咬攻击 验证目标：啃咬 → 验证目标 9+5=14 命中；共造成 9 点伤害。",
+      "afterHp": 311,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "prone"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:53:36.506Z",
+      "evidenceFile": "ui-cases/monsters/080-dire-wolf.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐听觉与嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "集群战术",
+      "automation": "headless",
+      "rule": "pack-tactics",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.allyDistanceFeet",
+        "rule.requiresAllyNotIncapacitated"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "adjacent-ally",
+        "distant-ally",
+        "dead-ally",
+        "incapacitated-ally"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

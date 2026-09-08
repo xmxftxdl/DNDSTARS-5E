@@ -2,8 +2,74 @@ import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
-import { dnd5eConditionsFromActiveEffects } from '../rulesets/dnd5e/activeEffects'
+import {
+  dnd5eActiveHitPointMaximumBonus,
+  dnd5eConditionsFromActiveEffects,
+} from '../rulesets/dnd5e/activeEffects'
+import { getDnd5eSrdMonster } from '../rulesets/dnd5e/monsters'
 import { dnd5eCombatTokenSide } from './opportunityAttacks'
+
+export { pruneInitiativeForToken, pruneInitiativeForValidTokens } from './initiativeRoster'
+
+export interface TokenPresentationHitPoints {
+  hp: number
+  max: number
+  temp?: number
+}
+
+/**
+ * Resolves the hit-point pool shown on map tokens and the initiative tracker.
+ * Creature forms replace the linked character's ordinary HP pool, so their
+ * token/runtime values must take precedence until the form ends.
+ */
+export function tokenPresentationHitPoints(
+  token: Token,
+  character?: Character,
+): TokenPresentationHitPoints | undefined {
+  const activeCreatureFormId = character?.dnd5eCombatState?.wildShapeFormId
+  if (character && activeCreatureFormId) {
+    const activeCreatureForm = getDnd5eSrdMonster(activeCreatureFormId)
+    const formMaximum = Math.max(
+      1,
+      token.maxHp ??
+        activeCreatureForm?.hitPoints.average ??
+        character.dnd5eCombatState?.wildShapeCurrentHp ??
+        character.maxHp,
+    )
+    return {
+      hp: Math.max(
+        0,
+        token.hp ??
+          character.dnd5eCombatState?.wildShapeCurrentHp ??
+          formMaximum,
+      ),
+      max: formMaximum,
+      temp: Math.max(
+        0,
+        token.dnd5eCombatState?.temporaryHp ?? character.tempHp ?? 0,
+      ),
+    }
+  }
+  if (character) {
+    const maximumBonus = dnd5eActiveHitPointMaximumBonus(
+      character.dnd5eCombatState?.activeEffects,
+    )
+    return {
+      hp: character.currentHp,
+      max: character.maxHp + maximumBonus,
+      temp: character.tempHp ?? 0,
+    }
+  }
+  if (token.maxHp == null) return undefined
+  const maximumBonus = dnd5eActiveHitPointMaximumBonus(
+    token.dnd5eCombatState?.activeEffects,
+  )
+  return {
+    hp: token.hp ?? token.maxHp,
+    max: token.maxHp + maximumBonus,
+    temp: token.dnd5eCombatState?.temporaryHp ?? 0,
+  }
+}
 
 /** 是否视为阵亡（优先用当前 HP 快照，与血条显示一致） */
 export function isTokenDefeated(
@@ -28,6 +94,29 @@ export function isTokenAlive(token: Token, characters: Character[]): boolean {
     return (token.hp ?? token.maxHp) > 0
   }
   return true
+}
+
+/**
+ * A creature temporarily moved off the current plane remains alive and keeps
+ * its initiative slot, but it is not a legal creature target on this map.
+ * Keep this separate from `isTokenAlive` so combat-end and turn-order logic do
+ * not mistake Blink/Banishment for defeat.
+ */
+export function isDnd5eTokenBanished(
+  token: Token,
+  characters: readonly Character[],
+): boolean {
+  const character = token.characterId
+    ? characters.find((candidate) => candidate.id === token.characterId)
+    : undefined
+  const combatState = character?.dnd5eCombatState ?? token.dnd5eCombatState
+  const conditions = [
+    ...(character?.conditions ?? []),
+    ...(character ? [] : token.dnd5eCombatState?.conditions ?? []),
+    ...dnd5eConditionsFromActiveEffects(combatState?.activeEffects),
+  ]
+  return conditions.some((condition) =>
+    ['banished', '放逐'].includes(condition.trim().toLowerCase()))
 }
 
 export function characterNeedsDeathSave(character: Pick<
@@ -133,22 +222,6 @@ export function checkCombatOutcome(
     }
   }
   return { ended: false }
-}
-
-/** 从先攻列表移除 token，并返回新的先攻索引 */
-export function pruneInitiativeForToken(
-  order: InitiativeEntry[],
-  currentIndex: number,
-  tokenId: string,
-): { order: InitiativeEntry[]; index: number } {
-  const removeAt = order.findIndex((e) => e.tokenId === tokenId)
-  if (removeAt < 0) return { order, index: currentIndex }
-  const nextOrder = order.filter((e) => e.tokenId !== tokenId)
-  if (nextOrder.length === 0) return { order: nextOrder, index: 0 }
-  let index = currentIndex
-  if (removeAt < index) index -= 1
-  else if (removeAt === index) index = Math.min(index, nextOrder.length - 1)
-  return { order: nextOrder, index: Math.max(0, index) }
 }
 
 /**

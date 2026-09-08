@@ -136,10 +136,19 @@ export function overflowConditionTokenTooltip(
   }
 }
 
-export const FLIGHT_TOKEN_TOOLTIP: TokenStatusTooltipContent = {
-  title: '飞行中',
-  description: '该 Token 当前高度高于脚下地形；移动与坠落会按空中单位处理。',
+export function flightTokenTooltip(flightHeightFeet?: number): TokenStatusTooltipContent {
+  const normalizedHeightFeet = Number.isFinite(flightHeightFeet)
+    ? Math.max(0, Math.round(flightHeightFeet!))
+    : undefined
+  return {
+    title: '飞行中',
+    description: normalizedHeightFeet == null
+      ? '该 Token 当前高度高于脚下地形；移动与坠落会按空中单位处理。'
+      : `飞行高度：${normalizedHeightFeet} 尺。移动与坠落会按空中单位处理。`,
+  }
 }
+
+export const FLIGHT_TOKEN_TOOLTIP: TokenStatusTooltipContent = flightTokenTooltip()
 
 export const SHILLELAGH_TOKEN_TOOLTIP: TokenStatusTooltipContent = {
   title: '橡棍术 · Shillelagh',

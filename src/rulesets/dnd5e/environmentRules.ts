@@ -1,6 +1,12 @@
 /** Closed scene tags used by deterministic environmental combat features. */
 export type Dnd5eMapEnvironment = 'normal' | 'outdoors' | 'indoors' | 'underground' | 'underwater'
 
+/** Host-authored scene weather used by deterministic spell and combat rules. */
+export type Dnd5eMapWeather = 'normal' | 'storm'
+
+/** Whether the scene has a visible overhead volume large enough for high-altitude effects. */
+export type Dnd5eOverheadSpace = 'open' | 'confined'
+
 const UNDERWATER_MELEE_EXCEPTIONS = new Set([
   'dnd5e-dagger', 'dnd5e-javelin', 'dnd5e-shortsword', 'dnd5e-spear', 'dnd5e-trident',
 ])

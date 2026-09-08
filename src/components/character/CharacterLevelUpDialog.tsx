@@ -35,7 +35,7 @@ interface CharacterLevelUpDialogProps {
   levelsGained: number
   revisionRecord?: Dnd5eLevelAdvancementRecordV1
   onCancel: () => void
-  onConfirm: (character: Character) => void
+  onConfirm: (character: Character) => void | Promise<void>
 }
 
 type AsiDraft =
@@ -152,6 +152,7 @@ export default function CharacterLevelUpDialog({
     Record<string, Record<string, string[]>>
   >(initialDecision?.contentChoiceSelections ?? {})
   const [error, setError] = useState('')
+  const [confirmPending, setConfirmPending] = useState(false)
   const plan = useMemo(
     () => buildDnd5eLevelAdvancementPlan(
       baseCharacter,
@@ -266,7 +267,8 @@ export default function CharacterLevelUpDialog({
     })
   }
 
-  const confirm = () => {
+  const confirm = async () => {
+    if (confirmPending) return
     const asiChoices = plan.asiLevels.flatMap((classLevel) => {
       const choice = choiceFromAsiDraft(asiDrafts[classLevel] ?? { mode: 'single' })
       return choice ? [{ classLevel, choice }] : []
@@ -307,7 +309,14 @@ export default function CharacterLevelUpDialog({
       setError(FAILURE_MESSAGES[result.reason])
       return
     }
-    onConfirm(result.character)
+    setConfirmPending(true)
+    try {
+      await onConfirm(result.character)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '升级保存失败，请重试。')
+    } finally {
+      setConfirmPending(false)
+    }
   }
 
   return createPortal(
@@ -819,11 +828,11 @@ export default function CharacterLevelUpDialog({
             确认时会同时写入等级、生命值、固定职业特性、属性、专长、职业选择、法术书和升级审计记录。
           </p>
           <div className="flex gap-2">
-            <button type="button" onClick={onCancel} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300">
+            <button type="button" onClick={onCancel} disabled={confirmPending} className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 disabled:cursor-wait disabled:opacity-50">
               取消
             </button>
-            <button type="button" onClick={confirm} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-950/30">
-              {revisionRecord ? '确认修订' : '确认升级'}
+            <button type="button" onClick={() => void confirm()} disabled={confirmPending} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-950/30 disabled:cursor-wait disabled:opacity-60">
+              {confirmPending ? '正在保存…' : revisionRecord ? '确认修订' : '确认升级'}
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>

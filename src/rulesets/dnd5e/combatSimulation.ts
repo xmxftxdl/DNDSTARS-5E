@@ -96,6 +96,7 @@ import {
   dnd5eActiveEffectId,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
+  reconcileDnd5eCompoundRepeatSaveEffects,
   type Dnd5eActiveEffectInstance,
   type Dnd5eActiveEffectPeriodicDamageRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
@@ -4798,6 +4799,15 @@ function executeHeadlessWeaponAction(input: {
                 ? effect.damage.map((damage) =>
                     Array.from({ length: damage.count }, () => random.die(damage.sides)))
                 : undefined,
+              durationRolls: effect.kind === 'saving-throw-condition' &&
+                effect.sharedDurationOnFailureMargin && failedResistance &&
+                savingThrow.dc - save.roll.total >=
+                  effect.sharedDurationOnFailureMargin.minimumFailureMargin
+                ? Array.from(
+                    { length: effect.sharedDurationOnFailureMargin.count },
+                    () => random.die(effect.sharedDurationOnFailureMargin!.sides),
+                  )
+                : undefined,
             }
           })
         : undefined
@@ -5842,7 +5852,7 @@ function simulationActiveEffectSavingThrows(
 ): Dnd5eActiveEffectSavingThrowRoll[] {
   const target = state.combatants[targetId]
   if (!target) return []
-  return normalizeDnd5eActiveEffects(target.classState.activeEffects)
+  return reconcileDnd5eCompoundRepeatSaveEffects(target.classState.activeEffects)
     .filter((effect) => effect.repeatSave?.timing === timing)
     .map((effect) => {
       const repeatSave = effect.repeatSave!
@@ -6019,7 +6029,8 @@ function simulationTurnStartGazeResolutions(
   ).map((requirement) => {
     const source = state.combatants[requirement.sourceId]
     const target = state.combatants[requirement.targetId]
-    const sourceUsesGaze = !!source && !!target && source.controller !== target.controller
+    const sourceUsesGaze = requirement.mandatory ||
+      (!!source && !!target && source.controller !== target.controller)
     if (!sourceUsesGaze) {
       return {
         sourceId: requirement.sourceId,

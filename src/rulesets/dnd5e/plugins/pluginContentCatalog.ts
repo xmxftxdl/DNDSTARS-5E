@@ -2,6 +2,12 @@ import type { ClassResourceDefinition } from '../../../lib/classDefinitionTypes'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Character } from '../../../types/character'
 import { dnd5eCharacterBuildFeatureIdsV1 } from '../buildChoices'
+import {
+  DND5E_SRD_AUDITED_SPELL_PACKAGE_ID,
+  dnd5eSrdAuditedFullContentDefinitionsV1,
+  dnd5eSrdAuditedPartialContentDefinitionsV1,
+  dnd5eSrdAuditedSpellDefinitionV1,
+} from '../activities/dnd5eSrdAuditedSpellActivities'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from '../classLevels'
 import type { Dnd5eClassId } from '../classes'
 import {
@@ -43,6 +49,10 @@ import {
 } from '../../../domain/content/contentDefinitionRegistry'
 import type { Dnd5eEffectDefinitionV1 } from '../activities/dnd5eEffectContracts'
 import { dnd5ePermanentContentEffectProjectionV1 } from '../activities/dnd5ePermanentContentEffects'
+import type { Dnd5eActivityDefinitionV1 } from '../activities/dnd5eActivityContracts'
+import { dnd5ePluginFeatureActionFromActivityV1 } from '../activities/dnd5eActivityFeatureActionAdapter'
+import { dnd5eActivityManualAdjudicationOperationsV1 } from '../activities/dnd5eActivityHeadlessCompiler'
+import { dnd5eActivityAutomationAnalysisV1 } from './pluginMechanicsRegistry'
 
 const {
   features: pluginFeatures,
@@ -69,6 +79,18 @@ function unifiedDefinitionsForPackage(packageId: string): readonly RegisteredCon
     cachedContentDefinitionRevision = revision
   }
   return cachedDefinitionsByPackage.get(packageId) ?? []
+}
+
+function cachedUnifiedDefinitionEntries(): readonly (readonly [string, readonly RegisteredContentDefinition[]])[] {
+  const revision = contentDefinitionRegistryRevision()
+  if (revision !== cachedContentDefinitionRevision) {
+    cachedDefinitionsByPackage = new Map(listRegisteredContentDefinitionPackages().map((entry) => [
+      entry.packageId,
+      entry.definitions,
+    ]))
+    cachedContentDefinitionRevision = revision
+  }
+  return [...cachedDefinitionsByPackage.entries()]
 }
 
 function clonePluginFeatureAction(
@@ -515,7 +537,7 @@ export function registeredDnd5ePluginSpells(): readonly RegisteredDnd5ePluginSpe
     .map((spell) => ({
       ...spell,
       classes: [...spell.classes],
-      components: { ...spell.components },
+      components: structuredClone(spell.components),
       castingTime: { ...spell.castingTime },
       range: { ...spell.range },
       targeting: spell.targeting ? { ...spell.targeting } : undefined,
@@ -529,13 +551,18 @@ export function registeredDnd5ePluginSpells(): readonly RegisteredDnd5ePluginSpe
 }
 
 export function dnd5ePluginSpellDefinition(id: string): RegisteredDnd5ePluginSpell | undefined {
-  return registeredDnd5ePluginSpells().find((spell) => spell.id === id)
+  return registeredDnd5ePluginSpells().find((spell) => spell.id === id) ??
+    dnd5eSrdAuditedSpellDefinitionV1(id)
 }
 
 function cloneRegisteredPluginItem(item: RegisteredDnd5ePluginItem): RegisteredDnd5ePluginItem {
   return {
     ...item,
     cost: item.cost ? { ...item.cost } : undefined,
+    spellcastingMaterial: item.spellcastingMaterial ? {
+      ...item.spellcastingMaterial,
+      tags: [...item.spellcastingMaterial.tags],
+    } : undefined,
     equipment: item.equipment ? structuredClone(item.equipment) : undefined,
     magicItem: item.magicItem ? { ...item.magicItem } : undefined,
     use: item.use ? structuredClone(item.use) : undefined,
@@ -570,9 +597,88 @@ export function dnd5ePluginAbilityGenerationMethod(
   return { ...method }
 }
 
+function runtimeGrantedActivityRecordV1(featureId: string): {
+  packageId: string
+  controlKind: 'area' | 'effect'
+  activity: Dnd5eActivityDefinitionV1
+} | undefined {
+  const registeredDefinitionEntries = cachedUnifiedDefinitionEntries()
+  const definitionEntries = registeredDefinitionEntries.some(([packageId]) =>
+    packageId === DND5E_SRD_AUDITED_SPELL_PACKAGE_ID)
+    ? registeredDefinitionEntries
+    : [
+        ...registeredDefinitionEntries,
+        [
+          DND5E_SRD_AUDITED_SPELL_PACKAGE_ID,
+          [
+            ...dnd5eSrdAuditedFullContentDefinitionsV1(),
+            ...dnd5eSrdAuditedPartialContentDefinitionsV1(),
+          ],
+        ] as const,
+      ]
+  for (const [packageId, definitions] of definitionEntries) {
+    const areaPrefix = `${packageId}:area-control.`
+    const effectPrefix = `${packageId}:effect-control.`
+    const controlKind = featureId.startsWith(areaPrefix)
+      ? 'area'
+      : featureId.startsWith(effectPrefix)
+        ? 'effect'
+        : undefined
+    if (!controlKind) continue
+    const activityId = featureId.slice(
+      controlKind === 'area' ? areaPrefix.length : effectPrefix.length,
+    )
+    const activity = definitions.flatMap((definition) => definition.activities ?? [])
+      .find((candidate): candidate is Dnd5eActivityDefinitionV1 =>
+        typeof candidate === 'object' && candidate != null &&
+        'id' in candidate && candidate.id === activityId) as Dnd5eActivityDefinitionV1 | undefined
+    if (!activity || activity.authorityBinding ||
+      (activity.invocation != null && activity.invocation.kind !== 'active')) return undefined
+    const activityAutomation = dnd5eActivityAutomationAnalysisV1(activity).capability.level
+    if (
+      activityAutomation !== 'full' &&
+      !(activityAutomation === 'assisted' && dnd5eActivityManualAdjudicationOperationsV1(activity).length > 0)
+    ) return undefined
+    return { packageId, controlKind, activity }
+  }
+  return undefined
+}
+
+/** Returns the authoritative Activity behind an area/effect-granted UI control. */
+export function dnd5ePluginGrantedActivityDefinitionV1(
+  featureId: string,
+): Dnd5eActivityDefinitionV1 | undefined {
+  const record = runtimeGrantedActivityRecordV1(featureId)
+  return record ? structuredClone(record.activity) : undefined
+}
+
 export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5ePluginFeature | undefined {
   const feature = pluginFeatures.get(featureId)
-  return feature ? cloneRegisteredFeature(feature) : undefined
+  if (feature) return cloneRegisteredFeature(feature)
+
+  const record = runtimeGrantedActivityRecordV1(featureId)
+  if (record) {
+    const { packageId, controlKind, activity } = record
+    const action = dnd5ePluginFeatureActionFromActivityV1(activity)
+    if (!action) return undefined
+    return {
+      id: featureId,
+      name: activity.name,
+      summary: activity.description ?? (controlKind === 'area'
+        ? '由持续区域实体授予的活动。'
+        : '由持续效果授予的活动。'),
+      description: activity.description ?? (controlKind === 'area'
+        ? '由持续区域实体授予的活动。'
+        : '由持续效果授予的活动。'),
+      sourceLabel: controlKind === 'area' ? '持续区域授予' : '持续效果授予',
+      automation: dnd5eActivityManualAdjudicationOperationsV1(activity).length > 0 ? 'partial' : 'full',
+      action,
+      ownerPluginId: packageId,
+      ownerPluginName: packageId,
+      ownerPluginLicense: controlKind === 'area' ? 'Runtime area control' : 'Runtime effect control',
+    }
+  }
+  return undefined
 }
 
 export function dnd5ePluginFeatureAvailableForCharacter(

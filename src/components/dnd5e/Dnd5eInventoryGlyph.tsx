@@ -419,6 +419,71 @@ export function Dnd5eInventoryGlyphShapes({ icon }: { icon: Dnd5eInventoryIconId
       <path d="m40 14 5 16 17-3-13 11 10 14-16-7-7 16-1-18-18 2 16-9-10-14 15 9Z" fill="#FFF2A8" stroke={INK} strokeWidth="1.8" strokeLinejoin="round" />
       <circle cx="40" cy="40" r="5" fill="#FFFFFF" />
     </g>
+    case 'container': return <g {...rootProps}>
+      <path d="M14 31h52v36H14z" fill={WOOD} {...outlined} />
+      <path d="M18 18h44l7 13H11Z" fill="#D58A45" {...outlined} />
+      <path d="M18 38h44M40 31v36" fill="none" stroke={WOOD_DARK} strokeWidth="3" />
+      <path d="M34 43h12v13H34z" fill={GOLD} {...outlined} />
+      <path d="M38 47h4v6h-4z" fill={INK} />
+      <path d="M17 24h46" stroke={GOLD_LIGHT} strokeWidth="2.5" opacity=".8" />
+    </g>
+    case 'book': return <g {...rootProps}>
+      <path d="M10 18c11-4 22-2 30 5v46c-8-7-19-9-30-5Z" fill="#F3E4B5" {...outlined} />
+      <path d="M70 18c-11-4-22-2-30 5v46c8-7 19-9 30-5Z" fill="#E4C987" {...outlined} />
+      <path d="M40 23v46" stroke={WOOD_DARK} strokeWidth="3" />
+      <path d="M17 31c6-1 11 0 16 3M17 40c6-1 11 0 16 3M47 34c5-3 11-4 16-3M47 43c5-3 11-4 16-3" fill="none" stroke="#8A6238" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="m40 20 5-8 5 8-5 10Z" fill={GOLD} {...outlined} />
+    </g>
+    case 'instrument': return <g {...rootProps}>
+      <path d="M31 45c-11 4-16 13-11 22 5 8 17 8 25 2 8-7 8-18 1-25Z" fill="#C77A38" {...outlined} />
+      <circle cx="33" cy="57" r="7" fill={WOOD_DARK} {...outlined} />
+      <path d="m42 46 17-34 8 4-16 35Z" fill={WOOD} {...outlined} />
+      <path d="m57 15 8-7 7 5-4 10Z" fill={GOLD} {...outlined} />
+      <path d="M45 44 64 15M41 48l18 12" stroke={GOLD_LIGHT} strokeWidth="2.2" />
+      <path d="M19 32c5-6 10-7 15-3m-18-9c7-7 14-8 21-3" fill="none" stroke={MAGIC_LIGHT} strokeWidth="3" strokeLinecap="round" />
+    </g>
+    case 'tool': return <g {...rootProps}>
+      <path d="M13 38h54v31H13z" fill={LEATHER} {...outlined} />
+      <path d="M25 38v-8c0-6 5-10 11-10h8c6 0 11 4 11 10v8" fill="none" stroke={METAL_DARK} strokeWidth="5" />
+      <path d="M13 45h54M34 45v9h12v-9" fill="none" stroke={GOLD} strokeWidth="4" />
+      <path d="m23 14 8-5 15 25-8 5Z" fill={WOOD} {...outlined} />
+      <path d="M16 9h20v13H16z" fill={METAL} {...outlined} />
+      <path d="M18 11h15" stroke={METAL_LIGHT} strokeWidth="3" />
+      <path d="m51 12 7-4 10 18-7 4Z" fill={METAL_DARK} {...outlined} />
+    </g>
+    case 'gaming-set': return <g {...rootProps}>
+      <rect x="10" y="38" width="31" height="31" rx="5" fill="#F2E7CF" {...outlined} transform="rotate(-8 25.5 53.5)" />
+      <circle cx="20" cy="48" r="3" fill={INK} /><circle cx="32" cy="59" r="3" fill={INK} /><circle cx="19" cy="64" r="3" fill={INK} />
+      <path d="M49 20h19v19H49z" fill="#E5484D" {...outlined} transform="rotate(9 58.5 29.5)" />
+      <path d="m58 23 3 5 5 2-4 4 1 6-5-3-5 3 1-6-4-4 5-2Z" fill={GOLD_LIGHT} />
+      <path d="M50 67h23M55 60h13l-3-9h-7Z" fill={GOLD} {...outlined} />
+      <circle cx="61.5" cy="45" r="7" fill={METAL_LIGHT} {...outlined} />
+    </g>
+    case 'mount': return <g {...rootProps}>
+      <path d="M27 68c-5-15-4-31 3-46l10-12 9 12c10 6 16 16 17 30-7 13-20 20-39 16Z" fill="#9B6339" {...outlined} />
+      <path d="m31 25-12-13 2 22m27-11 13-12-3 23" fill="#B77A48" {...outlined} />
+      <path d="M34 43c7 4 14 4 21 0l-2 14c-6 7-13 8-20 1Z" fill="#D6A06B" {...outlined} />
+      <circle cx="34" cy="37" r="3" fill={INK} /><circle cx="53" cy="37" r="3" fill={INK} />
+      <path d="M20 52c14 10 31 12 48 2" fill="none" stroke={GOLD} strokeWidth="4" strokeLinecap="round" />
+      <path d="M40 59v12" stroke={LEATHER_DARK} strokeWidth="3" />
+    </g>
+    case 'vehicle': return <g {...rootProps}>
+      <path d="M12 25h49l8 28H18Z" fill="#B87336" {...outlined} />
+      <path d="M19 28h40l4 16H16Z" fill="#D99A55" {...outlined} />
+      <path d="M21 21h37M25 13v17M54 13v17" fill="none" stroke={WOOD_DARK} strokeWidth="4" strokeLinecap="round" />
+      <circle cx="25" cy="59" r="12" fill={METAL_DARK} {...outlined} />
+      <circle cx="57" cy="59" r="12" fill={METAL_DARK} {...outlined} />
+      <circle cx="25" cy="59" r="5" fill={GOLD} {...outlined} /><circle cx="57" cy="59" r="5" fill={GOLD} {...outlined} />
+      <path d="M68 37h8" stroke={GOLD_LIGHT} strokeWidth="4" strokeLinecap="round" />
+    </g>
+    case 'ship': return <g {...rootProps}>
+      <path d="M13 50h57L58 67H25Z" fill={WOOD} {...outlined} />
+      <path d="M39 10h5v42h-5z" fill={WOOD_DARK} {...outlined} />
+      <path d="M44 14c13 5 21 14 23 28H44Z" fill="#F2E7CF" {...outlined} />
+      <path d="M38 19c-10 5-17 12-20 23h20Z" fill="#D8ECF4" {...outlined} />
+      <path d="M20 58c13 4 27 4 41 0" fill="none" stroke={GOLD_LIGHT} strokeWidth="3" />
+      <path d="M10 72c8-5 16-5 24 0 8-5 16-5 24 0 6-4 12-4 18-1" fill="none" stroke="#67C4E8" strokeWidth="4" strokeLinecap="round" />
+    </g>
     case 'generic': return <g {...rootProps}>
       <path d="M14 27 40 13l26 14-26 15Z" fill="#D39455" {...outlined} />
       <path d="M14 27v31l26 14V42Z" fill="#9B5C2E" {...outlined} />

@@ -8,7 +8,6 @@ import CharacterDetailPanel from '../../components/map/CharacterDetailPanel'
 import EnemyDetailPanel from '../../components/map/EnemyDetailPanel'
 import InitiativeTracker from '../../components/map/InitiativeTracker'
 import MapInventoryPanel from '../../components/map/MapInventoryPanel'
-import MapSpellsPanel from '../../components/map/MapSpellsPanel'
 import Dnd5eSpellEffectDetailPanel from '../../components/map/Dnd5eSpellEffectDetailPanel'
 import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import type { Token } from '../../store/maps'
@@ -60,7 +59,6 @@ export interface MapWorkspacePanelsLayerProps {
   initiativeRound?: number
   initiativeHitPoints?: ComponentProps<typeof InitiativeTracker>['hpByToken']
   defeatedTokenIds?: string[]
-  monsterThinkingTokenId?: string
   onInitiativeScroll: (offset: number) => void
   onInitiativeSelect: (tokenId: string) => void
   onClearCombatLog: () => void
@@ -87,7 +85,6 @@ const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
   initiativeRound,
   initiativeHitPoints,
   defeatedTokenIds,
-  monsterThinkingTokenId,
   onInitiativeScroll,
   onInitiativeSelect,
   onClearCombatLog,
@@ -99,7 +96,7 @@ const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
       {(combatActive || combatLog.length > 0) && (
         <div
           data-testid="combat-log-dock"
-          className="absolute bottom-3 right-3 z-[76] flex max-w-[calc(100%-1.5rem)] flex-col items-end"
+          className="absolute bottom-3 right-3 z-[120] flex max-w-[calc(100%-1.5rem)] flex-col items-end"
         >
           {combatLogOpen ? (
             <div className="w-[min(36rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-void-950/90 shadow-2xl backdrop-blur-md">
@@ -171,7 +168,6 @@ const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
             round={initiativeRound}
             hpByToken={initiativeHitPoints}
             defeatedTokenIds={defeatedTokenIds}
-            monsterThinkingTokenId={monsterThinkingTokenId}
             onScroll={onInitiativeScroll}
             onSelect={onInitiativeSelect}
           />
@@ -208,64 +204,29 @@ export function MapWorkspaceInventoryPanel(
   return <MemoizedMapInventoryPanel {...props} onUseItem={onUseItem} />
 }
 
-const MemoizedMapSpellsPanel = memo(MapSpellsPanel)
-
-export function MapWorkspaceSpellsPanel(props: ComponentProps<typeof MapSpellsPanel>) {
-  const onSelectedSpellSlotLevelChange = useOptionalLatestCallback(props.onSelectedSpellSlotLevelChange)
-  const onArmedSpellModifiersChange = useOptionalLatestCallback(props.onArmedSpellModifiersChange)
-  const onCastSpell = useOptionalLatestCallback(props.onCastSpell)
-  const onRequestAdjudication = useOptionalLatestCallback(props.onRequestAdjudication)
-  const onConfirmSpellTargets = useOptionalLatestCallback(props.onConfirmSpellTargets)
-  const onUndoSpellTarget = useOptionalLatestCallback(props.onUndoSpellTarget)
-  const onToggleSculptSpellTargets = useOptionalLatestCallback(props.onToggleSculptSpellTargets)
-  const onToggleCarefulSpellTargets = useOptionalLatestCallback(props.onToggleCarefulSpellTargets)
-  const onToggleHeightenedSpellTarget = useOptionalLatestCallback(props.onToggleHeightenedSpellTarget)
-  const onUseSustainedSpellAttack = useOptionalLatestCallback(props.onUseSustainedSpellAttack)
-  const onUseSustainedAreaAttack = useOptionalLatestCallback(props.onUseSustainedAreaAttack)
-  const onActivatePersistentArea = useOptionalLatestCallback(props.onActivatePersistentArea)
-  const onMovePersistentArea = useOptionalLatestCallback(props.onMovePersistentArea)
-  const onFocusedSpellChange = useOptionalLatestCallback(props.onFocusedSpellChange)
-
-  return (
-    <MemoizedMapSpellsPanel
-      {...props}
-      onArmedSpellModifiersChange={onArmedSpellModifiersChange}
-      onSelectedSpellSlotLevelChange={onSelectedSpellSlotLevelChange}
-      onCastSpell={onCastSpell}
-      onRequestAdjudication={onRequestAdjudication}
-      onConfirmSpellTargets={onConfirmSpellTargets}
-      onUndoSpellTarget={onUndoSpellTarget}
-      onToggleSculptSpellTargets={onToggleSculptSpellTargets}
-      onToggleCarefulSpellTargets={onToggleCarefulSpellTargets}
-      onToggleHeightenedSpellTarget={onToggleHeightenedSpellTarget}
-      onUseSustainedSpellAttack={onUseSustainedSpellAttack}
-      onUseSustainedAreaAttack={onUseSustainedAreaAttack}
-      onActivatePersistentArea={onActivatePersistentArea}
-      onMovePersistentArea={onMovePersistentArea}
-      onFocusedSpellChange={onFocusedSpellChange}
-    />
-  )
-}
-
 const MemoizedEnemyDetailPanel = memo(EnemyDetailPanel)
 
 export function MapWorkspaceEnemyDetailPanel(
   props: ComponentProps<typeof EnemyDetailPanel>,
 ) {
   const onSetHitPoints = useOptionalLatestCallback(props.onSetHitPoints)
+  const onAdjustHitPoints = useOptionalLatestCallback(props.onAdjustHitPoints)
   const onConditionsChange = useOptionalLatestCallback(props.onConditionsChange)
   const onMonsterBerserkChange = useOptionalLatestCallback(props.onMonsterBerserkChange)
   const onSelectMonsterAction = useOptionalLatestCallback(props.onSelectMonsterAction)
   const onSelectMonsterContinuation = useOptionalLatestCallback(props.onSelectMonsterContinuation)
+  const onUseGrantedActivity = useOptionalLatestCallback(props.onUseGrantedActivity)
   const onClose = useLatestCallback(props.onClose)
   return (
     <MemoizedEnemyDetailPanel
       {...props}
       onSetHitPoints={onSetHitPoints}
+      onAdjustHitPoints={onAdjustHitPoints}
       onConditionsChange={onConditionsChange}
       onMonsterBerserkChange={onMonsterBerserkChange}
       onSelectMonsterAction={onSelectMonsterAction}
       onSelectMonsterContinuation={onSelectMonsterContinuation}
+      onUseGrantedActivity={onUseGrantedActivity}
       onClose={onClose}
     />
   )
@@ -277,14 +238,18 @@ export function MapWorkspaceCharacterDetailPanel(
   props: ComponentProps<typeof CharacterDetailPanel>,
 ) {
   const onSetHitPoints = useLatestCallback(props.onSetHitPoints)
+  const onAdjustHitPoints = useOptionalLatestCallback(props.onAdjustHitPoints)
   const onConditionsChange = useOptionalLatestCallback(props.onConditionsChange)
+  const onCorpseStateChange = useOptionalLatestCallback(props.onCorpseStateChange)
   const onRemoveFromMap = useOptionalLatestCallback(props.onRemoveFromMap)
   const onClose = useLatestCallback(props.onClose)
   return (
     <MemoizedCharacterDetailPanel
       {...props}
       onSetHitPoints={onSetHitPoints}
+      onAdjustHitPoints={onAdjustHitPoints}
       onConditionsChange={onConditionsChange}
+      onCorpseStateChange={onCorpseStateChange}
       onRemoveFromMap={onRemoveFromMap}
       onClose={onClose}
     />

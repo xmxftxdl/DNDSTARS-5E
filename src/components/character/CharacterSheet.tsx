@@ -45,6 +45,7 @@ import Dnd5eMulticlassPanel from './Dnd5eMulticlassPanel'
 import CharacterLevelUpDialog from './CharacterLevelUpDialog'
 import SpellSlotResourceEditor from './SpellSlotResourceEditor'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
+import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 
 interface CharacterSheetProps {
   id: string
@@ -75,6 +76,8 @@ export default function CharacterSheet({
   const characters = useCharacterStore((state) => state.characters)
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
+  const loadSharedCharacters = useCharacterStore((state) => state.loadShared)
+  const saveSharedNow = useCharacterStore((state) => state.saveSharedNow)
   const updateSheetHitPoints = useCharacterStore((state) => state.updateSheetHitPoints)
   useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -500,7 +503,23 @@ export default function CharacterSheet({
               <Counter label="失败" value={c.deathSaveFailures ?? 0} max={3} tone="rose" onChange={(value) => updateCharacter({ deathSaveFailures: value })} />
               <div className="grid grid-cols-2 gap-2">
                 <Toggle label="伤势稳定" active={!!c.deathSaveStable} onClick={() => updateCharacter({ deathSaveStable: !c.deathSaveStable })} />
-                <Toggle label="保持专注" active={!!c.concentrating} onClick={() => updateCharacter({ concentrating: !c.concentrating })} />
+                <Toggle
+                  label="保持专注"
+                  active={!!c.concentrating}
+                  onClick={() => {
+                    if (readOnly) return
+                    if (!c.concentrating) {
+                      update(id, { concentrating: true })
+                      return
+                    }
+                    void browserSharedRoomService.submitPlayerCharacterCommand({
+                      commandId: globalThis.crypto?.randomUUID?.()
+                        ?? `end-concentration:${id}:${Date.now()}`,
+                      type: 'end-concentration',
+                      characterId: id,
+                    }).then(() => loadSharedCharacters({ force: true }))
+                  }}
+                />
               </div>
             </div>
           </section>
@@ -617,6 +636,7 @@ export default function CharacterSheet({
         <Dnd5eSpellbookPanel
           character={c}
           lockedChoiceKeys={lockedAdvancementChoices}
+          isDM={isDM}
         />
       )}
       {advancementRequest && (
@@ -628,8 +648,11 @@ export default function CharacterSheet({
             ? advancementRecords.find((record) => record.id === advancementRequest.revisionRecordId)
             : undefined}
           onCancel={() => setAdvancementRequest(undefined)}
-          onConfirm={(nextCharacter) => {
-            if (!readOnly || allowAdvancementRevision) update(id, nextCharacter)
+          onConfirm={async (nextCharacter) => {
+            if (!readOnly || allowAdvancementRevision) {
+              update(id, nextCharacter)
+              await saveSharedNow()
+            }
             setAdvancementRequest(undefined)
           }}
         />

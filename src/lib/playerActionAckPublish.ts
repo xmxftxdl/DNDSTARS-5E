@@ -12,6 +12,7 @@ import type {
 } from './sharedApi'
 import type { RoomJournalMutation } from './roomCommunications'
 import type { SharedMapGeometryState } from './mapGeometry'
+import type { SharedCampaignTimeState } from './campaignTime'
 
 export interface PlayerActionAuthoritativeSnapshots {
   characters: Character[]
@@ -21,6 +22,7 @@ export interface PlayerActionAuthoritativeSnapshots {
   updatedAt: number
   combat?: SharedCombatState
   mapGeometry?: SharedMapGeometryState
+  campaignTime?: SharedCampaignTimeState
 }
 
 export type PlayerActionAckResourceWriter = <T>(
@@ -39,7 +41,49 @@ export interface PublishPlayerActionAckInput {
     writes: readonly SharedResourceTransactionWrite[],
     options: SharedResourceWriteOptions & { transactionId?: string },
   ) => Promise<{ revisions?: Record<string, number> }>
+  /**
+   * Fresh authoritative read used only to disambiguate a lost transaction
+   * response. A transport failure can happen after the server has committed;
+   * observing the durable ACK prevents a retry from being reported as a
+   * failed cast or from spending the same resource twice.
+   */
+  loadSharedResource?: <T>(name: string) => Promise<T | null>
   publishAck: (ack: SharedPlayerActionAckState) => Promise<void>
+}
+
+function isTransientAuthorityTransportFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /failed to fetch|fetch failed|networkerror|network request failed|load failed|shared-state-transaction-(?:unavailable|502|503|504)/i
+    .test(message)
+}
+
+function sameDurablePlayerActionAck(
+  expected: SharedPlayerActionAckState,
+  candidate: SharedPlayerActionAckState | null,
+): candidate is SharedPlayerActionAckState {
+  return candidate != null &&
+    candidate.id === expected.id &&
+    candidate.actionId === expected.actionId &&
+    candidate.mapId === expected.mapId &&
+    candidate.status === expected.status
+}
+
+function isSingleCombatRevisionConflict(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /^(?:shared-)?state-transaction-conflict(?::[a-z0-9._-]+)*:combat$/i.test(message)
+}
+
+function sameCombatSettlementBoundary(
+  expected: SharedCombatState,
+  candidate: SharedCombatState | null,
+): candidate is SharedCombatState {
+  return candidate != null &&
+    candidate.mapId === expected.mapId &&
+    candidate.combatId === expected.combatId &&
+    candidate.active === expected.active &&
+    candidate.round === expected.round &&
+    candidate.initiativeIndex === expected.initiativeIndex &&
+    JSON.stringify(candidate.initiativeOrder) === JSON.stringify(expected.initiativeOrder)
 }
 
 export async function publishPlayerActionAckWithSnapshots({
@@ -49,6 +93,7 @@ export async function publishPlayerActionAckWithSnapshots({
   roomJournalMutations,
   saveSharedResource,
   commitSharedResources,
+  loadSharedResource,
   publishAck,
 }: PublishPlayerActionAckInput): Promise<void> {
   const requireSaved = (name: string, result: SharedResourceSaveResult): void => {
@@ -87,6 +132,9 @@ export async function publishPlayerActionAckWithSnapshots({
           ...(snapshots.mapGeometry
             ? [{ name: 'map-geometry', data: snapshots.mapGeometry }]
             : []),
+          ...(snapshots.campaignTime
+            ? [{ name: 'campaign-time', data: snapshots.campaignTime }]
+            : []),
         ]
       : []
   const writes: SharedResourceTransactionWrite[] = [
@@ -96,11 +144,67 @@ export async function publishPlayerActionAckWithSnapshots({
   ]
 
   if (commitSharedResources) {
-    const committed = await commitSharedResources(writes, {
+    const transactionOptions = {
       ...undoOptions,
       transactionId: `player-action:${ack.actionId}`,
       roomJournalMutations,
-    })
+    }
+    const observeCommittedAck = async (): Promise<SharedPlayerActionAckState | null> => {
+      if (!loadSharedResource) return null
+      try {
+        const persisted = await loadSharedResource<SharedPlayerActionAckState>('player-action-ack')
+        return sameDurablePlayerActionAck(ack, persisted) ? persisted : null
+      } catch {
+        return null
+      }
+    }
+    let committed: { revisions?: Record<string, number> }
+    try {
+      committed = await commitSharedResources(writes, transactionOptions)
+    } catch (firstError) {
+      // A second DM delivery of the same durable request can race the first
+      // authority tab/process. In that case this client receives a normal CAS
+      // conflict even though the exact action has already committed. Always
+      // inspect the durable ACK before classifying the failure; treating this
+      // as a failed cast would make the queue replay an already-settled action.
+      const alreadyCommitted = await observeCommittedAck()
+      if (alreadyCommitted) {
+        await publishAckBestEffort(alreadyCommitted)
+        return
+      }
+
+      // A turn-boundary write can finish immediately before the next player's
+      // action reaches the DM. The DM already has that exact round/index in its
+      // resolved snapshot, but its shared-resource CAS watermark may still be
+      // one revision behind. Refresh and retry only when combat is the sole
+      // conflicting resource and the durable initiative boundary is identical;
+      // a real turn/order change remains fail-closed.
+      let retryAfterCombatRevisionRefresh = false
+      if (isSingleCombatRevisionConflict(firstError) && snapshots?.combat && loadSharedResource) {
+        const durableCombat = await loadSharedResource<SharedCombatState>('combat').catch(() => null)
+        retryAfterCombatRevisionRefresh = sameCombatSettlementBoundary(snapshots.combat, durableCombat)
+      }
+      if (!retryAfterCombatRevisionRefresh && !isTransientAuthorityTransportFailure(firstError)) {
+        throw firstError
+      }
+
+      // Retry only transport failures and reuse the exact transaction id and
+      // payload. If the first response was merely lost, the second request may
+      // conflict; a final durable-ACK read below then proves the first commit.
+      if (!retryAfterCombatRevisionRefresh) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 120))
+      }
+      try {
+        committed = await commitSharedResources(writes, transactionOptions)
+      } catch (retryError) {
+        const committedDuringRetry = await observeCommittedAck()
+        if (committedDuringRetry) {
+          await publishAckBestEffort(committedDuringRetry)
+          return
+        }
+        throw retryError
+      }
+    }
     await publishAckBestEffort(committed.revisions
       ? { ...ack, authorityRevisions: committed.revisions }
       : ack)

@@ -3,8 +3,11 @@ import { submitDnd5eInventoryMutation } from '../lib/inventoryAuthority'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eConditionLabel,
+  dnd5eConditionSourceCreatureTypes,
   dnd5eConditionsFromActiveEffects,
+  dnd5eIncomingConditionImmunityBlocks,
   normalizeDnd5eActiveEffects,
+  removeDnd5eActiveEffectsForEvent,
   removeDnd5eSpellEffectFromMap,
   validateDnd5eSourceBoundConditions,
   type Dnd5eActiveEffectInstance,
@@ -25,6 +28,11 @@ import {
   dnd5eMonsterRuntimeStatusCapabilities,
   type Dnd5eMonsterRuntimeStatusId,
 } from '../rulesets/dnd5e/tokenStatusMarkers'
+import {
+  normalizeDnd5eHitPointMaximumReductionLedger,
+  recoverDnd5eHitPointMaximumReductionsForEffect,
+} from '../rulesets/dnd5e/hitPointMaximumReductions'
+import { dnd5eRestoredSummonedOriginalObject } from '../rulesets/dnd5e/summonedCreatures'
 
 type SpellChoicePatch = Pick<Character, 'dnd5eClassChoices'>
 
@@ -33,6 +41,27 @@ interface OptimisticHitPointEdit {
   revision: number
   previousCharacter?: Character
   previousToken?: Token
+}
+
+function manualDamageActiveEffectPatch(input: {
+  previousHitPoints: number
+  currentHitPoints: number
+  manuallySetMaximum?: boolean
+  combatState: Character['dnd5eCombatState'] | Token['dnd5eCombatState']
+}): Character['dnd5eCombatState'] | Token['dnd5eCombatState'] | undefined {
+  if (
+    input.manuallySetMaximum ||
+    input.currentHitPoints >= input.previousHitPoints
+  ) return undefined
+  const resolved = removeDnd5eActiveEffectsForEvent({
+    effects: input.combatState?.activeEffects,
+    trigger: 'takes-damage',
+  })
+  if (resolved.removed.length === 0) return undefined
+  return {
+    ...(input.combatState ?? {}),
+    activeEffects: resolved.effects.length > 0 ? resolved.effects : undefined,
+  }
 }
 
 let hitPointEditRevision = 0
@@ -112,6 +141,13 @@ export type AppRoomCommand =
       mapId: string
       tokenId: string
       activeEffects: readonly Dnd5eActiveEffectInstance[]
+    })
+  | (RoomCommandEnvelope & {
+      type: 'combat.concentration.end'
+      characterId?: string
+      mapId: string
+      tokenId: string
+      expectedConcentrationId: string
     })
   | (RoomCommandEnvelope & {
       type: 'combat.monster-berserk.set'
@@ -340,30 +376,78 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       : undefined
     if (!character && !token) return { status: 'rejected', message: '找不到生命值调整目标。' }
 
-    const maxHp = Math.max(1, Math.floor(command.maxHp))
+    const maxHp = token?.dnd5eSimulacrum
+      ? token.dnd5eSimulacrum.maximumHitPoints
+      : Math.max(1, Math.floor(command.maxHp))
     const currentHp = Math.max(0, Math.min(maxHp, Math.floor(command.currentHp)))
-    const temporaryHp = Math.max(0, Math.floor(command.temporaryHp ?? character?.tempHp ?? 0))
+    const temporaryHp = Math.max(0, Math.floor(
+      command.temporaryHp ?? character?.tempHp ?? token?.dnd5eCombatState?.temporaryHp ?? 0,
+    ))
     const previousCharacter = command.optimisticEdit?.previousCharacter ?? (character ? structuredClone(character) : undefined)
     const previousToken = command.optimisticEdit?.previousToken ?? (token ? structuredClone(token) : undefined)
     if (!command.optimisticEdit) {
+      const characterDamageState = character
+        ? manualDamageActiveEffectPatch({
+            previousHitPoints: character.currentHp,
+            currentHitPoints: currentHp,
+            manuallySetMaximum: command.manuallySetMaximum,
+            combatState: character.dnd5eCombatState,
+          })
+        : undefined
+      const tokenDamageState = !character && token
+        ? manualDamageActiveEffectPatch({
+            previousHitPoints: token.hp ?? token.maxHp ?? maxHp,
+            currentHitPoints: currentHp,
+            manuallySetMaximum: command.manuallySetMaximum,
+            combatState: token.dnd5eCombatState,
+          })
+        : undefined
       if (character) {
         characterState.applyAuthorityUpdate(character.id, {
           currentHp,
           maxHp,
           tempHp: temporaryHp,
+          ...(characterDamageState ? {
+            dnd5eCombatState: characterDamageState,
+            conditions: dnd5eConditionsFromActiveEffects(characterDamageState.activeEffects),
+          } : {}),
           ...(command.manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
             ? { hitPointMaximumMode: 'manual', hitPointRolls: undefined }
             : {}),
         }, { protectHitPointsUntilAcknowledged: true })
       }
       if (map && token) {
-        mapState.applyAuthorityTokenUpdate(
-          map.id,
-          token.id,
-          { hp: currentHp, maxHp },
-          { protectHitPointsUntilAcknowledged: true },
-        )
+        if (token.dnd5eSimulacrum && currentHp === 0) {
+          mapState.applyAuthorityMapUpdate(map.id, {
+            tokens: map.tokens.filter((candidate) => candidate.id !== token.id),
+          })
+        } else {
+          mapState.applyAuthorityTokenUpdate(
+            map.id,
+            token.id,
+            {
+              hp: currentHp,
+              maxHp,
+              ...(!character ? {
+              dnd5eCombatState: {
+                ...(token.dnd5eCombatState ?? {}),
+                temporaryHp,
+                ...(tokenDamageState ? {
+                  activeEffects: tokenDamageState.activeEffects,
+                  conditions: dnd5eConditionsFromActiveEffects(tokenDamageState.activeEffects),
+                } : {}),
+              },
+              } : {}),
+            },
+            { protectHitPointsUntilAcknowledged: true },
+          )
+        }
       }
+    }
+    if (command.optimisticEdit && map && token?.dnd5eSimulacrum && currentHp === 0) {
+      mapState.applyAuthorityMapUpdate(map.id, {
+        tokens: map.tokens.filter((candidate) => candidate.id !== token.id),
+      })
     }
     try {
       await persistRoomStores([
@@ -384,7 +468,14 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
         latestHitPointEditRevisionByKey.get(command.optimisticEdit.key) === command.optimisticEdit.revision
       if (canRollback) {
         if (previousCharacter) characterState.applyAuthorityUpdate(previousCharacter.id, previousCharacter)
-        if (map && previousToken) mapState.applyAuthorityTokenUpdate(map.id, previousToken.id, previousToken)
+        if (map && previousToken) {
+          const latestMap = mapState.maps.find((candidate) => candidate.id === map.id)
+          if (latestMap && !latestMap.tokens.some((candidate) => candidate.id === previousToken.id)) {
+            mapState.applyAuthorityMapUpdate(map.id, { tokens: [...latestMap.tokens, previousToken] })
+          } else {
+            mapState.applyAuthorityTokenUpdate(map.id, previousToken.id, previousToken)
+          }
+        }
         if (command.optimisticEdit) latestHitPointEditRevisionByKey.delete(command.optimisticEdit.key)
       }
       await Promise.allSettled([
@@ -514,37 +605,153 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
         message: `${dnd5eConditionLabel(sourceValidation.effect.standardCondition)}必须指定同一地图上的其他来源生物。`,
       }
     }
+    const currentActiveEffects = normalizeDnd5eActiveEffects(
+      character?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects,
+    )
+    const sourceCreatureTypesByActorId = Object.fromEntries(map.tokens.map((sourceToken) => {
+      const sourceCharacter = sourceToken.characterId
+        ? characterState.characters.find((candidate) => candidate.id === sourceToken.characterId)
+        : undefined
+      return [
+        sourceToken.id,
+        dnd5eConditionSourceCreatureTypes(sourceToken, sourceCharacter),
+      ]
+    }))
+    const immunityBlocks = dnd5eIncomingConditionImmunityBlocks({
+      currentEffects: currentActiveEffects,
+      nextEffects: activeEffects,
+      conditionImmunities: token.poolId
+        ? getDnd5eSrdMonster(token.poolId)?.conditionImmunities ?? []
+        : [],
+      sourceCreatureTypesByActorId,
+    })
+    if (immunityBlocks.length > 0) {
+      const block = immunityBlocks[0]
+      const sourceLabel = block.sourceCreatureTypes.length > 0
+        ? `来自${block.sourceCreatureTypes.join('、')}的`
+        : ''
+      return {
+        status: 'rejected',
+        message: `目标现有防护使其免疫${sourceLabel}${dnd5eConditionLabel(block.condition)}。`,
+      }
+    }
     const conditions = dnd5eConditionsFromActiveEffects(activeEffects)
+    const retainedEffectIds = new Set(activeEffects.map((effect) => effect.id))
+    const removedEffectIds = currentActiveEffects
+      .filter((effect) => !retainedEffectIds.has(effect.id))
+      .map((effect) => effect.id)
+    let maximumReductionLedger = normalizeDnd5eHitPointMaximumReductionLedger(
+      character?.dnd5eCombatState?.hitPointMaximumReductionLedger ??
+        token.dnd5eCombatState?.hitPointMaximumReductionLedger,
+    )
+    let restoredMaximum: number | undefined
+    for (const effectId of removedEffectIds) {
+      const recovery = recoverDnd5eHitPointMaximumReductionsForEffect(
+        maximumReductionLedger,
+        effectId,
+      )
+      maximumReductionLedger = recovery.ledger
+      if (recovery.maximum != null) restoredMaximum = recovery.maximum
+    }
     const previousCharacter = character ? structuredClone(character) : undefined
     const previousToken = structuredClone(token)
     if (character) {
       characterState.applyAuthorityUpdate(character.id, {
         conditions,
+        ...(restoredMaximum == null
+          ? {}
+          : {
+              maxHp: restoredMaximum,
+              currentHp: Math.min(character.currentHp, restoredMaximum),
+            }),
         dnd5eCombatState: {
           ...(character.dnd5eCombatState ?? {}),
           schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
           activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+          hitPointMaximumReductionLedger: maximumReductionLedger,
         },
       })
-    } else {
+      // Linked characters and their map tokens are both inputs to the combat
+      // snapshot. Keep the token's mirrored effect state authoritative too:
+      // otherwise a direct DM removal only clears the character sheet while a
+      // stale token effect continues to affect targeting and Headless rules.
       mapState.applyAuthorityTokenUpdate(map.id, token.id, {
+        ...(restoredMaximum == null
+          ? {}
+          : {
+              maxHp: restoredMaximum,
+              hp: Math.min(token.hp ?? restoredMaximum, restoredMaximum),
+            }),
         dnd5eCombatState: {
           ...(token.dnd5eCombatState ?? {}),
           schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
           conditions: conditions.length > 0 ? conditions : undefined,
           activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+          hitPointMaximumReductionLedger: maximumReductionLedger,
+        },
+      })
+    } else {
+      mapState.applyAuthorityTokenUpdate(map.id, token.id, {
+        ...(restoredMaximum == null
+          ? {}
+          : {
+              maxHp: restoredMaximum,
+              hp: Math.min(token.hp ?? restoredMaximum, restoredMaximum),
+            }),
+        dnd5eCombatState: {
+          ...(token.dnd5eCombatState ?? {}),
+          schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+          conditions: conditions.length > 0 ? conditions : undefined,
+          activeEffects: activeEffects.length > 0 ? activeEffects : undefined,
+          hitPointMaximumReductionLedger: maximumReductionLedger,
         },
       })
     }
     try {
-      await persistRoomStores(character ? ['characters'] : ['maps'])
+      await persistRoomStores(character ? ['characters', 'maps'] : ['maps'])
       return { status: 'applied' }
     } catch (error) {
       if (previousCharacter) {
         characterState.applyAuthorityUpdate(previousCharacter.id, previousCharacter)
-      } else {
-        mapState.applyAuthorityTokenUpdate(map.id, previousToken.id, previousToken)
       }
+      mapState.applyAuthorityTokenUpdate(map.id, previousToken.id, previousToken)
+      throw error
+    }
+  }
+
+  if (command.type === 'combat.concentration.end') {
+    if (!directDmMutationAllowed()) {
+      return { status: 'rejected', message: '玩家只能结束自己角色的专注。' }
+    }
+    const characterState = useCharacterStore.getState()
+    const mapState = useMapStore.getState()
+    const previousCharacters = structuredClone(characterState.characters)
+    const previousMaps = structuredClone(mapState.maps)
+    const plan = planRoomConcentrationEnd({
+      maps: mapState.maps,
+      characters: characterState.characters,
+      mapId: command.mapId,
+      tokenId: command.tokenId,
+      characterId: command.characterId,
+      expectedConcentrationId: command.expectedConcentrationId,
+    })
+    // A repeated click after the first command committed is an idempotent no-op.
+    if (plan.status === 'missing') return { status: 'applied' }
+    if (plan.status === 'stale') {
+      return { status: 'rejected', message: '该角色已经开始维持另一项专注；旧窗口未执行删除。' }
+    }
+    useCharacterStore.setState({ characters: plan.characters })
+    useMapStore.setState({ maps: plan.maps })
+    try {
+      await persistRoomStores(['characters', 'maps'])
+      return { status: 'applied' }
+    } catch (error) {
+      useCharacterStore.setState({ characters: previousCharacters })
+      useMapStore.setState({ maps: previousMaps })
+      await Promise.allSettled([
+        characterState.loadShared(),
+        mapState.loadShared(),
+      ])
       throw error
     }
   }
@@ -626,7 +833,9 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       return { status: 'rejected', message: '当前成员无权修改该角色的法术准备。' }
     }
     const previous = structuredClone(character)
-    state.applyAuthorityUpdate(character.id, command.patch)
+    state.applyAuthorityUpdate(character.id, command.patch, {
+      protectClassChoicesUntilAcknowledged: true,
+    })
     try {
       await persistRoomStores(['characters'])
       return { status: 'applied' }
@@ -711,14 +920,28 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
 
   if (command.mutation.type === 'grant') {
     if (!directDmMutationAllowed()) return { status: 'rejected', message: '只有 DM 可以分发物品。' }
-    const inventory = useCharacterStore.getState().applyInventoryMutation(command.mutation)
+    const state = useCharacterStore.getState()
+    const previousCharacters = structuredClone(state.characters)
+    const inventory = state.applyInventoryMutation(command.mutation)
+    if (inventory.ok) {
+      try {
+        // A DM grant is authoritative as soon as the UI reports success.  The
+        // inventory store's ordinary debounced save is not sufficient here:
+        // another room snapshot can arrive first and erase the just-granted
+        // material while the success notice is still visible.
+        await persistRoomStores(['characters'])
+      } catch (error) {
+        useCharacterStore.setState({ characters: previousCharacters })
+        throw error
+      }
+    }
     return {
       status: inventory.ok ? 'applied' : 'rejected',
       message: inventory.message,
       inventory,
     }
   }
-  const submitted = submitDnd5eInventoryMutation(command.mutation)
+  const submitted = await submitDnd5eInventoryMutation(command.mutation)
   return {
     status: submitted.status,
     message: submitted.message,
@@ -767,9 +990,13 @@ export function setRoomCharacterHitPoints(input: {
     return Promise.resolve({ status: 'rejected', message: '找不到生命值调整目标。' })
   }
 
-  const maxHp = Math.max(1, Math.floor(input.maxHp))
+  const maxHp = token?.dnd5eSimulacrum
+    ? token.dnd5eSimulacrum.maximumHitPoints
+    : Math.max(1, Math.floor(input.maxHp))
   const currentHp = Math.max(0, Math.min(maxHp, Math.floor(input.currentHp)))
-  const temporaryHp = Math.max(0, Math.floor(input.temporaryHp ?? character?.tempHp ?? 0))
+  const temporaryHp = Math.max(0, Math.floor(
+    input.temporaryHp ?? character?.tempHp ?? token?.dnd5eCombatState?.temporaryHp ?? 0,
+  ))
   const optimisticKey = hitPointEditKey(aggregateTarget)
   const optimisticEdit: OptimisticHitPointEdit = {
     key: optimisticKey,
@@ -779,11 +1006,32 @@ export function setRoomCharacterHitPoints(input: {
   }
   latestHitPointEditRevisionByKey.set(optimisticKey, optimisticEdit.revision)
 
+  const characterDamageState = character
+    ? manualDamageActiveEffectPatch({
+        previousHitPoints: character.currentHp,
+        currentHitPoints: currentHp,
+        manuallySetMaximum: input.manuallySetMaximum,
+        combatState: character.dnd5eCombatState,
+      })
+    : undefined
+  const tokenDamageState = !character && token
+    ? manualDamageActiveEffectPatch({
+        previousHitPoints: token.hp ?? token.maxHp ?? maxHp,
+        currentHitPoints: currentHp,
+        manuallySetMaximum: input.manuallySetMaximum,
+        combatState: token.dnd5eCombatState,
+      })
+    : undefined
+
   if (character) {
     characterState.applyAuthorityUpdate(character.id, {
       currentHp,
       maxHp,
       tempHp: temporaryHp,
+      ...(characterDamageState ? {
+        dnd5eCombatState: characterDamageState,
+        conditions: dnd5eConditionsFromActiveEffects(characterDamageState.activeEffects),
+      } : {}),
       ...(input.manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
         ? { hitPointMaximumMode: 'manual', hitPointRolls: undefined }
         : {}),
@@ -793,7 +1041,20 @@ export function setRoomCharacterHitPoints(input: {
     mapState.applyAuthorityTokenUpdate(
       map.id,
       token.id,
-      { hp: currentHp, maxHp },
+      {
+        hp: currentHp,
+        maxHp,
+        ...(!character ? {
+          dnd5eCombatState: {
+            ...(token.dnd5eCombatState ?? {}),
+            temporaryHp,
+            ...(tokenDamageState ? {
+              activeEffects: tokenDamageState.activeEffects,
+              conditions: dnd5eConditionsFromActiveEffects(tokenDamageState.activeEffects),
+            } : {}),
+          },
+        } : {}),
+      },
       { protectHitPointsUntilAcknowledged: true },
     )
   }
@@ -882,6 +1143,27 @@ export function replaceRoomCombatantActiveEffects(input: {
   })
 }
 
+export function endRoomConcentration(input: {
+  characterId?: string
+  mapId: string
+  tokenId: string
+  expectedConcentrationId: string
+}): Promise<AppRoomCommandResult> {
+  const aggregateTarget = roomCommandAggregateTarget({
+    characterIds: [input.characterId, linkedCharacterIdForToken(input.mapId, input.tokenId)],
+    mapId: input.mapId,
+    tokenId: input.tokenId,
+    fallback: 'room:invalid:concentration-end',
+  })
+  return appRoomCommandBus.dispatch({
+    ...input,
+    id: commandId('end-concentration'),
+    type: 'combat.concentration.end',
+    ...aggregateTarget,
+    issuedAt: Date.now(),
+  })
+}
+
 export function setRoomMonsterBerserk(input: {
   mapId: string
   tokenId: string
@@ -900,6 +1182,326 @@ export function setRoomMonsterBerserk(input: {
     ...aggregateTarget,
     issuedAt: Date.now(),
   })
+}
+
+export interface RoomConcentrationEndPlan {
+  status: 'missing' | 'stale' | 'ended'
+  maps: BattleMap[]
+  characters: Character[]
+  endedConcentrationId?: string
+  removedEffectIds: string[]
+}
+
+const DND5E_CREATURE_FORM_STATE_KEYS = [
+  'wildShapeFormId',
+  'wildShapeMode',
+  'wildShapeSourceActorId',
+  'wildShapeSourceActivityId',
+  'wildShapeMaximumChallengeRating',
+  'wildShapeMaximumSizeRank',
+  'shapechangeEquipmentDisposition',
+  'wildShapeCurrentHp',
+  'wildShapeRoundsRemaining',
+  'wildShapePermanent',
+  'wildShapePermanentAfterConcentrationCompletes',
+  'wildShapeOriginalCurrentHp',
+  'wildShapeOriginalMaxHp',
+  'wildShapeOriginalArmorClass',
+  'wildShapeOriginalSpeed',
+  'wildShapeOriginalMovementSpeeds',
+  'wildShapeOriginalSizeRank',
+  'wildShapeOriginalAbilities',
+  'wildShapeOriginalSavingThrowBonuses',
+  'wildShapeOriginalSavingThrowProficiencies',
+  'wildShapeOriginalSkillProficiencies',
+  'wildShapeOriginalPassivePerception',
+  'wildShapeOriginalStatBlockId',
+  'wildShapeOriginalCreatureType',
+  'wildShapeOriginalDamageVulnerabilities',
+  'wildShapeOriginalDamageResistances',
+  'wildShapeOriginalDamageImmunities',
+  'wildShapeOriginalDamageDefenseRules',
+  'wildShapeOriginalMagicResistance',
+  'wildShapeOriginalLimitedMagicImmunity',
+  'wildShapeOriginalWeaponAttacksMagical',
+  'wildShapeOriginalConditionImmunities',
+] as const
+
+type RoomCombatState = NonNullable<Character['dnd5eCombatState'] | Token['dnd5eCombatState']>
+
+function concentrationLinkedCreatureForm(
+  state: Character['dnd5eCombatState'] | Token['dnd5eCombatState'],
+  sourceActorIds: ReadonlySet<string>,
+): state is RoomCombatState {
+  return !!state?.wildShapeFormId &&
+    state.wildShapeMode !== 'wild-shape' &&
+    !!state.wildShapeSourceActorId &&
+    sourceActorIds.has(state.wildShapeSourceActorId)
+}
+
+function clearConcentrationLinkedCreatureForm<T extends RoomCombatState>(state: T): T {
+  const next = { ...state }
+  for (const key of DND5E_CREATURE_FORM_STATE_KEYS) delete next[key]
+  return next
+}
+
+function tokenSizeForDnd5eSizeRank(sizeRank: number | undefined): number | undefined {
+  if (!Number.isFinite(sizeRank)) return undefined
+  return [1, 1, 1, 2, 3, 4][Math.max(0, Math.min(5, Math.floor(sizeRank!)))]
+}
+
+function concentrationIdentity(character: Character | undefined, token: Token): string | undefined {
+  const structured = (
+    character?.dnd5eCombatState?.concentrationSpellId ??
+    token.dnd5eCombatState?.concentrationSpellId
+  )?.trim()
+  if (structured) return structured
+  return character?.concentrating === true ? 'manual-concentration' : undefined
+}
+
+/**
+ * Ends one exact concentration instance and every source-linked projection in
+ * the same room snapshot. The expected id prevents a delayed click from
+ * deleting a newer spell that replaced the badge while the dialog was open.
+ */
+export function planRoomConcentrationEnd(input: {
+  maps: readonly BattleMap[]
+  characters: readonly Character[]
+  mapId: string
+  tokenId: string
+  characterId?: string
+  expectedConcentrationId: string
+}): RoomConcentrationEndPlan {
+  const sourceMap = input.maps.find((candidate) => candidate.id === input.mapId)
+  const sourceToken = sourceMap?.tokens.find((candidate) => candidate.id === input.tokenId)
+  if (!sourceMap || !sourceToken) {
+    return {
+      status: 'missing',
+      maps: [...input.maps],
+      characters: [...input.characters],
+      removedEffectIds: [],
+    }
+  }
+  const sourceCharacterId = input.characterId ?? sourceToken.characterId
+  const sourceCharacter = sourceCharacterId
+    ? input.characters.find((candidate) => candidate.id === sourceCharacterId)
+    : undefined
+  const currentConcentrationId = concentrationIdentity(sourceCharacter, sourceToken)
+  if (!currentConcentrationId) {
+    return {
+      status: 'missing',
+      maps: [...input.maps],
+      characters: [...input.characters],
+      removedEffectIds: [],
+    }
+  }
+  if (currentConcentrationId !== input.expectedConcentrationId) {
+    return {
+      status: 'stale',
+      maps: [...input.maps],
+      characters: [...input.characters],
+      endedConcentrationId: currentConcentrationId,
+      removedEffectIds: [],
+    }
+  }
+
+  const sourceActorIds = new Set<string>([
+    sourceToken.id,
+    ...(sourceCharacterId ? [sourceCharacterId] : []),
+    ...input.maps.flatMap((map) => map.tokens
+      .filter((token) => !!sourceCharacterId && token.characterId === sourceCharacterId)
+      .map((token) => token.id)),
+  ])
+  const isMatchingConcentrationEffect = (effect: Dnd5eActiveEffectInstance) =>
+    effect.duration.type === 'concentration' &&
+    sourceActorIds.has(effect.duration.sourceActorId) &&
+    (
+      currentConcentrationId === 'manual-concentration' ||
+      !effect.duration.concentrationId ||
+      effect.duration.concentrationId === currentConcentrationId
+    )
+  const removedEffectIds: string[] = []
+  const clearLinkedCombatState = <T extends Character['dnd5eCombatState'] | Token['dnd5eCombatState']>(
+    state: T,
+    endOwnConcentration: boolean,
+  ): T => {
+    if (!state) return state
+    const endsCreatureForm = concentrationLinkedCreatureForm(state, sourceActorIds)
+    const activeEffects = normalizeDnd5eActiveEffects(state.activeEffects)
+    const remainingEffects = activeEffects.filter((effect) => {
+      const remove = isMatchingConcentrationEffect(effect)
+      if (remove) removedEffectIds.push(effect.id)
+      return !remove
+    })
+    const effectsChanged = remainingEffects.length !== activeEffects.length
+    const concentrationEffectsBySource = Object.fromEntries(
+      Object.entries(state.concentrationEffectsBySource ?? {})
+        .filter(([actorId]) => !sourceActorIds.has(actorId)),
+    )
+    const sourceLinksChanged = Object.keys(concentrationEffectsBySource).length !==
+      Object.keys(state.concentrationEffectsBySource ?? {}).length
+    if (!effectsChanged && !sourceLinksChanged && !endOwnConcentration && !endsCreatureForm) return state
+    const nextState = {
+      ...state,
+      ...(effectsChanged
+        ? {
+            activeEffects: remainingEffects.length > 0 ? remainingEffects : undefined,
+            conditions: remainingEffects.length > 0
+              ? dnd5eConditionsFromActiveEffects(remainingEffects)
+              : undefined,
+          }
+        : {}),
+      ...(sourceLinksChanged
+        ? {
+            concentrationEffectsBySource: Object.keys(concentrationEffectsBySource).length > 0
+              ? concentrationEffectsBySource
+              : undefined,
+          }
+        : {}),
+      ...(endOwnConcentration
+        ? {
+            concentrationSpellId: undefined,
+            concentrationSpellLevel: undefined,
+            concentrationTargetIds: undefined,
+            concentrationRoundsRemaining: undefined,
+            concentrationStartedTurnKey: undefined,
+            huntersMarkTargetId: undefined,
+          }
+        : {}),
+    } as RoomCombatState
+    return (endsCreatureForm
+      ? clearConcentrationLinkedCreatureForm(nextState)
+      : nextState) as T
+  }
+
+  const revertedCharacterForms = new Map<string, {
+    currentHp: number
+    maxHp: number
+    size: number | undefined
+  }>()
+  const nextCharacters = input.characters.map((character) => {
+    const endsOwn = character.id === sourceCharacterId
+    const previousState = character.dnd5eCombatState
+    if (concentrationLinkedCreatureForm(previousState, sourceActorIds)) {
+      revertedCharacterForms.set(character.id, {
+        // Character persistence deliberately retains the original body's HP
+        // while the form pool lives in wildShapeCurrentHp.
+        currentHp: character.currentHp,
+        maxHp: character.maxHp,
+        size: tokenSizeForDnd5eSizeRank(previousState.wildShapeOriginalSizeRank),
+      })
+    }
+    const nextState = clearLinkedCombatState(previousState, endsOwn)
+    if (!endsOwn && nextState === previousState) return character
+    return {
+      ...character,
+      ...(endsOwn ? { concentrating: false } : {}),
+      ...(nextState !== previousState && nextState
+        ? { conditions: dnd5eConditionsFromActiveEffects(nextState.activeEffects) }
+        : {}),
+      dnd5eCombatState: nextState,
+    }
+  })
+
+  const entityMatches = (entity: {
+    sourceCharacterId?: string
+    sourceTokenId?: string
+    concentrationId?: string
+  }) => (
+    !!entity.concentrationId &&
+    (sourceActorIds.has(entity.sourceTokenId ?? '') ||
+      (!!sourceCharacterId && entity.sourceCharacterId === sourceCharacterId)) &&
+    (currentConcentrationId === 'manual-concentration' || entity.concentrationId === currentConcentrationId)
+  )
+  const nextMaps = input.maps.map((map) => {
+    const removedAreas = (map.dnd5ePluginAreas ?? []).filter(entityMatches)
+    const removedAreaAnchorIds = new Set(removedAreas.flatMap((area) =>
+      area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : []))
+    const dnd5ePluginAreas = (map.dnd5ePluginAreas ?? []).filter((area) => !entityMatches(area))
+    const tokens = map.tokens.flatMap((token) => {
+      if (removedAreaAnchorIds.has(token.id) || (token.dnd5eSpellEffect && entityMatches(token.dnd5eSpellEffect))) {
+        return []
+      }
+      if (token.dnd5eSummon && entityMatches(token.dnd5eSummon)) {
+        if (token.dnd5eSummon.becomesHostileAfterConcentrationEnds === true) {
+          return [{
+            ...token,
+            dnd5eSummon: {
+              ...token.dnd5eSummon,
+              concentrationId: undefined,
+              becomesHostileAfterConcentrationEnds: undefined,
+              side: token.dnd5eSummon.side === 'player' ? 'enemy' as const : 'player' as const,
+              controlEnded: true as const,
+            },
+          }]
+        }
+        const restored = dnd5eRestoredSummonedOriginalObject(token)
+        return restored ? [restored] : []
+      }
+      const tokenOwnConcentrationId = token.dnd5eCombatState?.concentrationSpellId?.trim()
+      const endsOwn = sourceActorIds.has(token.id) && (
+        token.characterId === sourceCharacterId ||
+        tokenOwnConcentrationId === currentConcentrationId ||
+        (currentConcentrationId === 'manual-concentration' && !tokenOwnConcentrationId)
+      )
+      const previousState = token.dnd5eCombatState
+      const linkedCharacterReversion = token.characterId
+        ? revertedCharacterForms.get(token.characterId)
+        : undefined
+      const tokenCreatureFormReversion = concentrationLinkedCreatureForm(previousState, sourceActorIds)
+        ? {
+            currentHp: previousState.wildShapeOriginalCurrentHp,
+            maxHp: previousState.wildShapeOriginalMaxHp,
+            size: tokenSizeForDnd5eSizeRank(previousState.wildShapeOriginalSizeRank),
+            formId: previousState.wildShapeFormId,
+            originalStatBlockId: previousState.wildShapeOriginalStatBlockId,
+          }
+        : undefined
+      const nextState = clearLinkedCombatState(previousState, endsOwn)
+      const reversion = linkedCharacterReversion ?? tokenCreatureFormReversion
+      const currentForm = tokenCreatureFormReversion?.formId
+        ? getDnd5eSrdMonster(tokenCreatureFormReversion.formId)
+        : undefined
+      const originalForm = tokenCreatureFormReversion?.originalStatBlockId
+        ? getDnd5eSrdMonster(tokenCreatureFormReversion.originalStatBlockId)
+        : undefined
+      return nextState === previousState && !reversion
+        ? [token]
+        : [{
+            ...token,
+            ...(reversion?.currentHp != null ? { hp: reversion.currentHp } : {}),
+            ...(reversion?.maxHp != null ? { maxHp: reversion.maxHp } : {}),
+            ...(reversion?.size != null ? { size: reversion.size } : {}),
+            ...(tokenCreatureFormReversion
+              ? {
+                  poolId: tokenCreatureFormReversion.originalStatBlockId,
+                  ...(currentForm && originalForm && token.label === currentForm.name
+                    ? { label: originalForm.name }
+                    : {}),
+                }
+              : {}),
+            ...(nextState !== previousState ? { dnd5eCombatState: nextState } : {}),
+          }]
+    })
+    const areasChanged = dnd5ePluginAreas.length !== (map.dnd5ePluginAreas ?? []).length
+    const tokensChanged = tokens.length !== map.tokens.length ||
+      tokens.some((token, index) => token !== map.tokens[index])
+    return !areasChanged && !tokensChanged
+      ? map
+      : {
+          ...map,
+          tokens,
+          dnd5ePluginAreas: dnd5ePluginAreas.length > 0 ? dnd5ePluginAreas : undefined,
+        }
+  })
+
+  return {
+    status: 'ended',
+    maps: nextMaps,
+    characters: nextCharacters,
+    endedConcentrationId: currentConcentrationId,
+    removedEffectIds: [...new Set(removedEffectIds)],
+  }
 }
 
 export function setRoomMonsterRuntimeStatus(input: {

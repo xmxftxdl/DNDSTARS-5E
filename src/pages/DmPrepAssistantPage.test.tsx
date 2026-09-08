@@ -28,7 +28,7 @@ describe('DmPrepAssistantPage', () => {
     expect(html).not.toContain('备团就绪度')
     expect(html).not.toContain('快速前往')
     expect(html).toContain('max-w-[1800px]')
-    expect(html).toContain('可恢复的场次计划')
+    expect(html).toContain('保存本次备团')
     expect(html).toContain('尚未导入模组资料')
   })
 
@@ -46,8 +46,8 @@ describe('DmPrepAssistantPage', () => {
 
     expect(html).not.toContain('本地免费模型')
     expect(html).not.toContain('Ollama')
-    expect(html).toContain('AI 导入与任务')
-    expect(html).toContain('external-account')
+    expect(html).toContain('导入与复核')
+    expect(html).not.toContain('external-account')
     expect(html).toContain('导入并分析模组')
     expect(html).not.toContain('第一阶段：导入模组并建立 AI 战役索引')
   })

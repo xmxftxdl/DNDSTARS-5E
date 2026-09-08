@@ -10,6 +10,9 @@ import {
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterDeathAreaEffectSnapshot,
 } from './headlessCombatEngine'
+import {
+  dnd5eSwallowedContainerActorId,
+} from './activeEffects'
 
 const ABILITIES = {
   str: 10,
@@ -121,6 +124,47 @@ function resolveSingleTargetDeathArea(input: {
 }
 
 describe('SRD monster death-area Headless runtime', () => {
+  it('does not queue an external death burst against an unrelated swallowed creature', () => {
+    const worm = combatant('worm', 50, {
+      controller: 'dm', statBlockId: 'srd-5.1:purple-worm', sizeRank: 5,
+    })
+    const target = combatant('target', 40, { sizeRank: 2 })
+    const killer = combatant('killer', 30)
+    const source = combatant('source', 20, {
+      controller: 'dm', statBlockId: 'srd-5.1:steam-mephit', currentHp: 1,
+    })
+    const state = startDnd5eHeadlessCombat(
+      'death-area-swallowed-cover', [worm, target, killer, source],
+    )
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(worm.id, target.id)]: 5,
+      [dnd5eCombatantPairKey(source.id, target.id)]: 5,
+      [dnd5eCombatantPairKey(source.id, killer.id)]: 100,
+      [dnd5eCombatantPairKey(source.id, worm.id)]: 100,
+    }
+
+    const swallowed = expectSuccess(resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: worm.id,
+      actionId: 'bite',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: [[1, 1, 1]],
+        onHitEffectRolls: [{ effectId: 'bite-swallow', d20: 1 }],
+      }],
+    }))
+    expect(dnd5eSwallowedContainerActorId(
+      swallowed.state.combatants.target.classState.activeEffects,
+    )).toBe(worm.id)
+
+    swallowed.state.initiativeIndex = swallowed.state.initiativeOrder.indexOf(killer.id)
+    swallowed.state.combatants.killer.turn.actionAvailable = true
+    const killed = expectSuccess(kill(swallowed.state, killer.id, source.id))
+
+    expect(dnd5ePendingMonsterDeathAreaEffects(killed.state)[0]?.targetIds).toEqual([])
+  })
+
   it('creates one authoritative pending snapshot when a death-area monster dies', () => {
     const { killed, snapshot } = singleTargetDeathScenario('steam-mephit', 5)
 

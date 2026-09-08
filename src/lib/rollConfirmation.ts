@@ -25,6 +25,47 @@ import type { D20EnemyModifierOption } from './d20InterruptPolicy'
 const CONTINUE_OPTION_ID = 'continue'
 export const D20_ROLL_CONFIRMATION_TIMEOUT_MS = 10_000
 
+function stableD20ReplayHash(value: string): string {
+  let first = 2166136261
+  let second = 2246822519
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    first = Math.imul(first ^ code, 16777619)
+    second = Math.imul(second ^ code, 3266489917)
+  }
+  return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`
+}
+
+/**
+ * A durable parent action can be replayed after a refresh while one of its d20
+ * interrupts is already settled. Give every logical d20 occurrence a stable
+ * identity so the replay consumes the stored result instead of rolling again.
+ */
+export function durableD20RollId(input: {
+  mapId: string
+  sourceMode: string
+  transactionId: string
+  occurrenceIndex: number
+}): string {
+  if (!Number.isSafeInteger(input.occurrenceIndex) || input.occurrenceIndex < 0) {
+    throw new Error('invalid-durable-d20-occurrence-index')
+  }
+  const mapId = requireText(input.mapId, 'map-id', 80)
+  const sourceMode = requireText(input.sourceMode, 'source-mode', 20)
+  const transactionId = requireText(input.transactionId, 'transaction-id', 500)
+  return `${sourceMode}:${mapId}:rr-d20:transaction:${stableD20ReplayHash(transactionId)}:${input.occurrenceIndex}`
+}
+
+export function findD20RollConfirmationByRollId(
+  queue: Pick<SharedCombatInterruptQueueState, 'interrupts'>,
+  rollId: string,
+): CombatInterruptByKind<'roll-confirmation'> | undefined {
+  return queue.interrupts.find((interrupt) =>
+    isCombatInterruptKind(interrupt, 'roll-confirmation') &&
+    interrupt.payload.rollId === rollId,
+  ) as CombatInterruptByKind<'roll-confirmation'> | undefined
+}
+
 function rollConfirmationGenerationKey(
   interrupt: CombatInterruptByKind<'roll-confirmation'>,
 ): string {
@@ -77,7 +118,11 @@ export function currentD20RollConfirmations(
   }
   return [...latestByKey.values()]
     .filter((interrupt) =>
-      (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm') &&
+      // A Host-selected reroll enters `rolling` before its dice animation.
+      // Keep it discoverable so a refresh or a transient write failure can
+      // resume from the recorded roll options instead of stranding the
+      // enclosing attack/save forever.
+      (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm' || interrupt.status === 'rolling') &&
       (now == null || !isCombatInterruptExpired(interrupt, now)))
     .sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))
 }
@@ -440,6 +485,17 @@ export function d20RollConfirmationSettlementSelection(
   }
 }
 
+/**
+ * Only owner-choice rerolls need a second player interaction after the Host
+ * has rolled the extra d20. Inspiration and other fixed selection policies
+ * must settle immediately or the suspended attack/save remains locked.
+ */
+export function d20ChoiceRerollRequiresOwnerSelection(
+  option?: Pick<D20EnemyModifierOption, 'selectionPolicy'>,
+): boolean {
+  return !!option && (option.selectionPolicy ?? 'owner-chooses') === 'owner-chooses'
+}
+
 export function createD20DeclineContribution(input: {
   interruptId: string
   characterId: string
@@ -483,6 +539,40 @@ export function createD20ChoiceRerollContribution(input: {
     ...(input.selectedIndex != null ? { selectedIndex: input.selectedIndex } : {}),
     createdAt: now,
   }
+}
+
+/**
+ * Produces the player's safe timeout response without undoing a reroll that
+ * was already committed. Host-selected policies need no second player write;
+ * an owner-choice timeout keeps the original d20 while still preserving the
+ * resource-spending reroll transaction.
+ */
+export function d20RollConfirmationTimeoutContribution(input: {
+  contribution?: CombatInterruptContribution
+  rollOptions?: readonly number[]
+  selectionPolicy?: 'owner-chooses' | 'highest' | 'lowest' | 'must-use-latest'
+  hasEligibleFeature: boolean
+}): {
+  featureId: string
+  featureLabel: string
+  choiceDecision?: 'use'
+  decline?: boolean
+  selectedIndex?: number
+} | undefined {
+  const contribution = input.contribution
+  if (contribution?.kind === 'choice-reroll' && contribution.decision === 'use') {
+    return input.rollOptions && (input.selectionPolicy ?? 'owner-chooses') === 'owner-chooses'
+      ? {
+          featureId: contribution.featureId,
+          featureLabel: contribution.featureLabel,
+          choiceDecision: 'use',
+          selectedIndex: 0,
+        }
+      : undefined
+  }
+  return input.hasEligibleFeature
+    ? { featureId: '', featureLabel: '', decline: true }
+    : undefined
 }
 
 export function createD20AdjustmentContribution(input: {

@@ -8,6 +8,40 @@ import { settleDnd5eMovementTracesSequentially } from '../combat/dnd5eCombatRule
 
 type BattleMap = Parameters<typeof createDnd5eMapCombatSnapshot>[0]['map']
 type Token = BattleMap['tokens'][number]
+type InitiativeEntry = Parameters<typeof createDnd5eMapCombatSnapshot>[0]['initiativeOrder'][number]
+
+function projectInitiativeEntriesForHeadlessState(
+  current: readonly InitiativeEntry[],
+  state: Pick<
+    Dnd5eHeadlessCombatState,
+    'initiativeOrder' | 'initiativeSlotIds' | 'oneShotInitiativeSlotIds'
+  >,
+): InitiativeEntry[] {
+  const slotIds = state.initiativeSlotIds
+  if (!slotIds || slotIds.length !== state.initiativeOrder.length) return [...current]
+  const bySlotId = new Map(current.map((entry) => [entry.slotId ?? entry.tokenId, entry]))
+  const templateByTokenId = new Map<string, InitiativeEntry>()
+  for (const entry of current) {
+    if (!templateByTokenId.has(entry.tokenId) || !entry.turnKind) {
+      templateByTokenId.set(entry.tokenId, entry)
+    }
+  }
+  return slotIds.flatMap((slotId, index) => {
+    const tokenId = state.initiativeOrder[index]
+    const existing = bySlotId.get(slotId)
+    if (existing) return [{ ...existing, slotId }]
+    const template = templateByTokenId.get(tokenId)
+    if (!template) return []
+    return [{
+      ...template,
+      slotId,
+      firstRoundOnly: undefined,
+      turnKind: state.oneShotInitiativeSlotIds?.includes(slotId)
+        ? 'activity-extra-turn'
+        : undefined,
+    }]
+  })
+}
 
 export interface Dnd5eMovementHazardTrace {
   tokenId: string
@@ -95,16 +129,23 @@ export async function coordinateDnd5eMovementHazards(input: {
       })
       const map = settled.application.map
       const characters = settled.application.characters
+      const projectedInitiativeOrder = projectInitiativeEntriesForHeadlessState(
+        input.initiativeOrder,
+        settled.state,
+      )
       const refreshed = createDnd5eMapCombatSnapshot({
-        combatId: input.state.combatId,
-        round: input.state.round,
-        turnSlotId: input.state.turnSlotId,
+        combatId: settled.state.combatId,
+        round: settled.state.round,
+        turnSlotId: settled.state.turnSlotId,
         map,
         characters,
-        initiativeOrder: input.initiativeOrder,
+        initiativeOrder: projectedInitiativeOrder,
       })
-      const activeActorId = input.state.initiativeOrder[input.state.initiativeIndex]
-      const refreshedInitiativeIndex = refreshed.state.initiativeOrder.indexOf(activeActorId)
+      const activeSlotId = settled.state.initiativeSlotIds?.[settled.state.initiativeIndex]
+      const activeActorId = settled.state.initiativeOrder[settled.state.initiativeIndex]
+      const refreshedInitiativeIndex = activeSlotId
+        ? refreshed.state.initiativeSlotIds?.indexOf(activeSlotId) ?? -1
+        : refreshed.state.initiativeOrder.indexOf(activeActorId)
       return {
         context: {
           state: {

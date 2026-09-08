@@ -26,6 +26,12 @@ describe('map tabletop events', () => {
   it('rejects malformed or unbounded geometry', () => {
     expect(parseMapTabletopEvent({ ...annotation, to: { x: Number.POSITIVE_INFINITY, y: 0 } })).toBeNull()
     expect(parseMapTabletopEvent({ ...annotation, color: 'red' })).toBeNull()
+    expect(parseMapTabletopEvent({ ...annotation, shape: 'freehand', points: [{ x: 1, y: 1 }] })).toBeNull()
+    expect(parseMapTabletopEvent({
+      ...annotation,
+      shape: 'freehand',
+      points: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 4, y: 3 }],
+    })).toMatchObject({ shape: 'freehand' })
   })
 
   it('keeps temporary annotations per map and clears only the requested map', () => {
@@ -41,6 +47,21 @@ describe('map tabletop events', () => {
     }, 3_000)
     expect(mapTabletopForMap(cleared, 'map-a', 3_000).annotations).toHaveLength(0)
     expect(mapTabletopForMap(cleared, 'map-b', 3_000).annotations).toHaveLength(1)
+  })
+
+  it('deletes one annotation without clearing the others', () => {
+    const sibling = { ...annotation, id: 'annotation-456' }
+    const withBoth = reduceMapTabletopState(
+      reduceMapTabletopState(EMPTY_MAP_TABLETOP_STATE, annotation, 2_000),
+      sibling,
+      2_000,
+    )
+    const deleted = reduceMapTabletopState(withBoth, {
+      type: 'delete-annotation', id: 'delete-event-123', annotationId: annotation.id, mapId: 'map-a',
+      memberId: 'dm-member', memberName: '地下城主', role: 'dm', createdAt: 3_000, expiresAt: 20_000,
+    }, 3_000)
+
+    expect(deleted.annotations.map((entry) => entry.id)).toEqual([sibling.id])
   })
 
   it('drops expired pings during any reducer pass', () => {

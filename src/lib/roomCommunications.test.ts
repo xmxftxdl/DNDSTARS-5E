@@ -28,6 +28,31 @@ describe('room communications client contracts', () => {
     expect(normalized.messages.map((entry) => entry.id)).toEqual(['ok'])
   })
 
+  it('keeps only fully host-resolved telepathic-bond messages', () => {
+    const common = {
+      channel: 'telepathic-bond', createdAt: 1, senderMemberId: 'player-a',
+      senderRole: 'player', senderDisplayName: '甲',
+      persona: { kind: 'character', name: '艾琳', avatar: '🧝', sourceId: 'hero-a' },
+      text: '心灵讯息',
+    }
+    const normalized = normalizeSharedRoomChat({
+      messages: [
+        { id: 'missing-audience', ...common },
+        {
+          id: 'resolved', ...common,
+          telepathicNetworkKey: 'caster:telepathic-bond',
+          telepathicParticipantCharacterIds: ['hero-a', 'hero-b'],
+          telepathicParticipantNames: ['艾琳', '博林'],
+          audienceMemberIds: ['player-a', 'player-b'],
+        },
+      ],
+      updatedAt: 1,
+    })
+    expect(normalized.messages).toMatchObject([{
+      id: 'resolved', channel: 'telepathic-bond', audienceMemberIds: ['player-a', 'player-b'],
+    }])
+  })
+
   it('normalizes all three journal collections', () => {
     const normalized = normalizeSharedRoomJournal({
       handouts: [{

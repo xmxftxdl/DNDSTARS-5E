@@ -266,6 +266,7 @@ export interface Dnd5ePluginSubclassFeature {
   level: number
   name: string
   description: string
+  iconAssetId?: string
   automation?: Dnd5ePluginAutomationLevel
   canModifyEnemyD20?: boolean
   action?: Dnd5ePluginFeatureAction
@@ -666,6 +667,12 @@ function clonePluginRolls(
       !validId(roll.id) || seen.has(roll.id) || typeof roll.label !== 'string' || !roll.label.trim() ||
       !finiteInteger(roll.count, 1, 12) || !finiteInteger(roll.sides, 2, 100) ||
       !finiteInteger(roll.modifier ?? 0, -1_000_000, 1_000_000) ||
+      (roll.rerollValues != null && (
+        !Array.isArray(roll.rerollValues) || roll.rerollValues.length < 1 ||
+        roll.rerollValues.length >= roll.sides ||
+        roll.rerollValues.some((value: number) => !finiteInteger(value, 1, roll.sides)) ||
+        new Set(roll.rerollValues).size !== roll.rerollValues.length
+      )) ||
       (roll.visibility != null && roll.visibility !== 'public' && roll.visibility !== 'dm')
     ) throw new Error(`Invalid plugin dice declaration: ${actionId}:${roll.id}`)
     seen.add(roll.id)
@@ -675,6 +682,7 @@ function clonePluginRolls(
       count: roll.count,
       sides: roll.sides,
       modifier: roll.modifier ?? 0,
+      ...(roll.rerollValues ? { rerollValues: [...roll.rerollValues] } : {}),
       visibility: roll.visibility ?? 'public',
     }
   })
@@ -758,7 +766,7 @@ function clonePersistentAreaTriggers(
       !validId(trigger.id) || seen.has(trigger.id) ||
       typeof trigger.label !== 'string' || !trigger.label.trim() ||
       trigger.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
-      !['on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end'].includes(trigger.timing) ||
+      !['on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end', 'source-turn-start', 'on-detonate'].includes(trigger.timing) ||
       (trigger.timing === 'on-move-distance' && !finiteInteger(trigger.movementIntervalFeet, 1, 1_000)) ||
       (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) ||
       (!trigger.damage && !trigger.condition)
@@ -816,6 +824,7 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
   if (!action) return undefined
   return {
     ...action,
+    oncePerTurnKeys: action.oncePerTurnKeys ? [...action.oncePerTurnKeys] : undefined,
     targeting: action.targeting.kind === 'area'
       ? { ...action.targeting, template: { ...action.targeting.template } }
       : { ...action.targeting },
@@ -1204,6 +1213,14 @@ export function registerDnd5eRulesPlugin(
         if (!['action', 'bonusAction', 'reaction', 'none'].includes(definition.action.economy)) {
           throw new Error(`Invalid plugin feature action economy: ${featureId}`)
         }
+        if (definition.action.oncePerTurnKeys != null && (
+          !Array.isArray(definition.action.oncePerTurnKeys) ||
+          definition.action.oncePerTurnKeys.length === 0 ||
+          new Set(definition.action.oncePerTurnKeys).size !== definition.action.oncePerTurnKeys.length ||
+          definition.action.oncePerTurnKeys.some((key) => !validId(key))
+        )) {
+          throw new Error(`Invalid plugin feature once-per-turn keys: ${featureId}`)
+        }
         if (definition.action.trigger && definition.declarativeAbility?.trigger.kind !== definition.action.trigger.kind) {
           throw new Error(`Plugin feature trigger mismatch: ${featureId}`)
         }
@@ -1239,6 +1256,9 @@ export function registerDnd5eRulesPlugin(
       }
       const action = definition.action ? {
         ...definition.action,
+        oncePerTurnKeys: definition.action.oncePerTurnKeys
+          ? [...definition.action.oncePerTurnKeys]
+          : undefined,
         targeting: clonePluginTargeting(definition.action.targeting, featureId),
         interrupt: clonePluginInterrupt(definition.action.interrupt, featureId),
         persistentArea: definition.action.persistentArea
@@ -1552,6 +1572,7 @@ export function registerDnd5eRulesPlugin(
           name: feature.name,
           summary: feature.description,
           description: feature.description,
+          iconAssetId: feature.iconAssetId,
           minimumLevel: feature.level,
           automation: feature.automation ?? (feature.action ? 'full' : 'manual'),
           canModifyEnemyD20: feature.canModifyEnemyD20,
@@ -1771,6 +1792,7 @@ export function registerDnd5eRulesPlugin(
           level: ability.level,
           name: ability.name,
           description: ability.description,
+          iconAssetId: ability.iconAssetId,
           automation: compatibility.effective,
           canModifyEnemyD20: ability.canModifyEnemyD20 === true,
           action,

@@ -1,0 +1,107 @@
+{
+  "id": "srd-5.1:rhinoceros",
+  "slug": "rhinoceros",
+  "name": "犀牛",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "gore",
+      "name": "顶撞",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 190,
+      "slug": "rhinoceros",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:48:16.295Z",
+      "name": "犀牛",
+      "actionId": "gore",
+      "actionName": "顶撞",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "2",
+      "total": 334,
+      "mapId": "verify-ui-rhinoceros-gore-1788569296349",
+      "combatId": "verify-ui-rhinoceros-gore-1788569296349:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "犀牛 使用顶撞攻击 验证目标：顶撞 → 验证目标 9+7=16 命中；共造成 20 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:48 PM\n结算\n\n犀牛 使用顶撞攻击 验证目标：顶撞 → 验证目标 9+7=16 命中；共造成 20 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：顶撞｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +7。\n结果 · 16 vs AC 10：命中。\n伤害骰 · 顶撞（基础伤害·钝击）｜2d8 骰面：8 + 7 = 15｜固定加值 +5｜小计 20\n犀牛｜消耗动作\n验证目标｜受到 20 点伤害｜HP 320 → 300",
+      "playerLog": "犀牛 使用顶撞攻击 验证目标：顶撞 → 验证目标 9+7=16 命中；共造成 20 点伤害。",
+      "afterHp": 300,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:48:41.002Z",
+      "evidenceFile": "ui-cases/monsters/190-rhinoceros.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "冲锋",
+      "automation": "headless",
+      "rule": "charge-damage",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.minimumStraightMovementFeet",
+        "rule.actionId",
+        "rule.extraDamage.average",
+        "rule.extraDamage.count",
+        "rule.extraDamage.sides",
+        "rule.extraDamage.bonus",
+        "rule.extraDamage.type",
+        "rule.savingThrowOnHit.ability",
+        "rule.savingThrowOnHit.dc",
+        "rule.savingThrowOnHit.conditionOnFailedSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "no-movement",
+        "below-threshold",
+        "at-threshold"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

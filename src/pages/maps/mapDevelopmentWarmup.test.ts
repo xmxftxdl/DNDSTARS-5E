@@ -21,17 +21,17 @@ describe('地图开发服务器预热', () => {
     expect(viteConfigSource).toContain("'zustand/react/shallow'")
   })
 
-  it('在公布开发端口前转换地图画布和面板模块', () => {
+  it('启动监听后完成地图模块预热，避免等待未启动的依赖转换服务', () => {
     expect(viteServerSource).toContain("'/src/pages/MapsWorkspacePage.tsx'")
     expect(viteServerSource).toContain("'/src/presentation/maps/MapViewportLayer.tsx'")
     expect(viteServerSource).toContain("'/src/presentation/maps/MapWorkspacePanelsLayer.tsx'")
     expect(viteServerSource).toContain('await server.environments.client.waitForRequestsIdle()')
     expect(viteServerSource).toContain('await clientDepsOptimizer?.scanProcessing')
     expect(viteServerSource).toContain('dependency.processing')
-    expect(viteServerSource.indexOf('for (const url of warmupUrls)')).toBeLessThan(
+    expect(viteServerSource.indexOf('for (const url of warmupUrls)')).toBeGreaterThan(
       viteServerSource.indexOf('await server.listen()'),
     )
-    expect(viteServerSource.indexOf('await clientDepsOptimizer?.scanProcessing')).toBeLessThan(
+    expect(viteServerSource.indexOf('await clientDepsOptimizer?.scanProcessing')).toBeGreaterThan(
       viteServerSource.indexOf('await server.listen()'),
     )
   })

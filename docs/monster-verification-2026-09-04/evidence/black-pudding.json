@@ -1,0 +1,168 @@
+{
+  "id": "srd-5.1:black-pudding",
+  "slug": "black-pudding",
+  "name": "黑布丁",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "pseudopod",
+      "name": "伪足",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].target",
+        "attack.onHitEffects[].armorClassPenalty",
+        "attack.onHitEffects[].requiresNonmagical",
+        "attack.onHitEffects[].destroysAtProvidedArmorClass",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "split",
+      "name": "分裂",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 46,
+      "slug": "black-pudding",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:27:33.156Z",
+      "name": "黑布丁",
+      "actionId": "pseudopod",
+      "actionName": "伪足",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-black-pudding-pseudopod-1788557253211",
+      "combatId": "verify-ui-black-pudding-pseudopod-1788557253211:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/黑布丁 使用伪足攻击 验证目标：/)\nExpected: visible\nTimeout: 60000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 60000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/黑布丁 使用伪足攻击 验证目标：/)\u001b[22m\n\u001b[2m    - waiting for\" http://127.0.0.1:6973/campaign/local/maps\" navigation to finish...\u001b[22m\n\u001b[2m    - navigated to \"http://127.0.0.1:6973/campaign/local/maps\"\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:28:47.955Z",
+      "evidenceFile": "ui-cases/monsters/046-black-pudding.json"
+    },
+    {
+      "index": 118,
+      "slug": "black-pudding",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:31:30.705Z",
+      "name": "黑布丁",
+      "actionId": "pseudopod",
+      "actionName": "伪足",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "4",
+      "total": 334,
+      "mapId": "verify-ui-black-pudding-pseudopod-1788568290754",
+      "combatId": "verify-ui-black-pudding-pseudopod-1788568290754:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "黑布丁 使用伪足攻击 验证目标：伪足 → 验证目标 17+5=22 命中；共造成 20 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:31 PM\n结算\n\n黑布丁 使用伪足攻击 验证目标：伪足 → 验证目标 17+5=22 命中；共造成 20 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：伪足｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 17；最终采用 17；调整值 +5。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 伪足（基础伤害 1·钝击）｜1d6 骰面：3 = 3｜固定加值 +3｜小计 6\n伤害骰 · 伪足（基础伤害 2·强酸）｜4d8 骰面：2 + 5 + 6 + 1 = 14｜固定加值 +0｜小计 14\n黑布丁｜消耗动作\n验证目标｜受到 20 点伤害｜HP 320 → 300",
+      "playerLog": "黑布丁 使用伪足攻击 验证目标：伪足 → 验证目标 17+5=22 命中；共造成 20 点伤害。",
+      "afterHp": 300,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:31:57.362Z",
+      "evidenceFile": "ui-cases/monsters/118-black-pudding.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "无定形",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "腐蚀形态",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

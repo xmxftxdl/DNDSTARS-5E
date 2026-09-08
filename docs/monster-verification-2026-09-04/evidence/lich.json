@@ -1,0 +1,297 @@
+{
+  "id": "srd-5.1:lich",
+  "slug": "lich",
+  "name": "巫妖",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：传奇动作“戏法”不再整体降级为 DM 裁定。回合结束窗口只列出巫妖法术表中的 0 环法术；已注册的冷冻射线走统一 Headless 攻击、伤害、减速与传奇动作点结算，法师之手和魔法伎俩仍按所选法术进入 DM 裁定。非戏法与巫妖自己回合的伪造请求会被原子拒绝。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "paralyzing-touch",
+      "name": "麻痹之触",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "touch-paralyzed:apply",
+        "touch-paralyzed:save",
+        "touch-paralyzed:condition-immune"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "cantrip",
+      "name": "戏法",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "D&D 5e monster resource actions resolves the Lich Cantrip legendary action without spending its ordinary action",
+        "D&D 5e monster resource actions rejects non-cantrips and own-turn use through the Lich Cantrip action atomically"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "paralyzing-touch-costs-2-actions",
+      "name": "麻痹之触（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "frightening-gaze-costs-2-actions",
+      "name": "恐惧凝视（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.durationRounds",
+        "rule.repeatSaveAtEndOfTargetTurn",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "disrupt-life-costs-3-actions",
+      "name": "扰乱生命（消耗 3 动作）",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.targetCreatureTypeExclusions[]",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 9,
+      "slug": "lich",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:52:00.428Z",
+      "name": "巫妖",
+      "actionId": "paralyzing-touch",
+      "actionName": "麻痹之触",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "21",
+      "total": 334,
+      "mapId": "verify-ui-lich-paralyzing-touch-1788565920480",
+      "combatId": "verify-ui-lich-paralyzing-touch-1788565920480:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巫妖 使用麻痹之触攻击 验证目标：麻痹之触 → 验证目标 8+12=20 命中；共造成 15 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:52 PM\n结算\n\n巫妖 使用麻痹之触攻击 验证目标：麻痹之触 → 验证目标 8+12=20 命中；共造成 15 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：麻痹之触｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 8；最终采用 8；调整值 +12。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 麻痹之触（基础伤害·寒冷）｜3d6 骰面：6 + 3 + 6 = 15｜固定加值 +0｜小计 15\n巫妖｜消耗动作\n验证目标｜体质豁免 d20 13 +10 = 23 vs DC 18｜成功\n验证目标｜受到 15 点伤害｜HP 320 → 305",
+      "playerLog": "巫妖 使用麻痹之触攻击 验证目标：麻痹之触 → 验证目标 8+12=20 命中；共造成 15 点伤害。",
+      "afterHp": 305,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:52:25.913Z",
+      "evidenceFile": "ui-cases/monsters/009-lich.json"
+    },
+    {
+      "index": 183,
+      "slug": "lich",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:50:30.703Z",
+      "name": "巫妖",
+      "actionId": "paralyzing-touch",
+      "actionName": "麻痹之触",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-lich-paralyzing-touch-1788562230751",
+      "combatId": "verify-ui-lich-paralyzing-touch-1788562230751:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巫妖 使用麻痹之触攻击 验证目标：麻痹之触 → 验证目标 8+12=20 命中；共造成 12 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:50 PM\n结算\n\n巫妖 使用麻痹之触攻击 验证目标：麻痹之触 → 验证目标 8+12=20 命中；共造成 12 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：麻痹之触｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 8；最终采用 8；调整值 +12。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 麻痹之触（基础伤害·寒冷）｜3d6 骰面：2 + 4 + 6 = 12｜固定加值 +0｜小计 12\n巫妖｜消耗动作\n验证目标｜体质豁免 d20 12 +10 = 22 vs DC 18｜成功\n验证目标｜受到 12 点伤害｜HP 320 → 308",
+      "playerLog": "巫妖 使用麻痹之触攻击 验证目标：麻痹之触 → 验证目标 8+12=20 命中；共造成 12 点伤害。",
+      "afterHp": 308,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:51:03.419Z",
+      "evidenceFile": "ui-cases/monsters/183-lich.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "传奇抗性",
+      "automation": "headless",
+      "rule": "legendary-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumUses"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "choose",
+        "decline",
+        "exhausted"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "复苏",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "驱散抗性",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 23,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

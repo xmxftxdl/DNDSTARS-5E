@@ -15,7 +15,18 @@ import {
 import { geometryEntityPoints } from './mapCanvasGeometryUtils'
 import { usePrefersReducedMotion, useStatusAnimation, useTokenBadgeImage } from './mapEffectHooks'
 import { mapCanvasEffectTokenAreaRenderOffset } from './mapCanvasInteraction'
+import {
+  dnd5eNamedPersistentAreaPresentation,
+  type Dnd5eNamedPersistentAreaPresentation,
+} from './namedPersistentAreaPresentation'
 import { persistentAreaAtlasLoopFrames } from './persistentAreaAtlasFrames'
+import {
+  persistentAreaCircularRangeGeometry,
+  persistentAreaPresetUsesCircularRange,
+} from './persistentAreaRangePresentation'
+import { dnd5ePersistentAreaRenderPreset } from './persistentAreaRenderPreset'
+import { createWebAreaStrands } from './webAreaPresentation'
+import { moveEarthAreaPixelBounds } from './moveEarthAreaPresentation'
 
 interface Point {
   x: number
@@ -27,7 +38,6 @@ interface Point {
 function Dnd5eToxicCloudAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
   const grid = Math.max(1, map.gridSize)
   const groupRef = useRef<Konva.Group>(null)
-  const boundaryRef = useRef<Konva.Group>(null)
   const puffRefs = useRef<Array<Konva.Circle | null>>([])
   const reducedMotion = usePrefersReducedMotion()
   const puffs = useMemo(() => toxicCloudPuffs(area, map), [area, map])
@@ -53,10 +63,6 @@ function Dnd5eToxicCloudAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map:
         node.y(puff.y + Math.cos(wave * 0.73) * puff.drift * 0.62)
         node.scale({ x: 0.88 + Math.sin(wave * 1.19) * 0.12, y: 0.9 + Math.cos(wave) * 0.1 })
         node.opacity(Math.max(0.1, (0.2 + Math.sin(wave * 0.91) * 0.07) * opacityScale))
-      })
-      boundaryRef.current?.opacity(0.56 + Math.sin(seconds * 1.35) * 0.18)
-      boundaryRef.current?.getChildren().forEach((node) => {
-        if (node instanceof Konva.Rect) node.dashOffset(-seconds * 8)
       })
     },
     { active: !reducedMotion, fps: 12 },
@@ -84,12 +90,11 @@ function Dnd5eToxicCloudAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map:
           perfectDrawEnabled={false}
         />
       ))}
-      <Group ref={boundaryRef} listening={false}>
-        {area.cells.map((cell) => {
-          const { x, y } = cellTopLeft(cell, map)
-          return <Rect key={`cloud-boundary:${cellKey(cell)}`} x={x} y={y} width={grid} height={grid} stroke="#bef264" strokeWidth={2.5} dash={[10, 6]} listening={false} />
-        })}
-      </Group>
+      <PersistentCircularAreaRangeBoundary
+        area={area}
+        map={map}
+        glow={area.coreSpellId === 'incendiary-cloud' ? '#fb923c' : '#bef264'}
+      />
       <Group x={bounds.minX + 6} y={Math.max(4, bounds.minY + 6)} listening={false}>
         <Rect width={labelWidth} height={Math.max(24, grid * 0.34)} fill="rgba(8,15,4,0.82)" stroke="rgba(190,242,100,0.7)" strokeWidth={1} cornerRadius={7} />
         <Text
@@ -123,6 +128,548 @@ function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; ma
   })}</>
 }
 
+function Dnd5eMoveEarthAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
+  const bounds = moveEarthAreaPixelBounds(area.cells, map)
+  if (!bounds) return null
+  const grid = Math.max(1, map.gridSize)
+  const color = area.color || '#d97706'
+  return <Group name={`persistent-area-move-earth-${area.id}`} listening={false}>
+    {area.cells.map((cell) => {
+      const { x, y } = cellTopLeft(cell, map)
+      return <Rect
+        key={`move-earth-fill:${cellKey(cell)}`}
+        x={x}
+        y={y}
+        width={grid}
+        height={grid}
+        fill={color}
+        opacity={0.1}
+        listening={false}
+      />
+    })}
+    <Rect
+      x={bounds.x + 1.5}
+      y={bounds.y + 1.5}
+      width={Math.max(0, bounds.width - 3)}
+      height={Math.max(0, bounds.height - 3)}
+      fillEnabled={false}
+      stroke="#fbbf24"
+      strokeWidth={Math.max(3, grid * 0.055)}
+      dash={[Math.max(10, grid * 0.2), Math.max(5, grid * 0.1)]}
+      shadowColor="#d97706"
+      shadowBlur={Math.max(8, grid * 0.16)}
+      listening={false}
+    />
+  </Group>
+}
+
+function PersistentCircularAreaRangeBoundary({
+  area,
+  map,
+  glow,
+}: {
+  area: Dnd5ePluginArea
+  map: BattleMap
+  glow: string
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const outerRingRef = useRef<Konva.Circle>(null)
+  const innerRingRef = useRef<Konva.Circle>(null)
+  const reducedMotion = usePrefersReducedMotion()
+  const geometry = useMemo(() => persistentAreaCircularRangeGeometry({
+    cells: area.cells,
+    anchorCell: area.anchorCell,
+    gridSize: map.gridSize,
+    gridOffsetX: map.gridOffsetX,
+    gridOffsetY: map.gridOffsetY,
+  }), [area.anchorCell, area.cells, map.gridOffsetX, map.gridOffsetY, map.gridSize])
+  const phaseMs = useMemo(() => stableAnimationPhaseMs(area.id, 20_000), [area.id])
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    () => {
+      const seconds = (Date.now() + phaseMs) / 1000
+      outerRingRef.current?.opacity(0.86 + Math.sin(seconds * 1.3) * 0.08)
+      innerRingRef.current?.dashOffset(-seconds * 14)
+      innerRingRef.current?.opacity(0.72 + Math.sin(seconds * 1.05 + 0.8) * 0.1)
+    },
+    { active: !reducedMotion && !!geometry, fps: 12 },
+  )
+
+  if (!geometry) return null
+  const strokeWidth = Math.max(2.8, map.gridSize * 0.052)
+  return (
+    <Group
+      ref={groupRef}
+      name={`persistent-area-circular-range persistent-area-circular-range-${area.id}`}
+      x={geometry.x}
+      y={geometry.y}
+      listening={false}
+    >
+      <Circle
+        ref={outerRingRef}
+        radius={geometry.radius}
+        stroke={glow}
+        strokeWidth={strokeWidth}
+        opacity={0.9}
+        shadowColor={glow}
+        shadowBlur={Math.max(8, map.gridSize * 0.18)}
+        perfectDrawEnabled={false}
+      />
+      <Circle
+        ref={innerRingRef}
+        radius={Math.max(1, geometry.radius - strokeWidth * 1.65)}
+        stroke="#ffffff"
+        strokeWidth={Math.max(1.2, strokeWidth * 0.42)}
+        dash={[Math.max(8, map.gridSize * 0.22), Math.max(5, map.gridSize * 0.13)]}
+        opacity={0.78}
+        perfectDrawEnabled={false}
+      />
+    </Group>
+  )
+}
+
+
+function magicCircleAccent(area: Dnd5ePluginArea): string {
+  const protectedType = area.occupantModifiers?.attacksAgainstOccupantDisadvantageCreatureTypes?.[0]
+    ?? area.blocking?.includedCreatureTypes?.[0]
+  switch (protectedType?.trim().toLowerCase()) {
+    case 'celestial':
+    case '天界生物': return '#fde68a'
+    case 'elemental':
+    case '元素生物': return '#67e8f9'
+    case 'fey':
+    case '精类': return '#86efac'
+    case 'fiend':
+    case '邪魔': return '#fb7185'
+    case 'undead':
+    case '亡灵': return '#c4b5fd'
+    default: return '#c4b5fd'
+  }
+}
+
+function PersistentMagicCircleField({
+  area,
+  map,
+  reducedMotion,
+}: {
+  area: Dnd5ePluginArea
+  map: BattleMap
+  reducedMotion: boolean
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const auraRef = useRef<Konva.Circle>(null)
+  const outerSigilRef = useRef<Konva.Group>(null)
+  const innerSigilRef = useRef<Konva.Group>(null)
+  const outerRingRef = useRef<Konva.Circle>(null)
+  const innerRingRef = useRef<Konva.Circle>(null)
+  const geometry = useMemo(() => persistentAreaCircularRangeGeometry({
+    cells: area.cells,
+    anchorCell: area.anchorCell,
+    gridSize: map.gridSize,
+    gridOffsetX: map.gridOffsetX,
+    gridOffsetY: map.gridOffsetY,
+  }), [area.anchorCell, area.cells, map.gridOffsetX, map.gridOffsetY, map.gridSize])
+  const phaseMs = useMemo(() => stableAnimationPhaseMs(area.id, 24_000), [area.id])
+  const direction = area.blocking?.movementMode === 'exit' ? -1 : 1
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    () => {
+      const seconds = (Date.now() + phaseMs) / 1000
+      const pulse = (Math.sin(seconds * 1.75) + 1) / 2
+      outerSigilRef.current?.rotation(direction * seconds * 7)
+      innerSigilRef.current?.rotation(direction * seconds * -11)
+      outerRingRef.current?.dashOffset(direction * -seconds * 18)
+      innerRingRef.current?.dashOffset(direction * seconds * 12)
+      auraRef.current?.scale({ x: 0.985 + pulse * 0.03, y: 0.985 + pulse * 0.03 })
+      auraRef.current?.opacity(0.14 + pulse * 0.1)
+      outerSigilRef.current?.opacity(0.74 + pulse * 0.2)
+      innerSigilRef.current?.opacity(0.58 + (1 - pulse) * 0.22)
+    },
+    { active: !reducedMotion && !!geometry, fps: 16 },
+  )
+
+  if (!geometry) return null
+  const { x, y, radius } = geometry
+  const accent = magicCircleAccent(area)
+  const outerStrokeWidth = Math.max(2.5, map.gridSize * 0.055)
+  const runeRadius = radius * 0.76
+  const triangleRadius = radius * 0.58
+  const trianglePoints = (offset: number) => [0, 1, 2].flatMap((index) => {
+    const radians = (offset + index * 120) * Math.PI / 180
+    return [Math.cos(radians) * triangleRadius, Math.sin(radians) * triangleRadius]
+  })
+
+  return (
+    <Group
+      ref={groupRef}
+      name={`persistent-area-magic-circle persistent-area-magic-circle-${area.id}`}
+      x={x}
+      y={y}
+      listening={false}
+    >
+      <Circle
+        ref={auraRef}
+        radius={radius * 0.94}
+        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+        fillRadialGradientEndRadius={radius}
+        fillRadialGradientColorStops={[0, 'rgba(76,29,149,0.06)', 0.7, 'rgba(109,40,217,0.12)', 1, 'rgba(196,181,253,0.03)']}
+        shadowColor={accent}
+        shadowBlur={Math.max(12, radius * 0.18)}
+        opacity={0.2}
+        perfectDrawEnabled={false}
+      />
+      <Group ref={outerSigilRef} opacity={0.88} listening={false}>
+        <Circle
+          ref={outerRingRef}
+          radius={radius}
+          stroke={accent}
+          strokeWidth={outerStrokeWidth}
+          dash={[Math.max(10, radius * 0.16), Math.max(5, radius * 0.07)]}
+          shadowColor={accent}
+          shadowBlur={Math.max(8, radius * 0.12)}
+          perfectDrawEnabled={false}
+        />
+        <Circle radius={radius * 0.86} stroke="#ede9fe" strokeWidth={Math.max(1.2, outerStrokeWidth * 0.42)} opacity={0.82} />
+        {[0, 60, 120, 180, 240, 300].map((angle) => {
+          const radians = angle * Math.PI / 180
+          const nodeX = Math.cos(radians) * runeRadius
+          const nodeY = Math.sin(radians) * runeRadius
+          const runeSize = Math.max(3.5, radius * 0.055)
+          return <Line
+            key={`magic-circle-rune:${area.id}:${angle}`}
+            points={[nodeX, nodeY - runeSize, nodeX + runeSize, nodeY, nodeX, nodeY + runeSize, nodeX - runeSize, nodeY]}
+            closed
+            fill="#f8fafc"
+            stroke={accent}
+            strokeWidth={Math.max(1, outerStrokeWidth * 0.38)}
+            shadowColor={accent}
+            shadowBlur={Math.max(4, runeSize)}
+            listening={false}
+          />
+        })}
+      </Group>
+      <Group ref={innerSigilRef} opacity={0.72} listening={false}>
+        <Circle
+          ref={innerRingRef}
+          radius={radius * 0.7}
+          stroke="#ddd6fe"
+          strokeWidth={Math.max(1.4, outerStrokeWidth * 0.52)}
+          dash={[Math.max(4, radius * 0.055), Math.max(7, radius * 0.095)]}
+          perfectDrawEnabled={false}
+        />
+        <Line points={trianglePoints(-90)} closed stroke={accent} strokeWidth={Math.max(1.3, outerStrokeWidth * 0.48)} opacity={0.82} />
+        <Line points={trianglePoints(90)} closed stroke="#e0e7ff" strokeWidth={Math.max(1.1, outerStrokeWidth * 0.4)} opacity={0.7} />
+        <Circle radius={radius * 0.16} stroke={accent} strokeWidth={Math.max(1.5, outerStrokeWidth * 0.55)} opacity={0.9} shadowColor={accent} shadowBlur={6} />
+      </Group>
+    </Group>
+  )
+}
+
+
+function Dnd5eNamedPersistentAreaOverlay({
+  area,
+  map,
+  image,
+  presentation,
+}: {
+  area: Dnd5ePluginArea
+  map: BattleMap
+  image: HTMLImageElement
+  presentation: Dnd5eNamedPersistentAreaPresentation
+}) {
+  const grid = Math.max(1, map.gridSize)
+  const groupRef = useRef<Konva.Group>(null)
+  const boundaryRef = useRef<Konva.Rect>(null)
+  const secondaryBoundaryRef = useRef<Konva.Rect>(null)
+  const servantOuterRingRef = useRef<Konva.Circle>(null)
+  const servantInnerRingRef = useRef<Konva.Circle>(null)
+  const iconGroupRef = useRef<Konva.Group>(null)
+  const iconHaloRef = useRef<Konva.Circle>(null)
+  const orbitRef = useRef<Konva.Group>(null)
+  const projectionEchoLeftRef = useRef<Konva.Image>(null)
+  const projectionEchoRightRef = useRef<Konva.Image>(null)
+  const projectionOuterRingRef = useRef<Konva.Circle>(null)
+  const projectionInnerRingRef = useRef<Konva.Circle>(null)
+  const projectionScanRef = useRef<Konva.Line>(null)
+  const reducedMotion = usePrefersReducedMotion()
+  const animationPhaseMs = useMemo(
+    () => stableAnimationPhaseMs(area.id, 16_000),
+    [area.id],
+  )
+  const isServant = presentation.kind === 'servant'
+  const isProjection = presentation.kind === 'projection'
+  const isRemoteProjection = presentation.projectionStyle === 'remote-beacon'
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    () => {
+      const seconds = (Date.now() + animationPhaseMs) / 1000
+      const pulse = (Math.sin(seconds * (isServant ? 2.5 : 1.8)) + 1) / 2
+      boundaryRef.current?.dashOffset(-seconds * 11)
+      boundaryRef.current?.opacity(0.66 + pulse * 0.28)
+      secondaryBoundaryRef.current?.dashOffset(seconds * 8)
+      secondaryBoundaryRef.current?.opacity(0.42 + (1 - pulse) * 0.38)
+      servantOuterRingRef.current?.dashOffset(-seconds * 13)
+      servantOuterRingRef.current?.rotation(seconds * 9)
+      servantOuterRingRef.current?.opacity(0.64 + pulse * 0.28)
+      servantInnerRingRef.current?.dashOffset(seconds * 9)
+      servantInnerRingRef.current?.rotation(-seconds * 6)
+      servantInnerRingRef.current?.opacity(0.48 + (1 - pulse) * 0.34)
+      const iconScale = isServant
+        ? 0.96 + pulse * 0.07
+        : 0.94 + pulse * 0.1
+      iconGroupRef.current?.scale({ x: iconScale, y: iconScale })
+      iconGroupRef.current?.offsetY(Math.sin(seconds * (isServant ? 2.1 : 1.35)) * grid * 0.035)
+      iconGroupRef.current?.rotation(Math.sin(seconds * (isServant ? 1.35 : 0.85)) * (isServant ? 2.4 : 1.3))
+      iconHaloRef.current?.scale({ x: 0.94 + pulse * 0.12, y: 0.94 + pulse * 0.12 })
+      iconHaloRef.current?.opacity(0.34 + pulse * 0.3)
+      orbitRef.current?.rotation(seconds * (isServant ? 16 : -11))
+      orbitRef.current?.opacity(0.5 + pulse * 0.38)
+      if (isProjection) {
+        const echoDrift = grid * (0.06 + pulse * 0.08)
+        const leftEcho = projectionEchoLeftRef.current
+        const rightEcho = projectionEchoRightRef.current
+        leftEcho?.x(-leftEcho.width() / 2 - echoDrift)
+        leftEcho?.opacity(0.08 + (1 - pulse) * 0.16)
+        rightEcho?.x(-rightEcho.width() / 2 + echoDrift)
+        rightEcho?.opacity(0.08 + pulse * 0.16)
+      }
+      if (isRemoteProjection) {
+        projectionOuterRingRef.current?.rotation(seconds * 22)
+        projectionOuterRingRef.current?.dashOffset(-seconds * 18)
+        projectionOuterRingRef.current?.opacity(0.42 + pulse * 0.38)
+        projectionInnerRingRef.current?.rotation(-seconds * 15)
+        projectionInnerRingRef.current?.dashOffset(seconds * 13)
+        projectionInnerRingRef.current?.opacity(0.3 + (1 - pulse) * 0.34)
+        projectionScanRef.current?.y(Math.sin(seconds * 1.7) * grid * 0.38)
+        projectionScanRef.current?.opacity(0.28 + pulse * 0.5)
+      }
+    },
+    { active: !reducedMotion, fps: 18 },
+  )
+
+  const points = area.cells.map((cell) => cellTopLeft(cell, map))
+  if (points.length === 0) return null
+  const minX = Math.min(...points.map((point) => point.x))
+  const minY = Math.min(...points.map((point) => point.y))
+  const maxX = Math.max(...points.map((point) => point.x)) + grid
+  const maxY = Math.max(...points.map((point) => point.y)) + grid
+  const width = maxX - minX
+  const height = maxY - minY
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
+  const iconSize = isProjection
+    ? Math.max(42, grid * 0.94)
+    : isServant
+    ? Math.max(34, grid * 0.78)
+    : Math.max(42, Math.min(grid * 1.55, Math.min(width, height) * 0.58))
+  const ringRadius = isServant
+    ? Math.min(grid * 0.47, iconSize * 0.72)
+    : iconSize * 0.7
+  const orbitRadius = ringRadius * (isServant ? 1.08 : 1.16)
+
+  return (
+    <Group
+      ref={groupRef}
+      name={`persistent-area-named persistent-area-named-${presentation.kind}${isRemoteProjection ? ' persistent-area-project-image' : ''}`}
+      listening={false}
+    >
+      {presentation.kind === 'illusion' ? (
+        <>
+          <Rect
+            x={minX + 1.5}
+            y={minY + 1.5}
+            width={Math.max(0, width - 3)}
+            height={Math.max(0, height - 3)}
+            cornerRadius={Math.max(5, Math.min(13, grid * 0.16))}
+            fill={presentation.fill}
+            opacity={0.22}
+            shadowColor={presentation.glow}
+            shadowBlur={Math.max(8, grid * 0.14)}
+            listening={false}
+          />
+          <Rect
+            ref={boundaryRef}
+            x={minX + 1.5}
+            y={minY + 1.5}
+            width={Math.max(0, width - 3)}
+            height={Math.max(0, height - 3)}
+            cornerRadius={Math.max(5, Math.min(13, grid * 0.16))}
+            fillEnabled={false}
+            opacity={0.82}
+            stroke={presentation.border}
+            strokeWidth={3.5}
+            dash={[12, 5]}
+            shadowColor={presentation.glow}
+            shadowBlur={Math.max(9, grid * 0.2)}
+            shadowOpacity={0.9}
+            listening={false}
+          />
+          <Rect
+            ref={secondaryBoundaryRef}
+            x={minX + Math.max(7, grid * 0.12)}
+            y={minY + Math.max(7, grid * 0.12)}
+            width={Math.max(0, width - Math.max(14, grid * 0.24))}
+            height={Math.max(0, height - Math.max(14, grid * 0.24))}
+            cornerRadius={Math.max(4, grid * 0.1)}
+            stroke="#67e8f9"
+            strokeWidth={1.5}
+            dash={[3, 7]}
+            opacity={0.78}
+            listening={false}
+          />
+          <Line
+            points={[minX + 7, maxY - 7, maxX - 7, minY + 7]}
+            stroke="#c4b5fd"
+            strokeWidth={1.3}
+            dash={[2, 9]}
+            opacity={0.5}
+            listening={false}
+          />
+        </>
+      ) : presentation.kind === 'servant' ? (
+        <>
+          <Circle
+            ref={servantOuterRingRef}
+            x={centerX}
+            y={centerY}
+            radius={grid * 0.43}
+            fill="rgba(8,47,73,0.26)"
+            stroke="#67e8f9"
+            strokeWidth={2.2}
+            dash={[5, 4]}
+            shadowColor={presentation.glow}
+            shadowBlur={grid * 0.22}
+            listening={false}
+          />
+          <Circle
+            ref={servantInnerRingRef}
+            x={centerX}
+            y={centerY}
+            radius={grid * 0.31}
+            stroke="#ecfeff"
+            strokeWidth={1.2}
+            dash={[2, 5]}
+            opacity={0.82}
+            listening={false}
+          />
+        </>
+      ) : null}
+      <Group
+        ref={iconGroupRef}
+        x={centerX}
+        y={centerY}
+        listening={false}
+      >
+        {!isProjection && <Circle
+          ref={iconHaloRef}
+          radius={ringRadius}
+          fill="rgba(2,6,23,0.72)"
+          stroke={presentation.border}
+          strokeWidth={2}
+          opacity={0.72}
+          shadowColor={presentation.glow}
+          shadowBlur={Math.max(9, grid * 0.24)}
+          listening={false}
+        />}
+        {!isProjection && <Group ref={orbitRef} listening={false}>
+          {[0, 90, 180, 270].map((angle, index) => {
+            const radians = angle * Math.PI / 180
+            return (
+              <Circle
+                key={`named-area-orbit:${area.id}:${angle}`}
+                x={Math.cos(radians) * orbitRadius}
+                y={Math.sin(radians) * orbitRadius}
+                radius={Math.max(1.4, grid * (index % 2 === 0 ? 0.035 : 0.024))}
+                fill={index % 2 === 0 ? presentation.border : '#ecfeff'}
+                shadowColor={presentation.glow}
+                shadowBlur={Math.max(4, grid * 0.08)}
+                listening={false}
+              />
+            )
+          })}
+        </Group>}
+        {isProjection && <>
+          {isRemoteProjection && <>
+            <Circle
+              ref={projectionOuterRingRef}
+              radius={grid * 0.62}
+              stroke={presentation.border}
+              strokeWidth={Math.max(1.6, grid * 0.035)}
+              dash={[Math.max(3, grid * 0.075), Math.max(5, grid * 0.12)]}
+              opacity={0.68}
+              shadowColor={presentation.glow}
+              shadowBlur={Math.max(9, grid * 0.2)}
+              listening={false}
+            />
+            <Circle
+              ref={projectionInnerRingRef}
+              radius={grid * 0.48}
+              stroke="#67e8f9"
+              strokeWidth={Math.max(1.1, grid * 0.024)}
+              dash={[Math.max(2, grid * 0.045), Math.max(7, grid * 0.14)]}
+              opacity={0.56}
+              listening={false}
+            />
+          </>}
+          <KonvaImage
+            ref={projectionEchoLeftRef}
+            image={image}
+            x={-iconSize / 2 - grid * 0.1}
+            y={-iconSize / 2}
+            width={iconSize}
+            height={iconSize}
+            opacity={0.14}
+            shadowColor="#38bdf8"
+            shadowBlur={Math.max(8, grid * 0.18)}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+          <KonvaImage
+            ref={projectionEchoRightRef}
+            image={image}
+            x={-iconSize / 2 + grid * 0.1}
+            y={-iconSize / 2}
+            width={iconSize}
+            height={iconSize}
+            opacity={0.14}
+            shadowColor="#c084fc"
+            shadowBlur={Math.max(8, grid * 0.18)}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        </>}
+        <KonvaImage
+          image={image}
+          x={-iconSize / 2}
+          y={-iconSize / 2}
+          width={iconSize}
+          height={iconSize}
+          opacity={isRemoteProjection ? 0.84 : 0.98}
+          shadowColor={presentation.glow}
+          shadowBlur={Math.max(7, grid * 0.14)}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+        {isRemoteProjection && <Line
+          ref={projectionScanRef}
+          points={[-grid * 0.43, 0, grid * 0.43, 0]}
+          stroke="#cffafe"
+          strokeWidth={Math.max(1.2, grid * 0.026)}
+          opacity={0.6}
+          shadowColor={presentation.glow}
+          shadowBlur={Math.max(5, grid * 0.11)}
+          listening={false}
+        />}
+      </Group>
+    </Group>
+  )
+}
+
 
 
 const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>> = {
@@ -147,6 +694,10 @@ const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>
   'fog-cloud': { icon: '☁', glow: '#cbd5e1' }, web: { icon: '⌘', glow: '#e2e8f0' }, silence: { icon: '∅', glow: '#a5b4fc' },
   'sleet-storm': { icon: '❄', glow: '#bfdbfe' }, 'stinking-cloud': { icon: '☁', glow: '#fde047' }, 'wind-wall': { icon: '≋', glow: '#bae6fd' },
   'wall-of-force': { icon: '◇', glow: '#c4b5fd' }, 'wall-of-stone': { icon: '▦', glow: '#a8a29e' }, 'wall-of-ice': { icon: '❄', glow: '#bae6fd' }, 'wall-of-thorns': { icon: '✣', glow: '#a3e635' },
+  'silent-image': { icon: '幻', glow: '#c4b5fd' },
+  'major-image': { icon: '幻', glow: '#ddd6fe' },
+  'unseen-servant': { icon: '仆', glow: '#a5f3fc' },
+  'magic-circle': { icon: '✦', glow: '#c4b5fd' },
 }
 
 
@@ -375,6 +926,91 @@ function PersistentSilenceField({
       <Circle ref={middleRingRef} radius={radius * 0.64} stroke="#a5b4fc" strokeWidth={2.2} dash={[radius * 0.19, radius * 0.12]} opacity={0.28} />
       <Circle ref={outerRingRef} radius={radius * 0.9} stroke="#818cf8" strokeWidth={2.4} dash={[radius * 0.25, radius * 0.16]} opacity={0.22} />
       <Circle radius={radius * 0.09} fill="#0f172a" stroke="#e0e7ff" strokeWidth={2} opacity={0.82} shadowColor="#a5b4fc" shadowBlur={10} />
+    </Group>
+  )
+}
+
+function PersistentWebField({
+  areaId,
+  x,
+  y,
+  width,
+  height,
+  reducedMotion,
+}: {
+  areaId: string
+  x: number
+  y: number
+  width: number
+  height: number
+  reducedMotion: boolean
+}) {
+  const groupRef = useRef<Konva.Group>(null)
+  const strandRefs = useRef<Array<Konva.Line | null>>([])
+  const strands = useMemo(() => createWebAreaStrands(width, height), [height, width])
+  const minimumExtent = Math.min(width, height)
+  const phaseMs = useMemo(() => stableAnimationPhaseMs(areaId, 24_000), [areaId])
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    () => {
+      const seconds = (Date.now() + phaseMs) / 1000
+      strandRefs.current.forEach((strand, index) => {
+        if (!strand) return
+        const baseOpacity = strands[index]?.opacity ?? 0.6
+        strand.dashOffset(-seconds * (1.25 + index % 3 * 0.18))
+        strand.opacity(baseOpacity * (0.94 + Math.sin(seconds * 0.42 + index * 0.61) * 0.06))
+      })
+    },
+    { active: !reducedMotion, fps: 10 },
+  )
+
+  return (
+    <Group
+      ref={groupRef}
+      name="persistent-area-web-material"
+      x={x}
+      y={y}
+      listening={false}
+    >
+      <Rect
+        x={-width / 2}
+        y={-height / 2}
+        width={width}
+        height={height}
+        cornerRadius={minimumExtent * 0.06}
+        fill="rgba(226,232,240,0.1)"
+        shadowColor="#f8fafc"
+        shadowBlur={minimumExtent * 0.12}
+        listening={false}
+      />
+      {strands.map((strand, index) => (
+        <Line
+          key={`persistent-web-strand:${areaId}:${index}`}
+          ref={(node) => { strandRefs.current[index] = node }}
+          points={strand.points}
+          closed={strand.closed}
+          stroke={index % 4 === 0 ? '#ffffff' : '#e2e8f0'}
+          strokeWidth={strand.width}
+          opacity={strand.opacity}
+          dash={strand.closed ? [Math.max(7, width * 0.045), Math.max(3, width * 0.018)] : undefined}
+          lineCap="round"
+          lineJoin="round"
+          tension={strand.closed ? 0.24 : 0.16}
+          shadowColor="#f8fafc"
+          shadowBlur={Math.max(3, strand.width * 2.8)}
+          perfectDrawEnabled={false}
+          listening={false}
+        />
+      ))}
+      <Circle
+        radius={minimumExtent * 0.045}
+        fill="#ffffff"
+        opacity={0.88}
+        shadowColor="#ffffff"
+        shadowBlur={12}
+        listening={false}
+      />
     </Group>
   )
 }
@@ -669,7 +1305,7 @@ export function Dnd5eCoreSpellAreaOverlay({
   const iconRef = useRef<Konva.Text>(null)
   const reducedMotion = usePrefersReducedMotion()
   const areaVisual = dnd5ePersistentAreaPresentationVisual(area)
-  const preset = areaVisual?.preset ?? ''
+  const preset = dnd5ePersistentAreaRenderPreset(area)
   const persistentFlamingSphereImage = useTokenBadgeImage(
     preset === 'flaming-sphere' ? '/assets/vfx/flaming-sphere-sprite-v2.png' : undefined,
   )
@@ -678,6 +1314,9 @@ export function Dnd5eCoreSpellAreaOverlay({
   )
   const persistentSpriteAsset = PERSISTENT_AREA_SPRITE_ASSETS[preset]
   const persistentAreaImage = useTokenBadgeImage(persistentSpriteAsset)
+  const namedPresentation = dnd5eNamedPersistentAreaPresentation(preset)
+  const isProjectionPresentation = namedPresentation?.kind === 'projection'
+  const namedPersistentAreaImage = useTokenBadgeImage(namedPresentation?.iconAsset)
   const visual = CORE_AREA_VISUALS[preset] ?? { icon: '✦', glow: area.color }
   const areaCellKeys = new Set(area.cells.map(cellKey))
   const triggerOnlyCells = [...new Map(
@@ -712,7 +1351,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           : preset === 'insect-plague'
             ? 0.76
             : 0.82
-  const hasMaterialVisual = preset === 'grease' || preset === 'flaming-sphere' || preset === 'silence' || !!persistentSpriteAsset
+  const hasMaterialVisual = preset === 'grease' || preset === 'flaming-sphere' || preset === 'silence' || preset === 'web' || preset === 'magic-circle' || !!persistentSpriteAsset || !!namedPresentation
   const reportPersistentVisualReady = useCallback(
     () => onPersistentVisualReady?.(area.id),
     [area.id, onPersistentVisualReady],
@@ -722,6 +1361,8 @@ export function Dnd5eCoreSpellAreaOverlay({
     ? !!persistentFlamingSphereImage
     : preset === 'grease'
       ? !!persistentGreaseImage
+      : namedPresentation
+        ? !!namedPersistentAreaImage
       : persistentSpriteAsset
         ? !!persistentAreaImage
         : true
@@ -762,14 +1403,24 @@ export function Dnd5eCoreSpellAreaOverlay({
 
   return (
     <Group ref={groupRef} listening={false}>
-      {preset === 'dancing-lights' ? area.cells.map((cell, index) => {
+      {preset === 'dancing-lights' && area.dancingLightsForm === 'humanoid' && firstCell ? (() => {
+        const point = cellTopLeft(firstCell, map)
+        const centerX = point.x + grid / 2
+        const centerY = point.y + grid / 2
+        return <Group key={`dancing-light-humanoid:${area.id}`} opacity={0.9}>
+          <Circle x={centerX} y={centerY - grid * 0.25} radius={grid * 0.11} fill="#f5d0fe" shadowColor="#e879f9" shadowBlur={grid * 0.35} />
+          <Line points={[centerX, centerY - grid * 0.12, centerX, centerY + grid * 0.2]} stroke="#a5f3fc" strokeWidth={Math.max(3, grid * 0.08)} lineCap="round" shadowColor="#67e8f9" shadowBlur={grid * 0.25} />
+          <Line points={[centerX - grid * 0.2, centerY, centerX, centerY - grid * 0.06, centerX + grid * 0.2, centerY]} stroke="#f0abfc" strokeWidth={Math.max(2, grid * 0.065)} lineCap="round" lineJoin="round" shadowColor="#e879f9" shadowBlur={grid * 0.2} />
+          <Line points={[centerX - grid * 0.16, centerY + grid * 0.34, centerX, centerY + grid * 0.18, centerX + grid * 0.16, centerY + grid * 0.34]} stroke="#a5f3fc" strokeWidth={Math.max(2, grid * 0.065)} lineCap="round" lineJoin="round" shadowColor="#67e8f9" shadowBlur={grid * 0.2} />
+        </Group>
+      })() : preset === 'dancing-lights' ? area.cells.map((cell, index) => {
         const point = cellTopLeft(cell, map)
         return <Group key={`dancing-light:${area.id}:${cellKey(cell)}`}>
           <Circle x={point.x + grid / 2} y={point.y + grid / 2} radius={grid * 0.22} fill={index % 2 ? '#f0abfc' : '#a5f3fc'} opacity={0.92} shadowColor={index % 2 ? '#e879f9' : '#67e8f9'} shadowBlur={grid * 0.45} />
           <Circle x={point.x + grid / 2} y={point.y + grid / 2} radius={grid * 0.08} fill="#ffffff" opacity={0.96} />
         </Group>
       }) : null}
-      {triggerOnlyCells.map((cell) => {
+      {!isProjectionPresentation && triggerOnlyCells.map((cell) => {
         const { x, y } = cellTopLeft(cell, map)
         return (
           <Rect
@@ -787,7 +1438,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           />
         )
       })}
-      {area.cells.map((cell) => {
+      {!isProjectionPresentation && area.cells.map((cell) => {
         const { x, y } = cellTopLeft(cell, map)
         return (
           <Rect
@@ -832,7 +1483,14 @@ export function Dnd5eCoreSpellAreaOverlay({
           )
         })}
       </Group>}
-      {area.cells.length > 0 && preset === 'grease' && persistentGreaseImage ? (
+      {area.cells.length > 0 && namedPresentation && namedPersistentAreaImage ? (
+        <Dnd5eNamedPersistentAreaOverlay
+          area={area}
+          map={map}
+          image={namedPersistentAreaImage}
+          presentation={namedPresentation}
+        />
+      ) : area.cells.length > 0 && preset === 'grease' && persistentGreaseImage ? (
         <PersistentGreasePoolAtlas
           image={persistentGreaseImage}
           x={(areaPixelBounds.minX + areaPixelBounds.maxX) / 2}
@@ -860,6 +1518,21 @@ export function Dnd5eCoreSpellAreaOverlay({
           ) / 2)}
           reducedMotion={reducedMotion}
         />
+      ) : area.cells.length > 0 && preset === 'web' ? (
+        <PersistentWebField
+          areaId={area.id}
+          x={(areaPixelBounds.minX + areaPixelBounds.maxX) / 2}
+          y={(areaPixelBounds.minY + areaPixelBounds.maxY) / 2}
+          width={areaPixelBounds.maxX - areaPixelBounds.minX}
+          height={areaPixelBounds.maxY - areaPixelBounds.minY}
+          reducedMotion
+        />
+      ) : area.cells.length > 0 && preset === 'magic-circle' ? (
+        <PersistentMagicCircleField
+          area={area}
+          map={map}
+          reducedMotion={reducedMotion}
+        />
       ) : persistentAreaImage && (preset === 'wall-of-fire' || preset === 'blade-barrier') && area.wallOfFireGeometry?.shape === 'ring' && area.anchorCell ? (
         <WallOfFireRingVisual
           image={persistentAreaImage}
@@ -876,7 +1549,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           preset={preset}
           animationId={area.id}
         />
-      ) : firstCell && (
+      ) : firstCell && !namedPresentation && (
         <Text
           ref={iconRef}
           x={iconPoint.x}
@@ -892,6 +1565,13 @@ export function Dnd5eCoreSpellAreaOverlay({
           offsetX={0}
           offsetY={0}
           listening={false}
+        />
+      )}
+      {persistentAreaPresetUsesCircularRange(preset) && (
+        <PersistentCircularAreaRangeBoundary
+          area={area}
+          map={map}
+          glow={visual.glow}
         />
       )}
     </Group>
@@ -930,10 +1610,13 @@ export function Dnd5ePluginAreaOverlays({
   onPersistentVisualReady?: (areaId: string) => void
 }) {
   return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
-    const preset = dnd5ePersistentAreaPresentationVisual(area)?.preset ?? ''
-    const overlay = preset === 'toxic-cloud'
+    const preset = dnd5ePersistentAreaRenderPreset(area)
+    const namedPresentation = dnd5eNamedPersistentAreaPresentation(preset)
+    const overlay = area.coreSpellId === 'move-earth'
+      ? <Dnd5eMoveEarthAreaOverlay area={area} map={map} />
+      : preset === 'toxic-cloud'
       ? <ZoomStableToxicCloudAreaOverlay area={area} map={map} />
-      : CORE_AREA_VISUALS[preset]
+      : CORE_AREA_VISUALS[preset] || namedPresentation
         ? <ZoomStableCoreSpellAreaOverlay
             area={area}
             map={map}

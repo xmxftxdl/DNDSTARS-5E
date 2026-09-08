@@ -65,6 +65,65 @@ describe('core spell persistent area declarations', () => {
     })
   })
 
+  it('treats Wall of Fire as an opaque twenty-foot-high volume', () => {
+    const wallOfFire = getDnd5eCoreSpellAreaDeclaration('wall-of-fire')
+    expect(wallOfFire).toMatchObject({
+      vertical: { mode: 'volume', heightFeet: 20 },
+      blocking: { vision: true },
+    })
+    if (!wallOfFire) return
+    const area = createDnd5eCoreSpellArea({
+      declaration: wallOfFire,
+      actionId: 'wall-of-fire-opacity',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 4,
+      sourceSaveDc: 15,
+      round: 1,
+      cells: [{ col: 1, row: 1 }],
+      anchorCell: { col: 1, row: 1 },
+    })
+    expect(area.blocking).toEqual({ vision: true })
+  })
+
+  it('keeps Wall of Thorns damage deterministic across create, enter, and turn-end triggers', () => {
+    const wallOfThorns = getDnd5eCoreSpellAreaDeclaration('wall-of-thorns')
+    expect(wallOfThorns).toMatchObject({
+      movementCostMultiplier: 4,
+      blocking: { vision: true },
+      vertical: { mode: 'volume', heightFeet: 10 },
+    })
+    if (!wallOfThorns) return
+    const area = createDnd5eCoreSpellArea({
+      declaration: wallOfThorns,
+      actionId: 'wall-of-thorns-upcast',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 9,
+      sourceSaveDc: 19,
+      round: 1,
+      cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 },
+    })
+    expect(area.triggers).toEqual([
+      expect.objectContaining({
+        id: 'wall-of-thorns-create',
+        damage: { count: 10, sides: 8, modifier: 0, type: 'piercing' },
+        dmAdjustable: false,
+      }),
+      expect.objectContaining({
+        id: 'wall-of-thorns-enter',
+        damage: { count: 10, sides: 8, modifier: 0, type: 'slashing' },
+        dmAdjustable: false,
+      }),
+      expect.objectContaining({
+        id: 'wall-of-thorns-turn-end',
+        damage: { count: 10, sides: 8, modifier: 0, type: 'slashing' },
+        dmAdjustable: false,
+      }),
+    ])
+  })
+
   it('keeps the Grease pool authoritative for ten rounds without concentration', () => {
     const grease = getDnd5eCoreSpellAreaDeclaration('grease')
     expect(grease).toMatchObject({
@@ -83,12 +142,82 @@ describe('core spell persistent area declarations', () => {
     expect(getDnd5eCoreSpellAreaDeclaration('blade-barrier')?.visual?.preset).toBe('blade-barrier')
   })
 
+  it('ends Mage Hand when its caster moves beyond the 30-foot tether', () => {
+    const base = { ...map(), width: 1_000 }
+    const mageHand = getDnd5eCoreSpellAreaDeclaration('mage-hand')
+    expect(mageHand).toMatchObject({
+      durationRounds: 10,
+      movement: {
+        economy: 'action', maximumFeet: 30,
+        maximumDistanceFromSourceFeet: 30,
+        endWhenExceedingSourceDistance: true,
+      },
+    })
+    if (!mageHand) return
+    const hand = createDnd5eCoreSpellArea({
+      declaration: mageHand,
+      actionId: 'mage-hand-cast',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 0,
+      sourceSaveDc: 13,
+      round: 1,
+      cells: [{ col: 1, row: 1 }],
+      anchorCell: { col: 1, row: 1 },
+    })
+    expect(reconcileDnd5ePersistentAreaAnchors({
+      ...base,
+      tokens: base.tokens.map((token) => ({ ...token, x: 425, y: 75 })),
+      dnd5ePluginAreas: [hand],
+    }).dnd5ePluginAreas).toEqual([])
+  })
+
+  it('keeps an interposing Arcane Hand between its source and selected target', () => {
+    const base = map()
+    const hand = {
+      id: 'arcane-hand-token', label: '奥术之手', x: 325, y: 75,
+      color: '#60a5fa', emoji: '✋', size: 2, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'arcane-hand', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 10,
+      },
+    }
+    const target = {
+      id: 'arcane-hand-target', label: 'target', x: 375, y: 75,
+      color: '#f00', emoji: 'T', size: 1, type: 'enemy' as const,
+    }
+    const interposed = {
+      id: 'arcane-hand-area', pluginId: 'srd-5.1', featureId: 'spell:arcane-hand',
+      sourceKind: 'core-spell' as const, coreSpellId: 'arcane-hand', label: '奥术之手', color: '#60a5fa',
+      sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      cells: [{ col: 6, row: 1 }], anchorCell: { col: 6, row: 1 },
+      anchorMode: 'effect-token' as const, anchorTokenId: hand.id,
+      createdRound: 1, expiresAfterRound: 10,
+      interposition: { targetTokenId: target.id, mode: 'blocked' as const },
+    }
+    const reconciled = reconcileDnd5ePersistentAreaAnchors({
+      ...base,
+      tokens: [...base.tokens, hand, target],
+      dnd5ePluginAreas: [interposed],
+    })
+    expect(reconciled.tokens.find((token) => token.id === hand.id)).toMatchObject({ x: 275, y: 75 })
+    expect(reconciled.dnd5ePluginAreas?.[0]).toMatchObject({
+      anchorCell: { col: 5, row: 1 },
+      cells: [{ col: 5, row: 1 }],
+      interposition: { targetTokenId: target.id, mode: 'blocked' },
+    })
+  })
+
   it('declares the deterministic fog, silence, hazard and wall primitives without claiming narrative automation', () => {
     expect(getDnd5eCoreSpellAreaDeclaration('fog-cloud')).toMatchObject({
       obscuration: { kind: 'heavy' },
-      vertical: { mode: 'volume', heightFeet: 40 },
+      vertical: {
+        mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20,
+        perHigherSlot: { heightFeet: 40, anchorOffsetFeet: -20 },
+      },
     })
     expect(getDnd5eCoreSpellAreaDeclaration('web')).toMatchObject({
+      template: { shape: 'rect', widthFeet: 20, heightFeet: 20, gridAligned: true },
       movementCostMultiplier: 2,
       obscuration: { kind: 'light' },
       triggers: expect.arrayContaining([
@@ -104,6 +233,24 @@ describe('core spell persistent area declarations', () => {
     })
     expect(getDnd5eCoreSpellAreaDeclaration('stinking-cloud')).toMatchObject({
       triggers: [expect.objectContaining({ consumeActionOnFailedSave: true })],
+    })
+    expect(getDnd5eCoreSpellAreaDeclaration('sleet-storm')).toMatchObject({
+      template: { shape: 'circle', radiusFeet: 40, placeRangeFeet: 150 },
+      vertical: { mode: 'volume', heightFeet: 20 },
+      movementCostMultiplier: 2,
+      obscuration: { kind: 'heavy' },
+      triggers: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'sleet-storm-turn-start',
+          savingThrow: { ability: 'dex', onSuccess: 'none' },
+          condition: expect.objectContaining({ condition: 'prone' }),
+        }),
+        expect.objectContaining({
+          id: 'sleet-storm-concentration-turn-start',
+          savingThrow: { ability: 'con', onSuccess: 'none' },
+          endTargetConcentrationOnFailedSave: true,
+        }),
+      ]),
     })
     const stinkingCloud = getDnd5eCoreSpellAreaDeclaration('stinking-cloud')
     expect(stinkingCloud).toBeDefined()
@@ -123,7 +270,27 @@ describe('core spell persistent area declarations', () => {
         savingThrow: { automaticSuccessForDamageImmunity: 'poison' },
       })
     }
+    const windWall = getDnd5eCoreSpellAreaDeclaration('wind-wall')
+    expect(windWall).toMatchObject({
+      blocking: { movement: true, movementMode: 'boundary' },
+    })
+    expect(createDnd5eCoreSpellArea({
+      declaration: windWall!,
+      actionId: 'wind-wall-cast',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 3,
+      sourceSaveDc: 15,
+      round: 1,
+      cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 },
+    })).toMatchObject({
+      createdRound: 1,
+      expiresAfterRound: 11,
+      expiresAtSourceTurnEndAfterRound: 11,
+    })
     expect(getDnd5eCoreSpellAreaDeclaration('wall-of-force')).toMatchObject({
+      hiddenFromPlayers: true,
       blocking: { movement: true, lineOfEffect: true },
     })
     for (const spellId of ['wall-of-stone', 'wall-of-ice']) {
@@ -131,6 +298,35 @@ describe('core spell persistent area declarations', () => {
         blocking: { movement: true, vision: true, lineOfEffect: true },
       })
     }
+  })
+
+  it('scales Fog Cloud as a sphere when cast with a higher-level slot', () => {
+    const fogCloud = getDnd5eCoreSpellAreaDeclaration('fog-cloud')
+    expect(fogCloud).toBeDefined()
+    if (!fogCloud) return
+
+    const createAtSlot = (slotLevel: number) => createDnd5eCoreSpellArea({
+      declaration: fogCloud,
+      actionId: `fog-cloud-${slotLevel}`,
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel,
+      sourceSaveDc: 13,
+      round: 1,
+      cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 },
+      baseElevationFeet: 0,
+    })
+
+    expect(createAtSlot(1).vertical).toEqual({
+      mode: 'volume', baseElevationFeet: -20, heightFeet: 40, anchorOffsetFeet: -20,
+    })
+    expect(createAtSlot(2).vertical).toEqual({
+      mode: 'volume', baseElevationFeet: -40, heightFeet: 80, anchorOffsetFeet: -40,
+    })
+    expect(createAtSlot(4).vertical).toEqual({
+      mode: 'volume', baseElevationFeet: -80, heightFeet: 160, anchorOffsetFeet: -80,
+    })
   })
 
   it('captures fixed volume elevation and preserves anchored volume offsets in the runtime snapshot', () => {
@@ -362,6 +558,32 @@ describe('core spell persistent area declarations', () => {
     })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
   })
 
+  it('ends a generic spell entity when its movement command crosses an ending tether', () => {
+    const base = { ...map(), width: 1_000 }
+    const servant = {
+      id: 'activity-area:unseen-servant', pluginId: 'srd-5.1',
+      featureId: 'spell:unseen-servant', sourceKind: 'core-spell' as const,
+      coreSpellId: 'unseen-servant', label: '隐形仆役', color: '#94a3b8',
+      sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      cells: [{ col: 11, row: 1 }], createdRound: 1, expiresAfterRound: 600,
+      anchorMode: 'fixed' as const, anchorCell: { col: 11, row: 1 },
+      movement: {
+        economy: 'bonus-action' as const,
+        maximumFeet: 15,
+        maximumDistanceFromSourceFeet: 60,
+        endWhenExceedingSourceDistance: true,
+      },
+    }
+    const moved = moveDnd5eCoreSpellArea({
+      map: { ...base, dnd5ePluginAreas: [servant] },
+      areaId: servant.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 14, row: 1 },
+    })
+    expect(moved).toMatchObject({ ok: true, distanceFeet: 15 })
+    if (moved.ok) expect(moved.map.dnd5ePluginAreas).toEqual([])
+  })
+
   it('moves Dancing Lights origins independently and preserves their formation rules', () => {
     const dancingLights = getDnd5eCoreSpellAreaDeclaration('dancing-lights')
     expect(dancingLights).toBeDefined()
@@ -433,6 +655,80 @@ describe('core spell persistent area declarations', () => {
         { col: 18, row: 1 },
       ],
     })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
+  })
+
+  it('winks out only the Dancing Lights that exceed the 120-foot caster tether', () => {
+    const dancingLights = getDnd5eCoreSpellAreaDeclaration('dancing-lights')
+    expect(dancingLights).toBeDefined()
+    if (!dancingLights) return
+    const base = { ...map(), width: 1_500 }
+    const origins = [22, 23, 24, 25].map((col) => ({ col, row: 1 }))
+    const area = createDnd5eCoreSpellArea({
+      declaration: dancingLights,
+      actionId: 'cast-dancing-lights-tether',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 0,
+      sourceSaveDc: 13,
+      round: 1,
+      cells: origins,
+      anchorCell: origins[0],
+      lightingAnchorCells: origins,
+    })
+    const partiallyExtinguished = moveDnd5eCoreSpellArea({
+      map: { ...base, dnd5ePluginAreas: [area] },
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 24, row: 1 },
+      targetCells: [24, 25, 26, 27].map((col) => ({ col, row: 1 })),
+    })
+    expect(partiallyExtinguished).toMatchObject({
+      ok: true,
+      area: {
+        cells: [{ col: 24, row: 1 }, { col: 25, row: 1 }],
+        lightingAnchorCells: [{ col: 24, row: 1 }, { col: 25, row: 1 }],
+      },
+    })
+
+    const allExtinguished = moveDnd5eCoreSpellArea({
+      map: { ...base, dnd5ePluginAreas: [area] },
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 26, row: 1 },
+      targetCells: [26, 27, 28, 29].map((col) => ({ col, row: 1 })),
+    })
+    expect(allExtinguished).toMatchObject({ ok: true })
+    if (allExtinguished.ok) expect(allExtinguished.map.dnd5ePluginAreas).toEqual([])
+  })
+
+  it('reconciles Dancing Lights immediately when the caster is placed beyond their tether', () => {
+    const dancingLights = getDnd5eCoreSpellAreaDeclaration('dancing-lights')
+    expect(dancingLights).toBeDefined()
+    if (!dancingLights) return
+    const base = { ...map(), width: 3_000 }
+    const origins = [3, 4, 25, 26].map((col) => ({ col, row: 1 }))
+    const area = createDnd5eCoreSpellArea({
+      declaration: dancingLights,
+      actionId: 'cast-dancing-lights-source-move',
+      sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 0, sourceSaveDc: 13, round: 1,
+      cells: origins, anchorCell: origins[0], lightingAnchorCells: origins,
+    })
+    const reconciled = reconcileDnd5ePersistentAreaAnchors({
+      ...base,
+      dnd5ePluginAreas: [area],
+    })
+    expect(reconciled.dnd5ePluginAreas?.[0]).toMatchObject({
+      cells: [{ col: 3, row: 1 }, { col: 4, row: 1 }, { col: 25, row: 1 }],
+      anchorCell: { col: 3, row: 1 },
+    })
+
+    const casterFarAway = {
+      ...base,
+      tokens: base.tokens.map((token) => token.id === 'caster-token' ? { ...token, x: 2_775 } : token),
+      dnd5ePluginAreas: [area],
+    }
+    expect(reconcileDnd5ePersistentAreaAnchors(casterFarAway).dnd5ePluginAreas).toEqual([])
   })
 
   it('rebases a movable fixed volume on the destination terrain surface', () => {
@@ -548,6 +844,46 @@ describe('core spell persistent area declarations', () => {
     expect(merged).toContainEqual(concurrent)
   })
 
+  it('keeps a source-following effect token within its tether and removes it past maximum separation', () => {
+    const base = { ...map(), width: 2_000 }
+    const source = { ...base.tokens[0]!, x: 425, y: 75 }
+    const disk = {
+      id: 'disk-token', label: '浮碟', x: 75, y: 75, color: '#fff', emoji: '◯',
+      size: 0.6, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'floating-disk', sourceCharacterId: 'caster',
+        sourceTokenId: source.id, createdRound: 1, expiresAfterRound: 600,
+      },
+    }
+    const followerArea = {
+      id: 'floating-disk-area', pluginId: 'srd-5.1', featureId: 'spell:floating-disk',
+      sourceKind: 'core-spell' as const, coreSpellId: 'floating-disk', label: '浮碟术', color: '#fff',
+      sourceCharacterId: 'caster', sourceTokenId: source.id,
+      cells: [{ col: 1, row: 1 }], anchorCell: { col: 1, row: 1 },
+      createdRound: 1, expiresAfterRound: 600,
+      anchorMode: 'effect-token' as const, anchorTokenId: disk.id,
+      sourceFollower: {
+        stationaryWithinFeet: 20, maximumSeparationFeet: 100,
+        maximumStepHeightFeet: 10, carryingCapacityPounds: 500,
+      },
+    }
+    const followed = reconcileDnd5ePersistentAreaAnchors({
+      ...base, tokens: [source, disk], dnd5ePluginAreas: [followerArea],
+    })
+    expect(followed.tokens.find((token) => token.id === disk.id)).toMatchObject({ x: 225, y: 75 })
+    expect(followed.dnd5ePluginAreas?.[0]).toMatchObject({
+      anchorCell: { col: 4, row: 1 }, sourceFollower: { carryingCapacityPounds: 500 },
+    })
+
+    const tooFar = reconcileDnd5ePersistentAreaAnchors({
+      ...base,
+      tokens: [{ ...source, x: 1_425 }, disk],
+      dnd5ePluginAreas: [followerArea],
+    })
+    expect(tooFar.tokens.some((token) => token.id === disk.id)).toBe(false)
+    expect(tooFar.dnd5ePluginAreas).toEqual([])
+  })
+
   it('removes an effect Token and its anchored area without touching unrelated map relations', () => {
     const base = map()
     const flamingSphere = getDnd5eCoreSpellAreaDeclaration('flaming-sphere')
@@ -626,6 +962,100 @@ describe('core spell persistent area declarations', () => {
     })).toMatchObject({ ok: false, reason: 'movement-blocked' })
   })
 
+  it('lets Flaming Sphere leap a five-foot barrier but not a taller one', () => {
+    const base = map()
+    const flamingSphere = getDnd5eCoreSpellAreaDeclaration('flaming-sphere')
+    expect(flamingSphere?.movement).toEqual({
+      economy: 'bonus-action',
+      maximumFeet: 30,
+      maximumBarrierHeightFeet: 5,
+      maximumGapWidthFeet: 10,
+    })
+    if (!flamingSphere) return
+    const effectToken = {
+      id: 'sphere-token', label: '炽焰法球', x: 125, y: 125, color: '#f97316', emoji: '🔥',
+      size: 1, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'flaming-sphere', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+        concentrationId: 'flaming-sphere',
+      },
+    }
+    const area = createDnd5eCoreSpellArea({
+      declaration: flamingSphere,
+      actionId: 'cast-sphere', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 2, sourceSaveDc: 13, round: 1, cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 }, anchorTokenId: effectToken.id,
+    })
+    // Simulate a pre-upgrade saved area: missing declaration fields must inherit safely.
+    area.movement = { economy: 'bonus-action', maximumFeet: 30 }
+    const placed = { ...base, tokens: [...base.tokens, effectToken], dnd5ePluginAreas: [area] }
+    const geometry = createEmptyMapGeometry(base.id, 1)
+    geometry.walls.push({
+      id: 'low-wall', kind: 'wall', label: '矮墙',
+      points: [{ x: 150, y: 100 }, { x: 150, y: 150 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 5, createdAt: 1,
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token',
+      targetCell: { col: 4, row: 2 },
+    })).toMatchObject({ ok: true, distanceFeet: 10, area: { anchorCell: { col: 4, row: 2 } } })
+
+    geometry.walls[0] = { ...geometry.walls[0], id: 'high-wall', heightFeet: 10 }
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token',
+      targetCell: { col: 4, row: 2 },
+    })).toMatchObject({ ok: false, reason: 'movement-blocked' })
+  })
+
+  it('lets Flaming Sphere jump a ten-foot pit but rejects a wider pit or ending inside one', () => {
+    const base = map()
+    const flamingSphere = getDnd5eCoreSpellAreaDeclaration('flaming-sphere')
+    expect(flamingSphere).toBeDefined()
+    if (!flamingSphere) return
+    const effectToken = {
+      id: 'sphere-token', label: '炽焰法球', x: 125, y: 125, color: '#f97316', emoji: '🔥',
+      size: 1, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'flaming-sphere', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+        concentrationId: 'flaming-sphere',
+      },
+    }
+    const area = createDnd5eCoreSpellArea({
+      declaration: flamingSphere,
+      actionId: 'cast-sphere', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 2, sourceSaveDc: 13, round: 1, cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 }, anchorTokenId: effectToken.id,
+    })
+    const placed = { ...base, tokens: [...base.tokens, effectToken], dnd5ePluginAreas: [area] }
+    const geometry = createEmptyMapGeometry(base.id, 1)
+    geometry.obstacles.push({
+      id: 'ten-foot-pit', kind: 'obstacle', label: '十尺坑',
+      points: [{ x: 150, y: 100 }, { x: 250, y: 100 }, { x: 250, y: 150 }, { x: 150, y: 150 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainRegion: true, terrainElevationFeet: -10, createdAt: 1,
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token',
+      targetCell: { col: 5, row: 2 },
+    })).toMatchObject({ ok: true, distanceFeet: 15, area: { anchorCell: { col: 5, row: 2 } } })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token',
+      targetCell: { col: 4, row: 2 },
+    })).toMatchObject({ ok: false, reason: 'movement-blocked' })
+
+    geometry.obstacles[0] = {
+      ...geometry.obstacles[0], id: 'fifteen-foot-pit',
+      points: [{ x: 150, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 150 }, { x: 150, y: 150 }],
+    }
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token',
+      targetCell: { col: 6, row: 2 },
+    })).toMatchObject({ ok: false, reason: 'movement-blocked' })
+  })
+
   it('moves Spiritual Weapon through creatures but not through walls or beyond 20 feet', () => {
     const base = map()
     const spiritualWeapon = getDnd5eCoreSpellAreaDeclaration('spiritual-weapon')
@@ -692,5 +1122,81 @@ describe('core spell persistent area declarations', () => {
       sourceTokenId: 'caster-token',
       targetCell: { col: 6, row: 1 },
     })).toMatchObject({ ok: false, reason: 'movement-blocked' })
+  })
+
+  it('blocks Arcane Eye at solid walls but allows a one-inch mapped opening', () => {
+    const base = map()
+    const effectToken = {
+      id: 'arcane-eye-token', label: '秘法眼', x: 125, y: 75,
+      color: '#38bdf8', emoji: '◉', size: 0.5, type: 'obstacle' as const,
+      visibilityMode: 'dm-only' as const,
+      darkvisionRangeFeet: 30,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'arcane-eye', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 601,
+        concentrationId: 'arcane-eye', shareVisionWithSource: true as const,
+        hiddenBody: true as const,
+      },
+    }
+    const area = createDnd5eCoreSpellArea({
+      declaration: {
+        ...declaration,
+        spellId: 'arcane-eye',
+        label: '秘法眼',
+        minimumSlotLevel: 4,
+        durationRounds: 600,
+        anchorMode: 'effect-token',
+        movement: { economy: 'action', maximumFeet: 30 },
+      },
+      actionId: 'cast-arcane-eye',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 4,
+      sourceSaveDc: 13,
+      round: 1,
+      cells: [{ col: 2, row: 1 }],
+      anchorCell: { col: 2, row: 1 },
+      anchorTokenId: effectToken.id,
+    })
+    const placed = {
+      ...base,
+      tokens: [...base.tokens, effectToken],
+      dnd5ePluginAreas: [area],
+    }
+    const solidGeometry = createEmptyMapGeometry(base.id, 1)
+    solidGeometry.walls.push({
+      id: 'solid-wall', kind: 'wall', label: '石墙',
+      points: [{ x: 200, y: 50 }, { x: 200, y: 100 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed,
+      geometry: solidGeometry,
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 5, row: 1 },
+    })).toMatchObject({ ok: false, reason: 'movement-blocked' })
+
+    const oneInchOpening = createEmptyMapGeometry(base.id, 1)
+    oneInchOpening.doors.push({
+      id: 'one-inch-gap', kind: 'door', label: '一寸开口',
+      points: [{ x: 200, y: 50 }, { x: 200, y: 100 }],
+      state: 'closed', openState: 'closed', lockState: 'unlocked', physicalState: 'intact',
+      secret: false, passageGapInches: 1,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed,
+      geometry: oneInchOpening,
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 5, row: 1 },
+    })).toMatchObject({
+      ok: true,
+      distanceFeet: 15,
+      area: { anchorCell: { col: 5, row: 1 } },
+    })
   })
 })

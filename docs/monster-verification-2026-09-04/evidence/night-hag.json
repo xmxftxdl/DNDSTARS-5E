@@ -1,0 +1,175 @@
+{
+  "id": "srd-5.1:night-hag",
+  "slug": "night-hag",
+  "name": "夜鬼婆",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：以太化本身可复用位面切换处理器，但夜巫必须持有心石才能使用；怪物物品栏尚未权威记录心石的持有、转移和失去，不能跳过这个先决条件自动结算。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws-hag-form-only",
+      "name": "双爪（仅鬼婆形态）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "change-shape",
+      "name": "改变形态",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "etherealness",
+      "name": "以太化",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "nightmare-haunting",
+      "name": "梦魇纠缠",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 204,
+      "slug": "night-hag",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:02:07.989Z",
+      "name": "夜鬼婆",
+      "actionId": "claws-hag-form-only",
+      "actionName": "双爪（仅鬼婆形态）",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-night-hag-claws-hag-form-only-1788562928068",
+      "combatId": "verify-ui-night-hag-claws-hag-form-only-1788562928068:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "夜鬼婆 使用双爪（仅鬼婆形态）攻击 验证目标：双爪（仅鬼婆形态） → 验证目标 15+7=22 命中；共造成 12 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:02 PM\n结算\n\n夜鬼婆 使用双爪（仅鬼婆形态）攻击 验证目标：双爪（仅鬼婆形态） → 验证目标 15+7=22 命中；共造成 12 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：双爪（仅鬼婆形态）｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 15；最终采用 15；调整值 +7。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 双爪（仅鬼婆形态）（基础伤害·挥砍）｜2d8 骰面：1 + 7 = 8｜固定加值 +4｜小计 12\n夜鬼婆｜消耗动作\n验证目标｜受到 12 点伤害｜HP 320 → 308",
+      "playerLog": "夜鬼婆 使用双爪（仅鬼婆形态）攻击 验证目标：双爪（仅鬼婆形态） → 验证目标 15+7=22 命中；共造成 12 点伤害。",
+      "afterHp": 308,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:02:33.604Z",
+      "evidenceFile": "ui-cases/monsters/204-night-hag.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "夜鬼婆物品",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 5,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

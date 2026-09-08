@@ -81,6 +81,23 @@ describe('VFX sequence compiler', () => {
     }).sections[0]).toMatchObject({ renderer: 'material-area', assetId: undefined })
   })
 
+  it('routes Prismatic Spray through the rainbow cone atlas', () => {
+    expect(vfxAssetUrlForProjectileKind('prismatic-spray'))
+      .toBe('/assets/vfx/color-spray-sprite-v2.webp')
+    expect(compileMapProjectileVfxSequence({
+      id: 'spell:prismatic-spray:1',
+      kind: 'prismatic-spray',
+      from: { x: 20, y: 20 },
+      to: { x: 620, y: 20 },
+      areaWidthPx: 600,
+      durationMs: 1_500,
+    }).sections[0]).toMatchObject({
+      renderer: 'material-area',
+      assetId: 'area.color-spray.v2',
+      durationMs: 1_500,
+    })
+  })
+
   it('routes every fire projectile through one combined launch-flight-impact atlas', () => {
     for (const kind of ['fireball', 'fire-bolt', 'produce-flame'] as const) {
       expect(vfxAssetUrlForProjectileKind(kind))

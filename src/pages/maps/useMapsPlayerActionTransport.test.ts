@@ -5,6 +5,7 @@ import {
   drainDmPlayerActionQueue,
   playerActionAckMustWaitForCombatReceipt,
   playerActionRejectionNotice,
+  runExclusiveDmPlayerAction,
   syncPersistedAcceptedPlayerActionSnapshot,
 } from './useMapsPlayerActionTransport'
 
@@ -71,6 +72,76 @@ describe('DM player action drain', () => {
     expect(handled).toBe(1)
     expect(onAction).toHaveBeenCalledTimes(1)
     expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'first', sourceMode: 'player' }))
+  })
+})
+
+describe('DM player action cross-tab authority lock', () => {
+  it('lets only the tab that owns the action lock execute the rules engine', async () => {
+    const onAction = vi.fn(async () => undefined)
+    const lockManager = {
+      request: vi.fn(async (_name: string, _options: unknown, callback: (lock: unknown | null) => Promise<boolean>) =>
+        callback(null)),
+    }
+
+    await expect(runExclusiveDmPlayerAction({
+      action: action('spell-1'),
+      getProcessedActionIds: () => new Set(),
+      loadProcessed: async () => null,
+      onProcessedActionIds: vi.fn(),
+      onAction,
+      lockManager,
+    })).resolves.toBe(false)
+
+    expect(lockManager.request).toHaveBeenCalledWith(
+      'astral-trace:dm-player-action:map-1:spell-1',
+      { mode: 'exclusive', ifAvailable: true },
+      expect.any(Function),
+    )
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
+  it('rechecks durable processed ids after acquiring a delayed event lock', async () => {
+    const onAction = vi.fn(async () => undefined)
+    const onProcessedActionIds = vi.fn()
+    const lockManager = {
+      request: vi.fn(async (_name: string, _options: unknown, callback: (lock: unknown | null) => Promise<boolean>) =>
+        callback({ name: 'owned' })),
+    }
+
+    await expect(runExclusiveDmPlayerAction({
+      action: action('spell-1'),
+      getProcessedActionIds: () => new Set(),
+      loadProcessed: async () => ({
+        mapId: 'map-1', combatId: 'combat-1', actionIds: ['spell-1'], updatedAt: 2,
+      }),
+      onProcessedActionIds,
+      onAction,
+      lockManager,
+    })).resolves.toBe(false)
+
+    expect(onProcessedActionIds).toHaveBeenCalledWith(new Set(['spell-1']))
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
+  it('executes once when it owns the lock and the action is still pending', async () => {
+    const onAction = vi.fn(async () => undefined)
+    const lockManager = {
+      request: vi.fn(async (_name: string, _options: unknown, callback: (lock: unknown | null) => Promise<boolean>) =>
+        callback({ name: 'owned' })),
+    }
+
+    await expect(runExclusiveDmPlayerAction({
+      action: action('spell-1'),
+      getProcessedActionIds: () => new Set(),
+      loadProcessed: async () => ({
+        mapId: 'map-1', combatId: 'combat-1', actionIds: [], updatedAt: 2,
+      }),
+      onProcessedActionIds: vi.fn(),
+      onAction,
+      lockManager,
+    })).resolves.toBe(true)
+
+    expect(onAction).toHaveBeenCalledOnce()
   })
 })
 
@@ -151,6 +222,13 @@ describe('player action rejection notice', () => {
     })
   })
 
+  it('explains that Wind Wall rejects an ordinary projectile without consuming it', () => {
+    expect(playerActionRejectionNotice('projectile-blocked-by-wind-wall')).toEqual({
+      title: '飞射物被风墙偏转',
+      message: '普通箭矢、弩矢或其他普通飞射物穿过风墙时自动未命中；本次攻击未消耗动作或弹药。',
+    })
+  })
+
   it('keeps unknown rejection reasons visible for diagnosis', () => {
     expect(playerActionRejectionNotice('future-authority-rule')).toEqual({
       title: '行动被拒绝',
@@ -159,6 +237,26 @@ describe('player action rejection notice', () => {
   })
 
   it('explains why a spell was rejected instead of collapsing every failure into spell unavailable', () => {
+    expect(playerActionRejectionNotice('spell-environment-unavailable')).toEqual({
+      title: '环境无法容纳法术',
+      message: '当前权威地图标记为没有可见且足以容纳风暴云的高空空间；召雷术施法失败，未消耗动作或法术位。',
+    })
+    expect(playerActionRejectionNotice('invalid-class-feature')).toEqual({
+      title: '目标或行动前提不满足',
+      message: '目标的生物类型、状态或这项法术／特性的其他规则前提不满足；本次行动未结算，也没有消耗资源。',
+    })
+    expect(playerActionRejectionNotice('spellcasting-prohibited')).toEqual({
+      title: '当前效果禁止施法',
+      message: '当前形态或其他持续效果明确禁止施法；本次施法未结算，也不会消耗动作、法术位或其他资源。',
+    })
+    expect(playerActionRejectionNotice('action-prohibited')).toEqual({
+      title: '当前效果禁止该动作',
+      message: '当前形态或其他持续效果只允许规则明确列出的动作；本次行动未结算，也不会消耗动作或其他资源。',
+    })
+    expect(playerActionRejectionNotice('combat-ending')).toEqual({
+      title: '战斗正在结束',
+      message: 'DM 正在清理上一场战斗；本次行动未结算，也不会消耗动作、法术位或其他资源。',
+    })
     expect(playerActionRejectionNotice('spell-not-known-or-prepared')).toEqual({
       title: '尚未学习或准备',
       message: '当前角色未学习该戏法，或该法术未被当前施法职业学习并准备，本次施法未结算。',
@@ -171,9 +269,17 @@ describe('player action rejection notice', () => {
       title: '效果线被阻挡',
       message: '施法者与目标点之间存在全身掩护或阻挡效果线的墙体，本次施法未结算。',
     })
+    expect(playerActionRejectionNotice('spell-target-not-visible')).toEqual({
+      title: '必须看见目标点',
+      message: '该法术要求施法者看见目标或范围中心，但施法者正处于目盲状态，或视线被黑暗、墙体及其他遮挡阻断。',
+    })
+    expect(playerActionRejectionNotice('target-immune')).toEqual({
+      title: '目标免疫该法术',
+      message: '该目标已经对当前施法者的这次法术免疫；本次施法未结算，也不会消耗时间、法术位或其他资源。',
+    })
     expect(playerActionRejectionNotice('component-unavailable')).toEqual({
       title: '施法成分不可用',
-      message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术需要尚未结构化管理的贵重／消耗材料。',
+      message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术包含仍需 DM 确认数量的复杂特殊材料。',
     })
     expect(playerActionRejectionNotice('spell-area-target-out-of-range')).toEqual({
       title: '施法点超出射程',
@@ -182,6 +288,14 @@ describe('player action rejection notice', () => {
     expect(playerActionRejectionNotice('verbal-component-unavailable')).toEqual({
       title: '无法说出咒语',
       message: '角色处于沉默效果中，而该法术需要言语成分，本次施法未结算。',
+    })
+    expect(playerActionRejectionNotice('somatic-component-unavailable')).toEqual({
+      title: '无法完成施法姿势',
+      message: '该法术需要姿势成分，但角色双手均被占用，且不能用持用法器的手完成该法术姿势；请先空出一只手。',
+    })
+    expect(playerActionRejectionNotice('invalid-spell-target-attack-fields')).toEqual({
+      title: '逐次法术攻击字段冲突',
+      message: '多次法术攻击请求同时携带了只适用于单次攻击的顶层字段；本次结算已安全取消。',
     })
   })
 })

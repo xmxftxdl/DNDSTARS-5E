@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DmAdjudicationInterruptResponse } from './combatInterruptProtocol'
+import type { CounterspellInterruptResponse, DmAdjudicationInterruptResponse } from './combatInterruptProtocol'
 import type { DmCombatInterruptSettlement } from './combatInterruptDmSettlement'
 import {
   applyDmCombatInterruptSettlements,
@@ -22,7 +22,7 @@ function channels() {
     opportunityAttack: channel<boolean>('opportunity'),
     protection: channel<boolean>(),
     shieldSpell: channel<boolean>('shield'),
-    counterspell: channel<boolean>(),
+    counterspell: channel<CounterspellInterruptResponse>(),
     uncannyDodge: channel<boolean>(),
     deflectMissiles: channel<boolean>(),
     savingThrowReroll: channel<boolean>(),
@@ -104,6 +104,38 @@ describe('DM combat interrupt settlement runtime', () => {
     expect(settle).not.toHaveBeenCalled()
     expect(pending.opportunityAttack.resolve).not.toHaveBeenCalled()
     expect(pending.opportunityAttack.ref.current?.id).toBe('opportunity')
+  })
+
+  it('keeps the pending continuation registered when settlement persistence fails so a refresh can retry it', async () => {
+    const pending = channels()
+    pending.bardicInspiration.ref.current = {
+      id: 'inspiration',
+      resolve: pending.bardicInspiration.resolve,
+    }
+    const settlement: DmCombatInterruptSettlement = {
+      kind: 'bardic-inspiration', id: 'inspiration', reason: 'answered',
+      finishResponse: { useBardicInspiration: true }, useBardicInspiration: true,
+    }
+    const failingSettle = vi.fn<(value: DmCombatInterruptSettlement) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('transient write failure'))
+
+    await expect(applyDmCombatInterruptSettlements({
+      settlements: [settlement],
+      channels: refs(pending),
+      settle: failingSettle,
+      clearDmAdjudicationPrompt: vi.fn(),
+    })).rejects.toThrow('transient write failure')
+    expect(pending.bardicInspiration.ref.current?.id).toBe('inspiration')
+    expect(pending.bardicInspiration.resolve).not.toHaveBeenCalled()
+
+    await applyDmCombatInterruptSettlements({
+      settlements: [settlement],
+      channels: refs(pending),
+      settle: vi.fn().mockResolvedValue(undefined),
+      clearDmAdjudicationPrompt: vi.fn(),
+    })
+    expect(pending.bardicInspiration.resolve).toHaveBeenCalledWith(true)
+    expect(pending.bardicInspiration.ref.current).toBeNull()
   })
 
   it('clears a DM adjudication prompt and resumes the transaction without finishing it twice', async () => {

@@ -898,6 +898,15 @@ export function dnd5eInventorySemanticIcon(item: Pick<Dnd5eInventoryItemTemplate
   }
   if (item.magicItem?.kind === 'ammunition') return 'ammunition'
 
+  if (/(?:\bdice[- ]?set\b|\bdragonchess\b|\bplaying[- ]?card[- ]?set\b|\bthree[- ]dragon[- ]ante\b|gaming[- ]?set|骰子套组|龙棋套组|纸牌套组|三龙牌套组|游戏套组)/i.test(searchable)) return 'gaming-set'
+  if (/(?:\bbagpipes?\b|\bdrums?\b|\bflutes?\b|\bhorns?\b|\blutes?\b|\blyres?\b|pan[- ]flute|\bshawm\b|\bviols?\b|风笛|鼓|长笛|横笛|号角|鲁特琴|里拉琴|排箫|唢呐|提琴)/i.test(searchable)) return 'instrument'
+  if (/(?:\bgalley\b|\bkeelboat\b|\blongship\b|\browboat\b|\bsailing[- ]ship\b|\bwarship\b|桨帆战舰|龙骨船|长船|划艇|帆船|战舰)/i.test(searchable)) return 'ship'
+  if (/(?:\bcarriage\b|\bcart\b|\bchariot\b|\bsled\b|\bwagon\b|四轮马车|货车|战车|雪橇|篷车)/i.test(searchable)) return 'vehicle'
+  if (/(?:\b[a-z]+(?:-[a-z]+)*-mount\b|\bsaddles?\b|bit[- ]and[- ]bridle|（坐骑）|马嚼与缰绳|[军驮骑特]用?鞍|特殊鞍)/i.test(searchable)) return 'mount'
+  if (/(?:\bbooks?\b|书籍)/i.test(searchable)) return 'book'
+  if (item.category === 'container') return 'container'
+  if (item.category === 'tool') return 'tool'
+
   if (/(?:\bclothes?\b|clothing|costume|vestments?|\brobe\b|\bcloak\b|服装|衣装|戏服|祭服|长袍|斗篷)/i.test(searchable)) return 'clothing'
   if (/(?:crossbow|弩)/i.test(searchable)) return 'crossbow'
   if (/(?:longbow|shortbow|oathbow|\bbow\b|长弓|短弓|誓约弓)/i.test(searchable)) return 'bow'
@@ -939,7 +948,9 @@ export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' 
   const base = paletteFor(key, motif)
   const rarityPalette = item.magicItem ? DND5E_MAGIC_ITEM_RARITY_PALETTES[item.magicItem.rarity] : undefined
   const customAsset = dnd5ePluginImageAssetUrl(item.iconAssetId)
-  const asset = customAsset ?? DND5E_LEGACY_PAINTED_ITEM_ASSETS[item.id]
+  const asset = customAsset ?? DND5E_LEGACY_PAINTED_ITEM_ASSETS[item.id] ??
+    (item.id.startsWith('srd-5.1:spell-scroll:') && item.magicItem?.kind === 'scroll'
+      ? DND5E_LEGACY_PAINTED_ITEM_ASSETS['srd-5.1:magic-item:spell-scroll'] : undefined)
   return {
     ...base,
     inventoryIconId: semanticIcon,

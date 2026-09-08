@@ -1,0 +1,138 @@
+{
+  "id": "srd-5.1:rug-of-smothering",
+  "slug": "rug-of-smothering",
+  "name": "窒息地毯",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：反魔法易感特性原先被怪物自身 schema 拒绝；目录往返解析已通过。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "smother",
+      "name": "窒息包裹",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.targetMaxSizeRank",
+        "attack.target",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].relation.preventsSourceActionWhileLinked",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].dependentLegacyConditions[]",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 195,
+      "slug": "rug-of-smothering",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:49:34.509Z",
+      "name": "窒息地毯",
+      "actionId": "smother",
+      "actionName": "窒息包裹",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "2",
+      "total": 334,
+      "mapId": "verify-ui-rug-of-smothering-smother-1788569374566",
+      "combatId": "verify-ui-rug-of-smothering-smother-1788569374566:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "窒息地毯 使用窒息包裹攻击 验证目标：窒息包裹 → 验证目标 2+5=7 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:49 PM\n攻击\n\n窒息地毯 使用窒息包裹攻击 验证目标：窒息包裹 → 验证目标 2+5=7 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：窒息包裹｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 2；最终采用 2；调整值 +5。\n结果 · 7 vs AC 10：未命中。\n窒息地毯｜消耗动作",
+      "playerLog": "窒息地毯 使用窒息包裹攻击 验证目标：窒息包裹 → 验证目标 2+5=7 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:49:55.107Z",
+      "evidenceFile": "ui-cases/monsters/195-rug-of-smothering.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "反魔法易感",
+      "automation": "dm-adjudication",
+      "rule": "antimagic-susceptibility",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.incapacitatedInsideAntimagic",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "伤害转移",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

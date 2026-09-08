@@ -3,6 +3,8 @@ import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload } from '../../lib/sha
 import type { Character } from '../../types/character'
 import type { Dnd5eActionIconMotif } from '../../lib/dnd5eActionIcons'
 import type { Dnd5eClassId } from './classes'
+import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
+import type { RegisteredDnd5ePluginSpell } from './plugins/pluginRegistryContracts'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import {
   dnd5eCanEmpowerSpell,
@@ -93,6 +95,40 @@ export interface Dnd5ePluginSpellModifierCompatibilityV1 {
   castingTime: 'action' | 'bonus-action' | 'reaction' | 'special'
   hasDamage: boolean
   areaSavingThrow: boolean
+}
+
+/**
+ * Projects Activity-backed spells into the same compatibility vocabulary used
+ * by legacy combat spells. The spell catalogue alone is intentionally sparse
+ * for audited Activities, so checking only `spell.mechanics` incorrectly made
+ * Sculpt Spells reject Prismatic Spray before map targeting could begin.
+ */
+export function dnd5ePluginSpellModifierCompatibilityV1(
+  spell: RegisteredDnd5ePluginSpell,
+  activity?: Dnd5eActivityDefinitionV1,
+): Dnd5ePluginSpellModifierCompatibilityV1 {
+  const activityOperations = activity?.outcomes.flatMap((outcome) => outcome.operations) ?? []
+  const activityHasDamage = activityOperations.some((operation) =>
+    operation.kind === 'damage' ||
+    (operation.kind === 'mechanic' && operation.handlerId === 'core.prismatic-spray'))
+  return {
+    level: spell.level,
+    school: spell.school,
+    castingTime: spell.castingTime.unit === 'bonus-action'
+      ? 'bonus-action'
+      : spell.castingTime.unit === 'reaction'
+        ? 'reaction'
+        : spell.castingTime.unit === 'action'
+          ? 'action'
+          : 'special',
+    hasDamage: spell.mechanics?.damage != null || activityHasDamage,
+    areaSavingThrow: (
+      activity?.target.kind === 'area' &&
+      activity.checks?.some((check) => check.kind === 'saving-throw') === true
+    ) || (
+      spell.range.shape != null && spell.mechanics?.resolution === 'saving-throw'
+    ),
+  }
 }
 
 const definitions: readonly Dnd5eSpellModifierIntentDefinitionV1[] = [

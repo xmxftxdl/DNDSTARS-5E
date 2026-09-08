@@ -60,6 +60,44 @@ describe('Protection from Energy Headless spell', () => {
     expect(burned.state.combatants.ally.currentHp).toBe(15)
   })
 
+  it('accepts every higher-slot choice without inventing damage or effect dice', () => {
+    const variants = [
+      [4, 'acid'],
+      [5, 'cold'],
+      [6, 'lightning'],
+      [9, 'thunder'],
+    ] as const
+
+    for (const [slotLevel, damageType] of variants) {
+      const wizard = combatant('wizard', 30, {
+        classId: 'wizard', level: 20,
+        classSelections: { 'spell-prepared': ['protection-from-energy'] },
+        classResources: { [`dnd5e-spell-slot-${slotLevel}`]: { current: 1, max: 1 } },
+      })
+      const ally = combatant('ally', 10)
+      const result = resolveDnd5eHeadlessAction(
+        startDnd5eHeadlessCombat(`protection-from-energy-${slotLevel}`, [wizard, ally]),
+        {
+          type: 'cast-spell', actorId: 'wizard', targetId: 'ally',
+          spellId: 'protection-from-energy', slotLevel, effectDamageType: damageType,
+          effectRolls: [],
+        },
+      )
+
+      expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+      if (!result.ok) continue
+      expect(result.state.combatants.wizard.classResources[`dnd5e-spell-slot-${slotLevel}`]?.current).toBe(0)
+      expect(result.state.combatants.wizard.currentHp).toBe(20)
+      expect(result.state.combatants.ally.currentHp).toBe(20)
+      expect(result.state.combatants.ally.classState.activeEffects).toContainEqual(expect.objectContaining({
+        definitionId: 'srd-5.1:spell:protection-from-energy',
+        source: expect.objectContaining({ spellLevel: slotLevel }),
+        duration: expect.objectContaining({ type: 'concentration', remainingRounds: 600 }),
+        modifiers: expect.objectContaining({ damageResistance: damageType }),
+      }))
+    }
+  })
+
   it('applies Longstrider speed and its higher-slot target count through ActiveEffect', () => {
     const wizard = combatant('wizard', 30, {
       classId: 'wizard', level: 5,
@@ -75,6 +113,8 @@ describe('Protection from Energy Headless spell', () => {
     if (!result.ok) return
     expect(dnd5eEffectiveSpeed(result.state.combatants.ally)).toBe(40)
     expect(dnd5eEffectiveSpeed(result.state.combatants.wizard)).toBe(40)
+    expect(result.state.combatants.ally.turn.movementRemaining).toBe(40)
+    expect(result.state.combatants.wizard.turn.movementRemaining).toBe(40)
     expect(result.state.combatants.ally.classState.activeEffects).toContainEqual(expect.objectContaining({
       definitionId: 'srd-5.1:spell:longstrider',
       modifiers: expect.objectContaining({ speedBonusFeet: 10 }),

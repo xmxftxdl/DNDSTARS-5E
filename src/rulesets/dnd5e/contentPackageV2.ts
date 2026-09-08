@@ -20,7 +20,6 @@ import {
   type Dnd5ePluginBackgroundDefinition,
   type Dnd5ePluginFeatDefinition,
   type Dnd5ePluginFeatureDefinition,
-  type Dnd5ePluginFeatureAction,
   type Dnd5ePluginItemDefinition,
   type Dnd5ePluginRaceDefinition,
   type Dnd5ePluginSpellDefinition,
@@ -45,7 +44,7 @@ import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentD
 import { registerDnd5eUnifiedContentPackageV1 } from './activities/dnd5eUnifiedContentRegistry'
 import { dnd5eActivityAutomationAnalysisV1 } from './plugins/pluginMechanicsRegistry'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
-import { dnd5eActivityMapTemplateV1 } from './activities/dnd5eActivityMapInteraction'
+import { dnd5ePluginFeatureActionFromActivityV1 } from './activities/dnd5eActivityFeatureActionAdapter'
 import {
   compileDnd5eActivityHeadlessAction,
   dnd5eActivityManualAdjudicationOperationsV1,
@@ -485,6 +484,8 @@ export function dnd5eContentPackageAutomationCoverageV2(
     ...value.content.feats.flatMap((feat) => feat.iconAssetId ? [feat.iconAssetId] : []),
     ...value.content.spells.flatMap((spell) => spell.iconAssetId ? [spell.iconAssetId] : []),
     ...value.content.items.flatMap((item) => item.iconAssetId ? [item.iconAssetId] : []),
+    ...value.content.subclasses.flatMap((subclass) =>
+      subclass.abilities.flatMap((ability) => ability.iconAssetId ? [ability.iconAssetId] : [])),
   ])
   const activityMigration = activityProjection.counts
 
@@ -754,79 +755,6 @@ function areaGrantedContentActivities(
   })
 }
 
-function pluginFeatureActionFromActivity(
-  activity: Dnd5eActivityDefinitionV1,
-): Dnd5ePluginFeatureAction | undefined {
-  // Inventory, HP, hit-die and movement costs require the unified authority
-  // bridge, which owns the character inventory revision and can commit both
-  // ledgers atomically. Do not expose these Activities through the legacy
-  // plugin-action adapter where those facts are unavailable.
-  if ((activity.consumption ?? []).some((consumption) =>
-    !['action-economy', 'resource', 'spell-slot'].includes(consumption.kind))) {
-    return undefined
-  }
-  const economy = activity.activation.kind === 'action'
-    ? 'action' as const
-    : activity.activation.kind === 'bonus-action'
-      ? 'bonusAction' as const
-      : activity.activation.kind === 'reaction'
-        ? 'reaction' as const
-        : activity.activation.kind === 'free'
-          ? 'none' as const
-          : undefined
-  if (!economy) return undefined
-  const target = activity.target.kind === 'self'
-    ? { kind: 'self' as const }
-    : activity.target.kind === 'creature'
-      ? activity.target.count === 1
-        ? {
-            kind: 'single-creature' as const,
-            relation: activity.target.relation,
-            rangeFeet: activity.target.rangeFeet,
-            includeSelf: activity.target.includeSelf,
-          }
-        : {
-            kind: 'multiple-creatures' as const,
-            relation: activity.target.relation,
-            rangeFeet: activity.target.rangeFeet,
-            maximumTargets: activity.target.count,
-            includeSelf: activity.target.includeSelf,
-          }
-      : (() => {
-          const template = dnd5eActivityMapTemplateV1(activity)
-          return template
-            ? {
-                kind: 'area' as const,
-                relation: activity.target.relation,
-                includeSelf: activity.target.includeSelf,
-                maximumTargets: activity.target.maximumTargets,
-                template,
-              }
-            : undefined
-        })()
-  if (!target) return undefined
-  const manualOperations = dnd5eActivityManualAdjudicationOperationsV1(activity)
-  return {
-    id: activity.id,
-    label: activity.name,
-    description: activity.description,
-    economy,
-    targeting: target,
-    ...(manualOperations.length > 0 ? {
-      interrupt: {
-        prompt: manualOperations.map((operation) => operation.prompt).join('\n\n'),
-        audience: 'dm' as const,
-        options: [
-          { id: 'dm-apply', label: '批准并继续结算' },
-          { id: 'dm-cancel', label: '取消本次事务' },
-        ],
-        defaultOptionId: 'dm-cancel',
-        cancelOptionId: 'dm-cancel',
-      },
-    } : {}),
-  }
-}
-
 export function dnd5eRoomRuntimeProjectionBytesV2(bytes: ArrayBuffer): ArrayBuffer {
   const parsed = parseDnd5eContentPackageV2(bytes)
   if (!parsed) throw new Error('The selected file is not a V2 content package')
@@ -861,14 +789,14 @@ export function dnd5eRulesPluginFromContentPackageV2(
           ...value.content.features.flatMap((feature) => {
             if (feature.action) return []
             const activity = activeContentActivity(value, 'feature', feature.id)
-            return activity && pluginFeatureActionFromActivity(activity)
+            return activity && dnd5ePluginFeatureActionFromActivityV1(activity)
               ? [{ activity, outerSpellTransaction: false }]
               : []
           }),
           ...value.content.feats.flatMap((feat) => {
             if (feat.action) return []
             const activity = activeContentActivity(value, 'feat', feat.id)
-            return activity && pluginFeatureActionFromActivity(activity)
+            return activity && dnd5ePluginFeatureActionFromActivityV1(activity)
               ? [{ activity, outerSpellTransaction: false }]
               : []
           }),
@@ -898,18 +826,18 @@ export function dnd5eRulesPluginFromContentPackageV2(
           const activity = feature.action ? undefined : activeContentActivity(value, 'feature', feature.id)
           api.registerFeature(structuredClone({
             ...feature,
-            action: feature.action ?? (activity ? pluginFeatureActionFromActivity(activity) : undefined),
+            action: feature.action ?? (activity ? dnd5ePluginFeatureActionFromActivityV1(activity) : undefined),
           }))
         }
         for (const feat of value.content.feats) {
           const activity = feat.action ? undefined : activeContentActivity(value, 'feat', feat.id)
           api.registerFeat(structuredClone({
             ...feat,
-            action: feat.action ?? (activity ? pluginFeatureActionFromActivity(activity) : undefined),
+            action: feat.action ?? (activity ? dnd5ePluginFeatureActionFromActivityV1(activity) : undefined),
           }))
         }
         for (const activity of areaGrantedContentActivities(value)) {
-          const action = pluginFeatureActionFromActivity(activity)
+          const action = dnd5ePluginFeatureActionFromActivityV1(activity)
           if (!action) throw new Error(`Persistent area Activity cannot become an active control: ${activity.id}`)
           api.registerFeature({
             id: `area-control.${activity.id}`,

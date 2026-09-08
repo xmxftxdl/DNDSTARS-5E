@@ -3,7 +3,7 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_QUARTERSTAFF } from './equipment'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import {
   findDnd5eOpportunityAttackersForMove,
   dnd5eOpportunityAttackClassDamageDefinitions,
@@ -12,6 +12,7 @@ import {
   resolvePreparedDnd5eOpportunityAttack,
 } from './opportunityAttackAction'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 
 function hero(): Character {
   return {
@@ -51,6 +52,111 @@ describe('D&D 5e opportunity attack bridge', () => {
       to: { x: 45, y: 5 },
       turnEconomyByToken: {},
     }).map((token) => token.id)).toEqual(['kobold'])
+  })
+
+  it('triggers when an adjacent creature takes off, not on its later high-altitude movement', () => {
+    const { character, map, initiativeOrder } = fixture()
+    expect(findDnd5eOpportunityAttackersForMove({
+      map,
+      characters: [character],
+      movingToken: map.tokens[1],
+      to: { x: 15, y: 5 },
+      path: [{ x: 15, y: 5 }],
+      pathElevationsFeet: [40],
+      toElevationFeet: 40,
+      movementMode: 'fly',
+      turnEconomyByToken: {},
+    }).map((token) => token.id)).toEqual(['kobold'])
+
+    const airborneMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((token) => token.id === 'hero-token'
+        ? { ...token, elevationFeet: 40 }
+        : token),
+    }
+    expect(findDnd5eOpportunityAttackersForMove({
+      map: airborneMap,
+      characters: [character],
+      movingToken: airborneMap.tokens[1],
+      to: { x: 45, y: 5 },
+      path: [{ x: 15, y: 5 }, { x: 25, y: 5 }, { x: 45, y: 5 }],
+      pathElevationsFeet: [40, 40, 40],
+      toElevationFeet: 40,
+      movementMode: 'fly',
+      turnEconomyByToken: {},
+    })).toEqual([])
+    expect(prepareDnd5eOpportunityAttack({
+      combatId: 'combat',
+      map: airborneMap,
+      characters: [character],
+      initiativeOrder,
+      actorTokenId: 'kobold',
+      targetTokenId: 'hero-token',
+      turnEconomy: createDnd5eTurnEconomyCounts('kobold-turn', 30),
+    })).toEqual({ ok: false, reason: 'target-out-of-range' })
+  })
+
+  it('does not trigger an opportunity attack when heavy obscuration hides the mover at the reach boundary', () => {
+    const { character, map, initiativeOrder } = fixture()
+    map.dnd5ePluginAreas = [{
+      id: 'fog-cloud',
+      pluginId: 'srd-5.1',
+      featureId: 'spell:fog-cloud',
+      sourceKind: 'core-spell',
+      coreSpellId: 'fog-cloud',
+      label: '云雾术',
+      color: '#94a3b8',
+      sourceCharacterId: character.id,
+      sourceTokenId: 'hero-token',
+      cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }],
+      anchorCell: { col: 0, row: 0 },
+      createdRound: 1,
+      expiresAfterRound: 600,
+      obscuration: { kind: 'heavy' },
+    }]
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'bright',
+      },
+      updatedAt: 1,
+    }])
+    try {
+      expect(findDnd5eOpportunityAttackersForMove({
+        map,
+        characters: [character],
+        movingToken: map.tokens[1],
+        to: { x: 45, y: 5 },
+        path: [{ x: 15, y: 5 }, { x: 25, y: 5 }, { x: 45, y: 5 }],
+        turnEconomyByToken: {},
+      })).toEqual([])
+      expect(prepareDnd5eOpportunityAttack({
+        combatId: 'combat',
+        map,
+        characters: [character],
+        initiativeOrder,
+        actorTokenId: 'kobold',
+        targetTokenId: 'hero-token',
+        turnEconomy: createDnd5eTurnEconomyCounts('kobold-turn', 30),
+      })).toEqual({ ok: false, reason: 'target-not-visible' })
+
+      map.tokens[0] = { ...map.tokens[0], blindsightRangeFeet: 10 }
+      expect(findDnd5eOpportunityAttackersForMove({
+        map,
+        characters: [character],
+        movingToken: map.tokens[1],
+        to: { x: 45, y: 5 },
+        turnEconomyByToken: {},
+      }).map((token) => token.id)).toEqual(['kobold'])
+    } finally {
+      setMapGeometryRuntime([])
+    }
   })
 
   it('suppresses opportunity attacks from creatures the Mobile owner attacked in melee this turn', () => {
@@ -196,6 +302,27 @@ describe('D&D 5e opportunity attack bridge', () => {
     expect(resolved.application?.characters[0].currentHp).toBeLessThan(30)
   })
 
+  it('suppresses the opportunity-attack prompt when Calm Emotions forbids attacking the mover', () => {
+    const { character, map, initiativeOrder } = fixture()
+    map.tokens[0].dnd5eCombatState = {
+      schemaVersion: 2,
+      activeEffects: [createDnd5eMechanicalEffect({
+        definitionId: 'srd-5.1:spell:calm-emotions:indifferent',
+        label: '安定心神：漠然',
+        source: { kind: 'spell', actorId: 'cleric', pluginId: 'srd-5.1' },
+        targetId: 'kobold',
+        tags: ['calm-emotions:indifferent'],
+        modifiers: { calmEmotionsIndifferentTargetIds: ['hero-token'] },
+      })],
+    }
+
+    expect(prepareDnd5eOpportunityAttack({
+      combatId: 'combat', map, characters: [character], initiativeOrder,
+      actorTokenId: 'kobold', targetTokenId: 'hero-token',
+      turnEconomy: createDnd5eTurnEconomyCounts('kobold-turn', 30),
+    })).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
   it('does not treat an expanded critical miss as a preview hit', () => {
     const { character, map, initiativeOrder } = fixture()
     const prepared = prepareDnd5eOpportunityAttack({
@@ -230,6 +357,7 @@ describe('D&D 5e opportunity attack bridge', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared.attackMode).toBe('disadvantage')
+    expect(prepared.prepared.attackModeResolution?.disadvantageReasons).toContain('逃脱众敌令借机攻击具有劣势')
     expect(previewDnd5eOpportunityAttack(prepared.prepared, 20, 2).hit).toBe(false)
     const resolved = resolvePreparedDnd5eOpportunityAttack({
       prepared: prepared.prepared, d20: 20, d20Second: 2, damageRolls: [],

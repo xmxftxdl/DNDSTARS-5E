@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eAbilityCheckRollMode, dnd5eAttackerIsUnseenForAttack, dnd5eCombatantCanSee, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveFlySpeed, dnd5eEffectiveSizeRank, dnd5eEffectiveSpeed, dnd5eGrappleDragExtraMovementFeet, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, previewDnd5eUnsupportedAirborneFalls, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eAbilityCheckRollMode, dnd5eAttackerIsUnseenForAttack, dnd5eCombatantCanSee, dnd5eCombatantCanSpeak, dnd5eCombatantPairKey, dnd5eConfusedTurnBehavior, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveFlySpeed, dnd5eEffectiveSizeRank, dnd5eEffectiveSpeed, dnd5eGrappleDragExtraMovementFeet, dnd5eHeadlessEndTurnRestrictionFailure, dnd5eMonsterSpellAttackMode, dnd5eSourceMarkedAttackDisadvantage, dnd5eTargetArmorClassForAttack, dnd5eTrackingCapabilityForCombatant, dnd5eWeaponClassDamageDefinitions, endDnd5eConcentration, previewDnd5eUnsupportedAirborneFalls, previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
   dnd5eActiveSavingThrowBonus,
+  dnd5eActiveAttackRollFlags,
+  dnd5eActiveSpellTargetingImmunitySchools,
   dnd5eConditionsFromActiveEffects,
   type Dnd5eActiveEffectInstance,
 } from './activeEffects'
@@ -11,6 +13,9 @@ import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { dnd5eAttackerIsUnseen, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 import { getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
+import { dnd5eCombatantIsSurprised } from './surprise'
+import { ensureDnd5eCoreSpellActivitiesRegisteredV1 } from './activities/dnd5eCoreSpellActivities'
+import { dnd5ePluginHeadlessActionDefinition } from './pluginApi'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -37,9 +42,1734 @@ function fighter(id: string, initiative: number, patch = {}) {
   return combatant
 }
 
+function spellRuleStateEffect(input: {
+  spellId: string
+  family: string
+  sourceActorId: string
+  targetId: string
+}) {
+  const stateId = `spell:${input.spellId}:${input.family}`
+  return createDnd5eMechanicalEffect({
+    definitionId: `rule-state:${stateId}`,
+    label: stateId,
+    source: { kind: 'spell', actorId: input.sourceActorId, rulesId: input.spellId, magical: true },
+    targetId: input.targetId,
+    legacyCondition: `rule-state:${stateId}`,
+    duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+  })
+}
+
 describe('D&D 5e 2014 headless combat engine', () => {
   afterEach(() => {
     setDnd5eRoomMonsterCatalog([])
+  })
+
+  it('upcasts Cone of Cold to 12d8+INT and freezes only creatures killed by its cold damage', () => {
+    const caster = fighter('cone-wizard', 30, {
+      classId: 'wizard', subclassId: 'evocation', level: 20, classLevels: { wizard: 20 },
+      proficiencyBonus: 6, abilities: { ...abilities, int: 20 }, saveDc: 19,
+      classSelections: { 'spell-prepared': ['cone-of-cold'] },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const killed = fighter('cone-killed', 20, {
+      controller: 'dm', currentHp: 10, maxHp: 10, savingThrowBonuses: { con: 0 },
+    })
+    const survivor = fighter('cone-survivor', 15, {
+      controller: 'dm', currentHp: 100, maxHp: 100, savingThrowBonuses: { con: 0 },
+    })
+    const immune = fighter('cone-immune', 10, {
+      controller: 'dm', currentHp: 10, maxHp: 10, savingThrowBonuses: { con: 0 },
+      damageImmunities: ['cold'],
+    })
+
+    const resolved = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('cone-of-cold-upcast', [caster, killed, survivor, immune]),
+      {
+        type: 'cast-spell', actorId: caster.id,
+        targetId: killed.id, targetIds: [killed.id, survivor.id, immune.id],
+        spellId: 'cone-of-cold', slotLevel: 9,
+        targetSavingThrows: [killed, survivor, immune].map((target) => ({ targetId: target.id, d20: 1 })),
+        effectRolls: Array.from({ length: 12 }, () => 1),
+      },
+    )
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[caster.id].classResources['dnd5e-spell-slot-9']).toEqual({ current: 0, max: 1 })
+    expect(resolved.state.combatants[killed.id].currentHp).toBe(0)
+    expect(resolved.state.combatants[survivor.id].currentHp).toBe(83)
+    expect(resolved.state.combatants[immune.id].currentHp).toBe(10)
+    expect(resolved.state.combatants[killed.id].classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:cone-of-cold:frozen-statue',
+      label: '寒冰锥：冰冻塑像（直至解冻）',
+      tags: expect.arrayContaining(['frozen-statue', 'manual-thaw']),
+      source: expect.objectContaining({ kind: 'spell', actorId: caster.id, rulesId: 'cone-of-cold', spellLevel: 9 }),
+      duration: { type: 'permanent' },
+    }))
+    expect(resolved.state.combatants[survivor.id].classState.activeEffects).toBeUndefined()
+    expect(resolved.state.combatants[immune.id].classState.activeEffects).toBeUndefined()
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'spell-damage-feature-bonus-applied', spellId: 'cone-of-cold', amount: 5,
+    }))
+  })
+
+  it('allows Message recipients that understand a language to reply only when they can speak', () => {
+    expect(dnd5eCombatantCanSpeak({ languages: ['Common'] })).toBe(true)
+    expect(dnd5eCombatantCanSpeak({ languages: ['理解生前会说的所有语言，但无法说话'] })).toBe(false)
+    expect(dnd5eCombatantCanSpeak({ languages: ["understands the languages it knew in life but can't speak"] })).toBe(false)
+  })
+
+  it('upcasts Command to one additional nearby target per slot level and resolves Grovel without DM approval', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const caster = fighter('command-cleric', 30, {
+      classId: 'cleric', level: 9, classLevels: { cleric: 9 }, saveDc: 19,
+      languages: ['Common'],
+      classSelections: { 'spell-prepared': ['command'] },
+      classSelectionsByClass: { cleric: { 'spell-prepared': ['command'] } },
+      classResources: { 'dnd5e-spell-slot-5': { current: 1, max: 1 } },
+    })
+    const targets = Array.from({ length: 5 }, (_, index) => fighter(
+      `command-target-${index + 1}`,
+      20 - index,
+      {
+        controller: 'dm', languages: ['任意一种语言（通常为通用语）'], savingThrowBonuses: { wis: 0 },
+        position: { x: 10 + index, y: index % 2 === 0 ? 0 : 5 },
+      },
+    ))
+    const state = startDnd5eHeadlessCombat('command-upcast', [caster, ...targets])
+    state.distanceFeetByCombatantPair = {}
+    for (const target of targets) {
+      state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(caster.id, target.id)] = 20
+    }
+    for (let left = 0; left < targets.length; left += 1) {
+      for (let right = left + 1; right < targets.length; right += 1) {
+        state.distanceFeetByCombatantPair[
+          dnd5eCombatantPairKey(targets[left]!.id, targets[right]!.id)
+        ] = 25
+      }
+    }
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:command',
+        transactionId: 'command-upcast-grovel', actorId: caster.id,
+        targetId: targets[0]!.id, targetIds: targets.map((target) => target.id),
+        castLevel: 5, payload: { activityChoices: { 'command-mode': 'grovel' } },
+        rolls: Object.fromEntries(targets.map((target) => [
+          `command-save-d20:${target.id}`,
+          { values: [1, 2], modifier: 0, total: 3 },
+        ])),
+      },
+      spell: {
+        castingClassId: 'cleric', spellId: 'command', spellName: '命令术',
+        spellLevel: 1, slotLevel: 5, castingTime: 'action',
+        declaredTargetIds: targets.map((target) => target.id),
+        spellSchool: 'enchantment',
+      },
+    })
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[caster.id]?.classResources['dnd5e-spell-slot-5']?.current).toBe(0)
+    for (const target of targets) {
+      expect(resolved.state.combatants[target.id]?.classState.activeEffects).toContainEqual(
+        expect.objectContaining({
+          tags: expect.arrayContaining(['command-spell', 'command-mode:grovel']),
+          duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'target-turn-end' }),
+        }),
+      )
+    }
+
+    const recastState = resolved.state
+    recastState.combatants[caster.id]!.classResources['dnd5e-spell-slot-1'] = { current: 1, max: 1 }
+    recastState.combatants[caster.id]!.turn.actionAvailable = true
+    const switchedMode = resolveDnd5eHeadlessAction(recastState, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:command',
+        transactionId: 'command-recast-other', actorId: caster.id,
+        targetId: targets[0]!.id, targetIds: [targets[0]!.id],
+        castLevel: 1, payload: { activityChoices: { 'command-mode': 'other' } },
+        rolls: {
+          [`command-save-d20:${targets[0]!.id}`]: { values: [1, 2], modifier: 0, total: 3 },
+        },
+      },
+      spell: {
+        castingClassId: 'cleric', spellId: 'command', spellName: '命令术',
+        spellLevel: 1, slotLevel: 1, castingTime: 'action',
+        declaredTargetIds: [targets[0]!.id], spellSchool: 'enchantment',
+      },
+    })
+    expect(switchedMode.ok, switchedMode.ok ? undefined : switchedMode.reason).toBe(true)
+    if (!switchedMode.ok) return
+    const firstTargetCommandEffects = switchedMode.state.combatants[targets[0]!.id]
+      ?.classState.activeEffects?.filter((effect) => effect.tags?.includes('command-spell')) ?? []
+    expect(firstTargetCommandEffects).toHaveLength(1)
+    expect(firstTargetCommandEffects[0]?.tags).toContain('command-mode:other')
+    expect(switchedMode.state.combatants[targets[1]!.id]?.classState.activeEffects).toContainEqual(
+      expect.objectContaining({ tags: expect.arrayContaining(['command-spell', 'command-mode:grovel']) }),
+    )
+
+    resolved.state.initiativeIndex = resolved.state.initiativeOrder.indexOf(targets[0]!.id)
+    const targetTurn = resolveDnd5eHeadlessAction(resolved.state, {
+      type: 'begin-turn', actorId: targets[0]!.id,
+    })
+    expect(targetTurn.ok, targetTurn.ok ? undefined : targetTurn.reason).toBe(true)
+    if (!targetTurn.ok) return
+    expect(targetTurn.state.combatants[targets[0]!.id]).toMatchObject({
+      conditions: expect.arrayContaining(['prone']),
+      turn: { actionAvailable: false, bonusActionAvailable: false, movementRemaining: 0 },
+    })
+    expect(targetTurn.events).toContainEqual(expect.objectContaining({
+      type: 'command-turn-resolved', actorId: targets[0]!.id, mode: 'grovel', endedTurn: true,
+    }))
+  })
+
+  it('consumes Command against undead or a creature with no understood language but applies no effect', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const caster = fighter('command-immunity-cleric', 30, {
+      classId: 'cleric', level: 3, classLevels: { cleric: 3 }, saveDc: 16,
+      languages: ['Common'],
+      classSelections: { 'spell-prepared': ['command'] },
+      classSelectionsByClass: { cleric: { 'spell-prepared': ['command'] } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const undead = fighter('command-undead', 20, {
+      controller: 'dm', creatureType: 'undead', languages: ['Common'],
+      position: { x: 10, y: 0 }, savingThrowBonuses: { wis: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('command-undead-immunity', [caster, undead])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(caster.id, undead.id)]: 10,
+    }
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:command',
+        transactionId: 'command-undead-halt', actorId: caster.id,
+        targetId: undead.id, targetIds: [undead.id], castLevel: 1,
+        payload: { activityChoices: { 'command-mode': 'halt' } },
+        rolls: {
+          [`command-save-d20:${undead.id}`]: { values: [1, 2], modifier: 0, total: 3 },
+        },
+      },
+      spell: {
+        castingClassId: 'cleric', spellId: 'command', spellName: '命令术',
+        spellLevel: 1, slotLevel: 1, castingTime: 'action',
+        declaredTargetIds: [undead.id], spellSchool: 'enchantment',
+      },
+    })
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[caster.id]?.classResources['dnd5e-spell-slot-1']?.current).toBe(0)
+    expect(resolved.state.combatants[undead.id]?.classState.activeEffects ?? [])
+      .not.toContainEqual(expect.objectContaining({ tags: expect.arrayContaining(['command-spell']) }))
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: caster.id, targetId: undead.id,
+      stateKey: 'spell-unaffected:command-language-or-undead', active: false,
+    }))
+  })
+
+  it('applies Gentle Repose only to an authoritative corpse and keeps its duration when upcast', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const setup = (slotLevel: 2 | 3, targetPatch: Record<string, unknown> = {}) => {
+      const caster = fighter('repose-wizard', 30, {
+        classId: 'wizard', level: 5, classLevels: { wizard: 5 },
+        classSelections: { 'spell-prepared': ['gentle-repose'] },
+        classSelectionsByClass: { wizard: { 'spell-prepared': ['gentle-repose'] } },
+        classResources: { [`dnd5e-spell-slot-${slotLevel}`]: { current: 1, max: 1 } },
+      })
+      const corpse = fighter('repose-corpse', 20, {
+        controller: 'dm', currentHp: 0, ...targetPatch,
+      })
+      corpse.deathSaves.dead = true
+      corpse.deathSaves.failures = 3
+      corpse.classState.deathRound = 0
+      corpse.classState.bodyPresent = targetPatch.bodyPresent !== false
+      const state = startDnd5eHeadlessCombat(`gentle-repose-${slotLevel}`, [caster, corpse])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(caster.id, corpse.id)]: 5,
+      }
+      const action = {
+        type: 'plugin-spell-activity' as const, actorId: caster.id,
+        pluginAction: {
+          type: 'plugin' as const, pluginId: 'srd-5.1', actionId: 'spell:gentle-repose',
+          transactionId: `gentle-repose-${slotLevel}`, actorId: caster.id,
+          targetId: corpse.id, targetIds: [corpse.id], castLevel: slotLevel,
+        },
+        spell: {
+          castingClassId: 'wizard' as const, spellId: 'gentle-repose', spellName: '遗体防腐',
+          spellLevel: 2, slotLevel, castingTime: 'action' as const,
+          declaredTargetIds: [corpse.id], spellSchool: 'necromancy' as const,
+        },
+      }
+      return { caster, corpse, state, action }
+    }
+
+    for (const slotLevel of [2, 3] as const) {
+      const scenario = setup(slotLevel)
+      const resolved = resolveDnd5eHeadlessAction(scenario.state, scenario.action)
+      expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+      if (!resolved.ok) continue
+      expect(resolved.state.combatants[scenario.caster.id]
+        ?.classResources[`dnd5e-spell-slot-${slotLevel}`]?.current).toBe(0)
+      expect(resolved.state.combatants[scenario.corpse.id]?.classState.activeEffects)
+        .toContainEqual(expect.objectContaining({
+          definitionId: 'activity:gentle-repose:gentle-repose:modifiers:0',
+          tags: expect.arrayContaining(['corpse-preservation', 'prevents-undead-animation']),
+          duration: expect.objectContaining({ type: 'rounds', remainingRounds: 144_000 }),
+          source: expect.objectContaining({ spellLevel: slotLevel }),
+        }))
+    }
+
+    const living = setup(2)
+    living.corpse.deathSaves.dead = false
+    living.corpse.deathSaves.failures = 0
+    living.corpse.classState.deathRound = undefined
+    expect(resolveDnd5eHeadlessAction(living.state, living.action))
+      .toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(living.state.combatants[living.caster.id]
+      ?.classResources['dnd5e-spell-slot-2']?.current).toBe(1)
+
+    const missingBody = setup(2, { bodyPresent: false })
+    expect(resolveDnd5eHeadlessAction(missingBody.state, missingBody.action))
+      .toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('settles Plane Shift willing travel directly and gates the hostile Charisma save behind an attack hit', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const setup = () => {
+      const caster = fighter('plane-shift-wizard', 30, {
+        classId: 'wizard', level: 13, classLevels: { wizard: 13 }, saveDc: 18,
+        abilities: { ...abilities, int: 20 },
+        classSelections: { 'spell-prepared': ['plane-shift'] },
+        classSelectionsByClass: { wizard: { 'spell-prepared': ['plane-shift'] } },
+        classResources: { 'dnd5e-spell-slot-7': { current: 1, max: 1 } },
+      })
+      const target = fighter('plane-shift-target', 20, {
+        controller: 'dm', armorClass: 16, savingThrowBonuses: { cha: 0 },
+        position: { x: 5, y: 0 },
+      })
+      const state = startDnd5eHeadlessCombat('plane-shift-sequence', [caster, target])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(caster.id, target.id)]: 5,
+      }
+      return { caster, target, state }
+    }
+    const action = (
+      casterId: string,
+      targetId: string,
+      mode: 'willing-travel' | 'hostile-banishment',
+      rolls: Record<string, { values: number[]; modifier: number; total: number }>,
+    ) => ({
+      type: 'plugin-spell-activity' as const,
+      actorId: casterId,
+      pluginAction: {
+        type: 'plugin' as const, pluginId: 'srd-5.1', actionId: 'spell:plane-shift',
+        transactionId: `plane-shift-${mode}`, actorId: casterId,
+        targetId, targetIds: [targetId], castLevel: 7,
+        payload: { activityChoices: { mode } }, rolls,
+      },
+      spell: {
+        castingClassId: 'wizard' as const, spellId: 'plane-shift', spellName: '异界传送',
+        spellLevel: 7, slotLevel: 7, castingTime: 'action' as const,
+        declaredTargetIds: [targetId], spellSchool: 'conjuration' as const,
+      },
+    })
+
+    const willing = setup()
+    const willingResult = resolveDnd5eHeadlessAction(
+      willing.state,
+      action(willing.caster.id, willing.caster.id, 'willing-travel', {}),
+    )
+    expect(willingResult.ok, willingResult.ok ? undefined : willingResult.reason).toBe(true)
+    if (willingResult.ok) {
+      expect(willingResult.state.combatants[willing.caster.id]
+        ?.classResources['dnd5e-spell-slot-7']?.current).toBe(0)
+    }
+
+    const miss = setup()
+    const missRolls = {
+      [`spell-attack-d20:${miss.target.id}`]: { values: [5], modifier: 0, total: 5 },
+    }
+    const missed = resolveDnd5eHeadlessAction(
+      miss.state,
+      action(miss.caster.id, miss.target.id, 'hostile-banishment', missRolls),
+    )
+    expect(missed.ok, missed.ok ? undefined : missed.reason).toBe(true)
+    if (missed.ok) {
+      expect(missed.state.combatants[miss.target.id]?.classState.activeEffects ?? [])
+        .not.toContainEqual(expect.objectContaining({
+          definitionId: expect.stringContaining('plane-shift-transferred'),
+        }))
+    }
+
+    const forgedSaveAfterMiss = setup()
+    expect(resolveDnd5eHeadlessAction(
+      forgedSaveAfterMiss.state,
+      action(forgedSaveAfterMiss.caster.id, forgedSaveAfterMiss.target.id, 'hostile-banishment', {
+        [`spell-attack-d20:${forgedSaveAfterMiss.target.id}`]: { values: [5], modifier: 0, total: 5 },
+        [`spell-save-d20:${forgedSaveAfterMiss.target.id}`]: { values: [1], modifier: 0, total: 1 },
+      }),
+    )).toMatchObject({ ok: false, reason: 'invalid-dice' })
+
+    const failedSave = setup()
+    const transported = resolveDnd5eHeadlessAction(
+      failedSave.state,
+      action(failedSave.caster.id, failedSave.target.id, 'hostile-banishment', {
+        [`spell-attack-d20:${failedSave.target.id}`]: { values: [10], modifier: 0, total: 10 },
+        [`spell-save-d20:${failedSave.target.id}`]: { values: [1], modifier: 0, total: 1 },
+      }),
+    )
+    expect(transported.ok, transported.ok ? undefined : transported.reason).toBe(true)
+    if (transported.ok) {
+      expect(transported.state.combatants[failedSave.target.id]?.classState.activeEffects)
+        .toContainEqual(expect.objectContaining({
+          definitionId: expect.stringContaining('plane-shift-transferred'),
+          label: '异界传送：已被传送',
+        }))
+    }
+  })
+
+  it('enforces Bestow Curse source attack disadvantage, damage rider, and lose-action save', () => {
+    const caster = fighter('caster', 20)
+    const target = fighter('target', 10, { controller: 'dm' })
+    const sourceAttackCurse = createDnd5eMechanicalEffect({
+      id: 'bestow-curse-attack', definitionId: 'activity:spell:bestow-curse:attack',
+      label: '降咒·攻击施法者劣势', tags: ['curse', 'bestow-curse.attacks-against-source'],
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'bestow-curse', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+    })
+    target.classState.activeEffects = [sourceAttackCurse]
+    expect(dnd5eSourceMarkedAttackDisadvantage(target, caster)).toBe(true)
+    expect(dnd5eSourceMarkedAttackDisadvantage(target, fighter('other', 1))).toBe(false)
+
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'bestow-curse-damage', definitionId: 'activity:spell:bestow-curse:damage',
+      label: '降咒·施法者额外伤害', tags: ['curse', 'bestow-curse.source-bonus-damage'],
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'bestow-curse', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+    })]
+    const damageDefinitions = dnd5eWeaponClassDamageDefinitions({
+      state: startDnd5eHeadlessCombat('bestow-curse-damage', [caster, target]),
+      actorId: caster.id,
+      targetId: target.id,
+      context: meleeWeaponContext(),
+      effectiveMode: 'normal',
+      critical: false,
+    })
+    expect(damageDefinitions).toContainEqual(expect.objectContaining({
+      source: 'activity-effect-rider', rollId: 'bestow-curse-source-bonus-damage',
+      count: 1, sides: 8, type: 'necrotic', magical: true,
+    }))
+
+    const cleric = fighter('curse-cleric', 20, {
+      classId: 'cleric', level: 20, classLevels: { cleric: 20 }, saveDc: 19,
+      classSelections: { 'spell-cantrips': ['sacred-flame'] },
+      classSelectionsByClass: { cleric: { 'spell-cantrips': ['sacred-flame'] } },
+    })
+    const spellTarget = fighter('curse-spell-target', 10, {
+      controller: 'dm', currentHp: 30, maxHp: 30, savingThrowBonuses: { dex: -2 },
+    })
+    spellTarget.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'bestow-curse-spell-damage', definitionId: 'activity:spell:bestow-curse:damage',
+      label: '降咒·施法者法术额外伤害', tags: ['curse', 'bestow-curse.source-bonus-damage'],
+      source: { kind: 'spell', actorId: cleric.id, rulesId: 'bestow-curse', magical: true },
+      targetId: spellTarget.id,
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+    })]
+    const sacredFlame = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('bestow-curse-sacred-flame', [cleric, spellTarget]),
+      {
+        type: 'cast-spell', actorId: cleric.id, targetId: spellTarget.id,
+        spellId: 'sacred-flame', slotLevel: 0, savingThrowD20: 1,
+        effectRolls: [3, 1, 3, 2],
+        bestowCurseDamageRolls: [{ targetId: spellTarget.id, rolls: [6] }],
+      },
+    )
+    expect(sacredFlame.ok, sacredFlame.ok ? undefined : sacredFlame.reason).toBe(true)
+    if (sacredFlame.ok) {
+      expect(sacredFlame.state.combatants[spellTarget.id].currentHp).toBe(15)
+      expect(sacredFlame.events).toContainEqual(expect.objectContaining({
+        type: 'class-damage-applied', actorId: cleric.id, targetId: spellTarget.id,
+        source: 'activity-effect-rider', amount: 6,
+      }))
+    }
+
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'bestow-curse-lose-action', definitionId: 'activity:spell:bestow-curse:lose-action',
+      label: '降咒·可能失去动作', tags: ['curse', 'bestow-curse.lose-action'],
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'bestow-curse', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      repeatSave: { ability: 'wis', dc: 15, timing: 'target-turn-start', onSuccess: 'remove' },
+    })]
+    const loseActionState = startDnd5eHeadlessCombat('bestow-curse-lose-action', [caster, target])
+    loseActionState.initiativeIndex = loseActionState.initiativeOrder.indexOf(target.id)
+    const failed = resolveDnd5eHeadlessAction(
+      loseActionState,
+      {
+        type: 'begin-turn', actorId: target.id,
+        turnStartActiveEffectSavingThrows: [{ effectId: 'bestow-curse-lose-action', d20: 1 }],
+      },
+    )
+    expect(failed.ok, failed.ok ? undefined : failed.reason).toBe(true)
+    if (!failed.ok) return
+    expect(failed.state.combatants[target.id]?.turn.actionAvailable).toBe(false)
+    expect(failed.state.combatants[target.id]?.classState.activeEffects)
+      .toContainEqual(expect.objectContaining({ id: 'bestow-curse-lose-action' }))
+    expect(failed.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-save-resolved', effectId: 'bestow-curse-lose-action', success: false,
+    }))
+    expect(failed.events).toContainEqual({
+      type: 'turn-resource-spent', actorId: target.id, resource: 'action',
+    })
+  })
+
+  it('ends an empty Bestow Curse after a successful save and honors its 3rd/5th-level concentration boundary', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const castAt = (slotLevel: 3 | 5, savingThrowD20: number) => {
+      const caster = fighter(`bestow-caster-${slotLevel}-${savingThrowD20}`, 20, {
+        classId: 'cleric', level: 20, classLevels: { cleric: 20 }, saveDc: 19,
+        classSelections: { 'spell-prepared': ['bestow-curse'] },
+        classSelectionsByClass: { cleric: { 'spell-prepared': ['bestow-curse'] } },
+        classResources: {
+          [`dnd5e-spell-slot-${slotLevel}`]: { current: 1, max: 1 },
+        },
+      })
+      const target = fighter(`bestow-target-${slotLevel}-${savingThrowD20}`, 10, {
+        controller: 'dm', position: { x: 5, y: 0 }, savingThrowBonuses: { wis: 0 },
+      })
+      const state = startDnd5eHeadlessCombat(
+        `bestow-curse-${slotLevel}-${savingThrowD20}`,
+        [caster, target],
+      )
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(caster.id, target.id)]: 5,
+      }
+      return {
+        caster,
+        target,
+        resolved: resolveDnd5eHeadlessAction(state, {
+          type: 'plugin-spell-activity', actorId: caster.id,
+          pluginAction: {
+            type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:bestow-curse',
+            transactionId: `bestow-cast-${slotLevel}-${savingThrowD20}`,
+            actorId: caster.id, targetId: target.id, targetIds: [target.id],
+            distanceFeet: 5, castLevel: slotLevel,
+            payload: {
+              activityChoices: { mode: 'source-bonus-damage', ability: 'wis' },
+            },
+            rolls: {
+              [`bestow-curse-save:${target.id}`]: {
+                values: [savingThrowD20, savingThrowD20 === 20 ? 3 : 2],
+                modifier: 0,
+                total: savingThrowD20 + (savingThrowD20 === 20 ? 3 : 2),
+              },
+            },
+          },
+          spell: {
+            castingClassId: 'cleric', spellId: 'bestow-curse', spellName: '降咒',
+            spellLevel: 3, slotLevel, castingTime: 'action',
+            declaredTargetIds: [target.id],
+            concentrationRounds: slotLevel === 3 ? 10 : undefined,
+            concentrationTargetIds: slotLevel === 3 ? [target.id] : undefined,
+            spellSchool: 'necromancy',
+          },
+        }),
+      }
+    }
+
+    const saved = castAt(3, 20)
+    expect(saved.resolved.ok, saved.resolved.ok ? undefined : saved.resolved.reason).toBe(true)
+    if (!saved.resolved.ok) return
+    expect(saved.resolved.state.combatants[saved.caster.id]?.concentrating).toBe(false)
+    expect(saved.resolved.state.combatants[saved.target.id]?.classState.activeEffects ?? [])
+      .not.toContainEqual(expect.objectContaining({
+        tags: expect.arrayContaining(['bestow-curse.source-bonus-damage']),
+      }))
+
+    const third = castAt(3, 1)
+    expect(third.resolved.ok, third.resolved.ok ? undefined : third.resolved.reason).toBe(true)
+    if (!third.resolved.ok) return
+    expect(third.resolved.state.combatants[third.caster.id]?.concentrating).toBe(true)
+    expect(third.resolved.state.combatants[third.target.id]?.classState.activeEffects)
+      .toContainEqual(expect.objectContaining({
+        tags: expect.arrayContaining(['bestow-curse.source-bonus-damage']),
+        duration: expect.objectContaining({ type: 'concentration', remainingRounds: 10 }),
+      }))
+
+    const fifth = castAt(5, 1)
+    expect(fifth.resolved.ok, fifth.resolved.ok ? undefined : fifth.resolved.reason).toBe(true)
+    if (!fifth.resolved.ok) return
+    expect(fifth.resolved.state.combatants[fifth.caster.id]?.concentrating).toBe(false)
+    expect(fifth.resolved.state.combatants[fifth.target.id]?.classState.activeEffects)
+      .toContainEqual(expect.objectContaining({
+        tags: expect.arrayContaining(['bestow-curse.source-bonus-damage']),
+        duration: expect.objectContaining({ type: 'rounds', remainingRounds: 4_800 }),
+      }))
+  })
+
+  it('releases replaced low-level Bestow Curse concentration without removing high-level curses on other targets', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const caster = fighter('bestow-replacement-caster', 20, {
+      classId: 'cleric', level: 20, classLevels: { cleric: 20 }, saveDc: 19,
+      classSelections: { 'spell-prepared': ['bestow-curse'] },
+      classSelectionsByClass: { cleric: { 'spell-prepared': ['bestow-curse'] } },
+      classResources: {
+        'dnd5e-spell-slot-3': { current: 1, max: 1 },
+        'dnd5e-spell-slot-4': { current: 1, max: 1 },
+        'dnd5e-spell-slot-7': { current: 1, max: 1 },
+      },
+    })
+    const purple = fighter('bestow-replacement-purple', 10, {
+      controller: 'dm', position: { x: 5, y: 0 }, savingThrowBonuses: { wis: 0 },
+    })
+    const wolf = fighter('bestow-replacement-wolf', 9, {
+      controller: 'dm', position: { x: 0, y: 5 }, savingThrowBonuses: { wis: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('bestow-replacement', [caster, purple, wolf])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(caster.id, purple.id)]: 5,
+      [dnd5eCombatantPairKey(caster.id, wolf.id)]: 5,
+    }
+    const cast = (
+      current: typeof state,
+      slotLevel: 3 | 4 | 7,
+      targetId: string,
+      mode: 'ability' | 'attacks-against-source',
+    ) => resolveDnd5eHeadlessAction(current, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:bestow-curse',
+        transactionId: `bestow-replacement-${slotLevel}-${targetId}`,
+        actorId: caster.id, targetId, targetIds: [targetId], distanceFeet: 5, castLevel: slotLevel,
+        payload: { activityChoices: { mode, ability: 'wis' } },
+        rolls: {
+          [`bestow-curse-save:${targetId}`]: { values: [1, 2], modifier: 0, total: 3 },
+        },
+      },
+      spell: {
+        castingClassId: 'cleric', spellId: 'bestow-curse', spellName: '降咒',
+        spellLevel: 3, slotLevel, castingTime: 'action', declaredTargetIds: [targetId],
+        concentrationRounds: slotLevel <= 4 ? (slotLevel === 3 ? 10 : 100) : undefined,
+        concentrationTargetIds: slotLevel <= 4 ? [targetId] : undefined,
+        spellSchool: 'necromancy',
+      },
+    })
+
+    const fourth = cast(state, 4, purple.id, 'ability')
+    expect(fourth.ok, fourth.ok ? undefined : fourth.reason).toBe(true)
+    if (!fourth.ok) return
+    expect(fourth.state.combatants[caster.id]?.concentrating).toBe(true)
+    fourth.state.combatants[caster.id]!.turn.actionAvailable = true
+
+    const seventh = cast(fourth.state, 7, purple.id, 'attacks-against-source')
+    expect(seventh.ok, seventh.ok ? undefined : seventh.reason).toBe(true)
+    if (!seventh.ok) return
+    expect(seventh.state.combatants[caster.id]).toMatchObject({ concentrating: false })
+    expect(seventh.state.combatants[caster.id]?.classState.concentrationSpellId).toBeUndefined()
+    expect(seventh.state.combatants[purple.id]?.classState.concentrationEffectsBySource?.[caster.id])
+      .toBeUndefined()
+    expect(seventh.state.combatants[purple.id]?.classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        tags: expect.arrayContaining(['bestow-curse.attacks-against-source']),
+        duration: expect.objectContaining({ type: 'rounds', remainingRounds: 14_400 }),
+      }),
+    )
+    seventh.state.combatants[caster.id]!.turn.actionAvailable = true
+
+    const third = cast(seventh.state, 3, wolf.id, 'ability')
+    expect(third.ok, third.ok ? undefined : third.reason).toBe(true)
+    if (!third.ok) return
+    expect(third.state.combatants[caster.id]?.concentrating).toBe(true)
+    expect(third.state.combatants[purple.id]?.classState.activeEffects).toContainEqual(
+      expect.objectContaining({ tags: expect.arrayContaining(['bestow-curse.attacks-against-source']) }),
+    )
+    expect(third.events).not.toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: purple.id,
+    }))
+  })
+
+  it('derives and enforces the shared Confusion/Mindfire turn table from an active effect', () => {
+    const confused = fighter('confused', 20)
+    const nearby = fighter('nearby', 10, { controller: 'dm', position: { x: 5, y: 0 } })
+    confused.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'confused-behavior-effect',
+      definitionId: 'activity:spell:confusion:confusion',
+      label: 'Confusion',
+      source: { kind: 'spell', actorId: nearby.id, rulesId: 'confusion', magical: true },
+      targetId: confused.id,
+      legacyCondition: 'confused-behavior',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: { preventReactions: true },
+    })]
+    const states = Array.from({ length: 256 }, (_, index) =>
+      startDnd5eHeadlessCombat(`confusion-table-${index}`, [confused, nearby]))
+    const startedStates = states.flatMap((state) => {
+      const started = resolveDnd5eHeadlessAction(state, {
+        type: 'begin-turn', actorId: confused.id,
+      })
+      return started.ok ? [{ state: started.state, events: started.events }] : []
+    })
+    const stateWithMode = (mode: 'random-movement-no-action' | 'no-movement-or-action' | 'random-melee-attack' | 'normal') => startedStates.find(({ events }) =>
+      events.some((event) => event.type === 'confused-turn-behavior-resolved' && event.mode === mode))
+    const noActionState = stateWithMode('no-movement-or-action')?.state
+    expect(noActionState).toBeDefined()
+    if (!noActionState) return
+    expect(noActionState.combatants[confused.id]?.turn).toMatchObject({
+      actionAvailable: false, bonusActionAvailable: false,
+      reactionAvailable: false, movementRemaining: 0,
+    })
+    expect(resolveDnd5eHeadlessAction(noActionState, {
+      type: 'attack', actorId: confused.id, targetId: nearby.id,
+      attackModifier: 20, d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [4], type: 'slashing' },
+    })).toMatchObject({ ok: false, reason: 'action-unavailable' })
+
+    const randomMovementEntry = stateWithMode('random-movement-no-action')
+    const randomMovement = randomMovementEntry?.events.find((event) =>
+      event.type === 'confused-turn-behavior-resolved' && event.mode === 'random-movement-no-action')
+    expect(randomMovement).toMatchObject({
+      roll: 1, mode: 'random-movement-no-action', directionRoll: expect.any(Number),
+    })
+    if (!randomMovementEntry || !randomMovement || randomMovement.type !== 'confused-turn-behavior-resolved') return
+    const movementState = randomMovementEntry.state
+    const movementActor = movementState.combatants[confused.id]!
+    expect(movementActor.turn).toMatchObject({
+      actionAvailable: false, bonusActionAvailable: false, reactionAvailable: false,
+      movementRemaining: 30,
+    })
+    expect(dnd5eHeadlessEndTurnRestrictionFailure(movementState, confused.id))
+      .toBe('insufficient-movement')
+    expect(resolveDnd5eHeadlessAction(movementState, {
+      type: 'end-turn', actorId: confused.id,
+    })).toMatchObject({ ok: false, reason: 'insufficient-movement' })
+    const direction = [
+      { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
+      { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
+    ][randomMovement.directionRoll! - 1]!
+    const directionLength = Math.hypot(direction.x, direction.y)
+    const destination = {
+      x: movementActor.position.x + direction.x / directionLength * 30,
+      y: movementActor.position.y + direction.y / directionLength * 30,
+    }
+    expect(resolveDnd5eHeadlessAction(movementState, {
+      type: 'move', actorId: confused.id,
+      to: {
+        x: movementActor.position.x - direction.x / directionLength * 30,
+        y: movementActor.position.y - direction.y / directionLength * 30,
+      },
+      distance: 30, movementCost: 30,
+    })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+    expect(resolveDnd5eHeadlessAction(movementState, {
+      type: 'move', actorId: confused.id,
+      to: {
+        x: movementActor.position.x + direction.x / directionLength * 15,
+        y: movementActor.position.y + direction.y / directionLength * 15,
+      },
+      distance: 15, movementCost: 15,
+    })).toMatchObject({ ok: false, reason: 'insufficient-movement' })
+    expect(resolveDnd5eHeadlessAction(movementState, {
+      type: 'move', actorId: confused.id, to: destination,
+      distance: 30, movementCost: 30,
+    })).toMatchObject({ ok: true })
+
+    const forcedAttackState = stateWithMode('random-melee-attack')?.state
+    const forcedAttack = forcedAttackState && dnd5eConfusedTurnBehavior(forcedAttackState, confused.id)
+    expect(forcedAttack).toMatchObject({
+      mode: 'random-melee-attack', forcedTargetId: nearby.id,
+    })
+    if (!forcedAttackState) return
+    expect(forcedAttackState.combatants[confused.id]?.turn).toMatchObject({
+      actionAvailable: true, bonusActionAvailable: false,
+      reactionAvailable: false, movementRemaining: 0,
+    })
+    expect(resolveDnd5eHeadlessAction(forcedAttackState, {
+      type: 'move', actorId: confused.id, to: { x: 0, y: 5 }, distance: 5,
+    })).toMatchObject({ ok: false, reason: 'insufficient-movement' })
+    expect(resolveDnd5eHeadlessAction(forcedAttackState, {
+      type: 'end-turn', actorId: confused.id,
+    })).toMatchObject({ ok: false, reason: 'action-unavailable' })
+    expect(resolveDnd5eHeadlessAction(forcedAttackState, {
+      type: 'attack', actorId: confused.id, targetId: nearby.id,
+      attackModifier: 20, d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [4], type: 'slashing' },
+    })).toMatchObject({ ok: true })
+
+    const normalState = stateWithMode('normal')?.state
+    expect(normalState?.combatants[confused.id]?.turn).toMatchObject({
+      actionAvailable: true, bonusActionAvailable: true,
+      reactionAvailable: false, movementRemaining: 30,
+    })
+  })
+
+  it('requires an independent Mirror Image roll and consumes only a hit duplicate', () => {
+    const attacker = fighter('mirror-attacker', 20)
+    const target = fighter('mirror-target', 10, { position: { x: 5, y: 0 } })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'mirror-image-effect',
+      definitionId: 'activity:spell:mirror-image:mirror-image',
+      label: 'Mirror Image',
+      source: { kind: 'spell', actorId: target.id, rulesId: 'mirror-image', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        attackDecoys: {
+          remaining: 3,
+          redirectMinimumD20: [11, 8, 6],
+          armorClassBase: 10,
+          armorClassAbility: 'dex',
+          requiresOrdinarySight: true,
+        },
+      },
+    })]
+    const state = startDnd5eHeadlessCombat('mirror-image', [attacker, target])
+    const baseAction = {
+      type: 'attack' as const,
+      actorId: attacker.id,
+      targetId: target.id,
+      attackModifier: 5,
+      d20: 12,
+      // Host clients may already have rolled damage before the independent
+      // redirection d20 is requested; redirected attacks must ignore this pool.
+      damage: { count: 1, sides: 8, bonus: 0, rolls: [4], type: 'slashing' as const },
+    }
+    const requested = resolveDnd5eHeadlessAction(state, baseAction)
+    expect(requested).toMatchObject({
+      ok: false, reason: 'invalid-dice',
+      attackDecoyRollRequirement: {
+        occurrenceId: `attack:${attacker.id}:${target.id}`,
+        attackerId: attacker.id,
+        targetId: target.id,
+        effectId: 'mirror-image-effect',
+        remaining: 3,
+        minimumD20: 6,
+        armorClass: 12,
+      },
+    })
+    if (requested.ok || !requested.attackDecoyRollRequirement) return
+
+    const redirected = resolveDnd5eHeadlessAction(state, {
+      ...baseAction,
+      attackDecoyRolls: [{
+        occurrenceId: requested.attackDecoyRollRequirement.occurrenceId,
+        effectId: 'mirror-image-effect',
+        redirectD20: 6,
+      }],
+    })
+    expect(redirected).toMatchObject({
+      ok: true,
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'attack-decoy-resolved', redirected: true, decoyHit: true,
+          redirectD20: 6, minimumD20: 6, remaining: 2,
+        }),
+        expect.objectContaining({ type: 'attack-resolved', hit: false }),
+      ]),
+    })
+    if (!redirected.ok) return
+    expect(redirected.state.combatants[target.id].currentHp).toBe(20)
+    expect(redirected.state.combatants[target.id].classState.activeEffects?.[0]
+      .modifiers?.attackDecoys?.remaining).toBe(2)
+
+    const bypassAttacker = fighter('truth-seer', 20, {
+      specialSenses: [{ kind: 'truesight', rangeFeet: 60 }],
+    })
+    const bypassTarget = fighter('truth-target', 10, { position: { x: 5, y: 0 } })
+    bypassTarget.classState.activeEffects = target.classState.activeEffects
+    const bypassState = startDnd5eHeadlessCombat('mirror-image-truesight', [bypassAttacker, bypassTarget])
+    bypassState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(bypassAttacker.id, bypassTarget.id)]: 5,
+    }
+    const bypassed = resolveDnd5eHeadlessAction(bypassState, {
+      ...baseAction,
+      actorId: bypassAttacker.id,
+      targetId: bypassTarget.id,
+      damage: { ...baseAction.damage, rolls: [4] },
+    })
+    expect(bypassed.ok, bypassed.ok ? undefined : bypassed.reason).toBe(true)
+    expect(bypassed).toMatchObject({
+      ok: true,
+      state: { combatants: { [bypassTarget.id]: { currentHp: 16 } } },
+    })
+    if (!bypassed.ok) return
+    expect(bypassed.events.some((event) => event.type === 'attack-decoy-resolved')).toBe(false)
+
+    const antimagicTarget = fighter('antimagic-target', 10, {
+      position: { x: 5, y: 0 }, magicSuppressed: true,
+    })
+    antimagicTarget.classState.activeEffects = target.classState.activeEffects
+    const antimagicState = startDnd5eHeadlessCombat('mirror-image-antimagic', [attacker, antimagicTarget])
+    const antimagicAttack = resolveDnd5eHeadlessAction(antimagicState, {
+      ...baseAction,
+      targetId: antimagicTarget.id,
+    })
+    expect(antimagicAttack).toMatchObject({
+      ok: true,
+      state: { combatants: { [antimagicTarget.id]: { currentHp: 16 } } },
+    })
+    if (antimagicAttack.ok) {
+      expect(antimagicAttack.events.some((event) => event.type === 'attack-decoy-resolved')).toBe(false)
+    }
+  })
+
+  it('prevents cross-plane sight and attacks while Etherealness is active', () => {
+    const attacker = fighter('material-attacker', 20)
+    const target = fighter('ethereal-target', 10)
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:spell:etherealness:etherealness',
+      label: 'Etherealness',
+      source: { kind: 'spell', actorId: target.id, rulesId: 'etherealness', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: {
+        planarPhase: {
+          plane: 'ethereal',
+          ignoresMaterialCollision: true,
+          suppressCrossPlaneEffects: true,
+          unrestrictedVerticalMovement: true,
+        },
+      },
+    })]
+    const state = startDnd5eHeadlessCombat('etherealness', [attacker, target])
+    expect(dnd5eCombatantCanSee(state, attacker.id, target.id)).toBe(false)
+    state.combatants[attacker.id].classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:spell:true-seeing:true-seeing',
+      label: 'True Seeing',
+      source: { kind: 'spell', actorId: attacker.id, rulesId: 'true-seeing', magical: true },
+      targetId: attacker.id,
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      modifiers: { truesightRangeFeet: 120, seeInvisible: true },
+    })]
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(attacker.id, target.id)]: 5,
+    }
+    expect(dnd5eCombatantCanSee(state, attacker.id, target.id)).toBe(true)
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: attacker.id, targetId: target.id,
+      attackModifier: 20, d20: 20,
+      damage: { count: 1, sides: 8, bonus: 0, rolls: [8], type: 'slashing' },
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('rejects attack-like actions from a non-attacking summon but preserves ordinary actions', () => {
+    const familiar = fighter('familiar', 20, {
+      summonedCannotAttack: true,
+      summonedSourceCombatantId: 'wizard',
+      summonedPersistent: true,
+    })
+    const target = fighter('target', 10)
+    const state = startDnd5eHeadlessCombat('non-attacking-summon', [familiar, target])
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: familiar.id, targetId: target.id,
+      attackModifier: 20, d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [4], type: 'slashing' },
+    })).toMatchObject({ ok: false, reason: 'action-unavailable' })
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'shove', actorId: familiar.id, targetId: target.id,
+      actorD20: 20, targetD20: 1, targetDefense: 'athletics', outcome: 'prone',
+    })).toMatchObject({ ok: false, reason: 'action-unavailable' })
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'dodge', actorId: familiar.id,
+    })).toMatchObject({ ok: true })
+  })
+
+  it('applies source-relative Perception disadvantage and requires an explicit observed creature', () => {
+    const source = fighter('enthraller', 20)
+    const observer = fighter('observer', 15)
+    const other = fighter('other', 10)
+    observer.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:enthrall', label: 'Enthrall',
+      source: { kind: 'spell', actorId: source.id, magical: true }, targetId: observer.id,
+      modifiers: { perceptionDisadvantageAgainstOthersThanSource: true },
+      removal: { sourceLink: { sourceMustBeConsciousAndAbleToSpeak: true } },
+    })]
+    let state = startDnd5eHeadlessCombat('enthrall-perception', [source, observer, other])
+    state.initiativeIndex = state.initiativeOrder.indexOf(observer.id)
+
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'ability-check', actorId: observer.id, ability: 'wis', skill: 'perception',
+      d20: 18, d20Second: 3, dc: 10,
+    })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+
+    const againstOther = resolveDnd5eHeadlessAction(state, {
+      type: 'ability-check', actorId: observer.id, ability: 'wis', skill: 'perception',
+      perceivedTargetId: other.id, d20: 18, d20Second: 3, dc: 10,
+    })
+    expect(againstOther).toMatchObject({
+      ok: true,
+      events: expect.arrayContaining([expect.objectContaining({
+        type: 'ability-check-resolved', perceivedTargetId: other.id,
+        mode: 'disadvantage', d20: 3,
+      })]),
+    })
+    if (!againstOther.ok) return
+    state = againstOther.state
+    state.initiativeIndex = state.initiativeOrder.indexOf(observer.id)
+    const againstSource = resolveDnd5eHeadlessAction(state, {
+      type: 'ability-check', actorId: observer.id, ability: 'wis', skill: 'perception',
+      perceivedTargetId: source.id, d20: 18, dc: 10,
+    })
+    expect(againstSource).toMatchObject({
+      ok: true,
+      events: expect.arrayContaining([expect.objectContaining({
+        type: 'ability-check-resolved', perceivedTargetId: source.id,
+        mode: 'normal', d20: 18,
+      })]),
+    })
+    if (!againstSource.ok) return
+    state = againstSource.state
+    state.combatants[source.id].classState.activeEffects = [createDnd5eConditionEffect({
+      condition: 'unconscious', source: { kind: 'system', actorId: source.id }, targetId: source.id,
+    })]
+    state.combatants[source.id].conditions = ['unconscious']
+    state.initiativeIndex = state.initiativeOrder.indexOf(observer.id)
+    const reconciled = resolveDnd5eHeadlessAction(state, {
+      type: 'ability-check', actorId: observer.id, ability: 'int', d20: 10, dc: 5,
+    })
+    expect(reconciled).toMatchObject({
+      ok: true,
+      events: expect.arrayContaining([expect.objectContaining({
+        type: 'active-effect-removed', targetId: observer.id, reason: 'source-incapacitated',
+      })]),
+    })
+    if (!reconciled.ok) return
+    expect(reconciled.state.combatants[observer.id].classState.activeEffects ?? []).toEqual([])
+  })
+
+  it('applies underwater weapon penalties and lets a generic environmental capability suppress them', () => {
+    const attacker = fighter('underwater-attacker', 20)
+    const target = fighter('underwater-target', 10, { position: { x: 5, y: 0 } })
+    const attack = (state: ReturnType<typeof startDnd5eHeadlessCombat>) =>
+      resolveDnd5eHeadlessAction(state, {
+        type: 'attack', actorId: attacker.id, targetId: target.id,
+        attackModifier: 5, d20: 18, d20Second: 2,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [4], type: 'slashing' },
+        classDamageContext: {
+          ...meleeWeaponContext('greatsword'), weaponBaseId: 'greatsword',
+        },
+      })
+    const underwater = startDnd5eHeadlessCombat('underwater-penalty', [attacker, target])
+    underwater.environment = 'underwater'
+    const penalized = attack(underwater)
+    expect(penalized.ok).toBe(true)
+    if (!penalized.ok) return
+    expect(penalized.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: attacker.id, d20: 2, hit: false,
+    }))
+
+    const protectedAttacker = fighter('underwater-attacker', 20)
+    protectedAttacker.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:freedom-of-movement', label: 'Freedom of Movement',
+      source: { kind: 'spell', actorId: 'cleric', magical: true }, targetId: protectedAttacker.id,
+      modifiers: { environmentalCapabilities: { ignoreUnderwaterAttackPenalty: true } },
+    })]
+    const protectedState = startDnd5eHeadlessCombat('underwater-protected', [protectedAttacker, target])
+    protectedState.environment = 'underwater'
+    const unpenalized = attack(protectedState)
+    expect(unpenalized.ok).toBe(true)
+    if (!unpenalized.ok) return
+    expect(unpenalized.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: protectedAttacker.id, d20: 18, hit: true,
+    }))
+  })
+
+  it('resolves deterministic periodic healing once at each target turn start', () => {
+    const healer = fighter('healer', 20)
+    const target = fighter('target', 10, { currentHp: 10 })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:regenerate', label: '再生术', targetId: target.id,
+      source: { kind: 'spell', actorId: healer.id, rulesId: 'regenerate', magical: true },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      periodicHealing: { timing: 'target-turn-start', amount: 1 },
+      stackingKey: 'spell:regenerate',
+    })]
+    const initial = startDnd5eHeadlessCombat('periodic-healing', [healer, target])
+
+    const first = resolveDnd5eHeadlessAction(initial, { type: 'end-turn', actorId: healer.id })
+    expect(first.ok, first.ok ? undefined : first.reason).toBe(true)
+    if (!first.ok) return
+    expect(first.state.combatants[target.id].currentHp).toBe(11)
+    expect(first.events).toContainEqual(expect.objectContaining({
+      type: 'healing-applied', targetId: target.id, amount: 1, hpBefore: 10, hpAfter: 11,
+    }))
+
+    // A stale/replayed boundary cannot apply the same effect twice because the
+    // authoritative effect carries its last resolved turn key.
+    const duplicateBoundary = resolveDnd5eHeadlessAction(first.state, {
+      type: 'move', actorId: target.id, to: { x: 0, y: 0 }, distance: 0,
+    })
+    expect(duplicateBoundary.ok, duplicateBoundary.ok ? undefined : duplicateBoundary.reason).toBe(true)
+    if (!duplicateBoundary.ok) return
+    expect(duplicateBoundary.state.combatants[target.id].currentHp).toBe(11)
+  })
+
+  it('restores missing body parts after the configured authoritative turn count', () => {
+    const healer = fighter('healer', 20)
+    const target = fighter('target', 10)
+    target.classState.bodyPresent = true
+    target.classState.missingBodyParts = ['left-arm']
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:regenerate', label: '再生术', targetId: target.id,
+      source: { kind: 'spell', actorId: healer.id, rulesId: 'regenerate', magical: true },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      bodyRestoration: { roundsRemaining: 2 },
+      stackingKey: 'spell:regenerate',
+    })]
+    const initial = startDnd5eHeadlessCombat('body-restoration', [healer, target])
+    const firstTargetTurn = resolveDnd5eHeadlessAction(initial, {
+      type: 'end-turn', actorId: healer.id,
+    })
+    expect(firstTargetTurn.ok, firstTargetTurn.ok ? undefined : firstTargetTurn.reason).toBe(true)
+    if (!firstTargetTurn.ok) return
+    expect(firstTargetTurn.state.combatants[target.id].classState.missingBodyParts).toEqual(['left-arm'])
+    expect(firstTargetTurn.state.combatants[target.id].classState.activeEffects?.[0]
+      ?.bodyRestoration?.roundsRemaining).toBe(1)
+
+    const healerTurn = resolveDnd5eHeadlessAction(firstTargetTurn.state, {
+      type: 'end-turn', actorId: target.id,
+    })
+    expect(healerTurn.ok, healerTurn.ok ? undefined : healerTurn.reason).toBe(true)
+    if (!healerTurn.ok) return
+    const restored = resolveDnd5eHeadlessAction(healerTurn.state, {
+      type: 'end-turn', actorId: healer.id,
+    })
+    expect(restored.ok, restored.ok ? undefined : restored.reason).toBe(true)
+    if (!restored.ok) return
+    expect(restored.state.combatants[target.id].classState.missingBodyParts).toBeUndefined()
+    expect(restored.state.combatants[target.id].classState.activeEffects?.[0]
+      ?.bodyRestoration).toBeUndefined()
+    expect(restored.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: target.id, stateKey: 'body-restored', active: true,
+    }))
+  })
+
+  it('enforces Irresistible Dance through generic effect primitives and an action save', () => {
+    const dancer = fighter('dancer', 20, { savingThrowBonuses: { wis: 1 } })
+    const caster = fighter('caster', 10)
+    dancer.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:irresistible-dance:effect', label: '迷舞术', targetId: dancer.id,
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'irresistible-dance', magical: true },
+      duration: { type: 'concentration', sourceActorId: caster.id },
+      escapeSavingThrow: { ability: 'wis', dc: 14, economy: 'action' },
+      modifiers: {
+        speedOverrideFeet: 0,
+        speedBonusFeet: 30,
+        attackRollDisadvantage: true,
+        savingThrowDisadvantages: ['dex'],
+        attacksAgainstTargetAdvantage: true,
+      },
+    })]
+    const initial = startDnd5eHeadlessCombat('irresistible-dance', [dancer, caster])
+    const affected = initial.combatants[dancer.id]
+
+    expect(dnd5eEffectiveSpeed(affected)).toBe(0)
+    expect(dnd5eActiveAttackRollFlags(affected.classState.activeEffects)).toMatchObject({
+      disadvantage: true,
+    })
+    expect(dnd5eSavingThrowMode(affected, 'dex')).toBe('disadvantage')
+    expect(dnd5eTargetGrantsAttackAdvantage(affected)).toBe(true)
+
+    const failed = resolveDnd5eHeadlessAction(structuredClone(initial), {
+      type: 'escape-active-effect', actorId: dancer.id,
+      effectId: affected.classState.activeEffects![0]!.id, d20: 1,
+    })
+    expect(failed.ok, failed.ok ? undefined : failed.reason).toBe(true)
+    if (!failed.ok) return
+    expect(failed.state.combatants[dancer.id].turn.actionAvailable).toBe(false)
+    expect(failed.state.combatants[dancer.id].classState.activeEffects).toHaveLength(1)
+    expect(failed.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved', ability: 'wis', dc: 14, success: false,
+    }))
+
+    const escaped = resolveDnd5eHeadlessAction(structuredClone(initial), {
+      type: 'escape-active-effect', actorId: dancer.id,
+      effectId: affected.classState.activeEffects![0]!.id, d20: 20,
+    })
+    expect(escaped.ok, escaped.ok ? undefined : escaped.reason).toBe(true)
+    if (!escaped.ok) return
+    expect(escaped.state.combatants[dancer.id].turn.actionAvailable).toBe(false)
+    expect(escaped.state.combatants[dancer.id].classState.activeEffects).toBeUndefined()
+    expect(dnd5eEffectiveSpeed(escaped.state.combatants[dancer.id])).toBe(30)
+  })
+
+  it('lets configured creature profiles automatically pass a generic action escape check', () => {
+    const minotaur = fighter('minotaur', 20, { statBlockId: 'srd-5.1:minotaur' })
+    minotaur.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:maze:effect', label: '迷宫术', targetId: minotaur.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'maze', magical: true },
+      duration: { type: 'concentration', sourceActorId: 'caster' },
+      legacyCondition: 'banished',
+      escapeCheck: {
+        ability: 'int', dc: 20, economy: 'action',
+        automaticSuccessStatBlockIds: ['srd-5.1:minotaur', 'srd-5.1:goristro'],
+      },
+    })]
+    const state = startDnd5eHeadlessCombat('maze-auto-escape', [
+      minotaur,
+      fighter('caster', 20),
+    ])
+    const escaped = resolveDnd5eHeadlessAction(state, {
+      type: 'escape-active-effect', actorId: minotaur.id,
+      effectId: minotaur.classState.activeEffects[0]!.id, d20: 1,
+    })
+    expect(escaped.ok, escaped.ok ? undefined : escaped.reason).toBe(true)
+    if (!escaped.ok) return
+    expect(escaped.state.combatants[minotaur.id].classState.activeEffects).toBeUndefined()
+    expect(escaped.state.combatants[minotaur.id].turn.actionAvailable).toBe(false)
+    expect(escaped.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved', automatic: true, success: true, dc: 20,
+    }))
+  })
+
+  it('projects Mind Blank divination targeting immunity through the shared effect consumer', () => {
+    const target = fighter('target', 20)
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:mind-blank:effect', label: '心灵屏障', targetId: target.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'mind-blank', magical: true },
+      duration: { type: 'rounds', remainingRounds: 14_400, tickOn: 'target-turn-end' },
+      modifiers: {
+        damageImmunity: 'psychic',
+        conditionImmunities: ['charmed'],
+        spellTargetingImmunitySchools: ['divination'],
+      },
+    })]
+    expect(dnd5eActiveSpellTargetingImmunitySchools(target.classState.activeEffects))
+      .toEqual(['divination'])
+  })
+
+  it('normalizes a legacy core spell school before enforcing plugin Activity targeting immunity', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const caster = fighter('guidance-caster', 20)
+    const target = fighter('nondetection-target', 10, { position: { x: 5, y: 0 } })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:nondetection:effect', label: '回避侦测', targetId: target.id,
+      source: { kind: 'spell', actorId: target.id, rulesId: 'nondetection', magical: true },
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: { spellTargetingImmunitySchools: ['divination'] },
+    })]
+    const state = startDnd5eHeadlessCombat('nondetection-guidance', [caster, target])
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:guidance',
+        transactionId: 'guidance-cast', actorId: caster.id,
+        targetId: target.id, targetIds: [target.id], distanceFeet: 5, rolls: {},
+      },
+      spell: {
+        castingClassId: 'druid', spellId: 'guidance', spellName: '神导术',
+        spellLevel: 0, slotLevel: 0, castingTime: 'action',
+        declaredTargetIds: [target.id], concentrationRounds: 10,
+        concentrationTargetIds: [target.id],
+        // Legacy core payloads still carry the localized school label at this
+        // boundary even though the public action type is normalized.
+        spellSchool: '预言' as never,
+      },
+    })
+
+    expect(resolved).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(resolved.state.combatants[caster.id].turn.actionAvailable).toBe(true)
+  })
+
+  it.each([
+    { label: 'shapechanger', reason: 'shapechanger' as const },
+    { label: 'zero-hit-point creature', reason: 'zero-hit-points' as const },
+  ])('spends an Activity Polymorph cast without starting empty concentration on a $label', ({ reason }) => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const caster = fighter('polymorph-caster', 20, {
+      classId: 'druid', level: 8, classLevels: { druid: 8 }, saveDc: 16,
+      classSelections: { 'spell-prepared': ['polymorph'] },
+      classSelectionsByClass: { druid: { 'spell-prepared': ['polymorph'] } },
+      classResources: { 'dnd5e-spell-slot-4': { current: 1, max: 1 } },
+    })
+    const target = fighter('shapechanger-target', 10, {
+      controller: 'dm', position: { x: 5, y: 0 },
+      ...(reason === 'shapechanger'
+        ? { shapechanger: true }
+        : { currentHp: 0, usesDeathSaves: true }),
+    })
+    const state = startDnd5eHeadlessCombat(`activity-polymorph-${reason}`, [caster, target])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(caster.id, target.id)]: 5,
+    }
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:polymorph',
+        transactionId: 'polymorph-shapechanger-cast', actorId: caster.id,
+        targetId: target.id, targetIds: [target.id], distanceFeet: 5, castLevel: 4,
+        payload: { activityChoices: { mode: 'srd-5.1:bat' } },
+        rolls: { [`spell-save-d20:${target.id}`]: { values: [1, 2], modifier: 0, total: 3 } },
+      },
+      spell: {
+        castingClassId: 'druid', spellId: 'polymorph', spellName: '变形术',
+        spellLevel: 4, slotLevel: 4, castingTime: 'action',
+        declaredTargetIds: [target.id], concentrationRounds: 600,
+        concentrationTargetIds: [target.id], spellSchool: 'transmutation',
+      },
+    })
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[caster.id]).toMatchObject({
+      concentrating: false,
+      turn: { actionAvailable: false },
+      classResources: { 'dnd5e-spell-slot-4': { current: 0, max: 1 } },
+    })
+    expect(resolved.state.combatants[target.id].classState.wildShapeFormId).toBeUndefined()
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'creature-transformation-unaffected', targetId: target.id, reason,
+    }))
+    expect(resolved.events).not.toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', stateKey: 'concentration', active: true,
+    }))
+  })
+
+  it('allows a persistent-area Activity spell to include an unconscious but living creature', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const caster = fighter('storm-caster', 20, {
+      classId: 'druid', level: 20, classLevels: { druid: 20 }, saveDc: 19,
+      classSelections: { 'spell-prepared': ['storm-of-vengeance'] },
+      classSelectionsByClass: { druid: { 'spell-prepared': ['storm-of-vengeance'] } },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const dying = fighter('dying-target', 10, {
+      controller: 'player', currentHp: 0, conditions: ['unconscious', 'prone'],
+      position: { x: 5, y: 0 },
+    })
+    expect(dying.deathSaves.dead).toBe(false)
+    const state = startDnd5eHeadlessCombat('storm-with-unconscious-target', [caster, dying])
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:storm-of-vengeance',
+        transactionId: 'storm-with-unconscious-target-cast', actorId: caster.id,
+        targetId: caster.id, targetIds: [caster.id, dying.id],
+        targetCell: { col: 1, row: 1 }, distanceFeet: 5, castLevel: 9,
+        activityAreaPlacement: {
+          x: 50, y: 50, elevationFeet: 0, radiusFeet: 360,
+          instances: [{ x: 50, y: 50, elevationFeet: 0 }],
+        },
+        activityAreaPlacementDistanceFeet: 5,
+        rolls: {},
+      },
+      spell: {
+        castingClassId: 'druid', spellId: 'storm-of-vengeance', spellName: '复仇风暴',
+        spellLevel: 9, slotLevel: 9, castingTime: 'action',
+        declaredTargetIds: [caster.id, dying.id], concentrationRounds: 10,
+        concentrationTargetIds: [caster.id, dying.id], spellSchool: 'conjuration',
+      },
+    })
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.activityHandoffs?.persistentAreas).toContainEqual(expect.objectContaining({
+      label: '复仇风暴', durationRounds: 10, concentration: true,
+    }))
+    expect(resolved.state.combatants[caster.id]).toMatchObject({
+      concentrating: true,
+      turn: { actionAvailable: false },
+      classResources: { 'dnd5e-spell-slot-9': { current: 0, max: 1 } },
+      classState: {
+        concentrationSpellId: 'storm-of-vengeance',
+        concentrationTargetIds: [caster.id, dying.id],
+      },
+    })
+  })
+
+  it('settles the owning Shapechange spell after its self-transform Activity', () => {
+    dnd5ePluginHeadlessActionDefinition('srd-5.1', 'spell:shapechange')
+    const caster = fighter('shapechange-caster', 20, {
+      classId: 'wizard', level: 20, classLevels: { wizard: 20 }, saveDc: 19,
+      classSelections: { 'spell-prepared': ['shapechange'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['shapechange'] } },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const witness = fighter('shapechange-witness', 10, {
+      controller: 'dm', position: { x: 30, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('activity-shapechange-owning-spell', [caster, witness])
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:shapechange',
+        transactionId: 'shapechange-owning-spell-cast', actorId: caster.id,
+        targetId: caster.id, targetIds: [caster.id], distanceFeet: 0, castLevel: 9,
+        payload: {
+          activityChoices: {
+            mode: 'srd-5.1:adult-black-dragon', equipment: 'merge', seen: 'confirmed',
+          },
+        },
+        rolls: {}, interruptChoiceId: 'dm-apply',
+      },
+      spell: {
+        castingClassId: 'wizard', spellId: 'shapechange', spellName: '形体变化',
+        spellLevel: 9, slotLevel: 9, castingTime: 'action',
+        declaredTargetIds: [caster.id], concentrationRounds: 600,
+        concentrationTargetIds: [caster.id], spellSchool: 'transmutation',
+      },
+    })
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[caster.id]).toMatchObject({
+      currentHp: 195,
+      maxHp: 195,
+      armorClass: 19,
+      concentrating: true,
+      classResources: { 'dnd5e-spell-slot-9': { current: 0, max: 1 } },
+      classState: {
+        wildShapeFormId: 'srd-5.1:adult-black-dragon',
+        wildShapeMode: 'shapechange',
+        shapechangeEquipmentDisposition: 'merge',
+        concentrationSpellId: 'shapechange',
+      },
+    })
+  })
+
+  it('clears residual concentration links before a new Activity spell starts concentrating', () => {
+    dnd5ePluginHeadlessActionDefinition('srd-5.1', 'spell:spider-climb')
+    const caster = fighter('spider-climb-caster', 20, {
+      classId: 'wizard', level: 3, classLevels: { wizard: 3 }, saveDc: 14,
+      classSelections: { 'spell-prepared': ['spider-climb'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['spider-climb'] } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+      concentrating: false,
+    })
+    const staleTarget = fighter('stale-slow-target', 10, {
+      controller: 'dm', position: { x: 10, y: 0 },
+    })
+    staleTarget.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'stale-slow-effect',
+      definitionId: 'activity:slow:effect',
+      label: '缓慢术',
+      targetId: staleTarget.id,
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'slow', magical: true },
+      duration: {
+        type: 'concentration', sourceActorId: caster.id,
+        concentrationId: 'slow', remainingRounds: 10,
+      },
+      modifiers: { speedMultiplier: 0.5 },
+    })]
+    staleTarget.classState.concentrationEffectsBySource = { [caster.id]: 'slow' }
+    const state = startDnd5eHeadlessCombat('residual-concentration-links', [caster, staleTarget])
+
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'plugin-spell-activity', actorId: caster.id,
+      pluginAction: {
+        type: 'plugin', pluginId: 'srd-5.1', actionId: 'spell:spider-climb',
+        transactionId: 'spider-climb-after-stale-slow', actorId: caster.id,
+        targetId: caster.id, targetIds: [caster.id], distanceFeet: 0, castLevel: 2,
+        rolls: {},
+      },
+      spell: {
+        castingClassId: 'wizard', spellId: 'spider-climb', spellName: '蛛行术',
+        spellLevel: 2, slotLevel: 2, castingTime: 'action',
+        declaredTargetIds: [caster.id], concentrationRounds: 600,
+        concentrationTargetIds: [caster.id], spellSchool: 'transmutation',
+      },
+    })
+
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[staleTarget.id].classState.activeEffects).toBeUndefined()
+    expect(resolved.state.combatants[staleTarget.id].classState.concentrationEffectsBySource).toBeUndefined()
+    expect(resolved.state.combatants[caster.id]).toMatchObject({
+      concentrating: true,
+      classState: {
+        concentrationSpellId: 'spider-climb',
+        concentrationSpellLevel: 2,
+        concentrationRoundsRemaining: 600,
+        concentrationStartedTurnKey: 'residual-concentration-links:1:spider-climb-caster',
+      },
+    })
+    const casterTurnEnded = resolveDnd5eHeadlessAction(resolved.state, {
+      type: 'end-turn', actorId: caster.id,
+    })
+    expect(casterTurnEnded.ok, casterTurnEnded.ok ? undefined : casterTurnEnded.reason).toBe(true)
+    if (!casterTurnEnded.ok) return
+    expect(casterTurnEnded.state.combatants[caster.id].classState).toMatchObject({
+      concentrationRoundsRemaining: 600,
+      concentrationStartedTurnKey: undefined,
+    })
+    const targetTurnEnded = resolveDnd5eHeadlessAction(casterTurnEnded.state, {
+      type: 'end-turn', actorId: staleTarget.id,
+    })
+    expect(targetTurnEnded.ok, targetTurnEnded.ok ? undefined : targetTurnEnded.reason).toBe(true)
+    if (!targetTurnEnded.ok) return
+    const nextCasterTurnEnded = resolveDnd5eHeadlessAction(targetTurnEnded.state, {
+      type: 'end-turn', actorId: caster.id,
+    })
+    expect(nextCasterTurnEnded.ok, nextCasterTurnEnded.ok ? undefined : nextCasterTurnEnded.reason).toBe(true)
+    if (!nextCasterTurnEnded.ok) return
+    expect(nextCasterTurnEnded.state.combatants[caster.id].classState.concentrationRoundsRemaining)
+      .toBe(599)
+    expect(resolved.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: staleTarget.id,
+      effectId: 'stale-slow-effect', reason: 'concentration-ended',
+    }))
+  })
+
+  it('rejects a core divination spell targeting a creature protected by Nondetection', () => {
+    const caster = fighter('core-guidance-caster', 20, {
+      classId: 'druid', level: 1, classSelections: { 'spell-cantrips': ['guidance'] },
+    })
+    const target = fighter('core-nondetection-target', 10, { position: { x: 5, y: 0 } })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:nondetection:effect', label: '回避侦测', targetId: target.id,
+      source: { kind: 'spell', actorId: target.id, rulesId: 'nondetection', magical: true },
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: { spellTargetingImmunitySchools: ['divination'] },
+    })]
+    const state = startDnd5eHeadlessCombat('core-nondetection-guidance', [caster, target])
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: caster.id, targetId: target.id,
+      spellId: 'guidance', slotLevel: 0, effectRolls: [],
+    })
+
+    expect(resolved).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(resolved.state.combatants[caster.id].turn.actionAvailable).toBe(true)
+  })
+
+  it('persists cumulative repeat-save progress and transitions only at the declared failure threshold', () => {
+    const target = fighter('target', 20, { savingThrowBonuses: { con: 0 } })
+    const caster = fighter('caster', 10, { concentrating: true })
+    caster.classState.concentrationSpellId = 'progressive-save'
+    caster.classState.concentrationRoundsRemaining = 10
+    caster.classState.concentrationTargetIds = [target.id]
+    target.classState.activeEffects = [createDnd5eConditionEffect({
+      targetId: target.id,
+      condition: 'restrained',
+      source: {
+        kind: 'spell', actorId: caster.id, rulesId: 'progressive-save', pluginId: 'srd-5.1',
+        spellLevel: 6, spellSaveDc: 19, magical: true,
+      },
+      duration: { type: 'concentration', sourceActorId: caster.id, concentrationId: 'progressive-save' },
+      repeatSave: {
+        ability: 'con', dc: 14, timing: 'target-turn-end', onSuccess: 'remove',
+        successesRequired: 3, failuresRequired: 3, successes: 0, failures: 1,
+        onFailureTransition: {
+          replaceWithCondition: 'petrified', duration: 'source-concentration-then-permanent',
+        },
+      },
+    })]
+    let state = startDnd5eHeadlessCombat('progressive-save', [target, caster])
+    const effectId = state.combatants.target.classState.activeEffects![0]!.id
+
+    const secondFailure = resolveDnd5eHeadlessAction(state, {
+      type: 'end-turn', actorId: target.id,
+      activeEffectSavingThrows: [{ effectId, d20: 1 }],
+    })
+    expect(secondFailure.ok, secondFailure.ok ? undefined : secondFailure.reason).toBe(true)
+    if (!secondFailure.ok) return
+    expect(secondFailure.state.combatants.target.conditions).toContain('restrained')
+    expect(secondFailure.state.combatants.target.classState.activeEffects?.[0]?.repeatSave)
+      .toMatchObject({ successes: 0, failures: 2 })
+
+    const casterTurn = resolveDnd5eHeadlessAction(secondFailure.state, {
+      type: 'end-turn', actorId: caster.id,
+    })
+    expect(casterTurn.ok, casterTurn.ok ? undefined : casterTurn.reason).toBe(true)
+    if (!casterTurn.ok) return
+    state = casterTurn.state
+    const thirdFailure = resolveDnd5eHeadlessAction(state, {
+      type: 'end-turn', actorId: target.id,
+      activeEffectSavingThrows: [{ effectId, d20: 1 }],
+    })
+    expect(thirdFailure.ok, thirdFailure.ok ? undefined : thirdFailure.reason).toBe(true)
+    if (!thirdFailure.ok) return
+    expect(thirdFailure.state.combatants.target.conditions).not.toContain('restrained')
+    expect(thirdFailure.state.combatants.target.conditions).toContain('petrified')
+    expect(thirdFailure.state.combatants.target.classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        standardCondition: 'petrified',
+        duration: expect.objectContaining({ type: 'concentration', sourceActorId: caster.id }),
+        persistAfterConcentrationCompletes: true,
+        source: expect.objectContaining({
+          pluginId: 'srd-5.1', spellLevel: 6, spellSaveDc: 19, magical: true,
+        }),
+      }),
+    )
+
+    const interrupted = structuredClone(thirdFailure.state)
+    endDnd5eConcentration(interrupted, interrupted.combatants.caster, [])
+    expect(interrupted.combatants.target.conditions).not.toContain('petrified')
+
+    const completed = structuredClone(thirdFailure.state)
+    endDnd5eConcentration(completed, completed.combatants.caster, [], 'completed')
+    expect(completed.combatants.target.classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        standardCondition: 'petrified', duration: { type: 'permanent' },
+        persistAfterConcentrationCompletes: undefined,
+        source: expect.objectContaining({
+          pluginId: 'srd-5.1', spellLevel: 6, spellSaveDc: 19, magical: true,
+        }),
+      }),
+    )
+  })
+
+  it('consumes ability-scoped attack disadvantage and vulnerability-to-all from shared effects', () => {
+    const attacker = fighter('attacker', 20)
+    attacker.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:ability-attack-disadvantage', label: '力量攻击劣势', targetId: attacker.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'test-disease', magical: true },
+      modifiers: { attackRollDisadvantageAbilities: ['str'] },
+    })]
+    const target = fighter('target', 10, { controller: 'dm', armorClass: 10 })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:all-damage-vulnerability', label: '全伤害易伤', targetId: target.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'test-disease', magical: true },
+      modifiers: { vulnerabilityToAllDamage: true },
+    })]
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('disease-modifiers', [attacker, target]),
+      {
+        type: 'attack', actorId: attacker.id, targetId: target.id,
+        d20: 20, d20Second: 1, attackModifier: 5,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [5], type: 'slashing' },
+        classDamageContext: meleeWeaponContext('longsword'), classDamageRolls: [],
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: attacker.id, hit: false,
+    }))
+
+    const cleanAttacker = fighter('clean-attacker', 20)
+    const vulnerable = fighter('vulnerable', 10, { controller: 'dm', armorClass: 10 })
+    vulnerable.classState.activeEffects = target.classState.activeEffects
+    const doubled = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('all-vulnerability', [cleanAttacker, vulnerable]),
+      {
+        type: 'attack', actorId: cleanAttacker.id, targetId: vulnerable.id,
+        d20: 15, attackModifier: 5,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [5], type: 'slashing' },
+        classDamageContext: meleeWeaponContext('longsword'), classDamageRolls: [],
+      },
+    )
+    expect(doubled.ok, doubled.ok ? undefined : doubled.reason).toBe(true)
+    if (!doubled.ok) return
+    expect(doubled.state.combatants.vulnerable.currentHp).toBe(10)
+  })
+
+  it('applies an effect-authored on-damage condition until the damaged creature next ends its turn', () => {
+    const attacker = fighter('attacker', 20)
+    const target = fighter('target', 10, { controller: 'dm', armorClass: 10 })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:on-damage-stun', label: '受伤后震慑', targetId: target.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'test-disease', magical: true },
+      onDamageCondition: { condition: 'stunned', duration: 'until-target-next-turn-end' },
+    })]
+    const hit = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('on-damage-condition', [attacker, target]), {
+      type: 'attack', actorId: attacker.id, targetId: target.id, d20: 15, attackModifier: 5,
+      damage: { count: 1, sides: 8, bonus: 0, rolls: [3], type: 'slashing' },
+      classDamageContext: meleeWeaponContext('longsword'), classDamageRolls: [],
+    })
+    expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+    if (!hit.ok) return
+    expect(hit.state.combatants.target.conditions).toContain('stunned')
+    const attackerEnded = resolveDnd5eHeadlessAction(hit.state, { type: 'end-turn', actorId: attacker.id })
+    expect(attackerEnded.ok, attackerEnded.ok ? undefined : attackerEnded.reason).toBe(true)
+    if (!attackerEnded.ok) return
+    const targetEnded = resolveDnd5eHeadlessAction(attackerEnded.state, { type: 'end-turn', actorId: target.id })
+    expect(targetEnded.ok, targetEnded.ok ? undefined : targetEnded.reason).toBe(true)
+    if (!targetEnded.ok) return
+    expect(targetEnded.state.combatants.target.conditions).not.toContain('stunned')
+  })
+
+  it('enforces Haste speed, one restricted extra action, and its end penalty', () => {
+    const actor = fighter('actor', 20, { concentrating: true, armorClass: 14 })
+    const target = fighter('target', 10, { controller: 'dm', armorClass: 10, currentHp: 100, maxHp: 100 })
+    actor.classState.concentrationSpellId = 'haste'
+    actor.classState.concentrationRoundsRemaining = 10
+    actor.classState.concentrationTargetIds = [actor.id]
+    actor.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:haste:effect', label: '加速术', targetId: actor.id,
+      source: { kind: 'spell', actorId: actor.id, rulesId: 'haste', magical: true },
+      duration: { type: 'concentration', sourceActorId: actor.id, concentrationId: 'haste' },
+      modifiers: {
+        speedMultiplier: 2, armorClassBonus: 2, savingThrowAdvantages: ['dex'],
+        restrictedExtraAction: {
+          allowedActions: ['weapon-attack', 'dash', 'disengage', 'hide', 'use-object'],
+          maximumWeaponAttacks: 1,
+        },
+      },
+      afterEffectEnds: {
+        duration: 'until-target-next-turn-end', preventActions: true, preventMovement: true,
+      },
+    })]
+    let state = startDnd5eHeadlessCombat('haste-exact', [actor, target])
+    expect(dnd5eEffectiveSpeed(state.combatants.actor)).toBe(60)
+
+    const attack = (current: typeof state) => resolveDnd5eHeadlessAction(current, {
+      type: 'attack', actorId: actor.id, targetId: target.id, d20: 15, attackModifier: 5,
+      damage: { count: 1, sides: 8, bonus: 0, rolls: [1], type: 'slashing' },
+      classDamageContext: meleeWeaponContext('longsword'), classDamageRolls: [],
+    })
+    const ordinary = attack(state)
+    expect(ordinary.ok, ordinary.ok ? undefined : ordinary.reason).toBe(true)
+    if (!ordinary.ok) return
+    const hasted = attack(ordinary.state)
+    expect(hasted.ok, hasted.ok ? undefined : hasted.reason).toBe(true)
+    if (!hasted.ok) return
+    const forbiddenThird = attack(hasted.state)
+    expect(forbiddenThird).toMatchObject({ ok: false, reason: 'action-unavailable' })
+
+    state = hasted.state
+    const endEvents: Parameters<typeof endDnd5eConcentration>[2] = []
+    endDnd5eConcentration(state, state.combatants.actor, endEvents)
+    expect(dnd5eEffectiveSpeed(state.combatants.actor)).toBe(0)
+    expect(state.combatants.actor.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'activity:haste:effect:after-effect-ends',
+      modifiers: expect.objectContaining({ preventActions: true, speedOverrideFeet: 0 }),
+    }))
+    const blocked = resolveDnd5eHeadlessAction(state, { type: 'dash', actorId: actor.id })
+    expect(blocked).toMatchObject({ ok: false, reason: 'action-unavailable' })
+
+    const actorEnd = resolveDnd5eHeadlessAction(state, { type: 'end-turn', actorId: actor.id })
+    expect(actorEnd.ok, actorEnd.ok ? undefined : actorEnd.reason).toBe(true)
+    if (!actorEnd.ok) return
+    const targetEnd = resolveDnd5eHeadlessAction(actorEnd.state, { type: 'end-turn', actorId: target.id })
+    expect(targetEnd.ok, targetEnd.ok ? undefined : targetEnd.reason).toBe(true)
+    if (!targetEnd.ok) return
+    expect(dnd5eEffectiveSpeed(targetEnd.state.combatants.actor)).toBe(0)
+    const nextActorEnd = resolveDnd5eHeadlessAction(targetEnd.state, { type: 'end-turn', actorId: actor.id })
+    expect(nextActorEnd.ok, nextActorEnd.ok ? undefined : nextActorEnd.reason).toBe(true)
+    if (!nextActorEnd.ok) return
+    expect(dnd5eEffectiveSpeed(nextActorEnd.state.combatants.actor)).toBe(30)
+  })
+
+  it('does not leave Haste end penalty permanently active outside turn-tracked combat', () => {
+    const actor = fighter('actor', 20, { concentrating: true, armorClass: 14 })
+    actor.classState.concentrationSpellId = 'haste'
+    actor.classState.concentrationRoundsRemaining = 10
+    actor.classState.concentrationTargetIds = [actor.id]
+    actor.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:haste:effect', label: '加速术', targetId: actor.id,
+      source: { kind: 'spell', actorId: actor.id, rulesId: 'haste', magical: true },
+      duration: { type: 'concentration', sourceActorId: actor.id, concentrationId: 'haste' },
+      modifiers: { speedMultiplier: 2, armorClassBonus: 2 },
+      afterEffectEnds: {
+        duration: 'until-target-next-turn-end', preventActions: true, preventMovement: true,
+      },
+    })]
+    const state = startDnd5eHeadlessCombat('haste-exploration-end', [actor])
+    expect(state.active).toBe(false)
+
+    const events: Parameters<typeof endDnd5eConcentration>[2] = []
+    endDnd5eConcentration(state, state.combatants.actor, events)
+
+    expect(dnd5eEffectiveSpeed(state.combatants.actor)).toBe(30)
+    expect(state.combatants.actor.classState.activeEffects ?? []).not.toContainEqual(expect.objectContaining({
+      definitionId: 'activity:haste:effect:after-effect-ends',
+    }))
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: 'active-effect-applied',
+      definitionId: 'activity:haste:effect:after-effect-ends',
+    }))
   })
 
   it('omits only base weapon damage while an Activity replacement is armed', () => {
@@ -175,6 +1905,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
       classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
     })
     const ally = fighter('ally', 10)
+    cleric.classState.wardingBondMaterialEquipped = true
+    ally.classState.wardingBondMaterialEquipped = true
     const enemy = fighter('enemy', 5, { controller: 'dm' })
     const initial = startDnd5eHeadlessCombat('warding-bond', [cleric, ally, enemy])
     initial.distanceFeetByCombatantPair = {
@@ -203,6 +1935,44 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(dnd5eTargetArmorClassForAttack(cast.state, enemy.id, ally.id)).toBe(17)
 
+    for (const participantId of [cleric.id, ally.id]) {
+      const materialState = structuredClone(cast.state)
+      materialState.initiativeIndex = materialState.initiativeOrder.indexOf(enemy.id)
+      materialState.combatants[participantId].classState.wardingBondMaterialEquipped = false
+      const removed = resolveDnd5eHeadlessAction(materialState, {
+        type: 'end-turn', actorId: enemy.id,
+      })
+      expect(removed.ok).toBe(true)
+      if (!removed.ok) continue
+      expect(removed.state.combatants[ally.id].classState.activeEffects ?? []).not.toContainEqual(
+        expect.objectContaining({ definitionId: 'srd-5.1:spell:warding-bond' }),
+      )
+      expect(removed.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        definitionId: 'srd-5.1:spell:warding-bond',
+        reason: 'material-removed',
+      }))
+    }
+
+    const areaSave = resolveDnd5ePersistentAreaTrigger(
+      structuredClone(cast.state),
+      {
+        areaId: 'warding-bond-save-reporting', sourceId: enemy.id, targetId: ally.id,
+        trigger: {
+          id: 'warding-bond-save-reporting', label: '守护之链豁免日志', timing: 'on-create',
+          oncePerTurn: false,
+          savingThrow: { ability: 'dex', dc: 20, onSuccess: 'none' },
+        },
+        d20: 10,
+      },
+    )
+    expect(areaSave.ok).toBe(true)
+    if (!areaSave.ok) return
+    expect(areaSave.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved', targetId: ally.id, ability: 'dex',
+      d20: 10, modifier: 3, total: 13,
+    }))
+
     cast.state.initiativeIndex = cast.state.initiativeOrder.indexOf(enemy.id)
     cast.state.combatants[ally.id].concentrating = true
     const attack = resolveDnd5eHeadlessAction(cast.state, {
@@ -213,7 +1983,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       d20: 19,
       damage: { count: 1, sides: 10, bonus: 0, rolls: [9], type: 'slashing' },
     })
-    expect(attack.ok).toBe(true)
+    expect(attack.ok, attack.ok ? undefined : attack.reason).toBe(true)
     if (!attack.ok) return
     expect(attack.state.combatants[ally.id].currentHp).toBe(16)
     expect(attack.state.combatants[cleric.id].currentHp).toBe(16)
@@ -278,6 +2048,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       slotLevel: 2,
       effectRolls: [],
     })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
   })
 
   it('resolves See Invisibility through authoritative sight and attack modes', () => {
@@ -637,9 +2408,132 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'saving-throw-resolved', targetId: 'shapechanger', d20: 1, success: false,
     }))
     expect(moonbeam.events).toContainEqual(expect.objectContaining({
-      type: 'class-state-changed', actorId: 'shapechanger', stateKey: 'shapechanger-reverted', active: false,
+      type: 'class-state-changed', actorId: 'shapechanger', stateKey: 'shapechanger-reverted',
+      active: true, targetId: 'moonbeam',
     }))
-    expect(moonbeam.state.combatants.shapechanger).toMatchObject({ currentHp: 20, maxHp: 20 })
+    expect(moonbeam.state.combatants.shapechanger).toMatchObject({
+      currentHp: 20,
+      maxHp: 20,
+      classState: { shapechangerReversionAreaIds: ['moonbeam'] },
+    })
+
+    const placedHybrid = fighter('placed-hybrid', 30, {
+      controller: 'dm', shapechanger: true, currentHp: 58, maxHp: 58,
+      armorClass: 12, statBlockId: 'srd-5.1:werewolf-hybrid',
+    })
+    const forcedTrueForm = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('area-placed-shapechanger', [caster, placedHybrid]),
+      {
+        areaId: 'moonbeam-map-area', sourceId: caster.id, targetId: placedHybrid.id,
+        trigger: {
+          id: 'moonbeam', label: '月华之光', timing: 'turn-start', oncePerTurn: true,
+          savingThrow: {
+            ability: 'con', dc: 19, onSuccess: 'half',
+            shapechangerDisadvantage: true, revertShapechangerOnFailure: true,
+          },
+          damage: { count: 2, sides: 10, modifier: 0, type: 'radiant' },
+        },
+        d20: 20, d20Second: 1, damageRolls: [3, 4],
+      },
+    )
+    expect(forcedTrueForm.ok).toBe(true)
+    if (!forcedTrueForm.ok) return
+    expect(forcedTrueForm.events).toContainEqual({
+      type: 'monster-shapechanged', actorId: placedHybrid.id,
+      fromStatBlockId: 'srd-5.1:werewolf-hybrid',
+      toStatBlockId: 'srd-5.1:werewolf-human', forced: true,
+    })
+    expect(forcedTrueForm.state.combatants[placedHybrid.id]).toMatchObject({
+      statBlockId: 'srd-5.1:werewolf-human', armorClass: 11, currentHp: 51,
+      classState: {
+        monsterShapechangeOriginalStatBlockId: undefined,
+        monsterShapechangeFormId: undefined,
+        shapechangerReversionAreaIds: ['moonbeam-map-area'],
+      },
+    })
+    expect(resolveDnd5eHeadlessAction(forcedTrueForm.state, {
+      type: 'monster-shapechange', actorId: placedHybrid.id,
+      formId: 'srd-5.1:werewolf-hybrid',
+    })).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+  })
+
+  it('emits authoritative persistent-area notifications without requiring dice or changing HP', () => {
+    const caster = fighter('alarm-caster', 20)
+    const intruder = fighter('alarm-intruder', 10, { controller: 'dm' })
+    const result = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('area-alarm', [caster, intruder]),
+      {
+        areaId: 'alarm-zone', sourceId: caster.id, targetId: intruder.id,
+        trigger: {
+          id: 'alarm-enter-audible', label: '警报术·声音警报', timing: 'on-enter',
+          oncePerRound: false,
+          notification: { delivery: 'audible', audibleRadiusFeet: 60 },
+        },
+      },
+    )
+    expect(result).toMatchObject({
+      ok: true,
+      state: { combatants: { [intruder.id]: { currentHp: intruder.currentHp } } },
+      events: expect.arrayContaining([expect.objectContaining({
+        type: 'persistent-area-triggered', actorId: caster.id, targetId: intruder.id,
+        notification: { delivery: 'audible', audibleRadiusFeet: 60 },
+      })]),
+    })
+  })
+
+  it('records a visible Zone of Truth speech restriction after a failed save and preserves it after later saves', () => {
+    const caster = fighter('truth-caster', 20, { saveDc: 19 })
+    const target = fighter('truth-target', 10, { controller: 'dm' })
+    const trigger = {
+      id: 'zone-of-truth-turn-start',
+      frequencyGroupId: 'zone-of-truth-save',
+      label: '诚实之域·区域内开始回合',
+      timing: 'turn-start' as const,
+      oncePerTurn: true,
+      savingThrow: { ability: 'cha' as const, dc: 19, onSuccess: 'none' as const, magical: true },
+    }
+    const failed = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('zone-of-truth-failed-save', [caster, target]),
+      {
+        areaId: 'truth-area', areaSourceKind: 'core-spell', coreSpellId: 'zone-of-truth',
+        sourceId: caster.id, targetId: target.id, trigger, d20: 1,
+      },
+    )
+    expect(failed.ok).toBe(true)
+    if (!failed.ok) return
+    expect(failed.events).toContainEqual(expect.objectContaining({
+      type: 'persistent-area-triggered', targetId: target.id, saveSuccess: false,
+      semanticEffectApplied: {
+        definitionId: 'srd-5.1:spell:zone-of-truth:failed-save',
+        label: '诚实之域：区域内无法故意说谎',
+      },
+    }))
+    expect(failed.state.combatants[target.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:zone-of-truth:failed-save',
+        legacyCondition: 'truth-bound',
+        tags: expect.arrayContaining(['semantic-compliance', 'speech-restriction', 'persistent-area:truth-area']),
+        duration: { type: 'rounds', remainingRounds: 100, tickOn: 'target-turn-end' },
+        source: expect.objectContaining({ rulesId: 'zone-of-truth', spellSaveDc: 19, magical: true }),
+      }),
+    )
+
+    const laterSuccess = resolveDnd5ePersistentAreaTrigger(failed.state, {
+      areaId: 'truth-area', areaSourceKind: 'core-spell', coreSpellId: 'zone-of-truth',
+      sourceId: caster.id, targetId: target.id, trigger, d20: 20,
+    })
+    expect(laterSuccess.ok).toBe(true)
+    if (!laterSuccess.ok) return
+    expect(laterSuccess.events).toContainEqual(expect.objectContaining({
+      type: 'persistent-area-triggered', targetId: target.id, saveSuccess: true,
+      semanticEffectApplied: undefined,
+    }))
+    expect(laterSuccess.state.combatants[target.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:zone-of-truth:failed-save',
+        legacyCondition: 'truth-bound',
+      }),
+    )
   })
 
   it('consumes the action on a failed Stinking Cloud save and grants poison immunity an automatic success', () => {
@@ -682,6 +2576,102 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }))
   })
 
+  it('records a core persistent spell condition with the trigger DC and magical provenance', () => {
+    const caster = fighter('web-caster', 20, {
+      classId: 'wizard',
+      saveDc: 12,
+      concentrating: true,
+      classState: {
+        concentrationSpellId: 'web',
+        concentrationSpellLevel: 2,
+        concentrationRoundsRemaining: 600,
+      },
+    })
+    const target = fighter('web-target', 10, {
+      controller: 'dm',
+    })
+    const result = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('web-provenance', [caster, target]),
+      {
+        areaId: 'core-spell-area:web',
+        areaSourceKind: 'core-spell',
+        coreSpellId: 'web',
+        sourceId: caster.id,
+        targetId: target.id,
+        trigger: {
+          id: 'web-enter',
+          label: '蛛网术·进入蛛网',
+          timing: 'on-enter',
+          oncePerTurn: true,
+          savingThrow: { ability: 'dex', dc: 19, onSuccess: 'none' },
+          condition: {
+            condition: 'restrained',
+            duration: { expiresAt: 'permanent' },
+            escapeCheck: { ability: 'str', dc: 19, economy: 'action' },
+          },
+        },
+        d20: 1,
+      },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved', targetId: target.id, d20: 1, success: false,
+    }))
+    expect(result.state.combatants[target.id].classState.activeEffects).toEqual(
+      expect.arrayContaining([expect.objectContaining({
+        standardCondition: 'restrained',
+        escapeCheck: { ability: 'str', dc: 19, economy: 'action' },
+        source: expect.objectContaining({ spellSaveDc: 19, magical: true }),
+      })]),
+    )
+  })
+
+  it('ends an active concentration spell when the Sleet Storm Constitution save fails', () => {
+    const caster = fighter('storm-caster', 20)
+    const concentratingTarget = fighter('concentrating-target', 10, {
+      concentrating: true,
+      classState: {
+        concentrationSpellId: 'bless',
+        concentrationSpellLevel: 1,
+        concentrationRoundsRemaining: 10,
+      },
+    })
+    const trigger = {
+      id: 'sleet-storm-concentration-turn-start',
+      label: '雪雨暴·专注干扰',
+      timing: 'turn-start' as const,
+      oncePerTurn: true,
+      savingThrow: { ability: 'con' as const, dc: 18, onSuccess: 'none' as const },
+      endTargetConcentrationOnFailedSave: true,
+    }
+    const failed = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('sleet-storm-fail', [caster, concentratingTarget]),
+      { areaId: 'sleet-storm', sourceId: caster.id, targetId: concentratingTarget.id, trigger, d20: 1 },
+    )
+    expect(failed.ok).toBe(true)
+    if (!failed.ok) return
+    expect(failed.state.combatants[concentratingTarget.id]).toMatchObject({
+      concentrating: false,
+      classState: { concentrationSpellId: undefined },
+    })
+    expect(failed.events).toContainEqual(expect.objectContaining({
+      type: 'concentration-resolved', actorId: concentratingTarget.id, dc: 18, success: false,
+    }))
+
+    const succeeded = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('sleet-storm-success', [caster, concentratingTarget]),
+      { areaId: 'sleet-storm', sourceId: caster.id, targetId: concentratingTarget.id, trigger, d20: 20 },
+    )
+    expect(succeeded.ok).toBe(true)
+    if (!succeeded.ok) return
+    expect(succeeded.state.combatants[concentratingTarget.id].concentrating).toBe(true)
+    expect(succeeded.events).toContainEqual(expect.objectContaining({
+      type: 'concentration-resolved', actorId: concentratingTarget.id, dc: 18, success: true,
+    }))
+  })
+
   it('resolves the first-batch non-damage spells through authoritative Headless state', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric', level: 9, abilities: { ...abilities, wis: 18 },
@@ -713,6 +2703,173 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(temporary.ok).toBe(true)
     if (!temporary.ok) return
     expect(temporary.state.combatants.wizard.temporaryHp).toBe(13)
+  })
+
+  it('consumes the action and slot but suppresses a spell cast from inside antimagic', () => {
+    const wizard = fighter('antimagic-wizard', 20, {
+      classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['false-life'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+      magicSuppressed: true,
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('antimagic-casting', [wizard, fighter('antimagic-enemy', 20, { controller: 'dm' })]),
+      {
+        type: 'cast-spell', actorId: wizard.id, targetId: wizard.id,
+        spellId: 'false-life', slotLevel: 1, effectRolls: [4],
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[wizard.id]).toMatchObject({
+      temporaryHp: 0,
+      turn: { actionAvailable: false },
+      classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 1 } },
+    })
+    expect(result.events).toContainEqual({
+      type: 'spell-effect-suppressed-by-area',
+      actorId: wizard.id,
+      targetId: wizard.id,
+      spellId: 'false-life',
+      spellLevel: 1,
+      reason: 'antimagic',
+    })
+  })
+
+  it('consumes a unified Activity spell inside antimagic without replacing the existing concentration', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const wizard = fighter('antimagic-activity-wizard', 20, {
+      classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['protection-from-evil-and-good'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+      magicSuppressed: true,
+    })
+    wizard.concentrating = true
+    wizard.classState.concentrationSpellId = 'antimagic-field'
+    wizard.classState.concentrationTargetIds = [wizard.id]
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('antimagic-activity-casting', [
+        wizard,
+        fighter('antimagic-activity-enemy', 10, { controller: 'dm' }),
+      ]),
+      {
+        type: 'plugin-spell-activity', actorId: wizard.id,
+        pluginAction: {
+          type: 'plugin', pluginId: 'srd-5.1',
+          actionId: 'spell:protection-from-evil-and-good',
+          transactionId: 'antimagic-protection-cast', actorId: wizard.id,
+          targetId: wizard.id, targetIds: [wizard.id], distanceFeet: 0,
+          castLevel: 1, rolls: {},
+        },
+        spell: {
+          castingClassId: 'wizard',
+          spellId: 'protection-from-evil-and-good', spellName: '防护善恶',
+          spellLevel: 1, slotLevel: 1, castingTime: 'action',
+          declaredTargetIds: [wizard.id], concentrationRounds: 100,
+          concentrationTargetIds: [wizard.id], spellSchool: 'abjuration',
+        },
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[wizard.id]).toMatchObject({
+      concentrating: true,
+      turn: { actionAvailable: false },
+      classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 1 } },
+      classState: {
+        concentrationSpellId: 'antimagic-field',
+        concentrationTargetIds: [wizard.id],
+      },
+    })
+    expect(result.state.combatants[wizard.id].classState.activeEffects ?? []).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: expect.objectContaining({ rulesId: 'protection-from-evil-and-good' }) }),
+      ]),
+    )
+    expect(result).not.toHaveProperty('activityHandoffs')
+    expect(result).not.toHaveProperty('activityAreaInstance')
+    expect(result.events).toContainEqual({
+      type: 'spell-effect-suppressed-by-area',
+      actorId: wizard.id,
+      targetId: wizard.id,
+      spellId: 'protection-from-evil-and-good',
+      spellLevel: 1,
+      reason: 'antimagic',
+    })
+  })
+
+  it('consumes a spell cast but suppresses its effect on a target inside antimagic', () => {
+    const wizard = fighter('antimagic-caster', 20, {
+      classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'] },
+    })
+    const target = fighter('antimagic-target', 20, {
+      controller: 'dm', currentHp: 40, maxHp: 40, magicSuppressed: true,
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('antimagic-target', [wizard, target]),
+      {
+        type: 'cast-spell', actorId: wizard.id, targetId: target.id,
+        spellId: 'fire-bolt', slotLevel: 0, effectRolls: [],
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[target.id].currentHp).toBe(40)
+    expect(result.events).toContainEqual({
+      type: 'spell-effect-suppressed-by-area',
+      actorId: wizard.id,
+      targetId: target.id,
+      spellId: 'fire-bolt',
+      spellLevel: 0,
+      reason: 'antimagic',
+    })
+  })
+
+  it('suppresses low-level spells crossing a Globe boundary but not spells cast within the same Globe', () => {
+    const caster = fighter('globe-caster', 20, {
+      classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'] },
+    })
+    const target = fighter('globe-target', 20, {
+      controller: 'dm', currentHp: 40, maxHp: 40,
+      spellSuppressionAreas: [{ areaId: 'globe-1', maximumSpellLevel: 5 }],
+    })
+    const crossed = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('globe-crossing', [caster, target]),
+      {
+        type: 'cast-spell', actorId: caster.id, targetId: target.id,
+        spellId: 'fire-bolt', slotLevel: 0, effectRolls: [],
+      },
+    )
+    expect(crossed.ok, crossed.ok ? undefined : crossed.reason).toBe(true)
+    if (!crossed.ok) return
+    expect(crossed.state.combatants[target.id].currentHp).toBe(40)
+    expect(crossed.events).toContainEqual({
+      type: 'spell-effect-suppressed-by-area', actorId: caster.id,
+      targetId: target.id, spellId: 'fire-bolt', spellLevel: 0,
+      reason: 'spell-level-barrier', areaId: 'globe-1',
+    })
+
+    const insideCaster = fighter('inside-caster', 20, {
+      classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'] },
+      spellSuppressionAreas: [{ areaId: 'globe-1', maximumSpellLevel: 5 }],
+    })
+    const insideTarget = fighter('inside-target', 20, {
+      controller: 'dm', currentHp: 40, maxHp: 40,
+      spellSuppressionAreas: [{ areaId: 'globe-1', maximumSpellLevel: 5 }],
+    })
+    const internal = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('globe-internal', [insideCaster, insideTarget]),
+      {
+        type: 'cast-spell', actorId: insideCaster.id, targetId: insideTarget.id,
+        spellId: 'fire-bolt', slotLevel: 0, d20: 10, effectRolls: [4, 4],
+      },
+    )
+    expect(internal.ok, internal.ok ? undefined : internal.reason).toBe(true)
+    if (!internal.ok) return
+    expect(internal.state.combatants[insideTarget.id].currentHp).toBeLessThan(40)
   })
 
   it('shares a self-target spell with an owned persistent companion inside the Host-derived range', () => {
@@ -758,7 +2915,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(blinded.ok).toBe(true)
     if (!blinded.ok) return
     expect(blinded.state.combatants.humanoid.classState.activeEffects).toContainEqual(expect.objectContaining({
-      standardCondition: 'blinded', repeatSave: { ability: 'con', dc: 16, timing: 'target-turn-end', onSuccess: 'remove' },
+      standardCondition: 'blinded', repeatSave: expect.objectContaining({
+        ability: 'con', dc: 16, timing: 'target-turn-end', onSuccess: 'remove',
+      }),
     }))
 
     const held = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('hold', [wizard, humanoid]), {
@@ -785,6 +2944,51 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(restored.ok).toBe(true)
     if (!restored.ok) return
     expect(restored.state.combatants.restored.conditions).not.toContain('blinded')
+
+    const harmReducedTarget = fighter('harm-reduced', 10, {
+      currentHp: 20,
+      maxHp: 20,
+      classState: {
+        hitPointMaximumReductionLedger: {
+          schemaVersion: 1,
+          baseMaximum: 30,
+          entries: [{
+            id: 'harm:lesser-restoration',
+            amount: 10,
+            recovery: 'greater-restoration-or-other-magic',
+            remainingRounds: 600,
+            sourceActionId: 'harm',
+            damageType: 'necrotic',
+          }],
+        },
+      },
+    })
+    const diseaseCureCleric = fighter('disease-cure-cleric', 20, {
+      classId: 'cleric', level: 5, abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['lesser-restoration'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const diseaseCure = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('harm-lesser-restoration', [diseaseCureCleric, harmReducedTarget]),
+      {
+        type: 'cast-spell', actorId: diseaseCureCleric.id, targetId: harmReducedTarget.id,
+        spellId: 'lesser-restoration', slotLevel: 2, conditionChoice: 'disease', effectRolls: [],
+      },
+    )
+    expect(diseaseCure.ok, diseaseCure.ok ? undefined : diseaseCure.reason).toBe(true)
+    if (!diseaseCure.ok) return
+    expect(diseaseCure.state.combatants[harmReducedTarget.id]).toMatchObject({
+      currentHp: 20,
+      maxHp: 30,
+      classState: { hitPointMaximumReductionLedger: undefined },
+    })
+    expect(diseaseCure.events).toContainEqual(expect.objectContaining({
+      type: 'hit-point-maximum-restored',
+      targetId: harmReducedTarget.id,
+      amount: 10,
+      maximumBefore: 20,
+      maximumAfter: 30,
+    }))
   })
 
   it('resolves Charm Person targeting, combat advantage, immunity, duration, and harmful-action cleanup', () => {
@@ -824,7 +3028,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }))
     expect(cast.state.combatants.humanoid.classState.activeEffects).toContainEqual(expect.objectContaining({
       standardCondition: 'charmed',
-      source: expect.objectContaining({ actorId: 'wizard', rulesId: 'charm-person' }),
+      source: expect.objectContaining({ actorId: 'wizard', rulesId: 'charm-person', spellSaveDc: 13 }),
       duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
     }))
     expect(cast.state.combatants.wizard.classResources['dnd5e-spell-slot-1'].current).toBe(0)
@@ -910,7 +3114,43 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(invalidTarget).toMatchObject({ ok: false, reason: 'invalid-target' })
   })
 
-  it('grants 60-foot Darkvision for 8 hours without penetrating magical darkness', () => {
+  it('allows Charm Person to target a friendly humanoid without combat advantage', () => {
+    const wizard = fighter('wizard', 30, {
+      classId: 'wizard',
+      level: 3,
+      abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-prepared': ['charm-person'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const friendlyHumanoid = fighter('friendly-humanoid', 10, {
+      creatureType: 'humanoid',
+      abilities: { ...abilities, wis: 8 },
+    })
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('charm-person-friendly-humanoid', [wizard, friendlyHumanoid]),
+      {
+        type: 'cast-spell',
+        actorId: 'wizard',
+        targetId: 'friendly-humanoid',
+        spellId: 'charm-person',
+        slotLevel: 1,
+        savingThrowD20: 1,
+        effectRolls: [],
+      },
+    )
+
+    expect(cast.ok, cast.ok ? undefined : cast.reason).toBe(true)
+    if (!cast.ok) return
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: 'friendly-humanoid',
+      d20: 1,
+      success: false,
+    }))
+    expect(cast.state.combatants['friendly-humanoid'].conditions).toContain('charmed')
+  })
+
+  it('grants 60-foot Darkvision for ordinary darkness without penetrating heavy obscuration or magical darkness', () => {
     const wizard = fighter('wizard', 30, {
       classId: 'wizard',
       level: 3,
@@ -947,7 +3187,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
 
     const directedKey = dnd5eDirectedCombatantPairKey('ally', 'enemy')
     cast.state.lineOfSightBlockedByCombatantPair = { [directedKey]: true }
+    cast.state.ordinaryDarknessByCombatantPair = { [directedKey]: true }
     expect(dnd5eCombatantCanSee(cast.state, 'ally', 'enemy')).toBe(true)
+    cast.state.ordinaryDarknessByCombatantPair = {}
+    expect(dnd5eCombatantCanSee(cast.state, 'ally', 'enemy')).toBe(false)
     cast.state.magicalDarknessByCombatantPair = { [directedKey]: true }
     expect(dnd5eCombatantCanSee(cast.state, 'ally', 'enemy')).toBe(false)
   })
@@ -1013,6 +3256,25 @@ describe('D&D 5e 2014 headless combat engine', () => {
       distanceFeet: 30,
     }))
     expect(cast.events.some((event) => event.type === 'moved')).toBe(false)
+
+    const warded = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('warded-misty-step', [
+      wizard, fighter('ward-enemy', 10, { controller: 'dm' }),
+    ]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'wizard', targetIds: [],
+      spellId: 'misty-step', slotLevel: 2,
+      teleportDestination: {
+        to: { x: 35, y: 5 }, distanceFeet: 30, blockedByAreaId: 'private-sanctum',
+      },
+      effectRolls: [],
+    })
+    expect(warded.ok, warded.ok ? undefined : warded.reason).toBe(true)
+    if (!warded.ok) return
+    expect(warded.state.combatants.wizard.position).toEqual({ x: 5, y: 5 })
+    expect(warded.state.combatants.wizard.classResources['dnd5e-spell-slot-2'].current).toBe(0)
+    expect(warded.events).toContainEqual({
+      type: 'teleportation-blocked-by-area', actorId: 'wizard',
+      spellId: 'misty-step', areaId: 'private-sanctum',
+    })
 
     expect(resolveDnd5eHeadlessAction(initial, {
       type: 'cast-spell',
@@ -1115,7 +3377,18 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'cast-spell', actorId: 'wizard', targetId: 'low-int', spellId: 'hideous-laughter', slotLevel: 1,
       savingThrowD20: 1, effectRolls: [],
     })
-    expect(immune).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(immune.ok).toBe(true)
+    if (!immune.ok) return
+    expect(immune.state.combatants.wizard.turn.actionAvailable).toBe(false)
+    expect(immune.state.combatants.wizard.classResources['dnd5e-spell-slot-1']?.current).toBe(0)
+    expect(immune.state.combatants.wizard.concentrating).toBe(false)
+    expect(immune.state.combatants['low-int'].conditions).toEqual([])
+    expect(immune.events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'saving-throw-resolved', targetId: 'low-int' }),
+    ]))
+    expect(immune.events).toContainEqual(expect.objectContaining({
+      type: 'condition-attempted', targetId: 'low-int', condition: 'incapacitated', prevented: true,
+    }))
   })
 
   it('resolves Sleep by current HP, excludes immune creatures, and supports both wake conditions', () => {
@@ -1229,7 +3502,17 @@ describe('D&D 5e 2014 headless combat engine', () => {
       classSelections: { 'spell-prepared': ['color-spray'] },
       classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
     })
-    const low = fighter('low', 15, { controller: 'dm', currentHp: 4, maxHp: 20 })
+    const lowCharm = createDnd5eConditionEffect({
+      id: 'color-spray:charm-person',
+      condition: 'charmed',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'charm-person' },
+      targetId: 'low',
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+    })
+    const low = fighter('low', 15, {
+      controller: 'dm', currentHp: 4, maxHp: 20,
+      classState: { activeEffects: [lowCharm] },
+    })
     const middle = fighter('middle', 14, { controller: 'dm', currentHp: 7, maxHp: 20 })
     const high = fighter('high', 13, { controller: 'dm', currentHp: 8, maxHp: 20 })
     const alreadyBlind = fighter('already-blind', 12, {
@@ -1249,6 +3532,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(cast.ok).toBe(true)
     if (!cast.ok) return
     expect(cast.state.combatants.low.conditions).toContain('blinded')
+    expect(cast.state.combatants.low.conditions).not.toContain('charmed')
     expect(cast.state.combatants.middle.conditions).toContain('blinded')
     expect(cast.state.combatants.high.conditions).not.toContain('blinded')
     expect(cast.state.combatants['blind-immune'].conditions).not.toContain('blinded')
@@ -1256,8 +3540,11 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'color-spray-resolved', actorId: 'wizard', spellId: 'color-spray',
       hitPointPool: 12, remainingHitPoints: 1, affectedTargetIds: ['low', 'middle'],
     })
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'low', reason: 'harmful-action',
+    }))
     expect(cast.state.combatants.low.classState.activeEffects).toContainEqual(expect.objectContaining({
-      definitionId: 'condition:blinded',
+      definitionId: 'srd-5.1:spell:color-spray:blinded',
       stackingKey: 'srd-5.1:spell:color-spray:blinded',
       source: expect.objectContaining({ rulesId: 'color-spray' }),
       duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-end' }),
@@ -1725,6 +4012,152 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(repeated.state.combatants.druid.classState.concentrationSpellId).toBe('call-lightning')
   })
 
+  it('enforces Call Lightning overhead space and adds the existing-storm die to initial and sustained strikes', () => {
+    const druid = fighter('storm-druid', 20, {
+      classId: 'druid',
+      level: 7,
+      abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['call-lightning'] },
+      classResources: { 'dnd5e-spell-slot-4': { current: 1, max: 1 } },
+    })
+    const enemy = fighter('storm-enemy', 10, {
+      controller: 'dm', currentHp: 100, maxHp: 100,
+    })
+    const confined = startDnd5eHeadlessCombat('call-lightning-confined', [druid, enemy])
+    confined.overheadSpace = 'confined'
+    expect(resolveDnd5eHeadlessAction(confined, {
+      type: 'cast-spell', actorId: druid.id, targetId: enemy.id, targetIds: [enemy.id],
+      spellId: 'call-lightning', slotLevel: 4, savingThrowD20: 1,
+      effectRolls: [10, 10, 10, 10],
+    })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+    expect(confined.combatants[druid.id].turn.actionAvailable).toBe(true)
+    expect(confined.combatants[druid.id].classResources['dnd5e-spell-slot-4'])
+      .toEqual({ current: 1, max: 1 })
+
+    const storm = startDnd5eHeadlessCombat('call-lightning-storm', [druid, enemy])
+    storm.weather = 'storm'
+    storm.overheadSpace = 'open'
+    const cast = resolveDnd5eHeadlessAction(storm, {
+      type: 'cast-spell', actorId: druid.id, targetId: enemy.id, targetIds: [enemy.id],
+      spellId: 'call-lightning', slotLevel: 4, savingThrowD20: 1,
+      effectRolls: [1, 2, 3, 4, 5],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants[enemy.id].currentHp).toBe(85)
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied', targetId: enemy.id, amount: 15,
+    }))
+
+    cast.state.combatants[druid.id].turn.actionAvailable = true
+    const repeated = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'cast-spell', actorId: druid.id, targetId: enemy.id, targetIds: [enemy.id],
+      spellId: 'call-lightning', slotLevel: 4,
+      sustainedEffectAttack: 'call-lightning',
+      sustainedEffectAreaId: 'core-spell-area:call-lightning',
+      savingThrowD20: 1,
+      effectRolls: [5, 5, 5, 5, 5],
+    })
+    expect(repeated.ok).toBe(true)
+    if (!repeated.ok) return
+    expect(repeated.state.combatants[enemy.id].currentHp).toBe(60)
+    expect(repeated.state.combatants[druid.id].classResources['dnd5e-spell-slot-4'])
+      .toEqual({ current: 0, max: 1 })
+  })
+
+  it('resolves Calm Emotions saves, suppresses and restores charm/fear, and keeps upcasts non-scaling', () => {
+    const cleric = fighter('calm-cleric', 20, {
+      classId: 'cleric', level: 9, creatureType: 'humanoid',
+      abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['calm-emotions'] },
+      classResources: { 'dnd5e-spell-slot-5': { current: 1, max: 1 } },
+    })
+    const charmed = createDnd5eConditionEffect({
+      definitionId: 'test:charmed', condition: 'charmed',
+      source: { kind: 'spell', actorId: 'enemy-source', rulesId: 'test-charm', magical: true },
+      targetId: 'calm-ally', duration: { type: 'rounds', remainingRounds: 5, tickOn: 'target-turn-end' },
+    })
+    const frightened = createDnd5eConditionEffect({
+      definitionId: 'test:frightened', condition: 'frightened',
+      source: { kind: 'feature', actorId: 'enemy-source', rulesId: 'test-fear', magical: false },
+      targetId: 'calm-ally', duration: { type: 'rounds', remainingRounds: 5, tickOn: 'target-turn-end' },
+    })
+    const ally = fighter('calm-ally', 10, {
+      creatureType: 'humanoid',
+      classState: { activeEffects: [charmed, frightened] },
+    })
+    const enemy = fighter('calm-enemy', 5, { controller: 'dm', creatureType: 'humanoid' })
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('calm-suppress', [cleric, ally, enemy]),
+      {
+        type: 'cast-spell', actorId: cleric.id, targetId: ally.id,
+        targetIds: [ally.id, enemy.id], spellId: 'calm-emotions', slotLevel: 5,
+        calmEmotionsMode: 'suppress',
+        targetSavingThrows: [{ targetId: enemy.id, d20: 20 }],
+        effectRolls: [],
+      },
+    )
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants[cleric.id].classResources['dnd5e-spell-slot-5'])
+      .toEqual({ current: 0, max: 1 })
+    expect(cast.state.combatants[cleric.id].classState.concentrationSpellId).toBe('calm-emotions')
+    expect(cast.state.combatants[ally.id].conditions).toEqual([])
+    expect(cast.state.combatants[ally.id].classState.activeEffects).toHaveLength(3)
+    expect(cast.state.combatants[ally.id].classState.activeEffects?.filter((effect) =>
+      effect.standardCondition === 'charmed' || effect.standardCondition === 'frightened',
+    ).every((effect) => effect.suspendedBy?.length === 1)).toBe(true)
+    expect(cast.state.combatants[enemy.id].classState.activeEffects).toBeUndefined()
+
+    endDnd5eConcentration(cast.state, cast.state.combatants[cleric.id], [])
+    expect(cast.state.combatants[ally.id].conditions).toEqual(expect.arrayContaining(['charmed', 'frightened']))
+    expect(cast.state.combatants[ally.id].classState.activeEffects).toHaveLength(2)
+    expect(cast.state.combatants[ally.id].classState.activeEffects?.every((effect) =>
+      effect.suspendedBy == null,
+    )).toBe(true)
+  })
+
+  it('enforces Calm Emotions indifference and ends it when the target or a friend is harmed', () => {
+    const cleric = fighter('calm-indifference-cleric', 20, {
+      classId: 'cleric', level: 3, creatureType: 'humanoid',
+      abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['calm-emotions'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const enemyA = fighter('calm-enemy-a', 10, { controller: 'dm', creatureType: 'humanoid' })
+    const enemyB = fighter('calm-enemy-b', 5, { controller: 'dm', creatureType: 'humanoid' })
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('calm-indifference', [cleric, enemyA, enemyB]),
+      {
+        type: 'cast-spell', actorId: cleric.id, targetId: enemyA.id,
+        targetIds: [enemyA.id, enemyB.id], spellId: 'calm-emotions', slotLevel: 2,
+        calmEmotionsMode: 'indifferent', calmEmotionsIndifferenceScope: 'caster-allies',
+        targetSavingThrows: [{ targetId: enemyA.id, d20: 1 }, { targetId: enemyB.id, d20: 1 }],
+        effectRolls: [],
+      },
+    )
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    cast.state.initiativeIndex = cast.state.initiativeOrder.indexOf(enemyA.id)
+    const blocked = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'attack', actorId: enemyA.id, targetId: cleric.id,
+      attackModifier: 10, d20: 20, damage: { count: 1, sides: 4, bonus: 0, rolls: [1] },
+    })
+    expect(blocked).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(cast.state.combatants[enemyA.id].turn.actionAvailable).toBe(true)
+
+    cast.state.initiativeIndex = cast.state.initiativeOrder.indexOf(cleric.id)
+    cast.state.combatants[cleric.id].turn.actionAvailable = true
+    const harmedFriend = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'attack', actorId: cleric.id, targetId: enemyB.id,
+      attackModifier: 10, d20: 15, damage: { count: 1, sides: 4, bonus: 0, rolls: [1] },
+    })
+    expect(harmedFriend).toMatchObject({ ok: true })
+    if (!harmedFriend.ok) return
+    expect(harmedFriend.state.combatants[enemyA.id].classState.activeEffects).toBeUndefined()
+    expect(harmedFriend.state.combatants[enemyB.id].classState.activeEffects).toBeUndefined()
+  })
+
   it('resolves Guiding Bolt, fixed healing, healing pools, and Power Word Stun', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric', level: 17, proficiencyBonus: 6, abilities: { ...abilities, wis: 20 },
@@ -1747,14 +4180,42 @@ describe('D&D 5e 2014 headless combat engine', () => {
       definitionId: 'srd-5.1:spell:guiding-bolt:attack-advantage', breakOn: ['targeted-by-attack'],
     }))
 
-    const patient = fighter('patient', 10, { currentHp: 1, maxHp: 200, conditions: ['blinded', 'deafened'] })
+    const feeblemindEffect = createDnd5eMechanicalEffect({
+      definitionId: 'activity:spell:feeblemind:feeblemind', label: 'Feeblemind',
+      tags: ['feeblemind', 'ability-recovery-group:spell.feeblemind'],
+      source: { kind: 'spell', actorId: 'enemy-caster', rulesId: 'feeblemind', magical: true },
+      targetId: 'patient',
+      modifiers: {
+        actionRestriction: { prohibited: ['spellcasting', 'object-interaction', 'speech'] },
+      },
+    })
+    const patient = fighter('patient', 10, {
+      currentHp: 1, maxHp: 200, conditions: ['blinded', 'deafened'],
+      abilities: { ...abilities, int: 16, cha: 14 },
+      baseSavingThrowBonuses: { int: 3, cha: 2 },
+      savingThrowBonuses: { int: 3, cha: 2 },
+      classState: {
+        activeEffects: [feeblemindEffect],
+        abilityScoreReductionLedger: [
+          { id: 'feeblemind-int', ability: 'int', amount: 15, recovery: 'restoration-magic', recoveryGroupId: 'spell.feeblemind' },
+          { id: 'feeblemind-cha', ability: 'cha', amount: 13, recovery: 'restoration-magic', recoveryGroupId: 'spell.feeblemind' },
+        ],
+      },
+    })
+    expect(patient.abilities).toMatchObject({ int: 1, cha: 1 })
     const healed = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('heal', [cleric, patient]), {
       type: 'cast-spell', actorId: 'cleric', targetId: 'patient', spellId: 'heal', slotLevel: 6,
       effectRolls: [],
     })
     expect(healed.ok).toBe(true)
     if (!healed.ok) return
-    expect(healed.state.combatants.patient).toMatchObject({ currentHp: 71, conditions: [] })
+    expect(healed.state.combatants.patient).toMatchObject({
+      currentHp: 71, conditions: [], abilities: { int: 16, cha: 14 },
+      savingThrowBonuses: { int: 3, cha: 2 },
+    })
+    expect(healed.state.combatants.patient.classState.abilityScoreReductionLedger).toBeUndefined()
+    expect(healed.state.combatants.patient.classState.activeEffects?.some((effect) =>
+      effect.tags?.includes('feeblemind')) ?? false).toBe(false)
 
     const first = fighter('first', 10, { currentHp: 1, maxHp: 500 })
     const second = fighter('second', 5, { currentHp: 1, maxHp: 500 })
@@ -1782,6 +4243,62 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!stunned.ok) return
     expect(stunned.state.combatants.enemy.classState.activeEffects).toContainEqual(expect.objectContaining({
       standardCondition: 'stunned', repeatSave: expect.objectContaining({ ability: 'con', dc: 18 }),
+    }))
+  })
+
+  it('uses the inclusive 150 HP Power Word Stun threshold and resolves its turn-end save', () => {
+    const wizard = fighter('stunner', 20, {
+      classId: 'wizard', level: 20, proficiencyBonus: 6, abilities: { ...abilities, int: 20 },
+      classSelections: { 'spell-prepared': ['power-word-stun'] },
+      classResources: { 'dnd5e-spell-slot-8': { current: 1, max: 1 } },
+    })
+    const aboveThreshold = fighter('above', 10, {
+      controller: 'dm', currentHp: 151, maxHp: 200,
+    })
+    const unaffected = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('power-word-stun-above-threshold', [wizard, aboveThreshold]),
+      {
+        type: 'cast-spell', actorId: wizard.id, targetId: aboveThreshold.id,
+        spellId: 'power-word-stun', slotLevel: 8, effectRolls: [],
+      },
+    )
+    expect(unaffected.ok).toBe(true)
+    if (!unaffected.ok) return
+    expect(unaffected.state.combatants[aboveThreshold.id].conditions).not.toContain('stunned')
+    expect(unaffected.events.some((event) => event.type === 'saving-throw-resolved')).toBe(false)
+    expect(unaffected.state.combatants[wizard.id].classResources['dnd5e-spell-slot-8'].current).toBe(0)
+
+    const boundaryTarget = fighter('boundary', 10, {
+      controller: 'dm', currentHp: 150, maxHp: 200,
+    })
+    const stunned = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('power-word-stun-boundary', [wizard, boundaryTarget]),
+      {
+        type: 'cast-spell', actorId: wizard.id, targetId: boundaryTarget.id,
+        spellId: 'power-word-stun', slotLevel: 8, effectRolls: [],
+      },
+    )
+    expect(stunned.ok).toBe(true)
+    if (!stunned.ok) return
+    expect(stunned.state.combatants[boundaryTarget.id].conditions).toContain('stunned')
+    expect(stunned.events.some((event) => event.type === 'saving-throw-resolved')).toBe(false)
+    const effect = stunned.state.combatants[boundaryTarget.id].classState.activeEffects?.find(
+      (candidate) => candidate.standardCondition === 'stunned',
+    )
+    expect(effect?.repeatSave).toMatchObject({ ability: 'con', dc: 19, timing: 'target-turn-end' })
+    if (!effect) return
+
+    stunned.state.initiativeIndex = stunned.state.initiativeOrder.indexOf(boundaryTarget.id)
+    const recovered = resolveDnd5eHeadlessAction(stunned.state, {
+      type: 'end-turn', actorId: boundaryTarget.id,
+      activeEffectSavingThrows: [{ effectId: effect.id, d20: 20 }],
+    })
+    expect(recovered.ok).toBe(true)
+    if (!recovered.ok) return
+    expect(recovered.state.combatants[boundaryTarget.id].conditions).not.toContain('stunned')
+    expect(recovered.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-save-resolved', targetId: boundaryTarget.id,
+      effectId: effect.id, success: true,
     }))
   })
 
@@ -1946,15 +4463,19 @@ describe('D&D 5e 2014 headless combat engine', () => {
       classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
     })
     const first = fighter('first', 10, { currentHp: 1, maxHp: 30 })
-    const second = fighter('second', 5, { currentHp: 2, maxHp: 30 })
-    const massWord = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mass-word', [cleric, first, second]), {
-      type: 'cast-spell', actorId: 'cleric', targetId: 'first', targetIds: ['first', 'second'],
+    const second = fighter('second', 5, { controller: 'dm', currentHp: 2, maxHp: 30 })
+    const undeadTarget = fighter('undead-target', 5, {
+      controller: 'dm', creatureType: 'undead', currentHp: 3, maxHp: 30,
+    })
+    const massWord = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mass-word', [cleric, first, second, undeadTarget]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'first', targetIds: ['first', 'second', 'undead-target'],
       spellId: 'mass-healing-word', slotLevel: 3, effectRolls: [4],
     })
     expect(massWord.ok).toBe(true)
     if (!massWord.ok) return
     expect(massWord.state.combatants.first.currentHp).toBe(9)
     expect(massWord.state.combatants.second.currentHp).toBe(10)
+    expect(massWord.state.combatants['undead-target'].currentHp).toBe(3)
   })
 
   it('resolves Counterspell inside the Headless spell transaction and spends only declared resources', () => {
@@ -2145,6 +4666,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       {
         type: 'cast-spell', actorId: wizard.id, targetId: failed.id,
         targetIds: [failed.id, passed.id], spellId: 'slow', slotLevel: 3,
+        spellSaveDc: 19,
         targetSavingThrows: [
           { targetId: failed.id, d20: 1 },
           { targetId: passed.id, d20: 20 },
@@ -2160,6 +4682,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       (candidate) => candidate.definitionId === 'srd-5.1:spell:slow',
     )
     expect(effect).toMatchObject({
+      source: { spellSaveDc: 19 },
       duration: {
         type: 'concentration',
         sourceActorId: wizard.id,
@@ -2175,6 +4698,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
         speedMultiplier: 0.5,
         maximumAttacksPerTurn: 1,
         actionOrBonusActionOnly: true,
+        actionSpellDelay: { dieSides: 20, delayMinimum: 11 },
         armorClassBonus: -2,
         savingThrowBonusByAbility: { dex: -2 },
         preventReactions: true,
@@ -2198,6 +4722,105 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(recovered.state.combatants.failed.classState.activeEffects?.some(
       (candidate) => candidate.definitionId === 'srd-5.1:spell:slow',
     )).not.toBe(true)
+  })
+
+  it('pays and postpones a Slow-delayed action spell, then completes it with the next-turn action', () => {
+    const source = fighter('source', 30, {
+      classId: 'wizard', level: 5, proficiencyBonus: 3,
+      abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['slow'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const delayedCaster = fighter('delayed-caster', 20, {
+      controller: 'dm', classId: 'wizard', level: 5, proficiencyBonus: 3,
+      abilities: { ...abilities, int: 18, wis: 8 },
+      classSelections: { 'spell-prepared': ['magic-missile'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const target = fighter('target', 10, {
+      controller: 'player', currentHp: 50, maxHp: 50,
+    })
+    const slowed = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('slow-delay', [source, delayedCaster, target]),
+      {
+        type: 'cast-spell', actorId: source.id, targetId: delayedCaster.id,
+        targetIds: [delayedCaster.id, target.id],
+        spellId: 'slow', slotLevel: 3,
+        targetSavingThrows: [
+          { targetId: delayedCaster.id, d20: 1 },
+          { targetId: target.id, d20: 20 },
+        ],
+        effectRolls: [],
+      },
+    )
+    expect(slowed.ok, slowed.ok ? undefined : slowed.reason).toBe(true)
+    if (!slowed.ok) return
+    const casterTurn = resolveDnd5eHeadlessAction(slowed.state, {
+      type: 'end-turn', actorId: source.id,
+    })
+    expect(casterTurn.ok, casterTurn.ok ? undefined : casterTurn.reason).toBe(true)
+    if (!casterTurn.ok) return
+
+    const immediate = resolveDnd5eHeadlessAction(casterTurn.state, {
+      type: 'cast-spell', actorId: delayedCaster.id, targetId: target.id,
+      targetIds: [target.id], projectileTargetIds: [target.id, target.id, target.id],
+      spellId: 'magic-missile', slotLevel: 1, slowSpellDelayD20: 5,
+      effectRolls: [4, 3, 2],
+    })
+    expect(immediate.ok, immediate.ok ? undefined : immediate.reason).toBe(true)
+    if (immediate.ok) {
+      expect(immediate.state.combatants.target.currentHp).toBe(38)
+      expect(immediate.state.combatants[delayedCaster.id].classState.slowDelayedSpell).toBeUndefined()
+      expect(immediate.events).toContainEqual({
+        type: 'slow-spell-delay-resolved', actorId: delayedCaster.id,
+        spellId: 'magic-missile', slotLevel: 1, d20: 5, delayed: false,
+      })
+    }
+
+    const delayed = resolveDnd5eHeadlessAction(casterTurn.state, {
+      type: 'cast-spell', actorId: delayedCaster.id, targetId: target.id,
+      targetIds: [target.id], projectileTargetIds: [target.id, target.id, target.id],
+      spellId: 'magic-missile', slotLevel: 1, slowSpellDelayD20: 15,
+      effectRolls: [4, 3, 2],
+    })
+    expect(delayed.ok, delayed.ok ? undefined : delayed.reason).toBe(true)
+    if (!delayed.ok) return
+    expect(delayed.state.combatants.target.currentHp).toBe(50)
+    expect(delayed.state.combatants[delayedCaster.id].classResources['dnd5e-spell-slot-1'].current).toBe(0)
+    expect(delayed.state.combatants[delayedCaster.id].classState.slowDelayedSpell).toMatchObject({
+      schemaVersion: 1,
+      action: { spellId: 'magic-missile', slotLevel: 1 },
+    })
+    expect(delayed.events).toContainEqual({
+      type: 'slow-spell-delay-resolved', actorId: delayedCaster.id,
+      spellId: 'magic-missile', slotLevel: 1, d20: 15, delayed: true,
+    })
+
+    const slowEffect = delayed.state.combatants[delayedCaster.id].classState.activeEffects!
+      .find((effect) => effect.definitionId === 'srd-5.1:spell:slow')!
+    const targetTurn = resolveDnd5eHeadlessAction(delayed.state, {
+      type: 'end-turn', actorId: delayedCaster.id,
+      activeEffectSavingThrows: [{ effectId: slowEffect.id, d20: 1 }],
+    })
+    expect(targetTurn.ok, targetTurn.ok ? undefined : targetTurn.reason).toBe(true)
+    if (!targetTurn.ok) return
+    const sourceTurn = resolveDnd5eHeadlessAction(targetTurn.state, {
+      type: 'end-turn', actorId: target.id,
+    })
+    expect(sourceTurn.ok, sourceTurn.ok ? undefined : sourceTurn.reason).toBe(true)
+    if (!sourceTurn.ok) return
+    const completed = resolveDnd5eHeadlessAction(sourceTurn.state, {
+      type: 'end-turn', actorId: source.id,
+    })
+    expect(completed.ok, completed.ok ? undefined : completed.reason).toBe(true)
+    if (!completed.ok) return
+    expect(completed.state.combatants.target.currentHp).toBe(38)
+    expect(completed.state.combatants[delayedCaster.id].turn.actionAvailable).toBe(false)
+    expect(completed.state.combatants[delayedCaster.id].classState.slowDelayedSpell).toBeUndefined()
+    expect(completed.events).toContainEqual({
+      type: 'slow-delayed-spell-completed', actorId: delayedCaster.id,
+      spellId: 'magic-missile', slotLevel: 1,
+    })
   })
 
   it('resolves both Ice Storm damage components and halves each on a successful save', () => {
@@ -2304,7 +4927,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       d20: 20, d20Second: 1,
       damage: { count: 1, sides: 4, bonus: 0, rolls: [4] },
     })
-    expect(attack.ok).toBe(true)
+    expect(attack.ok, attack.ok ? undefined : attack.reason).toBe(true)
     if (!attack.ok) return
     expect(attack.events).toContainEqual(expect.objectContaining({
       type: 'attack-resolved', actorId: 'undead', targetId: 'warlock', d20: 1, hit: false,
@@ -2406,6 +5029,48 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(poisoned.ok ? 'ok' : poisoned.reason).toBe('ok')
     if (!poisoned.ok) return
     expect(poisoned.state.combatants.ally.currentHp).toBe(14)
+  })
+
+  it('neutralizes only one poison when Protection from Poison targets a creature with multiple poisons', () => {
+    const druid = fighter('druid', 20, {
+      classId: 'druid', level: 5, abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['protection-from-poison'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const firstPoison = createDnd5eConditionEffect({
+      id: 'poison:first', condition: 'poisoned', targetId: 'ally',
+      source: { kind: 'monster', actorId: 'poisoner-a', rulesId: 'monster:poisoner-a:poison' },
+      stackingPolicy: 'stack', stackingKey: 'poison:first',
+    })
+    const secondPoison = createDnd5eConditionEffect({
+      id: 'poison:second', condition: 'poisoned', targetId: 'ally',
+      source: { kind: 'monster', actorId: 'poisoner-b', rulesId: 'monster:poisoner-b:poison' },
+      stackingPolicy: 'stack', stackingKey: 'poison:second',
+    })
+    const ally = fighter('ally', 10, {
+      classState: { activeEffects: [firstPoison, secondPoison] },
+    })
+    const state = startDnd5eHeadlessCombat('protection-from-multiple-poisons', [druid, ally])
+    expect(state.combatants.ally.classState.activeEffects
+      ?.filter((effect) => effect.standardCondition === 'poisoned')).toHaveLength(2)
+    const resolved = resolveDnd5eHeadlessAction(
+      state,
+      {
+        type: 'cast-spell', actorId: 'druid', targetId: 'ally',
+        spellId: 'protection-from-poison', slotLevel: 2, effectRolls: [],
+      },
+    )
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    const remainingPoisonEffects = resolved.state.combatants.ally.classState.activeEffects
+      ?.filter((effect) => effect.standardCondition === 'poisoned') ?? []
+    expect(remainingPoisonEffects).toHaveLength(1)
+    expect(resolved.state.combatants.ally.conditions).toContain('poisoned')
+    expect(resolved.state.combatants.ally.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:protection-from-poison',
+    }))
+    expect(resolved.events.filter((event) => event.type === 'active-effect-removed')).toHaveLength(1)
   })
 
   it('lets Death Ward prevent both lethal damage and a damage-free instant death', () => {
@@ -2851,6 +5516,346 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(invisibleTarget.ok).toBe(true)
     if (!invisibleTarget.ok) return
     expect(invisibleTarget.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
+  })
+
+  it('applies True Strike advantage only to the caster attacking its linked target', () => {
+    const caster = fighter('caster', 20)
+    caster.concentrating = true
+    caster.classState.concentrationSpellId = 'true-strike'
+    caster.classState.concentrationTargetIds = ['marked']
+    caster.classState.concentrationRoundsRemaining = 1
+    const other = fighter('other', 15)
+    const marked = fighter('marked', 10, { armorClass: 16 })
+    marked.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'rule-state:spell:true-strike:target-linked-effect',
+      label: 'True Strike target link',
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'true-strike', magical: true },
+      targetId: marked.id,
+      legacyCondition: 'rule-state:spell:true-strike:target-linked-effect',
+      duration: { type: 'concentration', sourceActorId: caster.id, remainingRounds: 1 },
+    })]
+    const state = startDnd5eHeadlessCombat('true-strike-linked-target', [caster, other, marked])
+
+    const casterAttack = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: caster.id, targetId: marked.id, attackModifier: 0,
+      d20: 2, d20Second: 18,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [2] },
+    })
+    expect(casterAttack.ok).toBe(true)
+    if (!casterAttack.ok) return
+    expect(casterAttack.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', d20: 18, hit: true,
+    }))
+    expect(casterAttack.state.combatants.caster.concentrating).toBe(false)
+    expect(casterAttack.state.combatants.caster.classState.concentrationSpellId).toBeUndefined()
+    expect(casterAttack.state.combatants.marked.classState.activeEffects).toBeUndefined()
+    expect(casterAttack.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'marked', reason: 'concentration-ended',
+    }))
+
+    const otherTarget = fighter('other-target', 10, { armorClass: 16 })
+    otherTarget.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'rule-state:spell:true-strike:target-linked-effect',
+      label: 'True Strike target link',
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'true-strike', magical: true },
+      targetId: otherTarget.id,
+      legacyCondition: 'rule-state:spell:true-strike:target-linked-effect',
+      duration: { type: 'concentration', sourceActorId: caster.id, remainingRounds: 1 },
+    })]
+    const otherTurn = startDnd5eHeadlessCombat('true-strike-other-source', [other, otherTarget])
+    const otherAttack = resolveDnd5eHeadlessAction(otherTurn, {
+      type: 'attack', actorId: other.id, targetId: otherTarget.id, attackModifier: 0,
+      d20: 2,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [] },
+    })
+    expect(otherAttack.ok, otherAttack.ok ? undefined : otherAttack.reason).toBe(true)
+    if (!otherAttack.ok) return
+    expect(otherAttack.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', d20: 2, hit: false,
+    }))
+  })
+
+  it('consumes audited roll and damage rule states in real checks and attacks', () => {
+    const glib = fighter('glib', 30)
+    glib.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:glibness', label: 'Glibness',
+      source: { kind: 'spell', actorId: glib.id, rulesId: 'glibness', magical: true },
+      targetId: glib.id,
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      modifiers: { minimumAbilityCheckD20ByAbility: { cha: 15 } },
+    })]
+    const glibnessCheck = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('glibness-minimum', [glib, fighter('glib-observer', 10)]),
+      { type: 'ability-check', actorId: glib.id, ability: 'cha', skill: 'persuasion', d20: 2 },
+    )
+    expect(glibnessCheck.ok, glibnessCheck.ok ? undefined : glibnessCheck.reason).toBe(true)
+    if (!glibnessCheck.ok) return
+    expect(glibnessCheck.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved', actorId: glib.id, d20: 15, total: 14,
+    }))
+
+    const stealthActor = fighter('stealth-actor', 30, { position: { x: 25, y: 0 } })
+    const traceSource = fighter('trace-source', 20, { position: { x: 0, y: 0 } })
+    traceSource.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:pass-without-trace', label: 'Pass without Trace',
+      source: { kind: 'spell', actorId: traceSource.id, rulesId: 'pass-without-trace', magical: true },
+      targetId: traceSource.id,
+      duration: { type: 'concentration', sourceActorId: traceSource.id, concentrationId: 'pass-without-trace', remainingRounds: 60 },
+      modifiers: {
+        skillCheckBonusAuras: [{
+          skill: 'stealth', bonus: 10, radiusFeet: 30, relation: 'ally-and-self',
+          mundaneTracking: 'impossible', leavesTracks: false,
+        }],
+      },
+    })]
+    const traceState = startDnd5eHeadlessCombat('pass-without-trace', [stealthActor, traceSource])
+    traceState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(stealthActor.id, traceSource.id)]: 25,
+    }
+    const stealth = resolveDnd5eHeadlessAction(
+      traceState,
+      { type: 'ability-check', actorId: stealthActor.id, ability: 'dex', skill: 'stealth', d20: 2 },
+    )
+    expect(stealth.ok).toBe(true)
+    if (!stealth.ok) return
+    expect(stealth.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved', actorId: stealthActor.id, modifier: 12, total: 14,
+    }))
+    const hideInsideAura = resolveDnd5eHeadlessAction(
+      traceState,
+      { type: 'hide', actorId: stealthActor.id, d20: 10 },
+    )
+    expect(hideInsideAura.ok).toBe(true)
+    if (!hideInsideAura.ok) return
+    expect(hideInsideAura.events).toContainEqual(expect.objectContaining({
+      type: 'hide-resolved', actorId: stealthActor.id, d20: 10, total: 22,
+    }))
+    expect(dnd5eTrackingCapabilityForCombatant(traceState, stealthActor.id)).toEqual({
+      mundaneTrackingPossible: false,
+      leavesTracks: false,
+    })
+    traceState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(stealthActor.id, traceSource.id)]: 35,
+    }
+    expect(dnd5eTrackingCapabilityForCombatant(traceState, stealthActor.id)).toEqual({
+      mundaneTrackingPossible: true,
+      leavesTracks: true,
+    })
+    const hideOutsideAura = resolveDnd5eHeadlessAction(
+      traceState,
+      { type: 'hide', actorId: stealthActor.id, d20: 10 },
+    )
+    expect(hideOutsideAura.ok).toBe(true)
+    if (!hideOutsideAura.ok) return
+    expect(hideOutsideAura.events).toContainEqual(expect.objectContaining({
+      type: 'hide-resolved', actorId: stealthActor.id, d20: 10, total: 12,
+    }))
+
+    const enfeebled = fighter('enfeebled', 30)
+    enfeebled.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:ray-of-enfeeblement', label: 'Ray of Enfeeblement',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'ray-of-enfeeblement', magical: true },
+      targetId: enfeebled.id,
+      duration: { type: 'concentration', sourceActorId: 'caster', concentrationId: 'ray-of-enfeeblement', remainingRounds: 10 },
+      modifiers: { weaponDamageMultipliers: [{ multiplier: 0.5, ability: 'str' }] },
+    })]
+    const victim = fighter('ray-victim', 20)
+    const enfeebledAttack = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('ray-of-enfeeblement', [enfeebled, victim]),
+      {
+        type: 'attack', actorId: enfeebled.id, targetId: victim.id, attackModifier: 5, d20: 18,
+        damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+        classDamageContext: meleeWeaponContext(),
+      },
+    )
+    expect(enfeebledAttack.ok).toBe(true)
+    if (!enfeebledAttack.ok) return
+    expect(enfeebledAttack.state.combatants[victim.id].currentHp).toBe(16)
+
+    const enfeebledCloudGiant = fighter('enfeebled-cloud-giant', 30, {
+      controller: 'dm', statBlockId: 'srd-5.1:cloud-giant',
+      currentHp: 200, maxHp: 200, usesDeathSaves: false,
+    })
+    enfeebledCloudGiant.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:ray-of-enfeeblement', label: 'Ray of Enfeeblement',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'ray-of-enfeeblement', magical: true },
+      targetId: enfeebledCloudGiant.id,
+      duration: { type: 'concentration', sourceActorId: 'caster', concentrationId: 'ray-of-enfeeblement', remainingRounds: 10 },
+      modifiers: { weaponDamageMultipliers: [{ multiplier: 0.5, ability: 'str' }] },
+    })]
+    const giantVictim = fighter('giant-ray-victim', 10, {
+      armorClass: 15, currentHp: 100, maxHp: 100,
+    })
+    const enfeebledMonsterAttack = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('ray-of-enfeeblement-monster', [enfeebledCloudGiant, giantVictim]),
+      {
+        type: 'monster-action', actorId: enfeebledCloudGiant.id, actionId: 'rock',
+        rolls: [{ targetId: giantVictim.id, d20: 17, damageRolls: [[2, 9, 8, 1]] }],
+      },
+    )
+    expect(
+      enfeebledMonsterAttack.ok,
+      enfeebledMonsterAttack.ok ? undefined : enfeebledMonsterAttack.reason,
+    ).toBe(true)
+    if (!enfeebledMonsterAttack.ok) return
+    expect(enfeebledMonsterAttack.state.combatants[giantVictim.id].currentHp).toBe(86)
+    expect(enfeebledMonsterAttack.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: enfeebledCloudGiant.id,
+      targetId: giantVictim.id,
+      stateKey: 'active-effect:weapon-damage-multiplier', active: true, value: 14,
+    }))
+  })
+
+  it('applies conditional Active Effect resistance only to matching nonmagical damage', () => {
+    const stoneEffect = (targetId: string) => createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:stoneskin', label: 'Stoneskin',
+      source: { kind: 'spell', actorId: targetId, rulesId: 'stoneskin', magical: true },
+      targetId,
+      duration: { type: 'concentration', sourceActorId: targetId, concentrationId: 'stoneskin', remainingRounds: 600 },
+      modifiers: {
+        conditionalDamageResistances: [{
+          damageTypes: ['bludgeoning', 'piercing', 'slashing'],
+          sourceMagical: false,
+        }],
+      },
+    })
+    const mundaneAttacker = fighter('mundane-attacker', 30)
+    const mundaneTarget = fighter('mundane-target', 20)
+    mundaneTarget.classState.activeEffects = [stoneEffect(mundaneTarget.id)]
+    const mundane = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('stoneskin-mundane', [mundaneAttacker, mundaneTarget]),
+      {
+        type: 'attack', actorId: mundaneAttacker.id, targetId: mundaneTarget.id,
+        attackModifier: 10, d20: 15,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [8], type: 'slashing' },
+      },
+    )
+    expect(mundane.ok, mundane.ok ? undefined : mundane.reason).toBe(true)
+    if (!mundane.ok) return
+    expect(mundane.state.combatants[mundaneTarget.id].currentHp).toBe(16)
+    expect(mundane.events).toContainEqual(expect.objectContaining({
+      type: 'damage-defense-resolved', damageBefore: 8, damageAfter: 4,
+    }))
+
+    const magicAttacker = fighter('magic-attacker', 30)
+    magicAttacker.weaponDamageSources = { magic: { magical: true } }
+    const magicTarget = fighter('magic-target', 20)
+    magicTarget.classState.activeEffects = [stoneEffect(magicTarget.id)]
+    const magical = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('stoneskin-magical', [magicAttacker, magicTarget]),
+      {
+        type: 'attack', actorId: magicAttacker.id, targetId: magicTarget.id,
+        attackModifier: 10, d20: 15,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [8], type: 'slashing' },
+        classDamageContext: { ...meleeWeaponContext('magic') },
+        classDamageRolls: [],
+      },
+    )
+    expect(magical.ok, magical.ok ? undefined : magical.reason).toBe(true)
+    if (!magical.ok) return
+    expect(magical.state.combatants[magicTarget.id].currentHp).toBe(12)
+  })
+
+  it('uses native Active Effect advantage for death saving throws', () => {
+    const dying = fighter('beacon-target', 30, { currentHp: 0 })
+    dying.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:beacon-of-hope', label: 'Beacon of Hope',
+      source: { kind: 'spell', actorId: 'cleric', rulesId: 'beacon-of-hope', magical: true },
+      targetId: dying.id,
+      duration: { type: 'concentration', sourceActorId: 'cleric', concentrationId: 'beacon-of-hope', remainingRounds: 10 },
+      modifiers: { deathSavingThrowAdvantage: true, maximizeHealingDice: true },
+    })]
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('beacon-death-save', [dying, fighter('observer', 20)]),
+      { type: 'death-save', actorId: dying.id, d20: 2, d20Second: 15 },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[dying.id].deathSaves.successes).toBe(1)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'death-save-resolved', actorId: dying.id, d20: 15,
+    }))
+  })
+
+  it('uses native Foresight defenses for incoming attacks and surprise', () => {
+    const attacker = fighter('foresight-attacker', 30)
+    const target = fighter('foresight-target', 20)
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:foresight', label: 'Foresight',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'foresight', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: {
+        attacksAgainstTargetDisadvantage: true,
+        cannotBeSurprisedWhileConscious: true,
+      },
+    })]
+    target.classState.surprisedCombatId = 'foresight-combat'
+    expect(dnd5eCombatantIsSurprised(target, 'foresight-combat')).toBe(false)
+    expect(dnd5eMonsterSpellAttackMode(
+      startDnd5eHeadlessCombat('foresight-spell-defense', [attacker, target]),
+      attacker.id,
+      target.id,
+      'ranged',
+    )).toBe('disadvantage')
+
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('foresight-attack', [attacker, target]),
+      {
+        type: 'attack', actorId: attacker.id, targetId: target.id,
+        attackModifier: 0, d20: 18, d20Second: 2,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [], type: 'slashing' },
+      },
+    )
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', d20: 2, hit: false,
+    }))
+  })
+
+  it('uses native Foresight advantage for Activity spell attacks', () => {
+    const attacker = fighter('foresight-spell-attacker', 30)
+    const target = fighter('foresight-spell-target', 20)
+    attacker.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:foresight', label: 'Foresight',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'foresight', magical: true },
+      targetId: attacker.id,
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: { attackRollAdvantage: true },
+    })]
+
+    expect(dnd5eMonsterSpellAttackMode(
+      startDnd5eHeadlessCombat('foresight-spell-attack', [attacker, target]),
+      attacker.id,
+      target.id,
+      'ranged',
+    )).toBe('advantage')
+  })
+
+  it('uses Holy Aura as target-side save advantage and attack disadvantage', () => {
+    const attacker = fighter('holy-aura-attacker', 30)
+    const protectedTarget = fighter('holy-aura-target', 20)
+    protectedTarget.classState.activeEffects = [spellRuleStateEffect({
+      spellId: 'holy-aura', family: 'roll-mode-modifier',
+      sourceActorId: 'cleric', targetId: protectedTarget.id,
+    })]
+    protectedTarget.classState.activeEffects[0]!.modifiers = {
+      attacksAgainstTargetDisadvantage: true,
+    }
+    const attack = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('holy-aura-target-defense', [attacker, protectedTarget]),
+      {
+        type: 'attack', actorId: attacker.id, targetId: protectedTarget.id,
+        attackModifier: 0, d20: 18, d20Second: 2,
+        damage: { count: 1, sides: 4, bonus: 0, rolls: [] },
+      },
+    )
+    expect(attack.ok, attack.ok ? undefined : attack.reason).toBe(true)
+    if (!attack.ok) return
+    expect(attack.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', d20: 2, hit: false,
+    }))
   })
 
   it('uses directional map visibility for unseen attacker advantage', () => {
@@ -4443,6 +7448,26 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'attack-resolved', hit: true, critical: false,
     }))
     expect(ordinary.state.combatants.target.deathSaves.failures).toBe(1)
+
+    const heavyHit = startDnd5eHeadlessCombat('heavy-hit-at-zero', [
+      fighter('attacker', 20, { controller: 'dm' }),
+      fighter('target', 10, { currentHp: 0, maxHp: 20, conditions: ['unconscious', 'prone'] }),
+    ])
+    heavyHit.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('attacker', 'target')]: 10 }
+    const heavyDamageAtZero = resolveDnd5eHeadlessAction(heavyHit, {
+      type: 'attack', actorId: 'attacker', targetId: 'target', attackModifier: 20,
+      d20: 2, d20Second: 2,
+      damage: { count: 1, sides: 20, bonus: 15, rolls: [10], type: 'slashing' },
+    })
+    expect(heavyDamageAtZero.ok).toBe(true)
+    if (!heavyDamageAtZero.ok) return
+    expect(heavyDamageAtZero.state.combatants.target.deathSaves).toMatchObject({
+      failures: 1, dead: false,
+    })
+    expect(heavyDamageAtZero.events).toContainEqual(expect.objectContaining({
+      type: 'death-save-failure', targetId: 'target', failures: 1,
+    }))
+    expect(heavyDamageAtZero.events.some((event) => event.type === 'instant-death')).toBe(false)
   })
 
   it('ends concentration immediately when an incapacitating condition is present', () => {
@@ -5541,6 +8566,50 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(disease.state.combatants.paladin.classResources['dnd5e-lay-on-hands'].current).toBe(5)
     expect(disease.events).toContainEqual({ type: 'condition-ended', targetId: 'ally', condition: '疾病' })
 
+    const harmReducedAlly = fighter('harm-reduced-ally', 10, {
+      currentHp: 20,
+      maxHp: 20,
+      classState: {
+        hitPointMaximumReductionLedger: {
+          schemaVersion: 1,
+          baseMaximum: 30,
+          entries: [{
+            id: 'harm:lay-on-hands',
+            amount: 10,
+            recovery: 'greater-restoration-or-other-magic',
+            remainingRounds: 600,
+            sourceActionId: 'harm',
+            damageType: 'necrotic',
+          }],
+        },
+      },
+    })
+    const secondPaladin = fighter('second-paladin', 20, {
+      classId: 'paladin', level: 5,
+      classResources: { 'dnd5e-lay-on-hands': { current: 5, max: 25 } },
+    })
+    const recoveredMaximum = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('lay-cure-harm', [secondPaladin, harmReducedAlly]),
+      {
+        type: 'paladin-lay-on-hands', actorId: secondPaladin.id,
+        targetId: harmReducedAlly.id, cure: 'disease',
+      },
+    )
+    expect(recoveredMaximum.ok, recoveredMaximum.ok ? undefined : recoveredMaximum.reason).toBe(true)
+    if (!recoveredMaximum.ok) return
+    expect(recoveredMaximum.state.combatants[harmReducedAlly.id]).toMatchObject({
+      currentHp: 20,
+      maxHp: 30,
+      classState: { hitPointMaximumReductionLedger: undefined },
+    })
+    expect(recoveredMaximum.state.combatants[secondPaladin.id]
+      .classResources['dnd5e-lay-on-hands'].current).toBe(0)
+    expect(recoveredMaximum.events).toContainEqual(expect.objectContaining({
+      type: 'hit-point-maximum-restored',
+      targetId: harmReducedAlly.id,
+      amount: 10,
+    }))
+
     const undead = fighter('undead', 10, { creatureType: '亡灵', conditions: ['中毒'] })
     expect(resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('lay-undead', [paladin, undead]), {
       type: 'paladin-lay-on-hands', actorId: 'paladin', targetId: 'undead', cure: 'poisoned',
@@ -5867,6 +8936,77 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(damaged.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'druid', stateKey: 'wild-shape', active: false,
     }))
+    const overflowDamageIndex = damaged.events.findIndex((event) =>
+      event.type === 'damage-applied' && event.targetId === 'druid' &&
+      event.creatureFormHpBefore === 11 && event.creatureFormOverflowDamage === 4)
+    const formEndIndex = damaged.events.findIndex((event) =>
+      event.type === 'class-state-changed' && event.actorId === 'druid' &&
+      event.stateKey === 'wild-shape' && event.active === false)
+    expect(overflowDamageIndex).toBeGreaterThanOrEqual(0)
+    expect(formEndIndex).toBeGreaterThan(overflowDamageIndex)
+  })
+
+  it('resolves form-breaking damage before the unsupported-airborne fall', () => {
+    const druid = fighter('flyer', 20, {
+      classId: 'druid', level: 8, currentHp: 65, maxHp: 65,
+      classResources: { 'dnd5e-wild-shape': { current: 2, max: 2 } },
+      classSelections: { 'wild-shape-known-forms': ['srd-5.1:giant-eagle'] },
+      position: { x: 5, y: 0 },
+    })
+    const minotaur = fighter('minotaur', 10, {
+      controller: 'dm', position: { x: 0, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('form-break-fall-order', [druid, minotaur])
+    const transformed = resolveDnd5eHeadlessAction(state, {
+      type: 'druid-wild-shape', actorId: druid.id, formId: 'srd-5.1:giant-eagle',
+    })
+    expect(transformed.ok, transformed.ok ? undefined : transformed.reason).toBe(true)
+    if (!transformed.ok) return
+    const airborne = structuredClone(transformed.state)
+    const flyer = airborne.combatants[druid.id]!
+    flyer.currentHp = 15
+    flyer.classState.wildShapeCurrentHp = 15
+    flyer.elevationFeet = 40
+    flyer.groundElevationFeet = 0
+    flyer.airborne = true
+    airborne.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(minotaur.id, druid.id)]: 5,
+    }
+
+    const resolved = resolveDnd5eHeadlessAction(airborne, {
+      type: 'opportunity-attack', actorId: minotaur.id, targetId: druid.id,
+      attackModifier: 6, d20: 15,
+      damage: { count: 1, sides: 20, bonus: 2, rolls: [20], type: 'slashing' },
+      airborneFallDamageRollsByCombatantId: { [druid.id]: [5, 1, 2, 2] },
+    })
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.state.combatants[druid.id]).toMatchObject({
+      currentHp: 48,
+      maxHp: 65,
+      elevationFeet: 0,
+      groundElevationFeet: 0,
+      airborne: false,
+      classState: { wildShapeFormId: undefined },
+    })
+
+    const attackDamageIndex = resolved.events.findIndex((event) =>
+      event.type === 'damage-applied' && event.targetId === druid.id &&
+      event.amount === 22 && event.creatureFormOverflowDamage === 7)
+    const formEndIndexes = resolved.events.flatMap((event, index) =>
+      event.type === 'class-state-changed' && event.actorId === druid.id &&
+      event.stateKey === 'wild-shape' && event.active === false ? [index] : [])
+    const fallDamageIndex = resolved.events.findIndex((event) =>
+      event.type === 'damage-applied' && event.targetId === druid.id &&
+      event.amount === 10 && event.hpBefore === 58 && event.hpAfter === 48)
+    const fallingResolvedIndex = resolved.events.findIndex((event) =>
+      event.type === 'falling-damage-resolved' && event.actorId === druid.id)
+
+    expect(attackDamageIndex).toBeGreaterThanOrEqual(0)
+    expect(formEndIndexes).toHaveLength(1)
+    expect(formEndIndexes[0]).toBeGreaterThan(attackDamageIndex)
+    expect(fallDamageIndex).toBeGreaterThan(formEndIndexes[0]!)
+    expect(fallingResolvedIndex).toBeGreaterThan(fallDamageIndex)
   })
 
   it('uses a bonus action to end Wild Shape and grants Archdruid unlimited uses', () => {
@@ -5889,6 +9029,157 @@ describe('D&D 5e 2014 headless combat engine', () => {
       maxHp: 20,
       classState: { wildShapeFormId: undefined },
       turn: { bonusActionAvailable: false },
+    })
+  })
+
+  it('lets a spellcaster end their own Polymorph concentration without spending a bonus action', () => {
+    const caster = fighter('wizard', 20, {
+      classId: 'wizard',
+      currentHp: 11,
+      maxHp: 11,
+      armorClass: 13,
+      speed: 40,
+      concentrating: true,
+      statBlockId: 'srd-5.1:wolf',
+      classState: {
+        concentrationSpellId: 'polymorph',
+        concentrationRoundsRemaining: 600,
+        concentrationTargetIds: ['wizard'],
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'wizard',
+        wildShapeSourceActivityId: 'polymorph',
+        wildShapeCurrentHp: 11,
+        wildShapeRoundsRemaining: 600,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 20,
+        wildShapeOriginalArmorClass: 16,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 },
+      },
+    })
+    const state = startDnd5eHeadlessCombat('polymorph-voluntary-end', [caster, fighter('enemy', 10)])
+    const result = resolveDnd5eHeadlessAction(state, { type: 'druid-end-wild-shape', actorId: 'wizard' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.wizard).toMatchObject({
+      currentHp: 20,
+      maxHp: 20,
+      armorClass: 16,
+      speed: 30,
+      concentrating: false,
+      classState: {
+        concentrationSpellId: undefined,
+        wildShapeFormId: undefined,
+      },
+      turn: { bonusActionAvailable: true },
+    })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: 'wizard', stateKey: 'creature-form:polymorph', active: false,
+    }))
+    expect(result.events).toContainEqual({
+      type: 'class-state-changed', actorId: 'wizard', stateKey: 'concentration', active: false,
+    })
+    expect(result.events).not.toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', resource: 'bonusAction',
+    }))
+  })
+
+  it('does not let a Polymorph target end another caster\'s concentration', () => {
+    const target = fighter('target', 20, {
+      currentHp: 11,
+      maxHp: 11,
+      statBlockId: 'srd-5.1:wolf',
+      classState: {
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'caster',
+        wildShapeSourceActivityId: 'polymorph',
+        wildShapeCurrentHp: 11,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 20,
+      },
+    })
+    const state = startDnd5eHeadlessCombat('polymorph-target-end', [target, fighter('caster', 10)])
+    const result = resolveDnd5eHeadlessAction(state, { type: 'druid-end-wild-shape', actorId: 'target' })
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+  })
+
+  it('repairs an orphaned Polymorph form after its source concentration already ended', () => {
+    const target = fighter('target', 20, {
+      currentHp: 11,
+      maxHp: 11,
+      statBlockId: 'srd-5.1:wolf',
+      classState: {
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'caster',
+        wildShapeSourceActivityId: 'polymorph',
+        wildShapeCurrentHp: 11,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 20,
+        wildShapeOriginalArmorClass: 16,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 },
+      },
+    })
+    const state = startDnd5eHeadlessCombat('orphaned-polymorph', [target, fighter('caster', 10)])
+    const result = resolveDnd5eHeadlessAction(state, { type: 'dodge', actorId: 'target' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.target).toMatchObject({
+      currentHp: 20,
+      maxHp: 20,
+      armorClass: 16,
+      speed: 30,
+      statBlockId: undefined,
+      classState: { wildShapeFormId: undefined },
+    })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: 'target', stateKey: 'creature-form:polymorph', active: false,
+    }))
+  })
+
+  it('lets an untransformed caster end Polymorph on another target', () => {
+    const caster = fighter('caster', 20, {
+      classId: 'wizard',
+      concentrating: true,
+      classState: {
+        concentrationSpellId: 'activity:spell:srd-5.1:polymorph',
+        concentrationRoundsRemaining: 600,
+        concentrationTargetIds: ['target'],
+      },
+    })
+    const target = fighter('target', 10, {
+      currentHp: 11,
+      maxHp: 11,
+      statBlockId: 'srd-5.1:wolf',
+      classState: {
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'caster',
+        wildShapeSourceActivityId: 'activity:spell:srd-5.1:polymorph',
+        wildShapeCurrentHp: 11,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 20,
+      },
+    })
+    const state = startDnd5eHeadlessCombat('polymorph-other-target-end', [caster, target])
+    const result = resolveDnd5eHeadlessAction(state, { type: 'druid-end-wild-shape', actorId: 'caster' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.caster.concentrating).toBe(false)
+    expect(result.state.combatants.caster.turn.bonusActionAvailable).toBe(true)
+    expect(result.state.combatants.target).toMatchObject({
+      currentHp: 20,
+      maxHp: 20,
+      classState: { wildShapeFormId: undefined },
     })
   })
 
@@ -5918,7 +9209,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!killed.ok) return
     expect(killed.state.combatants.warlock.temporaryHp).toBe(10)
     expect(killed.events).toContainEqual({
-      type: 'temporary-hit-points-gained', actorId: 'warlock', amount: 10, current: 10,
+      type: 'temporary-hit-points-gained', actorId: 'warlock', amount: 10, offered: 10, current: 10,
     })
   })
 
@@ -6572,6 +9863,34 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(saved.state.combatants.target.currentHp).toBe(1)
     expect(saved.state.combatants.target.maxHp).toBe(80)
     expect(saved.state.combatants.target.classState.hitPointMaximumReductionLedger).toBeUndefined()
+
+    const upcastCleric = fighter('upcast-cleric', 20, {
+      classId: 'cleric', level: 13, proficiencyBonus: 5,
+      abilities: { ...abilities, wis: 20 },
+      classSelections: { 'spell-prepared': ['harm'] },
+      classResources: { 'dnd5e-spell-slot-7': { current: 1, max: 1 } },
+    })
+    const upcastTarget = fighter('upcast-target', 10, {
+      controller: 'dm', currentHp: 80, maxHp: 80,
+    })
+    const upcast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('harm-seventh-level', [upcastCleric, upcastTarget]),
+      {
+        type: 'cast-spell', actorId: upcastCleric.id, targetId: upcastTarget.id,
+        spellId: 'harm', slotLevel: 7, savingThrowD20: 1,
+        effectRolls: Array(14).fill(2),
+      },
+    )
+    expect(upcast.ok, upcast.ok ? undefined : upcast.reason).toBe(true)
+    if (!upcast.ok) return
+    expect(upcast.state.combatants[upcastCleric.id]
+      .classResources['dnd5e-spell-slot-7'].current).toBe(0)
+    expect(upcast.state.combatants[upcastTarget.id]).toMatchObject({
+      currentHp: 52,
+      maxHp: 52,
+    })
+    expect(upcast.state.combatants[upcastTarget.id].classState.hitPointMaximumReductionLedger)
+      .toMatchObject({ entries: [{ amount: 28, remainingRounds: 600 }] })
   })
 
   it('marks a creature reduced to zero by Disintegrate as dead', () => {
@@ -6594,11 +9913,25 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.state.combatants.target).toMatchObject({
       currentHp: 0,
       deathSaves: { successes: 0, failures: 3, stable: false, dead: true },
+      classState: {
+        bodyPresent: false,
+        vitalBodyPartsMissing: true,
+        activeEffects: [expect.objectContaining({
+          definitionId: 'srd-5.1:spell:disintegrate:body-destroyed',
+          tags: expect.arrayContaining(['disintegrated', 'body-destroyed']),
+          duration: { type: 'permanent' },
+        })],
+      },
     })
     expect(result.events).toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: 'wizard', targetId: 'target',
     }))
     expect(result.events.some((event) => event.type === 'undead-fortitude-save-required')).toBe(false)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-applied',
+      targetId: 'target',
+      definitionId: 'srd-5.1:spell:disintegrate:body-destroyed',
+    }))
     expect(result.state.combatants.target.classState.undeadFortitudePending).toBeUndefined()
   })
 
@@ -6617,6 +9950,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.state.combatants.target.deathSaves).toMatchObject({ failures: 3, dead: true })
+    expect(result.state.combatants.target.classState).toMatchObject({
+      bodyPresent: false,
+      vitalBodyPartsMissing: true,
+    })
     expect(result.state.combatants.target.conditions).not.toEqual(expect.arrayContaining(['unconscious', 'prone']))
     expect(result.events).toContainEqual({
       type: 'instant-death', sourceId: 'wizard', targetId: 'target', hpBefore: 30,
@@ -8808,6 +12145,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(secondWind.ok, secondWind.ok ? undefined : secondWind.reason).toBe(true)
     if (!secondWind.ok) return
+    expect(secondWind.state.combatants.target.turn).toMatchObject({
+      actionAvailable: false,
+      bonusActionAvailable: false,
+    })
     expect(resolveDnd5eHeadlessAction(secondWind.state, {
       type: 'attack',
       actorId: 'target',
@@ -8831,6 +12172,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(firstAttack.ok, firstAttack.ok ? undefined : firstAttack.reason).toBe(true)
     if (!firstAttack.ok) return
+    expect(firstAttack.state.combatants.target.turn).toMatchObject({
+      actionAvailable: false,
+      bonusActionAvailable: false,
+    })
     expect(resolveDnd5eHeadlessAction(firstAttack.state, {
       type: 'attack',
       actorId: 'target',
@@ -9074,7 +12419,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
           definitionId: 'srd-5.1:spell:fly',
           label: 'Fly',
           targetId: flyer.id,
-          source: { kind: 'spell', actorId: flyer.id, rulesId: 'fly' },
+          source: { kind: 'spell', actorId: flyer.id, rulesId: 'fly', magical: true },
           duration: { type: 'concentration', sourceActorId: flyer.id, concentrationId: 'fly' },
           modifiers: { flySpeedFeet: 60 },
         })]
@@ -9302,6 +12647,59 @@ describe('D&D 5e 2014 headless combat engine', () => {
         elevationFeet: 0,
         airborne: false,
       })
+    })
+
+    it('previews and resolves falling when a persistent environmental support area disappears', () => {
+      const heldAloft = createDnd5eMechanicalEffect({
+        id: 'reverse-gravity-area-support',
+        definitionId: 'persistent-area:reverse-gravity',
+        label: 'Reverse Gravity support',
+        targetId: 'flyer',
+        source: { kind: 'system', rulesId: 'persistent-area-occupant:flyer', magical: true },
+        duration: { type: 'permanent' },
+        modifiers: { magicallyHeldAloft: true },
+      })
+      const before = startDnd5eHeadlessCombat('reverse-gravity-before', [fighter('flyer', 10, {
+        currentHp: 20,
+        elevationFeet: 30,
+        groundElevationFeet: 0,
+        airborne: true,
+        classState: { activeEffects: [heldAloft] },
+      })])
+      const after = startDnd5eHeadlessCombat('reverse-gravity-after', [fighter('flyer', 10, {
+        currentHp: 20,
+        elevationFeet: 30,
+        groundElevationFeet: 0,
+        airborne: true,
+      })])
+
+      expect(previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(before, after)).toEqual([{
+        combatantId: 'flyer',
+        fromElevationFeet: 30,
+        groundElevationFeet: 0,
+        fallDistanceFeet: 30,
+        fallingDamageDice: 3,
+      }])
+      expect(resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(before, after, undefined))
+        .toMatchObject({ ok: false, reason: 'invalid-dice' })
+
+      const resolved = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
+        before,
+        after,
+        { flyer: [2, 3, 4] },
+      )
+      expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+      if (!resolved.ok) return
+      expect(resolved.state.combatants.flyer).toMatchObject({
+        currentHp: 11,
+        elevationFeet: 0,
+        groundElevationFeet: 0,
+        airborne: false,
+      })
+      expect(resolved.state.combatants.flyer.conditions).toContain('prone')
+      expect(resolved.events).toContainEqual(expect.objectContaining({
+        type: 'falling-damage-resolved', actorId: 'flyer', damage: 9,
+      }))
     })
   })
 })

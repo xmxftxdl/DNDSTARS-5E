@@ -9,6 +9,32 @@ export interface Dnd5eTransientCombatStartTokenMarkState {
   monsterDamageAversionActive?: boolean
   monsterDamageAversionSourceActorId?: string
   monsterRegenerationSuppressedDamageTypes?: string[]
+  /** One-shot initiative ownership cannot survive the combat that created it. */
+  activityExtraTurnGroup?: unknown
+  /** Time Stop suspension is paired with the one-shot group above. */
+  activityExtraTurnSuspension?: unknown
+  activeEffects?: unknown[]
+}
+
+const ACTIVITY_EXTRA_TURN_SUSPENSION_PREFIX = 'activity-extra-turns:suspension:'
+
+function isActivityExtraTurnSuspensionEffect(effect: unknown): boolean {
+  return !!effect && typeof effect === 'object' &&
+    typeof (effect as { definitionId?: unknown }).definitionId === 'string' &&
+    (effect as { definitionId: string }).definitionId.startsWith(
+      ACTIVITY_EXTRA_TURN_SUSPENSION_PREFIX,
+    )
+}
+
+/**
+ * Starting initiative does not end ongoing D&D effects. Status cleanup is an
+ * explicit scenario-reset option, never the default for the ordinary UI flow.
+ */
+export function shouldClearDnd5eStatusesAtCombatStart(
+  isDm: boolean,
+  requested?: boolean,
+): boolean {
+  return isDm && requested === true
 }
 
 interface Dnd5eStatusTokenMarkState extends Dnd5eTransientCombatStartTokenMarkState {
@@ -26,10 +52,17 @@ export function clearDnd5eTransientTokenMarksAtCombatStart<
   T extends object,
 >(state: T | undefined): T | undefined {
   if (!state) return state
+  const activityEffects = (state as Dnd5eTransientCombatStartTokenMarkState).activeEffects
+  const hasActivitySuspensionEffect = activityEffects?.some(
+    isActivityExtraTurnSuspensionEffect,
+  ) === true
   if (
     !Object.prototype.hasOwnProperty.call(state, 'monsterDamageAversionActive') &&
     !Object.prototype.hasOwnProperty.call(state, 'monsterDamageAversionSourceActorId') &&
-    !Object.prototype.hasOwnProperty.call(state, 'monsterRegenerationSuppressedDamageTypes')
+    !Object.prototype.hasOwnProperty.call(state, 'monsterRegenerationSuppressedDamageTypes') &&
+    !Object.prototype.hasOwnProperty.call(state, 'activityExtraTurnGroup') &&
+    !Object.prototype.hasOwnProperty.call(state, 'activityExtraTurnSuspension') &&
+    !hasActivitySuspensionEffect
   ) {
     return state
   }
@@ -38,14 +71,22 @@ export function clearDnd5eTransientTokenMarksAtCombatStart<
   delete persistentState.monsterDamageAversionActive
   delete persistentState.monsterDamageAversionSourceActorId
   delete persistentState.monsterRegenerationSuppressedDamageTypes
+  delete persistentState.activityExtraTurnGroup
+  delete persistentState.activityExtraTurnSuspension
+  if (hasActivitySuspensionEffect) {
+    persistentState.activeEffects = activityEffects!.filter(
+      (effect) => !isActivityExtraTurnSuspensionEffect(effect),
+    )
+  }
   return persistentState
 }
 
 /**
- * Clear every authoritative field that projects a status badge on a Token.
- * Combat resources, HP, spell slots and unrelated rule state are deliberately
- * retained. Persistent-area entities are separate map objects and are not
- * silently deleted by this presentation/status reset.
+ * Clear status badges that should not leak into a newly started combat.
+ * Concentration is deliberately retained: it is an ongoing spell lifecycle,
+ * not a presentation-only badge, and a spell cast during exploration remains
+ * active when initiative begins. Persistent-area entities are likewise
+ * separate map objects and are not silently deleted by this reset.
  */
 export function clearDnd5eStatusTokenMarksAtCombatStart<
   T extends object,
@@ -56,10 +97,5 @@ export function clearDnd5eStatusTokenMarksAtCombatStart<
     ...transientCleared,
     activeEffects: [],
     conditions: undefined,
-    concentrationSpellId: undefined,
-    concentrationSpellLevel: undefined,
-    concentrationTargetIds: undefined,
-    concentrationRoundsRemaining: undefined,
-    concentrationEffectsBySource: undefined,
   } as T & Dnd5eStatusTokenMarkState
 }

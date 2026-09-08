@@ -179,7 +179,11 @@ export async function publishPlayerActionRequest(input: {
 }): Promise<void> {
   if (input.appendAction) {
     await input.appendAction(input.action)
-    await input.publishAction(input.action)
+    // The append-only queue is the durable authority. Live delivery merely
+    // wakes the DM sooner and must not hold the player's action lock forever
+    // when the canonical SSE/event process is unreachable; the DM queue poll
+    // will still consume the exact persisted action.
+    void input.publishAction(input.action).catch(() => undefined)
     return
   }
   const current = await input.loadQueue()

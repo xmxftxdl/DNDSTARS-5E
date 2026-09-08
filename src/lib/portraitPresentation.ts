@@ -9,6 +9,26 @@ export interface TokenPortraitPresentation {
   tokenPortrait?: string
 }
 
+export interface SharedTokenPortraitPresentation {
+  portraitImageId?: string
+  tokenPortraitImageId?: string
+}
+
+/** Compact/circular surfaces must mirror the actual map Token crop. */
+export function resolveCompactPortraitImageId(
+  token?: SharedTokenPortraitPresentation,
+): string | undefined {
+  return token?.tokenPortraitImageId ?? token?.portraitImageId
+}
+
+/** Initiative surfaces prefer their crop, but never fall back to catalogue art
+ * when the room only has a custom Token crop available. */
+export function resolveInitiativePortraitImageId(
+  token?: SharedTokenPortraitPresentation,
+): string | undefined {
+  return token?.portraitImageId ?? token?.tokenPortraitImageId
+}
+
 /** Resolve the compact circular/square portrait used by map-token surfaces. */
 export function resolveMapTokenPortrait(
   character?: CharacterPortraitPresentation,

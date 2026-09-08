@@ -1,5 +1,5 @@
 import type { Character } from '../../types/character'
-import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
+import { resolveInitiativePortrait } from '../../lib/portraitPresentation'
 
 interface CharacterRailEntryProps {
   character: Character
@@ -12,7 +12,11 @@ export default function CharacterRailEntry({
   isActive,
   onAvatarClick,
 }: CharacterRailEntryProps) {
-  const portrait = resolveMapTokenPortrait(character)
+  // This button is the compact entry point for the character sheet, but it
+  // represents the same combatant as the initiative rail.  Using the map-token
+  // crop here made the two portraits visibly disagree whenever a character had
+  // configured a dedicated initiative portrait.
+  const portrait = resolveInitiativePortrait(character)
   return (
     <button
       type="button"

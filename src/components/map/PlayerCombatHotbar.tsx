@@ -24,8 +24,18 @@ import {
   dnd5eSpellbookEntriesWithPlugins,
   dnd5eSpellbookEntryCastingTime,
   dnd5eSpellbookEntryDescription,
+  dnd5eSpellbookEntryCanUseStructuredCastRoute,
+  dnd5eSpellbookEntryHasFullHeadlessAutomation,
+  dnd5eSpellUsesNarrativeResolution,
+  dnd5eSpellSupportsNarrativeObjectAlternative,
   dnd5eActiveSustainedSpellControl,
+  dnd5eFlameBladeManifestationControl,
+  dnd5eActiveActionRestriction,
+  dnd5eActiveHitPointMaximumBonus,
+  dnd5eAvailableRestrictedExtraActionKinds,
+  type Dnd5eActiveActionRestriction,
   getDnd5eSrdCombatSpell,
+  getDnd5eSrdMonster,
   normalizeDnd5eInventory,
   registeredDnd5ePluginSpells,
   resolveDnd5eSpellModifierIntents,
@@ -35,7 +45,9 @@ import {
   dnd5eActivityWeaponAttackGrantMatchesV1,
   fighterResourceState,
 } from '../../rulesets/dnd5e'
-import { dnd5eClassFeatureActionIcon, dnd5eItemActionIcon, dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
+import { dnd5ePluginSpellActivity } from '../../rulesets/dnd5e/pluginSpellTransaction'
+import { dnd5ePluginSpellDefinition } from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
+import { dnd5eClassFeatureActionIcon, dnd5eItemActionIcon, dnd5eSpellActionIcon, dnd5eSystemActionIcon } from '../../lib/dnd5eActionIcons'
 import {
   buildDnd5eCombatActionDescriptors,
   groupDnd5eCombatHotbarDescriptors,
@@ -63,14 +75,47 @@ import {
 } from './combatItemQuickbar'
 import { dnd5eCombatSpellDamagePreview } from './combatSpellDamagePresentation'
 import PlayerQuickCharacterSheet from './PlayerQuickCharacterSheet'
-import { resolveDnd5eHotbarSpellCommand } from './playerCombatHotbarSpellCommand'
+import {
+  dnd5eApplicableHotbarSpellModifiers,
+  dnd5eHotbarPluginSpellModifierCompatibility,
+  resolveDnd5eHotbarSpellCommand,
+} from './playerCombatHotbarSpellCommand'
 
 const STORAGE_PREFIX = 'dndstars5e:combat-hotbar:v1:'
 const ITEM_QUICKBAR_STORAGE_PREFIX = 'dndstars5e:combat-item-quickbar:v1:'
 const ITEM_BACKPACK_OPEN_PREFIX = 'dndstars5e:combat-backpack-open:v1:'
 const SPELL_PAGE_SIZE = 12
-const FEATURE_PAGE_SIZE = 3
 const EMPTY_ARMED_SPELL_MODIFIERS = new Set<Dnd5eCombatSpellModifier>()
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function dnd5eHotbarActionRestrictionReason(
+  entry: Dnd5eCombatActionDescriptorV1,
+  restriction: Dnd5eActiveActionRestriction,
+): string | undefined {
+  if (entry.command.kind === 'select-move' || entry.command.kind === 'end-turn') return undefined
+  const allowedDash = entry.command.kind === 'basic-action' && entry.command.action === 'dash' &&
+    restriction.allowedBasicActions?.includes('dash')
+  const allowedActivity = entry.command.kind === 'use-persistent-area-activity' &&
+    restriction.allowedActivityIds?.some((activityId) => entry.id.endsWith(`:${activityId}`))
+  if (allowedDash || allowedActivity) return undefined
+  if (entry.command.kind === 'open-panel') {
+    if (restriction.allowedBasicActions) return '当前形态只允许规则明确列出的动作。'
+    if (entry.command.panel === 'inventory' && restriction.prohibited.includes('object-interaction')) {
+      return '当前形态禁止使用或操作物品。'
+    }
+    return undefined
+  }
+  return entry.sourceKind === 'weapon' && restriction.prohibited.includes('attack')
+    ? '当前形态禁止攻击。'
+    : entry.sourceKind === 'spell' && restriction.prohibited.includes('spellcasting')
+      ? '当前形态禁止施法。'
+      : entry.sourceKind === 'item' && restriction.prohibited.includes('object-interaction')
+        ? '当前形态禁止使用或操作物品。'
+        : restriction.allowedBasicActions &&
+          (entry.economy === 'action' || entry.economy === 'bonus-action' || entry.economy === 'reaction')
+          ? '当前形态只允许规则明确列出的动作。'
+          : undefined
+}
 
 const ECONOMY_LABELS: Record<Dnd5eCombatActionEconomy, string> = {
   action: '动作',
@@ -78,7 +123,7 @@ const ECONOMY_LABELS: Record<Dnd5eCombatActionEconomy, string> = {
   reaction: '反应',
   movement: '移动',
   none: '无行动消耗',
-  special: '需要配置',
+  special: '长时/特殊施法',
 }
 
 const TARGETING_LABELS: Record<Dnd5eCombatActionTargeting, string> = {
@@ -92,11 +137,13 @@ const TARGETING_LABELS: Record<Dnd5eCombatActionTargeting, string> = {
 
 interface PlayerCombatHotbarProps {
   character: Character
+  mapWeather?: import('../../rulesets/dnd5e/environmentRules').Dnd5eMapWeather
   mode?: 'combat' | 'exploration'
   canAct: boolean
   pending: boolean
   turnEconomy: {
     turnKey?: string
+    usedOncePerTurnKeys?: readonly string[]
     action: { current: number; max?: number }
     bonusAction: { current: number; max?: number }
     movement: { current: number; max?: number }
@@ -110,9 +157,10 @@ interface PlayerCombatHotbarProps {
   movablePersistentAreas?: readonly {
     id: string
     label: string
-    economy: 'action' | 'bonus-action'
-    maximumFeet: number
-    coreSpellId?: string
+     economy: 'action' | 'bonus-action' | 'none'
+     maximumFeet: number
+     destinationRangeFeet?: number
+     coreSpellId?: string
   }[]
   sustainedAreaControls?: readonly {
     areaId: string
@@ -121,16 +169,18 @@ interface PlayerCombatHotbarProps {
     slotLevel: number
     controlId: import('../../lib/sharedCombatTypes').Dnd5eSustainedSpellControlId
     label: string
-    economy: 'action' | 'bonus-action'
+    economy: 'action' | 'bonus-action' | 'none'
     targeting: 'area' | 'creature'
   }[]
   persistentAreaActivityControls?: readonly {
-    areaId: string
+    areaId?: string
+    effectId?: string
     featureId: string
     activityId: string
     label: string
     economy: 'action' | 'bonus-action' | 'reaction' | 'none'
     targeting: 'self' | 'creature' | 'area'
+    oncePerTurnKeys?: readonly string[]
   }[]
   hunterMarkTransferAvailable?: boolean
   /**
@@ -141,6 +191,10 @@ interface PlayerCombatHotbarProps {
   armedSpellModifiers?: readonly Dnd5eCombatSpellModifier[]
   onArmedSpellModifiersChange?: (modifiers: readonly Dnd5eCombatSpellModifier[]) => void
   selectedSpellSlotLevels?: Readonly<Record<string, number>>
+  /** Reaction spells whose authoritative trigger is currently open. */
+  triggeredReactionSpellIds?: readonly string[]
+  /** Allows only Host-triggered reaction spell descriptors while off turn. */
+  canUseTriggeredReactions?: boolean
   onSelectedSpellSlotLevelChange?: (actionId: string, slotLevel: number) => void
   onCommand: (command: Dnd5eCombatActionCommand, descriptor: Dnd5eCombatActionDescriptorV1) => void
   onUnavailable?: (descriptor: Dnd5eCombatActionDescriptorV1) => void
@@ -153,11 +207,55 @@ function spellEconomy(value: ReturnType<typeof dnd5eSpellbookEntryCastingTime>):
   return 'special'
 }
 
-function spellTargeting(spell: ReturnType<typeof getDnd5eSrdCombatSpell>): Dnd5eCombatActionTargeting {
-  if (!spell) return 'configure'
-  if (spell.area || spell.target === 'area') return 'area'
-  if (spell.rangeFeet === 0 && spell.target === 'ally') return 'self'
-  return 'creature'
+// eslint-disable-next-line react-refresh/only-export-components
+export function dnd5eHotbarSpellTargeting(
+  spell: ReturnType<typeof getDnd5eSrdCombatSpell>,
+  activity?: ReturnType<typeof dnd5ePluginSpellActivity>,
+  spellbookId?: string,
+): Dnd5eCombatActionTargeting {
+  // Voice-narrative object, environment and conversation spells do not have a
+  // VTT target. Never expose a legacy creature/map picker for them.
+  if (dnd5eSpellUsesNarrativeResolution(spellbookId ?? spell?.id, activity)) return 'none'
+  if (spell?.area || spell?.target === 'area') return 'area'
+  if (spell?.rangeFeet === 0 && spell.target === 'ally') return 'self'
+  if (spell) return 'creature'
+  if (activity?.target.kind === 'area') {
+    return activity.target.maximumTargets === 1 && activity.target.origin === 'point'
+      ? 'map-position'
+      : 'area'
+  }
+  if (activity?.target.kind === 'self') return 'self'
+  if (activity?.target.kind === 'creature') return 'creature'
+  return 'configure'
+}
+
+/**
+ * Preserve explicit upcast intent: a primary click never silently chooses a
+ * higher slot, but it should expose the slot picker when the currently pinned
+ * or printed slot is unavailable and another legal slot exists.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function dnd5eHotbarSpellFallbackConfigurationLevel(
+  entry: Dnd5eCombatActionDescriptorV1,
+  configuredSlotLevel?: number,
+): number | undefined {
+  if (entry.command.kind !== 'cast-spell' || !entry.enabled) return undefined
+  const availableLevels = entry.availableSlotLevels ?? []
+  if (availableLevels.length < 1) return undefined
+  const currentLevel = configuredSlotLevel ?? entry.command.slotLevel
+  return availableLevels.includes(currentLevel) ? undefined : availableLevels[0]
+}
+
+/** Resolve the slot level shown by the compact direct-cast tooltip. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function dnd5eHotbarSpellTooltipLevel(
+  entry: Dnd5eCombatActionDescriptorV1 | undefined,
+  configuredSlotLevel?: number,
+): number | undefined {
+  if (entry?.sourceKind !== 'spell') return undefined
+  return entry.command.kind === 'cast-spell'
+    ? configuredSlotLevel ?? entry.command.slotLevel
+    : entry.resource?.current
 }
 
 function readPreference(characterId: string): Dnd5eCombatHotbarPreferenceV1 | undefined {
@@ -220,6 +318,7 @@ function readBackpackOpen(characterId: string): boolean {
 
 export default function PlayerCombatHotbar({
   character,
+  mapWeather,
   mode = 'combat',
   canAct,
   pending,
@@ -233,6 +332,8 @@ export default function PlayerCombatHotbar({
   armedSpellModifiers: controlledArmedSpellModifiers,
   onArmedSpellModifiersChange,
   selectedSpellSlotLevels,
+  triggeredReactionSpellIds = [],
+  canUseTriggeredReactions = false,
   onSelectedSpellSlotLevelChange,
   onCommand,
   onUnavailable,
@@ -250,6 +351,28 @@ export default function PlayerCombatHotbar({
     [character],
   )
   const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id ?? 'fighter'
+  const activeCreatureForm = character.dnd5eCombatState?.wildShapeFormId
+    ? getDnd5eSrdMonster(character.dnd5eCombatState.wildShapeFormId)
+    : undefined
+  const spellCreatureForm = !!activeCreatureForm &&
+    (character.dnd5eCombatState?.wildShapeMode === 'polymorph' ||
+      character.dnd5eCombatState?.wildShapeMode === 'true-polymorph' ||
+      character.dnd5eCombatState?.wildShapeMode === 'animal-shapes')
+  const shapechangeEquipmentDisposition = character.dnd5eCombatState?.wildShapeMode === 'shapechange'
+    ? character.dnd5eCombatState.shapechangeEquipmentDisposition
+    : undefined
+  const creatureFormEquipmentUnavailable = spellCreatureForm ||
+    (!!activeCreatureForm && character.dnd5eCombatState?.wildShapeMode === 'shapechange' &&
+      shapechangeEquipmentDisposition !== 'wear')
+  const activeCreatureFormLabel = character.dnd5eCombatState?.wildShapeMode === 'true-polymorph'
+    ? '完全变形术'
+    : character.dnd5eCombatState?.wildShapeMode === 'polymorph'
+    ? '变形术'
+    : character.dnd5eCombatState?.wildShapeMode === 'animal-shapes'
+      ? '动物形态'
+      : character.dnd5eCombatState?.wildShapeMode === 'shapechange'
+        ? '形体变化'
+        : '荒野形态'
   const [armedSpellModifierState, setArmedSpellModifierState] = useState<{
     characterId: string
     ids: Set<Dnd5eCombatSpellModifier>
@@ -278,7 +401,14 @@ export default function PlayerCombatHotbar({
       for (const spellId of dnd5eSelectedSpellIdsForClass(character, source.classId)) {
         const entry = spellbookById.get(spellId)
         if (!entry) continue
+        const narrativeSpell = dnd5eSpellUsesNarrativeResolution(
+          entry.id,
+          dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition(entry.id)),
+        )
+        const fullHeadless = !narrativeSpell && dnd5eSpellbookEntryHasFullHeadlessAutomation(entry)
+        const structuredCastRoute = !narrativeSpell && dnd5eSpellbookEntryCanUseStructuredCastRoute(entry)
         const combat = getDnd5eSrdCombatSpell(spellId)
+        const pluginActivity = dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition(entry.id))
         const imported = entry.imported
         const baseCastingTime = spellEconomy(dnd5eSpellbookEntryCastingTime(entry))
         const classLevel = source.classLevel
@@ -302,28 +432,34 @@ export default function PlayerCombatHotbar({
           ...(freeBaseCast ? [entry.level] : []),
           ...resourceSlotLevels,
         ])].sort((left, right) => left - right)
+        const ritualAvailable = (entry.imported?.ritual === true || entry.reference?.ritual === true) &&
+          definition.spellcasting.ritualCasting === true && entry.level > 0
         const defaultSlotLevel = entry.level === 0
           ? 0
           : pactLevel != null
             ? pactLevel
             : entry.level
-        const modifierResolution = combat && availableSlotLevels[0] != null
+        const modifierResolution = availableSlotLevels[0] != null
           ? resolveDnd5eSpellModifierIntents({
               character,
               castingClassId: definition.id,
               spellId,
               slotLevel: availableSlotLevels[0],
               modifierIds: [...armedSpellModifiers],
+              pluginSpell: dnd5eHotbarPluginSpellModifierCompatibility(spellId),
             })
           : undefined
         const castingTime = modifierResolution?.ok && modifierResolution.effectiveEconomy === 'bonus-action'
           ? 'bonus-action'
           : baseCastingTime
-        const supportedCastingTime = castingTime !== 'reaction' && dnd5eSpellbookEntryCastingTime(entry) !== 'unsupported'
+        const reactionTriggerOpen = castingTime === 'reaction' && triggeredReactionSpellIds.includes(spellId)
+        const declaredCastingTime = dnd5eSpellbookEntryCastingTime(entry)
+        const supportedCastingTime = (castingTime !== 'reaction' || reactionTriggerOpen) &&
+          (declaredCastingTime !== 'unsupported' || exploration)
         spellSources.push({
           id: spellId,
           label: entry.name,
-          description: dnd5eSpellbookEntryDescription(entry) || '打开法术配置，确认法术位与规则选项。',
+          description: dnd5eSpellbookEntryDescription(entry) || '点击直接施放；需要的规则选项会在施放流程中询问。',
           icon: dnd5eSpellActionIcon({
             id: spellId,
             name: entry.name,
@@ -338,18 +474,21 @@ export default function PlayerCombatHotbar({
           }),
           level: entry.level,
           castingTime,
-          targeting: spellTargeting(combat),
+          targeting: dnd5eHotbarSpellTargeting(combat, pluginActivity, entry.id),
           castingClassId: definition.id,
           defaultSlotLevel,
           availableSlotLevels,
-          available: supportedCastingTime && availableSlotLevels.length > 0,
-          unavailableReason: castingTime === 'reaction'
+          ritualAvailable,
+          available: supportedCastingTime && (availableSlotLevels.length > 0 || ritualAvailable),
+          unavailableReason: castingTime === 'reaction' && !reactionTriggerOpen
             ? '反应法术会在对应触发发生时询问。'
             : !supportedCastingTime
               ? '该法术的施法时间不适用于战斗动作。'
-              : '没有可用于施放该法术的法术位。',
+              : ritualAvailable
+                ? '没有普通施法位；仍可右键请求仪式施法。'
+                : '没有可用于施放该法术的法术位。',
         })
-        const sustainedControl = combat
+        const sustainedControl = combat && (fullHeadless || structuredCastRoute)
           ? dnd5eActiveSustainedSpellControl(character, combat)
           : undefined
         if (sustainedControl && combat) {
@@ -387,6 +526,38 @@ export default function PlayerCombatHotbar({
                   sustainedEffectAttack: sustainedControl.id,
                 },
           })
+        }
+        const flameBladeManifestation = combat && (fullHeadless || structuredCastRoute)
+          ? dnd5eFlameBladeManifestationControl(character, combat)
+          : undefined
+        if (flameBladeManifestation && combat) {
+          const controlKey = `${combat.id}:manifestation`
+          if (!sustainedControlKeys.has(controlKey)) {
+            sustainedControlKeys.add(controlKey)
+            sustainedControlSources.push({
+              id: `sustained-spell:${combat.id}:manifestation`,
+              label: flameBladeManifestation.label,
+              description: flameBladeManifestation.description,
+              icon: dnd5eSpellActionIcon({
+                id: combat.id,
+                name: combat.name,
+                englishName: combat.englishName,
+                level: combat.level,
+                school: combat.school,
+                effect: combat.effect,
+                damageType: combat.damageType,
+                castingClassId: definition.id,
+                iconAssetId: entry.iconAssetId,
+              }),
+              economy: flameBladeManifestation.economy,
+              targeting: 'none',
+              command: {
+                kind: 'set-flame-blade-manifestation',
+                effectId: flameBladeManifestation.effectId,
+                manifested: !flameBladeManifestation.manifested,
+              },
+            })
+          }
         }
       }
     }
@@ -488,29 +659,40 @@ export default function PlayerCombatHotbar({
       },
     })))
     featureSources.unshift(...persistentAreaActivityControls.map((control) => ({
-      id: `persistent-area-activity:${control.areaId}:${control.activityId}`,
+      id: `granted-activity:${control.areaId ?? control.effectId}:${control.activityId}`,
       label: control.label,
-      description: `由地图上的持续区域授予；${control.economy === 'bonus-action' ? '附赠动作' : control.economy === 'action' ? '动作' : control.economy === 'reaction' ? '反应' : '不消耗行动'}，区域消失后按钮自动移除。`,
+      description: `由${control.areaId ? '地图持续区域' : '当前持续效果'}授予；${control.economy === 'bonus-action' ? '附赠动作' : control.economy === 'action' ? '动作' : control.economy === 'reaction' ? '反应' : '不消耗行动'}，来源结束后按钮自动移除。`,
       icon: dnd5eSpellActionIcon({ id: control.activityId, name: control.label }),
       economy: control.economy,
       targeting: control.targeting,
+      available: !control.oncePerTurnKeys?.some((key) =>
+        turnEconomy.usedOncePerTurnKeys?.includes(key)),
+      unavailableReason: control.oncePerTurnKeys?.some((key) =>
+        turnEconomy.usedOncePerTurnKeys?.includes(key))
+        ? '同一回合只能使用一次。'
+        : undefined,
       command: {
         kind: 'use-persistent-area-activity' as const,
         areaId: control.areaId,
+        effectId: control.effectId,
         featureId: control.featureId,
       },
     })))
     featureSources.unshift(...movablePersistentAreas.map((area) => ({
       id: `persistent-area-move:${area.id}`,
-      label: `移动${area.label}`,
-      description: `以${area.economy === 'bonus-action' ? '附赠动作' : '动作'}在地图上选择新位置，至多移动 ${area.maximumFeet} 尺；落点、路径和撞击效果仍由 Headless 校验。`,
+      label: area.coreSpellId === 'major-image' ? '改变高等幻影位置' : `移动${area.label}`,
+      description: area.coreSpellId === 'major-image' && area.destinationRangeFeet != null
+        ? `动作 · 将地图上的现有高等幻影移到施法者 ${area.destinationRangeFeet} 尺内的任意新位置；不消耗法术位，也不会重新施法。`
+        : `${area.economy === 'none' ? '不消耗行动' : area.economy === 'bonus-action' ? '以附赠动作' : '以动作'}在地图上选择新位置，至多移动 ${area.maximumFeet} 尺；落点、路径和撞击效果仍由 Headless 校验。`,
       icon: dnd5eSpellActionIcon({
         id: area.coreSpellId ?? area.id,
         name: area.label,
       }),
       economy: area.economy,
       targeting: 'map-position' as const,
-      resource: { label: '尺', current: area.maximumFeet },
+      resource: area.coreSpellId === 'major-image' && area.destinationRangeFeet != null
+        ? { label: '射程', current: area.destinationRangeFeet }
+        : { label: '尺', current: area.maximumFeet },
       command: { kind: 'move-persistent-area' as const, areaId: area.id },
     })))
     const turnKey = turnEconomy.turnKey ?? ''
@@ -760,53 +942,134 @@ export default function PlayerCombatHotbar({
               : resource?.current === 0 ? `${resource.label}已经耗尽。` : undefined,
       }]
     })
+    const reactionOnly = !canAct && canUseTriggeredReactions && triggeredReactionSpellIds.length > 0
+    const restrictedExtraActionKinds = dnd5eAvailableRestrictedExtraActionKinds({
+      effects: character.dnd5eCombatState?.activeEffects,
+      usesByEffect: character.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
+      turnKey: turnEconomy.turnKey,
+    })
     const built = buildDnd5eCombatActionDescriptors({
-      canAct,
+      canAct: canAct || reactionOnly,
       pending,
       actionRemaining,
       bonusActionRemaining,
       movementRemaining,
+      restrictedExtraActionKinds,
       weaponLabel: character.equipment?.mainWeapon?.name,
       grappleEscapes,
       spells: spellSources,
       features: featureSources,
       items: itemSources,
     })
-    if (!exploration) return built
-    return built.filter((entry) =>
-      entry.id !== 'feature:sustained-spell:expeditious-retreat:expeditious-retreat'
-    ).map((entry) => {
-      if (entry.sourceKind === 'item') return {
-        ...entry,
-        enabled: true,
-        disabledReason: undefined,
-        command: { kind: 'open-panel' as const, panel: 'inventory' as const, focusId: entry.command.kind === 'use-item' ? entry.command.instanceId : undefined },
-      }
-      if (
-        entry.sourceKind === 'feature' &&
-        !entry.id.startsWith('feature:sustained-spell:') &&
-        !entry.id.startsWith('feature:persistent-area-move:') &&
-        !entry.id.startsWith('feature:persistent-area-activity:') &&
-        entry.command.kind !== 'open-panel' &&
-        entry.command.kind !== 'toggle-spell-modifier'
-      ) return {
-        ...entry,
-        enabled: true,
-        disabledReason: undefined,
-        command: { kind: 'open-panel' as const, panel: 'features' as const, focusId: entry.id },
-      }
-      if (entry.sourceKind !== 'system' && entry.sourceKind !== 'weapon') return entry
-      return {
-        ...entry,
-        enabled: false,
-        disabledReason: '基础动作只能在战斗中、轮到自己时使用。',
-      }
+    const creatureFormAttacks: Dnd5eCombatActionDescriptorV1[] = activeCreatureForm?.actions.flatMap((formAction, actionIndex) => {
+      if (formAction.kind !== 'weapon-attack' && formAction.kind !== 'multiattack') return []
+      const enabled = !pending && canAct && (
+        actionRemaining > 0 || restrictedExtraActionKinds.includes('weapon-attack')
+      )
+      return [{
+        schemaVersion: 1,
+        id: `creature-form:${activeCreatureForm.id}:attack:${actionIndex}`,
+        sourceKind: 'weapon',
+        label: `${activeCreatureForm.name}：${formAction.name}`,
+        description: formAction.description,
+        icon: dnd5eSystemActionIcon(
+          `creature-form:${activeCreatureForm.id}:${formAction.id}`,
+          'monster-attack',
+        ),
+        economy: 'action',
+        targeting: 'creature',
+        enabled,
+        disabledReason: enabled
+          ? undefined
+          : pending
+            ? '正在等待 DM 结算上一项操作。'
+            : !canAct
+              ? '当前不是该角色的可行动回合。'
+              : '本回合动作已用尽。',
+        command: {
+          kind: 'select-weapon-target',
+          options: { wildShapeActionIndex: actionIndex },
+        },
+      }]
+    }) ?? []
+    const builtWithCreatureFormAttacks = activeCreatureForm
+      ? [...built, ...creatureFormAttacks]
+      : built
+    const authorizedBuilt = reactionOnly
+      ? builtWithCreatureFormAttacks.map((entry) => {
+          const triggeredSpell = entry.sourceKind === 'spell' &&
+            triggeredReactionSpellIds.some((spellId) => entry.id.endsWith(`:${spellId}`))
+          return triggeredSpell ? entry : {
+            ...entry,
+            enabled: false,
+            disabledReason: '当前只开放已触发的反应法术。',
+          }
+        })
+      : builtWithCreatureFormAttacks
+    const formAuthorizedBuilt = spellCreatureForm || creatureFormEquipmentUnavailable
+      ? authorizedBuilt.map((entry) => {
+          if (
+            entry.command.kind === 'select-weapon-target' &&
+            entry.command.options?.wildShapeActionIndex != null
+          ) return entry
+          if (!spellCreatureForm && entry.sourceKind !== 'weapon' && entry.sourceKind !== 'item') return entry
+          if (entry.sourceKind === 'system') return entry
+          const disabledReason = entry.sourceKind === 'weapon'
+            ? shapechangeEquipmentDisposition === 'drop'
+              ? '本体武器已掉落在形体变化的施法位置；请使用当前形态动作。'
+              : '本体武器已融入法术形态；请使用基础动作栏中的当前形态攻击。'
+            : entry.sourceKind === 'item'
+              ? shapechangeEquipmentDisposition === 'drop'
+                ? '装备与道具已掉落在形体变化的施法位置，当前不能启动、使用、持握或受益。'
+                : '装备与道具已融入法术形态，当前不能启动、使用、持握或受益。'
+              : entry.sourceKind === 'spell'
+                ? '变形术或动物形态期间不能施法。'
+                : '法术形态会替换本体游戏数据，当前不能使用本体职业特性。'
+          return { ...entry, enabled: false, disabledReason }
+        })
+      : authorizedBuilt
+    const explorationAuthorizedBuilt = !exploration
+      ? formAuthorizedBuilt
+      : formAuthorizedBuilt.filter((entry) =>
+          entry.id !== 'feature:sustained-spell:expeditious-retreat:expeditious-retreat'
+        ).map((entry) => {
+          // 可执行的道具在探索状态下仍应沿用 use-item 权威链路。此前这里把药水等
+          // 全部降级成“打开背包”，导致快捷槽只能查看，不能真正使用。
+          if (entry.sourceKind === 'item') return entry
+          if (
+            entry.sourceKind === 'feature' &&
+            !entry.id.startsWith('feature:sustained-spell:') &&
+            !entry.id.startsWith('feature:persistent-area-move:') &&
+            !entry.id.startsWith('feature:persistent-area-activity:') &&
+            entry.command.kind !== 'use-persistent-area-activity' &&
+            entry.command.kind !== 'open-panel' &&
+            entry.command.kind !== 'toggle-spell-modifier'
+          ) return {
+            ...entry,
+            enabled: true,
+            disabledReason: undefined,
+            command: { kind: 'open-panel' as const, panel: 'features' as const, focusId: entry.id },
+          }
+          if (entry.sourceKind !== 'system' && entry.sourceKind !== 'weapon') return entry
+          return {
+            ...entry,
+            enabled: false,
+            disabledReason: '基础动作只能在战斗中、轮到自己时使用。',
+          }
+        })
+    const actionRestriction = dnd5eActiveActionRestriction(character.dnd5eCombatState?.activeEffects)
+    if (!actionRestriction) return explorationAuthorizedBuilt
+    return explorationAuthorizedBuilt.map((entry) => {
+      const prohibitedReason = dnd5eHotbarActionRestrictionReason(entry, actionRestriction)
+      return prohibitedReason ? { ...entry, enabled: false, disabledReason: prohibitedReason } : entry
     })
   }, [
     actionRemaining,
+    activeCreatureForm,
     armedSpellModifiers,
     bonusActionRemaining,
     canAct,
+    canUseTriggeredReactions,
     character,
     exploration,
     grappleEscapes,
@@ -818,10 +1081,15 @@ export default function PlayerCombatHotbar({
     pending,
     primaryClassId,
     spellModifierIntents,
+    spellCreatureForm,
     sustainedAreaControls,
     persistentAreaActivityControls,
+    creatureFormEquipmentUnavailable,
+    shapechangeEquipmentDisposition,
     turnEconomy.action.max,
     turnEconomy.turnKey,
+    turnEconomy.usedOncePerTurnKeys,
+    triggeredReactionSpellIds,
   ])
 
   const [storedPreference, setPreference] = useState<Dnd5eCombatHotbarPreferenceV1>(() =>
@@ -829,10 +1097,10 @@ export default function PlayerCombatHotbar({
   )
   const quickbarCandidateIds = useMemo(() => {
     const usable = inventory.entries
-      .filter((entry) => !!entry.item.use)
+      .filter((entry) => !!entry.item.use || !!entry.item.useActions?.length)
       .map((entry) => entry.instanceId)
     const remaining = inventory.entries
-      .filter((entry) => !entry.item.use)
+      .filter((entry) => !entry.item.use && !entry.item.useActions?.length)
       .map((entry) => entry.instanceId)
     return [...usable, ...remaining]
   }, [inventory.entries])
@@ -868,6 +1136,8 @@ export default function PlayerCombatHotbar({
     top: number
   } | null>(null)
   const suppressClickAfterDragRef = useRef(false)
+  const featureActionsRailRef = useRef<HTMLDivElement>(null)
+  const basicActionsRailRef = useRef<HTMLDivElement>(null)
   const preference = useMemo(
     () => reconcileDnd5eCombatHotbarPreference(storedPreference, descriptors),
     [descriptors, storedPreference],
@@ -909,13 +1179,6 @@ export default function PlayerCombatHotbar({
     }
     return byInstanceId
   }, [grouped.items])
-  const [featurePage, setFeaturePage] = useState(0)
-  const featurePageCount = Math.max(1, Math.ceil(grouped.features.length / FEATURE_PAGE_SIZE))
-  const activeFeaturePage = Math.min(featurePageCount - 1, featurePage)
-  const visibleFeatures = grouped.features.slice(
-    activeFeaturePage * FEATURE_PAGE_SIZE,
-    (activeFeaturePage + 1) * FEATURE_PAGE_SIZE,
-  )
   const activate = useCallback((entry: Dnd5eCombatActionDescriptorV1, configuredSlotLevel?: number) => {
     if (
       entry.command.kind === 'cast-spell' &&
@@ -949,12 +1212,24 @@ export default function PlayerCombatHotbar({
         return
       }
       const slotLevel = slotSelection.slotLevel
-      const resolvedCommand = resolveDnd5eHotbarSpellCommand(
-        character,
-        entry.command,
-        slotLevel,
-        [...armedSpellModifiers],
-      )
+      let resolvedCommand: ReturnType<typeof resolveDnd5eHotbarSpellCommand>
+      try {
+        resolvedCommand = resolveDnd5eHotbarSpellCommand(
+          character,
+          entry.command,
+          slotLevel,
+          [...armedSpellModifiers],
+        )
+      } catch (error: unknown) {
+        onUnavailable?.({
+          ...entry,
+          enabled: false,
+          disabledReason: error instanceof Error
+            ? `建立施法命令失败：${error.message}`
+            : '建立施法命令失败。',
+        })
+        return
+      }
       if (!resolvedCommand.ok) {
         onUnavailable?.({
           ...entry,
@@ -970,6 +1245,48 @@ export default function PlayerCombatHotbar({
     }
     onCommand(entry.command, entry)
   }, [armedSpellModifiers, character, commitArmedSpellModifiers, onCommand, onUnavailable])
+
+  const activateRitual = useCallback((entry: Dnd5eCombatActionDescriptorV1) => {
+    if (entry.command.kind !== 'cast-spell' || entry.ritualAvailable !== true) return
+    if (!entry.enabled) {
+      onUnavailable?.(entry)
+      return
+    }
+    onCommand({
+      ...entry.command,
+      options: { ritual: true },
+    }, entry)
+    commitArmedSpellModifiers(new Set())
+    setSpellConfiguration(null)
+  }, [commitArmedSpellModifiers, onCommand, onUnavailable])
+
+  const activateNarrativeObject = useCallback((
+    entry: Dnd5eCombatActionDescriptorV1,
+    slotLevel: number,
+  ) => {
+    if (
+      entry.command.kind !== 'cast-spell' ||
+      !dnd5eSpellSupportsNarrativeObjectAlternative(entry.command.spellId)
+    ) return
+    const slotSelection = resolveDnd5eCombatSpellSlotSelection(entry, slotLevel)
+    if (!entry.enabled || !slotSelection.ok) {
+      onUnavailable?.({
+        ...entry,
+        enabled: false,
+        disabledReason: slotSelection.ok
+          ? entry.disabledReason
+          : slotSelection.reason,
+      })
+      return
+    }
+    onCommand({
+      ...entry.command,
+      slotLevel: slotSelection.slotLevel,
+      options: { narrativeObject: true },
+    }, entry)
+    commitArmedSpellModifiers(new Set())
+    setSpellConfiguration(null)
+  }, [commitArmedSpellModifiers, onCommand, onUnavailable])
 
   const pinSpellSlotLevel = useCallback((actionId: string, slotLevel: number) => {
     if (onSelectedSpellSlotLevelChange) {
@@ -993,12 +1310,21 @@ export default function PlayerCombatHotbar({
 
   const spellConfigurationResolution = useMemo(() => {
     if (!spellConfiguration || spellConfiguration.entry.command.kind !== 'cast-spell') return undefined
+    const applicableModifiers = dnd5eApplicableHotbarSpellModifiers(
+      character,
+      spellConfiguration.entry.command,
+      spellConfiguration.slotLevel,
+      [...armedSpellModifiers],
+    )
     return resolveDnd5eSpellModifierIntents({
       character,
       castingClassId: spellConfiguration.entry.command.castingClassId as Parameters<typeof resolveDnd5eSpellModifierIntents>[0]['castingClassId'],
       spellId: spellConfiguration.entry.command.spellId,
       slotLevel: spellConfiguration.slotLevel,
-      modifierIds: [...armedSpellModifiers],
+      modifierIds: applicableModifiers,
+      pluginSpell: dnd5eHotbarPluginSpellModifierCompatibility(
+        spellConfiguration.entry.command.spellId,
+      ),
     })
   }, [armedSpellModifiers, character, spellConfiguration])
 
@@ -1044,6 +1370,7 @@ export default function PlayerCombatHotbar({
           entry.command.castingClassId,
           entry.command.spellId,
           pinnedSpellSlotLevel ?? entry.command.slotLevel,
+          { weather: mapWeather },
         )
       : undefined
     const modifierActive = entry.command.kind === 'toggle-spell-modifier' &&
@@ -1068,14 +1395,21 @@ export default function PlayerCombatHotbar({
         setDraggedActionId(null)
       }}
       onClick={() => {
-        if (!suppressClickAfterDragRef.current) activate(entry, pinnedSpellSlotLevel)
+        if (suppressClickAfterDragRef.current) return
+        const fallbackSlotLevel = dnd5eHotbarSpellFallbackConfigurationLevel(entry, pinnedSpellSlotLevel)
+        if (fallbackSlotLevel != null) {
+          setTooltip(null)
+          setSpellConfiguration({ entry, slotLevel: fallbackSlotLevel })
+          return
+        }
+        activate(entry, pinnedSpellSlotLevel)
       }}
       onContextMenu={(event) => {
         if (entry.command.kind !== 'cast-spell') return
         event.preventDefault()
         event.stopPropagation()
         const availableLevels = entry.availableSlotLevels ?? []
-        if (availableLevels.length < 1) {
+        if (availableLevels.length < 1 && entry.ritualAvailable !== true) {
           onUnavailable?.(entry)
           return
         }
@@ -1084,7 +1418,7 @@ export default function PlayerCombatHotbar({
           entry,
           slotLevel: pinnedSpellSlotLevel != null && availableLevels.includes(pinnedSpellSlotLevel)
             ? pinnedSpellSlotLevel
-            : availableLevels[0],
+            : availableLevels[0] ?? entry.command.slotLevel,
         })
       }}
       onMouseEnter={(event) => showTooltip(entry, event.currentTarget)}
@@ -1094,13 +1428,13 @@ export default function PlayerCombatHotbar({
       aria-label={entry.label}
       aria-disabled={!entry.enabled}
       title={entry.command.kind === 'cast-spell'
-        ? [
+        ? entry.enabled ? [
             entry.label,
             pinnedSpellSlotLevel == null
               ? `${entry.command.slotLevel === 0 ? '戏法' : `${entry.command.slotLevel}环`}（默认）`
               : `${pinnedSpellSlotLevel === 0 ? '戏法' : `${pinnedSpellSlotLevel}环`}（已固定）`,
             damagePreview?.summary,
-          ].filter(Boolean).join('\n')
+          ].filter(Boolean).join('\n') : `${entry.label}\n${entry.disabledReason ?? '当前不能施法。'}`
         : entry.disabledReason}
       data-spell-slot-level={entry.command.kind === 'cast-spell'
         ? pinnedSpellSlotLevel ?? entry.command.slotLevel
@@ -1109,7 +1443,7 @@ export default function PlayerCombatHotbar({
         ? 'true'
         : undefined}
       aria-describedby={tooltip?.entry.id === entry.id ? 'combat-hotbar-action-tooltip' : undefined}
-      className={`group relative h-12 w-12 shrink-0 rounded-lg border p-px transition ${entry.id === 'system:end-turn' ? 'border-amber-300/35 bg-amber-400/10' : activeActionId === entry.id || modifierActive ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]' : entry.enabled ? 'border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-violet-500/10' : 'cursor-not-allowed border-white/[0.045] bg-black/20'}`}
+      className={`group relative h-12 w-12 shrink-0 snap-start rounded-lg border p-px transition ${entry.id === 'system:end-turn' ? 'border-amber-300/35 bg-amber-400/10' : activeActionId === entry.id || modifierActive ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]' : entry.enabled ? 'border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-violet-500/10' : 'cursor-not-allowed border-white/[0.045] bg-black/20'}`}
     >
       <Dnd5eActionIcon spec={entry.icon} level={spellLevel} active={activeActionId === entry.id || modifierActive} disabled={!entry.enabled} badge={resourceBadge} className="w-full" />
       {modifierActive ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-amber-100/70 bg-amber-400 px-1 text-[9px] font-black text-void-950">✓</span> : null}
@@ -1183,6 +1517,8 @@ export default function PlayerCombatHotbar({
         draggable
         data-testid={`combat-item-quick-slot-${slotIndex + 1}`}
         aria-label={`${entry.item.name}${directlyUsable ? '' : '（打开背包查看）'}`}
+        aria-disabled={descriptor ? !descriptor.enabled : undefined}
+        data-command-kind={descriptor?.command.kind}
         title={directlyUsable
           ? `${entry.item.name}\n${descriptor.description}${(entry.item.useActions?.length ?? 0) > 1 ? '\n右键打开背包，选择其他法术或升环档位。' : ''}`
           : `${entry.item.name}\n该物品没有可直接执行的战斗使用动作，点击查看背包详情。`}
@@ -1233,11 +1569,17 @@ export default function PlayerCombatHotbar({
         <span className="absolute left-0.5 top-0 text-[8px] font-black text-amber-100/65">
           {slotIndex + 1}
         </span>
-        {!directlyUsable ? (
+        {directlyUsable ? (
+          <span className="absolute inset-x-1 bottom-0.5 rounded bg-black/75 px-0.5 text-[7px] font-semibold text-slate-300">
+            {descriptor?.enabled ? '使用' : creatureFormEquipmentUnavailable
+              ? shapechangeEquipmentDisposition === 'drop' ? '掉落' : '融入'
+              : '不可用'}
+          </span>
+        ) : (
           <span className="absolute inset-x-1 bottom-0.5 rounded bg-black/75 px-0.5 text-[7px] font-semibold text-slate-300">
             查看
           </span>
-        ) : null}
+        )}
         {descriptor && !descriptor.enabled ? (
           <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
             <LockKeyhole className="h-4 w-4 text-slate-300/75 drop-shadow" />
@@ -1247,9 +1589,10 @@ export default function PlayerCombatHotbar({
     )
   }
 
-  const tooltipSpellSlotLevel = tooltip?.entry.command.kind === 'cast-spell'
-    ? effectiveSelectedSpellSlotLevels[tooltip.entry.id] ?? tooltip.entry.command.slotLevel
-    : undefined
+  const tooltipSpellSlotLevel = dnd5eHotbarSpellTooltipLevel(
+    tooltip?.entry,
+    tooltip ? effectiveSelectedSpellSlotLevels[tooltip.entry.id] : undefined,
+  )
   const tooltipSpellDamage = tooltip?.entry.command.kind === 'cast-spell' &&
     tooltipSpellSlotLevel != null
     ? dnd5eCombatSpellDamagePreview(
@@ -1257,12 +1600,29 @@ export default function PlayerCombatHotbar({
         tooltip.entry.command.castingClassId,
         tooltip.entry.command.spellId,
         tooltipSpellSlotLevel,
+        { weather: mapWeather },
       )
     : undefined
   const tooltipSpellSlotLocked = tooltip?.entry.command.kind === 'cast-spell' &&
     effectiveSelectedSpellSlotLevels[tooltip.entry.id] != null
   const portrait = resolveMapTokenPortrait(character)
-  const hpPercentage = Math.max(0, Math.min(100, character.maxHp > 0 ? character.currentHp / character.maxHp * 100 : 0))
+  const hotbarCurrentHp = activeCreatureForm
+    ? character.dnd5eCombatState?.wildShapeCurrentHp ?? activeCreatureForm.hitPoints.average
+    : character.currentHp
+  const hotbarMaximumHp = activeCreatureForm?.hitPoints.average ??
+    character.maxHp + dnd5eActiveHitPointMaximumBonus(character.dnd5eCombatState?.activeEffects)
+  const hpPercentage = Math.max(0, Math.min(100, hotbarMaximumHp > 0 ? hotbarCurrentHp / hotbarMaximumHp * 100 : 0))
+  const restrictedExtraActionKinds = dnd5eAvailableRestrictedExtraActionKinds({
+    effects: character.dnd5eCombatState?.activeEffects,
+    usesByEffect: character.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
+    turnKey: turnEconomy.turnKey,
+  })
+  const scrollActionsRail = (rail: HTMLDivElement | null, direction: -1 | 1) => {
+    rail?.scrollBy({
+      left: direction * 156,
+      behavior: 'smooth',
+    })
+  }
 
   return (<>
     <section
@@ -1289,9 +1649,11 @@ export default function PlayerCombatHotbar({
           </button>
           <div className="mt-1 w-full">
             <div className="h-1.5 overflow-hidden rounded-full bg-black/70"><div className="h-full rounded-full bg-gradient-to-r from-rose-700 to-emerald-400" style={{ width: `${hpPercentage}%` }} /></div>
-            <div className="mt-0.5 text-center text-[9px] font-semibold tabular-nums text-slate-300">{character.currentHp}/{character.maxHp}</div>
+            <div className="mt-0.5 text-center text-[9px] font-semibold tabular-nums text-slate-300">{hotbarCurrentHp}/{hotbarMaximumHp}</div>
           </div>
-          {exploration ? (
+          {activeCreatureForm ? (
+            <div className="mt-1 w-full truncate rounded bg-emerald-400/10 px-1 py-0.5 text-center text-[8px] font-bold text-emerald-200" title={`${activeCreatureForm.name} · ${activeCreatureFormLabel}`}>{activeCreatureForm.name}</div>
+          ) : exploration ? (
             <div className="mt-1 w-full rounded bg-violet-400/10 py-0.5 text-center text-[8px] font-bold text-violet-200">探索施法</div>
           ) : (
             <div className="mt-1 grid w-full grid-cols-3 gap-0.5 text-center text-[8px] font-bold">
@@ -1300,6 +1662,13 @@ export default function PlayerCombatHotbar({
               <span title="剩余移动力" className={`rounded py-0.5 ${movementRemaining > 0 ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-slate-600'}`}>{movementRemaining}</span>
             </div>
           )}
+          {!exploration && restrictedExtraActionKinds.length > 0 ? (
+            <div
+              data-testid="combat-hotbar-restricted-extra-action"
+              className="mt-1 w-full rounded bg-cyan-400/15 px-1 py-0.5 text-center text-[8px] font-bold text-cyan-200"
+              title="加速术：可再执行一次武器攻击、疾走、撤离或躲藏"
+            >加速动作 1</div>
+          ) : null}
         </aside>
 
         <div data-testid="combat-hotbar-spells" className="rounded-lg border border-violet-300/15 bg-violet-950/15 p-1.5">
@@ -1347,16 +1716,31 @@ export default function PlayerCombatHotbar({
         <div data-testid="combat-hotbar-features" className="rounded-lg border border-emerald-300/15 bg-emerald-950/10 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-emerald-100/80">
             <Sparkles className="h-3 w-3" />职业特性
-            <span className="ml-auto font-normal tracking-normal text-slate-500">{grouped.features.length} 项 · {activeFeaturePage + 1}/{featurePageCount}</span>
+            <span className="ml-auto font-normal tracking-normal text-slate-500">{grouped.features.length} 项 · 左右滑动</span>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setFeaturePage(Math.max(0, activeFeaturePage - 1))} disabled={activeFeaturePage <= 0} aria-label="上一页职业特性" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronLeft className="h-3.5 w-3.5" /></button>
-            <div className="grid min-w-0 flex-1 grid-cols-3 gap-1">
-              {Array.from({ length: FEATURE_PAGE_SIZE }, (_, index) => visibleFeatures[index]
-                ? actionButton(visibleFeatures[index])
-                : <div key={`empty-feature-${index}`} className="h-12 w-12 shrink-0 rounded-lg border border-dashed border-emerald-200/[0.07] bg-black/10" />)}
+            <button type="button" onClick={() => scrollActionsRail(featureActionsRailRef.current, -1)} aria-label="向左滚动职业特性" className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"><ChevronLeft className="h-3.5 w-3.5" /></button>
+            <div
+              ref={featureActionsRailRef}
+              data-testid="combat-hotbar-features-rail"
+              aria-label="职业特性两行横向滑栏"
+              tabIndex={0}
+              onWheel={(event) => {
+                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+                event.preventDefault()
+                event.stopPropagation()
+                featureActionsRailRef.current?.scrollBy({ left: event.deltaY })
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                event.preventDefault()
+                scrollActionsRail(featureActionsRailRef.current, event.key === 'ArrowLeft' ? -1 : 1)
+              }}
+              className="grid h-[6.25rem] min-w-0 flex-1 auto-cols-[3rem] grid-flow-col grid-rows-2 gap-1 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {grouped.features.map(actionButton)}
             </div>
-            <button type="button" onClick={() => setFeaturePage(Math.min(featurePageCount - 1, activeFeaturePage + 1))} disabled={activeFeaturePage >= featurePageCount - 1} aria-label="下一页职业特性" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronRight className="h-3.5 w-3.5" /></button>
+            <button type="button" onClick={() => scrollActionsRail(featureActionsRailRef.current, 1)} aria-label="向右滚动职业特性" className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"><ChevronRight className="h-3.5 w-3.5" /></button>
           </div>
         </div>
 
@@ -1388,10 +1772,45 @@ export default function PlayerCombatHotbar({
         <div data-testid="combat-hotbar-basics" className="rounded-lg border border-slate-200/15 bg-slate-900/30 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-300">
             <Swords className="h-3 w-3" />基础动作
-            <span className="ml-auto font-normal tracking-normal text-slate-600">拖拽排序</span>
+            <span className="ml-auto font-normal tracking-normal text-slate-600">左右滑动 · 拖拽排序</span>
           </div>
-          <div className="grid grid-cols-4 gap-1">
-            {grouped.basics.map(actionButton)}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="向左滚动基础动作"
+              onClick={() => scrollActionsRail(basicActionsRailRef.current, -1)}
+              className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <div
+              ref={basicActionsRailRef}
+              data-testid="combat-hotbar-basics-rail"
+              aria-label="基础动作横向滑栏"
+              tabIndex={0}
+              onWheel={(event) => {
+                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+                event.preventDefault()
+                event.stopPropagation()
+                basicActionsRailRef.current?.scrollBy({ left: event.deltaY })
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                event.preventDefault()
+                scrollActionsRail(basicActionsRailRef.current, event.key === 'ArrowLeft' ? -1 : 1)
+              }}
+              className="grid h-[6.25rem] min-w-0 flex-1 auto-cols-[3rem] grid-flow-col grid-rows-2 gap-1 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {grouped.basics.map(actionButton)}
+            </div>
+            <button
+              type="button"
+              aria-label="向右滚动基础动作"
+              onClick={() => scrollActionsRail(basicActionsRailRef.current, 1)}
+              className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </div>
@@ -1458,7 +1877,7 @@ export default function PlayerCombatHotbar({
         style={{ left: tooltip.left, top: tooltip.top }}
       >
         <strong className="block text-xs text-white">{tooltip.entry.label}</strong>
-        <span className="mt-1 block text-[10px] leading-4 text-slate-400">{tooltip.entry.description}</span>
+        <span className="mt-1 block text-[10px] leading-4 text-white">{tooltip.entry.description}</span>
         <span className={`mt-2 block text-[10px] ${tooltip.entry.enabled ? 'text-emerald-300' : 'text-amber-300'}`}>
           {tooltip.entry.enabled
             ? `${ECONOMY_LABELS[tooltip.entry.economy]} · ${TARGETING_LABELS[tooltip.entry.targeting]}`
@@ -1468,7 +1887,9 @@ export default function PlayerCombatHotbar({
           <span className="mt-1 block text-[10px] font-semibold text-violet-200">
             {tooltipSpellSlotLevel === 0
               ? '戏法'
-              : `${tooltipSpellSlotLevel} 环施放${tooltipSpellSlotLocked ? '（已固定）' : '（默认）'}`}
+              : tooltip.entry.command.kind === 'cast-spell'
+                ? `${tooltipSpellSlotLevel} 环施放${tooltipSpellSlotLocked ? '（已固定）' : '（默认）'}`
+                : `${tooltipSpellSlotLevel} 环法术`}
           </span>
           {tooltipSpellDamage ? <span className="mt-1 block rounded-md border border-rose-300/15 bg-rose-500/[0.06] px-2 py-1.5 text-[10px] leading-4 text-rose-100">
             <strong>伤害：</strong>{tooltipSpellDamage.summary}
@@ -1478,7 +1899,11 @@ export default function PlayerCombatHotbar({
                 </span>
               : null}
           </span> : null}
-          <span className="mt-1 block text-[9px] text-violet-300">左键按当前环位施放 · 右键重新固定环位</span>
+          <span className="mt-1 block text-[9px] text-violet-300">
+            {tooltip.entry.command.kind === 'cast-spell'
+              ? '左键按当前环位施放 · 右键重新固定环位'
+              : '点击打开完整施法配置'}
+          </span>
         </> : null}
       </div>,
       document.body,
@@ -1537,6 +1962,41 @@ export default function PlayerCombatHotbar({
           >
             {spellConfiguration.slotLevel === 0 ? '固定为戏法' : `固定为 ${spellConfiguration.slotLevel} 环`}
           </button>
+          <button
+            type="button"
+            disabled={spellConfigurationResolution?.ok === false}
+            onClick={() => {
+              const { entry, slotLevel } = spellConfiguration
+              activate(entry, slotLevel)
+              pinSpellSlotLevel(entry.id, slotLevel)
+            }}
+            className="mt-2 w-full rounded-xl border border-emerald-300/30 bg-emerald-500/15 px-4 py-2.5 text-sm font-bold text-emerald-100 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {spellConfiguration.slotLevel === 0
+              ? '以戏法施放'
+              : `以 ${spellConfiguration.slotLevel} 环施放`}
+          </button>
+          {spellConfiguration.entry.ritualAvailable === true ? <button
+            type="button"
+            onClick={() => activateRitual(spellConfiguration.entry)}
+            className="mt-2 w-full rounded-xl border border-sky-300/25 bg-sky-500/10 px-4 py-2.5 text-sm font-bold text-sky-100 hover:bg-sky-500/20"
+          >
+            请求仪式施法（原施法时间 +10 分钟，不消耗法术位）
+          </button> : null}
+          {spellConfiguration.entry.command.kind === 'cast-spell' &&
+          dnd5eSpellSupportsNarrativeObjectAlternative(
+            spellConfiguration.entry.command.spellId,
+          ) ? <button
+            type="button"
+            disabled={spellConfigurationResolution?.ok === false}
+            onClick={() => activateNarrativeObject(
+              spellConfiguration.entry,
+              spellConfiguration.slotLevel,
+            )}
+            className="mt-2 w-full rounded-xl border border-sky-300/25 bg-sky-500/10 px-4 py-2.5 text-sm font-bold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {`以 ${spellConfiguration.slotLevel} 环对物件施放（语音叙事）`}
+          </button> : null}
         </section>
       </div>,
       document.body,

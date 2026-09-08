@@ -33,6 +33,7 @@ import {
 } from '../../lib/mapPathfinding'
 import {
   dnd5eMonsterAreaSavingThrowVariants,
+  dnd5eMonsterActionUsageId,
   dnd5eMonsterRequiredAreaSavingThrowVariantId,
   dnd5eMonsterMapSpeed,
   dnd5eMonsterProficiencyBonus,
@@ -1785,7 +1786,7 @@ function actionExpectedValue(input: {
       }),
       turnKey: plannerTurnKey,
       usedTurnKeys: attackerState?.declarativeUsedTurnKeys,
-      actorRecklessActive: attackerState?.recklessAttackTurnKey != null,
+      actorRecklessActive: attackerState?.recklessAttackTurnKey === plannerTurnKey,
       ...(() => {
         const movementState = attacker.dnd5eCombatState
         if (movementState?.monsterMechanicMovementTurnKey !== plannerTurnKey) {
@@ -3200,10 +3201,14 @@ function createTacticalCandidates(input: {
     .filter(({ action }) => dnd5eMonsterActionAutomation(action) === 'headless')
     .filter(({ action }) =>
       action.usage?.kind !== 'recharge' ||
-      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[action.id] !== false)
+      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ] !== false)
     .filter(({ action }) =>
       action.usage?.kind !== 'per-day' ||
-      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ?? action.usage.max) > 0)
+      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ]?.current ?? action.usage.max) > 0)
     .filter(({ action }) => {
       const resources = {
         rechargeReadyByActionId:

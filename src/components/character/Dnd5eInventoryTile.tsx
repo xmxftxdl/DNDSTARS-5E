@@ -50,7 +50,7 @@ export default function Dnd5eInventoryTile({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={() => combatQuickUse && selected && usable ? onActivate?.() : onSelect?.()}
-      title={entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name}\n${entry.item.rulesText}${combatQuickUse && usable ? '\n再次点击使用' : ''}`}
+      title={entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name}\n${entry.item.rulesText}${entry.linkedSpellAuthorityRecordId ? `\n长期法术连结：${entry.planarState === 'ethereal' ? '以太位面' : '物质位面'}` : ''}${entry.linkedSpellFocusAuthorityRecordId ? '\n长期法术锚点：对该物品施放解除魔法可结束连结' : ''}${combatQuickUse && usable ? '\n再次点击使用' : ''}`}
       className={`group relative rounded-2xl border p-2 text-left transition ${compact ? 'min-h-24' : 'min-h-28'} ${dragging ? 'scale-95 opacity-45' : ''} ${selected
         ? 'border-arcane-400/60 bg-arcane-500/15 shadow-[0_0_22px_rgba(124,92,255,0.16)]'
         : 'border-white/8 bg-gradient-to-b from-white/[0.045] to-black/20 hover:-translate-y-0.5 hover:border-white/20'}`}
@@ -69,18 +69,34 @@ export default function Dnd5eInventoryTile({
       </div>
       <p className="mt-2 line-clamp-2 text-center text-[11px] font-semibold leading-snug text-slate-100">{displayDnd5eInventoryItemName(entry)}</p>
       {!compact && <p className="mt-1 text-[10px] text-slate-600">{DND5E_INVENTORY_CATEGORY_LABELS[entry.item.category]}</p>}
-      {entry.attuned && (
-        <span className="absolute bottom-2 left-2 rounded-md bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] text-fuchsia-100">已同调</span>
+      {entry.linkedSpellAuthorityRecordId && (
+        <span className="absolute left-2 top-2 rounded-md bg-cyan-500/20 px-1.5 py-0.5 text-[9px] text-cyan-100">
+          {entry.planarState === 'ethereal' ? '以太连结' : '法术连结'}
+        </span>
       )}
-      {entry.attunementPending && !entry.attuned && (
-        <span className="absolute bottom-2 left-2 rounded-md bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-100">短休同调</span>
+      {entry.linkedSpellFocusAuthorityRecordId && (
+        <span className="rounded-full border border-sky-300/60 bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-100">
+          法术锚点
+        </span>
       )}
-      {entry.identified === false && (
-        <span className="absolute bottom-2 left-2 rounded-md bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] text-fuchsia-100">未鉴定</span>
-      )}
-      {entry.item.magicItem && !entry.equippedSlot && (
-        <span className={`absolute bottom-2 right-2 rounded-md px-1.5 py-0.5 text-[9px] ${entry.item.magicItem.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-violet-500/15 text-violet-200'}`}>
-          {entry.item.magicItem.automation === 'headless' ? 'Headless' : 'DM 裁定'}
+      {(entry.attuned || entry.attunementPending || entry.identified === false || (entry.item.magicItem && !entry.equippedSlot)) && (
+        <span data-testid="inventory-tile-status-row" className="mt-2 flex min-h-4 flex-wrap items-center justify-between gap-1">
+          <span className="flex flex-wrap items-center gap-1">
+            {entry.attuned && (
+              <span className="rounded-md bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] text-fuchsia-100">已同调</span>
+            )}
+            {entry.attunementPending && !entry.attuned && (
+              <span className="rounded-md bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-100">短休同调</span>
+            )}
+            {entry.identified === false && (
+              <span className="rounded-md bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] text-fuchsia-100">未鉴定</span>
+            )}
+          </span>
+          {entry.item.magicItem && !entry.equippedSlot && (
+            <span className={`rounded-md px-1.5 py-0.5 text-[9px] ${entry.item.magicItem.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-violet-500/15 text-violet-200'}`}>
+              {entry.item.magicItem.automation === 'headless' ? 'Headless' : 'DM 裁定'}
+            </span>
+          )}
         </span>
       )}
       <ItemTooltip entry={entry} />
@@ -115,6 +131,8 @@ function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
         {item.weightLb != null && <span>{item.weightLb} 磅</span>}
         {item.cost && <span>{item.cost.amount} {item.cost.currency}</span>}
         {item.use && <span>{item.use.economy === 'action' ? '动作' : item.use.economy === 'bonusAction' ? '附赠动作' : '无需行动'}</span>}
+        {entry.linkedSpellAuthorityRecordId && <span>长期法术连结 · {entry.planarState === 'ethereal' ? '以太位面' : '物质位面'}</span>}
+        {entry.linkedSpellFocusAuthorityRecordId && <span>长期法术锚点 · 可被解除魔法终止</span>}
         {Object.values(entry.resources ?? {}).map((resource) => <span key={resource.id}>{resource.label} {resource.current}/{resource.maximum}</span>)}
       </span>
       <span className="mt-3 block border-t border-white/8 pt-2 text-[10px] text-slate-600">{item.source.book} · {item.source.license}</span>

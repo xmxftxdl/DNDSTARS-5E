@@ -1,0 +1,121 @@
+{
+  "id": "srd-5.1:ochre-jelly",
+  "slug": "ochre-jelly",
+  "name": "赭冻怪",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "pseudopod",
+      "name": "伪足",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "split",
+      "name": "分裂",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 207,
+      "slug": "ochre-jelly",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:04:09.617Z",
+      "name": "赭冻怪",
+      "actionId": "pseudopod",
+      "actionName": "伪足",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-ochre-jelly-pseudopod-1788563049716",
+      "combatId": "verify-ui-ochre-jelly-pseudopod-1788563049716:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "赭冻怪 使用伪足攻击 验证目标：伪足 → 验证目标 8+4=12 命中；共造成 15 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:05 PM\n结算\n\n赭冻怪 使用伪足攻击 验证目标：伪足 → 验证目标 8+4=12 命中；共造成 15 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：伪足｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 8；最终采用 8；调整值 +4。\n结果 · 12 vs AC 10：命中。\n伤害骰 · 伪足（基础伤害 1·钝击）｜2d6 骰面：6 + 1 = 7｜固定加值 +2｜小计 9\n伤害骰 · 伪足（基础伤害 2·强酸）｜1d6 骰面：6 = 6｜固定加值 +0｜小计 6\n赭冻怪｜消耗动作\n验证目标｜受到 15 点伤害｜HP 320 → 305",
+      "playerLog": "赭冻怪 使用伪足攻击 验证目标：伪足 → 验证目标 8+4=12 命中；共造成 15 点伤害。",
+      "afterHp": 305,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:05:24.791Z",
+      "evidenceFile": "ui-cases/monsters/207-ochre-jelly.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "无定形",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛛行",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

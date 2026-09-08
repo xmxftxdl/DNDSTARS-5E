@@ -132,6 +132,7 @@ export interface SharedCounterspellPromptView {
   spellName: string
   spellLevel: number
   counterspellSlotLevel: number
+  counterspellSlotLevels: number[]
   abilityCheckDc?: number
   expiresAt?: number
 }
@@ -519,6 +520,9 @@ export function buildCombatInterruptPromptViews(
           spellName: counterspell.interrupt.payload.spellName,
           spellLevel: counterspell.interrupt.payload.spellLevel,
           counterspellSlotLevel: counterspell.interrupt.payload.counterspellSlotLevel,
+          counterspellSlotLevels: counterspell.interrupt.payload.counterspellSlotLevels ?? [
+            counterspell.interrupt.payload.counterspellSlotLevel,
+          ],
           abilityCheckDc: counterspell.interrupt.payload.abilityCheckDc,
           expiresAt: counterspell.interrupt.expiresAt,
         }

@@ -9,10 +9,7 @@ import {
   normalizeDnd5eMonsterControlState,
   type Dnd5eMonsterControlStateV1,
 } from './monsterControlState'
-import {
-  normalizeDnd5eMonsterTurnProgress,
-  type Dnd5eMonsterTurnProgressV1,
-} from './monsterTurnProgress'
+import { pruneInitiativeForValidTokens } from './initiativeRoster'
 
 export interface SharedCombatStateMigration {
   state: SharedCombatState
@@ -78,6 +75,10 @@ export function reconcileDnd5eTurnEconomy(
       tokenId,
       {
         turnKey: economy.turnKey,
+        usedOncePerTurnKeys: Array.isArray(economy.usedOncePerTurnKeys)
+          ? [...new Set(economy.usedOncePerTurnKeys.filter((key) =>
+              typeof key === 'string' && /^[a-z0-9][a-z0-9:._-]{0,239}$/i.test(key)))]
+          : undefined,
         attacksUsed: Math.max(0, Math.floor(economy.attacksUsed ?? 0)),
         action: { ...economy.action },
         bonusAction: { ...economy.bonusAction },
@@ -105,7 +106,6 @@ export type SharedCombatStateApplyDecision =
       settlementMode: CombatSettlementMode
       monsterControl: Dnd5eMonsterControlStateV1
       flowPause?: SharedCombatFlowPauseV1
-      monsterTurnProgress?: Dnd5eMonsterTurnProgressV1
       incomingCombatId: string
       incomingUpdatedAt: number
       incomingRevision?: number
@@ -149,11 +149,13 @@ export function resolveSharedCombatStateApply(input: {
         ...visibleTokenIds,
         ...(state.initiativeOrder ?? []).map((entry) => entry.tokenId),
       ])
-  const initiativeOrder = (state.initiativeOrder ?? []).filter((entry) => combatTokenIds.has(entry.tokenId))
-  const initiativeIndex =
-    initiativeOrder.length > 0
-      ? Math.min(Math.max(0, state.initiativeIndex ?? 0), initiativeOrder.length - 1)
-      : 0
+  const initiativeRoster = pruneInitiativeForValidTokens(
+    state.initiativeOrder ?? [],
+    state.initiativeIndex ?? 0,
+    combatTokenIds,
+  )
+  const initiativeOrder = initiativeRoster.order
+  const initiativeIndex = initiativeRoster.index
   const active = Boolean(state.active && initiativeOrder.length > 0)
   const dnd5eTurnEconomyByToken = reconcileDnd5eTurnEconomy(
     state.dnd5eTurnEconomyByToken,
@@ -165,23 +167,6 @@ export function resolveSharedCombatStateApply(input: {
   const incomingRevision = Number(state._sync?.revision)
   const lastAppliedRevision = Number(input.lastAppliedRevision)
   const settlementMode = normalizeCombatSettlementMode(state.settlementMode)
-  const currentEntry = initiativeOrder[initiativeIndex]
-  const monsterTurnProgress = normalizeDnd5eMonsterTurnProgress(
-    state.monsterTurnProgress,
-    {
-      active,
-      current: active && incomingCombatId && currentEntry
-        ? {
-            combatId: incomingCombatId,
-            round: state.round,
-            initiativeIndex,
-            initiativeSlotId: currentEntry.slotId ?? currentEntry.tokenId,
-            tokenId: currentEntry.tokenId,
-          }
-        : undefined,
-      now: input.now ?? Date.now(),
-    },
-  )
 
   const staleByAuthorityRevision =
     Number.isInteger(incomingRevision) &&
@@ -199,11 +184,8 @@ export function resolveSharedCombatStateApply(input: {
     return { status: 'ignored', reason: 'stale' }
   }
 
-  // Snapshot the normalized lease, not the raw wire value. Once its deadline
-  // passes, a recovery read must produce a different snapshot and clear a
-  // previously rendered thinking badge even when no newer write arrived.
   const snapshot = JSON.stringify({
-    state: { ...state, monsterTurnProgress },
+    state,
     tokenIds: Array.from(combatTokenIds).sort(),
   })
   if (snapshot === input.lastSnapshot) return { status: 'ignored', reason: 'unchanged' }
@@ -226,7 +208,6 @@ export function resolveSharedCombatStateApply(input: {
       incomingUpdatedAt,
     ),
     flowPause: normalizeSharedCombatFlowPause(state.flowPause),
-    monsterTurnProgress,
     incomingCombatId,
     incomingUpdatedAt,
     ...(Number.isInteger(incomingRevision) && incomingRevision >= 0

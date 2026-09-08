@@ -14,6 +14,7 @@ import type {
   CombatPresentationProjectileSpellId,
   CombatPresentationTargetEffectSpellId,
 } from '../../shared/combat-presentation-contract.mjs'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 
 export const COMBAT_PRESENTATION_CHANNEL = 'combat-presentation'
 export const FIRE_BOLT_ANIMATION_DURATION_MS = 980
@@ -63,6 +64,7 @@ export const FINGER_OF_DEATH_ANIMATION_DURATION_MS = 1_300
 export const POWER_WORD_STUN_ANIMATION_DURATION_MS = 1_250
 export const POWER_WORD_KILL_ANIMATION_DURATION_MS = 1_300
 export const COLOR_SPRAY_ANIMATION_DURATION_MS = 1_200
+export const PRISMATIC_SPRAY_ANIMATION_DURATION_MS = 1_500
 export const FAERIE_FIRE_ANIMATION_DURATION_MS = 1_300
 export const SLEEP_ANIMATION_DURATION_MS = 1_350
 export const FALSE_LIFE_ANIMATION_DURATION_MS = 1_250
@@ -240,6 +242,7 @@ const COMBAT_PRESENTATION_ANIMATION_DURATION_BY_SPELL: Readonly<Record<string, n
   'freezing-sphere': FREEZING_SPHERE_ANIMATION_DURATION_MS,
   'meteor-swarm': METEOR_SWARM_ANIMATION_DURATION_MS,
   'color-spray': COLOR_SPRAY_ANIMATION_DURATION_MS,
+  'prismatic-spray': PRISMATIC_SPRAY_ANIMATION_DURATION_MS,
   'faerie-fire': FAERIE_FIRE_ANIMATION_DURATION_MS,
   sleep: SLEEP_ANIMATION_DURATION_MS,
   entangle: ENTANGLE_ANIMATION_DURATION_MS,
@@ -574,6 +577,9 @@ export interface CombatPresentationSavingThrowEventV1 {
   dc: number
   total?: number
   success?: boolean
+  /** Final damage after the save and defenses. Present only on a result event. */
+  damage?: number
+  damageType?: Dnd5eDamageType
   createdAt: number
   expiresAt: number
 }
@@ -641,6 +647,7 @@ export interface CombatPresentationMapProjectile {
     | 'freezing-sphere'
     | 'meteor-swarm'
     | 'color-spray'
+    | 'prismatic-spray'
     | 'faerie-fire'
     | 'sleep'
     | 'entangle'
@@ -783,6 +790,8 @@ export interface CombatPresentationSavingThrow {
   dc: number
   total?: number
   success?: boolean
+  damage?: number
+  damageType?: Dnd5eDamageType
   createdAt: number
   expiresAt: number
 }
@@ -975,12 +984,18 @@ export function parseCombatPresentationEvent(
       Number(savingThrow.dc) < 0 ||
       Number(savingThrow.dc) > 100 ||
       (savingThrow.phase === 'rolling' &&
-        (savingThrow.total != null || savingThrow.success != null)) ||
+        (savingThrow.total != null || savingThrow.success != null ||
+          savingThrow.damage != null || savingThrow.damageType != null)) ||
       (savingThrow.phase === 'result' &&
         (!Number.isInteger(savingThrow.total) ||
           Number(savingThrow.total) < -100 ||
           Number(savingThrow.total) > 200 ||
-          typeof savingThrow.success !== 'boolean'))
+          typeof savingThrow.success !== 'boolean' ||
+          (savingThrow.damage != null &&
+            (!Number.isInteger(savingThrow.damage) || Number(savingThrow.damage) < 0 ||
+              Number(savingThrow.damage) > 1_000_000)) ||
+          (savingThrow.damageType != null &&
+            !DND5E_DAMAGE_TYPES.includes(savingThrow.damageType as Dnd5eDamageType))))
     ) return null
     return savingThrow as CombatPresentationSavingThrowEventV1
   }
@@ -1022,6 +1037,13 @@ export function combatPresentationProjectilesForMap(
       event.type === 'spell-banner' ||
       event.type === 'attack-banner' ||
       event.type === 'saving-throw-status'
+    ) return []
+    // Grease and Fog Cloud have no entrance animation. Their mature animated
+    // areas are owned by MapPersistentAreaLayers once authoritative state
+    // reaches the map. Ignore legacy/in-flight events from older clients too.
+    if (
+      event.type === 'spell-area-effect' &&
+      (event.spellId === 'grease' || event.spellId === 'fog-cloud')
     ) return []
     const animationDuration = combatPresentationAnimationDuration(event.spellId)
     const animationStartsAt = event.type === 'spell-area-projectile'
@@ -1355,6 +1377,8 @@ export function combatPresentationSavingThrowForMap(
     dc: event.dc,
     total: event.total,
     success: event.success,
+    damage: event.damage,
+    damageType: event.damageType,
     createdAt: event.createdAt,
     expiresAt: event.expiresAt,
   }
@@ -2303,6 +2327,9 @@ export async function publishAreaSpellPresentation(input: {
 }): Promise<{ completesAt: number }> {
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
+  // Fog Cloud begins directly in its mature persistent state. Publishing and
+  // awaiting a separate cast-in atlas caused the same cloud to appear twice.
+  if (input.spellId === 'fog-cloud') return { completesAt: createdAt }
   const duration = combatPresentationAnimationDuration(input.spellId)
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
     schemaVersion: 1,
@@ -2353,6 +2380,8 @@ export async function publishSavingThrowPresentation(input: {
   dc: number
   total?: number
   success?: boolean
+  damage?: number
+  damageType?: Dnd5eDamageType
 }): Promise<{ completesAt: number }> {
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()

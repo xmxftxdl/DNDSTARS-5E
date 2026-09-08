@@ -3,7 +3,8 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
+import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from './items'
 import {
   prepareDnd5ePlayerBasicAction,
   resolvePreparedDnd5ePlayerBasicAction,
@@ -70,7 +71,7 @@ describe('D&D 5e player basic action bridge', () => {
     expect(prepared.prepared).toMatchObject({ spendsAction, spendsBonusAction })
 
     const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
-    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
     expect(resolved.result.events).toContainEqual({
       type: 'turn-resource-spent',
       actorId: 'hero-token',
@@ -98,6 +99,191 @@ describe('D&D 5e player basic action bridge', () => {
       turnEconomy: economy,
     })
     expect(prepared).toEqual({ ok: false, reason: 'action-unavailable' })
+  })
+
+  it('accepts Haste Dash after the ordinary action is spent and consumes the restricted credential', () => {
+    const haste = createDnd5eMechanicalEffect({
+      id: 'haste-effect',
+      definitionId: 'activity:haste:effect',
+      label: '加速术',
+      source: { kind: 'spell', actorId: 'hero-token', rulesId: 'haste', magical: true },
+      targetId: 'hero-token',
+      modifiers: {
+        speedMultiplier: 2,
+        restrictedExtraAction: {
+          allowedActions: ['weapon-attack', 'dash', 'disengage', 'hide', 'use-object'],
+          maximumWeaponAttacks: 1,
+        },
+      },
+    })
+    const economy = createDnd5eTurnEconomyCounts('turn', 60)
+    economy.action.current = 0
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'dash' }),
+      map,
+      characters: [{ ...hero, dnd5eCombatState: { activeEffects: [haste] } }],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: economy,
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants['hero-token'].turn).toMatchObject({
+      actionAvailable: false,
+      movementRemaining: 120,
+    })
+    expect(resolved.result.state.combatants['hero-token'].classState.restrictedExtraActionUsesByEffect)
+      .toEqual({ 'haste-effect': 'combat:1:hero-token' })
+  })
+
+  it('authoritatively commands multiple controlled Animate Dead undead within 60 feet with one bonus action', () => {
+    const commandedMap: BattleMap = {
+      ...map,
+      tokens: [
+        ...map.tokens,
+        ...[
+          { id: 'skeleton', label: '受控骷髅', x: 25, y: 5, poolId: 'srd-5.1:skeleton', hp: 13, maxHp: 13 },
+          { id: 'zombie', label: '受控僵尸', x: 35, y: 5, poolId: 'srd-5.1:zombie', hp: 22, maxHp: 22 },
+        ].map((token) => ({
+          ...token,
+          color: '', emoji: '', size: 1, type: 'enemy' as const,
+          dnd5eSummon: {
+            schemaVersion: 1 as const,
+            pluginId: 'core-srd-spell',
+            featureId: 'spell:animate-dead',
+            sourceCharacterId: 'hero',
+            sourceTokenId: 'hero-token',
+            createdRound: 1,
+            expiresAfterRound: 14_400,
+            side: 'player' as const,
+            persistent: true as const,
+            createdWorldMinute: 1,
+            controlExpiresAtWorldMinute: 1_441,
+          },
+        })),
+      ],
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({
+        kind: 'command-animate-dead',
+        targetTokenIds: ['skeleton', 'zombie'],
+        command: '守卫法师，并攻击接近的敌人。',
+      }),
+      map: commandedMap,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'skeleton', label: '受控骷髅', emoji: '', color: '', roll: 15 },
+        { tokenId: 'zombie', label: '受控僵尸', emoji: '', color: '', roll: 14 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ spendsAction: false, spendsBonusAction: true })
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual({
+      type: 'turn-resource-spent', actorId: 'hero-token', resource: 'bonusAction',
+    })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'basic-action-adjudication-requested',
+      actorId: 'hero-token',
+      economy: 'bonusAction',
+      description: expect.stringContaining('受控骷髅、受控僵尸'),
+    }))
+  })
+
+  it.each([
+    {
+      label: 'duplicate targets',
+      payload: { kind: 'command-animate-dead', targetTokenIds: ['skeleton', 'skeleton'], command: '守卫。' } as const,
+      targetPatch: {},
+      reason: 'invalid-action' as const,
+    },
+    {
+      label: 'ended control',
+      payload: { kind: 'command-animate-dead', targetTokenIds: ['skeleton'], command: '守卫。' } as const,
+      targetPatch: { dnd5eSummon: { controlEnded: true as const } },
+      reason: 'invalid-target' as const,
+    },
+    {
+      label: 'more than 60 feet',
+      payload: { kind: 'command-animate-dead', targetTokenIds: ['skeleton'], command: '守卫。' } as const,
+      targetPatch: { x: 135 },
+      reason: 'invalid-target' as const,
+    },
+  ])('rejects an Animate Dead command with $label', ({ payload, targetPatch, reason }) => {
+    const summon = {
+      schemaVersion: 1 as const,
+      pluginId: 'core-srd-spell', featureId: 'spell:animate-dead',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', createdRound: 1,
+      expiresAfterRound: 14_400, side: 'player' as const, persistent: true as const,
+      createdWorldMinute: 1, controlExpiresAtWorldMinute: 1_441,
+    }
+    const skeleton = {
+      id: 'skeleton', label: '受控骷髅', x: 25, y: 5, color: '', emoji: '', size: 1,
+      type: 'enemy' as const, poolId: 'srd-5.1:skeleton', hp: 13, maxHp: 13,
+      dnd5eSummon: {
+        ...summon,
+        ...('dnd5eSummon' in targetPatch ? targetPatch.dnd5eSummon : {}),
+      },
+      ...(!('dnd5eSummon' in targetPatch) ? targetPatch : {}),
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ ...payload, targetTokenIds: [...payload.targetTokenIds] }),
+      map: { ...map, tokens: [...map.tokens, skeleton] },
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'skeleton', label: '受控骷髅', emoji: '', color: '', roll: 15 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared).toEqual({ ok: false, reason })
+  })
+
+  it('uses the Create Undead 120-foot command range without widening Animate Dead', () => {
+    const createUndeadSummon = {
+      schemaVersion: 1 as const,
+      pluginId: 'core-srd-spell', featureId: 'spell:create-undead',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', createdRound: 1,
+      expiresAfterRound: 14_400, side: 'player' as const, persistent: true as const,
+      createdWorldMinute: 1, controlExpiresAtWorldMinute: 1_441,
+    } as const
+    const prepareAtX = (x: number) => prepareDnd5ePlayerBasicAction({
+      action: request({
+        kind: 'command-animate-dead', targetTokenIds: ['ghoul'], command: '守卫。',
+      }),
+      map: {
+        ...map,
+        width: 300,
+        tokens: [...map.tokens, {
+          id: 'ghoul', label: '受控食尸鬼', x, y: 5, color: '', emoji: '', size: 1,
+          type: 'enemy' as const, poolId: 'srd-5.1:ghoul', hp: 22, maxHp: 22,
+          dnd5eSummon: createUndeadSummon,
+        }],
+      },
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'ghoul', label: '受控食尸鬼', emoji: '', color: '', roll: 15 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+
+    expect(prepareAtX(245).ok).toBe(true)
+    expect(prepareAtX(255)).toEqual({ ok: false, reason: 'invalid-target' })
   })
 
   it('accepts an omitted custom-action description and supplies a safe default for the DM', () => {
@@ -255,6 +441,68 @@ describe('D&D 5e player basic action bridge', () => {
     expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'falling-damage-resolved', actorId: 'enemy', distanceFeet: 20, damage: 6,
     }))
+  })
+
+  it('keeps a shoved Feather Fall target aloft after the first 60 feet instead of resolving instant fall damage', () => {
+    const featherFall = createDnd5eMechanicalEffect({
+      definitionId: 'activity:srd-5.1:spell:feather-fall:modifiers:0',
+      label: '羽落术',
+      source: { kind: 'spell', actorId: 'hero-token', rulesId: 'feather-fall', magical: true },
+      targetId: 'enemy',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        safeFallFeet: 600,
+        controlledDescent: { maximumFeetPerRound: 60, safeLanding: true, endsOnLanding: true },
+      },
+    })
+    const cliffMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((token) => token.id === 'enemy'
+        ? {
+            ...token,
+            elevationFeet: 100,
+            groundElevationFeet: 0,
+            airborne: true,
+            dnd5eCombatState: {
+              schemaVersion: 2,
+              conditions: [],
+              activeEffects: [featherFall],
+            },
+          }
+        : { ...token, elevationFeet: 100, groundElevationFeet: 100 }),
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'shove', targetTokenId: 'enemy', targetDefense: 'athletics', outcome: 'push' }),
+      map: cliffMap, characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({
+      prepared: prepared.prepared,
+      actorD20: 18,
+      targetD20: 2,
+      pushToElevationFeet: 0,
+      pushToGroundElevationFeet: 0,
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')).toMatchObject({
+      x: 25,
+      y: 5,
+      elevationFeet: 40,
+      groundElevationFeet: 0,
+      airborne: true,
+      hp: 10,
+    })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'controlled-descent-resolved', actorId: 'enemy', distanceFeet: 60, landed: false,
+    }))
+    expect(resolved.result.events.some((event) => event.type === 'falling-damage-resolved')).toBe(false)
   })
 
   it('asks the Host for the second d20 required by contest disadvantage', () => {
@@ -486,6 +734,130 @@ describe('D&D 5e player basic action bridge', () => {
       ability: 'str',
       dc: 14,
       success: true,
+    }))
+  })
+
+  it('spends an action and authoritatively dismisses a rules-authored self effect', () => {
+    const mirrorEffect = createDnd5eConditionEffect({
+      id: 'mirror-image:hero',
+      condition: 'invisible',
+      source: { kind: 'spell', actorId: 'hero-token', rulesId: 'mirror-image' },
+      targetId: 'hero-token',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      removal: {
+        action: { label: '解除镜影术', economy: 'action', maxDistanceFeet: 0 },
+      },
+    })
+    const mirrorHero: Character = {
+      ...hero,
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [mirrorEffect] },
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'dismiss-effect', effectId: mirrorEffect.id }),
+      map,
+      characters: [mirrorHero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      spendsAction: true,
+      dismissEffectId: mirrorEffect.id,
+    })
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters[0].dnd5eCombatState?.activeEffects ?? [])
+      .not.toContainEqual(expect.objectContaining({ id: mirrorEffect.id }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: 'hero-token', resource: 'action', amount: 1,
+    }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-manually-removed',
+      actorId: 'hero-token',
+      targetId: 'hero-token',
+      effectId: mirrorEffect.id,
+      label: '解除镜影术',
+      success: true,
+    }))
+  })
+
+  it('lets the source spend an action to dismiss Warding Bond from its linked target', () => {
+    const bond = createDnd5eMechanicalEffect({
+      id: 'warding-bond:hero-token:ally-token',
+      definitionId: 'srd-5.1:spell:warding-bond',
+      label: '守护之链：AC与豁免+1，获得所有伤害抗性',
+      kind: 'buff',
+      source: { kind: 'spell', actorId: 'hero-token', characterId: 'hero', rulesId: 'warding-bond' },
+      targetId: 'ally-token',
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      modifiers: { armorClassBonus: 1, savingThrowBonus: 1, resistanceToAllDamage: true },
+    })
+    const equipRing = (owner: Character): Character => {
+      const granted = applyDnd5eInventoryMutation([owner], {
+        type: 'grant', characterId: owner.id,
+        templateId: 'srd-5.1:item:platinum-ring-50gp', quantity: 1,
+      })
+      expect(granted.ok).toBe(true)
+      const ring = normalizeDnd5eInventory(granted.characters[0]).entries.find((entry) =>
+        entry.templateId === 'srd-5.1:item:platinum-ring-50gp')!
+      const equipped = applyDnd5eInventoryMutation(granted.characters, {
+        type: 'equip', characterId: owner.id, instanceId: ring.instanceId, slot: 'ring',
+      })
+      expect(equipped.ok).toBe(true)
+      return equipped.characters[0]
+    }
+    const source = equipRing({
+      ...hero,
+    })
+    const equippedAlly = equipRing({
+      ...hero,
+      id: 'ally',
+      name: '盟友',
+    })
+    const ally: Character = {
+      ...equippedAlly,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [bond],
+      },
+    }
+    const linkedMap: BattleMap = {
+      ...map,
+      tokens: [
+        ...map.tokens,
+        { id: 'ally-token', label: '盟友', characterId: 'ally', x: 25, y: 5, color: '', emoji: '', size: 1, type: 'player', hp: 30, maxHp: 30 },
+      ],
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'dismiss-warding-bond' }),
+      map: linkedMap,
+      characters: [source, ally],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'ally-token', label: '盟友', emoji: '', color: '', roll: 15 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(
+      resolved.result.ok,
+      resolved.result.ok ? undefined : `${resolved.result.reason}: ${JSON.stringify(resolved.result.events)}`,
+    ).toBe(true)
+    expect(resolved.application?.characters.find((character) => character.id === 'ally')
+      ?.dnd5eCombatState?.activeEffects ?? []).not.toContainEqual(
+        expect.objectContaining({ definitionId: 'srd-5.1:spell:warding-bond' }),
+      )
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: 'hero-token', resource: 'action', amount: 1,
     }))
   })
 

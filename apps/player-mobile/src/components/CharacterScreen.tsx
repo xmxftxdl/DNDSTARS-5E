@@ -6,6 +6,7 @@ import { CharacterAdvancementHistory, CharacterFeaturesPanel } from './Character
 import { CharacterLevelUpModal } from './CharacterLevelUpModal'
 import { AccountCharacterVaultPanel } from './AccountCharacterVaultPanel'
 import { CharacterProfileEditor, type MobileCharacterProfilePatch } from './CharacterProfileEditor'
+import { CharacterVitalsEditor } from './CharacterVitalsEditor'
 
 type InventoryMutation = Record<string, unknown>
 
@@ -21,6 +22,7 @@ interface CharacterScreenProps {
   onLevelUp: (characterId: string, decision: MobileLevelUpDecision) => Promise<void>
   onRollLevelHitPoints: (characterId: string, classId: string) => Promise<{ commandId: string; roll: number; hitDie: number }>
   onUpdateProfile: (characterId: string, patch: MobileCharacterProfilePatch) => Promise<void>
+  onSetHitPoints: (characterId: string, currentHp: number, temporaryHp: number) => Promise<void>
   accountCharacters: MobileAccountCharacterRecord[]
   onAttachAccountCharacter: (record: MobileAccountCharacterRecord) => Promise<void>
 }
@@ -46,6 +48,7 @@ export function CharacterScreen(props: CharacterScreenProps) {
   const [expandedSpell, setExpandedSpell] = useState('')
   const [levelUpOpen, setLevelUpOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [vitalsOpen, setVitalsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<CharacterTab>('overview')
   const latestRest = useMemo(() => workspace.restAdvances.find((advance) =>
     advance.recoveryReports.some((report) => report.characterId === character?.id)), [character?.id, workspace.restAdvances])
@@ -75,6 +78,7 @@ export function CharacterScreen(props: CharacterScreenProps) {
     {!!error && <Text style={styles.error}>{error}</Text>}
 
     {activeTab === 'overview' && <><View style={styles.stats}><Stat label="生命" value={`${character.currentHp}${character.tempHp ? ` +${character.tempHp}` : ''}/${character.maxHp}`} /><Stat label="护甲等级" value={`${character.ac}`} /><Stat label="速度" value={`${character.speed}尺`} /><Stat label="法术 DC" value={`${character.saveDC}`} /></View>
+    <View style={styles.vitalState}><View style={styles.flex}><Text style={styles.rowName}>结算状态</Text><Text style={styles.itemMeta}>激励 {character.inspiration} · 力竭 {character.exhaustionLevel} 级{character.currentHp <= 0 ? ` · 死亡豁免 ${character.deathSaveSuccesses} 成功 / ${character.deathSaveFailures} 失败${character.deathSaveStable ? ' · 已稳定' : ''}` : ''}</Text></View><Pressable disabled={!!workspace.combat?.active} style={[styles.adjustVitals, workspace.combat?.active && styles.disabled]} onPress={() => setVitalsOpen(true)}><Text style={styles.adjustVitalsText}>{workspace.combat?.active ? '战斗中由结算修改' : '调整生命'}</Text></Pressable></View>
     {!!latestRest && <RestCard advance={latestRest} character={character} busy={busy} onSpend={(poolIndex) => run(`hit-die:${poolIndex}`, () => props.onSpendHitDie(character.id, poolIndex))} onRecoverSlot={(resourceKey) => run(`recovery:${resourceKey}`, () => props.onRecoverSpellSlot(character.id, resourceKey, latestRest.id))} />}
 
     <SectionTitle>属性与豁免</SectionTitle><View style={styles.abilities}>{Object.entries(character.abilities).map(([key, score]) => <View key={key} style={styles.ability}><Text style={styles.abilityLabel}>{abilityLabels[key]}</Text><Text style={styles.abilityScore}>{score}</Text><Text style={styles.abilityMod}>{signed(modifier(score))}{character.savingThrows.includes(key) ? ' · 熟练' : ''}</Text></View>)}</View>
@@ -100,7 +104,7 @@ export function CharacterScreen(props: CharacterScreenProps) {
     }) : <Text style={styles.muted}>背包为空</Text>}</View></>}
 
     {activeTab === 'advancement' && <><View style={styles.advancementHeader}><View style={styles.flex}><SectionTitle>角色成长</SectionTitle><Text style={styles.muted}>每次只能提升 1 级；职业资格、生命值、子职、属性／专长与法术选择均由 Host 重新验证。</Text></View><Pressable disabled={character.level >= 20 || !(character.levelUpPlans?.some((plan) => plan.eligible))} style={[styles.levelButton, (character.level >= 20 || !(character.levelUpPlans?.some((plan) => plan.eligible))) && styles.disabled]} onPress={() => setLevelUpOpen(true)}><Text style={styles.levelButtonText}>提升到 {Math.min(20, character.level + 1)} 级</Text></Pressable></View><SectionTitle>升级记录</SectionTitle><CharacterAdvancementHistory character={character} /></>}
-  </ScrollView><CharacterLevelUpModal visible={levelUpOpen} character={character} busy={!!busy} onClose={() => setLevelUpOpen(false)} onRollHitPoints={(classId) => props.onRollLevelHitPoints(character.id, classId)} onConfirm={async (decision) => { await run('level-up', () => props.onLevelUp(character.id, decision), true); setLevelUpOpen(false) }} /><CharacterProfileEditor visible={profileOpen} character={character} busy={!!busy} onClose={() => setProfileOpen(false)} onSave={async (patch) => { await run('profile', () => props.onUpdateProfile(character.id, patch), true); setProfileOpen(false) }} /></>
+  </ScrollView><CharacterLevelUpModal visible={levelUpOpen} character={character} busy={!!busy} onClose={() => setLevelUpOpen(false)} onRollHitPoints={(classId) => props.onRollLevelHitPoints(character.id, classId)} onConfirm={async (decision) => { await run('level-up', () => props.onLevelUp(character.id, decision), true); setLevelUpOpen(false) }} /><CharacterProfileEditor visible={profileOpen} character={character} busy={!!busy} onClose={() => setProfileOpen(false)} onSave={async (patch) => { await run('profile', () => props.onUpdateProfile(character.id, patch), true); setProfileOpen(false) }} /><CharacterVitalsEditor visible={vitalsOpen} character={character} combatActive={!!workspace.combat?.active} busy={!!busy} onClose={() => setVitalsOpen(false)} onSave={async (currentHp, temporaryHp) => { await run('hit-points', () => props.onSetHitPoints(character.id, currentHp, temporaryHp), true); setVitalsOpen(false) }} /></>
 }
 
 function RestCard({ advance, character, busy, onSpend, onRecoverSlot }: { advance: MobileRestAdvance; character: MobileCharacterView; busy: string; onSpend: (poolIndex: number) => void; onRecoverSlot: (resourceKey: string) => void }) {
@@ -148,6 +152,7 @@ const styles = StyleSheet.create({
   characterList: { gap: 8, paddingBottom: 12 }, characterChip: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border }, characterChipActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft }, characterChipText: { color: colors.text, fontWeight: '800', fontSize: 11 },
   hero: { flexDirection: 'row', gap: 13, alignItems: 'center', padding: 16, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }, avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, avatarImage: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primarySoft }, avatarText: { fontSize: 32 }, name: { color: colors.text, fontSize: 23, fontWeight: '900' }, meta: { color: colors.muted, fontSize: 11, marginTop: 3 },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }, stat: { width: '48%', padding: 13, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14 }, statLabel: { color: colors.muted, fontSize: 10 }, statValue: { color: colors.text, fontSize: 17, fontWeight: '900', marginTop: 3 }, section: { color: colors.text, fontSize: 15, fontWeight: '900', marginTop: 20, marginBottom: 9 }, error: { marginTop: 10, color: '#fecdd3', borderWidth: 1, borderColor: colors.danger, backgroundColor: '#31151e', borderRadius: 12, padding: 10, fontSize: 11 },
+  vitalState: { marginTop: 8, minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderWidth: 1, borderColor: colors.border, borderRadius: 14, backgroundColor: colors.surface }, adjustVitals: { borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }, adjustVitalsText: { color: '#ddd6fe', fontSize: 10, fontWeight: '900' },
   abilities: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, ability: { width: '31.7%', borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 10, alignItems: 'center' }, abilityLabel: { color: colors.muted, fontSize: 10 }, abilityScore: { color: colors.text, fontSize: 20, fontWeight: '900', marginTop: 3 }, abilityMod: { color: colors.teal, fontSize: 9, marginTop: 2 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, tag: { borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.surface }, tagDanger: { borderColor: colors.danger, backgroundColor: '#31151e' }, tagText: { color: colors.text, fontSize: 10, fontWeight: '800' },
   card: { borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, overflow: 'hidden' }, cardMuted: { padding: 13, color: colors.muted, fontSize: 12 }, resourceRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', padding: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }, rowName: { color: colors.text, fontSize: 12, fontWeight: '700' }, stepper: { flexDirection: 'row', alignItems: 'center', gap: 8 }, step: { width: 32, height: 32, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated }, stepText: { color: colors.text, fontWeight: '900', fontSize: 17 }, stepValue: { minWidth: 24, textAlign: 'center', color: colors.teal, fontWeight: '900' }, disabled: { opacity: .38 },

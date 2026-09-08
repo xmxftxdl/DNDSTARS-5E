@@ -3,6 +3,12 @@ import type { EquipmentItem } from '../../types/equipment'
 import type { Dnd5eClassId } from './classes'
 import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
 import { dnd5ePluginBooleanStaticModifierForCharacter } from './pluginApi'
+import {
+  dnd5eCoreSpellMaterialRequirement,
+  dnd5eSpellMaterialConsumptionPlan,
+  type Dnd5eSpellMaterialConsumptionPlan,
+  type Dnd5eSpellMaterialRequirement,
+} from './spellMaterials'
 
 export interface Dnd5eSpellComponentRequirements {
   verbal: boolean
@@ -10,6 +16,8 @@ export interface Dnd5eSpellComponentRequirements {
   material: boolean
   costlyMaterial?: boolean
   consumedMaterial?: boolean
+  /** Exact inventory requirements for materials that a focus cannot replace. */
+  specificMaterial?: Dnd5eSpellMaterialRequirement
 }
 
 export interface Dnd5eSpellComponentCheck {
@@ -20,7 +28,11 @@ export interface Dnd5eSpellComponentCheck {
     | 'focus-or-pouch'
     | 'inventory-untracked'
     | 'missing-focus-or-pouch'
+    | 'specific-material'
+    | 'missing-specific-material'
+    | 'specific-material-hands-occupied'
     | 'unsupported-costly-material'
+  materialPlan?: Dnd5eSpellMaterialConsumptionPlan
 }
 
 const BARD_INSTRUMENT_IDS = new Set([
@@ -46,6 +58,7 @@ export function dnd5eCoreSpellComponentRequirements(
     material: /材料|\bM\b/i.test(text),
     costlyMaterial: /价值|worth at least|costs? at least/i.test(text),
     consumedMaterial: /消耗|consume[sd]?/i.test(text),
+    specificMaterial: dnd5eCoreSpellMaterialRequirement(spellId),
   }
 }
 
@@ -157,11 +170,14 @@ export function dnd5eSpellComponentCheck(
     entryTemplateKey(entry.templateId) === 'holy-symbol',
   )
   const hasMaterialSubstitute = hasHeldFocus || hasHolySymbol || (hasComponentPouch && hasFreeHand)
+  const materialPlan = requirements.specificMaterial
+    ? dnd5eSpellMaterialConsumptionPlan(actor, requirements.specificMaterial)
+    : undefined
   const somaticHandAvailable =
     dnd5ePluginBooleanStaticModifierForCharacter(
       actor as Character,
       'ignoreOccupiedHandsForSomaticComponents',
-    ) || hasFreeHand || (requirements.material && hasHeldFocus)
+    ) || hasFreeHand || (requirements.material && !requirements.specificMaterial && hasHeldFocus)
   return {
     verbal: !requirements.verbal
       ? 'not-required'
@@ -175,13 +191,20 @@ export function dnd5eSpellComponentCheck(
         : 'unavailable-hands-occupied',
     material: !requirements.material
       ? 'not-required'
-      : inventory == null
-        ? 'inventory-untracked'
+      : requirements.specificMaterial
+        ? inventory == null || !materialPlan
+          ? 'missing-specific-material'
+          : !hasFreeHand
+            ? 'specific-material-hands-occupied'
+            : 'specific-material'
         : materialUnavailable
           ? 'unsupported-costly-material'
-          : hasMaterialSubstitute
-            ? 'focus-or-pouch'
-            : 'missing-focus-or-pouch',
+          : inventory == null
+            ? 'inventory-untracked'
+            : hasMaterialSubstitute
+              ? 'focus-or-pouch'
+              : 'missing-focus-or-pouch',
+    ...(materialPlan ? { materialPlan } : {}),
   }
 }
 
@@ -189,5 +212,7 @@ export function dnd5eSpellComponentsAvailable(check: Dnd5eSpellComponentCheck): 
   return check.verbal !== 'unavailable-silenced' &&
     check.somatic !== 'unavailable-hands-occupied' &&
     check.material !== 'missing-focus-or-pouch' &&
+    check.material !== 'missing-specific-material' &&
+    check.material !== 'specific-material-hands-occupied' &&
     check.material !== 'unsupported-costly-material'
 }

@@ -37,7 +37,7 @@ describe('Prayer of Healing Headless', () => {
       level: 2,
       classes: ['cleric'],
       rangeFeet: 30,
-      target: 'ally',
+      target: 'creature',
       effect: 'healing',
       requiresVisibleTarget: true,
       dice: { count: 2, sides: 8, perHigherSlot: 1 },
@@ -81,7 +81,7 @@ describe('Prayer of Healing Headless', () => {
     })
   })
 
-  it.each(['undead', 'construct'])('rejects %s targets without spending the spell slot', (creatureType) => {
+  it.each(['undead', 'construct'])('spends the slot but has no effect on %s targets', (creatureType) => {
     const cleric = combatant('cleric', 20, {
       classId: 'cleric',
       level: 3,
@@ -101,7 +101,11 @@ describe('Prayer of Healing Headless', () => {
       },
     )
 
-    expect(result).toMatchObject({ ok: false, reason: 'invalid-target' })
-    expect(result.state.combatants[cleric.id].classResources['dnd5e-spell-slot-2'].current).toBe(1)
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants[invalidTarget.id].currentHp).toBe(10)
+    expect(result.state.combatants[cleric.id].classResources['dnd5e-spell-slot-2'].current).toBe(0)
+    expect(result.events.some((event) =>
+      event.type === 'healing-applied' && event.targetId === invalidTarget.id,
+    )).toBe(false)
   })
 })

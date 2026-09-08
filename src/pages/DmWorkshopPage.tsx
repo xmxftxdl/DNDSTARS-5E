@@ -21,6 +21,7 @@ import { publishAccountPluginVersion } from '../lib/pluginCatalogApi'
 import { getRoomSession } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
 import { showAppConfirm } from '../lib/appDialog'
+import { consumeDmWorkshopMonsterHandoff } from '../lib/dmWorkshopMonsterHandoff'
 import {
   compileDnd5eLocalContentCollection,
   dnd5eRoomRuntimeProjectionBytesV2,
@@ -32,7 +33,12 @@ export default function DmWorkshopPage() {
   const [roomSession] = useState(() => getRoomSession())
   const accountSession = useSyncExternalStore(subscribeAccountSession, getAccountSession, () => null)
   const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [campaignMonsterWorkshopImport, setCampaignMonsterWorkshopImport] = useState(
+    () => consumeDmWorkshopMonsterHandoff(campaignId),
+  )
+  const [notice, setNotice] = useState<string | null>(() => campaignMonsterWorkshopImport
+    ? `已从战役资源库载入“${campaignMonsterWorkshopImport.monster.name}”，请在怪物工坊中补齐并核对战斗数据。`
+    : null)
   const [error, setError] = useState<string | null>(null)
   const [coverage, setCoverage] = useState<Dnd5eContentAutomationCoverageReportV2 | null>(null)
   const [contentWorkshopImport, setContentWorkshopImport] = useState<Dnd5eWorkshopContentEditRequest | null>(null)
@@ -369,6 +375,8 @@ export default function DmWorkshopPage() {
           ? '保存并启用到当前房间'
           : '保存并在当前设备启用'}
         alwaysExpanded
+        monsterWorkshopImport={campaignMonsterWorkshopImport}
+        onMonsterWorkshopImportClose={() => setCampaignMonsterWorkshopImport(null)}
         contentWorkshopImport={contentWorkshopImport}
         onContentWorkshopImportClose={() => setContentWorkshopImport(null)}
       />

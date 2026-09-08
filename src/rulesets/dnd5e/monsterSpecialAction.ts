@@ -35,6 +35,7 @@ import {
 } from './mapBridge'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import {
+  dnd5eMonsterActionUsageId,
   getDnd5eSrdMonster,
   type Dnd5eMonsterAction,
   type Dnd5eMonsterStatBlock,
@@ -53,6 +54,7 @@ export type Dnd5eMonsterSpecialActionRejectReason =
   | 'destination-occupied'
   | 'destination-blocked'
   | 'destination-not-visible'
+  | 'invalid-target'
 
 export interface PreparedDnd5eMonsterSpecialAction {
   map: BattleMap
@@ -62,6 +64,8 @@ export interface PreparedDnd5eMonsterSpecialAction {
   actorToken: Token
   monster: Dnd5eMonsterStatBlock
   action: Dnd5eMonsterAction
+  targetToken?: Token
+  targetWilling?: boolean
   legendary: boolean
   teleportDestination?: Dnd5eSpellTeleportDestination
   persistentArea?: NonNullable<BattleMap['dnd5ePluginAreas']>[number]
@@ -97,11 +101,12 @@ function actionResourceAvailable(
       Math.max(1, action.legendaryCost ?? 1)
   }
   if (!actor.turn.actionAvailable) return false
+  const usageActionId = dnd5eMonsterActionUsageId(action)
   if (action.usage?.kind === 'recharge') {
-    return actor.classState.monsterRechargeReadyByActionId?.[action.id] !== false
+    return actor.classState.monsterRechargeReadyByActionId?.[usageActionId] !== false
   }
   if (action.usage?.kind === 'per-day') {
-    return (actor.classState.monsterActionUsesByActionId?.[action.id]?.current ?? 0) > 0
+    return (actor.classState.monsterActionUsesByActionId?.[usageActionId]?.current ?? 0) > 0
   }
   return true
 }
@@ -118,6 +123,10 @@ export function prepareDnd5eMonsterSpecialAction(input: {
   destinationCell?: GridCell
   destinationElevationFeet?: number
   turnEconomy?: Dnd5eTurnEconomyCounts
+  targetTokenId?: string
+  targetWilling?: boolean
+  /** Current initiative cursor; required for an off-turn legendary action. */
+  currentInitiativeIndex?: number
 }): { ok: true; prepared: PreparedDnd5eMonsterSpecialAction } | {
   ok: false
   reason: Dnd5eMonsterSpecialActionRejectReason
@@ -134,8 +143,11 @@ export function prepareDnd5eMonsterSpecialAction(input: {
     action.kind !== 'other' ||
     dnd5eMonsterActionAutomation(action) !== 'headless' ||
     action.rule?.kind !== 'teleport' &&
+    action.rule?.kind !== 'toggle-planar-phase' &&
     action.rule?.kind !== 'invisibility' &&
-    action.rule?.kind !== 'persistent-area'
+    action.rule?.kind !== 'persistent-area' &&
+    action.rule?.kind !== 'saving-throw-condition' &&
+    action.rule?.kind !== 'saving-throw-damage-and-max-hp-reduction'
   ) return { ok: false, reason: 'invalid-action' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -145,8 +157,18 @@ export function prepareDnd5eMonsterSpecialAction(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
+  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actor = snapshot.state.combatants[actorToken.id]
-  if (!actor) return { ok: false, reason: 'combatant-missing' }
+  if (actorIndex < 0 || !actor) return { ok: false, reason: 'combatant-missing' }
+  snapshot.state.initiativeIndex = legendary
+    ? Math.max(
+        0,
+        Math.min(
+          snapshot.state.initiativeOrder.length - 1,
+          input.currentInitiativeIndex ?? snapshot.state.initiativeIndex,
+        ),
+      )
+    : actorIndex
   applyTurnEconomy(snapshot.state, actor.id, input.turnEconomy)
   if (!actionResourceAvailable(snapshot.state, actor.id, action, legendary)) {
     return { ok: false, reason: 'resource-unavailable' }
@@ -154,6 +176,19 @@ export function prepareDnd5eMonsterSpecialAction(input: {
 
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
   let persistentArea: PreparedDnd5eMonsterSpecialAction['persistentArea']
+  let targetToken: Token | undefined
+  if (
+    action.rule.kind === 'saving-throw-condition' ||
+    action.rule.kind === 'saving-throw-damage-and-max-hp-reduction'
+  ) {
+    targetToken = input.map.tokens.find((candidate) =>
+      candidate.id === input.targetTokenId && candidate.type !== 'obstacle')
+    if (!targetToken || !snapshot.state.combatants[targetToken.id]) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+  } else if (input.targetTokenId != null) {
+    return { ok: false, reason: 'invalid-target' }
+  }
   if (action.rule.kind === 'teleport') {
     const cell = input.destinationCell
     const columns = Math.max(
@@ -324,6 +359,8 @@ export function prepareDnd5eMonsterSpecialAction(input: {
       actorToken,
       monster,
       action,
+      targetToken,
+      targetWilling: input.targetWilling,
       legendary,
       teleportDestination,
       persistentArea,
@@ -333,7 +370,20 @@ export function prepareDnd5eMonsterSpecialAction(input: {
 
 export function resolvePreparedDnd5eMonsterSpecialAction(input: {
   prepared: PreparedDnd5eMonsterSpecialAction
+  damageRolls?: readonly number[]
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+  savingThrow?: {
+    d20: number
+    d20Second?: number
+    halflingLuckyD20?: number
+    halflingLuckyD20Second?: number
+    blessRoll?: number
+    baneRoll?: number
+    rerollD20?: number
+    rerollD20Second?: number
+    bardicInspirationRoll?: number
+    darkOnesOwnLuckRoll?: number
+  }
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -346,6 +396,10 @@ export function resolvePreparedDnd5eMonsterSpecialAction(input: {
       : 'monster-special-action' as const,
     actorId: prepared.actorToken.id,
     actionId: prepared.action.id,
+    targetId: prepared.targetToken?.id,
+    targetWilling: prepared.targetWilling,
+    ...input.savingThrow,
+    damageRolls: input.damageRolls,
     teleportDestination: prepared.teleportDestination,
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
   } as const

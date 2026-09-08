@@ -113,15 +113,11 @@ export default function Dnd5eSpellAdvancementPicker({
                 <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[9px] font-semibold ${
                   spell.automationLevel === 'full'
                     ? 'bg-emerald-500/15 text-emerald-200'
-                    : spell.automationLevel === 'partial'
-                      ? 'bg-amber-500/15 text-amber-200'
-                      : 'bg-white/5 text-slate-500'
+                    : 'bg-amber-500/15 text-amber-200'
                 }`}>
                   {spell.automationLevel === 'full'
                     ? 'Headless'
-                    : spell.automationLevel === 'partial'
-                      ? '部分自动'
-                      : 'DM 裁定'}
+                    : 'DM 裁定'}
                 </span>
               </button>
             )
@@ -207,4 +203,3 @@ export default function Dnd5eSpellAdvancementPicker({
     </div>
   )
 }
-

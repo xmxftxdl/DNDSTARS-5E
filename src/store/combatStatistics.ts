@@ -12,6 +12,7 @@ import {
   deleteCombatStatisticsLog,
   dnd5eCombatStatisticsReceipt,
   normalizeSharedCombatStatistics,
+  restoreCombatStatisticsSession,
   type CombatStatisticsSession,
   type CombatLogArchiveInput,
   type CombatStatisticsSide,
@@ -34,6 +35,11 @@ interface CombatStatisticsStoreState {
     sideByCombatantId?: Readonly<Record<string, CombatStatisticsSide>>,
     characterIdByCombatantId?: Readonly<Record<string, string>>,
   ) => void
+  /** Roll back optimistic telemetry when the corresponding authority commit fails. */
+  restoreCombatSession: (
+    combatId: string,
+    snapshot: CombatStatisticsSession | undefined,
+  ) => Promise<boolean>
   /** 同一 combatId 仅接受一次；返回 false 表示已经结算。 */
   settleExperience: (settlement: CombatExperienceSettlement) => boolean
   archiveCombatLog: (input: CombatLogArchiveInput) => Promise<boolean>
@@ -132,6 +138,13 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
           .slice(-COMBAT_STATISTICS_MAX_SESSIONS),
       }))
       queueMicrotask(() => { void publish(get().sessions) })
+    },
+    restoreCombatSession: async (combatId, snapshot) => {
+      if (!combatId) return false
+      set((state) => ({
+        sessions: restoreCombatStatisticsSession(state.sessions, combatId, snapshot),
+      }))
+      return publish(get().sessions)
     },
     settleExperience: (settlement) => {
       let accepted = false

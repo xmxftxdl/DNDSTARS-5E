@@ -63,7 +63,7 @@ describe('dnd5eSpellResolutionInitiativeOrder', () => {
       map: map(),
       actorTokenId: 'hero',
       initiativeOrder: live,
-    })).toBe(live)
+    })).toEqual(live)
   })
 
   it('does not persist turn economy outside combat and preserves it during combat', () => {

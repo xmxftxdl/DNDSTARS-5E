@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
+import { dnd5eMonsterMultiattackRuntimeActionIds } from '../../application/combat/dnd5eCombatRules'
+import { getDnd5eSrdMonsterBySlug } from '../../rulesets/dnd5e/monsters'
 import {
   dnd5eMapKnownUnusedMonsterOccurrence,
   dnd5eMapMonsterOccurrenceTarget,
@@ -121,5 +123,44 @@ describe('Maps monster occurrence targets', () => {
       settledOccurrences: [],
       targetLinkedRelationAvailable: false,
     })).toBe('target-linked-relation-unavailable')
+  })
+
+  it('allocates the complete Roper sequence to one nearby target', () => {
+    const roper = getDnd5eSrdMonsterBySlug('roper')
+    const multiattack = roper?.actions.find((action) =>
+      action.id === 'multiattack')
+    expect(roper).toBeDefined()
+    expect(multiattack?.kind).toBe('multiattack')
+    if (!roper || !multiattack || multiattack.kind !== 'multiattack') return
+    const actionIds = dnd5eMonsterMultiattackRuntimeActionIds({
+      monster: roper,
+      action: multiattack,
+      unresolvedRandomRepeat: 'maximum',
+    })
+    expect(actionIds).toEqual([
+      'tendril', 'tendril', 'tendril', 'tendril', 'reel', 'bite',
+    ])
+    expect(dnd5eMapMonsterStableOccurrenceTargetIds({
+      monsterId: roper.id,
+      parentActionId: multiattack.id,
+      actionIds: actionIds ?? [],
+      candidateTargetIds: ['hero'],
+      preferredTargetId: 'hero',
+      canTarget: ({ actionId, targetId, assigned }) => {
+        const child = roper.actions.find((action) => action.id === actionId)
+        if (!child) return false
+        if (child.relationRequirement?.kind !== 'target-linked-to-source') {
+          return true
+        }
+        return assigned.some((occurrence) => {
+          if (occurrence.targetId !== targetId) return false
+          return roper.actions.find((action) =>
+            action.id === occurrence.actionId)?.attack?.onHitEffects?.some((effect) =>
+              effect.kind === 'source-linked-condition' &&
+              effect.relation.slotGroup === child.relationRequirement?.slotGroup,
+            ) === true
+        })
+      },
+    })).toEqual(['hero', 'hero', 'hero', 'hero', 'hero', 'hero'])
   })
 })

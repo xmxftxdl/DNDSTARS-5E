@@ -6,6 +6,7 @@ import { prepareDnd5eClassFeature, previewDnd5eMonkBonusAttack, resolvePreparedD
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { dnd5eSpellAuthorityResolutionContext } from '../../pages/maps/spellSettlementCoordinator'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   const result: Character = {
@@ -76,6 +77,102 @@ function fixture(actor: Character, payload: Dnd5eClassFeaturePayload, allies: Ch
 }
 
 describe('D&D 5e generic class feature authority bridge', () => {
+  it('routes voluntary Polymorph concentration ending for a non-Druid caster', () => {
+    const actor = character('wizard', '法师', {
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: true,
+      dnd5eCombatState: {
+        concentrationSpellId: 'polymorph',
+        concentrationRoundsRemaining: 600,
+        concentrationTargetIds: ['wizard-token'],
+        wildShapeFormId: 'srd-5.1:wolf',
+        wildShapeMode: 'polymorph',
+        wildShapeSourceActorId: 'wizard-token',
+        wildShapeSourceActivityId: 'polymorph',
+        wildShapeMaximumChallengeRating: 6,
+        wildShapeCurrentHp: 11,
+        wildShapeRoundsRemaining: 600,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 30,
+        wildShapeOriginalArmorClass: 14,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 14, cha: 16 },
+        wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 2, cha: 3 },
+      },
+    })
+    const prepared = prepareDnd5eClassFeature(fixture(actor, { feature: 'druid-end-wild-shape' }))
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared })
+    expect(resolved.result).toMatchObject({ ok: true })
+    expect(resolved.application?.characters[0]).toMatchObject({
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: false,
+    })
+    expect(resolved.application?.characters[0].dnd5eCombatState?.wildShapeFormId).toBeUndefined()
+    expect(resolved.application?.characters[0].dnd5eCombatState?.concentrationSpellId).toBeUndefined()
+    expect(resolved.result.state.combatants['wizard-token'].turn.bonusActionAvailable).toBe(true)
+  })
+
+  it('ends a spell form through the same authority transaction outside combat', () => {
+    const actor = character('wizard', '法师', {
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: true,
+      dnd5eCombatState: {
+        concentrationSpellId: 'shapechange',
+        concentrationRoundsRemaining: 600,
+        concentrationTargetIds: ['wizard-token'],
+        wildShapeFormId: 'srd-5.1:adult-black-dragon',
+        wildShapeMode: 'shapechange',
+        wildShapeSourceActorId: 'wizard-token',
+        wildShapeSourceActivityId: 'srd-5.1:spell:shapechange',
+        wildShapeMaximumChallengeRating: 20,
+        wildShapeCurrentHp: 183,
+        wildShapeRoundsRemaining: 600,
+        wildShapeOriginalCurrentHp: 20,
+        wildShapeOriginalMaxHp: 30,
+        wildShapeOriginalArmorClass: 14,
+        wildShapeOriginalSpeed: 30,
+        wildShapeOriginalMovementSpeeds: { walk: 30 },
+        wildShapeOriginalAbilities: { str: 16, dex: 14, con: 14, int: 10, wis: 14, cha: 16 },
+        wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 2, cha: 3 },
+      },
+    })
+    const input = fixture(actor, { feature: 'druid-end-wild-shape' })
+    input.action.combatId = undefined
+    const authority = dnd5eSpellAuthorityResolutionContext({
+      combatActive: false,
+      map: input.map,
+      actorTokenId: input.action.actorTokenId,
+      initiativeOrder: [],
+      turnEconomy: input.turnEconomy,
+    })
+    const prepared = prepareDnd5eClassFeature({
+      ...input,
+      initiativeOrder: [...authority.initiativeOrder],
+      turnEconomy: authority.turnEconomy,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0]).toMatchObject({
+      currentHp: 20,
+      maxHp: 30,
+      concentrating: false,
+    })
+    expect(resolved.application?.characters[0].dnd5eCombatState?.wildShapeFormId).toBeUndefined()
+
+    const forbidden = fixture(actor, { feature: 'barbarian-rage' })
+    forbidden.action.combatId = undefined
+    expect(prepareDnd5eClassFeature(forbidden)).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
   it('persists Barbarian Rage through the map bridge without changing AP', () => {
     const actor = character('barbarian', '野蛮人', {
       hitDice: '6d12',

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eCombatant,
   dnd5eCombatantPairKey,
@@ -14,6 +14,14 @@ import {
   type Dnd5eMonsterAction,
   type Dnd5eMonsterOnHitEffect,
 } from './monsters'
+
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
+
+const mechanicFixtures = new Map([['kraken', monsterMechanicFixture('kraken', ["bite","tentacle","fling","multiattack","multiattack-two-tentacles-and-fling","multiattack-tentacle-and-two-flings","multiattack-flings","legendary-fling","legendary-tentacle-attack"])],['purple-worm', monsterMechanicFixture('purple-worm', ["bite","tail-stinger","multiattack"])]])
+beforeEach(() => setDnd5eRoomMonsterCatalog([...mechanicFixtures.values()]))
+afterEach(() => setDnd5eRoomMonsterCatalog([]))
+const getMechanicMonster = (slug: string) => mechanicFixtures.get(slug) ?? getDnd5eSrdMonsterBySlug(slug)
 
 const TARGET_ABILITIES = {
   str: 10,
@@ -63,7 +71,7 @@ function encounter(
     targetArmorClass?: number
   } = {},
 ): Dnd5eHeadlessCombatState {
-  const monster = getDnd5eSrdMonsterBySlug(slug)
+  const monster = getMechanicMonster(slug)
   expect(monster, slug).toBeDefined()
   const sourceId = options.sourceId ?? 'monster'
   const targetId = options.targetId ?? 'hero'
@@ -96,7 +104,7 @@ function encounter(
 }
 
 function catalogAction(slug: string, actionId: string): Dnd5eMonsterAction {
-  const action = getDnd5eSrdMonsterBySlug(slug)?.actions.find(
+  const action = getMechanicMonster(slug)?.actions.find(
     (candidate) => candidate.id === actionId,
   )
   expect(action, `${slug}/${actionId}`).toBeDefined()
@@ -167,7 +175,7 @@ function monsterAttackRoll(input: {
   }
 }
 
-describe('complex relation Multiattacks', () => {
+describe('complex relation sub-rules in isolated fixtures', () => {
   it('publishes every reviewed parent and child action as a Headless rule', () => {
     const expected = [
       ['cloaker', 'multiattack'],
@@ -186,6 +194,7 @@ describe('complex relation Multiattacks', () => {
       ['kraken', 'multiattack-two-tentacles-and-fling'],
       ['kraken', 'multiattack-tentacle-and-two-flings'],
       ['kraken', 'multiattack-flings'],
+      ['kraken', 'bite'],
       ['kraken', 'fling'],
     ] as const
 
@@ -240,6 +249,22 @@ describe('complex relation Multiattacks', () => {
         slotGroup: 'tentacle',
       },
     })
+    expect(catalogAction('kraken', 'bite')).toMatchObject({
+      description: expect.stringContaining('命中 +17'),
+      relationRequirement: {
+        kind: 'target-linked-to-source',
+        slotGroup: 'tentacle',
+      },
+      attack: {
+        targetMaxSizeRank: 3,
+        onHitEffects: [expect.objectContaining({
+          id: 'bite-swallow',
+          sourceDeathEscape: { movementCostFeet: 15, applyProne: true },
+        })],
+      },
+    })
+    expect(catalogAction('kraken', 'tentacle').description)
+      .toContain('命中 +17')
     expect(catalogAction('roper', 'reel').rule).toBeDefined()
     expect(catalogAction('shambling-mound', 'engulf').rule).toBeDefined()
   })
@@ -391,6 +416,164 @@ describe('complex relation Multiattacks', () => {
       .toEqual(before.combatants.worm.turn)
   })
 
+  it('settles Kraken Bite only against a tentacle-grappled Large-or-smaller target', () => {
+    const state = encounter('kraken', {
+      sourceId: 'kraken',
+      targetSizeRank: 3,
+    })
+    const grappled = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: 'kraken',
+      actionId: 'tentacle',
+      rolls: [monsterAttackRoll({
+        slug: 'kraken',
+        actionId: 'tentacle',
+        effectId: 'tentacle-grapple',
+      })],
+    })
+    expect(grappled.ok, grappled.ok ? undefined : grappled.reason).toBe(true)
+    if (!grappled.ok) return
+    grappled.state.combatants.kraken.turn.actionAvailable = true
+    const swallowed = resolveDnd5eHeadlessAction(grappled.state, {
+      type: 'monster-action',
+      actorId: 'kraken',
+      actionId: 'bite',
+      rolls: [monsterAttackRoll({
+        slug: 'kraken',
+        actionId: 'bite',
+        effectId: 'bite-swallow',
+      })],
+    })
+    expect(swallowed.ok, swallowed.ok ? undefined : swallowed.reason).toBe(true)
+    if (!swallowed.ok) return
+    expect(sourceRelationEntries(swallowed.state, 'kraken', 'hero'))
+      .toHaveLength(1)
+    expect(sourceRelationEntries(swallowed.state, 'kraken', 'hero')[0]?.effect)
+      .toMatchObject({
+        relation: { kind: 'swallowed', slotGroup: 'swallow' },
+        periodicDamage: {
+          timing: 'source-turn-start',
+          count: 12,
+          sides: 6,
+          type: 'acid',
+        },
+      })
+    expect(swallowed.state.combatants.hero.conditions)
+      .toEqual(expect.arrayContaining(['blinded', 'restrained']))
+  })
+
+  it('enforces swallowed total cover, preserves corpse containment, and spends movement to exit prone', () => {
+    const state = encounter('purple-worm', { sourceId: 'worm' })
+    const outsider = combatant({
+      id: 'outsider',
+      initiative: 5,
+      controller: 'player',
+      x: 10,
+    })
+    state.combatants.outsider = outsider
+    state.initiativeOrder = ['worm', 'hero', 'outsider']
+    const swallowed = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: 'worm',
+      actionId: 'bite',
+      rolls: [monsterAttackRoll({
+        slug: 'purple-worm',
+        actionId: 'bite',
+        effectId: 'bite-swallow',
+        effectD20: 1,
+      })],
+    })
+    expect(swallowed.ok, swallowed.ok ? undefined : swallowed.reason).toBe(true)
+    if (!swallowed.ok) return
+
+    const outsiderState = structuredClone(swallowed.state)
+    outsiderState.initiativeIndex = 2
+    const outsideAttack = resolveDnd5eHeadlessAction(outsiderState, {
+      type: 'attack',
+      actorId: 'outsider',
+      targetId: 'hero',
+      attackModifier: 100,
+      d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [1], type: 'piercing' },
+    })
+    expect(outsideAttack).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const insideState = structuredClone(swallowed.state)
+    insideState.initiativeIndex = 1
+    const insideToOutside = resolveDnd5eHeadlessAction(insideState, {
+      type: 'attack',
+      actorId: 'hero',
+      targetId: 'outsider',
+      attackModifier: 100,
+      d20: 10,
+      d20Second: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [1], type: 'piercing' },
+    })
+    expect(insideToOutside).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const dyingState = structuredClone(swallowed.state)
+    dyingState.initiativeIndex = 1
+    dyingState.combatants.worm.currentHp = 10
+    const killedFromInside = resolveDnd5eHeadlessAction(dyingState, {
+      type: 'attack',
+      actorId: 'hero',
+      targetId: 'worm',
+      attackModifier: 100,
+      d20: 10,
+      d20Second: 10,
+      damage: { count: 1, sides: 20, bonus: 0, rolls: [20], type: 'slashing' },
+    })
+    expect(killedFromInside.ok, killedFromInside.ok ? undefined : killedFromInside.reason).toBe(true)
+    if (!killedFromInside.ok) return
+    expect(killedFromInside.state.combatants.hero.conditions).not.toContain('blinded')
+    expect(killedFromInside.state.combatants.hero.conditions).not.toContain('restrained')
+    const corpseRelation = sourceRelationEntries(
+      killedFromInside.state,
+      'worm',
+      'hero',
+    )[0]?.effect
+    expect(corpseRelation).toMatchObject({
+      relation: {
+        kind: 'swallowed',
+        corpseEscape: { movementCostFeet: 20, applyProne: true },
+      },
+      suspendedBy: expect.arrayContaining(['monster-swallow-source-dead']),
+    })
+    expect(killedFromInside.events).toContainEqual(expect.objectContaining({
+      type: 'monster-swallow-corpse-containment-started',
+      sourceId: 'worm',
+      targetId: 'hero',
+      movementCostFeet: 20,
+    }))
+
+    const tooFar = resolveDnd5eHeadlessAction(killedFromInside.state, {
+      type: 'move',
+      actorId: 'hero',
+      to: { x: 20, y: 0 },
+      distance: 15,
+    })
+    expect(tooFar).toMatchObject({ ok: false, reason: 'insufficient-movement' })
+
+    const escaped = resolveDnd5eHeadlessAction(killedFromInside.state, {
+      type: 'move',
+      actorId: 'hero',
+      to: { x: 10, y: 0 },
+      distance: 5,
+    })
+    expect(escaped.ok, escaped.ok ? undefined : escaped.reason).toBe(true)
+    if (!escaped.ok) return
+    expect(sourceRelationEntries(escaped.state, 'worm', 'hero')).toEqual([])
+    expect(escaped.state.combatants.hero.conditions).toContain('prone')
+    expect(escaped.state.combatants.hero.turn.movementRemaining).toBe(5)
+    expect(escaped.events).toContainEqual(expect.objectContaining({
+      type: 'monster-swallow-corpse-escaped',
+      sourceId: 'worm',
+      targetId: 'hero',
+      movementCostFeet: 20,
+      prone: true,
+    }))
+  })
+
   it('declares the unresolved composite semantics without fixing their transaction payload', () => {
     expect(dnd5eMonsterMultiattackConstraint(
       'srd-5.1:shambling-mound',
@@ -419,4 +602,10 @@ describe('complex relation Multiattacks', () => {
     expect(catalogAction('kraken', 'multiattack-flings').sequence)
       .toEqual(['fling', 'fling', 'fling'])
   })
+})
+
+vi.mock('./monsterMultiattackConstraints', async importOriginal => {
+  const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
+  const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
+  return monsterMechanicConstraints(original)
 })

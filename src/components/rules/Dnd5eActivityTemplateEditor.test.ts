@@ -38,6 +38,9 @@ describe('Activity authoring presets', () => {
     expect(source).toContain('此 Effect 受来源专注约束')
     expect(source).toContain('Host 机制处理器')
     expect(source).toContain('listDnd5eMechanicOperationHandlersV1')
+    expect(source).toContain('权威随机表')
+    expect(source).toContain('骰值区间')
+    expect(source).toContain("kind: 'check-total'")
   })
 
   it('keeps executionMode frozen as a legacy loading adapter', () => {

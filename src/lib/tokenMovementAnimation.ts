@@ -11,8 +11,11 @@ export interface TokenMovementAnimation {
 }
 
 const MAX_PATH_POINTS = 128
+const MAX_ANIMATION_ID_LENGTH = 200
 const MIN_DURATION_MS = 240
 const MAX_DURATION_MS = 3_000
+const MIN_LATE_OBSERVATION_WINDOW_MS = 180
+const MAX_LATE_OBSERVATION_REPLAY_MS = 5_000
 
 function finitePoint(value: unknown): value is TokenMovementAnimationPoint {
   if (!value || typeof value !== 'object') return false
@@ -28,6 +31,24 @@ function dedupePoints(points: readonly TokenMovementAnimationPoint[]): TokenMove
       ? []
       : [{ x: point.x, y: point.y }]
   })
+}
+
+function movementAnimationId(value: string): string {
+  if (value.length <= MAX_ANIMATION_ID_LENGTH) return value
+  // Summoned Token ids include the full authority transaction id. Combining
+  // one with the combat and movement ids can legitimately exceed the shared
+  // presentation schema's 200-character boundary. Keep a readable prefix and
+  // hash the complete value so long ids that differ only after the prefix do
+  // not collapse onto the same animation.
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    first = Math.imul(first ^ code, 0x01000193) >>> 0
+    second = Math.imul(second ^ (code + index), 0x85ebca6b) >>> 0
+  }
+  const suffix = `${first.toString(16).padStart(8, '0')}${second.toString(16).padStart(8, '0')}`
+  return `${value.slice(0, MAX_ANIMATION_ID_LENGTH - suffix.length - 1)}~${suffix}`
 }
 
 export function normalizeTokenMovementAnimation(value: unknown): TokenMovementAnimation | undefined {
@@ -66,11 +87,36 @@ export function createTokenMovementAnimation(input: {
   const segmentDuration = (path.length - 1) * 130
   const distanceDuration = totalDistance * 3.5
   return {
-    id: input.id,
+    id: movementAnimationId(input.id),
     points: path,
     durationMs: Math.round(Math.max(MIN_DURATION_MS, Math.min(MAX_DURATION_MS, Math.max(segmentDuration, distanceDuration)))),
     issuedAt: Math.round(input.issuedAt ?? Date.now()),
   }
+}
+
+/**
+ * Gives a newly observed shared movement enough local time to be visible.
+ *
+ * Authority writes the final coordinates and the presentation timestamp in a
+ * single snapshot. A slow save/SSE hop can therefore deliver a valid path only
+ * after (or just before) its original animation window ends. Rebase only that
+ * recent late arrival; genuinely old metadata stays expired so refreshing a
+ * map never replays historical movement.
+ */
+export function tokenMovementAnimationForObservation(
+  animation: TokenMovementAnimation,
+  observedAt: number,
+): TokenMovementAnimation {
+  const completesAt = animation.issuedAt + animation.durationMs
+  const remainingMs = completesAt - observedAt
+  const minimumVisibleMs = Math.min(
+    animation.durationMs,
+    MIN_LATE_OBSERVATION_WINDOW_MS,
+  )
+  if (remainingMs >= minimumVisibleMs || observedAt < animation.issuedAt) return animation
+  const lateByMs = Math.max(0, observedAt - completesAt)
+  if (lateByMs > MAX_LATE_OBSERVATION_REPLAY_MS) return animation
+  return { ...animation, issuedAt: Math.round(observedAt) }
 }
 
 export function truncateTokenMovementPath(
@@ -91,6 +137,46 @@ export function truncateTokenMovementPath(
   if (closestDistance < 0.01) truncated[truncated.length - 1] = { ...finalPosition }
   else truncated.push({ ...finalPosition })
   return dedupePoints(truncated)
+}
+
+/** Builds the unplayed suffix after an interrupt checkpoint on the route. */
+export function continueTokenMovementPath(
+  path: readonly TokenMovementAnimationPoint[],
+  checkpoint: TokenMovementAnimationPoint,
+  finalPosition: TokenMovementAnimationPoint,
+): TokenMovementAnimationPoint[] {
+  const route = truncateTokenMovementPath(path, finalPosition)
+  if (route.length < 2) return dedupePoints([checkpoint, finalPosition])
+  let closestSegmentIndex = 0
+  let closestSegmentRatio = 0
+  let closestDistance = Number.POSITIVE_INFINITY
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const from = route[index]
+    const to = route[index + 1]
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const lengthSquared = dx * dx + dy * dy
+    const ratio = lengthSquared <= 0
+      ? 0
+      : Math.max(0, Math.min(1, (
+          (checkpoint.x - from.x) * dx + (checkpoint.y - from.y) * dy
+        ) / lengthSquared))
+    const projected = { x: from.x + dx * ratio, y: from.y + dy * ratio }
+    const distance = Math.hypot(checkpoint.x - projected.x, checkpoint.y - projected.y)
+    if (distance < closestDistance) {
+      closestDistance = distance
+      closestSegmentIndex = index
+      closestSegmentRatio = ratio
+    }
+  }
+  const suffixStart = closestSegmentRatio >= 0.999
+    ? closestSegmentIndex + 2
+    : closestSegmentIndex + 1
+  return dedupePoints([
+    checkpoint,
+    ...route.slice(suffixStart),
+    finalPosition,
+  ])
 }
 
 export function tokenMovementAnimationPosition(

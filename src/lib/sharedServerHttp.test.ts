@@ -34,7 +34,13 @@ async function startServer(
     process.execPath,
     [serverScript, '--host', HOST, '--port', String(port), '--root', distRoot],
     {
-      env: { ...process.env, STARS_SHARED_ROOT: sharedRoot, ...extraEnv },
+      env: {
+        ...process.env,
+        STARS_SHARED_ROOT: sharedRoot,
+        ASTRALTRACE_LOCAL_AI_CONFIG_DIR: path.join(sharedRoot, 'local-ai-config'),
+        ASTRALTRACE_LOCAL_VOICE_CONFIG_DIR: path.join(sharedRoot, 'local-voice-config'),
+        ...extraEnv,
+      },
       stdio: 'ignore',
     },
   )
@@ -975,19 +981,21 @@ describe('账号级战役与临时房间协议', () => {
           timelineOrder: 10, timelineKind: 'current', dmEditedFields: ['summary'], graphPosition: { x: 420, y: 56 },
         }, {
           id: 'story-survives', title: '艾莉诺拉继续调查', summary: '', details: '', timeLabel: '',
-          status: 'planned', source: 'dm', sourceEventIds: [], sceneIds: [], personIds: ['person-elinora'], clueIds: [], tags: [], graphPosition: { x: 420, y: 318 },
+          status: 'not-triggered', statusAutomation: 'branch', source: 'dm', sourceEventIds: [], sceneIds: [], personIds: ['person-elinora'], clueIds: [], tags: [], graphPosition: { x: 420, y: 318 },
         }],
         graphLinks: [{
           id: 'story-link-survives', fromEventId: 'story-chapel', toEventId: 'story-survives', label: '',
           condition: { kind: 'person-state', personId: 'person-elinora', state: 'alive' },
-          resolution: 'triggered',
+          resolution: 'not-triggered',
           labelPosition: { x: 688, y: 248 },
         }],
         graphInitialized: true,
         graphEditedByDm: true,
         graphLinksClearedByDm: false,
         graphLayoutVersion: 4,
-        timelineMarkers: [{ id: 'story-time-chapel', y: 224, label: '第 2 日 14:30', gameTimeWorldMinute: 2_310 }],
+        timelineMarkers: [{ id: 'story-time-chapel', y: 224, label: '第 1 小时', gameTimeWorldMinute: 2_310, source: 'analysis', sourceKey: 'offset:60', sourceEventIds: ['story-chapel'], relativeOffsetMinutes: 60, timelineKind: 'current', dmEditedFields: ['y'] }],
+        dismissedTimelineMarkerSourceKeys: ['text:时间未注明'],
+        storyStartWorldMinute: 2_250,
         personStates: [{ personId: 'person-elinora', status: 'active', note: '仍在调查', updatedBySessionId: 'session-chapel' }], clueStates: [], recaps: [],
         activeSession: {
           id: 'session-chapel', title: '第二场：调查伪信', startedAt: 1_000,
@@ -1734,9 +1742,27 @@ describe('账号插件库协议', () => {
     const catalog = await fetch(`${offServer.base}/api/plugins/catalog?q=目录&category=rules`)
     expect(catalog.status).toBe(200)
     await expect(catalog.json()).resolves.toMatchObject({
+      facets: {
+        total: 1,
+        categories: { rules: 1, items: 0, adventure: 0 },
+      },
+      pagination: {
+        offset: 0,
+        limit: 200,
+        returned: 1,
+        total: 1,
+        hasMore: false,
+      },
       plugins: [{
         id: pluginId,
         publisher: { accountId: owner.session.accountId, displayName: '公开作者' },
+        popularity: {
+          periodDays: 30,
+          views: 0,
+          downloads: 0,
+          installs: 0,
+          activeInstallations: 0,
+        },
         versions: [{
           version: pluginVersion,
           integrity,
@@ -1844,6 +1870,27 @@ describe('账号插件库协议', () => {
       },
       products: [{ productId: pluginId, activeInstallations: 1 }],
     })
+
+    const popularCatalog = await fetch(`${offServer.base}/api/plugins/catalog`)
+    expect(popularCatalog.status).toBe(200)
+    const popular = await popularCatalog.json()
+    expect(popular).toMatchObject({
+      discovery: {
+        newest: expect.arrayContaining([expect.objectContaining({ id: pluginId })]),
+        hot: expect.arrayContaining([expect.objectContaining({ id: pluginId })]),
+      },
+      plugins: expect.arrayContaining([expect.objectContaining({
+        id: pluginId,
+        popularity: {
+          periodDays: 30, views: 1, downloads: 1, installs: 1, activeInstallations: 1,
+        },
+      })]),
+      pagination: { offset: 0, hasMore: false },
+    })
+    // Other protocol tests also publish packages to this isolated server.
+    // The unfiltered discovery list must retain them, not pretend it is empty.
+    expect(popular.pagination.returned).toBe(popular.plugins.length)
+    expect(popular.pagination.total).toBeGreaterThanOrEqual(1)
 
     const publicationStatuses = await fetch(
       `${offServer.base}/api/marketplace/creators/me/publications`,

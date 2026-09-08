@@ -1,0 +1,191 @@
+{
+  "id": "srd-5.1:darkmantle",
+  "slug": "darkmantle",
+  "name": "暗幕怪",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "crush",
+      "name": "碾压",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].relation.attackAdvantageAgainstLinkedTarget",
+        "attack.onHitEffects[].relation.requiresAttackAdvantage",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].rootLegacyCondition",
+        "attack.onHitEffects[].conditionsWhenAttackHasAdvantage[].condition",
+        "attack.onHitEffects[].conditionsWhenAttackHasAdvantage[].targetMaxSizeRank",
+        "attack.onHitEffects[].dependentLegacyConditionsWhenAttackHasAdvantage[].condition",
+        "attack.onHitEffects[].dependentLegacyConditionsWhenAttackHasAdvantage[].targetMaxSizeRank",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "darkness-aura",
+      "name": "黑暗灵光",
+      "automation": "headless",
+      "rule": "persistent-area",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.durationRounds",
+        "rule.concentration",
+        "rule.anchorMode",
+        "rule.vertical.mode",
+        "rule.vertical.heightFeet",
+        "rule.vertical.anchorOffsetFeet",
+        "rule.relation",
+        "rule.includeSelf",
+        "rule.lighting.kind",
+        "rule.lighting.radiusFeet",
+        "rule.lighting.spellLevel",
+        "rule.lighting.suppressesMagicalLightThroughLevel",
+        "rule.color",
+        "rule.visual.preset",
+        "rule.visual.intensity"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 75,
+      "slug": "darkmantle",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:48:37.971Z",
+      "name": "暗幕怪",
+      "actionId": "crush",
+      "actionName": "碾压",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-darkmantle-crush-1788558518071",
+      "combatId": "verify-ui-darkmantle-crush-1788558518071:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "暗幕怪 使用碾压攻击 验证目标：碾压 → 验证目标 6+5=11 命中；共造成 9 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:49 PM\n结算\n\n暗幕怪 使用碾压攻击 验证目标：碾压 → 验证目标 6+5=11 命中；共造成 9 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：碾压｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 6；最终采用 6；调整值 +5。\n结果 · 11 vs AC 10：命中。\n伤害骰 · 碾压（基础伤害·钝击）｜1d6 骰面：6 = 6｜固定加值 +3｜小计 9\n暗幕怪｜消耗动作\n验证目标｜受到 9 点伤害｜HP 320 → 311",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/暗幕怪 使用碾压攻击 验证目标：/)\nExpected: \u001b[32m\"暗幕怪 使用碾压攻击 验证目标：碾压 → 验证目标 6+5=11 命中；共造成 9 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/暗幕怪 使用碾压攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:49:45.087Z",
+      "evidenceFile": "ui-cases/monsters/075-darkmantle.json"
+    },
+    {
+      "index": 221,
+      "slug": "darkmantle",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:55:00.789Z",
+      "name": "暗幕怪",
+      "actionId": "crush",
+      "actionName": "碾压",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/2",
+      "total": 334,
+      "mapId": "verify-ui-darkmantle-crush-1788569700841",
+      "combatId": "verify-ui-darkmantle-crush-1788569700841:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "暗幕怪 使用碾压攻击 验证目标：碾压 → 验证目标 7+5=12 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:55 PM\n结算\n\n暗幕怪 使用碾压攻击 验证目标：碾压 → 验证目标 7+5=12 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：碾压｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 7；最终采用 7；调整值 +5。\n结果 · 12 vs AC 10：命中。\n伤害骰 · 碾压（基础伤害·钝击）｜1d6 骰面：3 = 3｜固定加值 +3｜小计 6\n暗幕怪｜消耗动作\n验证目标｜受到 6 点伤害｜HP 320 → 314",
+      "playerLog": "暗幕怪 使用碾压攻击 验证目标：碾压 → 验证目标 7+5=12 命中；共造成 6 点伤害。",
+      "afterHp": 314,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:55:25.351Z",
+      "evidenceFile": "ui-cases/monsters/221-darkmantle.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "回声定位",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

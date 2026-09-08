@@ -1,0 +1,119 @@
+{
+  "id": "srd-5.1:giant-weasel",
+  "slug": "giant-weasel",
+  "name": "巨型鼬",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 139,
+      "slug": "giant-weasel",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:26:07.562Z",
+      "name": "巨型鼬",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-weasel-bite-1788560767644",
+      "combatId": "verify-ui-giant-weasel-bite-1788560767644:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "status": "failed",
+      "error": "TimeoutError: locator.click: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: '验证目标 选择', exact: true })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" data-testid=\"manual-monster-target-target\" class=\"flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-xs font-semibold text-slate-100 hover:border-rose-300/35 hover:bg-rose-500/15\">…</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:26:48.722Z",
+      "evidenceFile": "ui-cases/monsters/139-giant-weasel.json"
+    },
+    {
+      "index": 295,
+      "slug": "giant-weasel",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:12:09.419Z",
+      "name": "巨型鼬",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/8",
+      "total": 334,
+      "mapId": "verify-ui-giant-weasel-bite-1788570729472",
+      "combatId": "verify-ui-giant-weasel-bite-1788570729472:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨型鼬 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+5=8 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:12 PM\n攻击\n\n巨型鼬 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+5=8 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 3；最终采用 3；调整值 +5。\n结果 · 8 vs AC 10：未命中。\n巨型鼬｜消耗动作",
+      "playerLog": "巨型鼬 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+5=8 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:12:29.889Z",
+      "evidenceFile": "ui-cases/monsters/295-giant-weasel.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐听觉与嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

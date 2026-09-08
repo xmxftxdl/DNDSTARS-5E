@@ -120,7 +120,6 @@ export function MapGeometryLayer({
   tool,
   selectedEntityId,
   inv,
-  terrainEditingLocked,
   onSelect,
   onDelete,
   onPointsChange,
@@ -133,7 +132,6 @@ export function MapGeometryLayer({
   tool: MapGeometryTool
   selectedEntityId: string | null
   inv: number
-  terrainEditingLocked: boolean
   onSelect?: (entityId: string | null) => void
   onDelete?: (entityId: string) => void
   onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
@@ -182,9 +180,6 @@ export function MapGeometryLayer({
         const selectEntity = (event: Konva.KonvaEventObject<MouseEvent>) => {
           event.cancelBubble = true
           if (editMode && tool === 'delete') {
-            if (terrainEditingLocked && entity.kind === 'obstacle' && (
-              entity.terrainRegion || (entity.terrainElevationFeet ?? 0) !== 0
-            )) return
             onDelete?.(entity.id)
           }
           else onSelect?.(entity.id)

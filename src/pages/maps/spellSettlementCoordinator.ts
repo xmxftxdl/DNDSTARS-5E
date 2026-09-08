@@ -1,12 +1,32 @@
-import type { BattleMap } from '../../store/maps'
+import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
+import type { Character } from '../../types/character'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
+import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import { cellDistance, type GridCell } from '../../lib/gridCombat'
+import { removePersistentAreaByDm } from './dmWallOfFireRemoval'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
   isCombatPresentationAreaSpellId,
 } from '../../../shared/combat-presentation-contract.mjs'
 import type { CombatPresentationAreaSpellId } from '../../../shared/combat-presentation-contract.mjs'
+
+export function dnd5eSpellAttackPresentationOrigin(input: {
+  map: BattleMap
+  actorToken: Token
+  sustainedEffectAreaId?: string
+  sustainedAttackOrigin?: 'caster' | 'effect-token' | 'persistent-area'
+}): Token {
+  if (input.sustainedAttackOrigin !== 'effect-token' || !input.sustainedEffectAreaId) {
+    return input.actorToken
+  }
+  const area = input.map.dnd5ePluginAreas?.find((candidate) =>
+    candidate.id === input.sustainedEffectAreaId && candidate.anchorMode === 'effect-token',
+  )
+  if (!area?.anchorTokenId) return input.actorToken
+  return input.map.tokens.find((token) => token.id === area.anchorTokenId) ?? input.actorToken
+}
 
 export function dnd5eSpellResolutionInitiativeOrder(input: {
   combatActive: boolean
@@ -14,9 +34,10 @@ export function dnd5eSpellResolutionInitiativeOrder(input: {
   actorTokenId: string
   initiativeOrder: readonly InitiativeEntry[]
 }): readonly InitiativeEntry[] {
-  if (input.combatActive) return input.initiativeOrder
-  return input.map.tokens
-    .filter((token) => token.type === 'player' || token.type === 'enemy')
+  const ordinaryOrder = input.combatActive
+    ? [...input.initiativeOrder]
+    : input.map.tokens
+    .filter((token) => token.type === 'player' || token.type === 'enemy' || token.type === 'npc')
     .sort((left, right) => left.id === input.actorTokenId
       ? -1
       : right.id === input.actorTokenId ? 1 : left.id.localeCompare(right.id))
@@ -28,6 +49,51 @@ export function dnd5eSpellResolutionInitiativeOrder(input: {
       color: token.color,
       roll: Math.max(1, 20 - index),
     }))
+  if (!input.combatActive) return ordinaryOrder
+  const representedTokenIds = new Set(ordinaryOrder.map((entry) => entry.tokenId))
+  const npcTargets = input.map.tokens
+    .filter((token) => token.type === 'npc' && !representedTokenIds.has(token.id))
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((token) => ({
+      slotId: `spell-resolution:npc:${token.id}`,
+      tokenId: token.id,
+      label: token.label,
+      emoji: token.emoji,
+      color: token.color,
+      roll: 1,
+    }))
+  return [...ordinaryOrder, ...npcTargets]
+}
+
+/**
+ * A new concentration spell removes the caster's previous concentration area
+ * during the headless spell application. Some areas (notably Delayed Blast
+ * Fireball) must resolve an on-detonate wave when that removal happens, so the
+ * UI authority boundary needs the exact removed area snapshot before it is
+ * discarded.
+ */
+export function dnd5eConcentrationReplacementDetonationAreas(input: {
+  beforeMap: BattleMap
+  afterMap: BattleMap
+  sourceCharacterId: string
+  sourceTokenId: string
+  replacementConcentrationId?: string
+  concentrationEnded?: boolean
+}): Dnd5ePluginArea[] {
+  const liveAreaIds = new Set((input.afterMap.dnd5ePluginAreas ?? []).map((area) => area.id))
+  return (input.beforeMap.dnd5ePluginAreas ?? []).filter((area) =>
+    !!area.concentrationId &&
+    (
+      input.concentrationEnded === true ||
+      !liveAreaIds.has(area.id) ||
+      (!!input.replacementConcentrationId && area.concentrationId !== input.replacementConcentrationId)
+    ) &&
+    (
+      area.sourceCharacterId === input.sourceCharacterId ||
+      area.sourceTokenId === input.sourceTokenId
+    ) &&
+    (area.triggers ?? []).some((trigger) => trigger.timing === 'on-detonate')
+  )
 }
 
 export function dnd5eSpellAuthorityResolutionContext(input: {
@@ -157,7 +223,6 @@ export type PreRollSpellPresentation = {
     | 'mass-healing-word'
     | 'prayer-of-healing'
     | 'dancing-lights'
-    | 'minor-illusion'
     | 'thaumaturgy'
     | 'shillelagh'
   id: string
@@ -247,14 +312,13 @@ export function spellPresentationsBeforeRoll(input: {
     'mass-healing-word',
     'prayer-of-healing',
     'dancing-lights',
-    'minor-illusion',
     'thaumaturgy',
     'shillelagh',
   ])
   if (!supported.has(input.spellId as PreRollSpellPresentation['spellId'])) return []
   const spellId = input.spellId as PreRollSpellPresentation['spellId']
   const selfManifestation = spellId === 'misty-step' || spellId === 'dancing-lights' ||
-    spellId === 'minor-illusion' || spellId === 'thaumaturgy' || spellId === 'shillelagh'
+    spellId === 'thaumaturgy' || spellId === 'shillelagh'
   const targetTokenIds = selfManifestation && input.targetTokenIds.length === 0
     ? [input.actorTokenId]
     : input.targetTokenIds
@@ -319,6 +383,10 @@ export function areaSpellPresentationForSettlement(input: {
     input.areaAnchorCell.col < 0 ||
     input.areaAnchorCell.row < 0
   ) return null
+  // Grease is rendered exclusively by the authoritative persistent-area layer.
+  // Do not publish the transient area atlas first: it duplicates the oil pool
+  // and delays settlement before the ground effect can be installed.
+  if (input.spellId === 'grease') return null
   if (!isCombatPresentationAreaSpellId(input.spellId)) return null
   const area = COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS[input.spellId]
   return {
@@ -686,6 +754,104 @@ export function spellSettlementMapLayerChanges(before: BattleMap, after: BattleM
   }
 }
 
+export interface Dnd5eCrossMapConcentrationProjectionCleanup {
+  mapId: string
+  dnd5ePluginAreas: Dnd5ePluginArea[]
+  tokens: Token[]
+}
+
+/**
+ * A character owns one concentration state across the campaign, not one per
+ * map. When a new concentration area is committed, remove that character's
+ * old area/effect-token projections from every other map in the same atomic
+ * room snapshot.
+ */
+export function planDnd5eCrossMapConcentrationProjectionCleanup(input: {
+  maps: readonly BattleMap[]
+  currentMapId: string
+  createdArea: Pick<Dnd5ePluginArea, 'concentrationId' | 'sourceCharacterId'>
+}): Dnd5eCrossMapConcentrationProjectionCleanup[] {
+  if (!input.createdArea.concentrationId || !input.createdArea.sourceCharacterId) return []
+  return input.maps.flatMap((map) => {
+    if (map.id === input.currentMapId) return []
+    const dnd5ePluginAreas = (map.dnd5ePluginAreas ?? []).filter((area) =>
+      !(area.concentrationId && area.sourceCharacterId === input.createdArea.sourceCharacterId),
+    )
+    const tokens = map.tokens.filter((token) =>
+      !(
+        token.dnd5eSpellEffect?.concentrationId &&
+        token.dnd5eSpellEffect.sourceCharacterId === input.createdArea.sourceCharacterId
+      ),
+    )
+    if (
+      dnd5ePluginAreas.length === (map.dnd5ePluginAreas ?? []).length &&
+      tokens.length === map.tokens.length
+    ) return []
+    return [{ mapId: map.id, dnd5ePluginAreas, tokens }]
+  })
+}
+
+export interface SunburstDarknessDispelSettlement {
+  map: BattleMap
+  characters: Character[]
+  removedAreaIds: string[]
+  changedCharacterIds: string[]
+  changedTokenIds: string[]
+}
+
+/**
+ * Sunburst ends every spell-created darkness volume touched by its 60-foot
+ * sphere. Removing the map area and its exact concentration controller in one
+ * pure settlement prevents the UI from leaving an invisible, still-active
+ * Darkness concentration behind after the visual volume disappears.
+ */
+export function settleSunburstSpellDarknessDispels(input: {
+  map: BattleMap
+  characters: readonly Character[]
+  anchorCell: GridCell
+  radiusFeet: number
+}): SunburstDarknessDispelSettlement {
+  let map = input.map
+  let characters = [...input.characters]
+  const maximumCells = Math.floor(input.radiusFeet / Math.max(1, input.map.feetPerCell ?? 5))
+  const candidateIds = (input.map.dnd5ePluginAreas ?? []).flatMap((area) =>
+    area.sourceKind === 'core-spell' &&
+    area.lighting?.kind === 'magical-darkness' &&
+    area.cells.some((cell) => cellDistance(input.anchorCell, cell) <= maximumCells)
+      ? [area.id]
+      : [],
+  )
+  const removedAreaIds: string[] = []
+  const changedCharacterIds = new Set<string>()
+  const changedTokenIds = new Set<string>()
+  for (const areaId of candidateIds) {
+    const beforeTokens = new Map(map.tokens.map((token) => [token.id, token]))
+    const removal = removePersistentAreaByDm({ map, characters, areaId })
+    if (!removal) continue
+    map = removal.map
+    removedAreaIds.push(areaId)
+    if (removal.character) {
+      characters = characters.map((character) =>
+        character.id === removal.character!.id ? removal.character! : character,
+      )
+      changedCharacterIds.add(removal.character.id)
+    }
+    for (const token of map.tokens) {
+      if (JSON.stringify(beforeTokens.get(token.id)) !== JSON.stringify(token)) changedTokenIds.add(token.id)
+    }
+    for (const tokenId of beforeTokens.keys()) {
+      if (!map.tokens.some((token) => token.id === tokenId)) changedTokenIds.add(tokenId)
+    }
+  }
+  return {
+    map,
+    characters,
+    removedAreaIds,
+    changedCharacterIds: [...changedCharacterIds],
+    changedTokenIds: [...changedTokenIds],
+  }
+}
+
 /**
  * 只把本次法术事务实际改动的区域合并进最新地图。
  * Interrupt／掷骰等待期间由其他事务创建的区域必须保留，不能用 prepare 阶段的旧数组整表覆盖。
@@ -728,4 +894,33 @@ export function spellSettlementSpentTurnResource(
     (spent.resource === 'action' || spent.resource === 'bonusAction')
     ? spent.resource
     : undefined
+}
+
+/**
+ * Select only the saves declared by the spell cast itself. Damage can enqueue
+ * concentration or other follow-up saves in the same Headless transaction;
+ * those are real events, but must not inflate the cast summary's target-save
+ * count. The first matching event is authoritative because primary spell saves
+ * are emitted before damage-triggered follow-up saves.
+ */
+export function spellSettlementPrimarySavingThrows(
+  events: readonly Dnd5eCombatEvent[],
+  expected: readonly { targetId: string; ability?: AbilityKey; dc: number }[],
+): Extract<Dnd5eCombatEvent, { type: 'saving-throw-resolved' }>[] {
+  const matched = new Set<string>()
+  const saves: Extract<Dnd5eCombatEvent, { type: 'saving-throw-resolved' }>[] = []
+  for (const event of events) {
+    if (event.type !== 'saving-throw-resolved') continue
+    const declaration = expected.find((candidate) =>
+      candidate.targetId === event.targetId &&
+      candidate.dc === event.dc &&
+      (candidate.ability == null || candidate.ability === event.ability),
+    )
+    if (!declaration) continue
+    const key = `${declaration.targetId}\u0000${declaration.ability ?? event.ability}\u0000${declaration.dc}`
+    if (matched.has(key)) continue
+    matched.add(key)
+    saves.push(event)
+  }
+  return saves
 }

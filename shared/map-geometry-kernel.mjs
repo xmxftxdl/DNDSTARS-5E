@@ -298,6 +298,7 @@ export function raycastGeometry(input) {
     const toEye = toElevation + (input.toEyeHeightFeet ?? 0)
     const height = fromEye + (toEye - fromEye) * t
     if (height < segment.baseHeightFeet || height >= segment.baseHeightFeet + segment.heightFeet) continue
+    if (input.ignoreSegment?.(segment, t, height) === true) continue
     if (!nearest || t < nearest.t) nearest = { segment, t }
   }
   return nearest

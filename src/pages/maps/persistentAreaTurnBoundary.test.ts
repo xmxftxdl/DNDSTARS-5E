@@ -19,9 +19,11 @@ import {
 import {
   commitDnd5ePersistentAreaTurnCursorAfterSuccess,
   dnd5ePersistentAreaTurnCursor,
+  dnd5ePersistentAreaTurnKey,
   mergeDnd5ePersistentAreaTurnCharacterDelta,
   mergeDnd5ePersistentAreaTurnMapDelta,
   planDnd5ePersistentAreaTurnTransition,
+  projectDnd5ePersistentAreaActionConsumption,
   settleDnd5ePersistentAreaTurnTransition,
   type Dnd5ePersistentAreaTurnTransition,
 } from './persistentAreaTurnBoundary'
@@ -81,6 +83,48 @@ function entry(tokenId: string, slotId = `${tokenId}-slot`): InitiativeEntry {
 }
 
 describe('persistent-area authoritative turn boundaries', () => {
+  it('projects a failed Stinking Cloud save into the shared action economy only', () => {
+    const economy = {
+      turnKey: 'combat:1:target', attacksUsed: 0,
+      action: { current: 1, max: 1 },
+      bonusAction: { current: 1, max: 1 },
+      reaction: { current: 1, max: 1 },
+      objectInteraction: { current: 1, max: 1 },
+      movement: { current: 30, max: 30 },
+    }
+
+    expect(projectDnd5ePersistentAreaActionConsumption(economy, true)).toEqual({
+      ...economy,
+      action: { current: 0, max: 1 },
+    })
+    expect(projectDnd5ePersistentAreaActionConsumption(economy, false)).toBe(economy)
+
+    expect(projectDnd5ePersistentAreaActionConsumption(
+      economy,
+      true,
+      'combat:1:target:normal',
+    )).toEqual({
+      ...economy,
+      turnKey: 'combat:1:target:normal',
+      action: { current: 0, max: 1 },
+    })
+  })
+
+  it('uses the same initiative-slot key for boundaries and in-turn settlements', () => {
+    const cursor = dnd5ePersistentAreaTurnCursor({
+      mapId: 'map', combatId: 'combat', round: 4, initiativeIndex: 1,
+      initiativeOrder: [entry('hero', 'hero-primary'), entry('monster', 'monster-primary')],
+    })!
+
+    const inTurnKey = dnd5ePersistentAreaTurnKey({
+      round: cursor.round,
+      slotId: cursor.slotId,
+      tokenId: cursor.tokenId,
+    })
+    expect(inTurnKey).toBe('4:monster-primary')
+    expect(inTurnKey).toBe(planDnd5ePersistentAreaTurnTransition(null, cursor).boundaries[0]?.turnKey)
+  })
+
   it('plans one stable end/start pair and treats a repeated ACK cursor as a no-op', () => {
     const initiativeOrder = [entry('hero', 'hero-primary'), entry('monster', 'monster-primary')]
     const previous = dnd5ePersistentAreaTurnCursor({
@@ -98,6 +142,41 @@ describe('persistent-area authoritative turn boundaries', () => {
       ],
     })
     expect(planDnd5ePersistentAreaTurnTransition(current, current).boundaries).toEqual([])
+  })
+
+  it('preserves boundary combat events for the next actor economy projection', async () => {
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [],
+    }
+    const cursor = dnd5ePersistentAreaTurnCursor({
+      mapId: map.id, combatId: 'combat', round: 2, initiativeIndex: 1,
+      initiativeOrder: [entry('hero'), entry('target')],
+    })!
+    const settled = await settleDnd5ePersistentAreaTurnTransition({
+      transition: {
+        cursor,
+        boundaries: [
+          { timing: 'turn-end', round: 2, tokenId: 'hero', turnKey: '2:hero-slot' },
+          { timing: 'turn-start', round: 2, tokenId: 'target', turnKey: '2:target-slot' },
+        ],
+      },
+      map,
+      characters: [],
+      settleBoundary: async ({ boundary, map: boundaryMap, characters }) => ({
+        map: boundaryMap,
+        characters: [...characters],
+        logs: [],
+        events: [{ type: 'turn-started', actorId: boundary.tokenId, round: boundary.round }],
+      }),
+      expireBoundary: ({ map: boundaryMap }) => boundaryMap,
+    })
+
+    expect(settled.events).toEqual([
+      { type: 'turn-started', actorId: 'hero', round: 2 },
+      { type: 'turn-started', actorId: 'target', round: 2 },
+    ])
   })
 
   it('does not advance the fallback cursor when authoritative persistence fails', async () => {

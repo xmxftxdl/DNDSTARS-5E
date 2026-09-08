@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eConditionEffect,
   dnd5eActiveArmorClassBonus,
@@ -13,8 +13,18 @@ import {
   startDnd5eHeadlessCombat,
   type Dnd5eCombatant,
 } from './headlessCombatEngine'
-import { getDnd5eSrdMonsterBySlug } from './monsters'
-import { dnd5eSavingThrowMode } from './passiveDefenses'
+import { getDnd5eSrdMonsterBySlug, setDnd5eRoomMonsterCatalog } from './monsters'
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
+// These fixtures isolate the structured sub-rules from unrelated catalog rows.
+const mechanicFixtures = new Map([
+  ['homunculus', monsterMechanicFixture('homunculus', ['bite'])],
+  ['ghost', monsterMechanicFixture('ghost', ['horrifying-visage'])],
+  ['kraken', monsterMechanicFixture('kraken', ['tentacle', 'fling', 'legendary-tentacle-attack', 'legendary-fling', 'lightning-storm', 'lightning-storm-costs-2-actions'])],
+])
+beforeEach(() => setDnd5eRoomMonsterCatalog([...mechanicFixtures.values()]))
+afterEach(() => setDnd5eRoomMonsterCatalog([]))
+const getMechanicMonster = (slug: string) => mechanicFixtures.get(slug) ?? getDnd5eSrdMonsterBySlug(slug)
+import { dnd5eConditionImmuneFromSource, dnd5eSavingThrowMode } from './passiveDefenses'
 
 const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
 
@@ -42,7 +52,7 @@ function combatant(
 }
 
 function legendaryState(slug: string) {
-  const monster = getDnd5eSrdMonsterBySlug(slug)
+  const monster = getMechanicMonster(slug)
   if (!monster) throw new Error(`Missing monster ${slug}`)
   const target = combatant('target', 20, {
     creatureType: 'humanoid',
@@ -62,59 +72,90 @@ function legendaryState(slug: string) {
   return state
 }
 
-describe('remaining combat action Headless coverage batch', () => {
-  it('embeds missing Vampire-form attacks while retaining safe local references', () => {
-    const bat = getDnd5eSrdMonsterBySlug('vampire-bat')!
-    const mist = getDnd5eSrdMonsterBySlug('vampire-mist')!
-
-    expect(bat.legendaryActions).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'legendary-unarmed-strike',
-        kind: 'weapon-attack',
-        automation: 'headless',
-        attack: expect.objectContaining({ toHit: 9 }),
-      }),
-      expect.objectContaining({
-        id: 'legendary-bite-costs-2-actions',
-        referencedActionId: 'bite',
-        automation: 'headless',
-      }),
-    ]))
-    expect(mist.legendaryActions).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'legendary-unarmed-strike',
-        kind: 'weapon-attack',
-        automation: 'headless',
-        attack: expect.objectContaining({ toHit: 9 }),
-      }),
-      expect.objectContaining({
-        id: 'legendary-bite-costs-2-actions',
-        kind: 'weapon-attack',
-        automation: 'headless',
-        attack: expect.objectContaining({ toHit: 9 }),
-      }),
-    ]))
+describe('combat action regression batch (isolated partial rules are explicitly marked above)', () => {
+  it('keeps bat-form Bite local and omits attacks forbidden by the current form', () => {
+    const bat = getMechanicMonster('vampire-bat')!
+    expect(bat.legendaryActions?.map(action => action.id))
+      .toEqual(['move', 'legendary-bite-costs-2-actions'])
+    expect(bat.legendaryActions?.find(action => action.id === 'legendary-bite-costs-2-actions'))
+      .toMatchObject({ referencedActionId: 'bite', automation: 'headless' })
+    expect(getMechanicMonster('vampire-mist')?.legendaryActions).toEqual([])
   })
 
   it('exposes every Druid quarterstaff damage branch without parsing prose', () => {
-    const druid = getDnd5eSrdMonsterBySlug('druid')
+    const druid = getMechanicMonster('druid')
     expect(druid?.actions.filter((action) => action.id.startsWith('quarterstaff')))
       .toMatchObject([
         { id: 'quarterstaff', automation: 'headless', attack: { toHit: 2, damage: [{ count: 1, sides: 6, bonus: 0 }] } },
         { id: 'quarterstaff-two-handed', automation: 'headless', attack: { toHit: 2, damage: [{ count: 1, sides: 8, bonus: 0 }] } },
-        { id: 'quarterstaff-shillelagh', automation: 'headless', attack: { toHit: 4, damage: [{ count: 1, sides: 8, bonus: 2 }] } },
+        {
+          id: 'quarterstaff-shillelagh', automation: 'headless',
+          requiredActiveEffectDefinitionId: 'srd-5.1:spell:shillelagh',
+          attack: { toHit: 4, damage: [{ count: 1, sides: 8, bonus: 2 }] },
+        },
       ])
   })
 
-  it('settles the Homunculus poison and margin-gated unconscious rider', () => {
-    const monster = getDnd5eSrdMonsterBySlug('homunculus')!
+  it('settles both Homunculus poison durations and the margin-gated unconscious rider', () => {
+    const monster = getMechanicMonster('homunculus')!
+    expect(monster.actions.find((action) => action.id === 'bite')).toMatchObject({
+      automation: 'headless',
+      attack: {
+        onHitEffects: [expect.objectContaining({
+          sharedDurationOnFailureMargin: {
+            minimumFailureMargin: 5,
+            count: 1,
+            sides: 10,
+            bonus: 0,
+            roundsPerUnit: 10,
+          },
+        })],
+      },
+    })
     const actor = combatant('homunculus', 20, {
       controller: 'dm',
       statBlockId: monster.id,
       creatureType: monster.creatureType,
     })
     const target = combatant('target', 10, { savingThrowBonuses: { con: 0 } })
-    const state = startDnd5eHeadlessCombat('homunculus-bite', [actor, target])
+    const shallow = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('homunculus-bite-shallow', [actor, target]),
+      {
+        type: 'monster-action',
+        actorId: actor.id,
+        actionId: 'bite',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[]],
+          onHitEffectRolls: [{ effectId: 'bite-poisoned-unconscious', d20: 6 }],
+        }],
+      },
+    )
+    expect(shallow.ok, shallow.ok ? undefined : shallow.reason).toBe(true)
+    if (!shallow.ok) return
+    expect(shallow.state.combatants.target.conditions).toContain('poisoned')
+    expect(shallow.state.combatants.target.conditions).not.toContain('unconscious')
+    expect(shallow.state.combatants.target.classState.activeEffects?.find((effect) =>
+      effect.standardCondition === 'poisoned')?.duration).toMatchObject({
+        type: 'rounds', remainingRounds: 10,
+      })
+
+    const state = startDnd5eHeadlessCombat('homunculus-bite-deep', [actor, target])
+    const missingDuration = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: 'bite',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: [[]],
+        onHitEffectRolls: [{ effectId: 'bite-poisoned-unconscious', d20: 5 }],
+      }],
+    })
+    expect(missingDuration).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    expect(missingDuration.state).toEqual(state)
+
     const result = resolveDnd5eHeadlessAction(state, {
       type: 'monster-action',
       actorId: actor.id,
@@ -123,7 +164,11 @@ describe('remaining combat action Headless coverage batch', () => {
         targetId: target.id,
         d20: 10,
         damageRolls: [[]],
-        onHitEffectRolls: [{ effectId: 'bite-poisoned-unconscious', d20: 1 }],
+        onHitEffectRolls: [{
+          effectId: 'bite-poisoned-unconscious',
+          d20: 5,
+          durationRolls: [7],
+        }],
       }],
     })
     expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
@@ -131,6 +176,16 @@ describe('remaining combat action Headless coverage batch', () => {
     expect(result.state.combatants.target.conditions).toEqual(
       expect.arrayContaining(['poisoned', 'unconscious']),
     )
+    const poison = result.state.combatants.target.classState.activeEffects?.find((effect) =>
+      effect.standardCondition === 'poisoned')
+    const unconscious = result.state.combatants.target.classState.activeEffects?.find((effect) =>
+      effect.standardCondition === 'unconscious')
+    expect(poison?.duration).toMatchObject({ type: 'rounds', remainingRounds: 70 })
+    expect(unconscious).toMatchObject({
+      duration: { type: 'rounds', remainingRounds: 70 },
+      dependsOnEffectId: poison?.id,
+      breakOn: expect.arrayContaining(['takes-damage', 'awakened']),
+    })
   })
 
   it('resolves Lich Disrupt Life as a three-point legendary area action', () => {
@@ -177,6 +232,13 @@ describe('remaining combat action Headless coverage batch', () => {
     if (!result.ok) return
     expect(result.state.combatants.target.currentHp).toBe(94)
     expect(result.state.combatants.solar.classState.monsterLegendaryActionPoints).toBe(1)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'damage-defense-resolved',
+      targetId: 'target',
+      damageType: 'fire',
+      damageBefore: 4,
+      damageAfter: 2,
+    }))
   })
 
   it.each([
@@ -208,7 +270,7 @@ describe('remaining combat action Headless coverage batch', () => {
   )
 
   it('settles Sea Hag Death Glare only against a frightened visible target', () => {
-    const monster = getDnd5eSrdMonsterBySlug('sea-hag')!
+    const monster = getMechanicMonster('sea-hag')!
     const actor = combatant('sea-hag', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -243,7 +305,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Will-o-Wisp Consume Life as a bonus action and heals only on death', () => {
-    const monster = getDnd5eSrdMonsterBySlug('will-o-wisp')!
+    const monster = getMechanicMonster('will-o-wisp')!
     const actor = combatant('will-o-wisp', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -319,7 +381,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Otyugh Tentacle Slam against exactly every tentacle-held target', () => {
-    const monster = getDnd5eSrdMonsterBySlug('otyugh')!
+    const monster = getMechanicMonster('otyugh')!
     const actor = combatant('otyugh', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -378,7 +440,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('splits Mummy Lord Attack into executable fist and Dreadful Glare variants', () => {
-    const monster = getDnd5eSrdMonsterBySlug('mummy-lord')!
+    const monster = getMechanicMonster('mummy-lord')!
     expect(monster.legendaryActions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'attack-rotting-fist',
@@ -413,7 +475,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Green Hag Invisible Passage as concentration invisibility', () => {
-    const monster = getDnd5eSrdMonsterBySlug('green-hag')!
+    const monster = getMechanicMonster('green-hag')!
     const actor = combatant('green-hag', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -466,7 +528,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Rug of Smothering Smother as an attached suffocating restraint', () => {
-    const monster = getDnd5eSrdMonsterBySlug('rug-of-smothering')!
+    const monster = getMechanicMonster('rug-of-smothering')!
     const actor = combatant('rug-of-smothering', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -533,7 +595,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Clay Golem Haste and gates its bonus-action Slam behind the buff', () => {
-    const monster = getDnd5eSrdMonsterBySlug('clay-golem')!
+    const monster = getMechanicMonster('clay-golem')!
     const actor = combatant('clay-golem', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -611,7 +673,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Duergar Enlarge and gates both normal and doubled-damage branches', () => {
-    const monster = getDnd5eSrdMonsterBySlug('duergar')!
+    const monster = getMechanicMonster('duergar')!
     const actor = combatant('duergar', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -679,12 +741,11 @@ describe('remaining combat action Headless coverage batch', () => {
     ['tarrasque', 20, true],
     ['vampire-vampire', 30, false],
     ['vampire-bat', 30, false],
-    ['vampire-mist', 20, false],
   ] as const)(
     'settles %s legendary Move as bounded movement budget',
     (slug, expectedMovement, provokesOpportunityAttacks) => {
       const state = legendaryState(slug)
-      const monster = getDnd5eSrdMonsterBySlug(slug)!
+      const monster = getMechanicMonster(slug)!
       state.combatants[slug].speed = monster.speed.walk ?? 0
       state.combatants[slug].movementSpeeds = { ...monster.speed }
       state.combatants[slug].turn.movementRemaining = 0
@@ -697,9 +758,16 @@ describe('remaining combat action Headless coverage batch', () => {
       expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
       if (!result.ok) return
       expect(result.state.combatants[slug].turn.movementRemaining)
-        .toBe(expectedMovement)
+        .toBe(0)
       expect(result.state.combatants[slug].disengaged)
-        .toBe(!provokesOpportunityAttacks)
+        .toBe(false)
+      expect(result.state.combatants[slug].classState.monsterLegendaryMovement).toMatchObject({
+        schemaVersion: 1,
+        actionId: 'move',
+        maximumFeet: expectedMovement,
+        traversalMode: 'any',
+        provokesOpportunityAttacks,
+      })
       expect(result.state.combatants[slug].classState.monsterLegendaryActionPoints)
         .toBe(2)
       expect(result.events).toContainEqual({
@@ -712,8 +780,68 @@ describe('remaining combat action Headless coverage batch', () => {
     },
   )
 
+  it('settles Mummy Lord Whirlwind of Sand as one protected 60-foot movement window', () => {
+    const state = legendaryState('mummy-lord')
+    const granted = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-legendary-special-action',
+      actorId: 'mummy-lord',
+      actionId: 'whirlwind-of-sand-costs-2-actions',
+    })
+    expect(granted.ok, granted.ok ? undefined : granted.reason).toBe(true)
+    if (!granted.ok) return
+    const mummy = granted.state.combatants['mummy-lord']
+    expect(mummy.classState.monsterLegendaryMovement).toMatchObject({
+      schemaVersion: 1,
+      actionId: 'whirlwind-of-sand-costs-2-actions',
+      maximumFeet: 60,
+      traversalMode: 'any',
+      provokesOpportunityAttacks: true,
+      temporaryDamageImmunity: 'all',
+      temporaryConditionImmunities: [
+        'grappled', 'petrified', 'prone', 'restrained', 'stunned',
+      ],
+    })
+    expect(mummy.classState.monsterLegendaryActionPoints).toBe(1)
+    for (const condition of [
+      'grappled', 'petrified', 'prone', 'restrained', 'stunned',
+    ] as const) {
+      expect(dnd5eConditionImmuneFromSource(mummy, condition, granted.state.combatants.target))
+        .toBe(true)
+    }
+
+    const hpBefore = mummy.currentHp
+    const attack = resolveDnd5eHeadlessAction(granted.state, {
+      type: 'attack', actorId: 'target', targetId: 'mummy-lord',
+      attackModifier: 100, d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [4], type: 'force' },
+    })
+    expect(attack.ok, attack.ok ? undefined : attack.reason).toBe(true)
+    if (!attack.ok) return
+    expect(attack.state.combatants['mummy-lord'].currentHp).toBe(hpBefore)
+    expect(attack.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied', targetId: 'mummy-lord', amount: 0,
+    }))
+
+    const moved = resolveDnd5eHeadlessAction(attack.state, {
+      type: 'move', actorId: 'mummy-lord', monsterLegendaryMovement: true,
+      to: { x: 60, y: 0 }, distance: 60, traversalMode: 'walk',
+    })
+    expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+    if (!moved.ok) return
+    expect(moved.state.combatants['mummy-lord'].position).toEqual({ x: 60, y: 0 })
+    expect(moved.state.combatants['mummy-lord'].classState.monsterLegendaryMovement)
+      .toBeUndefined()
+    expect(dnd5eConditionImmuneFromSource(
+      moved.state.combatants['mummy-lord'], 'grappled', moved.state.combatants.target,
+    )).toBe(false)
+  })
+
   it('splits Tarrasque Chomp into executable Bite and Swallow legendary choices', () => {
-    const monster = getDnd5eSrdMonsterBySlug('tarrasque')!
+    const monster = getMechanicMonster('tarrasque')!
+    expect(monster.actions.find((action) => action.id === 'swallow')?.attack?.onHitEffects)
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        sourceDeathEscape: { movementCostFeet: 30, applyProne: true },
+      })]))
     expect(monster.legendaryActions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'chomp-bite-costs-2-actions',
@@ -752,7 +880,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('splits Kraken Tentacle Attack or Fling into executable legendary choices', () => {
-    const monster = getDnd5eSrdMonsterBySlug('kraken')!
+    const monster = getMechanicMonster('kraken')!
     expect(monster.legendaryActions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'legendary-tentacle-attack',
@@ -792,10 +920,31 @@ describe('remaining combat action Headless coverage batch', () => {
     )
     expect(result.state.combatants.kraken.classState.monsterLegendaryActionPoints)
       .toBe(2)
+
+    const fling = resolveDnd5eHeadlessAction(result.state, {
+      type: 'monster-legendary-special-action',
+      actorId: 'kraken',
+      actionId: 'legendary-fling',
+      targetId: 'target',
+      forcedMovements: [{
+        targetId: 'target',
+        to: { x: 35, y: 0 },
+        distanceFeet: 30,
+      }],
+      damageRolls: [1, 2, 3],
+    })
+    expect(fling.ok, fling.ok ? undefined : fling.reason).toBe(true)
+    if (!fling.ok) return
+    expect(fling.state.combatants.target.currentHp).toBe(81)
+    expect(fling.state.combatants.target.position).toEqual({ x: 35, y: 0 })
+    expect(fling.state.combatants.target.conditions).toContain('prone')
+    expect(fling.state.combatants.target.conditions).not.toContain('grappled')
+    expect(fling.state.combatants.kraken.classState.monsterLegendaryActionPoints)
+      .toBe(1)
   })
 
   it('settles Vrock Spores through periodic damage and repeat-save effect lifecycle', () => {
-    const monster = getDnd5eSrdMonsterBySlug('vrock')!
+    const monster = getMechanicMonster('vrock')!
     const actor = combatant('vrock', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -876,7 +1025,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Ghost Horrifying Visage and enforces source-action immunity', () => {
-    const monster = getDnd5eSrdMonsterBySlug('ghost')!
+    const monster = getMechanicMonster('ghost')!
     const actor = combatant('ghost', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -922,7 +1071,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('enforces the Androsphinx Roar sequence and resolves all three stages', () => {
-    const monster = getDnd5eSrdMonsterBySlug('androsphinx')!
+    const monster = getMechanicMonster('androsphinx')!
     const roar = monster.actions.find((candidate) => candidate.id === 'roar')
     expect(roar).toMatchObject({
       automation: 'headless',
@@ -1029,7 +1178,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('limits Kraken Lightning Storm to three visible selected targets', () => {
-    const monster = getDnd5eSrdMonsterBySlug('kraken')!
+    const monster = getMechanicMonster('kraken')!
     const actor = combatant('kraken', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -1053,7 +1202,7 @@ describe('remaining combat action Headless coverage batch', () => {
         schemaVersion: 1,
         targetIds: targets.map((target) => target.id),
         targetSavingThrows: targets.map((target) => ({ targetId: target.id, d20: 1 })),
-        damageRolls: [1, 1, 1, 1],
+        damageRolls: Array(12).fill(1),
       },
     })
     expect(tooMany).toMatchObject({ ok: false, reason: 'invalid-dice' })
@@ -1068,7 +1217,7 @@ describe('remaining combat action Headless coverage batch', () => {
         schemaVersion: 1,
         targetIds: selected.map((target) => target.id),
         targetSavingThrows: selected.map((target) => ({ targetId: target.id, d20: 1 })),
-        damageRolls: [1, 1, 1, 1],
+        damageRolls: Array(12).fill(1),
       },
     })
     expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
@@ -1092,14 +1241,14 @@ describe('remaining combat action Headless coverage batch', () => {
       legendary: true,
       resolution: {
         schemaVersion: 1,
-        targetIds: ['target'],
-        targetSavingThrows: [{ targetId: 'target', d20: 1 }],
-        damageRolls: [1, 1, 1, 1],
+        targetIds: ['target', 'target', 'target'],
+        targetSavingThrows: Array.from({ length: 3 }, () => ({ targetId: 'target', d20: 1 })),
+        damageRolls: Array(12).fill(1),
       },
     })
     expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
     if (!result.ok) return
-    expect(result.state.combatants.target.currentHp).toBe(96)
+    expect(result.state.combatants.target.currentHp).toBe(88)
     expect(result.state.combatants.kraken.classState.monsterLegendaryActionPoints).toBe(1)
   })
 
@@ -1112,7 +1261,7 @@ describe('remaining combat action Headless coverage batch', () => {
     escapeDc,
     targetMaxSizeRank,
   ) => {
-    const monster = getDnd5eSrdMonsterBySlug(slug)!
+    const monster = getMechanicMonster(slug)!
     const action = monster.actions.find((candidate) => candidate.id === 'web')
     expect(action).toMatchObject({
       kind: 'weapon-attack',
@@ -1175,10 +1324,10 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it.each([
-    ['behir', 'constrict', 'constrict', 2, 6, 6],
-    ['giant-frog', 'bite', 'bite', 1, 2, 4],
-    ['giant-toad', 'bite', 'bite', 2, 3, 6],
-    ['remorhaz', 'bite', 'bite', 2, 6, 6],
+    ['behir', 'constrict', 'constrict', 2, 6, 6, 15],
+    ['giant-frog', 'bite', 'bite', 1, 2, 4, 5],
+    ['giant-toad', 'bite', 'bite', 2, 3, 6, 5],
+    ['remorhaz', 'bite', 'bite', 2, 6, 6, 15],
   ] as const)('settles %s Swallow from the required grapple relation', (
     slug,
     grappleActionId,
@@ -1186,8 +1335,9 @@ describe('remaining combat action Headless coverage batch', () => {
     maximumTargetSizeRank,
     periodicCount,
     periodicSides,
+    sourceDeathEscapeMovementFeet,
   ) => {
-    const monster = getDnd5eSrdMonsterBySlug(slug)!
+    const monster = getMechanicMonster(slug)!
     const grappleAction = monster.actions.find((candidate) =>
       candidate.id === grappleActionId)!
     const grappleEffect = grappleAction.attack?.onHitEffects?.find((effect) =>
@@ -1269,13 +1419,21 @@ describe('remaining combat action Headless coverage batch', () => {
         type: 'acid',
       },
     })
+    expect(swallow?.attack?.onHitEffects).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceDeathEscape: {
+          movementCostFeet: sourceDeathEscapeMovementFeet,
+          applyProne: true,
+        },
+      }),
+    ]))
     expect(swallowed.state.combatants.target.conditions).toEqual(
       expect.arrayContaining(['restrained', 'blinded']),
     )
   })
 
   it('tracks damage from inside a Behir and authoritatively regurgitates on a failed save', () => {
-    const monster = getDnd5eSrdMonsterBySlug('behir')!
+    const monster = getMechanicMonster('behir')!
     const constrict = monster.actions.find((action) => action.id === 'constrict')!
     const swallow = monster.actions.find((action) => action.id === 'swallow')!
     const constrictEffect = constrict.attack!.onHitEffects!.find((effect) =>
@@ -1391,7 +1549,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('settles Succubus Charm with humanoid targeting, replacement, and immunity', () => {
-    const monster = getDnd5eSrdMonsterBySlug('succubus-incubus')!
+    const monster = getMechanicMonster('succubus-incubus')!
     const actor = combatant('succubus', 30, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -1454,7 +1612,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('keeps separate three-target humanoid and beast pools for Dryad Fey Charm', () => {
-    const monster = getDnd5eSrdMonsterBySlug('dryad')!
+    const monster = getMechanicMonster('dryad')!
     const dryad = combatant('dryad', 20, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -1518,7 +1676,7 @@ describe('remaining combat action Headless coverage batch', () => {
   })
 
   it('only offers a Vampire Charm repeat save after harm from the vampire or its allies', () => {
-    const monster = getDnd5eSrdMonsterBySlug('vampire-vampire')!
+    const monster = getMechanicMonster('vampire-vampire')!
     const vampire = combatant('vampire', 40, {
       controller: 'dm',
       statBlockId: monster.id,
@@ -1591,4 +1749,10 @@ describe('remaining combat action Headless coverage batch', () => {
       mode: 'normal',
     }))
   })
+})
+
+vi.mock('./monsterMultiattackConstraints', async importOriginal => {
+  const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
+  const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
+  return monsterMechanicConstraints(original)
 })

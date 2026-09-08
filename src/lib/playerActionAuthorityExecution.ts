@@ -18,6 +18,7 @@ export type PlayerActionAuthorityRoute =
   | 'dnd5e-item-use'
   | 'dnd5e-ability-check'
   | 'dnd5e-spell-cast'
+  | 'dnd5e-spell-whisper-reply'
   | 'dnd5e-persistent-area-move'
   | 'dnd5e-adjudicated-spell'
   | 'dnd5e-map-interaction'
@@ -41,11 +42,45 @@ export function playerActionAuthorityRoute(action: Pick<SharedPlayerActionState,
   if (action.type === 'dnd5e-item-use') return 'dnd5e-item-use'
   if (action.type === 'dnd5e-ability-check') return 'dnd5e-ability-check'
   if (action.type === 'dnd5e-spell-cast') return 'dnd5e-spell-cast'
+  if (action.type === 'dnd5e-spell-whisper-reply') return 'dnd5e-spell-whisper-reply'
   if (action.type === 'dnd5e-persistent-area-move') return 'dnd5e-persistent-area-move'
   if (action.type === 'dnd5e-adjudicated-spell') return 'dnd5e-adjudicated-spell'
   if (action.type === 'dnd5e-map-interaction') return 'dnd5e-map-interaction'
   if (action.type === 'move-token') return 'move-token'
   return 'unsupported'
+}
+
+/**
+ * Treat the client-side Headless classification as a hint only. The DM Host
+ * re-runs the audit lookup and safely downgrades a stale/incorrect full-cast
+ * request to the deterministic-cost adjudication protocol while preserving the command
+ * identity used by ACK/deduplication.
+ */
+export function routePlayerSpellActionByAutomation(
+  action: SharedPlayerActionState,
+  hasFullHeadlessAutomation: boolean,
+  forceNarrativeObjectResolution = false,
+): SharedPlayerActionState {
+  if (
+    action.type !== 'dnd5e-spell-cast' ||
+    !action.dnd5eSpellCast ||
+    (hasFullHeadlessAutomation && !forceNarrativeObjectResolution)
+  ) return action
+  return {
+    ...action,
+    type: 'dnd5e-adjudicated-spell',
+    targetTokenId: undefined,
+    targetTokenIds: undefined,
+    targetCell: undefined,
+    targetPosition: undefined,
+    dnd5eSpellCast: undefined,
+    dnd5eAdjudicatedSpell: {
+      spellId: action.dnd5eSpellCast.spellId,
+      castingClassId: action.dnd5eSpellCast.castingClassId,
+      slotLevel: action.dnd5eSpellCast.slotLevel,
+      narrativeOnly: true,
+    },
+  }
 }
 
 export function planPlayerActionAuthorityExecution(input: {

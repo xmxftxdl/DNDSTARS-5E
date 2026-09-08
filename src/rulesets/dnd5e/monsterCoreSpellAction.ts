@@ -110,6 +110,7 @@ export interface PreparedDnd5eMonsterCoreSpell {
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaTargetElevationFeet?: number
   teleportDestination?: Dnd5eSpellTeleportDestination
+  legendaryActionId?: string
 }
 
 function applyTurnEconomy(
@@ -280,6 +281,9 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   slotLevel: number
   turnEconomy?: Dnd5eTurnEconomyCounts
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
+  /** Current turn is retained for an off-turn legendary cast. */
+  currentInitiativeIndex?: number
+  legendaryActionId?: string
 }): { ok: true; prepared: PreparedDnd5eMonsterCoreSpell } | {
   ok: false
   reason: Dnd5eMonsterCoreSpellRejectReason
@@ -297,6 +301,14 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   if (dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full') {
     return { ok: false, reason: 'manual-spell' }
   }
+  const legendaryDefinition = input.legendaryActionId
+    ? monster.legendaryActions?.find((candidate) => candidate.id === input.legendaryActionId)
+    : undefined
+  if (input.legendaryActionId && (
+    !legendaryDefinition ||
+    legendaryDefinition.kind !== 'other' ||
+    !/(?:^|-)cast-a-spell(?:-|$)/.test(legendaryDefinition.id)
+  )) return { ok: false, reason: 'invalid-spell' }
   const occupantModifiers = dnd5ePersistentAreaOccupantModifiersAt({
     map: input.map,
     token: actorToken,
@@ -536,6 +548,16 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     !snapshot.state.combatants[actorToken.id] ||
     targetTokens.some((target) => !snapshot.state.combatants[target!.id])
   ) return { ok: false, reason: 'combatant-missing' }
+  const currentInitiativeIndex = input.legendaryActionId
+    ? input.currentInitiativeIndex
+    : actorIndex
+  if (
+    currentInitiativeIndex == null ||
+    !Number.isInteger(currentInitiativeIndex) ||
+    currentInitiativeIndex < 0 ||
+    currentInitiativeIndex >= snapshot.state.initiativeOrder.length ||
+    (input.legendaryActionId && snapshot.state.initiativeOrder[currentInitiativeIndex] === actorToken.id)
+  ) return { ok: false, reason: 'invalid-actor' }
   if (
     spell.id === 'hold-person' &&
     targetTokens.some((target) => !dnd5eCharmPersonEligibleCreatureType(
@@ -561,7 +583,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
-      state: { ...snapshot.state, initiativeIndex: actorIndex },
+      state: { ...snapshot.state, initiativeIndex: currentInitiativeIndex },
       actorToken,
       targetTokens: targetTokens as Token[],
       monster,
@@ -592,6 +614,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       areaTargetOrientation: input.areaTargetOrientation,
       areaTargetElevationFeet: input.areaTargetElevationFeet,
       teleportDestination,
+      legendaryActionId: input.legendaryActionId,
     },
   }
 }
@@ -602,6 +625,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
   counterspellReaction?: Dnd5eCounterspellReaction
   spellInterceptionReaction?: Dnd5eSpellInterceptionReaction
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+  attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -660,6 +684,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
     actorId: prepared.actorToken.id,
     spellId: prepared.spell.id,
     slotLevel: prepared.slotLevel,
+    legendaryActionId: prepared.legendaryActionId,
     counterspellReaction: input.counterspellReaction,
     spellInterceptionReaction: input.spellInterceptionReaction,
     resolution: {
@@ -669,6 +694,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
       teleportDestination: prepared.teleportDestination,
     },
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+    attackDecoyRolls: input.attackDecoyRolls,
   } as const
   const fallPreview = input.airborneFallDamageRollsByCombatantId == null
     ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
@@ -681,6 +707,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
     map: prepared.map,
     characters: prepared.characters,
     characterIdByCombatantId: prepared.characterIdByCombatantId,
+    events: [...result.events],
   })
   let createdAreaId: string | undefined
   const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)

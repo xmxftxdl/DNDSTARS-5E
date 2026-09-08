@@ -77,6 +77,8 @@ export interface Dnd5ePluginFeatureAction {
   description?: string
   economy: Dnd5ePluginActionEconomy
   targeting: Dnd5ePluginTargeting
+  /** Host-authoritative turn-usage keys projected from Unified Activity requirements. */
+  oncePerTurnKeys?: readonly string[]
   trigger?: DeclarativeSubclassAbilityV1['trigger']
   interrupt?: Dnd5ePluginInterruptDeclaration
   persistentArea?: {

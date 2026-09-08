@@ -1,0 +1,169 @@
+{
+  "id": "srd-5.1:sprite",
+  "slug": "sprite",
+  "name": "小妖精",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "shortbow",
+      "name": "短弓",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHit",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].condition",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].durationRounds",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].minimumFailureMargin",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].dependsOnCondition",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].breakOnDamage",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].canBeAwakenedByAction"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "shortbow-poisoned-unconscious:apply",
+        "shortbow-poisoned-unconscious:save",
+        "shortbow-poisoned-unconscious:condition-immune"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "heart-sight",
+      "name": "洞察心灵",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "invisibility",
+      "name": "隐形",
+      "automation": "headless",
+      "rule": "invisibility",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.target",
+        "rule.concentration",
+        "rule.breakOn[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 281,
+      "slug": "sprite",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:09:00.250Z",
+      "name": "小妖精",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/4",
+      "total": 334,
+      "mapId": "verify-ui-sprite-longsword-1788570540312",
+      "combatId": "verify-ui-sprite-longsword-1788570540312:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "小妖精 使用长剑攻击 验证目标：长剑 → 验证目标 10+2=12 命中；共造成 1 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:09 PM\n结算\n\n小妖精 使用长剑攻击 验证目标：长剑 → 验证目标 10+2=12 命中；共造成 1 点伤害。\n\n查看 Headless 结算依据（7）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +2。\n结果 · 12 vs AC 10：命中。\n小妖精｜消耗动作\n验证目标｜受到 1 点伤害｜HP 320 → 319",
+      "playerLog": "小妖精 使用长剑攻击 验证目标：长剑 → 验证目标 10+2=12 命中；共造成 1 点伤害。",
+      "afterHp": 319,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:09:21.737Z",
+      "evidenceFile": "ui-cases/monsters/281-sprite.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 12,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

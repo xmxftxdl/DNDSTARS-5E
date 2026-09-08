@@ -19,6 +19,7 @@ import {
 } from '../../rulesets/dnd5e/customMonsterWorkshop'
 import { setDnd5eRoomMonsterCatalog } from '../../rulesets/dnd5e/monsters'
 import type { BattleMap, Token } from '../../store/maps'
+import { planMapsManualSettlement } from './manualSettlementTransaction'
 import { settleDnd5eConcentrationChecks } from './settleDnd5eCombatResult'
 
 const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
@@ -86,6 +87,159 @@ describe('地图战斗结果结算器', () => {
     expect(rollD20).not.toHaveBeenCalled()
     expect(settled.result.state).toEqual(state)
     expect(settled.application.map.id).toBe('map')
+  })
+
+  it('后续结算会保留首轮已经物化的 Token 状态补丁', async () => {
+    const caster = combatant('hero', 20, true)
+    caster.classState.concentrationSpellId = 'modify-memory'
+    caster.classState.concentrationTargetIds = ['enemy']
+    caster.classState.concentrationRoundsRemaining = 10
+    const target = combatant('enemy', 10)
+    const charmed = createDnd5eConditionEffect({
+      condition: 'charmed',
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'modify-memory' },
+      targetId: target.id,
+      duration: {
+        type: 'concentration', sourceActorId: caster.id,
+        concentrationId: 'modify-memory', remainingRounds: 10,
+      },
+      breakOn: ['takes-damage', 'targeted-by-spell'],
+    })
+    target.classState.activeEffects = [charmed]
+    target.classState.concentrationEffectsBySource = { [caster.id]: 'modify-memory' }
+    target.conditions = dnd5eConditionsFromActiveEffects([charmed])
+    const state = startDnd5eHeadlessCombat('combat', [caster, target])
+    const materializedMap = map()
+    materializedMap.tokens = materializedMap.tokens.map((entry) => entry.id === target.id
+      ? {
+          ...entry,
+          dnd5eCombatState: {
+            schemaVersion: 2,
+            activeEffects: [charmed],
+            conditions: ['charmed'],
+            concentrationEffectsBySource: { [caster.id]: 'modify-memory' },
+          },
+        }
+      : entry)
+    const originalPatch = materializedMap.tokens.find((entry) => entry.id === target.id)!
+      .dnd5eCombatState
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result: { ok: true, state, events: [] },
+      map: materializedMap,
+      characters: [],
+      characterIdByCombatantId: {},
+      priorApplication: {
+        changedTokenIds: [target.id],
+        changedCharacterIds: [],
+        tokenPatches: { [target.id]: { dnd5eCombatState: originalPatch } },
+        characterPatches: {},
+      },
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(settled.application.changedTokenIds).toContain(target.id)
+    expect(settled.application.tokenPatches?.[target.id]?.dnd5eCombatState)
+      .toEqual(originalPatch)
+  })
+
+  it('keeps animated-object overkill when the UI settlement runs concentration follow-ups', async () => {
+    const animatedObject: Token = {
+      ...token('animated-blade', 'enemy'),
+      label: '活化物件 · 飞刀',
+      poolId: 'srd-5.1:animated-object:tiny:fly-hover:slashing',
+      hp: 20,
+      maxHp: 20,
+      dnd5eSummon: {
+        schemaVersion: 1,
+        pluginId: 'core-srd-spell',
+        featureId: 'spell:animate-objects',
+        sourceCharacterId: 'wizard',
+        sourceTokenId: 'wizard-token',
+        createdRound: 1,
+        expiresAfterRound: 10,
+        concentrationId: 'animate-objects',
+        side: 'player',
+        truePolymorphOriginalObject: {
+          schemaVersion: 1,
+          id: 'blade-object',
+          label: '飞刀',
+          x: 25,
+          y: 25,
+          color: '#aaaaaa',
+          emoji: '🔪',
+          size: 1,
+          hp: 10,
+          maxHp: 10,
+        },
+      },
+    }
+    const scene: BattleMap = { ...map(), tokens: [animatedObject] }
+    const manualPlan = planMapsManualSettlement({
+      map: scene,
+      characters: [],
+      targetId: animatedObject.id,
+      operation: 'damage',
+      amount: 25,
+    })
+    expect(manualPlan?.application).toBeDefined()
+    expect(manualPlan?.headless).toBeDefined()
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result: manualPlan!.headless!.result,
+      map: scene,
+      characters: [],
+      priorApplication: manualPlan!.application,
+      characterIdByCombatantId: manualPlan!.headless!.characterIdByCombatantId,
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(settled.application.map.tokens).toContainEqual(expect.objectContaining({
+      id: 'blade-object',
+      type: 'obstacle',
+      hp: 5,
+      maxHp: 10,
+    }))
+    expect(settled.application.map.tokens.some((entry) => entry.id === animatedObject.id)).toBe(false)
+  })
+
+  it('专注后处理保留 Activity 的地图交接数据', async () => {
+    const state = startDnd5eHeadlessCombat('activity-handoff', [
+      combatant('hero', 20), combatant('enemy', 10),
+    ])
+    const activityHandoffs: NonNullable<Extract<Dnd5eActionResult, { ok: true }>['activityHandoffs']> = {
+      persistentAreas: [],
+      summons: [],
+      duplications: [],
+      movements: [],
+      areaRelocations: [],
+      areaReshapes: [],
+      areaSenseModes: [],
+      areaDetonations: [],
+      invocations: [],
+      mapObjectLocks: [],
+      mapObjectLights: [],
+      mapObjectPurifications: [],
+    }
+    const result: Extract<Dnd5eActionResult, { ok: true }> = {
+      ok: true, state, events: [], activityHandoffs,
+    }
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(settled.result.activityHandoffs).toEqual(activityHandoffs)
   })
 
   it('runs registered Activity windows before building the production map application', async () => {
@@ -266,6 +420,137 @@ describe('地图战斗结果结算器', () => {
     expect(settled.result.events).toContainEqual(expect.objectContaining({
       type: 'concentration-resolved',
       actorId: 'hero',
+      success: false,
+    }))
+  })
+
+  it('专注体质豁免会继承气化形体等主动效果授予的豁免优势', async () => {
+    const hero = combatant('hero', 20, true)
+    hero.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'gaseous-form-effect',
+      definitionId: 'srd-5.1:spell:gaseous-form',
+      label: '气化形体',
+      targetId: hero.id,
+      source: { kind: 'spell', actorId: hero.id, rulesId: 'gaseous-form' },
+      duration: {
+        type: 'concentration', sourceActorId: hero.id,
+        concentrationId: 'gaseous-form', remainingRounds: 600,
+      },
+      modifiers: { savingThrowAdvantages: ['str', 'dex', 'con'] },
+    })]
+    hero.classState.concentrationSpellId = 'gaseous-form'
+    hero.classState.concentrationTargetIds = [hero.id]
+    hero.classState.concentrationRoundsRemaining = 600
+    const state = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10)])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = {
+      ok: true,
+      state,
+      events: [{ type: 'concentration-check-required', targetId: 'hero', dc: 10 }],
+    }
+    const rolls = [2, 18]
+    const rollD20 = vi.fn(async () => rolls.shift() ?? 1)
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(rollD20).toHaveBeenCalledTimes(2)
+    expect(settled.result.state.combatants.hero.concentrating).toBe(true)
+    expect(settled.result.events).toContainEqual(expect.objectContaining({
+      type: 'concentration-resolved',
+      actorId: 'hero',
+      d20: 18,
+      success: true,
+    }))
+  })
+
+  it('气化形体在高处因降至零生命结束时会结算失去悬浮后的坠落', async () => {
+    const hero = combatant('hero', 20, true, {
+      airborne: true,
+      elevationFeet: 10,
+      groundElevationFeet: 0,
+    })
+    hero.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id: 'gaseous-form-effect',
+      definitionId: 'srd-5.1:spell:gaseous-form',
+      label: '气化形体',
+      targetId: hero.id,
+      source: { kind: 'spell', actorId: hero.id, rulesId: 'gaseous-form' },
+      duration: {
+        type: 'concentration', sourceActorId: hero.id,
+        concentrationId: 'gaseous-form', remainingRounds: 600,
+      },
+      modifiers: { flySpeedFeet: 10, hoverWhileFlying: true },
+    })]
+    hero.classState.concentrationSpellId = 'gaseous-form'
+    hero.classState.concentrationTargetIds = [hero.id]
+    hero.classState.concentrationRoundsRemaining = 600
+    const before = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10)])
+    const after = structuredClone(before)
+    after.combatants.hero.currentHp = 0
+    after.combatants.hero.concentrating = false
+    after.combatants.hero.classState.activeEffects = []
+    delete after.combatants.hero.classState.concentrationSpellId
+    delete after.combatants.hero.classState.concentrationTargetIds
+    delete after.combatants.hero.classState.concentrationRoundsRemaining
+    const rollDice = vi.fn(async () => [4])
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result: { ok: true, state: after, events: [] },
+      priorState: before,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice,
+    })
+
+    expect(rollDice).toHaveBeenCalledWith(1, 6, '失去飞行支撑·坠落伤害', 'hero')
+    expect(settled.result.state.combatants.hero.elevationFeet).toBe(0)
+    expect(settled.result.state.combatants.hero.airborne).toBe(false)
+    expect(settled.result.events).toContainEqual(expect.objectContaining({
+      type: 'elevation-changed', actorId: 'hero', fromElevationFeet: 10, toElevationFeet: 0,
+    }))
+  })
+
+  it('为持续区域施加的严重干扰自动掷两颗 d20 并以劣势结算专注', async () => {
+    const hero = combatant('hero', 20, true)
+    hero.classState.concentrationCheckDisadvantagePendingSourceId =
+      'environment:persistent-area'
+    const state = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10)])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = {
+      ok: true,
+      state,
+      events: [{ type: 'concentration-check-required', targetId: 'hero', dc: 10 }],
+    }
+    const rolls = [18, 2]
+    const rollD20 = vi.fn(async () => rolls.shift() ?? 1)
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(rollD20).toHaveBeenCalledTimes(2)
+    expect(settled.result.state.combatants.hero.concentrating).toBe(false)
+    expect(settled.result.state.combatants.hero.classState
+      .concentrationCheckDisadvantagePendingSourceId).toBeUndefined()
+    expect(settled.result.events).toContainEqual(expect.objectContaining({
+      type: 'concentration-resolved',
+      actorId: 'hero',
+      d20: 2,
       success: false,
     }))
   })

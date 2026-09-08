@@ -1,0 +1,537 @@
+{
+  "id": "srd-5.1:tarrasque",
+  "slug": "tarrasque",
+  "name": "塔拉斯克",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复运行时与入口：传奇移动使用当前窗口内的一次可选额度，不再累加到普通移动池；翼击限定飞行。已覆盖超距、模式错误、重复和过期请求；真实 UI 专项已覆盖取消移动与完成移动。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "horns",
+      "name": "双角",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitRule.kind",
+        "attack.onHitRule.ability",
+        "attack.onHitRule.dc",
+        "attack.onHitRule.condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "frightful-presence",
+      "name": "骇人威仪",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.conditionOnFailedSave.repeatSaveDisadvantageWhenSourceVisible",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "swallow",
+      "name": "吞咽",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.targetMaxSizeRank",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].regurgitation.damageThreshold",
+        "attack.onHitEffects[].regurgitation.ability",
+        "attack.onHitEffects[].regurgitation.dc",
+        "attack.onHitEffects[].regurgitation.ejects",
+        "attack.onHitEffects[].regurgitation.applyProne",
+        "attack.onHitEffects[].regurgitation.placementWithinFeet",
+        "attack.onHitEffects[].sourceDeathEscape.movementCostFeet",
+        "attack.onHitEffects[].sourceDeathEscape.applyProne",
+        "attack.onHitEffects[].removeSourceRelationSlotGroupOnApply"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-swallow",
+      "name": "多重攻击：吞咽 ×5",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-frightful-presence",
+      "name": "多重攻击：骇人威仪 ×6",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-frightful-presence-and-swallow",
+      "name": "多重攻击：骇人威仪 ×6",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "attack",
+      "name": "攻击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "referencedActionId",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "move",
+      "name": "移动",
+      "automation": "headless",
+      "rule": "grant-movement",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.maximumSpeedFraction",
+        "rule.provokesOpportunityAttacks"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "no-points",
+        "move",
+        "move-too-far",
+        "window-expired"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "chomp-bite-costs-2-actions",
+      "name": "猛咬（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "chomp-swallow-costs-2-actions",
+      "name": "猛咬（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 0,
+      "slug": "tarrasque",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:48:05.423Z",
+      "name": "塔拉斯克",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "30",
+      "total": 334,
+      "mapId": "verify-ui-tarrasque-bite-1788565685501",
+      "combatId": "verify-ui-tarrasque-bite-1788565685501:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "塔拉斯克 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+19=22 命中；共造成 33 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:48 PM\n结算\n\n塔拉斯克 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+19=22 命中；共造成 33 点伤害。\n\n查看 Headless 结算依据（13）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 3；最终采用 3；调整值 +19。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜4d12 骰面：2 + 5 + 5 + 11 = 23｜固定加值 +10｜小计 33\n塔拉斯克｜消耗动作\n验证目标｜受到 33 点伤害｜HP 320 → 287\n验证目标｜获得状态：擒抱｜来源：塔拉斯克\n验证目标｜效果生效：擒抱\n塔拉斯克｜monster:srd-5.1:tarrasque:bite:bite-grapple生效｜目标 验证目标\n验证目标｜获得状态：束缚｜来源：塔拉斯克\n验证目标｜效果生效：束缚",
+      "playerLog": "塔拉斯克 使用啃咬攻击 验证目标：啃咬 → 验证目标 3+19=22 命中；共造成 33 点伤害。",
+      "afterHp": 287,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled",
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:48:30.369Z",
+      "evidenceFile": "ui-cases/monsters/000-tarrasque.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "传奇抗性",
+      "automation": "headless",
+      "rule": "legendary-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumUses"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "choose",
+        "decline",
+        "exhausted"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "反射甲壳",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "攻城怪物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 43,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

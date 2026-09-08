@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { coordinateCombatEnd } from './combatEndCoordinator'
 
 describe('coordinateCombatEnd', () => {
-  it('waits for accepted settlements before publishing inactive and then opens XP', async () => {
+  it('clears the ending combat queue before publishing inactive and opening XP', async () => {
     const events: string[] = []
     let finishPending = () => {}
     const settlementPending = new Promise<void>((resolve) => {
@@ -29,13 +29,30 @@ describe('coordinateCombatEnd', () => {
     await task
     expect(events).toEqual([
       'pending-transactions',
+      'clear-queues',
       'publish-inactive',
       'open-xp',
-      'clear-queues',
     ])
   })
 
-  it('preserves queues and XP state when publishing inactive fails', async () => {
+  it('does not publish inactivity or open XP if the queue reset fails', async () => {
+    const publishInactiveCombat = vi.fn(async () => {})
+    const openExperienceSettlement = vi.fn()
+
+    await expect(coordinateCombatEnd({
+      publishInactiveCombat,
+      openExperienceSettlement,
+      awaitPendingTransactions: async () => {},
+      clearMessageQueues: async () => {
+        throw new Error('queue-reset-failed')
+      },
+    })).rejects.toThrow('queue-reset-failed')
+
+    expect(publishInactiveCombat).not.toHaveBeenCalled()
+    expect(openExperienceSettlement).not.toHaveBeenCalled()
+  })
+
+  it('does not open XP when publishing inactive fails after the queue reset', async () => {
     const clearMessageQueues = vi.fn(async () => {})
     const openExperienceSettlement = vi.fn()
 
@@ -49,6 +66,6 @@ describe('coordinateCombatEnd', () => {
     })).rejects.toThrow('offline')
 
     expect(openExperienceSettlement).not.toHaveBeenCalled()
-    expect(clearMessageQueues).not.toHaveBeenCalled()
+    expect(clearMessageQueues).toHaveBeenCalledOnce()
   })
 })

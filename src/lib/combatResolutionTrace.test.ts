@@ -61,8 +61,68 @@ describe('formatDnd5eSavingThrowResolutionTrace', () => {
 
     expect(details).toContain('攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 10 尺（常规射程 80 尺）。')
     expect(details).toContain('空间判定 · 冒险者海拔 40 尺；针刺魔海拔 0 尺；掩护：半身掩护（AC +2）。')
-    expect(details).toContain('攻击骰 · 劣势（2d20 取低）；各骰面 18 / 6；最终采用 6；调整值 +5（祝福术 +3）。')
+    expect(details).toContain('攻击骰 · 劣势（2d20 取低）；采用劣势的原因：本次旧结算记录未保存具体规则来源；各骰面 18 / 6；最终采用 6；调整值 +5（祝福术 +3）。')
     expect(details).toContain('结果 · 11 vs AC 15：未命中。')
+  })
+
+  it('states the concrete source of attack disadvantage', () => {
+    const details = formatDnd5eAttackResolutionTrace({
+      actorName: '弓手', targetName: '兽人', distanceFeet: 30, rangeLabel: '射程 80/320 尺',
+      actorElevationFeet: 0, targetElevationFeet: 0, mode: 'disadvantage',
+      modeReasons: {
+        advantage: [],
+        disadvantage: ['远程攻击者 5 尺内有敌人', '目标正在闪避'],
+      },
+      d20: 19, d20Second: 10, modifier: 8, total: 18,
+      targetArmorClass: 16, hit: true,
+    })
+
+    expect(details).toContain('优劣势依据 · 劣势：远程攻击者 5 尺内有敌人、目标正在闪避。')
+    expect(details).toContain('攻击骰 · 劣势（2d20 取低）；采用劣势的原因：远程攻击者 5 尺内有敌人、目标正在闪避；各骰面 19 / 10；最终采用 10；调整值 +8。')
+  })
+
+  it('reads the authoritative roll-mode reason fields used by prepared attacks', () => {
+    const details = formatDnd5eAttackResolutionTrace({
+      actorName: '战士', targetName: '目盲目标', distanceFeet: 5, rangeLabel: '触及 5 尺',
+      actorElevationFeet: 0, targetElevationFeet: 0, mode: 'advantage',
+      modeReasons: {
+        advantageReasons: ['目标处于目盲状态'],
+        disadvantageReasons: [],
+      },
+      d20: 7, d20Second: 16, modifier: 6, total: 22,
+      targetArmorClass: 14, hit: true,
+    })
+
+    expect(details).toContain('优劣势依据 · 优势：目标处于目盲状态。')
+    expect(details).toContain('攻击骰 · 优势（2d20 取高）；采用优势的原因：目标处于目盲状态；各骰面 7 / 16；最终采用 16；调整值 +6。')
+    expect(details.join('\n')).not.toContain('权威结算指定优势')
+  })
+
+  it('accepts a partial mode-reason record from monster attacks', () => {
+    const details = formatDnd5eAttackResolutionTrace({
+      actorName: '狒狒', targetName: '法师', distanceFeet: 5, rangeLabel: '触及 5 尺',
+      actorElevationFeet: 0, targetElevationFeet: 0, mode: 'normal',
+      modeReasons: { advantage: ['集群战术'] },
+      d20: 12, modifier: 1, total: 13, targetArmorClass: 13, hit: true,
+    })
+
+    expect(details).toContain('优劣势依据 · 优势：集群战术。')
+    expect(details).toContain('结果 · 13 vs AC 13：命中。')
+  })
+
+  it('explains when attack advantage and disadvantage cancel', () => {
+    const details = formatDnd5eAttackResolutionTrace({
+      actorName: '潜行者', targetName: '倒地目标', distanceFeet: 20, rangeLabel: '射程 80/320 尺',
+      actorElevationFeet: 0, targetElevationFeet: 0, mode: 'normal',
+      modeReasons: {
+        advantage: ['目标看不见攻击者'],
+        disadvantage: ['目标倒地且攻击距离超过 5 尺'],
+      },
+      d20: 12, modifier: 6, total: 18, targetArmorClass: 15, hit: true,
+    })
+
+    expect(details).toContain('优劣势依据 · 优势：目标看不见攻击者；劣势：目标倒地且攻击距离超过 5 尺。')
+    expect(details).toContain('抵消关系 · 本次同时存在优势与劣势，按 D&D 5e 规则互相抵消，最终使用普通攻击骰。')
   })
 
   it('does not infer a fall solely from a lower destination terrain', () => {

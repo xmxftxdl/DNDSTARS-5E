@@ -1,6 +1,8 @@
 import {
   DND_FEET_PER_CELL,
+  cellToPixel,
   cellKey,
+  mapCellExtent,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
   tokenOccupiedCellsAt,
@@ -8,12 +10,14 @@ import {
 } from '../../lib/gridCombat'
 import {
   mapGeometryMovementBlocked,
+  mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
   type MapGeometryState,
 } from '../../lib/mapGeometry'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
+import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Dnd5eClassId } from './classes'
 import type {
@@ -29,6 +33,29 @@ import type {
 } from './persistentAreaTypes'
 import type { Dnd5eWallOfFireGeometry } from './wallOfFireGeometry'
 import { dnd5eMovementPathCells } from './itemAreas'
+
+/**
+ * Chooses the grid point occupied by an interposing spell entity. Keeping one
+ * Large-creature footprint between source and target prevents the entity from
+ * overlapping the selected target while still following either endpoint.
+ */
+export function dnd5eInterpositionAnchorCell(
+  map: BattleMap,
+  source: Pick<Token, 'x' | 'y' | 'size'>,
+  target: Pick<Token, 'x' | 'y' | 'size'>,
+): GridCell {
+  const sourceCell = tokenAnchorCellFromPixel(source.x, source.y, source, map)
+  const targetCell = tokenAnchorCellFromPixel(target.x, target.y, target, map)
+  const deltaCol = sourceCell.col - targetCell.col
+  const deltaRow = sourceCell.row - targetCell.row
+  const separation = Math.max(Math.abs(deltaCol), Math.abs(deltaRow))
+  const offset = Math.max(0, Math.min(2, separation - 1))
+  const { cols, rows } = mapCellExtent(map)
+  return {
+    col: Math.max(0, Math.min(cols - 1, targetCell.col + Math.sign(deltaCol) * offset)),
+    row: Math.max(0, Math.min(rows - 1, targetCell.row + Math.sign(deltaRow) * offset)),
+  }
+}
 
 export interface Dnd5eCoreSpellAreaDamageDeclaration {
   count: number
@@ -69,7 +96,13 @@ export interface Dnd5eCoreSpellAreaDeclaration {
    */
   vertical?:
     | { mode: 'ground' }
-    | { mode: 'volume'; heightFeet: number; anchorOffsetFeet?: number }
+    | {
+        mode: 'volume'
+        heightFeet: number
+        anchorOffsetFeet?: number
+        /** Slot scaling for a three-dimensional volume, relative to minimumSlotLevel. */
+        perHigherSlot?: { heightFeet: number; anchorOffsetFeet?: number }
+      }
   movement?: Dnd5ePersistentAreaMovementDeclaration
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
@@ -98,7 +131,11 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
-    movement: { economy: 'bonus-action', maximumFeet: 60 },
+    movement: {
+      economy: 'bonus-action', maximumFeet: 60,
+      maximumDistanceFromSourceFeet: 120,
+      endWhenExceedingSourceDistance: true,
+    },
     relation: 'any',
     includeSelf: true,
     lighting: { kind: 'light', brightRadiusFeet: 0, dimRadiusFeet: 10, color: '#a5f3fc', spellLevel: 0 },
@@ -114,7 +151,11 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 10,
     concentration: false,
     anchorMode: 'fixed',
-    movement: { economy: 'action', maximumFeet: 30 },
+    movement: {
+      economy: 'action', maximumFeet: 30,
+      maximumDistanceFromSourceFeet: 30,
+      endWhenExceedingSourceDistance: true,
+    },
     relation: 'any',
     includeSelf: true,
     color: '#a78bfa',
@@ -165,7 +206,12 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     durationRounds: 600,
     concentration: true,
     anchorMode: 'fixed',
-    vertical: { mode: 'volume', heightFeet: 40, anchorOffsetFeet: -20 },
+    vertical: {
+      mode: 'volume',
+      heightFeet: 40,
+      anchorOffsetFeet: -20,
+      perHigherSlot: { heightFeet: 40, anchorOffsetFeet: -20 },
+    },
     relation: 'any',
     includeSelf: true,
     obscuration: { kind: 'heavy' },
@@ -177,7 +223,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     spellId: 'web',
     label: '蛛网术',
     minimumSlotLevel: 2,
-    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, gridAligned: true },
     durationRounds: 600,
     concentration: true,
     anchorMode: 'fixed',
@@ -261,6 +307,13 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
         dmAdjustable: true,
       },
+      {
+        id: 'sleet-storm-concentration-turn-start', frequencyGroupId: 'sleet-storm-concentration',
+        label: '雪雨暴·专注干扰', timing: 'turn-start', oncePerTurn: true,
+        savingThrow: { ability: 'con', onSuccess: 'none' },
+        endTargetConcentrationOnFailedSave: true,
+        dmAdjustable: true,
+      },
     ],
   },
   {
@@ -299,6 +352,10 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     vertical: { mode: 'volume', heightFeet: 15 },
     relation: 'any',
     includeSelf: true,
+    // Wind Wall is not a solid wall. Its movement boundary applies only to
+    // Small-or-smaller airborne creatures and creatures in Gaseous Form; the
+    // geometry adapter enforces those creature predicates.
+    blocking: { movement: true, movementMode: 'boundary' },
     color: '#bae6fd',
     visual: { preset: 'wind-wall', intensity: 'strong' },
     triggers: [{
@@ -322,6 +379,10 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     vertical: { mode: 'volume', heightFeet: 10 },
     relation: 'any',
     includeSelf: true,
+    // The caster still receives its own hidden area projection so the player
+    // can manipulate the known placement; other player-character views must
+    // not render an invisible wall.
+    hiddenFromPlayers: true,
     blocking: { movement: true, lineOfEffect: true },
     color: '#c4b5fd',
     visual: { preset: 'wall-of-force', intensity: 'normal' },
@@ -393,21 +454,18 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         id: 'wall-of-thorns-create', label: '棘墙术·棘墙出现', timing: 'on-create',
         savingThrow: { ability: 'dex', onSuccess: 'half' },
         damage: { count: 7, sides: 8, perHigherSlot: 1, type: 'piercing' },
-        dmAdjustable: true,
       },
       {
         id: 'wall-of-thorns-enter', frequencyGroupId: 'wall-of-thorns-slicing',
         label: '棘墙术·进入棘墙', timing: 'on-enter', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'half' },
         damage: { count: 7, sides: 8, perHigherSlot: 1, type: 'slashing' },
-        dmAdjustable: true,
       },
       {
         id: 'wall-of-thorns-turn-end', frequencyGroupId: 'wall-of-thorns-slicing',
         label: '棘墙术·回合结束', timing: 'turn-end', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'half' },
         damage: { count: 7, sides: 8, perHigherSlot: 1, type: 'slashing' },
-        dmAdjustable: true,
       },
     ],
   },
@@ -415,7 +473,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     spellId: 'grease',
     label: '油腻术',
     minimumSlotLevel: 1,
-    template: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60 },
+    template: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60, gridAligned: true },
     durationRounds: 10,
     concentration: false,
     anchorMode: 'fixed',
@@ -430,19 +488,16 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         id: 'grease-create', label: '油腻术·油脂出现', timing: 'on-create',
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
-        dmAdjustable: true,
       },
       {
         id: 'grease-enter', label: '油腻术·进入区域', timing: 'on-enter', oncePerRound: false,
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
-        dmAdjustable: true,
       },
       {
         id: 'grease-turn-end', label: '油腻术·回合结束', timing: 'turn-end', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
-        dmAdjustable: true,
       },
     ],
   },
@@ -450,7 +505,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     spellId: 'entangle',
     label: '纠缠术',
     minimumSlotLevel: 1,
-    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90, gridAligned: true },
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
@@ -477,7 +532,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     spellId: 'black-tentacles',
     label: '黑触手',
     minimumSlotLevel: 4,
-    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90, gridAligned: true },
     durationRounds: 10,
     concentration: true,
     anchorMode: 'fixed',
@@ -530,7 +585,11 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     concentration: true,
     anchorMode: 'effect-token',
     vertical: { mode: 'volume', heightFeet: 10 },
-    movement: { economy: 'bonus-action', maximumFeet: 30 },
+    movement: {
+      economy: 'bonus-action', maximumFeet: 30,
+      maximumBarrierHeightFeet: 5,
+      maximumGapWidthFeet: 10,
+    },
     relation: 'any',
     includeSelf: true,
     color: '#f97316',
@@ -686,6 +745,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     vertical: { mode: 'volume', heightFeet: 20 },
     relation: 'any',
     includeSelf: true,
+    blocking: { vision: true },
     color: '#ef4444',
     visual: { preset: 'wall-of-fire', intensity: 'strong' },
     triggers: [
@@ -889,6 +949,7 @@ function resolvedTrigger(
       : undefined,
     skipSaveWhenSourceConditionActive: declaration.skipSaveWhenSourceConditionActive,
     consumeActionOnFailedSave: declaration.consumeActionOnFailedSave === true,
+    endTargetConcentrationOnFailedSave: declaration.endTargetConcentrationOnFailedSave === true,
     damage: declaration.damage
       ? {
           count: declaration.damage.count + higherLevels * (declaration.damage.perHigherSlot ?? 0),
@@ -928,9 +989,11 @@ export function createDnd5eCoreSpellArea(input: {
   triggerCellsById?: Readonly<Record<string, readonly GridCell[]>>
   wallOfFireGeometry?: Dnd5eWallOfFireGeometry
   lightingAnchorCells?: readonly GridCell[]
+  dancingLightsForm?: 'lights' | 'humanoid'
   excludedTargetIds?: readonly string[]
 }): Dnd5ePluginArea {
   const declaration = input.declaration
+  const durationRounds = input.durationRounds ?? declaration.durationRounds
   const sourceIsEvil = /邪恶|evil/i.test(input.sourceAlignment ?? '')
   const alignmentDamageType = declaration.damageTypeBySourceAlignment
     ? sourceIsEvil
@@ -940,17 +1003,23 @@ export function createDnd5eCoreSpellArea(input: {
   const baseElevationFeet = Number.isFinite(input.baseElevationFeet)
     ? persistentAreaElevationFeet(Number(input.baseElevationFeet))
     : 0
+  const higherSlotLevels = Math.max(0, Math.floor(input.slotLevel) - declaration.minimumSlotLevel)
   const vertical = declaration.vertical?.mode === 'ground'
     ? { mode: 'ground' as const }
     : declaration.vertical?.mode === 'volume'
       ? {
           mode: 'volume' as const,
           baseElevationFeet: persistentAreaElevationFeet(
-            baseElevationFeet + (declaration.vertical.anchorOffsetFeet ?? 0),
+            baseElevationFeet + (declaration.vertical.anchorOffsetFeet ?? 0)
+              + higherSlotLevels * (declaration.vertical.perHigherSlot?.anchorOffsetFeet ?? 0),
           ),
-          heightFeet: declaration.vertical.heightFeet,
-          ...(declaration.vertical.anchorOffsetFeet != null
-            ? { anchorOffsetFeet: declaration.vertical.anchorOffsetFeet }
+          heightFeet: declaration.vertical.heightFeet
+            + higherSlotLevels * (declaration.vertical.perHigherSlot?.heightFeet ?? 0),
+          ...(declaration.vertical.anchorOffsetFeet != null || declaration.vertical.perHigherSlot?.anchorOffsetFeet != null
+            ? {
+                anchorOffsetFeet: (declaration.vertical.anchorOffsetFeet ?? 0)
+                  + higherSlotLevels * (declaration.vertical.perHigherSlot?.anchorOffsetFeet ?? 0),
+              }
             : {}),
         }
       : undefined
@@ -968,10 +1037,13 @@ export function createDnd5eCoreSpellArea(input: {
     sourceTokenId: input.sourceTokenId,
     cells: input.cells.map((cell) => ({ ...cell })),
     createdRound: input.round,
-    expiresAfterRound: input.round + (input.durationRounds ?? declaration.durationRounds),
+    expiresAfterRound: input.round + durationRounds,
     expiresAtSourceTurnEndAfterRound: declaration.expiresAtSourceNextTurnEnd
       ? input.round + 1
-      : undefined,
+      // A duration measured in rounds/minutes ends at the matching point in
+      // the caster's initiative cycle. Turn end is the closest stable Host
+      // boundary and prevents a 10-round spell from surviving all of round 11.
+      : input.round + durationRounds,
     concentrationId: declaration.concentration ? declaration.spellId : undefined,
     anchorMode: declaration.anchorMode,
     anchorTokenId: input.anchorTokenId ?? (
@@ -987,6 +1059,9 @@ export function createDnd5eCoreSpellArea(input: {
     hiddenFromPlayers: declaration.hiddenFromPlayers === true,
     lighting: declaration.lighting
       ? { ...declaration.lighting, spellLevel: input.slotLevel }
+      : undefined,
+    dancingLightsForm: declaration.spellId === 'dancing-lights'
+      ? input.dancingLightsForm ?? 'lights'
       : undefined,
     obscuration: declaration.obscuration ? { ...declaration.obscuration } : undefined,
     occupantModifiers: declaration.occupantModifiers
@@ -1122,6 +1197,50 @@ function shiftedCells(
     .filter((cell) => cell.col >= 0 && cell.row >= 0 && cell.col < columns && cell.row < rows)
 }
 
+function mappedBarrierCanBeCleared(input: {
+  geometry?: MapGeometryState
+  entityId?: string
+  pathElevationFeet: number
+  maximumBarrierHeightFeet?: number
+}): boolean {
+  if (!input.geometry || !input.entityId || input.maximumBarrierHeightFeet == null) return false
+  const entity = [
+    ...input.geometry.walls,
+    ...input.geometry.doors,
+    ...(input.geometry.windows ?? []),
+    ...input.geometry.obstacles,
+  ].find((candidate) => candidate.id === input.entityId)
+  if (!entity || !entity.blocksMovement) return false
+  const barrierTopFeet = entity.baseHeightFeet + entity.heightFeet
+  return barrierTopFeet - input.pathElevationFeet <= input.maximumBarrierHeightFeet + 1e-6
+}
+
+function movementPathCrossesUnsupportedGap(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  anchorToken: Token
+  path: readonly GridCell[]
+  feetPerCell: number
+  maximumGapWidthFeet?: number
+}): boolean {
+  if (!input.geometry || input.maximumGapWidthFeet == null || input.path.length < 2) return false
+  const origin = tokenCenterForAnchorCell(input.path[0], input.anchorToken, input.map)
+  const pathElevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, origin)
+  let gapWidthFeet = 0
+  for (const cell of input.path.slice(1)) {
+    const point = tokenCenterForAnchorCell(cell, input.anchorToken, input.map)
+    const elevationFeet = mapGeometryTerrainElevationAtPoint(input.geometry, point)
+    if (elevationFeet < pathElevationFeet - 1e-6) {
+      gapWidthFeet += input.feetPerCell
+      if (gapWidthFeet > input.maximumGapWidthFeet + 1e-6) return true
+    } else {
+      gapWidthFeet = 0
+    }
+  }
+  // The printed rule permits crossing a pit, not ending the command inside it.
+  return gapWidthFeet > 0
+}
+
 export function moveDnd5eCoreSpellArea(input: {
   map: BattleMap
   geometry?: MapGeometryState
@@ -1140,7 +1259,9 @@ export function moveDnd5eCoreSpellArea(input: {
   const declaredMovement = area?.coreSpellId
     ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
     : undefined
-  const movement = area?.movement ?? declaredMovement
+  const movement = area?.movement
+    ? { ...declaredMovement, ...area.movement }
+    : declaredMovement
   if (!area || !movement) return { ok: false, reason: 'area-not-movable' }
   if (area.sourceTokenId !== input.sourceTokenId) return { ok: false, reason: 'invalid-source' }
   const previous = area.anchorCell ?? area.cells[0]
@@ -1163,7 +1284,7 @@ export function moveDnd5eCoreSpellArea(input: {
     Math.max(Math.abs(target.col - origin.col), Math.abs(target.row - origin.row)) * feetPerCell
   ))
   if (distanceFeet > movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
-  if (movement.maximumDistanceFromSourceFeet != null) {
+  if (movement.maximumDistanceFromSourceFeet != null && area.coreSpellId !== 'dancing-lights') {
     const sourceToken = input.map.tokens.find((token) => token.id === input.sourceTokenId)
     if (!sourceToken) return { ok: false, reason: 'invalid-source' }
     const sourceCell = tokenAnchorCellFromPixel(sourceToken.x, sourceToken.y, sourceToken, input.map)
@@ -1172,6 +1293,21 @@ export function moveDnd5eCoreSpellArea(input: {
       Math.abs(input.targetCell.row - sourceCell.row),
     ) * feetPerCell
     if (tetherDistanceFeet > movement.maximumDistanceFromSourceFeet) {
+      if (movement.endWhenExceedingSourceDistance) {
+        const removedWithToken = area.anchorTokenId
+          ? removeDnd5eSpellEffectFromMap(input.map, area.anchorTokenId)
+          : undefined
+        return {
+          ok: true,
+          map: removedWithToken?.map ?? {
+            ...input.map,
+            dnd5ePluginAreas: (input.map.dnd5ePluginAreas ?? []).filter((candidate) =>
+              candidate.id !== area.id),
+          },
+          area,
+          distanceFeet,
+        }
+      }
       return { ok: false, reason: 'target-out-of-range' }
     }
   }
@@ -1189,6 +1325,41 @@ export function moveDnd5eCoreSpellArea(input: {
   if (new Set(requestedTargets.map((cell) => `${cell.col}:${cell.row}`)).size !== requestedTargets.length) {
     return { ok: false, reason: 'invalid-target' }
   }
+  let resolvedDancingLightTargets = dancingLightTargets
+  if (area.coreSpellId === 'dancing-lights' && dancingLightTargets) {
+    const sourceToken = input.map.tokens.find((token) => token.id === area.sourceTokenId)
+    if (!sourceToken) return { ok: false, reason: 'invalid-source' }
+    const sourceCell = tokenAnchorCellFromPixel(
+      sourceToken.x,
+      sourceToken.y,
+      sourceToken,
+      input.map,
+    )
+    const maximumDistance = movement.maximumDistanceFromSourceFeet ?? 120
+    resolvedDancingLightTargets = dancingLightTargets.filter((cell) =>
+      Math.max(Math.abs(cell.col - sourceCell.col), Math.abs(cell.row - sourceCell.row)) * feetPerCell <= maximumDistance
+    )
+    if (resolvedDancingLightTargets.length === 0) {
+      return {
+        ok: true,
+        map: {
+          ...input.map,
+          dnd5ePluginAreas: (input.map.dnd5ePluginAreas ?? []).filter((candidate) => candidate.id !== area.id),
+        },
+        area,
+        distanceFeet,
+      }
+    }
+    if (
+      resolvedDancingLightTargets.length > 1 &&
+      resolvedDancingLightTargets.some((cell, index, lights) =>
+        !lights.some((other, otherIndex) =>
+          index !== otherIndex &&
+          Math.max(Math.abs(cell.col - other.col), Math.abs(cell.row - other.row)) * feetPerCell <= 20
+        )
+      )
+    ) return { ok: false, reason: 'invalid-target' }
+  }
   let resolvedTargetCell = { ...input.targetCell }
   let impactTargetId: string | undefined
   const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
@@ -1196,16 +1367,37 @@ export function moveDnd5eCoreSpellArea(input: {
     : undefined
   if (area.coreSpellId === 'flaming-sphere' && anchorToken) {
     const path = dnd5eMovementPathCells(previous, input.targetCell)
+    if (movementPathCrossesUnsupportedGap({
+      geometry: input.geometry,
+      map: input.map,
+      anchorToken,
+      path,
+      feetPerCell,
+      maximumGapWidthFeet: movement.maximumGapWidthFeet,
+    })) return { ok: false, reason: 'movement-blocked' }
+    const finalPoint = tokenCenterForAnchorCell(input.targetCell, anchorToken, input.map)
+    if (mapGeometryPlacementBlocked({
+      geometry: input.geometry,
+      map: input.map,
+      token: anchorToken,
+      at: finalPoint,
+    }).blocked) return { ok: false, reason: 'movement-blocked' }
     let lastCell = previous
     for (const nextCell of path.slice(1)) {
       const from = tokenCenterForAnchorCell(lastCell, anchorToken, input.map)
       const to = tokenCenterForAnchorCell(nextCell, anchorToken, input.map)
-      if (mapGeometryMovementBlocked({
+      const movementBlock = mapGeometryMovementBlocked({
         geometry: input.geometry,
         map: input.map,
         token: { ...anchorToken, ...from },
         to,
-      }).blocked) {
+      })
+      if (movementBlock.blocked && !mappedBarrierCanBeCleared({
+        geometry: input.geometry,
+        entityId: movementBlock.entityId,
+        pathElevationFeet: mapGeometryTerrainElevationAtPoint(input.geometry, from),
+        maximumBarrierHeightFeet: movement.maximumBarrierHeightFeet,
+      })) {
         if (lastCell.col === previous.col && lastCell.row === previous.row) {
           return { ok: false, reason: 'movement-blocked' }
         }
@@ -1225,7 +1417,10 @@ export function moveDnd5eCoreSpellArea(input: {
         break
       }
     }
-  } else if (area.coreSpellId === 'spiritual-weapon' && anchorToken) {
+  } else if (
+    (area.coreSpellId === 'spiritual-weapon' || area.coreSpellId === 'arcane-eye') &&
+    anchorToken
+  ) {
     const path = dnd5eMovementPathCells(previous, input.targetCell)
     let lastCell = previous
     for (const nextCell of path.slice(1)) {
@@ -1236,6 +1431,11 @@ export function moveDnd5eCoreSpellArea(input: {
         map: input.map,
         token: { ...anchorToken, ...from },
         to,
+        // Arcane Eye may pass through an opening as small as one inch, but it
+        // still cannot cross a solid wall.  Door/window geometry carries its
+        // physical gap explicitly, so use that rule without shrinking the
+        // map Token or its vision footprint.
+        minimumPassageGapInches: area.coreSpellId === 'arcane-eye' ? 1 : undefined,
       }).blocked) {
         return { ok: false, reason: 'movement-blocked' }
       }
@@ -1246,12 +1446,12 @@ export function moveDnd5eCoreSpellArea(input: {
   const nextArea: Dnd5ePluginArea = {
     ...area,
     movement: { ...movement },
-    cells: dancingLightTargets
-      ? dancingLightTargets.map((cell) => ({ ...cell }))
+    cells: resolvedDancingLightTargets
+      ? resolvedDancingLightTargets.map((cell) => ({ ...cell }))
       : shiftedCells(area, resolvedTargetCell, input.map),
-    anchorCell: dancingLightTargets ? { ...dancingLightTargets[0] } : { ...resolvedTargetCell },
-    lightingAnchorCells: dancingLightTargets
-      ? dancingLightTargets.map((cell) => ({ ...cell }))
+    anchorCell: resolvedDancingLightTargets ? { ...resolvedDancingLightTargets[0] } : { ...resolvedTargetCell },
+    lightingAnchorCells: resolvedDancingLightTargets
+      ? resolvedDancingLightTargets.map((cell) => ({ ...cell }))
       : area.lightingAnchorCells?.map((cell) => ({
           col: cell.col + resolvedTargetCell.col - previous.col,
           row: cell.row + resolvedTargetCell.row - previous.row,
@@ -1262,28 +1462,9 @@ export function moveDnd5eCoreSpellArea(input: {
     cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows
   )) return { ok: false, reason: 'invalid-target' }
   if (area.coreSpellId === 'dancing-lights') {
-    const sourceToken = input.map.tokens.find((token) => token.id === area.sourceTokenId)
-    if (!sourceToken || !nextArea.lightingAnchorCells?.length) {
+    if (!nextArea.lightingAnchorCells?.length) {
       return { ok: false, reason: 'invalid-source' }
     }
-    const sourceCell = tokenAnchorCellFromPixel(
-      sourceToken.x,
-      sourceToken.y,
-      sourceToken,
-      input.map,
-    )
-    if (nextArea.lightingAnchorCells.some((cell) =>
-      Math.max(Math.abs(cell.col - sourceCell.col), Math.abs(cell.row - sourceCell.row)) * feetPerCell > 120
-    )) return { ok: false, reason: 'target-out-of-range' }
-    if (
-      nextArea.lightingAnchorCells.length > 1 &&
-      nextArea.lightingAnchorCells.some((cell, index, lights) =>
-        !lights.some((other, otherIndex) =>
-          index !== otherIndex &&
-          Math.max(Math.abs(cell.col - other.col), Math.abs(cell.row - other.row)) * feetPerCell <= 20
-        )
-      )
-    ) return { ok: false, reason: 'invalid-target' }
   }
   const anchorPosition = anchorToken
     ? tokenCenterForAnchorCell(resolvedTargetCell, anchorToken, input.map)
@@ -1311,10 +1492,12 @@ export function moveDnd5eCoreSpellArea(input: {
         },
       }
     : nextArea
-  const resolvedDistanceFeet = Math.max(
-    Math.abs(resolvedTargetCell.col - previous.col),
-    Math.abs(resolvedTargetCell.row - previous.row),
-  ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+  const resolvedDistanceFeet = dancingLightTargets
+    ? distanceFeet
+    : Math.max(
+        Math.abs(resolvedTargetCell.col - previous.col),
+        Math.abs(resolvedTargetCell.row - previous.row),
+      ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   return {
     ok: true,
     map: {
@@ -1398,9 +1581,109 @@ export function removeDnd5eSpellEffectFromMap(
 export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {
   let changed = false
   const geometry = mapGeometryRuntimeForMap(map.id)
-  const areas = (map.dnd5ePluginAreas ?? []).map((area) => {
-    if (area.anchorMode !== 'source-token' && area.anchorMode !== 'effect-token') return area
-    const anchorToken = map.tokens.find((token) => token.id === (area.anchorTokenId ?? area.sourceTokenId))
+  let tokens = map.tokens
+  const removedAreaIds = new Set<string>()
+  const removedTokenIds = new Set<string>()
+  const feetPerCell = Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+  const areasAfterDancingLightsTether = (map.dnd5ePluginAreas ?? []).flatMap((area) => {
+    if (area.coreSpellId !== 'dancing-lights') return [area]
+    const source = tokens.find((token) => token.id === area.sourceTokenId)
+    if (!source) {
+      changed = true
+      return []
+    }
+    const sourceCell = tokenAnchorCellFromPixel(source.x, source.y, source, map)
+    const anchors = area.lightingAnchorCells?.length ? area.lightingAnchorCells : area.cells
+    const maximumDistance = area.movement?.maximumDistanceFromSourceFeet ??
+      getDnd5eCoreSpellAreaDeclaration('dancing-lights')?.movement?.maximumDistanceFromSourceFeet ?? 120
+    const surviving = anchors.filter((cell) =>
+      Math.max(Math.abs(cell.col - sourceCell.col), Math.abs(cell.row - sourceCell.row)) * feetPerCell <= maximumDistance
+    )
+    if (surviving.length === anchors.length) return [area]
+    changed = true
+    if (surviving.length === 0) return []
+    return [{
+      ...area,
+      cells: surviving.map((cell) => ({ ...cell })),
+      lightingAnchorCells: surviving.map((cell) => ({ ...cell })),
+      anchorCell: { ...surviving[0] },
+    }]
+  })
+  for (const area of areasAfterDancingLightsTether) {
+    const movement = area.movement ?? (area.coreSpellId
+      ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
+      : undefined)
+    if (
+      movement?.endWhenExceedingSourceDistance &&
+      movement.maximumDistanceFromSourceFeet != null && area.anchorCell
+    ) {
+      const source = tokens.find((token) => token.id === area.sourceTokenId)
+      if (source) {
+        const sourceCell = tokenAnchorCellFromPixel(source.x, source.y, source, map)
+        const separationFeet = Math.max(
+          Math.abs(area.anchorCell.col - sourceCell.col),
+          Math.abs(area.anchorCell.row - sourceCell.row),
+        ) * Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
+        if (separationFeet > movement.maximumDistanceFromSourceFeet) {
+          removedAreaIds.add(area.id)
+          if (area.anchorMode === 'effect-token' && area.anchorTokenId) {
+            removedTokenIds.add(area.anchorTokenId)
+          }
+          changed = true
+          continue
+        }
+      }
+    }
+    if (area.interposition && area.anchorMode === 'effect-token' && area.anchorTokenId) {
+      const source = tokens.find((token) => token.id === area.sourceTokenId)
+      const target = tokens.find((token) => token.id === area.interposition?.targetTokenId)
+      const entity = tokens.find((token) => token.id === area.anchorTokenId)
+      if (source && target && entity) {
+        const desired = cellToPixel(dnd5eInterpositionAnchorCell(map, source, target), map)
+        if (Math.abs(entity.x - desired.x) > 1e-4 || Math.abs(entity.y - desired.y) > 1e-4) {
+          tokens = tokens.map((token) => token.id === entity.id
+            ? { ...token, x: desired.x, y: desired.y }
+            : token)
+          changed = true
+        }
+      }
+    }
+    const follower = area.sourceFollower
+    if (!follower || area.anchorMode !== 'effect-token' || !area.anchorTokenId) continue
+    const source = tokens.find((token) => token.id === area.sourceTokenId)
+    const entity = tokens.find((token) => token.id === area.anchorTokenId)
+    if (!source || !entity) continue
+    const feetPerPixel = Math.max(1, map.feetPerCell ?? 5) / Math.max(1, map.gridSize || 50)
+    const separationFeet = Math.hypot(source.x - entity.x, source.y - entity.y) * feetPerPixel
+    if (separationFeet > follower.maximumSeparationFeet) {
+      removedAreaIds.add(area.id)
+      removedTokenIds.add(entity.id)
+      changed = true
+      continue
+    }
+    if (separationFeet <= follower.stationaryWithinFeet) continue
+    const travelFeet = separationFeet - follower.stationaryWithinFeet
+    const ratio = travelFeet / separationFeet
+    const to = {
+      x: entity.x + (source.x - entity.x) * ratio,
+      y: entity.y + (source.y - entity.y) * ratio,
+    }
+    const fromElevation = mapGeometryTerrainElevationAtPoint(geometry, entity)
+    const toElevation = mapGeometryTerrainElevationAtPoint(geometry, to)
+    if (
+      follower.maximumStepHeightFeet != null &&
+      Math.abs(toElevation - fromElevation) >= follower.maximumStepHeightFeet
+    ) continue
+    const path = findMapGeometryPath({ map: { ...map, tokens }, geometry, token: entity, to })
+    if (!path) continue
+    tokens = tokens.map((token) => token.id === entity.id ? { ...token, x: to.x, y: to.y } : token)
+    changed = true
+  }
+  const areas = areasAfterDancingLightsTether
+    .filter((area) => !removedAreaIds.has(area.id))
+    .map((area) => {
+    if (area.anchorMode !== 'source-token' && area.anchorMode !== 'target-token' && area.anchorMode !== 'effect-token') return area
+    const anchorToken = tokens.find((token) => token.id === (area.anchorTokenId ?? area.sourceTokenId))
     if (!anchorToken) return area
     const anchorCell = tokenAnchorCellFromPixel(anchorToken.x, anchorToken.y, anchorToken, map)
     const anchorCellChanged = anchorCell.col !== area.anchorCell?.col || anchorCell.row !== area.anchorCell?.row
@@ -1423,7 +1706,11 @@ export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {
     changed = true
     return { ...area, cells, anchorCell, vertical }
   })
-  return changed ? { ...map, dnd5ePluginAreas: areas } : map
+  return changed ? {
+    ...map,
+    tokens: tokens.filter((token) => !removedTokenIds.has(token.id)),
+    dnd5ePluginAreas: areas,
+  } : map
 }
 
 export function dnd5eCoreSpellAreasOwnedBy(

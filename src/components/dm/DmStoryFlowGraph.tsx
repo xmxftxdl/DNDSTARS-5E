@@ -5,6 +5,7 @@ import {
   Clock3,
   GitBranch,
   Link2,
+  MapPin,
   Maximize2,
   Minimize2,
   Settings2,
@@ -16,10 +17,9 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   AccountCampaignStoryWorkspaceV1,
-  AccountStoryEventLinkConditionV1,
   AccountStoryEventLinkV1,
   AccountStoryEventStatusV1,
   AccountStoryEventV1,
@@ -27,13 +27,15 @@ import type {
 } from '../../lib/accountApi'
 import { formatCampaignTime } from '../../lib/campaignTime'
 import { useCampaignTimeStore } from '../../store/campaignTime'
-import type { PdfCampaignAnalysisV2 } from '../../lib/pdfCampaignAnalysisV2'
+import type { PdfCampaignAnalysisV2, PdfNamedRecordV2, PdfPersonRecordV2, PdfSourceCitationV2 } from '../../lib/pdfCampaignAnalysisV2'
 import {
   createDmStoryEvent,
   evaluateStoryLinkCondition,
+  removeStoryGraphLink,
   resolveStoryBranch,
   storyEventAvailability,
   storyEventSourceCitations,
+  synchronizeStoryBranchEventStatuses,
 } from './dmCampaignStoryModel'
 import PdfSourceEvidenceDrawer, { PdfCitationButtons } from './PdfSourceEvidenceDrawer'
 import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
@@ -51,6 +53,7 @@ import {
   storyGraphAnchoredScroll,
   storyGraphCenteredScroll,
   storyGraphFitZoom,
+  storyGraphNewNodePosition,
 } from './dmStoryGraphViewport'
 import {
   createStoryTimelineMarker,
@@ -60,6 +63,7 @@ import {
   storyEventIsBeforeTimeline,
   storyTimelineYBelowEvent,
   storyTimelineMarkerIsReached,
+  synchronizeAnalysisStoryTimelineMarkers,
 } from './dmStoryTimelineMarkers'
 
 type DmEditableEventField = NonNullable<AccountStoryEventV1['dmEditedFields']>[number]
@@ -72,16 +76,22 @@ function applyDmEventPatch(
   event: AccountStoryEventV1,
   patch: Partial<AccountStoryEventV1>,
 ): AccountStoryEventV1 {
-  if (event.source === 'dm' || event.source === 'session-log') return { ...event, ...patch }
+  if (event.source === 'dm' || event.source === 'session-log') {
+    const next = { ...event, ...patch }
+    if (Object.prototype.hasOwnProperty.call(patch, 'status')) delete next.statusAutomation
+    return next
+  }
   const editedFields = new Set(event.dmEditedFields ?? [])
   for (const field of DM_EDITABLE_EVENT_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(patch, field)) editedFields.add(field)
   }
-  return {
+  const next = {
     ...event,
     ...patch,
     ...(editedFields.size > 0 ? { dmEditedFields: [...editedFields] } : {}),
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'status')) delete next.statusAutomation
+  return next
 }
 
 const NODE_WIDTH = STORY_GRAPH_NODE_WIDTH
@@ -93,31 +103,16 @@ const STATUS_COPY: Record<AccountStoryEventStatusV1, string> = {
   active: '进行中',
   completed: '已完成',
   skipped: '已跳过',
+  'not-triggered': '未触发',
 }
 
 const STATUS_STYLE: Record<AccountStoryEventStatusV1, string> = {
   planned: 'border-violet-400/35 bg-[#12101d]',
-  active: 'border-cyan-300/60 bg-cyan-950/30 shadow-[0_0_24px_rgba(34,211,238,0.12)]',
-  completed: 'border-emerald-400/45 bg-emerald-950/20',
+  // 节点表面必须不透明，才能真正遮住 z-index 更低的时间横线与剧情连线。
+  active: 'border-cyan-300/60 bg-[#0a1b24] shadow-[0_0_24px_rgba(34,211,238,0.12)]',
+  completed: 'border-emerald-400/45 bg-[#0a1918]',
   skipped: 'border-slate-700 bg-slate-950/70 opacity-65',
-}
-
-type BranchConditionKind =
-  | 'always'
-  | 'event-completed'
-  | 'event-skipped'
-  | 'person-dead'
-  | 'person-alive'
-  | 'manual'
-
-function sequentialLinks(events: readonly AccountStoryEventV1[]): AccountStoryEventLinkV1[] {
-  return events.slice(1).map((event, index) => ({
-    id: `story-link-${Date.now().toString(36)}-${index}`,
-    fromEventId: events[index]!.id,
-    toEventId: event.id,
-    label: '',
-    condition: { kind: 'always' },
-  }))
+  'not-triggered': 'border-slate-700 bg-slate-950/70 opacity-50 grayscale',
 }
 
 function conditionLabel(
@@ -125,17 +120,17 @@ function conditionLabel(
   analysis: PdfCampaignAnalysisV2,
   events: readonly AccountStoryEventV1[] = [],
 ): string {
+  const label = link.label.trim()
+  if (label) return label === '然后' ? '' : label
   const condition = link.condition
-  if (!condition || condition.kind === 'always') return link.label === '然后' ? '' : link.label
-  if (condition.kind === 'manual') return link.label ? `${condition.expression} · ${link.label}` : condition.expression
+  if (!condition || condition.kind === 'always') return ''
+  if (condition.kind === 'manual') return condition.expression
   if (condition.kind === 'event-status') {
     const event = events.find((entry) => entry.id === condition.eventId)
-    const status = `${event?.title ?? '指定事件'}${condition.status === 'completed' ? '已发生' : '未发生'}`
-    return link.label ? `${status} · ${link.label}` : status
+    return `${event?.title ?? '指定事件'}${condition.status === 'completed' ? '已发生' : '未发生'}`
   }
   const person = analysis.people.find((entry) => entry.id === condition.personId)
-  const status = `${person?.name ?? '指定人物'}${condition.state === 'dead' ? '已死亡' : '仍存活'}`
-  return link.label ? `${status} · ${link.label}` : status
+  return `${person?.name ?? '指定人物'}${condition.state === 'dead' ? '已死亡' : '仍存活'}`
 }
 
 function conditionColor(link: AccountStoryEventLinkV1, workspace: AccountCampaignStoryWorkspaceV1): string {
@@ -151,42 +146,119 @@ function compactLinkLabel(value: string, maxLength = 28): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
 }
 
-function buildCondition(
-  kind: BranchConditionKind,
-  personId: string,
-  eventId: string,
-  expression: string,
-): AccountStoryEventLinkConditionV1 | null {
-  if (kind === 'always') return { kind: 'always' }
-  if (kind === 'manual') return expression.trim() ? { kind: 'manual', expression: expression.trim() } : null
-  if (kind === 'event-completed' || kind === 'event-skipped') {
-    return eventId
-      ? { kind: 'event-status', eventId, status: kind === 'event-completed' ? 'completed' : 'skipped' }
-      : null
-  }
-  if (!personId) return null
-  return { kind: 'person-state', personId, state: kind === 'person-dead' ? 'dead' : 'alive' }
+type StoryGraphEntityKind = 'person' | 'location'
+
+interface StoryGraphEntityRef {
+  kind: StoryGraphEntityKind
+  id: string
+  name: string
 }
 
-export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
+interface StoryGraphEntityAlias {
+  value: string
+  normalized: string
+  entity: StoryGraphEntityRef
+}
+
+type StoryGraphEntityTextPart = { text: string; entity?: StoryGraphEntityRef }
+
+function normalizedEntityName(value: string): string {
+  return value.trim().toLocaleLowerCase()
+}
+
+function buildStoryGraphEntityAliases(analysis: PdfCampaignAnalysisV2): StoryGraphEntityAlias[] {
+  const aliases = new Map<string, StoryGraphEntityAlias>()
+  const add = (kind: StoryGraphEntityKind, id: string, name: string, values: readonly string[]) => {
+    const stableShortNames = kind === 'person' ? name.split(/[·・]/u).filter((part) => part.trim().length >= 2) : []
+    for (const rawValue of [name, ...stableShortNames, ...values]) {
+      const value = rawValue.trim()
+      if (!value) continue
+      const normalized = normalizedEntityName(value)
+      // Prefer a canonical-name match over an alias collision. Otherwise retain the
+      // first record so identical names do not open a different entity between renders.
+      const existing = aliases.get(normalized)
+      if (existing && (existing.value === existing.entity.name || value !== name)) continue
+      aliases.set(normalized, { value, normalized, entity: { kind, id, name } })
+    }
+  }
+  for (const person of analysis.people ?? []) add('person', person.id, person.name, person.aliases ?? [])
+  for (const location of analysis.locations ?? []) add('location', location.id, location.name, location.aliases ?? [])
+  return [...aliases.values()].sort((left, right) => right.value.length - left.value.length || left.value.localeCompare(right.value))
+}
+
+function storyTextMentionsRecord(text: string, record: Pick<PdfNamedRecordV2, 'name' | 'aliases'>): boolean {
+  const normalizedText = normalizedEntityName(text)
+  return [record.name, ...(record.aliases ?? [])].some((value) => {
+    const normalized = normalizedEntityName(value)
+    return normalized.length > 1 ? normalizedText.includes(normalized) : normalizedText === normalized
+  })
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function storyGraphEntityTextParts(text: string, aliases: readonly StoryGraphEntityAlias[]): StoryGraphEntityTextPart[] {
+  const candidates = aliases.filter((alias) => {
+    if (alias.value.length > 1) return normalizedEntityName(text).includes(alias.normalized)
+    return normalizedEntityName(text) === alias.normalized
+  })
+  if (!text || candidates.length === 0) return [{ text }]
+  const byName = new Map(candidates.map((alias) => [alias.normalized, alias.entity]))
+  const matcher = new RegExp(candidates.map((alias) => escapeRegExp(alias.value)).join('|'), 'giu')
+  const parts: StoryGraphEntityTextPart[] = []
+  let cursor = 0
+  for (const match of text.matchAll(matcher)) {
+    const index = match.index ?? 0
+    if (index > cursor) parts.push({ text: text.slice(cursor, index) })
+    const value = match[0]
+    parts.push({ text: value, entity: byName.get(normalizedEntityName(value)) })
+    cursor = index + value.length
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor) })
+  return parts
+}
+
+function StoryEntityLinkedText({ text, aliases, onOpen }: {
+  text: string
+  aliases: readonly StoryGraphEntityAlias[]
+  onOpen: (entity: StoryGraphEntityRef) => void
+}) {
+  return <>{storyGraphEntityTextParts(text, aliases).map((part, index) => part.entity ? <button
+    key={`${part.entity.kind}:${part.entity.id}:${index}`}
+    type="button"
+    data-story-entity-link
+    data-story-entity-kind={part.entity.kind}
+    title={`查看${part.entity.kind === 'person' ? '人物' : '地点'}：${part.entity.name}`}
+    onPointerDown={(pointer) => pointer.stopPropagation()}
+    onPointerUp={(pointer) => pointer.stopPropagation()}
+    onClick={(click) => { click.stopPropagation(); onOpen(part.entity!) }}
+    className={`inline cursor-pointer border-b border-dashed font-semibold leading-[inherit] transition hover:brightness-125 ${part.entity.kind === 'person' ? 'border-violet-300/55 text-violet-200' : 'border-sky-300/55 text-sky-200'}`}
+  >{part.text}</button> : <span key={`text:${index}`}>{part.text}</span>)}</>
+}
+
+export interface DmStoryFlowGraphHandle {
+  addEvent: () => void
+}
+
+const DmStoryFlowGraph = forwardRef<DmStoryFlowGraphHandle, {
   workspace: AccountCampaignStoryWorkspaceV1
   analysis: PdfCampaignAnalysisV2
   onChange: (workspace: AccountCampaignStoryWorkspaceV1) => void
-}) {
+  onOpenSourceWorkspace?: (citation: PdfSourceCitationV2) => void
+}>(function DmStoryFlowGraph({ workspace, analysis, onChange, onOpenSourceWorkspace }, ref) {
   const links = useMemo(() => workspace.graphLinks ?? [], [workspace.graphLinks])
   const positionSnapshot = JSON.stringify(workspace.events.map((event) => [event.id, event.graphPosition?.x ?? 420, event.graphPosition?.y ?? 56]))
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(() => Object.fromEntries(workspace.events.map((event) => [event.id, event.graphPosition ?? { x: 420, y: 56 }])))
   const [fromEventId, setFromEventId] = useState('')
   const [toEventId, setToEventId] = useState('')
-  const [conditionKind, setConditionKind] = useState<BranchConditionKind>('always')
-  const [conditionPersonId, setConditionPersonId] = useState('')
-  const [conditionEventId, setConditionEventId] = useState('')
-  const [manualExpression, setManualExpression] = useState('')
+  const [newBranchText, setNewBranchText] = useState('')
   const [zoom, setZoom] = useState(0.95)
   const [fullscreen, setFullscreen] = useState(false)
   const [editToolsOpen, setEditToolsOpen] = useState(false)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [detailEventId, setDetailEventId] = useState<string | null>(null)
+  const [selectedEntity, setSelectedEntity] = useState<StoryGraphEntityRef | null>(null)
   const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null)
   const [editingEventId, setEditingEventId] = useState<string | null>(null)
@@ -207,6 +279,7 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
   const wheelGestureRef = useRef<{ deltaY: number; offsetX: number; offsetY: number } | null>(null)
   const fitOnFullscreenRef = useRef(false)
   const campaignClock = useCampaignTimeStore((state) => state.state)
+  const entityAliases = useMemo(() => buildStoryGraphEntityAliases(analysis), [analysis])
   const timelineMarkers = useMemo(() => workspace.timelineMarkers ?? [], [workspace.timelineMarkers])
   const reachedTimelineY = useMemo(
     () => currentStoryTimelineY(timelineMarkers, campaignClock.worldMinute),
@@ -220,8 +293,38 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
 
   const commitWorkspace = useCallback((nextWorkspace: AccountCampaignStoryWorkspaceV1) => {
     rememberViewport()
-    onChange(nextWorkspace)
+    onChange(synchronizeStoryBranchEventStatuses(nextWorkspace))
   }, [onChange, rememberViewport])
+
+  const addEventAtViewport = useCallback(() => {
+    const viewport = viewportRef.current
+    const event = createDmStoryEvent()
+    const graphPosition = viewport
+      ? storyGraphNewNodePosition({
+          viewportWidth: viewport.clientWidth,
+          viewportHeight: viewport.clientHeight,
+          scrollLeft: viewport.scrollLeft,
+          scrollTop: viewport.scrollTop,
+          zoom: zoomRef.current,
+          nodeWidth: NODE_WIDTH,
+          nodeHeight: NODE_HEIGHT,
+          occupied: Object.values(positions),
+        })
+      : { x: 420, y: 56 }
+    setPositions((current) => ({ ...current, [event.id]: graphPosition }))
+    commitWorkspace({
+      ...workspace,
+      events: [...workspace.events, { ...event, graphPosition }],
+      graphInitialized: true,
+      graphLayoutVersion: 4,
+    })
+    setSelectedEventId(event.id)
+    setDetailEventId(null)
+    setSelectedLinkId(null)
+    setEditingEventId(event.id)
+  }, [commitWorkspace, positions, workspace])
+
+  useImperativeHandle(ref, () => ({ addEvent: addEventAtViewport }), [addEventAtViewport])
 
   useEffect(() => {
     if (dragRef.current) return
@@ -254,7 +357,19 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
     })
     if (migratedLayoutSignatureRef.current === signature) return
     migratedLayoutSignatureRef.current = signature
-    commitWorkspace({ ...workspace, events: layoutStoryGraphEvents(workspace.events, links), graphLayoutVersion: 4, graphInitialized: true })
+    const events = layoutStoryGraphEvents(workspace.events, links)
+    commitWorkspace({
+      ...workspace,
+      events,
+      timelineMarkers: synchronizeAnalysisStoryTimelineMarkers(events, workspace.timelineMarkers, {
+        storyStartWorldMinute: workspace.storyStartWorldMinute,
+        dismissedSourceKeys: workspace.dismissedTimelineMarkerSourceKeys,
+        eventHeight: NODE_HEIGHT,
+        fallbackGap: STORY_GRAPH_NODE_GAP_Y,
+      }),
+      graphLayoutVersion: 4,
+      graphInitialized: true,
+    })
   }, [commitWorkspace, links, workspace])
 
   useEffect(() => {
@@ -293,7 +408,18 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
     }
   }, [displayPositions, edgeLabelLayouts, minCanvasWidth, nodeHeight, nodeWidth, timelineMarkerDragPreview, timelineMarkers])
 
-  const commitEvents = (events: AccountStoryEventV1[]) => commitWorkspace({ ...workspace, events, graphInitialized: true, graphLayoutVersion: 4 })
+  const commitEvents = (events: AccountStoryEventV1[]) => commitWorkspace({
+    ...workspace,
+    events,
+    timelineMarkers: synchronizeAnalysisStoryTimelineMarkers(events, timelineMarkers, {
+      storyStartWorldMinute: workspace.storyStartWorldMinute,
+      dismissedSourceKeys: workspace.dismissedTimelineMarkerSourceKeys,
+      eventHeight: NODE_HEIGHT,
+      fallbackGap: STORY_GRAPH_NODE_GAP_Y,
+    }),
+    graphInitialized: true,
+    graphLayoutVersion: 4,
+  })
   const commitLinks = (nextLinks: AccountStoryEventLinkV1[]) => commitWorkspace({
     ...workspace,
     graphLinks: nextLinks,
@@ -305,7 +431,15 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
   const updateLink = (id: string, patch: Partial<AccountStoryEventLinkV1>) => commitLinks(links.map((link) => link.id === id ? { ...link, ...patch } : link))
   const updateEvent = (id: string, patch: Partial<AccountStoryEventV1>) => commitEvents(workspace.events.map((event) => event.id === id ? applyDmEventPatch(event, patch) : event))
   const commitTimelineMarkers = (markers: AccountStoryTimelineMarkerV1[]) => commitWorkspace({ ...workspace, timelineMarkers: markers })
-  const updateTimelineMarker = (id: string, patch: Partial<AccountStoryTimelineMarkerV1>) => commitTimelineMarkers(timelineMarkers.map((marker) => marker.id === id ? { ...marker, ...patch } : marker))
+  const updateTimelineMarker = (id: string, patch: Partial<AccountStoryTimelineMarkerV1>) => commitTimelineMarkers(timelineMarkers.map((marker) => {
+    if (marker.id !== id) return marker
+    if (marker.source !== 'analysis') return { ...marker, ...patch }
+    const editedFields = new Set(marker.dmEditedFields ?? [])
+    if (Object.prototype.hasOwnProperty.call(patch, 'y')) editedFields.add('y')
+    if (Object.prototype.hasOwnProperty.call(patch, 'label')) editedFields.add('label')
+    if (Object.prototype.hasOwnProperty.call(patch, 'gameTimeWorldMinute')) editedFields.add('gameTimeWorldMinute')
+    return { ...marker, ...patch, dmEditedFields: [...editedFields] }
+  }))
   const addTimelineMarker = (y: number, currentTime = false) => {
     const marker = createStoryTimelineMarker(y, currentTime ? {
       label: formatCampaignTime(campaignClock),
@@ -314,6 +448,13 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
     commitTimelineMarkers([...timelineMarkers, marker])
     setSelectedTimelineMarkerId(marker.id)
   }
+  const removeTimelineMarker = (marker: AccountStoryTimelineMarkerV1) => commitWorkspace({
+    ...workspace,
+    timelineMarkers: timelineMarkers.filter((candidate) => candidate.id !== marker.id),
+    ...(marker.source === 'analysis' && marker.sourceKey
+      ? { dismissedTimelineMarkerSourceKeys: [...new Set([...(workspace.dismissedTimelineMarkerSourceKeys ?? []), marker.sourceKey])] }
+      : {}),
+  })
   const timelineYBelowSelectedEvent = () => {
     if (!selectedEventId) return null
     const selectedPosition = positions[selectedEventId]
@@ -331,19 +472,33 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
     addTimelineMarker(y, currentTime)
   }
 
+  const setCurrentTimeAsStoryStart = () => commitWorkspace({
+    ...workspace,
+    storyStartWorldMinute: campaignClock.worldMinute,
+    timelineMarkers: synchronizeAnalysisStoryTimelineMarkers(workspace.events, timelineMarkers, {
+      storyStartWorldMinute: campaignClock.worldMinute,
+      dismissedSourceKeys: workspace.dismissedTimelineMarkerSourceKeys,
+      eventHeight: NODE_HEIGHT,
+      fallbackGap: STORY_GRAPH_NODE_GAP_Y,
+    }),
+  })
+
   const addLink = (fromId = fromEventId, toId = toEventId) => {
-    const condition = buildCondition(conditionKind, conditionPersonId, conditionEventId, manualExpression)
-    if (!fromId || !toId || fromId === toId || !condition) return
-    const duplicate = links.some((link) => link.fromEventId === fromId && link.toEventId === toId && JSON.stringify(link.condition ?? { kind: 'always' }) === JSON.stringify(condition))
+    const text = newBranchText.trim()
+    if (!fromId || !toId || fromId === toId || !text) return
+    const condition = { kind: 'manual' as const, expression: text }
+    const duplicate = links.some((link) => link.fromEventId === fromId && link.toEventId === toId && conditionLabel(link, analysis, workspace.events) === text)
     if (!duplicate) commitLinks([...links, {
       id: `story-link-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
       fromEventId: fromId,
       toEventId: toId,
-      label: '',
+      label: text,
       condition,
+      resolution: 'pending',
     }])
     setFromEventId('')
     setToEventId('')
+    setNewBranchText('')
   }
 
   const addDecisionNode = () => {
@@ -382,34 +537,10 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
   }
 
   const removeLink = (linkId: string) => {
-    const removed = links.find((link) => link.id === linkId)
-    let nextLinks = links.filter((link) => link.id !== linkId)
-    let nextEvents = workspace.events
-    const source = removed && workspace.events.find((event) => event.id === removed.fromEventId)
-    if (removed?.resolution === 'triggered' && source?.nodeKind === 'decision') {
-      nextLinks = nextLinks.map((link) => link.fromEventId === source.id ? { ...link, resolution: 'pending' as const } : link)
-      nextEvents = workspace.events.map((event) => event.id === source.id ? { ...event, status: 'planned' as const } : event)
-    }
-    commitWorkspace({
-      ...workspace,
-      events: nextEvents,
-      graphLinks: nextLinks,
-      graphInitialized: true,
-      graphEditedByDm: true,
-      graphLinksClearedByDm: nextLinks.length === 0,
-      graphLayoutVersion: 4,
-    })
+    commitWorkspace(removeStoryGraphLink(workspace, linkId))
   }
 
   const arrange = () => commitEvents(layoutStoryGraphEvents(workspace.events, links))
-  const makeLinear = () => {
-    const ordered = [...workspace.events].sort((left, right) => (
-      (left.graphPosition?.y ?? 0) - (right.graphPosition?.y ?? 0)
-      || (left.graphPosition?.x ?? 0) - (right.graphPosition?.x ?? 0)
-    ))
-    const nextLinks = sequentialLinks(ordered)
-    commitWorkspace({ ...workspace, graphLinks: nextLinks, events: layoutStoryGraphEvents(ordered, nextLinks), graphInitialized: true, graphEditedByDm: true, graphLinksClearedByDm: nextLinks.length === 0, graphLayoutVersion: 4 })
-  }
   const applyZoomAndScroll = useCallback((nextZoom: number, nextScroll: { left: number; top: number }) => {
     const viewport = viewportRef.current
     if (!viewport) return
@@ -525,11 +656,6 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
     viewport.addEventListener('wheel', zoomWithWheel, { capture: true, passive: false })
     return () => viewport.removeEventListener('wheel', zoomWithWheel, { capture: true })
   }, [zoomWithWheel])
-  const setPersonStatus = (personId: string, status: 'active' | 'dead') => {
-    const nextState = { personId, status, note: '由 DM 在剧情世界线中设置', updatedBySessionId: workspace.activeSession?.id ?? 'dm-story-flow' }
-    const exists = workspace.personStates.some((entry) => entry.personId === personId)
-    commitWorkspace({ ...workspace, personStates: exists ? workspace.personStates.map((entry) => entry.personId === personId ? nextState : entry) : [...workspace.personStates, nextState] })
-  }
   const removeEvent = (event: AccountStoryEventV1) => {
     if (event.source === 'dm') {
       const nextLinks = links.filter((link) => link.fromEventId !== event.id && link.toEventId !== event.id)
@@ -561,8 +687,6 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
     }])
   }
 
-  const selectedPersonState = conditionPersonId ? workspace.personStates.find((entry) => entry.personId === conditionPersonId) : undefined
-  const selectedConditionEvent = conditionEventId ? workspace.events.find((entry) => entry.id === conditionEventId) : undefined
   const eventCitations = useMemo(() => new Map(
     workspace.events.map((event) => [event.id, storyEventSourceCitations(event, analysis)]),
   ), [analysis, workspace.events])
@@ -570,6 +694,7 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
   const editingEvent = editingEventId ? workspace.events.find((event) => event.id === editingEventId) : undefined
   const selectedLink = selectedLinkId ? links.find((link) => link.id === selectedLinkId) : undefined
   const selectedTimelineMarker = selectedTimelineMarkerId ? timelineMarkers.find((marker) => marker.id === selectedTimelineMarkerId) : undefined
+  const selectedTimelineMarkerBound = selectedTimelineMarker ? Number.isSafeInteger(selectedTimelineMarker.gameTimeWorldMinute) : false
   const selectedTimelineMarkerReached = selectedTimelineMarker
     ? storyTimelineMarkerIsReached(selectedTimelineMarker, campaignClock.worldMinute)
     : false
@@ -577,7 +702,14 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
   return (
     <section ref={graphSectionRef} tabIndex={0} onKeyDown={(event) => {
       const target = event.target as HTMLElement
-      if (editingEventId || target.closest('input,textarea,select,button,[contenteditable="true"]')) return
+      if (editingEventId) return
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedLinkId && target.closest('[data-story-link-label]')) {
+        event.preventDefault()
+        removeLink(selectedLinkId)
+        setSelectedLinkId(null)
+        return
+      }
+      if (target.closest('input,textarea,select,button,[contenteditable="true"]')) return
       if (event.key.toLowerCase() !== 't' || event.ctrlKey || event.metaKey || event.altKey) return
       event.preventDefault()
       addTimelineMarkerBelowSelectedEvent(true)
@@ -586,7 +718,7 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
         <div className={`flex flex-wrap items-center justify-between gap-3 ${fullscreen ? 'rounded-2xl border border-white/10 bg-[#0b0a13]/90 px-3 py-2 shadow-2xl' : ''}`} data-testid="dm-story-flow-toolbar">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-100"><GitBranch className="h-4 w-4 text-violet-300" />剧情世界线</div>
-            <p className="mt-1 text-[10px] text-slate-500">{workspace.events.length} 个节点 · 完整事件、分支条件与时间线；点击节点查看细节与 PDF 原文</p>
+            <p className="mt-1 text-[10px] text-slate-500">{workspace.events.length} 个节点 · 完整事件、分支与时间线；点击节点查看细节与 PDF 原文</p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <button type="button" aria-label="缩小剧情图" onClick={() => zoomAroundViewportCenter(zoomRef.current - 0.1)} className="rounded-lg border border-white/10 p-2 text-slate-300"><ZoomOut className="h-3.5 w-3.5" /></button>
@@ -604,46 +736,32 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
             <button type="button" onClick={() => centerCanvas(1)} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] text-slate-300">100%</button>
             <button type="button" onClick={() => centerCanvas()} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] text-slate-300"><LocateFixed className="h-3 w-3" />居中</button>
             <button type="button" onClick={arrange} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] text-slate-300"><RotateCcw className="h-3 w-3" />重新排版</button>
-            <button type="button" onClick={makeLinear} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] text-slate-300">改为单线</button>
             <button type="button" onClick={addDecisionNode} className="inline-flex items-center gap-1 rounded-lg border border-amber-400/20 bg-amber-500/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-amber-200"><GitBranch className="h-3 w-3" />添加选择框</button>
             <button type="button" disabled={!selectedEventId} onClick={() => addTimelineMarkerBelowSelectedEvent()} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] text-slate-300 disabled:opacity-35"><CirclePlus className="h-3 w-3" />时间点</button>
             <button type="button" disabled={!selectedEventId} onClick={() => addTimelineMarkerBelowSelectedEvent(true)} className="inline-flex items-center gap-1 rounded-lg border border-rose-400/20 bg-rose-500/[0.07] px-2.5 py-1.5 text-[10px] text-rose-200 disabled:opacity-35"><Clock3 className="h-3 w-3" />当前时间</button>
+            <button type="button" onClick={setCurrentTimeAsStoryStart} className="inline-flex items-center gap-1 rounded-lg border border-amber-400/20 bg-amber-500/[0.07] px-2.5 py-1.5 text-[10px] text-amber-200"><Clock3 className="h-3 w-3" />{workspace.storyStartWorldMinute === undefined ? '当前为故事开始' : '更新故事开始'}</button>
+            {workspace.storyStartWorldMinute !== undefined && <span className="text-[9px] text-amber-300/70">起点：{formatCampaignTime({ ...campaignClock, worldMinute: workspace.storyStartWorldMinute })}</span>}
             <span className="ml-auto text-[9px] text-slate-600">编辑模式下可拖动节点、分支标签和时间线</span>
           </div>
 
           <details className="mt-3 rounded-xl border border-white/8 bg-white/[0.015] px-3 py-2">
             <summary className="cursor-pointer text-[10px] font-semibold text-slate-300">添加或管理分支 · {links.length}</summary>
-            <div className="mt-3 grid gap-2 2xl:grid-cols-[minmax(150px,1fr)_150px_minmax(170px,1fr)_minmax(150px,1fr)_auto]">
+            <div className="mt-3 grid gap-2 2xl:grid-cols-[minmax(160px,1fr)_minmax(260px,2fr)_minmax(160px,1fr)_auto]">
               <select aria-label="分支起点" value={fromEventId} onChange={(event) => setFromEventId(event.target.value)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200"><option value="">选择起点事件…</option>{workspace.events.map((event) => <option key={event.id} value={event.id}>{event.title}</option>)}</select>
-              <select aria-label="分支判断类型" value={conditionKind} onChange={(event) => setConditionKind(event.target.value as BranchConditionKind)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200">
-                <option value="always">无条件推进</option>
-                <option value="event-completed">指定事件已发生</option>
-                <option value="event-skipped">指定事件未发生</option>
-                <option value="person-dead">人物已死亡</option>
-                <option value="person-alive">人物仍存活</option>
-                <option value="manual">其他事件或自定义条件</option>
-              </select>
-              {conditionKind === 'person-dead' || conditionKind === 'person-alive'
-                ? <select aria-label="分支判断人物" value={conditionPersonId} onChange={(event) => setConditionPersonId(event.target.value)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200"><option value="">选择人物…</option>{analysis.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
-                : conditionKind === 'event-completed' || conditionKind === 'event-skipped'
-                  ? <select aria-label="分支判断事件" value={conditionEventId} onChange={(event) => setConditionEventId(event.target.value)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200"><option value="">选择事件…</option>{workspace.events.map((event) => <option key={event.id} value={event.id}>{event.nodeKind === 'decision' ? '◇ ' : ''}{event.title}</option>)}</select>
-                  : conditionKind === 'manual'
-                    ? <input aria-label="自定义分支条件" value={manualExpression} maxLength={240} onChange={(event) => setManualExpression(event.target.value)} placeholder="例如：警报被触发、玩家交出伪信、检定成功" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-400/40" />
-                    : <div className="rounded-xl border border-white/7 bg-black/10 px-3 py-2 text-[10px] text-slate-600">无需额外条件</div>}
+              <input aria-label="新分支文字" value={newBranchText} maxLength={240} onChange={(event) => setNewBranchText(event.target.value)} placeholder="例如：玩家选择同行、警报被触发、检定成功" className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-400/40" />
               <select aria-label="分支终点" value={toEventId} onChange={(event) => setToEventId(event.target.value)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs text-slate-200"><option value="">选择终点事件…</option>{workspace.events.map((event) => <option key={event.id} value={event.id} disabled={event.id === fromEventId}>{event.title}</option>)}</select>
-              <button type="button" disabled={!fromEventId || !toEventId || fromEventId === toEventId || ((conditionKind === 'person-dead' || conditionKind === 'person-alive') && !conditionPersonId) || ((conditionKind === 'event-completed' || conditionKind === 'event-skipped') && !conditionEventId) || (conditionKind === 'manual' && !manualExpression.trim())} onClick={() => addLink()} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-35"><Link2 className="h-3.5 w-3.5" />建立分支</button>
+              <button type="button" disabled={!fromEventId || !toEventId || fromEventId === toEventId || !newBranchText.trim()} onClick={() => addLink()} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-violet-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-35"><Link2 className="h-3.5 w-3.5" />建立分支</button>
             </div>
-            {(conditionKind === 'person-dead' || conditionKind === 'person-alive') && conditionPersonId && <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-cyan-400/10 bg-cyan-500/[0.025] px-3 py-2 text-[10px] text-slate-500"><span>当前判断：<strong className={selectedPersonState?.status === 'dead' ? 'text-rose-300' : 'text-emerald-300'}>{selectedPersonState?.status === 'dead' ? '已死亡' : '仍存活'}</strong></span><button type="button" onClick={() => setPersonStatus(conditionPersonId, 'active')} className="rounded-md border border-emerald-400/20 px-2 py-1 text-emerald-300">标记存活</button><button type="button" onClick={() => setPersonStatus(conditionPersonId, 'dead')} className="rounded-md border border-rose-400/20 px-2 py-1 text-rose-300">标记死亡</button></div>}
-            {(conditionKind === 'event-completed' || conditionKind === 'event-skipped') && selectedConditionEvent && <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-violet-400/10 bg-violet-500/[0.025] px-3 py-2 text-[10px] text-slate-500"><span>事件状态：<strong className={selectedConditionEvent.status === 'completed' ? 'text-emerald-300' : selectedConditionEvent.status === 'skipped' ? 'text-slate-400' : 'text-amber-300'}>{STATUS_COPY[selectedConditionEvent.status]}</strong></span><button type="button" onClick={() => updateEvent(selectedConditionEvent.id, { status: 'completed' })} className="rounded-md border border-emerald-400/20 px-2 py-1 text-emerald-300">标记已发生</button><button type="button" onClick={() => updateEvent(selectedConditionEvent.id, { status: 'skipped' })} className="rounded-md border border-slate-400/20 px-2 py-1 text-slate-300">标记未发生</button></div>}
             {links.length > 0 && <div className="mt-2 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">{links.map((link) => { const label = conditionLabel(link, analysis, workspace.events); const selected = selectedLinkId === link.id; return <div key={link.id} className={`inline-flex items-center rounded-lg border bg-black/15 text-[9px] ${selected ? 'border-violet-300/45 ring-1 ring-violet-400/20' : 'border-white/8'}`}><button type="button" aria-label={`编辑剧情箭头：${workspace.events.find((event) => event.id === link.fromEventId)?.title ?? ''} 到 ${workspace.events.find((event) => event.id === link.toEventId)?.title ?? ''}`} onClick={() => { setSelectedLinkId(link.id); setSelectedEventId(null) }} className="inline-flex items-center gap-1 px-2 py-1 text-slate-500"><span className="max-w-24 truncate">{workspace.events.find((event) => event.id === link.fromEventId)?.title}</span><span style={{ color: conditionColor(link, workspace) }}>→{label ? ` ${label} →` : ''}</span><span className="max-w-24 truncate">{workspace.events.find((event) => event.id === link.toEventId)?.title}</span></button><button type="button" aria-label="删除剧情箭头" onClick={() => removeLink(link.id)} className="px-1.5 py-1 text-rose-400/70"><Trash2 className="h-3 w-3" /></button></div> })}<button type="button" onClick={() => commitLinks([])} className="inline-flex items-center gap-1 rounded-lg border border-rose-400/15 px-2 py-1 text-[9px] text-rose-300"><Unlink className="h-3 w-3" />清空箭头</button></div>}
           </details>
-          {selectedLink && <LinkEditor link={selectedLink} workspace={workspace} analysis={analysis} onChange={(patch) => updateLink(selectedLink.id, patch)} onResolve={(resolution) => resolveLink(selectedLink.id, resolution)} onResetPosition={() => updateLink(selectedLink.id, { labelPosition: undefined })} onRemove={() => { removeLink(selectedLink.id); setSelectedLinkId(null) }} />}
-          {selectedTimelineMarker && <div className={`mt-2 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 ${selectedTimelineMarkerReached ? 'border-emerald-400/30 bg-emerald-500/[0.07]' : 'border-rose-400/15 bg-rose-500/[0.035]'}`} data-testid="dm-story-timeline-marker-editor" data-timeline-reached={selectedTimelineMarkerReached ? 'true' : 'false'}>
-            <Clock3 className={`h-3.5 w-3.5 ${selectedTimelineMarkerReached ? 'text-emerald-300' : 'text-rose-300'}`} />
+          {selectedLink && <LinkEditor link={selectedLink} workspace={workspace} analysis={analysis} onChange={(patch) => updateLink(selectedLink.id, patch)} onResolve={(resolution) => resolveLink(selectedLink.id, resolution)} onRemove={() => { removeLink(selectedLink.id); setSelectedLinkId(null) }} />}
+          {selectedTimelineMarker && <div className={`mt-2 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 ${selectedTimelineMarkerReached ? 'border-emerald-400/30 bg-emerald-500/[0.07]' : selectedTimelineMarkerBound ? 'border-rose-400/15 bg-rose-500/[0.035]' : 'border-amber-400/20 bg-amber-500/[0.04]'}`} data-testid="dm-story-timeline-marker-editor" data-timeline-reached={selectedTimelineMarkerReached ? 'true' : 'false'}>
+            <Clock3 className={`h-3.5 w-3.5 ${selectedTimelineMarkerReached ? 'text-emerald-300' : selectedTimelineMarkerBound ? 'text-rose-300' : 'text-amber-300'}`} />
             <input aria-label="时间横线名称" value={selectedTimelineMarker.label} maxLength={160} onChange={(event) => updateTimelineMarker(selectedTimelineMarker.id, { label: event.target.value })} className="min-w-48 flex-1 rounded-lg border border-white/10 bg-black/25 px-2.5 py-1.5 text-[10px] text-slate-200 outline-none focus:border-rose-400/40" />
             {selectedTimelineMarkerReached && <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-semibold text-emerald-200">已到达</span>}
+            {!selectedTimelineMarkerBound && selectedTimelineMarker.source === 'analysis' && <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-[9px] font-semibold text-amber-200">分析相对时间</span>}
             <button type="button" onClick={() => updateTimelineMarker(selectedTimelineMarker.id, { label: formatCampaignTime(campaignClock), gameTimeWorldMinute: campaignClock.worldMinute })} className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold ${selectedTimelineMarkerReached ? 'border-emerald-400/25 text-emerald-200' : 'border-rose-400/20 text-rose-200'}`}>设为当前时间</button>
-            <button type="button" aria-label="删除时间横线" onClick={() => { commitTimelineMarkers(timelineMarkers.filter((marker) => marker.id !== selectedTimelineMarker.id)); setSelectedTimelineMarkerId(null) }} className="rounded-lg border border-rose-400/15 p-1.5 text-rose-300"><Trash2 className="h-3.5 w-3.5" /></button>
+            <button type="button" aria-label="删除时间横线" onClick={() => { removeTimelineMarker(selectedTimelineMarker); setSelectedTimelineMarkerId(null) }} className="rounded-lg border border-rose-400/15 p-1.5 text-rose-300"><Trash2 className="h-3.5 w-3.5" /></button>
           </div>}
         </div>}
       </div>
@@ -737,6 +855,7 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
                   setLinkLabelDragPreview(null)
                   setSelectedLinkId(link.id)
                   setSelectedEventId(null)
+                  if (!drag.moved) setEditToolsOpen(true)
                   if (drag.moved) updateLink(link.id, { labelPosition: { x: drag.x, y: drag.y } })
                 }}
                 onPointerCancel={() => { linkLabelDragRef.current = null; setLinkLabelDragPreview(null) }}
@@ -747,6 +866,7 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
 
             {timelineMarkers.map((marker) => {
               const markerY = timelineMarkerDragPreview?.id === marker.id ? timelineMarkerDragPreview.y : marker.y
+              const markerBound = Number.isSafeInteger(marker.gameTimeWorldMinute)
               const markerReached = storyTimelineMarkerIsReached(marker, campaignClock.worldMinute)
               return <div
                 key={marker.id}
@@ -765,6 +885,7 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
                 onPointerMove={(pointer) => {
                   const drag = timelineMarkerDragRef.current
                   if (!drag || drag.id !== marker.id || drag.pointerId !== pointer.pointerId) return
+                  pointer.stopPropagation()
                   const deltaY = pointer.clientY - drag.clientY
                   const nextY = moveStoryTimelineMarkerY(drag.startY, deltaY, zoom)
                   if (!storyCanvasGestureIsClick(0, deltaY)) drag.moved = true
@@ -774,12 +895,14 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
                 onPointerUp={(pointer) => {
                   const drag = timelineMarkerDragRef.current
                   if (!drag || drag.id !== marker.id || drag.pointerId !== pointer.pointerId) return
-                  pointer.currentTarget.releasePointerCapture(pointer.pointerId)
+                  pointer.stopPropagation()
+                  if (pointer.currentTarget.hasPointerCapture(pointer.pointerId)) pointer.currentTarget.releasePointerCapture(pointer.pointerId)
                   timelineMarkerDragRef.current = null
                   setTimelineMarkerDragPreview(null)
                   if (drag.moved && drag.y !== marker.y) updateTimelineMarker(marker.id, { y: drag.y })
                 }}
-                onPointerCancel={() => {
+                onPointerCancel={(pointer) => {
+                  pointer.stopPropagation()
                   timelineMarkerDragRef.current = null
                   setTimelineMarkerDragPreview(null)
                 }}
@@ -788,11 +911,11 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
                   event.preventDefault()
                   updateTimelineMarker(marker.id, { y: moveStoryTimelineMarkerY(marker.y, event.key === 'ArrowUp' ? -10 : 10, 1) })
                 }}
-                className={`pointer-events-auto absolute left-0 right-0 z-[1] h-3 -translate-y-1/2 cursor-ns-resize select-none outline-none ${markerReached ? 'focus-visible:bg-emerald-500/10' : 'focus-visible:bg-rose-500/10'}`}
+                className={`pointer-events-auto absolute left-0 right-0 z-[1] h-3 -translate-y-1/2 cursor-ns-resize select-none outline-none ${markerReached ? 'focus-visible:bg-emerald-500/10' : markerBound ? 'focus-visible:bg-rose-500/10' : 'focus-visible:bg-amber-500/10'}`}
                 style={{ top: markerY, touchAction: 'none' }}
               >
-                <span className={`pointer-events-none absolute inset-x-0 top-1/2 border-t ${markerReached ? 'border-emerald-400/75 shadow-[0_-1px_8px_rgba(52,211,153,0.2)]' : 'border-rose-400/70 shadow-[0_-1px_8px_rgba(251,113,133,0.18)]'}`} />
-                <span className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 rounded-full border px-2.5 py-1 text-[9px] font-semibold shadow-lg ${markerReached ? selectedTimelineMarkerId === marker.id ? 'border-emerald-300/65 bg-emerald-500/25 text-emerald-100' : 'border-emerald-400/30 bg-[#0c1a16] text-emerald-300' : selectedTimelineMarkerId === marker.id ? 'border-rose-300/60 bg-rose-500/25 text-rose-100' : 'border-rose-400/25 bg-[#160d17] text-rose-300'}`}>{marker.label || '时间待设置'}</span>
+                <span className={`pointer-events-none absolute inset-x-0 top-1/2 border-t ${marker.timelineKind === 'conditional' ? 'border-dashed' : ''} ${markerReached ? 'border-emerald-400/75 shadow-[0_-1px_8px_rgba(52,211,153,0.2)]' : markerBound ? 'border-rose-400/70 shadow-[0_-1px_8px_rgba(251,113,133,0.18)]' : 'border-amber-400/65 shadow-[0_-1px_8px_rgba(251,191,36,0.16)]'}`} />
+                <span className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 rounded-full border px-2.5 py-1 text-[9px] font-semibold shadow-lg ${markerReached ? selectedTimelineMarkerId === marker.id ? 'border-emerald-300/65 bg-emerald-500/25 text-emerald-100' : 'border-emerald-400/30 bg-[#0c1a16] text-emerald-300' : markerBound ? selectedTimelineMarkerId === marker.id ? 'border-rose-300/60 bg-rose-500/25 text-rose-100' : 'border-rose-400/25 bg-[#160d17] text-rose-300' : selectedTimelineMarkerId === marker.id ? 'border-amber-300/60 bg-amber-500/25 text-amber-100' : 'border-amber-400/25 bg-[#17130b] text-amber-300'}`}>{marker.label || '时间待设置'}</span>
               </div>
             })}
 
@@ -801,15 +924,20 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
               const timelinePosition = positions[event.id] ?? position
               const outgoing = links.filter((link) => link.fromEventId === event.id)
               const citations = eventCitations.get(event.id) ?? []
-              const completedByTimeline = event.status !== 'skipped' && storyEventIsBeforeTimeline(timelinePosition.y, NODE_HEIGHT, reachedTimelineY)
+              const completedByTimeline = event.status !== 'skipped' && event.status !== 'not-triggered' && storyEventIsBeforeTimeline(timelinePosition.y, NODE_HEIGHT, reachedTimelineY)
               const visualStatus: AccountStoryEventStatusV1 = completedByTimeline ? 'completed' : event.status
               const selected = selectedEventId === event.id
               const firstCitation = citations[0]
               const availability = storyEventAvailability(workspace, event.id)
-              const blockedByBranch = availability === 'blocked' && event.status !== 'completed' && event.status !== 'active'
-              const isDecision = event.nodeKind === 'decision'
-              const decisionColor = blockedByBranch ? '#64748b' : visualStatus === 'completed' ? '#34d399' : visualStatus === 'active' ? '#22d3ee' : '#a78bfa'
-              return <article key={event.id} data-story-event-node data-story-explicit-decision={isDecision ? 'true' : undefined} data-story-event-availability={availability} data-story-event-selected={selected ? 'true' : 'false'} onPointerDown={(pointer) => {
+               const blockedByBranch = availability === 'blocked' && event.status !== 'completed' && event.status !== 'active'
+               const isDecision = event.nodeKind === 'decision'
+               const decisionColor = blockedByBranch ? '#64748b' : visualStatus === 'completed' ? '#34d399' : visualStatus === 'active' ? '#22d3ee' : '#a78bfa'
+               const eventScenes = (analysis.scenes ?? []).filter((scene) => event.sceneIds.includes(scene.id))
+               const eventEntityText = `${event.title}\n${event.summary}\n${event.details}\n${eventScenes.map((scene) => `${scene.name}\n${scene.location}\n${scene.npcs.join('、')}\n${scene.description}`).join('\n')}`
+               const referencedEntities = storyGraphEntityTextParts(eventEntityText, entityAliases).flatMap((part) => part.entity ? [part.entity] : [])
+               const eventPeople = (analysis.people ?? []).filter((person) => event.personIds.includes(person.id) || referencedEntities.some((entity) => entity.kind === 'person' && entity.id === person.id))
+               const eventLocations = (analysis.locations ?? []).filter((location) => referencedEntities.some((entity) => entity.kind === 'location' && entity.id === location.id))
+               return <article key={event.id} data-story-event-node data-story-explicit-decision={isDecision ? 'true' : undefined} data-story-event-availability={availability} data-story-event-selected={selected ? 'true' : 'false'} onPointerDown={(pointer) => {
                 if ((pointer.target as HTMLElement).closest('button')) return
                 const rect = pointer.currentTarget.getBoundingClientRect()
                 dragRef.current = { id: event.id, dx: (pointer.clientX - rect.left) / zoom, dy: (pointer.clientY - rect.top) / zoom, x: position.x, y: position.y, moved: false }
@@ -838,14 +966,16 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
               }} data-timeline-completed={completedByTimeline ? 'true' : 'false'} className={`absolute z-[2] cursor-grab select-none transition-[filter,opacity,box-shadow,border-color] active:cursor-grabbing ${isDecision ? 'overflow-visible border border-transparent bg-transparent' : `overflow-hidden rounded-xl border shadow-xl ${STATUS_STYLE[visualStatus]}`} ${selected && !isDecision ? 'ring-2 ring-violet-300/80 ring-offset-2 ring-offset-[#080711] shadow-[0_0_34px_rgba(139,92,246,0.22)]' : ''} ${!isDecision && (completedByTimeline ? 'hover:border-emerald-300/70 hover:shadow-[0_0_26px_rgba(52,211,153,0.14)]' : 'hover:border-violet-300/60 hover:shadow-[0_0_26px_rgba(139,92,246,0.14)]')} ${blockedByBranch ? 'grayscale opacity-35' : availability === 'waiting' ? 'opacity-[0.85]' : ''}`} style={{ left: position.x, top: position.y, width: nodeWidth, height: nodeHeight, touchAction: 'none' }}>
                 {isDecision ? <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center" style={{ width: 132, height: 132 }}>
                   <svg className="absolute inset-0 h-full w-full drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]" viewBox="0 0 100 100" aria-hidden="true"><polygon points="50,2 98,50 50,98 2,50" fill={blockedByBranch ? '#11131a' : '#171321'} stroke={decisionColor} strokeWidth={selected ? 3 : 1.8} /></svg>
-                  <div className="relative max-w-[78%] text-center"><strong className="line-clamp-3 text-[12px] font-semibold leading-4 text-slate-100">{event.title}</strong><span className="mt-1 block text-[8px]" style={{ color: decisionColor }}>{blockedByBranch ? '支线未触发' : availability === 'waiting' ? '等待选择' : STATUS_COPY[visualStatus]}</span></div>
+                  <div className="relative max-w-[78%] text-center"><strong className="line-clamp-3 text-[12px] font-semibold leading-4 text-slate-100"><StoryEntityLinkedText text={event.title} aliases={entityAliases} onOpen={setSelectedEntity} /></strong><span className="mt-1 block text-[8px]" style={{ color: decisionColor }}>{blockedByBranch ? '支线未触发' : availability === 'waiting' ? '等待选择' : STATUS_COPY[visualStatus]}</span></div>
                 </div> : <>
-                  <div className="border-b border-white/8 px-3.5 py-2.5"><div className="flex items-start gap-2"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${visualStatus === 'active' ? 'animate-pulse bg-cyan-300' : visualStatus === 'completed' ? 'bg-emerald-400' : visualStatus === 'skipped' ? 'bg-slate-600' : 'bg-violet-400'}`} /><strong className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-5 text-slate-100">{event.title}</strong><span className="shrink-0 text-[9px] text-slate-600">{STATUS_COPY[visualStatus]}</span></div><p className="mt-1 truncate pl-4 text-[10px] text-slate-500">{event.timeLabel || '时间待校准'}</p></div>
-                  <p className="line-clamp-2 px-3.5 pt-2.5 text-[11px] leading-[1.15rem] text-slate-300">{event.summary || '点击查看事件详情。'}</p>
+                  <div className="border-b border-white/8 px-3.5 py-2.5"><div className="flex items-start gap-2"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${visualStatus === 'active' ? 'animate-pulse bg-cyan-300' : visualStatus === 'completed' ? 'bg-emerald-400' : visualStatus === 'skipped' || visualStatus === 'not-triggered' ? 'bg-slate-600' : 'bg-violet-400'}`} /><strong className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-5 text-slate-100"><StoryEntityLinkedText text={event.title} aliases={entityAliases} onOpen={setSelectedEntity} /></strong><span className="shrink-0 text-[9px] text-slate-600">{STATUS_COPY[visualStatus]}</span></div><p className="mt-1 truncate pl-4 text-[10px] text-slate-500">{event.timeLabel || '时间待校准'}</p></div>
+                  <p className="line-clamp-2 px-3.5 pt-2.5 text-[11px] leading-[1.15rem] text-slate-300"><StoryEntityLinkedText text={event.summary || '点击查看事件详情。'} aliases={entityAliases} onOpen={setSelectedEntity} /></p>
                   <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 border-t border-white/7 bg-black/25 px-3 py-2 text-[9px] text-slate-500">
                     {firstCitation && <button type="button" title={`${firstCitation.documentName} · 第 ${firstCitation.page} 页`} onClick={(click) => { click.stopPropagation(); setSelectedCitation(firstCitation) }} className="inline-flex max-w-[9rem] items-center gap-1 truncate rounded-md border border-sky-400/15 bg-sky-500/[0.06] px-1.5 py-0.5 font-semibold text-sky-200"><Bookmark className="h-2.5 w-2.5 shrink-0" />第 {firstCitation.page} 页{citations.length > 1 ? ` +${citations.length - 1}` : ''}</button>}
                     {event.sceneIds.length > 0 && <span>{event.sceneIds.length} 场景</span>}
-                    {(event.personIds.length > 0 || event.clueIds.length > 0) && <span>{event.personIds.length + event.clueIds.length} 关联</span>}
+                    {eventPeople.slice(0, 1).map((person) => <button key={person.id} type="button" data-story-entity-link data-story-entity-kind="person" title={`查看人物：${person.name}`} onPointerDown={(pointer) => pointer.stopPropagation()} onClick={(click) => { click.stopPropagation(); setSelectedEntity({ kind: 'person', id: person.id, name: person.name }) }} className="inline-flex max-w-[4.5rem] items-center gap-1 truncate rounded-md border border-violet-400/15 bg-violet-500/[0.06] py-0.5 pl-0.5 pr-1.5 text-violet-200">{person.portraitDataUrl ? <img src={person.portraitDataUrl} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" /> : <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-violet-400/15 text-[7px] font-bold text-violet-100">{Array.from(person.name).slice(0, 1).join('')}</span>}<span className="truncate">{person.name}</span></button>)}
+                    {eventLocations.slice(0, 1).map((location) => <button key={location.id} type="button" data-story-entity-link data-story-entity-kind="location" title={`查看地点：${location.name}`} onPointerDown={(pointer) => pointer.stopPropagation()} onClick={(click) => { click.stopPropagation(); setSelectedEntity({ kind: 'location', id: location.id, name: location.name }) }} className="inline-flex max-w-[4.5rem] items-center gap-0.5 truncate rounded-md border border-sky-400/15 bg-sky-500/[0.06] px-1.5 py-0.5 text-sky-200"><MapPin className="h-2.5 w-2.5 shrink-0" /><span className="truncate">{location.name}</span></button>)}
+                    {(eventPeople.length > 1 || eventLocations.length > 1 || event.clueIds.length > 0) && <span>+{Math.max(0, eventPeople.length - 1) + Math.max(0, eventLocations.length - 1) + event.clueIds.length}</span>}
                     <span className="ml-auto">{outgoing.length > 0 ? `${outgoing.length} 分支` : '末端'}</span>
                   </div>
                 </>}
@@ -860,12 +990,14 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
         event={detailEvent}
         analysis={analysis}
         events={workspace.events}
+        pairedEntityOpen={Boolean(selectedEntity)}
         citations={eventCitations.get(detailEvent.id) ?? []}
         outgoingLinks={links.filter((link) => link.fromEventId === detailEvent.id)}
         onClose={() => setDetailEventId(null)}
         onEdit={() => { setDetailEventId(null); setEditingEventId(detailEvent.id) }}
         onResolveLink={resolveLink}
         onCitationOpen={setSelectedCitation}
+        onEntityOpen={setSelectedEntity}
       />}
       {editingEvent && <EventEditor
         event={editingEvent}
@@ -877,45 +1009,140 @@ export default function DmStoryFlowGraph({ workspace, analysis, onChange }: {
         onToggleOutcome={(toEventId) => toggleOutcome(editingEvent.id, toEventId)}
         onRemove={() => removeEvent(editingEvent)}
       />}
-      <PdfSourceEvidenceDrawer citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
+      {selectedEntity && <StoryEntityDetailDrawer
+        entity={selectedEntity}
+        analysis={analysis}
+        workspace={workspace}
+        pairedWithEvent={Boolean(detailEvent && !editingEvent)}
+        onClose={() => setSelectedEntity(null)}
+        onCitationOpen={setSelectedCitation}
+      />}
+      <PdfSourceEvidenceDrawer citation={selectedCitation} onClose={() => setSelectedCitation(null)} onOpenWorkspace={onOpenSourceWorkspace} />
     </section>
   )
-}
+})
 
-function StoryEventDetail({ event, analysis, events, citations, outgoingLinks, onClose, onEdit, onResolveLink, onCitationOpen }: {
+export default DmStoryFlowGraph
+
+function StoryEventDetail({ event, analysis, events, pairedEntityOpen, citations, outgoingLinks, onClose, onEdit, onResolveLink, onCitationOpen, onEntityOpen }: {
   event: AccountStoryEventV1
   analysis: PdfCampaignAnalysisV2
   events: AccountStoryEventV1[]
+  pairedEntityOpen: boolean
   citations: readonly PdfViewCitation[]
   outgoingLinks: AccountStoryEventLinkV1[]
   onClose: () => void
   onEdit: () => void
   onResolveLink: (linkId: string, resolution: NonNullable<AccountStoryEventLinkV1['resolution']>) => void
   onCitationOpen: (citation: PdfViewCitation) => void
+  onEntityOpen: (entity: StoryGraphEntityRef) => void
 }) {
   const attachedScenes = analysis.scenes.filter((scene) => event.sceneIds.includes(scene.id))
   const people = analysis.people.filter((person) => event.personIds.includes(person.id))
   const clues = analysis.clues.filter((clue) => event.clueIds.includes(clue.id))
+  const entityAliases = buildStoryGraphEntityAliases(analysis)
+  const eventText = `${event.title}\n${event.summary}\n${event.details}\n${attachedScenes.map((scene) => `${scene.name}\n${scene.location}\n${scene.description}`).join('\n')}`
+  const locations = analysis.locations.filter((location) => storyTextMentionsRecord(eventText, location))
   return <div className="fixed inset-0 z-[390] flex justify-end bg-black/65 backdrop-blur-sm" onPointerDown={(pointer) => { if (pointer.target === pointer.currentTarget) onClose() }}>
-    <aside role="dialog" aria-modal="true" aria-label="剧情事件详情" className="h-full w-full max-w-xl overflow-y-auto border-l border-violet-400/20 bg-[#0b0a13] p-5 shadow-2xl">
+    <aside role="dialog" aria-modal="true" aria-label="剧情事件详情" data-paired-detail={pairedEntityOpen ? 'true' : 'false'} className={`h-full overflow-y-auto border-l border-violet-400/20 bg-[#0b0a13] p-5 shadow-2xl transition-[width] ${pairedEntityOpen ? 'w-1/2 max-w-xl' : 'w-full max-w-xl'}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-[9px] font-semibold text-violet-200">{STATUS_COPY[event.status]}</span>{event.timeLabel && <span className="text-[10px] text-slate-500">{event.timeLabel}</span>}</div><h3 className="mt-3 text-xl font-bold leading-7 text-slate-100">{event.title}</h3></div>
+        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-[9px] font-semibold text-violet-200">{STATUS_COPY[event.status]}</span>{event.timeLabel && <span className="text-[10px] text-slate-500">{event.timeLabel}</span>}</div><h3 className="mt-3 text-xl font-bold leading-7 text-slate-100"><StoryEntityLinkedText text={event.title} aliases={entityAliases} onOpen={onEntityOpen} /></h3></div>
         <button type="button" aria-label="关闭剧情事件详情" onClick={onClose} className="rounded-lg border border-white/10 p-2 text-slate-400"><X className="h-4 w-4" /></button>
       </div>
 
-      <section className="mt-5 rounded-2xl border border-white/8 bg-white/[0.018] p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">事件概要</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">{event.summary || '暂无概要。'}</p>{event.details && <><div className="my-4 border-t border-white/7" /><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">DM 运行细节</p><p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-400">{event.details}</p></>}</section>
+      <section className="mt-5 rounded-2xl border border-white/8 bg-white/[0.018] p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">事件概要</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white"><StoryEntityLinkedText text={event.summary || '暂无概要。'} aliases={entityAliases} onOpen={onEntityOpen} /></p>{event.details && <><div className="my-4 border-t border-white/7" /><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">DM 运行细节</p><p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-white"><StoryEntityLinkedText text={event.details} aliases={entityAliases} onOpen={onEntityOpen} /></p></>}</section>
 
       <section className="mt-4 rounded-2xl border border-sky-400/15 bg-sky-500/[0.035] p-4" data-testid="dm-story-source-bookmarks">
         <div className="flex items-center gap-2"><Bookmark className="h-4 w-4 text-sky-300" /><strong className="text-xs text-sky-100">PDF 原文书签</strong><span className="ml-auto text-[10px] text-sky-200">{citations.length} 处</span></div>
         {citations.length > 0 ? <PdfCitationButtons citations={citations} onOpen={onCitationOpen} /> : <p className="mt-2 text-[10px] leading-5 text-slate-500">这个节点没有可核验的 PDF 页码。</p>}
       </section>
 
-      {attachedScenes.length > 0 && <section className="mt-4"><div className="flex items-center justify-between"><h4 className="text-xs font-semibold text-slate-200">关联场景</h4><span className="text-[10px] text-slate-600">{attachedScenes.length}</span></div><div className="mt-2 space-y-2">{attachedScenes.map((scene) => <article key={scene.id} className="rounded-xl border border-white/8 bg-black/15 p-3"><strong className="text-xs text-slate-200">{scene.name}</strong>{scene.location && <span className="ml-2 text-[10px] text-sky-300/70">{scene.location}</span>}<p className="mt-1 line-clamp-3 text-[10px] leading-5 text-slate-500">{scene.description || '暂无场景说明'}</p></article>)}</div></section>}
+      {attachedScenes.length > 0 && <section className="mt-4"><div className="flex items-center justify-between"><h4 className="text-xs font-semibold text-slate-200">关联场景</h4><span className="text-[10px] text-slate-600">{attachedScenes.length}</span></div><div className="mt-2 space-y-2">{attachedScenes.map((scene) => <article key={scene.id} className="rounded-xl border border-white/8 bg-black/15 p-3"><strong className="text-xs text-slate-200"><StoryEntityLinkedText text={scene.name} aliases={entityAliases} onOpen={onEntityOpen} /></strong>{scene.location && <span className="ml-2 text-[10px] text-sky-300/70"><StoryEntityLinkedText text={scene.location} aliases={entityAliases} onOpen={onEntityOpen} /></span>}<p className="mt-1 line-clamp-3 text-[10px] leading-5 text-slate-500"><StoryEntityLinkedText text={scene.description || '暂无场景说明'} aliases={entityAliases} onOpen={onEntityOpen} /></p></article>)}</div></section>}
 
-      {(people.length > 0 || clues.length > 0) && <section className="mt-4 grid gap-3 sm:grid-cols-2"><RelatedList title="人物" values={people.map((person) => person.name)} /><RelatedList title="线索" values={clues.map((clue) => clue.name)} /></section>}
+      {(people.length > 0 || locations.length > 0 || clues.length > 0) && <section className="mt-4 grid gap-3 sm:grid-cols-2">{people.length > 0 && <EntityRelatedList title="人物" kind="person" records={people} onOpen={onEntityOpen} />}{locations.length > 0 && <EntityRelatedList title="地点" kind="location" records={locations} onOpen={onEntityOpen} />}{clues.length > 0 && <RelatedList title="线索" values={clues.map((clue) => clue.name)} />}</section>}
       {outgoingLinks.length > 0 && <section className="mt-4 rounded-2xl border border-white/8 p-4"><h4 className="text-xs font-semibold text-slate-200">{event.nodeKind === 'decision' ? '玩家选择' : '可能走向'} · {outgoingLinks.length}</h4><div className="mt-2 space-y-1.5">{outgoingLinks.map((link) => <div key={link.id} className={`rounded-lg border px-3 py-2 text-[10px] ${link.resolution === 'triggered' ? 'border-emerald-400/25 bg-emerald-500/[0.06]' : link.resolution === 'not-triggered' ? 'border-slate-700 bg-slate-950/60 opacity-55' : 'border-white/7 bg-white/[0.025]'}`}><div className="flex items-center gap-2"><span className="font-semibold text-violet-200">{link.label || conditionLabel(link, analysis, events) || '无条件推进'}</span><span className="text-slate-700">→</span><span className="min-w-0 flex-1 truncate text-slate-400">{events.find((entry) => entry.id === link.toEventId)?.title ?? '后续事件'}</span>{link.resolution === 'triggered' && <span className="text-emerald-300">已触发</span>}{link.resolution === 'not-triggered' && <span className="text-slate-500">未触发</span>}</div>{event.nodeKind === 'decision' && <div className="mt-2 flex justify-end gap-1.5"><button type="button" onClick={() => onResolveLink(link.id, 'triggered')} className="rounded-md border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-emerald-200">选择此项</button><button type="button" onClick={() => onResolveLink(link.id, 'pending')} className="rounded-md border border-white/8 px-2 py-1 text-slate-500">重置选择</button></div>}</div>)}</div></section>}
 
       <div className="sticky bottom-0 mt-6 flex justify-end gap-2 border-t border-white/8 bg-[#0b0a13]/95 py-4 backdrop-blur"><button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-4 py-2 text-xs text-slate-300">关闭</button><button type="button" onClick={onEdit} className="rounded-xl bg-violet-500 px-4 py-2 text-xs font-semibold text-white">编辑此节点</button></div>
+    </aside>
+  </div>
+}
+
+function EntityRelatedList({ title, kind, records, onOpen }: {
+  title: string
+  kind: StoryGraphEntityKind
+  records: readonly PdfNamedRecordV2[]
+  onOpen: (entity: StoryGraphEntityRef) => void
+}) {
+  return <div className="rounded-xl border border-white/8 bg-white/[0.015] p-3"><p className="text-[10px] font-semibold text-slate-500">{title} · {records.length}</p><div className="mt-2 flex flex-wrap gap-1.5">{records.map((record) => {
+    const portraitDataUrl = kind === 'person' && 'portraitDataUrl' in record && typeof record.portraitDataUrl === 'string' ? record.portraitDataUrl : ''
+    return <button key={record.id} type="button" data-story-entity-link data-story-entity-kind={kind} onClick={() => onOpen({ kind, id: record.id, name: record.name })} className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-2 text-[10px] transition hover:brightness-125 ${kind === 'person' ? 'border-violet-400/20 bg-violet-500/[0.06] text-violet-200' : 'border-sky-400/20 bg-sky-500/[0.06] text-sky-200'}`}>{kind === 'person' ? portraitDataUrl ? <img src={portraitDataUrl} alt="" className="h-5 w-5 rounded-full object-cover" /> : <span className="grid h-5 w-5 place-items-center rounded-full bg-violet-400/15 text-[8px] font-bold text-violet-100">{Array.from(record.name).slice(0, 1).join('')}</span> : <MapPin className="ml-1 h-3 w-3" />}{record.name}</button>
+  })}</div></div>
+}
+
+function EntityDetailField({ label, children }: { label: string; children?: ReactNode }) {
+  if (children === undefined || children === null || children === '') return null
+  return <div><dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</dt><dd className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-white">{children}</dd></div>
+}
+
+const PERSON_STATE_LABELS: Record<NonNullable<AccountCampaignStoryWorkspaceV1['personStates']>[number]['status'], string> = {
+  unknown: '状态未知',
+  active: '当前活跃',
+  changed: '状态已改变',
+  departed: '已经离场',
+  dead: '已经死亡',
+}
+
+function StoryEntityDetailDrawer({ entity, analysis, workspace, pairedWithEvent, onClose, onCitationOpen }: {
+  entity: StoryGraphEntityRef
+  analysis: PdfCampaignAnalysisV2
+  workspace: AccountCampaignStoryWorkspaceV1
+  pairedWithEvent: boolean
+  onClose: () => void
+  onCitationOpen: (citation: PdfViewCitation) => void
+}) {
+  const person = entity.kind === 'person' ? analysis.people.find((entry) => entry.id === entity.id) : undefined
+  const location = entity.kind === 'location' ? analysis.locations.find((entry) => entry.id === entity.id) : undefined
+  const record: PdfPersonRecordV2 | PdfNamedRecordV2 | undefined = person ?? location
+  if (!record) return null
+
+  const portraitDataUrl = person?.portraitDataUrl || analysis.people.find((candidate) => (
+    candidate.portraitDataUrl
+    && normalizedEntityName(candidate.name) === normalizedEntityName(person?.name ?? '')
+  ))?.portraitDataUrl
+
+  const names = new Set([record.name, ...(record.aliases ?? [])].map(normalizedEntityName))
+  const relationships = analysis.relationships.filter((relationship) => (
+    relationship.fromEntityId === record.id
+    || relationship.toEntityId === record.id
+    || names.has(normalizedEntityName(relationship.from))
+    || names.has(normalizedEntityName(relationship.to))
+  ))
+  const relatedScenes = entity.kind === 'person'
+    ? analysis.scenes.filter((scene) => (
+      workspace.events.some((event) => event.personIds.includes(record.id) && event.sceneIds.includes(scene.id))
+      || scene.npcs.some((npc) => names.has(normalizedEntityName(npc)))
+    ))
+    : analysis.scenes.filter((scene) => storyTextMentionsRecord(`${scene.location}\n${scene.name}`, record))
+  const personState = person ? workspace.personStates.find((state) => state.personId === person.id) : undefined
+
+  return <div className={`fixed inset-0 z-[430] flex justify-start ${pairedWithEvent ? 'pointer-events-none bg-transparent' : 'bg-black/65 backdrop-blur-sm'}`} onPointerDown={(pointer) => { if (!pairedWithEvent && pointer.target === pointer.currentTarget) onClose() }}>
+    <aside role="dialog" aria-modal="true" aria-label={`${entity.kind === 'person' ? '人物' : '地点'}详情：${record.name}`} data-testid="dm-story-entity-detail" data-drawer-side="left" data-paired-detail={pairedWithEvent ? 'true' : 'false'} className={`pointer-events-auto h-full overflow-y-auto border-r border-violet-400/20 bg-[#0b0a13] p-5 shadow-2xl transition-[width] ${pairedWithEvent ? 'w-1/2 max-w-xl' : 'w-full max-w-xl'}`}>
+      <div className="flex items-start gap-4 border-b border-white/8 pb-4">
+        {person ? portraitDataUrl ? <img src={portraitDataUrl} alt={`${person.name}的立绘`} className="h-28 w-24 shrink-0 rounded-2xl border border-violet-400/25 object-cover" /> : <div className="grid h-28 w-24 shrink-0 place-items-center rounded-2xl border border-violet-400/25 bg-gradient-to-br from-violet-500/20 to-slate-950 text-xl font-bold text-violet-100">{Array.from(person.name).slice(0, 2).join('')}</div> : <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl border border-sky-400/25 bg-sky-500/10 text-sky-200"><MapPin className="h-7 w-7" /></div>}
+        <div className="min-w-0 flex-1"><p className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${entity.kind === 'person' ? 'text-violet-300' : 'text-sky-300'}`}>{entity.kind === 'person' ? '人物详情' : '地点详情'}</p><h3 className="mt-1 text-xl font-bold text-white">{record.name}</h3>{person?.role && <p className="mt-1 text-sm text-white">{person.role}</p>}{personState && <span className="mt-2 inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/[0.07] px-2 py-1 text-[9px] text-emerald-200">{PERSON_STATE_LABELS[personState.status]}</span>}</div>
+        <button type="button" aria-label="关闭人物或地点详情" onClick={onClose} className="rounded-lg border border-white/10 p-2 text-slate-400 hover:bg-white/[0.04] hover:text-white"><X className="h-4 w-4" /></button>
+      </div>
+
+      <dl className="mt-5 space-y-4">
+        <EntityDetailField label="详细信息">{record.description || '暂无详细说明。'}</EntityDetailField>
+        {person && <><EntityDetailField label="外貌描述">{person.appearance}</EntityDetailField><EntityDetailField label="性格">{person.personality}</EntityDetailField><EntityDetailField label="欲望或目标">{person.motivation}</EntityDetailField><EntityDetailField label="秘密">{person.secret}</EntityDetailField><EntityDetailField label="扮演与声线提示">{person.voice}</EntityDetailField>{personState?.note && <EntityDetailField label="战役状态备注">{personState.note}</EntityDetailField>}</>}
+      </dl>
+
+      {relatedScenes.length > 0 && <section className="mt-5 rounded-2xl border border-white/8 bg-white/[0.018] p-4"><div className="flex items-center justify-between"><h4 className="text-xs font-semibold text-slate-200">相关场景</h4><span className="text-[10px] text-slate-600">{relatedScenes.length}</span></div><div className="mt-2 space-y-2">{relatedScenes.map((scene) => <article key={scene.id} className="rounded-xl border border-white/7 bg-black/15 p-3"><strong className="text-xs text-slate-200">{scene.name}</strong>{scene.location && <p className="mt-1 text-[10px] text-sky-300/70">{scene.location}</p>}<p className="mt-1 line-clamp-3 text-[10px] leading-5 text-slate-500">{scene.description || '暂无场景说明'}</p></article>)}</div></section>}
+
+      {relationships.length > 0 && <section className="mt-4 rounded-2xl border border-white/8 bg-white/[0.018] p-4"><div className="flex items-center justify-between"><h4 className="text-xs font-semibold text-slate-200">人物、势力与地点关系</h4><span className="text-[10px] text-slate-600">{relationships.length}</span></div><div className="mt-2 space-y-2">{relationships.map((relationship) => <article key={relationship.id} className="rounded-xl border border-white/7 bg-black/15 p-3"><p className="text-[10px] font-semibold text-violet-200">{relationship.from} <span className="px-1 text-slate-600">—{relationship.type || '关联'}→</span> {relationship.to}</p>{relationship.description && <p className="mt-1 text-[10px] leading-5 text-slate-500">{relationship.description}</p>}</article>)}</div></section>}
+
+      <section className="mt-4 rounded-2xl border border-sky-400/15 bg-sky-500/[0.035] p-4"><div className="flex items-center gap-2"><Bookmark className="h-4 w-4 text-sky-300" /><strong className="text-xs text-sky-100">PDF 原文书签</strong><span className="ml-auto text-[10px] text-sky-200">{record.citations.length} 处</span></div>{record.citations.length > 0 ? <PdfCitationButtons citations={record.citations} onOpen={onCitationOpen} /> : <p className="mt-2 text-[10px] leading-5 text-slate-500">这条资料没有可核验的 PDF 页码。</p>}</section>
     </aside>
   </div>
 }
@@ -946,39 +1173,17 @@ function EventEditor({ event, analysis, events, outcomeIds, onClose, onChange, o
   </section></div>
 }
 
-function LinkEditor({ link, workspace, analysis, onChange, onResolve, onResetPosition, onRemove }: {
+function LinkEditor({ link, workspace, analysis, onChange, onResolve, onRemove }: {
   link: AccountStoryEventLinkV1
   workspace: AccountCampaignStoryWorkspaceV1
   analysis: PdfCampaignAnalysisV2
   onChange: (patch: Partial<AccountStoryEventLinkV1>) => void
   onResolve: (resolution: NonNullable<AccountStoryEventLinkV1['resolution']>) => void
-  onResetPosition: () => void
   onRemove: () => void
 }) {
-  const condition = link.condition ?? { kind: 'always' as const }
   const from = workspace.events.find((event) => event.id === link.fromEventId)?.title ?? '未知事件'
   const to = workspace.events.find((event) => event.id === link.toEventId)?.title ?? '未知事件'
-  const selectedPersonId = condition.kind === 'person-state' ? condition.personId : ''
-  const selectedPersonState = condition.kind === 'person-state' ? condition.state : 'alive'
-  const selectedConditionEventId = condition.kind === 'event-status' ? condition.eventId : ''
-  const selectedConditionEventStatus = condition.kind === 'event-status' ? condition.status : 'completed'
-  const conditionKind: BranchConditionKind = condition.kind === 'person-state'
-    ? condition.state === 'dead' ? 'person-dead' : 'person-alive'
-    : condition.kind === 'event-status'
-      ? condition.status === 'completed' ? 'event-completed' : 'event-skipped'
-      : condition.kind === 'manual' ? 'manual' : 'always'
-  const setKind = (kind: BranchConditionKind) => {
-    if (kind === 'always') onChange({ condition: { kind: 'always' } })
-    else if (kind === 'manual') onChange({ condition: { kind: 'manual', expression: condition.kind === 'manual' ? condition.expression : '填写事件、选择、线索或检定条件' } })
-    else if (kind === 'event-completed' || kind === 'event-skipped') {
-      const eventId = selectedConditionEventId || link.fromEventId || workspace.events[0]?.id
-      if (eventId) onChange({ condition: { kind: 'event-status', eventId, status: kind === 'event-completed' ? 'completed' : 'skipped' } })
-    }
-    else {
-      const personId = selectedPersonId || analysis.people[0]?.id
-      if (personId) onChange({ condition: { kind: 'person-state', personId, state: kind === 'person-dead' ? 'dead' : 'alive' } })
-    }
-  }
+  const branchText = conditionLabel(link, analysis, workspace.events)
   return <div className="mt-2 rounded-xl border border-white/10 bg-black/20 p-3" data-testid="dm-story-link-editor">
     <div className="flex flex-wrap items-center gap-2"><strong className="text-xs text-slate-200">编辑分支</strong><span className="min-w-0 truncate text-[10px] text-slate-500">{from} → {to}</span><span className="ml-auto text-[10px]" style={{ color: conditionColor(link, workspace) }}>{conditionLabel(link, analysis, workspace.events) || '无条件推进'}</span></div>
     <div className="mt-2 grid gap-2 md:grid-cols-[minmax(180px,1fr)_auto_minmax(180px,1fr)]">
@@ -986,18 +1191,14 @@ function LinkEditor({ link, workspace, analysis, onChange, onResolve, onResetPos
       <span className="self-center text-center text-xs text-violet-300">→</span>
       <select aria-label="编辑分支终点" value={link.toEventId} onChange={(event) => onChange({ toEventId: event.target.value, resolution: 'pending', labelPosition: undefined })} className="rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200">{workspace.events.map((entry) => <option key={entry.id} value={entry.id} disabled={entry.id === link.fromEventId}>{entry.nodeKind === 'decision' ? '◇ ' : ''}{entry.title}</option>)}</select>
     </div>
-    <div className="mt-2 grid gap-2 xl:grid-cols-[160px_minmax(180px,1fr)_minmax(220px,1.2fr)_auto_auto]">
-      <select aria-label="编辑分支条件类型" value={conditionKind} onChange={(event) => setKind(event.target.value as BranchConditionKind)} className="rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200"><option value="always">无条件推进</option><option value="event-completed">指定事件已发生</option><option value="event-skipped">指定事件未发生</option><option value="person-dead">人物已死亡</option><option value="person-alive">人物仍存活</option><option value="manual">其他事件或自定义条件</option></select>
-      {condition.kind === 'person-state'
-        ? <select aria-label="编辑分支人物" value={selectedPersonId} onChange={(event) => onChange({ condition: { kind: 'person-state', personId: event.target.value, state: selectedPersonState } })} className="rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200">{analysis.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
-        : condition.kind === 'event-status'
-          ? <select aria-label="编辑分支事件" value={selectedConditionEventId} onChange={(event) => onChange({ condition: { kind: 'event-status', eventId: event.target.value, status: selectedConditionEventStatus } })} className="rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200">{workspace.events.map((entry) => <option key={entry.id} value={entry.id}>{entry.nodeKind === 'decision' ? '◇ ' : ''}{entry.title}</option>)}</select>
-          : condition.kind === 'manual'
-            ? <input aria-label="编辑自定义分支条件" value={condition.expression} maxLength={240} onChange={(event) => onChange({ condition: { kind: 'manual', expression: event.target.value } })} placeholder="例如：警报被触发或玩家取得钥匙" className="rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200" />
-            : <span className="rounded-lg border border-white/7 px-2.5 py-2 text-[10px] text-slate-600">不需要额外条件</span>}
-      <input aria-label="编辑分支说明" value={link.label} maxLength={80} onChange={(event) => onChange({ label: event.target.value })} placeholder="说明该原因如何产生结果" className="rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200" />
-      <button type="button" onClick={onResetPosition} className="rounded-lg border border-white/10 px-2.5 py-2 text-[10px] text-slate-400">自动摆放</button>
-      <button type="button" onClick={onRemove} className="inline-flex items-center justify-center gap-1 rounded-lg border border-rose-400/20 px-2.5 py-2 text-[10px] text-rose-300"><Trash2 className="h-3 w-3" />删除</button>
+    <div className="mt-2">
+      <input aria-label="编辑分支文字" value={branchText} maxLength={240} onChange={(event) => {
+        const text = event.target.value
+        onChange({
+          label: text,
+          condition: text.trim() ? { kind: 'manual', expression: text } : { kind: 'always' },
+        })
+      }} placeholder="直接填写箭头上的文字" className="w-full rounded-lg border border-white/10 bg-[#0b0a13] px-2.5 py-2 text-xs text-slate-200" />
     </div>
     <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/7 bg-white/[0.015] px-2.5 py-2">
       <span className="mr-1 text-[10px] text-slate-500">本次剧情结果</span>
@@ -1005,6 +1206,7 @@ function LinkEditor({ link, workspace, analysis, onChange, onResolve, onResetPos
       <button type="button" aria-pressed={link.resolution === 'triggered'} onClick={() => onResolve('triggered')} className={`rounded-md border px-2 py-1 text-[10px] ${link.resolution === 'triggered' ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-100' : 'border-white/8 text-slate-500'}`}>已触发</button>
       <button type="button" aria-pressed={link.resolution === 'not-triggered'} onClick={() => onResolve('not-triggered')} className={`rounded-md border px-2 py-1 text-[10px] ${link.resolution === 'not-triggered' ? 'border-slate-400/35 bg-slate-500/12 text-slate-200' : 'border-white/8 text-slate-500'}`}>未触发</button>
       <span className="ml-auto text-[9px] text-slate-600">选择框只允许一个出口触发；其余出口会自动变灰</span>
+      <button type="button" aria-label="删除当前分支" onClick={onRemove} className="inline-flex items-center gap-1 rounded-md border border-rose-400/20 bg-rose-500/[0.06] px-2 py-1 text-[10px] text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-3 w-3" />删除分支</button>
     </div>
   </div>
 }
@@ -1015,5 +1217,5 @@ function toggle(values: string[], id: string): string[] {
 
 function RelationPicker({ title, entries, selected, onToggle }: { title: string; entries: Array<{ id: string; label: string }>; selected: string[]; onToggle: (id: string) => void }) {
   const orderedEntries = prioritizeSelectedStoryEntries(entries, selected)
-  return <div className="rounded-xl border border-white/7 bg-white/[0.015] p-3"><p className="text-[10px] font-semibold text-slate-400">{title} · {selected.length}</p><div className="mt-2 max-h-36 space-y-1 overflow-y-auto">{orderedEntries.map((entry) => <button key={entry.id} type="button" aria-pressed={selected.includes(entry.id)} onClick={() => onToggle(entry.id)} className={`block w-full truncate rounded-lg px-2 py-1.5 text-left text-[10px] ${selected.includes(entry.id) ? 'bg-violet-500/15 text-violet-100' : 'text-slate-600 hover:bg-white/[0.03] hover:text-slate-400'}`}>{entry.label}</button>)}{entries.length === 0 && <span className="text-[10px] text-slate-700">暂无可关联资料</span>}</div></div>
+  return <div className="rounded-xl border border-white/10 bg-white/[0.025] p-3"><p className="text-[10px] font-semibold text-slate-300">{title} · {selected.length}</p><div className="mt-2 max-h-36 space-y-1 overflow-y-auto">{orderedEntries.map((entry) => <button key={entry.id} type="button" aria-pressed={selected.includes(entry.id)} onClick={() => onToggle(entry.id)} className={`block w-full truncate rounded-lg border px-2 py-1.5 text-left text-[10px] transition-colors ${selected.includes(entry.id) ? 'border-violet-300/35 bg-violet-500/20 font-semibold text-white shadow-[inset_0_0_12px_rgba(139,92,246,0.08)]' : 'border-transparent text-slate-300 hover:border-white/10 hover:bg-white/[0.06] hover:text-white'}`}>{entry.label}</button>)}{entries.length === 0 && <span className="text-[10px] text-slate-500">暂无可关联资料</span>}</div></div>
 }

@@ -18,6 +18,7 @@ interface Dnd5eActionIconProps {
   badge?: string | number
   active?: boolean
   disabled?: boolean
+  presentation?: 'full' | 'compact'
 }
 
 type Dnd5eClassBorderFlowStyle = CSSProperties & {
@@ -206,10 +207,37 @@ function ClassBorderOrnaments({ classId, color }: { classId: string; color: stri
   }
 }
 
-export default function Dnd5eActionIcon({ spec, className = '', level, badge, active = false, disabled = false }: Dnd5eActionIconProps) {
+function AnimatedClassBorderFlow({ classId, accent, glow }: {
+  classId: string
+  accent: string
+  glow: string
+}) {
+  const [classBorderFlowBegin] = useState(() => dnd5eClassBorderFlowBegin())
+  return <span className="dnd5e-class-border-flow" data-class-border-flow={classId}>
+    <span
+      className="dnd5e-class-border-flow__paint"
+      style={{
+        '--dnd5e-class-border-accent': accent,
+        '--dnd5e-class-border-glow': glow,
+        animationDuration: DND5E_CLASS_BORDER_FLOW_DURATION,
+        animationDelay: classBorderFlowBegin,
+      } as Dnd5eClassBorderFlowStyle}
+    />
+  </span>
+}
+
+export default function Dnd5eActionIcon({
+  spec,
+  className = '',
+  level,
+  badge,
+  active = false,
+  disabled = false,
+  presentation = 'full',
+}: Dnd5eActionIconProps) {
   const reactId = useId().replace(/:/g, '')
   const gradientId = `action-icon-${reactId}`
-  const [classBorderFlowBegin] = useState(() => dnd5eClassBorderFlowBegin())
+  const compact = presentation === 'compact'
   const paintedActionAsset = spec.preferSemanticGlyph && spec.inventoryIconId
     ? undefined
     : spec.asset ??
@@ -241,8 +269,10 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
               <stop offset="1" stopColor={spec.background} stopOpacity=".18" />
             </linearGradient>
           ) : null}
-          <filter id={`${gradientId}-glow`} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.4" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-          <filter id={`${gradientId}-border-glow`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation={DND5E_CLASS_BORDER_BLUR_STD_DEVIATION} result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+          {!compact ? <>
+            <filter id={`${gradientId}-glow`} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.4" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+            <filter id={`${gradientId}-border-glow`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation={DND5E_CLASS_BORDER_BLUR_STD_DEVIATION} result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+          </> : null}
         </defs>
         <rect width="80" height="80" rx="11" fill={spec.rarityBackdropId ? '#070a10' : `url(#${gradientId})`} />
         {spec.rarityBackdropId ? (
@@ -252,7 +282,7 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
             <circle cx="67" cy="68" r="24" fill={spec.background} opacity=".1" />
           </g>
         ) : null}
-        {spec.classBackdropId ? (
+        {spec.classBackdropId && !compact ? (
           <g data-class-backdrop={spec.classBackdropId}>
             <rect width="80" height="80" rx="11" fill={spec.glow} opacity=".035" />
             <Dnd5eClassBackdrop classId={spec.classBackdropId} color={spec.accent} glow={spec.glow} />
@@ -276,7 +306,7 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
               <path d="M18-10v100M34-10v100M50-10v100M66-10v100" />
             </g>
             <circle cx="40" cy="40" r="31" fill="none" stroke={spec.accent} strokeOpacity=".2" />
-            <g filter={`url(#${gradientId}-glow)`} data-icon-detail={spec.inventoryIconId ? `colored-${spec.inventoryIconId}` : undefined}>
+            <g filter={compact ? undefined : `url(#${gradientId}-glow)`} data-icon-detail={spec.inventoryIconId ? `colored-${spec.inventoryIconId}` : undefined}>
               {spec.inventoryIconId
                 ? <Dnd5eInventoryGlyphShapes icon={spec.inventoryIconId} />
                 : <Motif motif={spec.motif} color={spec.accent} />}
@@ -303,32 +333,22 @@ export default function Dnd5eActionIcon({ spec, className = '', level, badge, ac
               stroke={spec.glow}
               strokeOpacity=".3"
               strokeWidth={DND5E_CLASS_BORDER_TOP_STROKE_WIDTH}
-              filter={`url(#${gradientId}-border-glow)`}
+              filter={compact ? undefined : `url(#${gradientId}-border-glow)`}
             />
-            <ClassBorderOrnaments classId={spec.classBackdropId} color={spec.accent} />
+            {!compact ? <ClassBorderOrnaments classId={spec.classBackdropId} color={spec.accent} /> : null}
           </g>
         ) : spec.rarityBackdropId ? (
           <g data-rarity-border={spec.rarityBackdropId}>
             <rect x="1.75" y="1.75" width="76.5" height="76.5" rx="9.75" fill="none" stroke="#02040a" strokeOpacity=".95" strokeWidth="3.5" />
             <rect x="3" y="3" width="74" height="74" rx="8.5" fill="none" stroke={spec.background} strokeOpacity=".98" strokeWidth="3" />
-            <rect x="4.5" y="4.5" width="71" height="71" rx="7" fill="none" stroke={spec.glow} strokeOpacity=".94" strokeWidth="1.5" filter={`url(#${gradientId}-border-glow)`} />
+            <rect x="4.5" y="4.5" width="71" height="71" rx="7" fill="none" stroke={spec.glow} strokeOpacity=".94" strokeWidth="1.5" filter={compact ? undefined : `url(#${gradientId}-border-glow)`} />
           </g>
         ) : (
           <rect x="1.5" y="1.5" width="77" height="77" rx="10" fill="none" stroke={spec.accent} strokeOpacity={paintedActionAsset ? '.34' : '.52'} strokeWidth={paintedActionAsset ? '1.5' : '2'} />
         )}
       </svg>
       {spec.classBackdropId ? (
-        <span className="dnd5e-class-border-flow" data-class-border-flow={spec.classBackdropId}>
-          <span
-            className="dnd5e-class-border-flow__paint"
-            style={{
-              '--dnd5e-class-border-accent': spec.accent,
-              '--dnd5e-class-border-glow': spec.glow,
-              animationDuration: DND5E_CLASS_BORDER_FLOW_DURATION,
-              animationDelay: classBorderFlowBegin,
-            } as Dnd5eClassBorderFlowStyle}
-          />
-        </span>
+        !compact ? <AnimatedClassBorderFlow classId={spec.classBackdropId} accent={spec.accent} glow={spec.glow} /> : null
       ) : null}
       {level != null ? <span className="absolute bottom-1 left-1 min-w-5 rounded-md border border-white/15 bg-black/70 px-1 text-center text-[10px] font-black text-white shadow">{level}</span> : null}
       {badge != null && badge !== '' ? <span className={`absolute rounded border border-white/15 bg-black/75 text-center font-black text-white shadow ${paintedActionAsset ? 'right-0.5 top-0.5 min-w-4 px-0.5 text-[9px]' : 'right-1 top-1 min-w-5 px-1 text-[10px]'}`}>{badge}</span> : null}

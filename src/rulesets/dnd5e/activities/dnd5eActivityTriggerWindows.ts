@@ -16,6 +16,7 @@ import { dnd5eTrackableDefinitionIdV1 } from './dnd5eActivityIdentity'
 import { getDnd5eSrdCombatSpell } from '../spells'
 import { dnd5eSpellSchoolIdFromLabel } from '../subclassSpellcasting'
 import { dnd5ePluginSpellDefinition } from '../pluginApi'
+import { ensureDnd5eCoreSpellActivitiesRegisteredV1 } from './dnd5eCoreSpellActivities'
 
 export interface Dnd5eActivityTriggerWindowV1 {
   eventIndex: number
@@ -52,6 +53,30 @@ function context(
     },
     actionEconomyAvailable: economy(state, actorId),
   }
+}
+
+function actorActiveEffectRequirementsSatisfied(
+  activity: AvailableRegisteredDnd5eActivityV1['activity'],
+  actor: Dnd5eHeadlessCombatState['combatants'][string],
+): boolean {
+  return (activity.requirements ?? []).every((requirement) => {
+    if (requirement.kind !== 'active-effect' || requirement.subject !== 'actor') return true
+    const present = (actor.classState.activeEffects ?? []).some((effect) =>
+      (
+        effect.definitionId === requirement.effectId ||
+        effect.definitionId.endsWith(`:${requirement.effectId}`) ||
+        effect.definitionId.includes(`:${requirement.effectId}:`)
+      ) && (requirement.source === 'any' || effect.source.actorId === actor.id))
+    return present === requirement.present
+  })
+}
+
+function combatantGrantedActivity(
+  actor: Dnd5eHeadlessCombatState['combatants'][string],
+  activityId: string,
+): boolean {
+  return (actor.classState.activeEffects ?? []).some((effect) =>
+    effect.grantedActivities?.includes(activityId) === true)
 }
 
 function attackEventSource(
@@ -241,6 +266,10 @@ export function listDnd5eActivityTriggerWindowsV1(input: {
   eventBatchId: string
   charactersByCombatantId?: Readonly<Record<string, Character>>
 }): readonly Dnd5eActivityTriggerWindowV1[] {
+  // The map authority can be the first route loaded in a fresh browser tab.
+  // Trigger discovery must therefore bootstrap the built-in activity catalog
+  // instead of depending on a spellbook/cast route having run beforehand.
+  ensureDnd5eCoreSpellActivitiesRegisteredV1()
   return input.events.flatMap((event, eventIndex) =>
     dnd5eActivityTriggerContextsFromCombatEventV1(
       input.state, event, eventIndex, input.eventBatchId, input.events,
@@ -253,12 +282,17 @@ export function listDnd5eActivityTriggerWindowsV1(input: {
         triggerContext,
         actorId,
         targetIds: triggerContext.eligibleTargetIds,
-      }).filter((entry) => dnd5eCombatantEntitledToActivityV1({
-        packageId: entry.packageId,
-        activity: entry.activity,
-        combatant: actor,
-        character: input.charactersByCombatantId?.[actorId],
-      }))
+      }).filter((entry) =>
+        actorActiveEffectRequirementsSatisfied(entry.activity, actor) &&
+        (
+          combatantGrantedActivity(actor, entry.activity.id) ||
+          dnd5eCombatantEntitledToActivityV1({
+            packageId: entry.packageId,
+            activity: entry.activity,
+            combatant: actor,
+            character: input.charactersByCombatantId?.[actorId],
+          })
+        ))
       return available.length > 0 ? [{ eventIndex, triggerContext, available }] : []
     }))
 }

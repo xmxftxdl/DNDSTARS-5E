@@ -1,12 +1,14 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { AbilityKey } from '../../lib/dnd'
-import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
+import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { dnd5eClassDefinitionForCharacter } from './classes'
 import {
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eActiveEffectRepeatSaveEligibleAtBoundary,
+  dnd5ePendingTurnEndRandomConditions,
   dnd5ePendingTurnEndPeriodicDamage,
   dnd5ePendingTurnStartPeriodicDamage,
   dnd5ePendingSwallowRegurgitationRequirements,
@@ -33,9 +35,11 @@ import {
   dnd5eActiveFlySpeed,
   dnd5eActiveSafeFallFeet,
   dnd5eConditionsFromActiveEffects,
+  reconcileDnd5eCompoundRepeatSaveEffects,
   removeDnd5eActiveEffectsByStandardCondition,
   type Dnd5eActiveEffectInstance,
   type Dnd5eActiveEffectPeriodicDamageRoll,
+  type Dnd5eActiveEffectRandomConditionRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
 import type { Dnd5eDamageType } from './damageTypes'
@@ -99,6 +103,12 @@ export interface PreparedDnd5ePlayerEndTurn {
       legendaryResistanceUses: number
     }
   }[]
+  activeEffectRandomConditions: readonly {
+    effect: Dnd5eActiveEffectInstance
+    dieSides: number
+    minimum: number
+    condition: string
+  }[]
   swallowRegurgitationSavingThrows:
     readonly Dnd5eSwallowRegurgitationRequirement[]
   turnStartActiveEffectSavingThrows: readonly {
@@ -155,6 +165,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
+  turnEconomy?: Dnd5eTurnEconomyCounts
 }): { ok: true; prepared: PreparedDnd5ePlayerEndTurn } | { ok: false; reason: Dnd5eEndTurnRejectReason } {
   if (input.action.type !== 'end-turn' && input.action.type !== 'dnd5e-death-save') {
     return { ok: false, reason: 'invalid-action' }
@@ -184,7 +195,37 @@ export function prepareDnd5ePlayerEndTurn(input: {
     : snapshot.state.initiativeOrder.indexOf(actorToken.id)
   if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id]) return { ok: false, reason: 'combatant-missing' }
   snapshot.state.initiativeIndex = actorIndex
+  const requestedSlotId = requestedSlot?.slotId ?? requestedSlot?.tokenId
+  if (
+    requestedSlotId?.startsWith('activity-extra-turns:') &&
+    !snapshot.state.oneShotInitiativeSlotIds?.includes(requestedSlotId)
+  ) {
+    // Shared initiative payloads may come from an older/filtered client that
+    // preserved the durable Activity slot id but omitted its presentation
+    // marker. Reassert the one-shot lifecycle at the authority boundary so
+    // ending the turn can never promote that generated slot to a permanent
+    // duplicate initiative entry.
+    snapshot.state.oneShotInitiativeSlotIds = [
+      ...(snapshot.state.oneShotInitiativeSlotIds ?? []),
+      requestedSlotId,
+    ]
+  }
   const actorCombatant = snapshot.state.combatants[actorToken.id]
+  if (input.turnEconomy) {
+    actorCombatant.turn = {
+      ...actorCombatant.turn,
+      actionAvailable:
+        actorCombatant.turn.actionAvailable && input.turnEconomy.action.current > 0,
+      bonusActionAvailable:
+        actorCombatant.turn.bonusActionAvailable && input.turnEconomy.bonusAction.current > 0,
+      reactionAvailable:
+        actorCombatant.turn.reactionAvailable && input.turnEconomy.reaction.current > 0,
+      objectInteractionAvailable:
+        actorCombatant.turn.objectInteractionAvailable !== false &&
+        (input.turnEconomy.objectInteraction?.current ?? 1) > 0,
+      movementRemaining: Math.max(0, input.turnEconomy.movement.current),
+    }
+  }
   const fearSourceId = actorCombatant.classState.intimidatingPresenceSourceId
   const fearSourceToken = fearSourceId ? input.map.tokens.find((token) => token.id === fearSourceId) : undefined
   if (
@@ -200,8 +241,13 @@ export function prepareDnd5ePlayerEndTurn(input: {
     }).effects
     actorCombatant.conditions = dnd5eConditionsFromActiveEffects(actorCombatant.classState.activeEffects)
   }
-  const activeEffectSavingThrows = (actorCombatant.classState.activeEffects ?? []).flatMap((effect) => {
-    if (effect.repeatSave?.timing !== 'target-turn-end') return []
+  const activeEffectSavingThrows = reconcileDnd5eCompoundRepeatSaveEffects(
+    actorCombatant.classState.activeEffects,
+  ).flatMap((effect) => {
+    if (
+      effect.repeatSave?.timing !== 'target-turn-end' ||
+      !dnd5eActiveEffectRepeatSaveEligibleAtBoundary(snapshot.state, actorCombatant.id, effect)
+    ) return []
     const repeatSave = effect.repeatSave
     const source = effect.source.actorId ? snapshot.state.combatants[effect.source.actorId] : undefined
     let mode = dnd5eSavingThrowMode(actorCombatant, repeatSave.ability, {
@@ -274,6 +320,10 @@ export function prepareDnd5ePlayerEndTurn(input: {
         : undefined,
     }
   })
+  const activeEffectRandomConditions = dnd5ePendingTurnEndRandomConditions(
+    snapshot.state,
+    actorCombatant.id,
+  )
   const swallowRegurgitationSavingThrows =
     dnd5ePendingSwallowRegurgitationRequirements(
       snapshot.state,
@@ -351,8 +401,13 @@ export function prepareDnd5ePlayerEndTurn(input: {
   const previewNextCombatant = nextCombatant
     ? turnStartPreview?.combatants[nextCombatant.id]
     : undefined
-  const turnStartActiveEffectSavingThrows = (previewNextCombatant?.classState.activeEffects ?? []).flatMap((effect) => {
-    if (effect.repeatSave?.timing !== 'target-turn-start') return []
+  const turnStartActiveEffectSavingThrows = reconcileDnd5eCompoundRepeatSaveEffects(
+    previewNextCombatant?.classState.activeEffects,
+  ).flatMap((effect) => {
+    if (
+      effect.repeatSave?.timing !== 'target-turn-start' ||
+      !dnd5eActiveEffectRepeatSaveEligibleAtBoundary(turnStartPreview!, previewNextCombatant!.id, effect)
+    ) return []
     const repeatSave = effect.repeatSave
     const source = effect.source.actorId
       ? turnStartPreview?.combatants[effect.source.actorId]
@@ -481,6 +536,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       activeEffectSavingThrows,
       activeEffectPeriodicDamage,
+      activeEffectRandomConditions,
       swallowRegurgitationSavingThrows,
       turnStartActiveEffectSavingThrows,
       turnStartActiveEffectPeriodicDamage,
@@ -500,8 +556,10 @@ export function resolveDnd5ePlayerEndTurn(input: {
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
+  turnEconomy?: Dnd5eTurnEconomyCounts
   activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   activeEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]
+  activeEffectRandomConditionRolls?: readonly Dnd5eActiveEffectRandomConditionRoll[]
   swallowRegurgitationSavingThrows?:
     readonly Dnd5eSwallowRegurgitationSavingThrowRoll[]
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
@@ -537,6 +595,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
       type: 'end-turn', actorId: actorToken.id,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
       activeEffectPeriodicDamageRolls: input.activeEffectPeriodicDamageRolls,
+      activeEffectRandomConditionRolls: input.activeEffectRandomConditionRolls,
       swallowRegurgitationSavingThrows:
         input.swallowRegurgitationSavingThrows,
       turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
@@ -568,6 +627,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, Clock3, Eye, LoaderCircle, MoonStar, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
+import { AlertTriangle, Clock3, Eye, LoaderCircle, MoonStar, RefreshCw, ShieldCheck, Trash2, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { assignableRoomCharactersForPlayer, roomCharactersOwnedByMembers } from '../../lib/playerView'
 import { assignRoomPlayerCharacter, loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
 import { getRoomSession } from '../../lib/roomSession'
 import { completeDnd5eCampaignLongRest } from '../../store/campaignLongRest'
 import { useCharacterStore } from '../../store/characters'
+import { useMapStore } from '../../store/maps'
+import { showAppAlert, showAppConfirm } from '../../lib/appDialog'
+import { loadSharedResource, saveSharedResourcesAtomically } from '../../composition/browserSharedRoomResources'
+import type { SharedCombatState } from '../../lib/sharedCombatTypes'
+import { pruneInitiativeForValidTokens } from '../../lib/initiativeRoster'
+import type { SharedMapsState } from '../../store/maps'
+import { browserRuntime } from '../../adapters/browser/browserRuntime'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
 import CharacterSheet from './CharacterSheet'
 
@@ -13,6 +20,7 @@ export default function DMRoster() {
   const roomSession = useMemo(() => getRoomSession(), [])
   const characters = useCharacterStore((state) => state.characters)
   const updateCharacter = useCharacterStore((state) => state.update)
+  const removeCharacter = useCharacterStore((state) => state.remove)
   const saveCharactersNow = useCharacterStore((state) => state.saveSharedNow)
   const [players, setPlayers] = useState<RoomRosterMember[]>([])
   const [loading, setLoading] = useState(true)
@@ -22,6 +30,7 @@ export default function DMRoster() {
   const [longRestMessage, setLongRestMessage] = useState('')
   const [assignmentBusyMemberId, setAssignmentBusyMemberId] = useState<string | null>(null)
   const [assignmentMessage, setAssignmentMessage] = useState('')
+  const [deletingCharacterId, setDeletingCharacterId] = useState<string | null>(null)
   const completeLongRest = async () => {
     if (longRestBusy) return
     setLongRestBusy(true)
@@ -78,6 +87,14 @@ export default function DMRoster() {
       : [],
     [characters, currentMemberIds, roomSession],
   )
+  const unassignedRoomCharacters = useMemo(
+    () => roomSession
+      ? characters.filter((character) =>
+          character.roomId === roomSession.roomId &&
+          (!character.roomMemberId || !currentMemberIds.has(character.roomMemberId)))
+      : [],
+    [characters, currentMemberIds, roomSession],
+  )
   const charactersByMember = useMemo(() => new Map(currentPlayers.map((player) => [
     player.memberId,
     currentRoomCharacters.filter((character) => character.roomMemberId === player.memberId),
@@ -92,7 +109,13 @@ export default function DMRoster() {
           .find((character) => character.id === characterId)
         : null
       if (characterId && !candidate) throw new Error('character-assignment-conflict')
-      if (candidate && candidate.roomMemberId !== player.memberId) {
+      // The roster and character snapshots can arrive in either order after a
+      // player reconnects.  The assignment endpoint verifies the durable
+      // character owner, so always write the candidate's current room owner
+      // before locking the player's active character.  Restricting this write
+      // to a locally-observed owner change could leave the UI offering a card
+      // that the server still considers occupied by a departed member.
+      if (candidate) {
         updateCharacter(candidate.id, {
           roomId: roomSession.roomId,
           roomMemberId: player.memberId,
@@ -118,8 +141,114 @@ export default function DMRoster() {
       setAssignmentBusyMemberId(null)
     }
   }
+  const deleteRoomCharacter = async (player: RoomRosterMember | null, characterId: string) => {
+    if (!roomSession || roomSession.role !== 'dm' || deletingCharacterId) return
+    const character = characters.find((candidate) => candidate.id === characterId)
+    if (!character) return
+    const linkedTokens = useMapStore.getState().maps.flatMap((map) =>
+      map.tokens.filter((token) => token.characterId === character.id).map((token) => ({
+        mapId: map.id,
+        tokenId: token.id,
+      })))
+    const confirmed = await showAppConfirm({
+      title: '删除房间角色',
+      message: `确定删除“${character.name}”吗？${linkedTokens.length > 0 ? `系统会同时从地图移除 ${linkedTokens.length} 个关联 Token。` : ''}账号角色库中的玩家备份不会被删除。`,
+      confirmLabel: '确认删除',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    setDeletingCharacterId(character.id)
+    setAssignmentMessage('')
+    try {
+      if (
+        player?.characterAssignment.enforced &&
+        player.characterAssignment.characterId === character.id
+      ) {
+        await assignRoomPlayerCharacter(roomSession, player.memberId, null)
+      }
+      const mapState = useMapStore.getState()
+      for (const token of linkedTokens) mapState.removeToken(token.mapId, token.tokenId)
+      removeCharacter(character.id)
+      await Promise.all([
+        saveCharactersNow(),
+        ...(linkedTokens.length > 0 ? [useMapStore.getState().saveSharedNow()] : []),
+      ])
+      if (linkedTokens.length > 0) {
+        const removedTokenIds = new Set(linkedTokens.map((token) => token.tokenId))
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const [mapsSnapshot, combat] = await Promise.all([
+            loadSharedResource<SharedMapsState>('maps'),
+            loadSharedResource<SharedCombatState>('combat'),
+          ])
+          if (!mapsSnapshot || !combat?.active || !linkedTokens.some((token) => token.mapId === combat.mapId)) break
+          const nextMaps = mapsSnapshot.maps.map((map) => ({
+            ...map,
+            tokens: map.tokens.filter((token) => !removedTokenIds.has(token.id)),
+          }))
+          const combatMap = nextMaps.find((map) => map.id === combat.mapId)
+          if (!combatMap) break
+          const validTokenIds = new Set(combatMap.tokens.map((token) => token.id))
+          const pruned = pruneInitiativeForValidTokens(
+            combat.initiativeOrder ?? [],
+            combat.initiativeIndex ?? 0,
+            validTokenIds,
+          )
+          if (pruned.removedTokenIds.length === 0) break
+          const nextRound = pruned.activeEntryRemoved && pruned.wrappedToStart && pruned.order.length > 0
+            ? combat.round + 1
+            : combat.round
+          const nextTurnEconomy = Object.fromEntries(
+            Object.entries(combat.dnd5eTurnEconomyByToken ?? {})
+              .filter(([tokenId]) => validTokenIds.has(tokenId)),
+          )
+          const now = browserRuntime.now()
+          try {
+            await saveSharedResourcesAtomically([
+              {
+                name: 'maps',
+                data: { ...mapsSnapshot, maps: nextMaps, updatedAt: now },
+              },
+              {
+                name: 'combat',
+                data: {
+                  ...combat,
+                  active: pruned.order.length > 0,
+                  round: nextRound,
+                  initiativeOrder: pruned.order,
+                  initiativeIndex: pruned.index,
+                  dnd5eTurnEconomyByToken: nextTurnEconomy,
+                  updatedAt: now,
+                },
+              },
+            ], {
+              transactionId: `roster-delete:${character.id}:${now}`,
+              undoLabel: '删除房间角色并清理先攻',
+            })
+            break
+          } catch (error) {
+            if (attempt > 0 || !(error instanceof Error) || !error.message.includes('state-transaction-conflict')) {
+              throw error
+            }
+          }
+        }
+      }
+      if (inspectedCharacterId === character.id) setInspectedCharacterId(null)
+      setAssignmentMessage(`已删除“${character.name}”${linkedTokens.length > 0 ? `，并清理 ${linkedTokens.length} 个地图 Token` : ''}。`)
+      await refresh()
+    } catch (cause) {
+      console.error('[room-character-delete-failed]', cause)
+      await showAppAlert({
+        title: '删除角色未能完整同步',
+        message: cause instanceof Error ? cause.message : '请刷新名册后重试。',
+        tone: 'danger',
+      })
+    } finally {
+      setDeletingCharacterId(null)
+    }
+  }
   const inspectedCharacter = inspectedCharacterId
-    ? currentRoomCharacters.find((character) => character.id === inspectedCharacterId) ?? null
+    ? [...currentRoomCharacters, ...unassignedRoomCharacters]
+      .find((character) => character.id === inspectedCharacterId) ?? null
     : null
 
   const onlineCount = onlinePlayers.length
@@ -183,6 +312,39 @@ export default function DMRoster() {
       )}
 
       <Dnd5eDmInventoryDistributor players={onlinePlayers} />
+
+      {unassignedRoomCharacters.length > 0 && (
+        <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-500/[0.05] p-3">
+          <p className="text-xs font-semibold text-amber-100">待分配角色</p>
+          <p className="mt-1 text-[11px] text-slate-500">由 DM 导入或原玩家已离开的角色。可先检视，再分配或删除。</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {unassignedRoomCharacters.map((character) => (
+              <div key={character.id} className="flex items-center gap-2 rounded-lg border border-white/8 bg-black/15 p-2">
+                <button
+                  type="button"
+                  onClick={() => setInspectedCharacterId(character.id)}
+                  className="inline-flex min-w-0 flex-1 items-center gap-1.5 px-1 text-left text-xs text-slate-300 hover:text-white"
+                >
+                  <Eye className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{character.name}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteRoomCharacter(null, character.id)}
+                  disabled={deletingCharacterId !== null}
+                  aria-label={`删除角色：${character.name}`}
+                  title={`删除角色：${character.name}`}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-400/15 text-red-300/80 transition hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-wait disabled:opacity-40"
+                >
+                  {deletingCharacterId === character.id
+                    ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    : <Trash2 className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading && currentPlayers.length === 0 ? (
         <div className="flex items-center justify-center gap-2 px-4 py-14 text-sm text-slate-500">
@@ -257,18 +419,31 @@ export default function DMRoster() {
                 <div className="mt-3 border-t border-white/6 pt-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">名下角色</p>
                   {ownedCharacters.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="mt-2 space-y-2">
                       {ownedCharacters.map((character) => (
-                        <button
-                          type="button"
-                          key={character.id}
-                          onClick={() => setInspectedCharacterId(character.id)}
-                          aria-label={`查看角色卡：${character.name}`}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-arcane-400/15 bg-arcane-500/[0.07] px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-arcane-300/35 hover:bg-arcane-500/15 hover:text-white"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          {character.name}
-                        </button>
+                        <div key={character.id} className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setInspectedCharacterId(character.id)}
+                            aria-label={`查看角色卡：${character.name}`}
+                            className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-arcane-400/15 bg-arcane-500/[0.07] px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-arcane-300/35 hover:bg-arcane-500/15 hover:text-white"
+                          >
+                            <Eye className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{character.name}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteRoomCharacter(player, character.id)}
+                            disabled={deletingCharacterId !== null}
+                            aria-label={`删除角色：${character.name}`}
+                            title={`删除角色：${character.name}`}
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-400/15 text-red-300/80 transition hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-wait disabled:opacity-40"
+                          >
+                            {deletingCharacterId === character.id
+                              ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                              : <Trash2 className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ) : (

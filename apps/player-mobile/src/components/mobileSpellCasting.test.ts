@@ -6,7 +6,9 @@ function character(overrides: Partial<MobileCharacterView> = {}): MobileCharacte
   return {
     id: 'wizard', name: '法师', player: '玩家', avatar: '🧙', race: '人类', charClass: '法师', level: 7,
     background: '侍僧', experience: 0, abilities: { str: 8, dex: 14, con: 14, int: 18, wis: 12, cha: 10 },
-    savingThrows: ['int', 'wis'], skills: [], maxHp: 40, currentHp: 40, tempHp: 0, ac: 13, speed: 30,
+    savingThrows: ['int', 'wis'], skills: [], maxHp: 40, currentHp: 40, tempHp: 0,
+    deathSaveSuccesses: 0, deathSaveFailures: 0, deathSaveStable: false, exhaustionLevel: 0, inspiration: 0,
+    ac: 13, speed: 30,
     initiativeBonus: 2, saveDC: 15, passivePerception: 11, conditions: [],
     classLevels: { wizard: 7 },
     classResources: {

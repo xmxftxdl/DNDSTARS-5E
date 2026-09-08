@@ -10,6 +10,7 @@ import {
   mapGeometryObstacleIsGroundSurfaceOverlay,
   mapGeometryDoorLockState,
   mapGeometryDoorOpenState,
+  mapGeometryDoorPassageGapInches,
   mapGeometryMovementBlocked,
   mapGeometryPlacementBlocked,
   mapGeometryPointInPolygon,
@@ -52,8 +53,11 @@ export interface MapGeometryPathTreeInput {
   /** Fixed flight plane used by every route in this tree. */
   targetElevationFeet?: number
   maximumTerrainStepFeet?: number
+  minimumPassageGapInches?: number
   allowOpenUnlockedDoors?: boolean
   ignoreTokens?: boolean
+  /** Ignores walls, doors, solid obstacles and terrain surfaces on the Material Plane. */
+  ignoreGeometryCollision?: boolean
   /** Tokens whose occupied cells may be traversed but never used as a final destination. */
   passThroughTokenIds?: readonly string[]
   maximumVisited?: number
@@ -142,8 +146,11 @@ export function findMapGeometryPath(input: {
   canFly?: boolean
   targetElevationFeet?: number
   maximumTerrainStepFeet?: number
+  minimumPassageGapInches?: number
   allowOpenUnlockedDoors?: boolean
   ignoreTokens?: boolean
+  /** Ignores walls, doors, solid obstacles and terrain surfaces on the Material Plane. */
+  ignoreGeometryCollision?: boolean
   /** Tokens whose occupied cells may be traversed but never used as a final destination. */
   passThroughTokenIds?: readonly string[]
   allowOccupiedDestination?: boolean
@@ -163,17 +170,18 @@ export function findMapGeometryPath(input: {
   const rows = Math.max(1, Math.ceil(input.map.height / gridSize))
   const start = tokenAnchorCellFromPixel(input.token.x, input.token.y, input.token, input.map)
   const destination = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
-  const pathGeometry = geometryWithOpenableDoors(
-    input.geometry,
-    input.allowOpenUnlockedDoors,
-  )
+  const pathGeometry = input.ignoreGeometryCollision
+    ? undefined
+    : geometryWithOpenableDoors(input.geometry, input.allowOpenUnlockedDoors)
   const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
   const destinationPosition = tokenCenterForAnchorCell(destination, input.token, input.map)
   const startTerrainElevation = mapGeometryTerrainElevationAtPoint(pathGeometry, startPosition)
   const storedStartElevation = Number.isFinite(input.token.elevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
     : startTerrainElevation
-  const startElevation = Math.max(startTerrainElevation, storedStartElevation)
+  const startElevation = input.ignoreGeometryCollision
+    ? storedStartElevation
+    : Math.max(startTerrainElevation, storedStartElevation)
   const targetElevation = Number.isFinite(input.targetElevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.targetElevationFeet!))
     : input.canFly ? startElevation : undefined
@@ -228,6 +236,7 @@ export function findMapGeometryPath(input: {
           token: input.token,
           at: destinationPosition,
           elevationFeet: finalElevation,
+          minimumPassageGapInches: input.minimumPassageGapInches,
         }).blocked) return undefined
         elevationsFeet[0] = finalElevation
       }
@@ -238,10 +247,12 @@ export function findMapGeometryPath(input: {
         const from = points[index - 1]
         const to = points[index]
         distanceFeet += feetPerCell
-        for (const door of input.geometry?.doors ?? []) {
+        for (const door of input.ignoreGeometryCollision ? [] : input.geometry?.doors ?? []) {
           if (
             mapGeometryDoorOpenState(door) === 'closed' &&
             mapGeometryDoorLockState(door) === 'unlocked' &&
+            (input.minimumPassageGapInches == null ||
+              mapGeometryDoorPassageGapInches(door) < input.minimumPassageGapInches) &&
             mapGeometrySegmentsIntersect(from, to, door.points[0], door.points[1], true)
           ) {
             doorsToOpen.add(door.id)
@@ -270,6 +281,7 @@ export function findMapGeometryPath(input: {
         to: position,
         fromElevationFeet: current.elevationFeet,
         toElevationFeet: nextElevation,
+        minimumPassageGapInches: input.minimumPassageGapInches,
       }).blocked) continue
       if (isDestination && mapGeometryPlacementBlocked({
         geometry: pathGeometry,
@@ -277,6 +289,7 @@ export function findMapGeometryPath(input: {
         token: placed,
         at: position,
         elevationFeet: nextElevation,
+        minimumPassageGapInches: input.minimumPassageGapInches,
       }).blocked) continue
       if (direction.dc !== 0 && direction.dr !== 0) {
         // A diagonal may not squeeze through the corner between two occupied
@@ -307,6 +320,7 @@ export function findMapGeometryPath(input: {
             to: cornerPosition,
             fromElevationFeet: current.elevationFeet,
             toElevationFeet: cornerElevation,
+            minimumPassageGapInches: input.minimumPassageGapInches,
           }).blocked || mapGeometryMovementBlocked({
             geometry: pathGeometry,
             map: input.map,
@@ -314,6 +328,7 @@ export function findMapGeometryPath(input: {
             to: position,
             fromElevationFeet: cornerElevation,
             toElevationFeet: nextElevation,
+            minimumPassageGapInches: input.minimumPassageGapInches,
           }).blocked) {
             continue directionLoop
           }
@@ -528,10 +543,9 @@ export function createMapGeometryPathTree(
     input.token,
     input.map,
   )
-  const pathGeometry = geometryWithOpenableDoors(
-    input.geometry,
-    input.allowOpenUnlockedDoors,
-  )
+  const pathGeometry = input.ignoreGeometryCollision
+    ? undefined
+    : geometryWithOpenableDoors(input.geometry, input.allowOpenUnlockedDoors)
   const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
   const startTerrainElevation = mapGeometryTerrainElevationAtPoint(
     pathGeometry,
@@ -540,7 +554,9 @@ export function createMapGeometryPathTree(
   const storedStartElevation = Number.isFinite(input.token.elevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
     : startTerrainElevation
-  const startElevation = Math.max(startTerrainElevation, storedStartElevation)
+  const startElevation = input.ignoreGeometryCollision
+    ? storedStartElevation
+    : Math.max(startTerrainElevation, storedStartElevation)
   const flightElevation = input.canFly && Number.isFinite(input.targetElevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.targetElevationFeet!))
     : undefined
@@ -750,6 +766,7 @@ export function createMapGeometryPathTree(
         token: input.token,
         at: destinationPosition,
         elevationFeet: destinationElevation,
+        minimumPassageGapInches: input.minimumPassageGapInches,
       }).blocked) return undefined
       const points = cells.map((cell) =>
         tokenCenterForAnchorCell(cell, input.token, input.map))
@@ -757,10 +774,12 @@ export function createMapGeometryPathTree(
       for (let index = 1; index < points.length; index += 1) {
         const from = points[index - 1]
         const target = points[index]
-        for (const door of input.geometry?.doors ?? []) {
+        for (const door of input.ignoreGeometryCollision ? [] : input.geometry?.doors ?? []) {
           if (
             mapGeometryDoorOpenState(door) === 'closed' &&
             mapGeometryDoorLockState(door) === 'unlocked' &&
+            (input.minimumPassageGapInches == null ||
+              mapGeometryDoorPassageGapInches(door) < input.minimumPassageGapInches) &&
             mapGeometrySegmentsIntersect(
               from,
               target,

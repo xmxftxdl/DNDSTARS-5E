@@ -1,0 +1,157 @@
+{
+  "mapId": "mummy-sand-ui-1788602880808",
+  "combatId": "mummy-sand-ui-1788602880808:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T10:08:01.862Z",
+  "before": {
+    "actorPosition": {
+      "x": 175,
+      "y": 245
+    },
+    "legendaryPoints": 3
+  },
+  "legendaryWindow": "传奇动作时机\n\n沙旋风验证目标 的回合即将结束。使用一次传奇动作，或跳过后继续推进先攻。\n\n传奇动作点\n\n3 / 3\n\n攻击\n消耗 1 点\n\n木乃伊领主以腐烂拳发动一次攻击，或使用恐怖凝视。\n\n攻击\n消耗 1 点\n\n木乃伊领主以腐烂拳发动一次攻击，或使用恐怖凝视。\n\n需要 DM 裁定；选择后可填写最终效果，批准时才扣除传奇动作点。\n\n致盲尘土\n消耗 1 点\n\n令人目盲的尘土和沙砾以魔法在木乃伊领主周围旋舞。木乃伊领主 5 尺内的每个生物都必须通过一次 DC 16 的体质豁免，否则会目盲至该生物下一回合结束。\n\n渎神真言（消耗 2 动作）\n消耗 2 点\n\n木乃伊领主吐出亵渎之言。木乃伊领主 10 尺内每个能听见这句魔法话语的非亡灵生物都必须通过一次 DC 16 的体质豁免，否则会震慑至木乃伊领主下一回合结束。\n\n引导负能量（消耗 2 动作）\n消耗 2 点\n\n木乃伊领主以魔法释放负能量。木乃伊领主 60 尺内的生物无法恢复生命值，包括位于屏障后或拐角另一侧的生物。该效果持续到木乃伊领主下一回合结束。\n\n需要 DM 裁定；选择后可填写最终效果，批准时才扣除传奇动作点。\n\n沙旋风（消耗 2 动作）\n消耗 2 点\n\n木乃伊领主以魔法变成一股沙旋风，移动至多 60 尺，然后恢复正常形态。在旋风形态下，木乃伊领主免疫所有伤害，并且无法被擒抱、石化、击倒、束缚或震慑。木乃伊领主穿戴或携带的装备仍归它持有。\n\n攻击目标\n沙旋风验证目标\n跳过并继续\n使用传奇动作",
+  "movementPrompt": "为“沙旋风（消耗 2 动作） · 可选移动 60 尺（取消则留在原地）”选择移动终点（0/1）。\n取消本次 Activity",
+  "afterPurchase": {
+    "id": "actor",
+    "label": "木乃伊领主",
+    "x": 175,
+    "y": 245,
+    "color": "#a16207",
+    "emoji": "M",
+    "size": 1,
+    "creatureSize": "中型",
+    "type": "enemy",
+    "poolId": "srd-5.1:mummy-lord",
+    "hp": 97,
+    "maxHp": 97,
+    "dnd5eCombatState": {
+      "schemaVersion": 2,
+      "monsterLegendaryActionPoints": 1,
+      "monsterLegendaryMovement": {
+        "schemaVersion": 1,
+        "actionId": "whirlwind-of-sand-costs-2-actions",
+        "boundaryKey": "mummy-sand-ui-1788602880808:combat:1:target",
+        "maximumFeet": 60,
+        "traversalMode": "any",
+        "provokesOpportunityAttacks": true,
+        "temporaryDamageImmunity": "all",
+        "temporaryConditionImmunities": [
+          "grappled",
+          "petrified",
+          "prone",
+          "restrained",
+          "stunned"
+        ]
+      },
+      "monsterActionUsesByActionId": {},
+      "monsterSpellSlots": {
+        "1": {
+          "current": 4,
+          "max": 4
+        },
+        "2": {
+          "current": 3,
+          "max": 3
+        },
+        "3": {
+          "current": 3,
+          "max": 3
+        },
+        "4": {
+          "current": 3,
+          "max": 3
+        },
+        "5": {
+          "current": 2,
+          "max": 2
+        },
+        "6": {
+          "current": 1,
+          "max": 1
+        }
+      },
+      "monsterSpellUsesBySpellId": {}
+    },
+    "dnd5eWorldTimeAppliedMinute": 480
+  },
+  "afterMove": {
+    "id": "actor",
+    "label": "木乃伊领主",
+    "x": 175,
+    "y": 175,
+    "color": "#a16207",
+    "emoji": "M",
+    "size": 1,
+    "creatureSize": "中型",
+    "type": "enemy",
+    "poolId": "srd-5.1:mummy-lord",
+    "hp": 97,
+    "maxHp": 97,
+    "dnd5eCombatState": {
+      "schemaVersion": 2,
+      "turnStartResolvedTurnKey": "mummy-sand-ui-1788602880808:combat:1:actor",
+      "monsterMechanicMovementTurnKey": "mummy-sand-ui-1788602880808:combat:1:target",
+      "monsterMechanicMovementFeet": 5,
+      "monsterMechanicMovementOrigin": {
+        "x": 175,
+        "y": 245
+      },
+      "monsterMechanicMovementLast": {
+        "x": 175,
+        "y": 175
+      },
+      "monsterMechanicMovementStraight": true,
+      "monsterLegendaryActionPoints": 3,
+      "monsterActionUsesByActionId": {},
+      "monsterSpellSlots": {
+        "1": {
+          "current": 4,
+          "max": 4
+        },
+        "2": {
+          "current": 3,
+          "max": 3
+        },
+        "3": {
+          "current": 3,
+          "max": 3
+        },
+        "4": {
+          "current": 3,
+          "max": 3
+        },
+        "5": {
+          "current": 2,
+          "max": 2
+        },
+        "6": {
+          "current": 1,
+          "max": 1
+        }
+      },
+      "monsterSpellUsesBySpellId": {}
+    },
+    "dnd5eWorldTimeAppliedMinute": 480,
+    "movementAnimation": {
+      "id": "monster-move:mummy-sand-ui-1788602880808:combat:1:actor:1788602904753",
+      "points": [
+        {
+          "x": 175,
+          "y": 245
+        },
+        {
+          "x": 175,
+          "y": 175
+        }
+      ],
+      "durationMs": 245,
+      "issuedAt": 1788602904853
+    }
+  },
+  "dmLog": "木乃伊领主使用传奇动作沙旋风（消耗 2 动作）。",
+  "playerLog": "木乃伊领主使用传奇动作沙旋风（消耗 2 动作）。",
+  "status": "passed",
+  "finishedAt": "2026-09-05T10:08:27.957Z"
+}

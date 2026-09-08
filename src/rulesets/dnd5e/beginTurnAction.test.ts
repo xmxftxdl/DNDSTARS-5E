@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { prepareDnd5eBeginTurn, resolveDnd5eBeginTurn } from './beginTurnAction'
+import {
+  createDnd5eMechanicalEffect,
+  dnd5eWaterWalkSurfaceRiseElevation,
+} from './activeEffects'
+import {
+  prepareDnd5eBeginTurn,
+  resolveDnd5eBeginTurn,
+} from './beginTurnAction'
 import {
   buildDnd5eCustomMonster,
   createDnd5eCustomMonsterDraft,
@@ -109,7 +117,56 @@ function fixture(order: 'hero-first' | 'basilisk-first' = 'hero-first') {
 }
 
 describe('D&D 5e authoritative begin-turn bridge', () => {
-  afterEach(() => setDnd5eRoomMonsterCatalog([]))
+  afterEach(() => {
+    setDnd5eRoomMonsterCatalog([])
+    setMapGeometryRuntime([])
+  })
+
+  it('raises an underwater Water Walk target by 60 feet at the start of its turn', () => {
+    const input = fixture()
+    input.characters[0] = {
+      ...input.characters[0],
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eMechanicalEffect({
+          definitionId: 'activity:water-walk:water-walk:modifiers:0',
+          label: 'Water Walk',
+          source: {
+            kind: 'spell',
+            actorId: input.map.tokens[0].id,
+            rulesId: 'water-walk',
+            spellLevel: 3,
+            magical: true,
+          },
+          targetId: input.map.tokens[0].id,
+          duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+          modifiers: {
+            environmentalCapabilities: {
+              treatLiquidSurfacesAsSolidGround: true,
+              riseTowardLiquidSurfaceFeetPerRound: 60,
+            },
+          },
+        })],
+      },
+    }
+    const firstRise = dnd5eWaterWalkSurfaceRiseElevation({
+      elevationFeet: -120,
+      activeEffects: input.characters[0].dnd5eCombatState?.activeEffects,
+      underwater: true,
+    })
+    expect(firstRise).toBe(-60)
+
+    const secondRise = dnd5eWaterWalkSurfaceRiseElevation({
+      elevationFeet: firstRise,
+      activeEffects: input.characters[0].dnd5eCombatState?.activeEffects,
+      underwater: true,
+    })
+    expect(secondRise).toBe(0)
+    expect(dnd5eWaterWalkSurfaceRiseElevation({
+      elevationFeet: -120,
+      activeEffects: input.characters[0].dnd5eCombatState?.activeEffects,
+      underwater: false,
+    })).toBe(-120)
+  })
 
   it('rejects a forged first-round-only slot after round one', () => {
     const input = fixture()
@@ -121,6 +178,24 @@ describe('D&D 5e authoritative begin-turn bridge', () => {
     expect(prepareDnd5eBeginTurn(input)).toEqual({
       ok: false,
       reason: 'invalid-action',
+    })
+  })
+
+  it('starts an explicit map combat turn with a sole initiative participant', () => {
+    const input = fixture()
+    input.map.tokens = [input.map.tokens[0]]
+    input.initiativeOrder = [input.initiativeOrder[0]]
+
+    const resolved = resolveDnd5eBeginTurn(input)
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok || !resolved.result.ok) return
+    expect(resolved.result.state).toMatchObject({
+      active: true,
+      round: 1,
+      initiativeIndex: 0,
+      initiativeOrder: ['hero-token'],
+      turnSlotId: 'hero-token:normal',
     })
   })
 

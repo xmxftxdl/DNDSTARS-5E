@@ -1,16 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Clock3, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react'
+import { ChevronDown, Clock3, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react'
 import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 import { showAppConfirm } from '../../lib/appDialog'
 import type {
   DmCombatRecoveryResult,
   DmUndoTransactionSummary,
 } from '../../ports/sharedRoomGateway'
+import {
+  combatRecoveryAffectedTransactions,
+  combatRecoveryOperationTransactions,
+  isCombatRecoveryInternalTransaction,
+  isCombatRecoveryResource,
+} from './dmCombatRecoveryImpact'
 
-const COMBAT_RESOURCES = new Set([
-  'maps', 'characters', 'combat', 'combat-interrupts', 'combat-log',
-  'combat-statistics', 'map-geometry', 'map-fog', 'map-exploration',
-])
+const COMBAT_RESOURCE_LABELS: Readonly<Record<string, string>> = {
+  characters: '角色与怪物（HP、资源、状态）',
+  maps: 'Token、地图效果与持续区域',
+  combat: '轮次、先攻与行动经济',
+  'combat-interrupts': '反应与裁定中断',
+  'combat-log': '战斗日志',
+  'combat-statistics': '战斗统计',
+  'map-geometry': '墙体、门窗与地图几何',
+  'map-fog': '战争迷雾',
+  'map-exploration': '地图探索记录',
+}
 
 function combatTransactionLabel(transaction: DmUndoTransactionSummary): string {
   const round = transaction.combat?.afterRound ?? transaction.combat?.beforeRound
@@ -23,13 +36,73 @@ function isCombatRecoveryCandidate(
   combatId: string,
 ): boolean {
   if (transaction.status !== 'applied') return false
-  if (transaction.label === '更新 combat') return false
-  if (!transaction.combatRecoverable && !transaction.resources.some((name) => COMBAT_RESOURCES.has(name))) {
+  if (isCombatRecoveryInternalTransaction(transaction)) return false
+  if (!transaction.combatRecoverable && !transaction.resources.some(isCombatRecoveryResource)) {
     return false
   }
   if (transaction.combat?.mapId && transaction.combat.mapId !== mapId) return false
   if (transaction.combat?.combatId && transaction.combat.combatId !== combatId) return false
   return transaction.resources.includes('combat') || transaction.combat?.combatId === combatId
+}
+
+export function DmCombatRecoveryImpactDetails({
+  transactions,
+}: {
+  transactions: readonly DmUndoTransactionSummary[]
+}) {
+  if (transactions.length === 0) return null
+  const operations = combatRecoveryOperationTransactions(transactions)
+  const internalCount = transactions.length - operations.length
+  const affectedResources = [...new Set(transactions.flatMap((transaction) =>
+    transaction.resources.filter(isCombatRecoveryResource)))]
+  return (
+    <details
+      data-testid="dm-combat-recovery-impact"
+      className="group mt-4 overflow-hidden rounded-xl border border-amber-300/20 bg-amber-500/[0.06]"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-3 text-xs text-amber-100 transition hover:bg-amber-500/10 [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">将撤回 {operations.length} 个实际操作</span>
+          <span className="mt-0.5 block text-[11px] text-amber-200/65">展开查看操作与需要同步恢复的数据</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-amber-300/15 px-3 pb-3 pt-2">
+        <p className="mb-2 text-[10px] text-slate-500">按撤回顺序排列：最新操作优先，最后撤回所选检查点。</p>
+        <ol className="space-y-2" data-testid="dm-combat-recovery-impact-list">
+          {operations.map((transaction, index) => (
+            <li
+              key={transaction.transactionId}
+              data-testid={`dm-combat-recovery-impact-transaction-${transaction.transactionId}`}
+              className="rounded-lg border border-white/8 bg-black/15 px-3 py-2"
+            >
+              <div className="flex items-start gap-2 text-xs text-slate-200">
+                <span className="w-5 shrink-0 text-right font-mono text-slate-600">{index + 1}.</span>
+                <span className="font-semibold">{combatTransactionLabel(transaction)}</span>
+              </div>
+              <div className="ml-7 mt-1 text-[10px] leading-4 text-slate-500">
+                {new Date(transaction.createdAt).toLocaleTimeString('zh-CN')} · {transaction.resources
+                  .map((resource) => COMBAT_RESOURCE_LABELS[resource] ?? resource)
+                  .join('、')}
+              </div>
+            </li>
+          ))}
+        </ol>
+        {internalCount > 0 && (
+          <p data-testid="dm-combat-recovery-internal-summary" className="mt-2 text-[10px] leading-4 text-slate-500">
+            另有 {internalCount} 条关联状态同步会随上述操作自动恢复，不是额外的玩家或 DM 操作。
+          </p>
+        )}
+        {affectedResources.length > 0 && (
+          <p data-testid="dm-combat-recovery-resource-summary" className="mt-2 text-[10px] leading-4 text-slate-500">
+            同步恢复：{affectedResources
+              .map((resource) => COMBAT_RESOURCE_LABELS[resource] ?? resource)
+              .join('、')}。
+          </p>
+        )}
+      </div>
+    </details>
+  )
 }
 
 export interface DmCombatRecoveryDialogProps {
@@ -60,9 +133,14 @@ export default function DmCombatRecoveryDialog({
   const candidates = useMemo(() => history.filter((transaction) =>
     isCombatRecoveryCandidate(transaction, mapId, combatId)), [combatId, history, mapId])
   const selected = candidates.find((transaction) => transaction.transactionId === selectedId)
-  const affectedCount = selected
-    ? candidates.filter((transaction) => transaction.createdAt >= selected.createdAt).length
-    : 0
+  const affectedTransactions = useMemo(
+    () => combatRecoveryAffectedTransactions(history, selectedId),
+    [history, selectedId],
+  )
+  const affectedOperationCount = useMemo(
+    () => combatRecoveryOperationTransactions(affectedTransactions).length,
+    [affectedTransactions],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -92,7 +170,7 @@ export default function DmCombatRecoveryDialog({
     if (!selected || recovering) return
     const confirmed = await showAppConfirm({
       title: '恢复完整战斗检查点',
-      message: `将恢复到“${combatTransactionLabel(selected)}”执行前，并撤销其后 ${affectedCount} 个战斗事务。HP、法术位、坐标、行动资源、状态、专注和持续区域会一起恢复。该操作不会重放旧玩家请求。`,
+      message: `将恢复到“${combatTransactionLabel(selected)}”执行前，共撤回 ${affectedOperationCount} 个实际操作（包含所选操作）。相关内部状态同步会自动一并恢复。HP、法术位、坐标、行动资源、状态、专注和持续区域会一起恢复。该操作不会重放旧玩家请求。`,
       confirmLabel: '确认恢复',
       cancelLabel: '取消',
       tone: 'danger',
@@ -163,7 +241,7 @@ export default function DmCombatRecoveryDialog({
               })}
             </div>
           )}
-          {selected && <p data-testid="dm-combat-recovery-impact" className="mt-4 text-xs text-amber-200">将撤销所选事务及其后的 {affectedCount} 个战斗事务。</p>}
+          {selected && <DmCombatRecoveryImpactDetails transactions={affectedTransactions} />}
           {error && <p data-testid="dm-combat-recovery-error" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-xs text-rose-100">{error}</p>}
         </div>
 

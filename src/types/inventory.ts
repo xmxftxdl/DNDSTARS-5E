@@ -31,6 +31,14 @@ export const DND5E_INVENTORY_ICON_IDS = [
   'backpack',
   'bedroll',
   'clothing',
+  'container',
+  'book',
+  'instrument',
+  'tool',
+  'gaming-set',
+  'mount',
+  'vehicle',
+  'ship',
   'rope',
   'string',
   'nails',
@@ -97,6 +105,8 @@ export interface Dnd5eMagicItemMetadata {
   attunementRequirement?: string
   /** headless 表示当前声明式效果已全部接入；其余物品不会伪装成已自动结算。 */
   automation: 'headless' | 'dm-adjudication'
+  /** Immutable rules fact; Remove Curse breaks attunement but does not erase it. */
+  cursed?: boolean
 }
 
 export const DND5E_INVENTORY_SCHEMA_VERSION = 3 as const
@@ -241,6 +251,19 @@ export interface Dnd5eInventoryHeadlessEffectSnapshot {
   resources: Record<string, Dnd5eInventoryResourceState>
 }
 
+/**
+ * Minimal Host-authored projection used by Detect Magic. It deliberately
+ * carries no executable rules text: the detector may learn that a visible
+ * item bears magic without being allowed to execute or identify that item.
+ */
+export interface Dnd5eInventoryMagicDetectionSnapshot {
+  instanceId: string
+  templateId: string
+  displayName: string
+  equippedSlot?: EquipmentSlot
+  containerInstanceId?: string
+}
+
 /** Host-authored inventory projection for the three SRD reaction spells. */
 export interface Dnd5eInventoryReactionSpellSnapshot {
   instanceId: string
@@ -322,6 +345,17 @@ export interface Dnd5eInventoryUseAction {
   effect: Dnd5eInventoryUseEffect
 }
 
+/**
+ * Explicit rules identity for a spell material. Price alone is never enough to
+ * satisfy a spell: a 500 gp weapon must not be accepted as a 500 gp diamond.
+ */
+export interface Dnd5eSpellcastingMaterialMetadata {
+  /** Stable, namespaced ingredient identities understood by spell requirements. */
+  tags: readonly string[]
+  /** Rules value of one inventory unit, independent from a shop's sale price. */
+  unitValueGp?: number
+}
+
 export interface Dnd5eInventoryItemTemplate {
   /** 稳定、可由规则包命名空间扩展的模板 ID。 */
   id: string
@@ -334,12 +368,16 @@ export interface Dnd5eInventoryItemTemplate {
   description: string
   rulesText: string
   weightLb?: number
+  /** Physical longest edge used by spells with an object-size limit. */
+  longestDimensionFeet?: number
   cost?: Dnd5eItemCost
   /** 装入该容器的物品总重上限。只限制内容物，不包含容器自身重量。 */
   containerCapacityWeightLb?: number
   /** 弹药模板的标准弹药种类；远程武器事务按该字段权威扣除。 */
   ammunitionKind?: Dnd5eAmmunitionKind
   stackable: boolean
+  /** Optional explicit identity used by authoritative costly/consumed M checks. */
+  spellcastingMaterial?: Dnd5eSpellcastingMaterialMetadata
   equipment?: EquipmentItem
   /** SRD 魔法物品的可检索规则元数据；普通装备不携带此字段。 */
   magicItem?: Dnd5eMagicItemMetadata
@@ -391,9 +429,23 @@ export interface Dnd5eInventoryEntry {
   attunedAt?: number
   /** 未鉴定魔法物品不会公开规则正文，也不会激活装备或 Headless 效果。 */
   identified?: boolean
+  /** 玩家投影可公开的唯一鉴定线索；不会泄露模板 ID、物品类型或规则效果。 */
+  unidentifiedMagicItemRarity?: Dnd5eMagicItemRarity
   /** 直接容器。容器仍属于同一角色，且禁止形成嵌套循环。 */
   containerInstanceId?: string
   acquiredAt: number
+  /** Campaign-clock expiry for Host-generated temporary items such as Goodberry. */
+  expiresAtWorldMinute?: number
+  /** Traceable rules identity; never interpreted as executable content. */
+  generatedByRulesId?: string
+  /** Host-owned food/drink contamination markers. Empty/omitted means safe. */
+  contaminants?: readonly ('poison' | 'disease')[]
+  /** Host-owned location for a spell-linked object; Ethereal entries cannot be used/equipped. */
+  planarState?: 'material' | 'ethereal'
+  /** Durable spell-authority record that owns the planar transition. */
+  linkedSpellAuthorityRecordId?: string
+  /** Exact costly focus whose destruction or dispelling ends the linked spell. */
+  linkedSpellFocusAuthorityRecordId?: string
 }
 
 export interface Dnd5eInventory {
@@ -423,6 +475,8 @@ export interface Dnd5eInventoryGrant {
   templateId: string
   quantity: number
   identified?: boolean
+  expiresAtWorldMinute?: number
+  generatedByRulesId?: string
 }
 
 export interface Dnd5eInventoryCurrencyGrant {
@@ -441,11 +495,41 @@ export type Dnd5eInventoryMutation =
   | { type: 'end-attunement'; characterId: string; instanceId: string }
   | { type: 'set-container'; characterId: string; instanceId: string; containerInstanceId?: string }
   | { type: 'adjust-currency'; characterId: string; currency: Dnd5eCurrency; delta: number }
-  | { type: 'identify'; characterId: string; instanceId: string }
+  | {
+      type: 'identify'
+      characterId: string
+      instanceId: string
+      /** Durable Host command receipt used by Activity-based Identify. */
+      receiptId?: string
+      expectedInventoryRevision?: number
+    }
+  | {
+      type: 'break-cursed-attunement'
+      characterId: string
+      instanceId: string
+      receiptId?: string
+      expectedInventoryRevision?: number
+    }
+  | {
+      type: 'purify-consumable'
+      characterId: string
+      instanceId: string
+      receiptId?: string
+      expectedInventoryRevision?: number
+    }
+  | {
+      /** DM-authored scene state used by poison, disease, and purification rules. */
+      type: 'set-consumable-contaminants'
+      characterId: string
+      instanceId: string
+      contaminants: readonly ('poison' | 'disease')[]
+    }
   | {
       type: 'use'
       characterId: string
       instanceId: string
+      /** Selects one Host-declared action when an item exposes multiple ways to use it. */
+      useActionId?: string
       /** Creature-targeted healing applies to this character; the source still pays the item cost. */
       targetCharacterId?: string
       healingRolls?: number[]

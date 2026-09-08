@@ -24,6 +24,9 @@ export class SharedRoomService {
     options?: SharedResourceWriteOptions & { transactionId?: string },
   ) => this.gateway.saveResourcesAtomically(writes, options)
   readonly appendSharedPlayerActionRequest = <T>(action: T) => this.gateway.appendPlayerActionRequest(action)
+  readonly submitPlayerCharacterCommand = (
+    command: Record<string, unknown> & { commandId: string },
+  ) => this.gateway.submitPlayerCharacterCommand(command)
   readonly loadDmUndoHistory = () => this.gateway.loadDmUndoHistory()
   readonly undoDmTransaction = (transactionId?: string) => this.gateway.undoDmTransaction(transactionId)
   readonly recoverDmCombatToTransaction = (transactionId: string) =>

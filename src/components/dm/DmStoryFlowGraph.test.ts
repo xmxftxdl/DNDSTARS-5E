@@ -9,6 +9,7 @@ import {
   storyGraphAnchoredScroll,
   storyGraphCenteredScroll,
   storyGraphFitZoom,
+  storyGraphNewNodePosition,
 } from './dmStoryGraphViewport'
 import {
   layoutStoryGraphEdgeLabels,
@@ -74,6 +75,21 @@ describe('DmStoryFlowGraph layout', () => {
     })).toEqual({ left: 700, top: 610 })
   })
 
+  it('新建剧情节点优先放入当前可见画布而不是追加到整张图底部', () => {
+    const position = storyGraphNewNodePosition({
+      viewportWidth: 1_200,
+      viewportHeight: 700,
+      scrollLeft: 0,
+      scrollTop: 0,
+      zoom: 1,
+      nodeWidth: 304,
+      nodeHeight: 154,
+      occupied: [{ x: 420, y: 56 }, { x: 420, y: 2_158 }, { x: 420, y: 2_390 }],
+    })
+    expect(position.y).toBeLessThan(546)
+    expect(position).not.toEqual({ x: 420, y: 2_622 })
+  })
+
   it('单列剧情节点在最小画布中央纵向排布，不会迁移到最左边', () => {
     const laidOut = layoutStoryGraphEvents([storyEvent('a'), storyEvent('b')], [{
       id: 'link', fromEventId: 'a', toEventId: 'b', label: '', condition: { kind: 'always' },
@@ -95,9 +111,35 @@ describe('DmStoryFlowGraph layout', () => {
     expect(dead.graphPosition?.y).toBe(alive.graphPosition?.y)
   })
 
+  it('不让不同分析时间锚点共用同一排导致横线重叠', () => {
+    const timed = (id: string, timeLabel: string, timelineOrder: number): AccountStoryEventV1 => ({
+      ...storyEvent(id),
+      source: 'analysis-timeline',
+      sourceEventIds: [id],
+      timeLabel,
+      timelineOrder,
+    })
+    const first = timed('first', '第一小时', 10)
+    const second = timed('second', '第二小时', 20)
+    const ending = timed('ending', '第三小时', 30)
+    const laidOut = layoutStoryGraphEvents([first, second, ending], [
+      { id: 'first-ending', fromEventId: 'first', toEventId: 'ending', label: '', condition: { kind: 'always' } },
+      { id: 'second-ending', fromEventId: 'second', toEventId: 'ending', label: '', condition: { kind: 'always' } },
+    ])
+    const y = Object.fromEntries(laidOut.map((event) => [event.id, event.graphPosition!.y]))
+    expect(y.second).toBeGreaterThan(y.first)
+    expect(y.ending).toBeGreaterThan(y.second)
+  })
+
   it('关联选择器把已关联人物、线索和结局稳定置顶', () => {
     const entries = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
     expect(prioritizeSelectedStoryEntries(entries, ['c', 'a']).map((entry) => entry.id)).toEqual(['a', 'c', 'b', 'd'])
+  })
+
+  it('关联选择器在深色背景中保持未选项和选中项清晰可读', () => {
+    expect(storyFlowGraphSource).toContain("'border-transparent text-slate-300")
+    expect(storyFlowGraphSource).toContain("bg-violet-500/20 font-semibold text-white")
+    expect(storyFlowGraphSource).not.toContain("'text-slate-600 hover:bg-white/[0.03]")
   })
 
   it('分支标签自动错开且不会覆盖事件卡片', () => {
@@ -140,7 +182,7 @@ describe('DmStoryFlowGraph layout', () => {
     const analysis = { people: [], clues: [] } as unknown as PdfCampaignAnalysisV2
     const html = renderToStaticMarkup(createElement(DmStoryFlowGraph, { workspace, analysis, onChange: () => undefined }))
     expect(html).toContain('剧情世界线')
-    expect(html).toContain('完整事件、分支条件与时间线')
+    expect(html).toContain('完整事件、分支与时间线')
     expect(html).toContain('适应')
     expect(html).toContain('全屏')
     expect(html).not.toContain('编辑完整世界线')
@@ -150,6 +192,15 @@ describe('DmStoryFlowGraph layout', () => {
     expect(html).toContain('data-testid="dm-story-timeline-marker"')
     expect(html).toContain('aria-label="移动时间横线')
     expect(html).toContain('第 2 日 14:30')
+  })
+
+  it('让时间横线位于不透明事件卡片下方，不再透过卡片文字区域', () => {
+    expect(storyFlowGraphSource).toContain('left-0 right-0 z-[1]')
+    expect(storyFlowGraphSource).toContain('absolute z-[2] cursor-grab')
+    expect(storyFlowGraphSource).toContain("active: 'border-cyan-300/60 bg-[#0a1b24]")
+    expect(storyFlowGraphSource).toContain("completed: 'border-emerald-400/45 bg-[#0a1918]'")
+    expect(storyFlowGraphSource).not.toContain('bg-cyan-950/30')
+    expect(storyFlowGraphSource).not.toContain('bg-emerald-950/20')
   })
 
   it('全屏把编辑器收进覆盖式下拉层，不再挤压思维导图画布', () => {
@@ -163,12 +214,25 @@ describe('DmStoryFlowGraph layout', () => {
     expect(storyFlowGraphSource).toContain('max-h-[calc(100vh-6.5rem)]')
   })
 
-  it('分支编辑器提供通用事件条件，不再把所有非人物分支称为 DM 裁定', () => {
-    expect(storyFlowGraphSource).toContain('<option value="event-completed">指定事件已发生</option>')
-    expect(storyFlowGraphSource).toContain('<option value="event-skipped">指定事件未发生</option>')
-    expect(storyFlowGraphSource).toContain('<option value="manual">其他事件或自定义条件</option>')
-    expect(storyFlowGraphSource).toContain('aria-label="分支判断事件"')
-    expect(storyFlowGraphSource).not.toContain('<option value="manual">DM 手动裁定</option>')
+  it('只保留完整世界线，不再提供单线或旧分支恢复模式', () => {
+    expect(storyFlowGraphSource).not.toContain('改为单线')
+    expect(storyFlowGraphSource).not.toContain('function sequentialLinks')
+    expect(storyFlowGraphSource).not.toContain('恢复原分支')
+    expect(storyFlowGraphSource).not.toContain('restoreStoryGraphBranches')
+  })
+
+  it('分支编辑器只保留直接文字和待决定、已触发、未触发三态', () => {
+    expect(storyFlowGraphSource).toContain('aria-label="新分支文字"')
+    expect(storyFlowGraphSource).toContain('aria-label="编辑分支文字"')
+    expect(storyFlowGraphSource).toContain('>待决定</button>')
+    expect(storyFlowGraphSource).toContain('>已触发</button>')
+    expect(storyFlowGraphSource).toContain('>未触发</button>')
+    expect(storyFlowGraphSource).toContain('aria-label="删除当前分支"')
+    expect(storyFlowGraphSource).toContain("event.key === 'Delete' || event.key === 'Backspace'")
+    expect(storyFlowGraphSource).not.toContain('aria-label="分支判断类型"')
+    expect(storyFlowGraphSource).not.toContain('aria-label="分支判断人物"')
+    expect(storyFlowGraphSource).not.toContain('aria-label="分支判断事件"')
+    expect(storyFlowGraphSource).not.toContain('aria-label="编辑分支条件类型"')
   })
 
   it('在 AI 剧情节点上显示可点击回查的 PDF 原文书签数量', () => {
@@ -209,12 +273,55 @@ describe('DmStoryFlowGraph layout', () => {
     expect(html).toContain('第 7 页')
   })
 
+  it('把剧情节点中的人物与地点名称渲染为可点击详情链接', () => {
+    const workspace: AccountCampaignStoryWorkspaceV1 = {
+      schemaVersion: 1,
+      mode: 'prep',
+      events: [{
+        ...storyEvent('arrival'),
+        title: '艾琳抵达鹿灯驿馆',
+        summary: '灰羽女士在驿馆检查伪信。',
+        personIds: ['person-elinora'],
+      }],
+      graphLinks: [],
+      graphInitialized: true,
+      graphLayoutVersion: 4,
+      personStates: [],
+      clueStates: [],
+      recaps: [],
+    }
+    const recordBase = { evidenceIds: [], confidence: 1, reviewStatus: 'approved' as const, citations: [] }
+    const analysis = {
+      people: [{ ...recordBase, id: 'person-elinora', aliases: ['灰羽女士'], name: '艾琳·灰羽', description: '调查伪信。', role: '法师', personality: '谨慎', motivation: '查明真相', secret: '', voice: '言辞克制', portraitDataUrl: 'data:image/png;base64,AA==' }],
+      locations: [{ ...recordBase, id: 'location-deer-lamp', aliases: ['驿馆'], name: '鹿灯驿馆', description: '北方驿站。' }],
+      clues: [],
+      scenes: [],
+    } as unknown as PdfCampaignAnalysisV2
+
+    const html = renderToStaticMarkup(createElement(DmStoryFlowGraph, { workspace, analysis, onChange: () => undefined }))
+    expect(html).toContain('data-story-entity-kind="person"')
+    expect(html).toContain('data-story-entity-kind="location"')
+    expect(html).toContain('查看人物：艾琳·灰羽')
+    expect(html).toContain('查看地点：鹿灯驿馆')
+    expect(html).toContain('data:image/png;base64,AA==')
+    expect(storyFlowGraphSource).toContain('data-testid="dm-story-entity-detail"')
+    expect(storyFlowGraphSource).toContain('data-drawer-side="left"')
+    expect(storyFlowGraphSource).toContain("pairedWithEvent ? 'pointer-events-none bg-transparent'")
+    expect(storyFlowGraphSource).toContain("pairedEntityOpen ? 'w-1/2 max-w-xl'")
+    expect(storyFlowGraphSource).toContain('data-paired-detail={pairedWithEvent')
+    expect(storyFlowGraphSource).toContain('border-r border-violet-400/20')
+    expect(storyFlowGraphSource).toContain('人物、势力与地点关系')
+    expect(storyFlowGraphSource).toContain('PDF 原文书签')
+    expect(storyFlowGraphSource).toContain('whitespace-pre-wrap text-sm leading-6 text-white')
+    expect(storyFlowGraphSource).not.toContain('别名：{record.aliases')
+  })
+
   it('完整世界线直接显示事件摘要、时间与 DM 调整后的分支位置', () => {
     const workspace: AccountCampaignStoryWorkspaceV1 = {
       schemaVersion: 1,
       mode: 'prep',
       events: [
-        { ...storyEvent('root'), summary: '这段完整摘要不应出现在简洁主流程。', timeLabel: '第三日午夜', graphPosition: { x: 488, y: 64 } },
+        { ...storyEvent('root'), summary: '这段完整摘要应显示在世界线节点中。', timeLabel: '第三日午夜', graphPosition: { x: 488, y: 64 } },
         { ...storyEvent('outcome'), graphPosition: { x: 488, y: 450 } },
       ],
       graphLinks: [{
@@ -234,10 +341,10 @@ describe('DmStoryFlowGraph layout', () => {
     const analysis = { people: [], clues: [] } as unknown as PdfCampaignAnalysisV2
     const html = renderToStaticMarkup(createElement(DmStoryFlowGraph, { workspace, analysis, onChange: () => undefined }))
     expect(html).toContain('data-story-link-label="true"')
-    expect(html).toContain('玩家选择交出伪信')
+    expect(html).toContain('交出伪信后获得通行证')
     expect(html).toContain('left:720px')
     expect(html).toContain('top:310px')
-    expect(html).toContain('这段完整摘要不应出现在简洁主流程。')
+    expect(html).toContain('这段完整摘要应显示在世界线节点中。')
     expect(html).toContain('第三日午夜')
   })
 

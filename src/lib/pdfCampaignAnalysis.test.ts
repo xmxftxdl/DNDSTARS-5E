@@ -155,6 +155,9 @@ describe('PDF 战役分析', () => {
     expect(properties.relationships.maxItems).toBe(40)
     expect(properties.scenes.maxItems).toBe(10)
     expect(properties.warnings.maxItems).toBe(8)
+    const importItems = properties.importCandidates.items as { required?: string[]; properties?: Record<string, unknown> }
+    expect(importItems.required).toContain('monsterStatBlockText')
+    expect(importItems.properties).toHaveProperty('monsterStatBlockText')
   })
 
   it('按分析阶段关闭无关字段，并给长文档提供非强制的模型建议', () => {
@@ -498,6 +501,21 @@ describe('PDF 战役分析', () => {
     })).toBe(false)
   })
 
+  it('怪物候选必须携带新的完整属性块字段，从而使旧分段缓存自动失效', () => {
+    const legacy = output(1)
+    legacy.importCandidates = [{
+      name: '潮汐祭司', description: '旧缓存只有基础说明。', kind: 'monster', automation: 'partial',
+      citations: [{ documentName: '冒险.pdf', page: 1 }],
+    }]
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(false)
+    legacy.importCandidates[0]!.monsterStatBlockText = '潮汐祭司\nAC 14\nHP 45\n动作\n潮汐打击。近战武器攻击。'
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(true)
+    legacy.importCandidates[0] = { ...legacy.importCandidates[0]!, kind: 'item', monsterStatBlockText: '不应附在物品上的怪物文本' }
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(false)
+    legacy.importCandidates[0] = { ...legacy.importCandidates[0]!, kind: 'monster', automation: 'full', monsterStatBlockText: '' }
+    expect(validatePdfCampaignChunkAnalysis(legacy)).toBe(false)
+  })
+
   it('模型返回非法结构时终止任务而不是写入半成品', async () => {
     const registry = new AiProviderRegistryV1()
     registry.register(runtime(async (request) => ({
@@ -757,9 +775,9 @@ describe('PDF 战役分析', () => {
 
   it('本地模型命中结构化输出上限时自动扩容重试', async () => {
     const registry = new AiProviderRegistryV1()
-    const requests: Array<{ maxOutputTokens?: number; userPrompt: string }> = []
+    const requests: Array<{ maxOutputTokens?: number; userPrompt: string; outputSchema: unknown }> = []
     registry.register(runtime(async (request) => {
-      requests.push({ maxOutputTokens: request.maxOutputTokens, userPrompt: request.userPrompt })
+      requests.push({ maxOutputTokens: request.maxOutputTokens, userPrompt: request.userPrompt, outputSchema: request.outputSchema })
       if (requests.length === 1) throw new Error('structured-output-truncated')
       return {
         schemaVersion: 1,
@@ -778,10 +796,12 @@ describe('PDF 战役分析', () => {
       onProgress: progress,
     })
 
-    expect(requests.map(({ maxOutputTokens }) => maxOutputTokens)).toEqual([2_200, 4_400])
+    expect(requests.map(({ maxOutputTokens }) => maxOutputTokens)).toEqual([5_000, 6_144])
     expect(requests[1]?.userPrompt).toContain('上一次输出达到长度上限')
+    const retryImportSchema = ((requests[1]?.outputSchema as { properties?: Record<string, { items?: { properties?: Record<string, { maxLength?: number }> } }> }).properties?.importCandidates?.items?.properties)
+    expect(retryImportSchema?.monsterStatBlockText?.maxLength).toBe(24_000)
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringContaining('第 1 次扩容重试（4400 tokens）'),
+      message: expect.stringContaining('第 1 次扩容重试（6144 tokens）'),
     }))
     expect(result.people).toHaveLength(1)
   })
@@ -925,8 +945,8 @@ describe('PDF 战役分析', () => {
     expect(generate).toHaveBeenCalledTimes(7)
     expect(generate.mock.calls.filter(([request]) => request.task === 'pdf-extraction')).toHaveLength(6)
     expect(generate.mock.calls.slice(0, 6).map(([request]) => request.maxOutputTokens)).toEqual([
-      1_400, 1_200, 1_600,
-      1_400, 1_200, 1_600,
+      1_400, 1_200, 5_000,
+      1_400, 1_200, 5_000,
     ])
     expect(generate.mock.calls.at(-1)?.[0].maxOutputTokens).toBe(12_000)
     expect(generate.mock.calls.at(-1)?.[0].task).toBe('campaign-analysis')

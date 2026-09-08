@@ -6,13 +6,43 @@ import {
   createD20ReplacementContribution,
   createD20RollConfirmationInterrupt,
   currentD20RollConfirmations,
+  d20ChoiceRerollRequiresOwnerSelection,
+  durableD20RollId,
+  findD20RollConfirmationByRollId,
   findCurrentD20RollConfirmation,
   resolvedD20Adjustment,
   resolvedD20Value,
   settleD20RollConfirmation,
 } from './rollConfirmation'
+import { dnd5eCoreInspirationChoiceRerollOption } from './d20InterruptPolicy'
 
 describe('d20 roll confirmation', () => {
+  it('reuses a stable d20 identity when a durable parent action resumes after refresh', () => {
+    const first = durableD20RollId({
+      mapId: 'map-1', sourceMode: 'dm', transactionId: 'player-action-123', occurrenceIndex: 0,
+    })
+    const replay = durableD20RollId({
+      mapId: 'map-1', sourceMode: 'dm', transactionId: 'player-action-123', occurrenceIndex: 0,
+    })
+    const nextOccurrence = durableD20RollId({
+      mapId: 'map-1', sourceMode: 'dm', transactionId: 'player-action-123', occurrenceIndex: 1,
+    })
+    expect(replay).toBe(first)
+    expect(nextOccurrence).not.toBe(first)
+
+    const settled = {
+      ...createD20RollConfirmationInterrupt({
+        mapId: 'map-1', rollId: first, label: '巨鹰·喙击命中检定',
+        targetName: '牛头人', originalValue: 8,
+      }),
+      status: 'done' as const,
+      response: { decision: 'continue' as const, finalValue: 16 },
+    }
+    expect(findD20RollConfirmationByRollId({ interrupts: [settled] }, replay))
+      .toBe(settled)
+    expect(resolvedD20Value(settled.response, settled.payload.originalValue)).toBe(16)
+  })
+
   it('shows only the latest reconnect generation and never revives an older ghost prompt', () => {
     const first = createD20RollConfirmationInterrupt({
       mapId: 'map-1', combatId: 'combat-1', rollId: 'retry-1', label: '法术攻击',
@@ -50,6 +80,27 @@ describe('d20 roll confirmation', () => {
     expect(currentD20RollConfirmations({ interrupts: [expired] }, expired.expiresAt)).toEqual([])
     expect(findCurrentD20RollConfirmation({ interrupts: [expired] }, expired, expired.expiresAt)).toBeUndefined()
     expect(currentD20RollConfirmations({ interrupts: [expired] }, expired.expiresAt! - 1)).toEqual([expired])
+  })
+
+  it('reconnects to an in-flight Inspiration reroll until it can finish or safely time out', () => {
+    const pending = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', combatId: 'combat-1', rollId: 'inspiration-recovery', label: '敏捷豁免',
+      targetName: '卓尔', originalValue: 7, rollerCharacterId: 'drow', now: 100,
+      eligibleModifiers: [dnd5eCoreInspirationChoiceRerollOption({ id: 'drow', inspiration: 1 }, 'drow-token')!],
+    })
+    const rolling = { ...pending, status: 'rolling' as const, expiresAt: 10_100 }
+
+    expect(currentD20RollConfirmations({ interrupts: [rolling] }, 10_099)).toEqual([rolling])
+    expect(currentD20RollConfirmations({ interrupts: [rolling] }, 10_100)).toEqual([])
+
+    const diceRecorded = {
+      ...rolling,
+      payload: {
+        ...rolling.payload,
+        rollOptions: { contributionId: 'inspiration-use', values: [7, 16] },
+      },
+    }
+    expect(currentD20RollConfirmations({ interrupts: [diceRecorded] }, 20_000)).toEqual([diceRecorded])
   })
 
   it('opens a DM-owned after-roll transaction and keeps the original result by default', () => {
@@ -301,6 +352,43 @@ describe('d20 roll confirmation', () => {
     })
     expect(response.transaction?.rollLedger.entries).toHaveLength(2)
     expect(response.transaction?.rollLedger.entries[1].dice).toEqual({ sides: 20, values: [5] })
+  })
+
+  it('settles core Inspiration in one click as advantage and keeps the higher d20', () => {
+    const option = dnd5eCoreInspirationChoiceRerollOption({ id: 'hero', inspiration: 1 }, 'hero-token')!
+    expect(d20ChoiceRerollRequiresOwnerSelection(option)).toBe(false)
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1', rollId: 'core-inspiration', label: '英雄攻击', originalValue: 8,
+      rollerCharacterId: 'hero', eligibleModifiers: [option], now: 10,
+    })
+    const use = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id, characterId: 'hero', characterName: '英雄',
+      featureId: option.featureId, featureLabel: option.featureLabel, decision: 'use', now: 12,
+    })
+    const improved = settleD20RollConfirmation(
+      { ...interrupt, contributions: [use] }, use.id, 20, undefined, undefined, 16,
+    )
+    expect(improved).toMatchObject({
+      finalValue: 16,
+      choiceReroll: { selectedValue: 16, selectedIndex: 1, selectionPolicy: 'highest' },
+    })
+
+    const lowerReroll = settleD20RollConfirmation(
+      { ...interrupt, contributions: [use] }, use.id, 20, undefined, undefined, 4,
+    )
+    expect(lowerReroll).toMatchObject({
+      finalValue: 8,
+      choiceReroll: { selectedValue: 8, selectedIndex: 0, selectionPolicy: 'highest' },
+    })
+  })
+
+  it('only pauses after the second d20 when the feature owner must choose a result', () => {
+    expect(d20ChoiceRerollRequiresOwnerSelection({ selectionPolicy: 'owner-chooses' })).toBe(true)
+    expect(d20ChoiceRerollRequiresOwnerSelection({ selectionPolicy: undefined })).toBe(true)
+    expect(d20ChoiceRerollRequiresOwnerSelection({ selectionPolicy: 'highest' })).toBe(false)
+    expect(d20ChoiceRerollRequiresOwnerSelection({ selectionPolicy: 'lowest' })).toBe(false)
+    expect(d20ChoiceRerollRequiresOwnerSelection({ selectionPolicy: 'must-use-latest' })).toBe(false)
+    expect(d20ChoiceRerollRequiresOwnerSelection()).toBe(false)
   })
 
   it('supports a three-result choice and records every Host die', () => {

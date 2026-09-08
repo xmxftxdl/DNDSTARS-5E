@@ -122,6 +122,7 @@ for (const directory of ['src/domain', 'src/application', 'src/ports']) {
 const mapsPage = await source('src/pages/MapsPage.tsx')
 const mapsWorkspacePage = await source('src/pages/MapsWorkspacePage.tsx')
 const mapCanvas = await source('src/components/map/MapCanvas.tsx')
+const mapViewportLayer = await source('src/presentation/maps/MapViewportLayer.tsx')
 const mapPersistentAreaLayers = await source('src/components/map/MapPersistentAreaLayers.tsx')
 const serverCore = await source('scripts/shared-server-core.mjs')
 const pluginApi = await source('src/rulesets/dnd5e/pluginApi.ts')
@@ -213,7 +214,8 @@ for (const directory of ['src/pages', 'src/components', 'src/store']) {
 
 const requiredMigrations = [
   [mapsWorkspacePage, "from '../presentation/maps/combatViewModel'", 'MapsPage CombatViewModel projection'],
-  [mapsWorkspacePage, "import('../presentation/maps/SceneCanvas')", 'MapsPage lazy SceneCanvas boundary'],
+  [mapsWorkspacePage, "import('../presentation/maps/MapViewportLayer')", 'MapsPage lazy viewport boundary'],
+  [mapViewportLayer, "from './SceneCanvas'", 'Viewport SceneCanvas boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useCombatInteraction'", 'MapsPage CombatInteraction boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useCombatDialog'", 'MapsPage combat dialog boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useDicePresentation'", 'MapsPage dice presentation boundary'],
@@ -227,7 +229,7 @@ const requiredMigrations = [
   [monsterTurnPlanner, "from './monsterStructuredSpecialCandidates'", 'monster structured special candidate boundary'],
   [monsterTurnPlanner, "from './monsterPersistentAreaHazardScoring'", 'monster persistent-area hazard scoring boundary'],
   [monsterTurnPlanner, "from './monsterControlCandidateGenerators'", 'monster control candidate boundary'],
-  [mapsWorkspacePage, "from '../composition/browserSceneClock'", 'MapCanvas campaign clock projection boundary'],
+  [mapViewportLayer, "from '../../composition/browserSceneClock'", 'MapCanvas campaign clock projection boundary'],
   [mapCanvas, "from './MapMeasureLine'", 'MapCanvas measurement projection boundary'],
   [mapCanvas, "from './Dnd5eItemAreaOverlays'", 'MapCanvas item-area overlay boundary'],
   [mapPersistentAreaLayers, "from './toxicCloudPresentation'", 'MapCanvas toxic-cloud presentation boundary'],

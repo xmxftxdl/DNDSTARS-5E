@@ -1,0 +1,120 @@
+{
+  "id": "srd-5.1:mage",
+  "slug": "mage",
+  "name": "法师",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "dagger",
+      "name": "匕首",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 79,
+      "slug": "mage",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:21:14.009Z",
+      "name": "法师",
+      "actionId": "dagger",
+      "actionName": "匕首",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "6",
+      "total": 334,
+      "mapId": "verify-ui-mage-dagger-1788567674067",
+      "combatId": "verify-ui-mage-dagger-1788567674067:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "法师 使用匕首攻击 验证目标：匕首 → 验证目标 15+5=20 命中；共造成 5 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:21 PM\n结算\n\n法师 使用匕首攻击 验证目标：匕首 → 验证目标 15+5=20 命中；共造成 5 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：匕首｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 15；最终采用 15；调整值 +5。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 匕首（基础伤害·穿刺）｜1d4 骰面：3 = 3｜固定加值 +2｜小计 5\n法师｜消耗动作\n验证目标｜受到 5 点伤害｜HP 320 → 315",
+      "playerLog": "法师 使用匕首攻击 验证目标：匕首 → 验证目标 15+5=20 命中；共造成 5 点伤害。",
+      "afterHp": 315,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:21:37.601Z",
+      "evidenceFile": "ui-cases/monsters/079-mage.json"
+    },
+    {
+      "index": 187,
+      "slug": "mage",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:52:20.300Z",
+      "name": "法师",
+      "actionId": "dagger",
+      "actionName": "匕首",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-mage-dagger-1788562340346",
+      "combatId": "verify-ui-mage-dagger-1788562340346:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "status": "failed",
+      "error": "TimeoutError: locator.click: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /^Log(?: \\d+)?$/ })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"button\" data-testid=\"combat-log-toggle\" class=\"flex items-center gap-2 rounded-xl border border-white/10 bg-void-950/88 px-3 py-2 text-xs font-bold text-slate-200 shadow-xl backdrop-blur-md hover:bg-white/10\">…</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n\u001b[2m    - element is visible, enabled and stable\u001b[22m\n\u001b[2m    - scrolling into view if needed\u001b[22m\n\u001b[2m    - done scrolling\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:53:21.075Z",
+      "evidenceFile": "ui-cases/monsters/187-mage.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

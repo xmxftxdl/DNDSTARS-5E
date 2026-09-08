@@ -69,7 +69,7 @@ export function emptyPdfEncounter(): PdfEncounterRecordV1 {
 }
 
 export function emptyPdfImportCandidate(): PdfImportCandidateV1 {
-  return { name: '新资源', description: '', kind: 'npc', automation: 'manual', citations: [] }
+  return { name: '新资源', description: '', kind: 'npc', automation: 'manual', monsterStatBlockText: '', citations: [] }
 }
 
 export function emptyPdfPrepTip(): PdfPrepTipV1 {

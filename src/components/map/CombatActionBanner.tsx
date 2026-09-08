@@ -29,6 +29,18 @@ export default function CombatActionBanner({
   attackName = '攻击',
   attackKind = 'melee',
 }: CombatActionBannerProps) {
+  const title = mode === 'turn' ? '你的回合' : mode === 'spell' ? spellName : attackName
+  const titleGlyphCount = Math.max(2, [...title.replace(/\s/g, '')].length)
+  // Keep the original centered banner composition. Only the glyph size is
+  // reduced for long action/spell names; sizing the copy with container-query
+  // units required stretching it across the center panel and shifted short
+  // turn announcements visibly to the left.
+  const titleFit = `${Number(Math.max(18, Math.min(56, 430 / titleGlyphCount)).toFixed(3))}px`
+  const titleTracking = titleGlyphCount > 12
+    ? '0.03em'
+    : titleGlyphCount > 7
+      ? '0.07em'
+      : '0.14em'
   const palette = DND5E_CLASS_ICON_PALETTES[classId] ?? FALLBACK_PALETTE
   const style = {
     '--combat-banner-color': palette[0],
@@ -39,6 +51,8 @@ export default function CombatActionBanner({
     '--streak-deep': palette[1],
     '--streak-accent': palette[2],
     '--streak-glow': palette[3],
+    '--combat-banner-title-fit': titleFit,
+    '--combat-banner-title-tracking': titleTracking,
   } as CSSProperties
   const icon = mode === 'spell'
     ? dnd5eSpellActionIcon({
@@ -89,7 +103,7 @@ export default function CombatActionBanner({
             />
           ) : null}
           <div className="combat-action-banner__copy">
-            <strong>{mode === 'turn' ? '你的回合' : mode === 'spell' ? spellName : attackName}</strong>
+            <strong data-banner-title-glyphs={titleGlyphCount}>{title}</strong>
           </div>
         </div>
         <span className="kill-streak-banner__gold-line kill-streak-banner__gold-line--bottom" />

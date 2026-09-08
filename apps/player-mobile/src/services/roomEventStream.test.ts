@@ -47,6 +47,10 @@ function changed(sequence: number, name: string, streamId = 'stream-1') {
   })}\n\n`
 }
 
+function directEvent(sequence: number, channel: string, payload: unknown, streamId = 'stream-1') {
+  return `event: message\ndata: ${JSON.stringify({ channel, streamId, sequence, payload })}\n\n`
+}
+
 describe('mobile room event stream', () => {
   it('builds the authenticated room stream URL without mutating the server base', () => {
     const url = new URL(mobileRoomEventStreamUrl(credentials))
@@ -85,6 +89,28 @@ describe('mobile room event stream', () => {
     expect(request.headers.get('X-Stars-Room-Token')).toBe('room-token')
     stop()
     expect(request.aborted).toBe(true)
+  })
+
+  it('forwards authenticated direct events but never exposes private projection placeholders', () => {
+    const requests: FakeRequest[] = []
+    const events: Array<{ channel: string; payload: unknown }> = []
+    const stop = subscribeMobileRoomEventStream(credentials, {
+      onStateChanged: () => undefined,
+      onRecoveryRequired: () => undefined,
+      onEvent: (channel, payload) => events.push({ channel, payload }),
+    }, { createRequest: () => { const request = new FakeRequest(); requests.push(request); return request } })
+
+    requests[0].push(ready('stream-1', 0))
+    requests[0].push(directEvent(1, 'dnd5e-inventory-dm-to-player', {
+      requestId: 'inventory-1', recipientMemberId: 'member-1', status: 'applied',
+    }))
+    requests[0].push(directEvent(2, '_private', null))
+
+    expect(events).toEqual([{
+      channel: 'dnd5e-inventory-dm-to-player',
+      payload: { requestId: 'inventory-1', recipientMemberId: 'member-1', status: 'applied' },
+    }])
+    stop()
   })
 
   it('reconnects once after a terminated transport', () => {

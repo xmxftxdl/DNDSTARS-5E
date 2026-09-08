@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { normalizeCharacter } from '../../store/characters'
 import type { Dnd5eInventoryItemTemplate } from '../../types/inventory'
 import {
+  addDnd5eShopOffer,
   createDnd5eShop,
+  dnd5eShopRandomStockWeight,
   dnd5eShopBasePriceCopper,
   dnd5eShopEligibleTemplates,
   dnd5eShopOfferDisplayRarity,
@@ -88,6 +90,48 @@ describe('D&D 5e shop domain', () => {
       .toEqual(['custom:acid'])
     expect(dnd5eShopEligibleTemplates('general-store', catalog).map((item) => item.id).sort())
       .toEqual(['custom:acid', 'custom:rope'])
+  })
+
+  it('applies the same rarity decay to every random storefront', () => {
+    const common = template({
+      id: 'custom:common', name: 'A 普通奇物', category: 'magic-item',
+      magicItem: { kind: 'wondrous-item', rarity: 'common', attunement: 'none', automation: 'headless' },
+    })
+    const legendary = template({
+      id: 'custom:legendary', name: 'Z 传奇奇物', category: 'magic-item',
+      magicItem: { kind: 'wondrous-item', rarity: 'legendary', attunement: 'none', automation: 'headless' },
+    })
+
+    expect(dnd5eShopRandomStockWeight(common)).toBe(18)
+    expect(dnd5eShopRandomStockWeight(legendary)).toBe(0.15)
+    const legendaryCatalog = Array.from({ length: 100 }, (_, index) => ({
+      ...legendary,
+      id: `${legendary.id}-${index}`,
+      name: `${legendary.name}-${index}`,
+    }))
+    expect(restockDnd5eShop(createDnd5eShop('magic-curios', 100), 1, {
+      catalog: [common, ...legendaryCatalog],
+      random: () => 0.99,
+      now: 101,
+    }).offers[0].templateId).toBe(common.id)
+  })
+
+  it('lets the DM manually add any canonical item and merges its stock snapshot', () => {
+    const artifact = template({
+      id: 'custom:artifact', name: 'DM 神器', category: 'magic-item',
+      magicItem: { kind: 'wondrous-item', rarity: 'artifact', attunement: 'required', automation: 'headless' },
+    })
+    const initial = addDnd5eShopOffer(createDnd5eShop('general-store', 100), artifact, 2, 101)
+    const priced = setDnd5eShopOfferPrice(initial, initial.offers[0].id, 123_400, 102)!
+    const restocked = addDnd5eShopOffer(priced, artifact, 3, 103)
+
+    expect(restocked.offers).toHaveLength(1)
+    expect(restocked.offers[0]).toMatchObject({
+      templateId: artifact.id,
+      rarity: 'artifact',
+      quantity: 5,
+      priceOverrideCopper: 123_400,
+    })
   })
 
   it('randomly restocks from the selected catalog and merges repeated stock', () => {

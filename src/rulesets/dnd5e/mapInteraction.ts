@@ -9,6 +9,12 @@ import {
 } from '../../lib/mapGeometry'
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { SceneInteractionPoint } from '../../lib/sceneOrchestration'
+import {
+  dnd5eArcaneLockAuthorizedTokenV1,
+  dnd5eArcaneLockIsActive,
+  dnd5eArcaneLockPasswordMatchesV1,
+  type Dnd5eArcaneLockSuppressionV1,
+} from './mapObjectState'
 
 export type Dnd5eMapInteractionOperation =
   | 'open'
@@ -21,6 +27,7 @@ export type Dnd5eMapInteractionOperation =
 export type Dnd5eMapInteractionMethod =
   | 'interact'
   | 'key'
+  | 'password'
   | 'thieves-tools'
   | 'force'
   | 'perception'
@@ -32,6 +39,8 @@ export type Dnd5eMapInteractionPayload =
       doorId: string
       operation: Exclude<Dnd5eMapInteractionOperation, 'search' | 'interact-point'>
       method?: Dnd5eMapInteractionMethod
+      /** Submitted only for a password attempt and never persisted or logged. */
+      spokenPassword?: string
     }
   | {
       operation: 'search'
@@ -60,11 +69,35 @@ export interface PreparedDnd5eMapInteraction {
   automaticSuccess: boolean
   nextDoorState?: 'open' | 'closed'
   nextDoorPhysicalState?: MapGeometryDoorPhysicalState
+  nextArcaneLockSuppression?: Dnd5eArcaneLockSuppressionV1
 }
 
 export type PrepareDnd5eMapInteractionResult =
   | { ok: true; prepared: PreparedDnd5eMapInteraction }
   | { ok: false; reason: string }
+
+/** Mirrors the host-side direct-open gate used by the player interaction UI. */
+export function dnd5eMapInteractionCanOpenDoorDirectly(input: {
+  door: MapGeometryDoor
+  actorTokenId: string | undefined
+  worldMinute?: number
+  combatId?: string
+  round?: number
+}): boolean {
+  if (mapGeometryDoorOpenState(input.door) !== 'closed') return false
+  const lockState = mapGeometryDoorLockState(input.door)
+  if (lockState === 'jammed') return false
+  const arcaneLockActive = dnd5eArcaneLockIsActive({
+    lock: input.door.dnd5eArcaneLock,
+    worldMinute: input.worldMinute,
+    combatId: input.combatId,
+    round: input.round,
+  })
+  const actorBypassesArcaneLock = arcaneLockActive && !!input.actorTokenId &&
+    dnd5eArcaneLockAuthorizedTokenV1(input.door.dnd5eArcaneLock, input.actorTokenId)
+  if (arcaneLockActive && !actorBypassesArcaneLock) return false
+  return lockState !== 'locked' || actorBypassesArcaneLock
+}
 
 const DEFAULT_LOCK_PICK_DC = 15
 const DEFAULT_BREAK_DC = 15
@@ -198,6 +231,9 @@ export function prepareDnd5eMapInteraction(input: {
   interactionPoints?: readonly SceneInteractionPoint[]
   hasMatchingKey?: boolean
   hasThievesTools?: boolean
+  worldMinute?: number
+  combatId?: string
+  round?: number
 }): PrepareDnd5eMapInteractionResult {
   const payload = input.payload
   if (payload.operation === 'interact-point') {
@@ -219,15 +255,48 @@ export function prepareDnd5eMapInteraction(input: {
   const door = input.geometry?.doors.find((candidate) => candidate.id === payload.doorId)
   if (!door) return { ok: false, reason: 'door-not-found' }
   if (!withinInteractionReach(input.map, input.actor, door)) return { ok: false, reason: 'door-out-of-reach' }
+  if (payload.spokenPassword != null && (
+    payload.method !== 'password' || !payload.spokenPassword.trim() ||
+    payload.spokenPassword.normalize('NFKC').trim().length > 120
+  )) return { ok: false, reason: 'invalid-arcane-lock-password' }
 
   const interaction = door.interaction
   const operation = payload.operation
   const openState = mapGeometryDoorOpenState(door)
   const lockState = mapGeometryDoorLockState(door)
   const physicalState = mapGeometryDoorPhysicalState(door)
+  const arcaneLockActive = dnd5eArcaneLockIsActive({
+    lock: door.dnd5eArcaneLock,
+    worldMinute: input.worldMinute,
+    combatId: input.combatId,
+    round: input.round,
+  })
+  const actorBypassesArcaneLock = arcaneLockActive && dnd5eArcaneLockAuthorizedTokenV1(
+    door.dnd5eArcaneLock,
+    input.actor.id,
+  )
   if (operation === 'open') {
     if (openState === 'open') return { ok: false, reason: 'door-already-open' }
-    if (lockState === 'locked') return { ok: false, reason: 'door-locked' }
+    if (payload.method === 'password') {
+      if (!arcaneLockActive || !payload.spokenPassword || !dnd5eArcaneLockPasswordMatchesV1(
+        door.dnd5eArcaneLock,
+        payload.spokenPassword,
+      )) return { ok: false, reason: 'arcane-lock-password-invalid' }
+      const suppression: Dnd5eArcaneLockSuppressionV1 = input.combatId && Number.isInteger(input.round)
+        ? { kind: 'combat-round', combatId: input.combatId, throughRound: Number(input.round) + 9 }
+        : { kind: 'campaign-time', untilWorldMinute: Math.max(0, Math.floor(input.worldMinute ?? 0)) + 1 }
+      return {
+        ok: true,
+        prepared: {
+          door, interactionId: `${operation}:${door.id}:password`, label: door.label,
+          blindSearch: false, operation, method: 'password', spendAction: false,
+          turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'open',
+          nextArcaneLockSuppression: suppression,
+        },
+      }
+    }
+    if (arcaneLockActive && !actorBypassesArcaneLock) return { ok: false, reason: 'door-arcane-locked' }
+    if (lockState === 'locked' && !actorBypassesArcaneLock) return { ok: false, reason: 'door-locked' }
     if (lockState === 'jammed') return { ok: false, reason: 'door-jammed' }
     return { ok: true, prepared: { door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false, operation, method: 'interact', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'open' } }
   }
@@ -238,8 +307,8 @@ export function prepareDnd5eMapInteraction(input: {
   }
   if (operation === 'unlock') {
     if (lockState === 'jammed') return { ok: false, reason: 'door-jammed' }
-    if (lockState !== 'locked') return { ok: false, reason: 'door-not-locked' }
-    if (payload.method === 'key' && input.hasMatchingKey) {
+    if (lockState !== 'locked' && !arcaneLockActive) return { ok: false, reason: 'door-not-locked' }
+    if (payload.method === 'key' && input.hasMatchingKey && !arcaneLockActive) {
       return { ok: true, prepared: { door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false, operation, method: 'key', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'closed' } }
     }
     if (interaction?.requiresThievesTools !== false && !input.hasThievesTools) {
@@ -249,9 +318,10 @@ export function prepareDnd5eMapInteraction(input: {
       ok: true,
       prepared: {
         door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false,
-        operation, method: 'thieves-tools', dc: interaction?.lockPickDc ?? DEFAULT_LOCK_PICK_DC,
+        operation, method: 'thieves-tools',
+        dc: (interaction?.lockPickDc ?? DEFAULT_LOCK_PICK_DC) + (arcaneLockActive ? 10 : 0),
         checkAbility: 'dex', checkSkill: 'sleightOfHand', spendAction: true, turnCost: 'action', automaticSuccess: false,
-        nextDoorState: 'closed',
+        nextDoorState: arcaneLockActive ? 'open' : 'closed',
       },
     }
   }
@@ -261,7 +331,7 @@ export function prepareDnd5eMapInteraction(input: {
       ok: true,
       prepared: {
         door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false,
-        operation, method: 'force', dc: interaction?.breakDc ?? DEFAULT_BREAK_DC,
+        operation, method: 'force', dc: (interaction?.breakDc ?? DEFAULT_BREAK_DC) + (arcaneLockActive ? 10 : 0),
         checkAbility: 'str', checkSkill: 'athletics', spendAction: true, turnCost: 'action', automaticSuccess: false,
         nextDoorState: 'open',
         nextDoorPhysicalState: 'broken',
@@ -294,6 +364,7 @@ export function resolveDnd5eMapInteraction(input: {
   dc?: number
   nextDoorState?: 'open' | 'closed'
   nextDoorPhysicalState?: MapGeometryDoorPhysicalState
+  nextArcaneLockSuppression?: Dnd5eArcaneLockSuppressionV1
   revealSecret: boolean
 } {
   const dc = input.prepared.dc == null
@@ -312,6 +383,9 @@ export function resolveDnd5eMapInteraction(input: {
     ...(success && input.prepared.nextDoorState ? { nextDoorState: input.prepared.nextDoorState } : {}),
     ...(success && input.prepared.nextDoorPhysicalState
       ? { nextDoorPhysicalState: input.prepared.nextDoorPhysicalState }
+      : {}),
+    ...(success && input.prepared.nextArcaneLockSuppression
+      ? { nextArcaneLockSuppression: input.prepared.nextArcaneLockSuppression }
       : {}),
     revealSecret: success && (input.prepared.operation === 'inspect' || input.prepared.operation === 'search') && !!input.prepared.door?.secret,
   }

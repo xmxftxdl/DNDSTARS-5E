@@ -19,6 +19,7 @@ import type { RoomJournalMutation } from './roomCommunications'
 
 const SHARED_CLIENT_PROTOCOL_VERSION = CLIENT_SHARED_PROTOCOL_VERSION
 export const SHARED_STATE_CLIENT_MAX_BYTES = 8 * 1024 * 1024
+const SHARED_REQUEST_TIMEOUT_MS = 5_000
 const sharedResourceRevisions = new Map<string, number>()
 const sharedResourceWriteChains = new Map<string, Promise<unknown>>()
 
@@ -38,6 +39,16 @@ const sharedResourceReadCache = new Map<string, {
 const sharedResourceReadRequests = new Map<string, Promise<unknown | null>>()
 const sharedResourceReadGenerations = new Map<string, number>()
 let sharedResourceReadEpoch = 0
+
+async function fetchSharedCandidate(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), SHARED_REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    globalThis.clearTimeout(timeout)
+  }
+}
 
 export type SharedResourceSaveResult =
   | { status: 'saved'; revision?: number }
@@ -168,7 +179,10 @@ export function configuredApiBases(): string[] | null {
 
 function defaultDmApiBase(): string {
   if (typeof window === 'undefined') return 'http://127.0.0.1:5273/api'
-  const port = '5273'
+  const currentPort = window.location.port
+  const port = currentPort.startsWith('617') ? '6173'
+    : currentPort.startsWith('647') ? '6473'
+      : '5273'
   return `${window.location.protocol}//${window.location.hostname}:${port}/api`
 }
 
@@ -178,7 +192,13 @@ function sameOriginApiBase(): string {
   return sameOrigin
 }
 
-const LOCAL_SPLIT_SHARED_PORTS = new Set(['5273', '5274', '5275', '5276'])
+const LOCAL_SPLIT_SHARED_PORTS = new Set([
+  '5273', '5274', '5275', '5276',
+  // Local preview/QA builds may be served from alternate static ports while
+  // the canonical shared API remains on the DM runtime at 5273.
+  '6173', '6174', '6175', '6176',
+  '6473', '6474', '6475', '6476',
+])
 
 /**
  * The packaged local preview serves DM/player/spectator clients from separate
@@ -267,7 +287,7 @@ async function requestJson<T>(path: string, init?: RequestInit, resourceName?: s
   let notFound = false
   for (const api of sharedApiCandidates()) {
     try {
-      const res = await fetch(sharedSessionUrl(`${api}${path}`), {
+      const res = await fetchSharedCandidate(sharedSessionUrl(`${api}${path}`), {
         cache: 'no-store',
         ...init,
         headers: {
@@ -417,7 +437,7 @@ async function performSharedResourceSave<T>(
   const expectedRevision = sharedResourceRevisions.get(revisionKey) ?? 0
   for (const api of sharedWriteApiCandidates()) {
     try {
-      const response = await fetch(sharedSessionUrl(`${api}/state/${name}`), {
+      const response = await fetchSharedCandidate(sharedSessionUrl(`${api}/state/${name}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -558,7 +578,7 @@ async function performSharedResourcesAtomicSave(
     `state-transaction:${Date.now()}:${Math.random().toString(36).slice(2)}`
   const api = sharedEventApiCandidates()[0]
   if (!api) throw new Error('shared-state-transaction-unavailable')
-  const response = await fetch(sharedSessionUrl(`${api}/state/transaction`), {
+  const response = await fetchSharedCandidate(sharedSessionUrl(`${api}/state/transaction`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -576,6 +596,8 @@ async function performSharedResourcesAtomicSave(
   })
   const body = await response.json().catch(() => ({})) as {
     error?: string
+    name?: string
+    reason?: string
     revisions?: Record<string, number>
     conflicts?: Array<{ name: string; currentRevision: number }>
   }
@@ -593,7 +615,16 @@ async function performSharedResourcesAtomicSave(
       }
       for (const listener of [...sharedStateChangedListeners]) listener(event)
     }
-    throw new Error(body.error ?? `shared-state-transaction-${response.status}`)
+    const conflictResources = (body.conflicts ?? [])
+      .map((conflict) => conflict.name)
+      .filter(Boolean)
+      .join(',')
+    throw new Error(
+      `${body.error ?? `shared-state-transaction-${response.status}`}` +
+      (body.name ? `:${body.name}` : '') +
+      (body.reason ? `:${body.reason}` : '') +
+      (conflictResources ? `:${conflictResources}` : ''),
+    )
   }
   const revisions = body.revisions ?? {}
   for (const [name, revision] of Object.entries(revisions)) {
@@ -613,21 +644,82 @@ export function saveSharedResourcesAtomically(
 }
 
 export async function appendSharedPlayerActionRequest<T>(action: T): Promise<void> {
-  const api = sharedEventApiCandidates()[0]
-  if (!api) throw new Error('player-action-append-unavailable')
-  const response = await fetch(sharedSessionUrl(`${api}/state/player-action-requests/append`), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...sharedAccessHeaders(),
-      ...sharedMemberHeaders(),
-      ...sharedProtocolHeaders(),
-    },
-    body: JSON.stringify({ action }),
-  })
-  const body = await response.json().catch(() => ({})) as { error?: string; revision?: number }
-  if (!response.ok) throw new Error(body.error ?? `player-action-append-${response.status}`)
-  if (Number.isInteger(body.revision)) rememberSharedResourceRevisionWatermark('player-action-requests', Number(body.revision))
+  let lastError: unknown = new Error('player-action-append-unavailable')
+  for (const api of sharedApiCandidates()) {
+    try {
+      const response = await fetchSharedCandidate(
+        sharedSessionUrl(`${api}/state/player-action-requests/append`),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...sharedAccessHeaders(),
+            ...sharedMemberHeaders(),
+            ...sharedProtocolHeaders(),
+          },
+          body: JSON.stringify({ action }),
+        },
+      )
+      const body = await response.json().catch(() => ({})) as { error?: string; revision?: number }
+      if (!response.ok) throw new Error(body.error ?? `player-action-append-${response.status}`)
+      if (Number.isInteger(body.revision)) {
+        rememberSharedResourceRevisionWatermark('player-action-requests', Number(body.revision))
+      }
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
+export async function submitSharedPlayerCharacterCommand(
+  command: Record<string, unknown> & { commandId: string },
+): Promise<{ revision: number; result: Record<string, unknown> }> {
+  let lastError: unknown = new Error('player-character-command-unavailable')
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await loadSharedResource('characters')
+    const expectedRevision = getSharedResourceRevisionWatermark('characters')
+    for (const api of sharedApiCandidates()) {
+      try {
+        const response = await fetchSharedCandidate(
+          sharedSessionUrl(`${api}/state/characters/command`),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...sharedAccessHeaders(),
+              ...sharedMemberHeaders(),
+              ...sharedProtocolHeaders(),
+            },
+            body: JSON.stringify({ expectedRevision, command }),
+          },
+        )
+        const body = await response.json().catch(() => ({})) as {
+          error?: string
+          currentRevision?: number
+          revision?: number
+          result?: Record<string, unknown>
+        }
+        if (response.status === 409 && attempt === 0) {
+          invalidateSharedResourceReadCache('characters')
+          break
+        }
+        if (!response.ok) throw new Error(body.error ?? `player-character-command-${response.status}`)
+        const revision = Number(body.revision)
+        if (!Number.isSafeInteger(revision) || revision < 0) {
+          throw new Error('player-character-command-invalid-revision')
+        }
+        invalidateSharedResourceReadCache('characters')
+        rememberSharedResourceRevisionWatermark('characters', revision)
+        recordSharedWrite('characters', revision)
+        return { revision, result: body.result ?? {} }
+      } catch (error) {
+        lastError = error
+      }
+    }
+  }
+  throw lastError
 }
 
 export interface DmUndoTransactionSummary {
@@ -775,7 +867,7 @@ async function performClearSharedResource(name: string): Promise<void> {
   const expectedRevision = sharedResourceRevisions.get(revisionKey) ?? 0
   for (const api of sharedWriteApiCandidates()) {
     try {
-      const response = await fetch(sharedSessionUrl(`${api}/state/${encodeURIComponent(name)}`), {
+      const response = await fetchSharedCandidate(sharedSessionUrl(`${api}/state/${encodeURIComponent(name)}`), {
         method: 'DELETE',
         headers: {
           ...sharedAccessHeaders(),
@@ -828,7 +920,7 @@ export async function mutateSharedCombatInterrupt<T>(mutation: SharedCombatInter
   if (!api) return null
   for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
-      const res = await fetch(sharedSessionUrl(`${api}/state/combat-interrupts/interrupt`), {
+      const res = await fetchSharedCandidate(sharedSessionUrl(`${api}/state/combat-interrupts/interrupt`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(mutation),
@@ -836,6 +928,21 @@ export async function mutateSharedCombatInterrupt<T>(mutation: SharedCombatInter
       if (res.ok) {
         const value = (await res.json()) as T
         rememberSharedResourceRevision('combat-interrupts', value, res)
+        // Do not wait for this client's own SSE echo before reflecting a
+        // successful interrupt mutation. In particular, choice-reroll uses a
+        // two-stage contribution -> Host roll -> selection flow; a stale local
+        // prompt otherwise looks like a dead button and can time out before the
+        // new roll options are rendered.
+        invalidateSharedResourceReadCache('combat-interrupts')
+        const updatedAt = value && typeof value === 'object'
+          ? Number((value as { updatedAt?: unknown }).updatedAt)
+          : Number.NaN
+        const event: SharedStateChangedEvent = {
+          id: `local:combat-interrupts:${Date.now()}`,
+          name: 'combat-interrupts',
+          updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+        }
+        for (const listener of [...sharedStateChangedListeners]) listener(event)
         return value
       }
       if (res.status >= 400 && res.status < 500 && res.status !== 409) return null

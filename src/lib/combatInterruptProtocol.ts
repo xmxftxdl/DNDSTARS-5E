@@ -3,6 +3,8 @@ import type { Character } from '../types/character'
 import type { EnemyTurnResult } from './enemyAi'
 import type { CombatInterruptKind, SharedCombatInterrupt } from './combatInterruptQueue'
 import type { CombatTransaction } from './combatTransaction'
+import { dnd5eCombatTokenSide } from './opportunityAttacks'
+import type { Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 
 export type GaleComboDecision = 'accepted' | 'declined' | 'timeout'
 
@@ -75,10 +77,12 @@ export type CounterspellInterruptPayload = Record<string, unknown> & {
   spellName: string
   spellLevel: number
   counterspellSlotLevel: number
+  counterspellSlotLevels?: number[]
   abilityCheckDc?: number
 }
 export type CounterspellInterruptResponse = Record<string, unknown> & {
   useCounterspell: boolean
+  counterspellSlotLevel?: number
   abilityCheckTotal?: number
 }
 
@@ -118,6 +122,11 @@ export type LegendaryResistanceInterruptResponse = Record<string, unknown> & { u
 export type BardicInspirationRollType = '攻击检定' | '豁免' | '属性检定' | '武器伤害' | '护甲等级'
 export type BardicInspirationInterruptPayload = Record<string, unknown> & {
   targetName: string
+  /**
+   * Authoritative map token that owns the roll being modified. Character ids
+   * alone are not enough because an enemy token may retain a character link.
+   */
+  rollerTokenId?: string
   dieSides: number
   rollType: BardicInspirationRollType
   total: number
@@ -217,33 +226,69 @@ export function isAssistedDmBoundaryChoice(input: {
 
 export type DmAdjudicationOperation = 'damage' | 'healing' | 'temporary-hit-points'
 
+export type DmAdjudicationConditionTurnBoundary =
+  | 'source-turn-start'
+  | 'source-turn-end'
+  | 'target-turn-start'
+  | 'target-turn-end'
+
 export interface DmAdjudicationEffect extends Record<string, unknown> {
   targetTokenId: string
   operation?: DmAdjudicationOperation
-  /** DM 填写的是完成抗性、豁免等裁定后的最终数值。 */
+  /**
+   * When damageType is omitted, amount is the fully adjudicated final damage.
+   * When damageType is present, amount is post-save but pre-defense damage and
+   * the Host applies immunity, resistance and vulnerability.
+   */
   amount?: number
+  damageType?: Dnd5eDamageType
   addCondition?: string
+  /** Optional finite lifetime for an explicitly added condition. Omit for permanent/manual removal. */
+  conditionDurationRounds?: number
+  conditionDurationTickOn?: DmAdjudicationConditionTurnBoundary
   removeCondition?: string
 }
 
+export interface DmAdjudicationTerrainEffect extends Record<string, unknown> {
+  /** Existing authoritative persistent area whose plant terrain is being changed. */
+  areaId: string
+  /** 1 makes the selected plant terrain ordinary; 2 makes it difficult terrain. */
+  movementCostMultiplier: 1 | 2
+}
+
 export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
-  contextKind?: 'spell' | 'activity-boundary' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action' | 'post-spell-random-table'
+  contextKind?: 'spell' | 'activity-boundary' | 'persistent-area-trigger' | 'map-interaction' | 'basic-action' | 'post-spell-random-table' | 'monster-action' | 'monster-spell' | 'monster-legendary-action'
   actionId: string
   casterName: string
+  /** Authoritative caster token used by self-targeting adjudication presets. */
+  casterTokenId?: string
   spellId: string
   spellName: string
   spellLevel: number
   slotLevel: number
-  castingTime: 'action' | 'bonus-action'
+  castingTime: 'action' | 'bonus-action' | 'reaction' | 'long'
+  /** True when the request started outside initiative; casting time is descriptive and spends no combat turn resource. */
+  exploration?: true
+  /** Whole shared campaign-clock minutes elapsed before the spell takes effect. */
+  elapsedCastingMinutes?: number
+  ritual?: true
+  /** The ordinary audited Headless spell effect will run after confirmation; DM must not duplicate it manually. */
+  automatedRitual?: true
   description: string
   concentration: boolean
   suggestedConcentrationRounds?: number
   proposedHit?: boolean
   proposedDamage?: number
+  /** Same rolled damage projected through an explicit successful save. */
+  proposedDamageOnSaveSuccess?: number
+  /** Same rolled damage projected through an explicit failed save. */
+  proposedDamageOnSaveFailure?: number
+  /** Fixed damage type declared by the authoritative source; prefilled for DM review. */
+  proposedDamageType?: Dnd5eDamageType
   proposedSaveSuccess?: boolean
   proposedConditionIds?: string[]
   targetTokenId?: string
-  triggerTiming?: 'on-create' | 'on-enter' | 'on-move-distance' | 'on-area-move-impact' | 'turn-start' | 'turn-end'
+  triggerTiming?: 'on-create' | 'on-enter' | 'on-move-distance' | 'on-area-move-impact' | 'turn-start' | 'turn-end' | 'source-turn-start' | 'on-detonate'
   proposedDc?: number
   doorId?: string
   mapInteractionOperation?: string
@@ -251,6 +296,44 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   randomTableFeatureId?: string
   randomTableOutcomeId?: string
   sourceSpellId?: string
+  legendaryActionCost?: number
+  legendaryActionPointsBefore?: number
+  requiresMonsterSpellSelection?: boolean
+  monsterSpellOptions?: readonly {
+    spellId: string
+    spellName: string
+    level: number
+    availableSlotLevels: readonly number[]
+    resourceLabels: Readonly<Record<string, string>>
+  }[]
+  /** Host-normalized Sending declaration shown read-only to the DM. */
+  sending?: import('./sharedCombatTypes').Dnd5eSendingDeclarationV1
+  /** Host-normalized Animal Messenger declaration shown read-only to the DM. */
+  animalMessenger?: import('./sharedCombatTypes').Dnd5eAnimalMessengerDeclarationV1
+  /** Host-normalized Animate Dead mode and exact remains/controlled-undead targets. */
+  animateDead?: import('./sharedCombatTypes').Dnd5eAnimateDeadDeclarationV1
+  /** Host-normalized Animate Objects targets and Host-derived object profiles. */
+  animateObjects?: import('./sharedCombatTypes').Dnd5eAnimateObjectsDeclarationV1
+  /** Host-normalized Creation object, material mix, size and placement. */
+  creation?: import('./sharedCombatTypes').Dnd5eCreationDeclarationV1
+  /** Host-normalized Create or Destroy Water mode, volume/area and target. */
+  createOrDestroyWater?: import('./sharedCombatTypes').Dnd5eCreateOrDestroyWaterDeclarationV1
+  /** Host-normalized Sequester target and optional early-ending condition. */
+  sequester?: import('./sharedCombatTypes').Dnd5eSequesterDeclarationV1
+  /** Host-normalized Word of Recall mode and bounded declaration. */
+  wordOfRecall?: import('./sharedCombatTypes').Dnd5eWordOfRecallDeclarationV1
+  /** Host-derived destination snapshot. In designation mode this is the proposed current location. */
+  wordOfRecallSanctuary?: {
+    mapId: string
+    mapName: string
+    x: number
+    y: number
+    elevationFeet: number
+    sanctuaryName: string
+    deityConnection: string
+  }
+  /** Host-normalized Wish mode and exact player declaration shown read-only to the DM. */
+  wish?: import('./sharedCombatTypes').Dnd5eWishDeclarationV1
 }
 
 export type DmDamageAdjustment =
@@ -261,6 +344,8 @@ export type DmDamageAdjustment =
 export type DmAdjudicationInterruptResponse = Record<string, unknown> & {
   decision: 'approved' | 'cancelled'
   effects: DmAdjudicationEffect[]
+  /** Explicit map-state effects approved by the DM, currently used by Speak with Plants. */
+  terrainEffects?: DmAdjudicationTerrainEffect[]
   note?: string
   concentrationRounds?: number
   hitOverride?: boolean
@@ -270,6 +355,20 @@ export type DmAdjudicationInterruptResponse = Record<string, unknown> & {
   useLegendaryResistance?: boolean
   adjustedDc?: number
   mapInteractionOverride?: 'roll' | 'success' | 'failure'
+  selectedMonsterSpellId?: string
+  selectedMonsterSpellSlotLevel?: number
+  /** Host-authored Sending delivery result; validated again before resources are spent. */
+  sending?: import('./sharedCombatTypes').Dnd5eSendingResolutionV1
+  /** Host confirmation of Animal Messenger's visibility and previously-visited destination gates. */
+  animalMessenger?: import('./sharedCombatTypes').Dnd5eAnimalMessengerResolutionV1
+  /** Host confirmation of Animate Dead's displayed target conversion/control plan. */
+  animateDead?: import('./sharedCombatTypes').Dnd5eAnimateDeadResolutionV1
+  /** Host confirmation of Animate Objects' displayed weighted replacement plan. */
+  animateObjects?: import('./sharedCombatTypes').Dnd5eAnimateObjectsResolutionV1
+  /** Host confirmation for Sequester's creature-willingness boundary. */
+  sequester?: import('./sharedCombatTypes').Dnd5eSequesterResolutionV1
+  /** Host confirmation for Word of Recall's consecration or willing-creature boundary. */
+  wordOfRecall?: import('./sharedCombatTypes').Dnd5eWordOfRecallResolutionV1
 }
 
 export type RollConfirmationInterruptPayload = Record<string, unknown> & {
@@ -482,6 +581,18 @@ export function resolveCombatInterruptAnswerCandidate(
   ) return { character, canAnswer: false }
   if (!character || (character.currentHp <= 0 && interrupt.kind !== 'bardic-inspiration')) {
     return { character, canAnswer: false }
+  }
+
+  if (interrupt.kind === 'bardic-inspiration' && interrupt.payload.rollerTokenId) {
+    const rollerToken = context.tokens?.find(
+      (token) => token.id === interrupt.payload.rollerTokenId,
+    )
+    // The side controlling the actual d20 owns this decision. In particular,
+    // a character link on a DM-controlled monster must never route that
+    // monster's attack/save prompt to a player client.
+    if (rollerToken && dnd5eCombatTokenSide(rollerToken) === 'enemy' && context.authority !== 'dm') {
+      return { character, canAnswer: false }
+    }
   }
 
   const isOwnedRoomCharacter =

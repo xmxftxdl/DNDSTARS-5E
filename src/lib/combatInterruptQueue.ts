@@ -185,7 +185,13 @@ export function answerCombatInterrupt(
   return updateCombatInterrupt(
     queue,
     id,
-    (interrupt) => interrupt.status === 'pending' || interrupt.status === 'rolling'
+    // DM adjudication moves from pending to waiting-for-dm before a human can
+    // answer. Treat that durable wait state as answerable; otherwise the UI
+    // dismisses its prompt locally while the shared interrupt remains pending
+    // forever and is re-presented after every reload.
+    (interrupt) => interrupt.status === 'pending' ||
+      interrupt.status === 'rolling' ||
+      interrupt.status === 'waiting-for-dm'
       ? { ...interrupt, status: 'answered', response, updatedAt: now }
       : interrupt,
     now,
@@ -205,6 +211,9 @@ export function markCombatInterruptRolling(
       ...interrupt,
       status: 'rolling',
       response: response ?? interrupt.response,
+      ...(interrupt.kind === 'roll-confirmation' && interrupt.payload.visibility !== 'dm-only'
+        ? { expiresAt: now + 10_000 }
+        : {}),
       updatedAt: now,
     }) : interrupt,
     now,
@@ -350,7 +359,9 @@ export function findCombatTransactionLock(
 }
 
 export function isCombatInterruptExpired(interrupt: SharedCombatInterrupt, now = Date.now()): boolean {
-  return interrupt.status === 'pending' && interrupt.timeoutPolicy === 'rollback' &&
+  const stalledRollConfirmation = interrupt.status === 'rolling' &&
+    interrupt.kind === 'roll-confirmation' && interrupt.payload.rollOptions == null
+  return (interrupt.status === 'pending' || stalledRollConfirmation) && interrupt.timeoutPolicy === 'rollback' &&
     interrupt.expiresAt != null && now >= interrupt.expiresAt
 }
 

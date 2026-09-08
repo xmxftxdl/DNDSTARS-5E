@@ -216,3 +216,28 @@ export function playerViewCharacters(
   const mine = getPlayerCharacter(characters, opts)
   return mine ? [mine] : []
 }
+
+/**
+ * The player's explicit room assignment is the character they are asking to
+ * view and edit. Shared character-store selection can lag behind a room sync,
+ * so it must not pull the full sheet back to a previously selected character.
+ */
+export function playerCharacterPageActiveId(
+  visibleCharacters: readonly { id: string }[],
+  options: {
+    isDM: boolean
+    assignedCharacterId?: string | null
+    selectedCharacterId?: string | null
+  },
+): string | null {
+  if (
+    !options.isDM &&
+    options.assignedCharacterId &&
+    visibleCharacters.some((character) => character.id === options.assignedCharacterId)
+  ) return options.assignedCharacterId
+  if (
+    options.selectedCharacterId &&
+    visibleCharacters.some((character) => character.id === options.selectedCharacterId)
+  ) return options.selectedCharacterId
+  return visibleCharacters[0]?.id ?? null
+}

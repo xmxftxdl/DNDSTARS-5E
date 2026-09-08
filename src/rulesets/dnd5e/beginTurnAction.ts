@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eClassDefinitionForCharacter } from './classes'
 import {
+  dnd5eActiveEffectRepeatSaveEligibleAtBoundary,
   dnd5eCombatantHasConcentrationEffect,
   dnd5ePendingTurnStartPeriodicDamage,
   prepareDnd5eTurnStartGazeRequirements,
@@ -26,6 +27,7 @@ import {
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import {
+  reconcileDnd5eCompoundRepeatSaveEffects,
   type Dnd5eActiveEffectInstance,
   type Dnd5eActiveEffectPeriodicDamageRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
@@ -176,9 +178,12 @@ export function prepareDnd5eBeginTurn(
 
   const turnStartActiveEffectSavingThrows = alreadyResolved
     ? []
-    : (previewActor.classState.activeEffects ?? []).flatMap((effect) => {
+    : reconcileDnd5eCompoundRepeatSaveEffects(previewActor.classState.activeEffects).flatMap((effect) => {
         const repeatSave = effect.repeatSave
-        if (repeatSave?.timing !== 'target-turn-start') return []
+        if (
+          repeatSave?.timing !== 'target-turn-start' ||
+          !dnd5eActiveEffectRepeatSaveEligibleAtBoundary(snapshot.state, actorToken.id, effect)
+        ) return []
         const source = effect.source.actorId
           ? preview.combatants[effect.source.actorId]
           : undefined
@@ -374,6 +379,13 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     optionalBonusDice: input.optionalBonusDice,
   }, input.airborneFallDamageRollsByCombatantId)
   if (!result.ok) return { ok: false, reason: 'invalid-action', airborneFalls }
+  const application = planDnd5eMapResultApplication({
+    state: result.state,
+    map: input.map,
+    characters: input.characters,
+    characterIdByCombatantId,
+    events: [...result.events],
+  })
   return {
     ok: true,
     actor,
@@ -381,11 +393,6 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
     actorToken,
     result,
     airborneFalls,
-    application: planDnd5eMapResultApplication({
-      state: result.state,
-      map: input.map,
-      characters: input.characters,
-      characterIdByCombatantId,
-    }),
+    application,
   }
 }

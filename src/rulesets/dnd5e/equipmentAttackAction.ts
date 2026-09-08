@@ -14,6 +14,7 @@ import {
   dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponDamageSource,
+  dnd5eVirtualWeaponDamageSource,
   dnd5eWeaponPropertyIds,
   dnd5eWeaponRangeFeet,
   dnd5eWearingUnproficientArmor,
@@ -27,11 +28,12 @@ import {
   dnd5eEffectiveAttacksPerAttackAction,
   dnd5ePluginBonusWeaponAttackForCharacter,
 } from './pluginApi'
-import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
+import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode, type Dnd5eRollModeResolution } from './rollMode'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eBlurImposesAttackDisadvantage,
+  dnd5eAttackDisadvantageReasons,
   dnd5eAttackerIsUnseenForAttack,
   dnd5ePendingAllyAttackAdvantage,
   dnd5eSourceMarkedAttackDisadvantage,
@@ -76,17 +78,23 @@ import {
   createDnd5eMapCombatSnapshot,
   dnd5eAttackCoverForPair,
   dnd5eMapTokenCanThreatenRangedAttacker,
+  dnd5eRequestedInitiativeActorIndex,
   planDnd5eMapResultApplication,
   type Dnd5eAttackCoverSnapshot,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
 import { consumeDnd5eWeaponAmmunition } from './items'
-import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { mapGeometryOrdinaryProjectileBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 import { dnd5eMartialSpellBonusAttackAvailable } from './martialSpellSynergy'
-import { dnd5eActiveAttackProfileRewrite, dnd5eActiveMagicWeaponBonus } from './activeEffects'
-import { dnd5eMapTokenDistanceFeet } from './verticalCombatGeometry'
+import {
+  dnd5eActiveAttackProfileRewrite,
+  dnd5eActiveEnvironmentalCapabilities,
+  dnd5eActiveMagicWeaponBonus,
+  dnd5eAvailableRestrictedExtraActionKinds,
+} from './activeEffects'
+import { dnd5eCreatureHeightFeetForSizeRank, dnd5eMapTokenDistanceFeet } from './verticalCombatGeometry'
 import type { Dnd5ePluginDiceRollResult } from './pluginApi'
 import { dnd5eActivityWeaponAttackGrantMatchesV1 } from './activities/dnd5eActivityWeaponAttackGrant'
 import {
@@ -102,6 +110,7 @@ export type Dnd5eEquipmentAttackRejectReason =
   | 'not-dnd5e-class'
   | 'no-weapon'
   | 'ammunition-unavailable'
+  | 'projectile-blocked-by-wind-wall'
   | 'target-out-of-range'
   | 'attack-action-spent'
   | 'divine-smite-unavailable'
@@ -134,6 +143,7 @@ export interface PreparedDnd5eEquipmentAttack {
   spendsBonusAction: boolean
   countsTowardAttackAction: boolean
   attackMode: 'normal' | 'advantage' | 'disadvantage'
+  attackModeResolution?: Dnd5eRollModeResolution
   declarativeIntentFeatureIds: readonly string[]
   classDamageContext: Dnd5eWeaponClassDamageContext
   stunningStrike?: {
@@ -265,7 +275,8 @@ export function prepareDnd5eEquipmentAttack(input: {
     },
   }
   const equippedWeapon = offHandAttack ? actor.equipment?.offHand : actor.equipment?.[selectedWeaponSlot]
-  const persistedDamageSource = dnd5eWeaponDamageSource(equippedWeapon)
+  const persistedDamageSource = dnd5eWeaponDamageSource(equippedWeapon) ??
+    dnd5eVirtualWeaponDamageSource(profile.weaponId)
   if (!persistedDamageSource || persistedDamageSource.weaponId !== profile.weaponId) {
     return { ok: false, reason: 'no-weapon' }
   }
@@ -275,6 +286,21 @@ export function prepareDnd5eEquipmentAttack(input: {
       dnd5eActiveMagicWeaponBonus(actor.dnd5eCombatState?.activeEffects, profile.weaponId) > 0 ||
       (!offHandAttack && selectedWeaponSlot === 'mainWeapon' && shillelagh?.weaponId === profile.weaponId),
   }
+  if (
+    profile.mode === 'ranged' &&
+    mapGeometryOrdinaryProjectileBlocked({
+      geometry,
+      map: input.map,
+      from: actorToken,
+      to: targetToken,
+      fromHeightFeet: dnd5eCreatureHeightFeetForSizeRank(
+        dnd5eEffectiveSizeRank(handSnapshot.state.combatants[actorToken.id]),
+      ),
+      toHeightFeet: dnd5eCreatureHeightFeetForSizeRank(
+        dnd5eEffectiveSizeRank(handSnapshot.state.combatants[targetToken.id]),
+      ),
+    })
+  ) return { ok: false, reason: 'projectile-blocked-by-wind-wall' }
   if (!consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
   if (
     offHandAttack && (
@@ -295,7 +321,9 @@ export function prepareDnd5eEquipmentAttack(input: {
     mode: profile.mode,
     distanceFeet,
     normalRangeFeet: profile.rangeFeet?.normal,
-    hasSwimmingSpeed: (actor.dnd5eMovementSpeeds?.swim ?? 0) > 0,
+    hasSwimmingSpeed: (actor.dnd5eMovementSpeeds?.swim ?? 0) > 0 ||
+      dnd5eActiveEnvironmentalCapabilities(actor.dnd5eCombatState?.activeEffects)
+        .ignoresUnderwaterAttackPenalty,
   })
   if (underwater.automaticMiss) return { ok: false, reason: 'target-out-of-range' }
   const divineSmiteSlotLevel = action.dnd5eWeaponAttackOptions?.divineSmiteSlotLevel
@@ -412,7 +440,15 @@ export function prepareDnd5eEquipmentAttack(input: {
   const attacksAllowed = specialAttack ? 1 : weaponAttacksPerAction * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
   if (!specialAttack && input.attacksUsed >= attacksAllowed) return { ok: false, reason: 'attack-action-spent' }
   const spendsAction = !specialAttack && input.attacksUsed % weaponAttacksPerAction === 0
-  if (!specialAttack && spendsAction && input.turnEconomy && input.turnEconomy.action.current < 1) {
+  const restrictedWeaponAttackAvailable = dnd5eAvailableRestrictedExtraActionKinds({
+    effects: actor.dnd5eCombatState?.activeEffects,
+    usesByEffect: actor.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
+    turnKey: input.turnEconomy?.turnKey,
+  }).includes('weapon-attack')
+  if (
+    !specialAttack && spendsAction && input.turnEconomy &&
+    input.turnEconomy.action.current < 1 && !restrictedWeaponAttackAvailable
+  ) {
     return { ok: false, reason: 'attack-action-spent' }
   }
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -423,7 +459,11 @@ export function prepareDnd5eEquipmentAttack(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   const target = snapshot.state.combatants[targetToken.id]
   if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id] || !target) return { ok: false, reason: 'combatant-missing' }
   const actorCombatant = snapshot.state.combatants[actorToken.id]
@@ -499,44 +539,52 @@ export function prepareDnd5eEquipmentAttack(input: {
     dnd5eSourceLinkedRelations(snapshot.state, actorCombatant.id).some((link) =>
       link.effect.relation?.movement === 'source-rides-target' &&
       link.target.currentHp > 0 && dnd5eEffectiveSizeRank(link.target) > dnd5eEffectiveSizeRank(target))
-  const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
-    (dnd5eTargetGrantsAttackAdvantage(target) ||
-      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) ||
-      dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, target) ||
-      dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
-      actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5) ||
-      dnd5ePendingAllyAttackAdvantage(actorCombatant, target) ||
-      dnd5eRageAllyMeleeAdvantage(
-        snapshot.state,
-        actorCombatant,
-        target,
-        profile.mode === 'melee',
-      ) ||
-      dnd5eOpeningAttackHasAdvantage(snapshot.state, actorCombatant, target) || mountedMeleeAdvantage)
-  const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
-    dnd5eWearingUnproficientArmor(actor) ||
-    dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
-    dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
-    (profile.mode === 'ranged' && (
-      distanceFeet > (profile.rangeFeet?.normal ?? 0) ||
-      input.map.tokens.some((candidate) => {
-        const candidateCombatant = snapshot.state.combatants[candidate.id]
-        return candidate.id !== actorToken.id && candidate.type !== 'obstacle' &&
-          areOpposedCombatTokens(actorToken, candidate) &&
-          dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
-          tokenDistanceFeet(actorToken, candidate) <= 5
-      })
-    ))
-  const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
-    dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || attackerHasDisadvantage ||
-    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
-    dnd5eSourceMarkedAttackDisadvantage(actorCombatant, target) ||
-    dnd5eRageAllyProtectionDisadvantage(snapshot.state, actorCombatant, target)
-  const attackMode = resolveDnd5eRollMode({
-    advantage: [{ active: attackerHasAdvantage, reason: 'equipment-attack-advantage' }],
-    disadvantage: [{ active: targetImposesDisadvantage, reason: 'equipment-attack-disadvantage' }],
-  }).mode
+  const advantageAllowed = !dnd5ePreventsAttackAdvantage(target)
+  const rangedThreatened = profile.mode === 'ranged' && input.map.tokens.some((candidate) => {
+    const candidateCombatant = snapshot.state.combatants[candidate.id]
+    return candidate.id !== actorToken.id && candidate.type !== 'obstacle' &&
+      areOpposedCombatTokens(actorToken, candidate) &&
+      dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
+      tokenDistanceFeet(actorToken, candidate) <= 5
+  })
+  const attackModeResolution = resolveDnd5eRollMode({
+    advantage: [
+      ...dnd5eTargetAttackAdvantageReasons(target)
+        .map((reason) => ({ active: advantageAllowed, reason })),
+      { active: advantageAllowed && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target), reason: '协助动作' },
+      { active: advantageAllowed && dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, target), reason: '规则效果提供攻击优势' },
+      { active: advantageAllowed && dnd5eNextD20AdvantageApplies(actorCombatant, 'attack'), reason: '下一次 d20 攻击优势' },
+      { active: advantageAllowed && actorCombatant.classState.hiddenCheckTotal != null, reason: '攻击者处于隐藏状态' },
+      { active: advantageAllowed && (recklessAttack || recklessAlreadyActive), reason: '鲁莽攻击' },
+      { active: advantageAllowed && !!target.classState.recklessAttackTurnKey, reason: '目标的鲁莽攻击仍在持续' },
+      { active: advantageAllowed && !!target.classState.stunnedByActorId, reason: '目标处于震慑状态' },
+      { active: advantageAllowed && dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id), reason: '目标看不见攻击者' },
+      { active: advantageAllowed && targetProne && distanceFeet <= 5, reason: '目标倒地且攻击者在 5 尺内' },
+      { active: advantageAllowed && dnd5ePendingAllyAttackAdvantage(actorCombatant, target), reason: '盟友能力提供攻击优势' },
+      { active: advantageAllowed && dnd5eRageAllyMeleeAdvantage(snapshot.state, actorCombatant, target, profile.mode === 'melee'), reason: '狂暴盟友能力提供近战优势' },
+      { active: advantageAllowed && dnd5eOpeningAttackHasAdvantage(snapshot.state, actorCombatant, target), reason: '首击能力提供优势' },
+      { active: advantageAllowed && mountedMeleeAdvantage, reason: '骑乘战斗：近战攻击更小的未骑乘目标' },
+    ],
+    disadvantage: [
+      ...dnd5eAttackDisadvantageReasons(snapshot.state, actorToken.id, targetToken.id)
+        .map((reason) => ({ active: true, reason })),
+      { active: underwater.disadvantage, reason: '水下武器攻击限制' },
+      { active: (actor.exhaustionLevel ?? 0) >= 3, reason: '3 级或更高力竭' },
+      { active: dnd5eWearingUnproficientArmor(actor), reason: '穿着不熟练的护甲' },
+      { active: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },
+      { active: dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant), reason: '攻击者处于恐慌且能看见恐惧源' },
+      { active: actorProne, reason: '攻击者处于倒地状态' },
+      { active: targetProne && distanceFeet > 5, reason: '目标倒地且攻击距离超过 5 尺' },
+      { active: profile.mode === 'ranged' && distanceFeet > (profile.rangeFeet?.normal ?? 0), reason: '远程攻击超过常规射程' },
+      { active: rangedThreatened, reason: '远程攻击者 5 尺内有敌人' },
+      { active: dnd5eTargetIsDodging(target), reason: '目标正在闪避' },
+      { active: dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id), reason: '目标受朦胧术影响' },
+      { active: dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id), reason: '攻击者看不见目标' },
+      { active: dnd5eSourceMarkedAttackDisadvantage(actorCombatant, target), reason: '攻击受到标记类能力限制' },
+      { active: dnd5eRageAllyProtectionDisadvantage(snapshot.state, actorCombatant, target), reason: '目标受到盟友保护能力影响' },
+    ],
+  })
+  const attackMode = attackModeResolution.mode
   const stunningStrikeResolution = stunningStrike
     ? {
         saveDc: 8 + rules.proficiencyBonus(actor.level) + rules.abilityModifier(actor.abilities.wis),
@@ -572,6 +620,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       spendsBonusAction: frenzyAttack || offHandAttack || featureBonusWeaponAttack || activityWeaponAttackGranted,
       countsTowardAttackAction: !specialAttack,
       attackMode,
+      attackModeResolution,
       declarativeIntentFeatureIds: [...declarativeIntentFeatureIds],
       classDamageContext,
       stunningStrike: stunningStrikeResolution ? {
@@ -622,19 +671,30 @@ export function dnd5ePreparedEquipmentAttackMode(
   prepared: PreparedDnd5eEquipmentAttack,
   protectedAttack: boolean,
 ): PreparedDnd5eEquipmentAttack['attackMode'] {
+  return dnd5ePreparedEquipmentAttackModeResolution(prepared, protectedAttack).mode
+}
+
+export function dnd5ePreparedEquipmentAttackModeResolution(
+  prepared: PreparedDnd5eEquipmentAttack,
+  protectedAttack: boolean,
+): Dnd5eRollModeResolution {
+  const baseResolution = prepared.attackModeResolution ?? resolveDnd5eRollMode({
+    advantage: [{ active: prepared.attackMode === 'advantage', reason: 'Headless 攻击上下文判定' }],
+    disadvantage: [{ active: prepared.attackMode === 'disadvantage', reason: 'Headless 攻击上下文判定' }],
+  })
   const nextAttackAdvantageIntent = prepared.declarativeIntentFeatureIds.some((featureId) =>
     dnd5eDeclarativeCombatManeuverDefinition(featureId)?.mechanic.operation === 'next-attack-advantage'
   )
-  const maneuverMode = nextAttackAdvantageIntent
-    ? resolveDnd5eRollMode({
-        advantage: [
-          { active: prepared.attackMode === 'advantage', reason: 'prepared-attack-advantage' },
-          { active: true, reason: 'next-attack-advantage' },
-        ],
-        disadvantage: [{ active: prepared.attackMode === 'disadvantage', reason: 'prepared-attack-disadvantage' }],
-      }).mode
-    : prepared.attackMode
-  return dnd5eAttackModeWithProtection(maneuverMode, protectedAttack)
+  return resolveDnd5eRollMode({
+    advantage: [
+      ...baseResolution.advantageReasons.map((reason) => ({ active: true, reason })),
+      { active: nextAttackAdvantageIntent, reason: '战技令下一次攻击具有优势' },
+    ],
+    disadvantage: [
+      ...baseResolution.disadvantageReasons.map((reason) => ({ active: true, reason })),
+      { active: protectedAttack, reason: '保护战斗风格' },
+    ],
+  })
 }
 
 export function previewDnd5eEquipmentAttack(
@@ -667,15 +727,32 @@ export function previewDnd5eEquipmentAttack(
       use: postD20Adjustment,
     }),
     criticalThreshold: prepared.profile.criticalThreshold,
-    automaticCritical: dnd5eConditionHitIsAutomaticCritical({
-      target: prepared.state.combatants[prepared.targetToken.id],
-      distanceFeet: prepared.distanceFeet,
-    }) || dnd5eOpeningAttackIsAutomaticCritical(
-      prepared.state,
-      prepared.state.combatants[prepared.actorToken.id],
-      prepared.state.combatants[prepared.targetToken.id],
-    ),
+    automaticCritical: dnd5ePreparedEquipmentAttackIsAutomaticCritical(prepared),
   })
+}
+
+/**
+ * Host-authoritative automatic-critical rule for a prepared weapon attack.
+ *
+ * Keep this separate from the provisional attack preview: an AC-changing
+ * interrupt can turn a provisional hit into a miss (or vice versa). The UI
+ * must therefore decide the final critical only after all hit adjustments,
+ * then build the damage pool from this same predicate that Headless uses.
+ */
+export function dnd5ePreparedEquipmentAttackIsAutomaticCritical(
+  prepared: PreparedDnd5eEquipmentAttack,
+): boolean {
+  const actor = prepared.state.combatants[prepared.actorToken.id]
+  const target = prepared.state.combatants[prepared.targetToken.id]
+  if (!actor || !target) return false
+  return dnd5eConditionHitIsAutomaticCritical({
+    target,
+    distanceFeet: prepared.distanceFeet,
+  }) || dnd5eOpeningAttackIsAutomaticCritical(
+    prepared.state,
+    actor,
+    target,
+  )
 }
 
 /**
@@ -754,6 +831,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   damageMitigationInterrupts?: readonly Dnd5eDamageMitigationInterruptUse[]
   transaction?: CombatTransaction
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+  attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -762,6 +840,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   const { prepared } = input
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'attack',
+    attackDecoyRolls: input.attackDecoyRolls,
     actorId: prepared.actorToken.id,
     targetId: prepared.targetToken.id,
     attackModifier: prepared.profile.attackModifier,
@@ -838,6 +917,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     map: prepared.map,
     characters,
     characterIdByCombatantId: prepared.characterIdByCombatantId,
+    events: [...result.events],
   })
   if (ammunition.ok && ammunition.instanceId && !application.changedCharacterIds.includes(prepared.actor.id)) {
     application.changedCharacterIds = [...application.changedCharacterIds, prepared.actor.id]

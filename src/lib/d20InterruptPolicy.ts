@@ -32,7 +32,12 @@ export interface D20EnemyModifierOption {
 export function dnd5eCoreInspirationChoiceRerollOption(
   character: Pick<Character, 'id' | 'inspiration'>,
   sourceTokenId?: string,
+  existingRollMode: 'normal' | 'advantage' | 'disadvantage' = 'normal',
 ): D20EnemyModifierOption | undefined {
+  // 2014 Inspiration grants advantage; advantage/disadvantage never stacks.
+  // Do not offer (or animate) another d20 after the roll has already been
+  // prepared with either mode.
+  if (existingRollMode !== 'normal') return undefined
   if (!Number.isSafeInteger(character.inspiration) || character.inspiration < 1) return undefined
   return {
     characterId: character.id,
@@ -42,10 +47,29 @@ export function dnd5eCoreInspirationChoiceRerollOption(
     sourceTokenId,
     rerollScope: 'self-roll',
     additionalDice: 1,
-    selectionPolicy: 'owner-chooses',
+    // 2014 Inspiration grants advantage. The roll-confirmation bridge creates
+    // the second d20 after the player commits the resource, so the Host must
+    // take the higher result instead of opening a second, timeout-prone choice.
+    selectionPolicy: 'highest',
     resourceCosts: [{ resourceKey: DND5E_CORE_INSPIRATION_RESOURCE_KEY, amount: 1 }],
     decisionRequired: true,
   }
+}
+
+/**
+ * Multi-die recipes also carry damage and random-table rolls. Only a single,
+ * normal-mode d20 test made by an identified player may enter the Inspiration
+ * choice bridge; advantage/disadvantage pools already contain their second die.
+ */
+export function shouldOfferDnd5ePlayerD20ChoiceReroll(input: {
+  count: number
+  sides: number
+  rollKind?: 'attack' | 'ability-check' | 'saving-throw'
+  rollMode?: 'normal' | 'advantage' | 'disadvantage'
+  rollerSide?: 'player' | 'enemy'
+}): boolean {
+  return input.count === 1 && input.sides === 20 && input.rollKind != null &&
+    (input.rollMode ?? 'normal') === 'normal' && input.rollerSide === 'player'
 }
 
 export type D20ResolvedOutcome = 'success' | 'failure' | 'unknown'

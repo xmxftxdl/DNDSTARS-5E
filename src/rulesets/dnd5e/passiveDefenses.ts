@@ -4,18 +4,24 @@ import type { Dnd5eClassId } from './classes'
 import type { Dnd5eDamageType } from './monsters'
 import {
   dnd5eActiveConditionImmunities,
+  dnd5eActiveConditionImmuneBySourceCreatureType,
+  dnd5eActiveConditionImmuneBySourceMagic,
+  dnd5eActiveSavingThrowAdvantageBySourceCreatureType,
   dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveEffectsGrantAttackAdvantageAgainstTarget,
   dnd5eActiveSavingThrowAdvantages,
   dnd5eActiveSavingThrowDisadvantages,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveSpeedBonus,
   dnd5eActiveSpeedPenalty,
+  effectiveDnd5eActiveEffects,
   type Dnd5eActiveEffectInstance,
 } from './activeEffects'
 import {
+  DND5E_STANDARD_CONDITIONS,
+  dnd5eActiveStandardConditions,
   dnd5eConditionGrantsAttackAdvantage,
   dnd5eConditionGrantsAttackAdvantageToAttacker,
-  dnd5eConditionImposesAttackDisadvantage,
   dnd5eConditionIncapacitated,
   dnd5eConditionSetsSpeedToZero,
   dnd5eConditionSavingThrowDisadvantage,
@@ -57,8 +63,13 @@ export interface Dnd5eDefensiveCreature {
       roll: 'attack' | 'damage' | 'saving-throw'
       mode: 'bonus' | 'advantage' | 'disadvantage'
     }[]
+    monsterLegendaryMovement?: {
+      temporaryConditionImmunities?: readonly string[]
+    }
   }
   conditions: readonly string[]
+  /** Transient map projection for creatures with Antimagic Susceptibility. */
+  incapacitatedByAntimagicSusceptibility?: boolean
   creatureType?: string
   magicResistance?: boolean
   spellSavingThrowAdvantage?: boolean
@@ -203,9 +214,13 @@ function hasMechanicalEffect(
 }
 
 export function dnd5eIsIncapacitated(
-  creature: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
+  creature: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<
+    Dnd5eDefensiveCreature,
+    'conditions' | 'incapacitatedByAntimagicSusceptibility'
+  >>,
 ): boolean {
-  return !!creature.classState.stunnedByActorId || dnd5eConditionIncapacitated(creature)
+  return creature.incapacitatedByAntimagicSusceptibility === true ||
+    !!creature.classState.stunnedByActorId || dnd5eConditionIncapacitated(creature)
 }
 
 export function dnd5eSavingThrowModeExplanation(
@@ -264,6 +279,11 @@ export function dnd5eSavingThrowModeExplanation(
     (context.sourceIsSpell === true || context.sourceIsMagical === true) &&
     creature.racialSavingThrowAdvantages?.magicAbilities?.includes(ability)
   ))
+  const sourceQualifiedConditionSaveAdvantage = dnd5eActiveSavingThrowAdvantageBySourceCreatureType(
+    creature.classState.activeEffects,
+    context.condition,
+    context.sourceCreatureType,
+  )
   const strengthEffect = ability === 'str'
     ? dnd5eActiveStrengthRollFlags(creature.classState.activeEffects)
     : { advantage: false, disadvantage: false }
@@ -279,6 +299,7 @@ export function dnd5eSavingThrowModeExplanation(
       { active: spellSavingThrowAdvantage, reason: 'spell-saving-throw-advantage' },
       { active: nearbySpellSavingThrowAdvantage, reason: 'nearby-spell-saving-throw-advantage' },
       { active: racialSaveAdvantage, reason: 'racial-save-advantage' },
+      { active: sourceQualifiedConditionSaveAdvantage, reason: 'source-qualified-condition-save-advantage' },
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: dodgeDexterity, reason: 'dodge' },
       { active: strengthEffect.advantage, reason: 'active-effect-strength-advantage' },
@@ -381,12 +402,49 @@ export function dnd5eIsBlinded(creature: { conditions?: readonly string[] }): bo
 
 /** 目标目盲时，对其进行的攻击检定具有优势。 */
 export function dnd5eTargetGrantsAttackAdvantage(creature: Dnd5eDefensiveCreature): boolean {
+  return dnd5eTargetAttackAdvantageReasons(creature).length > 0
+}
+
+/**
+ * Returns the concrete public rule sources behind attacks having advantage
+ * against this target. Combat logs consume these labels instead of collapsing
+ * every condition and ActiveEffect into the opaque phrase “目标状态”.
+ */
+export function dnd5eTargetAttackAdvantageReasons(
+  creature: Dnd5eDefensiveCreature,
+): readonly string[] {
+  if (dnd5ePreventsAttackAdvantage(creature)) return []
   const guidingBolt = creature.classState.activeEffects?.some((effect) =>
     effect.definitionId === 'srd-5.1:spell:guiding-bolt:attack-advantage'
   ) === true
   const faerieFire = hasMechanicalEffect(creature, 'srd-5.1:spell:faerie-fire')
-  return (dnd5eConditionGrantsAttackAdvantage({ target: creature }) || guidingBolt || faerieFire) &&
-    !dnd5ePreventsAttackAdvantage(creature)
+  const conditionReasons = dnd5eActiveStandardConditions(creature)
+    .filter((condition) =>
+      DND5E_STANDARD_CONDITIONS[condition].attacksAgainstHaveAdvantage === true)
+    .map((condition) => `目标处于${DND5E_STANDARD_CONDITIONS[condition].label}状态`)
+  const activeEffectReasons = effectiveDnd5eActiveEffects(
+    creature.classState.activeEffects,
+  ).filter((effect) =>
+    effect.modifiers?.attacksAgainstTargetAdvantage === true,
+  ).map((effect) => `目标效果“${effect.label}”提供攻击优势`)
+  const reasons = [
+    ...conditionReasons,
+    ...(guidingBolt ? ['目标受到曳光弹影响'] : []),
+    ...(faerieFire ? ['目标受到妖火术影响'] : []),
+    ...activeEffectReasons,
+  ]
+  // Keep the boolean rule source as a compatibility fallback for extensions
+  // whose old projection has not yet exposed a named ActiveEffect.
+  if (
+    reasons.length === 0 &&
+    (
+      dnd5eConditionGrantsAttackAdvantage({ target: creature }) ||
+      dnd5eActiveEffectsGrantAttackAdvantageAgainstTarget(
+        creature.classState.activeEffects,
+      )
+    )
+  ) reasons.push('目标的规则状态提供攻击优势')
+  return [...new Set(reasons)]
 }
 
 /** 攻击者不可见时，其攻击检定具有优势（特殊感官可在规则扩展层覆盖）。 */
@@ -415,23 +473,55 @@ export function dnd5eHasViciousMockeryAttackDisadvantage(
   return creature.classState.viciousMockeryAttackDisadvantage === true
 }
 
+/**
+ * Returns public, rule-specific labels for disadvantage caused by the
+ * attacker's own standard conditions. Keeping this separate from visibility
+ * prevents conditions such as Restrained from being reported as an unseen
+ * target.
+ */
+export function dnd5eAttackerAttackDisadvantageReasons(
+  creature: Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
+): readonly string[] {
+  return dnd5eActiveStandardConditions(creature)
+    .filter((condition) =>
+      DND5E_STANDARD_CONDITIONS[condition].attackRollsDisadvantage === true)
+    .map((condition) => `攻击者处于${DND5E_STANDARD_CONDITIONS[condition].label}状态`)
+}
+
+/** Returns non-visibility rules on the target that impose attack disadvantage. */
+export function dnd5eTargetAttackDisadvantageReasons(
+  attacker: Pick<Dnd5eDefensiveCreature, 'creatureType'>,
+  target: Pick<Dnd5eDefensiveCreature, 'classId' | 'subclassId' | 'level' | 'classLevels' | 'subclassIds' | 'classState'>,
+): readonly string[] {
+  const activeEffectReasons = effectiveDnd5eActiveEffects(
+    target.classState.activeEffects,
+  ).filter((effect) =>
+    effect.modifiers?.attacksAgainstTargetDisadvantage === true,
+  ).map((effect) => `目标效果“${effect.label}”令对其攻击具有劣势`)
+  const purityOfSpirit = defensiveClassLevel(target as Dnd5eDefensiveCreature, 'paladin') >= 15 &&
+    defensiveHasSubclass(target as Dnd5eDefensiveCreature, 'paladin', 'devotion') &&
+    dnd5eProtectionCreatureType(attacker.creatureType)
+  return [...new Set([
+    ...activeEffectReasons,
+    ...(purityOfSpirit ? ['目标的纯净之魂令该生物类型的攻击具有劣势'] : []),
+  ])]
+}
+
 export function dnd5eUnseenTargetImposesDisadvantage(
   attacker: Pick<Dnd5eDefensiveCreature, 'classId' | 'level' | 'classLevels' | 'creatureType'> & { conditions?: readonly string[] },
   target: Pick<Dnd5eDefensiveCreature, 'classId' | 'subclassId' | 'level' | 'classLevels' | 'subclassIds' | 'classState'> &
     Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
   options?: { targetVisible?: boolean },
 ): boolean {
-  if (dnd5eConditionImposesAttackDisadvantage({ attacker })) return true
+  if (dnd5eAttackerAttackDisadvantageReasons(attacker).length > 0) return true
+  if (dnd5eTargetAttackDisadvantageReasons(attacker, target).length > 0) return true
   const targetIsOutlined = hasMechanicalEffect(target, 'srd-5.1:spell:faerie-fire')
   const targetIsUnseen = options?.targetVisible === true
     ? false
     : (!targetIsOutlined && dnd5eHasStandardCondition(target, 'invisible')) ||
       (target.classState.emptyBodyRoundsRemaining ?? 0) > 0
   const unseenDisadvantage = targetIsUnseen && !(defensiveClassLevel(attacker as Dnd5eDefensiveCreature, 'ranger') >= 18)
-  const purityOfSpirit = defensiveClassLevel(target as Dnd5eDefensiveCreature, 'paladin') >= 15 &&
-    defensiveHasSubclass(target as Dnd5eDefensiveCreature, 'paladin', 'devotion') &&
-    dnd5eProtectionCreatureType(attacker.creatureType)
-  return unseenDisadvantage || purityOfSpirit
+  return unseenDisadvantage
 }
 
 export function dnd5eReactionsPrevented(
@@ -491,6 +581,7 @@ export function dnd5eConditionImmuneFromSource(
   target: Dnd5eDefensiveCreature & { conditionImmunities?: readonly string[] },
   condition: string,
   source?: Pick<Dnd5eDefensiveCreature, 'creatureType'>,
+  context?: { sourceMagical?: boolean },
 ): boolean {
   const normalized = condition.trim().toLowerCase()
   const standard = dnd5eStandardConditionId(condition)
@@ -505,6 +596,20 @@ export function dnd5eConditionImmuneFromSource(
   if (standard != null && dnd5eActiveConditionImmunities(target.classState.activeEffects).includes(standard)) {
     return true
   }
+  if (dnd5eActiveConditionImmuneBySourceCreatureType(
+    target.classState.activeEffects,
+    standard ?? normalized,
+    source?.creatureType,
+  )) return true
+  if (
+    standard != null &&
+    target.classState.monsterLegendaryMovement?.temporaryConditionImmunities?.includes(standard)
+  ) return true
+  if (dnd5eActiveConditionImmuneBySourceMagic(
+    target.classState.activeEffects,
+    standard ?? normalized,
+    context?.sourceMagical,
+  )) return true
   const charmOrFear = standard === 'charmed' || standard === 'frightened'
   if (
     charmOrFear &&

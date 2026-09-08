@@ -3,12 +3,53 @@ import {
   aoeOrientFromCell,
   canPlaceAoe,
   cellsForAoe,
+  lineAoeGeometry,
   type SkillAoeTargeting,
 } from '../../lib/skillTargeting'
 import type { Dnd5eSpellTargetingSession } from '../../presentation/maps/useCombatInteraction'
 import type { BattleMap } from '../../store/maps'
 import type { AoeHighlight } from '../../components/map/mapCanvasContracts'
 import { wallOfFireTargetingPreview } from './wallOfFireTargeting'
+import { spellAreaSelectionLocked } from './aoeTargetingSession'
+
+/** Beyond this budget the vector outline communicates the same area without
+ * mounting thousands of Konva Rect nodes. */
+export const MAX_AOE_CELL_PREVIEW_NODES = 2_000
+
+export function isGuessedSpellVisibleTargetCandidate(input: {
+  spellId: string
+  actorTokenId: string
+  candidateTokenId: string
+  candidateType: string
+  perceptionVisibility?: string
+  opposed: boolean
+}): boolean {
+  const allowsNonHostileTarget = input.spellId === 'dispel-magic' || input.spellId === 'sanctuary'
+  return input.candidateType !== 'obstacle' &&
+    input.perceptionVisibility !== 'detected-unseen' &&
+    (input.candidateTokenId !== input.actorTokenId || allowsNonHostileTarget) &&
+    (allowsNonHostileTarget || input.opposed)
+}
+
+function estimatedAoeCellCount(targeting: SkillAoeTargeting): number {
+  if (targeting.shape === 'circle') {
+    const radiusCells = Math.max(0, targeting.radiusFeet / 5)
+    return Math.PI * (radiusCells + 1) ** 2
+  }
+  if (targeting.shape === 'cone') {
+    const lengthCells = Math.max(0, targeting.lengthFeet / 5)
+    return lengthCells ** 2 / 2
+  }
+  const widthCells = Math.max(1, targeting.widthFeet / 5)
+  const lengthCells = Math.max(1, (
+    targeting.shape === 'line' ? targeting.lengthFeet : targeting.heightFeet
+  ) / 5)
+  return widthCells * lengthCells
+}
+
+export function shouldUseVectorOnlyAoePreview(targeting: SkillAoeTargeting): boolean {
+  return estimatedAoeCellCount(targeting) > MAX_AOE_CELL_PREVIEW_NODES
+}
 
 export function buildSpellOrSkillAoeHighlight(input: {
   targeting: SkillAoeTargeting | null | undefined
@@ -18,7 +59,10 @@ export function buildSpellOrSkillAoeHighlight(input: {
   rectRotation: number
   spellTargeting: Dnd5eSpellTargetingSession | null
 }): AoeHighlight | undefined {
-  const { targeting, previewCell, casterCell, map, rectRotation, spellTargeting } = input
+  const { targeting, previewCell: hoverPreviewCell, casterCell, map, rectRotation, spellTargeting } = input
+  const previewCell = spellAreaSelectionLocked(spellTargeting)
+    ? spellTargeting?.areaTargetCell ?? hoverPreviewCell
+    : hoverPreviewCell
   if (!targeting || !previewCell || !casterCell) return undefined
   if (map) {
     const wallPreview = wallOfFireTargetingPreview({
@@ -40,7 +84,9 @@ export function buildSpellOrSkillAoeHighlight(input: {
       ? { rectAngleDegrees: spellTargeting?.areaTargetAngleDegrees ?? 0 }
       : {}),
   })
-  const cells = cellsForAoe(targeting, orientFrom, previewCell)
+  const cells = shouldUseVectorOnlyAoePreview(targeting)
+    ? []
+    : cellsForAoe(targeting, orientFrom, previewCell)
   const isSelfCircle = targeting.shape === 'circle' && targeting.origin === 'self'
   const mapDiagonalFeet = map
     ? Math.hypot(
@@ -103,10 +149,31 @@ export function buildSpellOrSkillAoeHighlight(input: {
       const endY = origin.y + uy * length
       return [origin.x, origin.y, endX + px * halfWidth, endY + py * halfWidth, endX - px * halfWidth, endY - py * halfWidth]
     }
-    const origin = cellCenterToPixel(targeting.shape === 'line' ? casterCell : previewCell)
-    const aim = targeting.shape === 'line'
-      ? cellCenterToPixel(previewCell)
-      : cellCenterToPixel({
+    if (targeting.shape === 'line') {
+      const geometry = lineAoeGeometry(
+        casterCell,
+        previewCell,
+        targeting.lengthFeet,
+        targeting.widthFeet,
+      )
+      const gridPointToPixel = (point: { x: number; y: number }) => ({
+        x: gridOffsetX + (point.x + 0.5) * gridSize,
+        y: gridOffsetY + (point.y + 0.5) * gridSize,
+      })
+      const start = gridPointToPixel(geometry.start)
+      const end = gridPointToPixel(geometry.end)
+      const px = -geometry.direction.y
+      const py = geometry.direction.x
+      const width = targeting.widthFeet / 5 * gridSize
+      return [
+        start.x + px * width / 2, start.y + py * width / 2,
+        end.x + px * width / 2, end.y + py * width / 2,
+        end.x - px * width / 2, end.y - py * width / 2,
+        start.x - px * width / 2, start.y - py * width / 2,
+      ]
+    }
+    const origin = cellCenterToPixel(previewCell)
+    const aim = cellCenterToPixel({
           col: previewCell.col * 2 - orientFrom.col,
           row: previewCell.row * 2 - orientFrom.row,
         })
@@ -118,16 +185,7 @@ export function buildSpellOrSkillAoeHighlight(input: {
     const px = -uy
     const py = ux
     const width = targeting.widthFeet / 5 * gridSize
-    const height = (targeting.shape === 'line' ? targeting.lengthFeet : targeting.heightFeet) / 5 * gridSize
-    if (targeting.shape === 'line') {
-      const end = { x: origin.x + ux * height, y: origin.y + uy * height }
-      return [
-        origin.x + px * width / 2, origin.y + py * width / 2,
-        end.x + px * width / 2, end.y + py * width / 2,
-        end.x - px * width / 2, end.y - py * width / 2,
-        origin.x - px * width / 2, origin.y - py * width / 2,
-      ]
-    }
+    const height = targeting.heightFeet / 5 * gridSize
     return [
       origin.x - ux * height / 2 + px * width / 2, origin.y - uy * height / 2 + py * width / 2,
       origin.x + ux * height / 2 + px * width / 2, origin.y + uy * height / 2 + py * width / 2,

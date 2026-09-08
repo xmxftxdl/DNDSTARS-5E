@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { resolvePlayerMapSpellHotbarCharacter } from './playerMapSpellHotbarCharacter'
 import { playerMapMovablePersistentAreas, playerMapSustainedAreaControls } from './playerMapPersistentAreas'
 
 const character = {
@@ -10,6 +11,17 @@ const character = {
 } as Character
 
 describe('playerMapMovablePersistentAreas', () => {
+  it('keeps the assigned player character as the spell-bar actor during an enemy turn', () => {
+    const wizard = { ...character, id: 'assigned-wizard' }
+    const archmage = { ...character, id: 'enemy-archmage' }
+
+    expect(resolvePlayerMapSpellHotbarCharacter({
+      playerCharacter: wizard,
+      activeCharacter: archmage,
+      combatActive: true,
+    })).toBe(wizard)
+  })
+
   it('keeps Dancing Lights movable in exploration and migrates a legacy area declaration', () => {
     const map = {
       id: 'map',
@@ -45,6 +57,26 @@ describe('playerMapMovablePersistentAreas', () => {
       economy: 'bonus-action',
       maximumFeet: 60,
       coreSpellId: 'dancing-lights',
+    }])
+  })
+
+  it('projects an existing Major Image as an action reposition within the caster range', () => {
+    const map = {
+      id: 'map', name: 'Map', width: 1500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [],
+      dnd5ePluginAreas: [{
+        id: 'major-image', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:major-image',
+        sourceKind: 'core-spell', coreSpellId: 'major-image', label: '高等幻影', color: '#8b5cf6',
+        sourceCharacterId: character.id, sourceTokenId: 'wizard-token',
+        cells: [{ col: 1, row: 1 }], anchorCell: { col: 1, row: 1 },
+        createdRound: 1, expiresAfterRound: 101, anchorMode: 'fixed',
+        movement: { economy: 'action', maximumFeet: 240, maximumDistanceFromSourceFeet: 120 },
+      }],
+    } as BattleMap
+
+    expect(playerMapMovablePersistentAreas(map, character)).toEqual([{
+      id: 'major-image', label: '高等幻影', economy: 'action', maximumFeet: 240,
+      destinationRangeFeet: 120, coreSpellId: 'major-image',
     }])
   })
 

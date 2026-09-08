@@ -1,0 +1,175 @@
+{
+  "id": "srd-5.1:treant",
+  "slug": "treant",
+  "name": "树人",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：活化树木要求选择真实地形树，创建带临时属性覆盖的树人实体，并跟踪一天、距离、来源死亡、奖励动作解除和重新扎根。当前召唤模型没有地形实体选择与属性覆盖。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "slam",
+      "name": "猛击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "rock",
+      "name": "投石",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "animate-trees",
+      "name": "活化树木",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 61,
+      "slug": "treant",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:14:52.901Z",
+      "name": "树人",
+      "actionId": "slam",
+      "actionName": "猛击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "9",
+      "total": 334,
+      "mapId": "verify-ui-treant-slam-1788567292953",
+      "combatId": "verify-ui-treant-slam-1788567292953:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "树人 使用猛击攻击 验证目标：猛击 → 验证目标 8+10=18 命中；共造成 20 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:15 PM\n结算\n\n树人 使用猛击攻击 验证目标：猛击 → 验证目标 8+10=18 命中；共造成 20 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：猛击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 8；最终采用 8；调整值 +10。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 猛击（基础伤害·钝击）｜3d6 骰面：3 + 6 + 5 = 14｜固定加值 +6｜小计 20\n树人｜消耗动作\n验证目标｜受到 20 点伤害｜HP 320 → 300",
+      "playerLog": "树人 使用猛击攻击 验证目标：猛击 → 验证目标 8+10=18 命中；共造成 20 点伤害。",
+      "afterHp": 300,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:15:16.555Z",
+      "evidenceFile": "ui-cases/monsters/061-treant.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "攻城怪物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

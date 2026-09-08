@@ -1,0 +1,109 @@
+{
+  "id": "srd-5.1:berserker",
+  "slug": "berserker",
+  "name": "狂战士",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：鲁莽攻击必须在本回合显式启用；启用本身不消耗动作。攻击者优势与敌人攻击它的优势分别结算，来源下一回合开始时清除。牛头人的完整双端 UI 周期已另行手动复核。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greataxe",
+      "name": "巨斧",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 43,
+      "slug": "berserker",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:26:15.543Z",
+      "name": "狂战士",
+      "actionId": "greataxe",
+      "actionName": "巨斧",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-berserker-greataxe-1788557175646",
+      "combatId": "verify-ui-berserker-greataxe-1788557175646:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "狂战士 使用巨斧攻击 验证目标：巨斧 → 验证目标 17+5=22 命中；共造成 15 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:26 PM\n结算\n\n狂战士 使用巨斧攻击 验证目标：巨斧 → 验证目标 17+5=22 命中；共造成 15 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：巨斧｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 17；最终采用 17；调整值 +5。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 巨斧（基础伤害·挥砍）｜1d12 骰面：12 = 12｜固定加值 +3｜小计 15\n狂战士｜消耗动作\n验证目标｜受到 15 点伤害｜HP 320 → 305",
+      "playerLog": "狂战士 使用巨斧攻击 验证目标：巨斧 → 验证目标 17+5=22 命中；共造成 15 点伤害。",
+      "afterHp": 305,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:26:41.865Z",
+      "evidenceFile": "ui-cases/monsters/043-berserker.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "鲁莽",
+      "automation": "headless",
+      "rule": "reckless",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.activation",
+        "rule.outgoing.delivery",
+        "rule.outgoing.mode",
+        "rule.outgoing.rollMode",
+        "rule.outgoing.duration",
+        "rule.incoming.rollMode",
+        "rule.incoming.duration"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "Berserker and Minotaur Reckless lifecycle berserker attacks normally when the optional choice is omitted",
+        "Berserker and Minotaur Reckless lifecycle minotaur attacks normally when the optional choice is omitted",
+        "Berserker and Minotaur Reckless lifecycle rejects unsupported, incapacitated, repeated and off-turn Reckless choices atomically",
+        "Berserker and Minotaur Reckless lifecycle activates berserker only by choice and grants outgoing and incoming advantage",
+        "Berserker and Minotaur Reckless lifecycle activates minotaur only by choice and grants outgoing and incoming advantage",
+        "Berserker and Minotaur Reckless lifecycle clears stale Reckless vulnerability and does not reactivate while incapacitated",
+        "Berserker and Minotaur Reckless lifecycle uses a stable initiative slot id when Host preparation validates active Reckless"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 10,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

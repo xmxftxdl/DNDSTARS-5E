@@ -120,4 +120,46 @@ describe('Dnd5eConcentrationTokenBadge', () => {
     expect(onTooltipChange).toHaveBeenNthCalledWith(2, { clientX: 120, clientY: 80 })
     expect(onTooltipChange).toHaveBeenNthCalledWith(3)
   })
+
+  it('only captures badge clicks when status inspection is available', () => {
+    const mark: ConcentrationTokenMark = {
+      instance: concentrationInstance,
+      tokenId: 'wizard-token',
+      spellId: 'flaming-sphere',
+      backgroundHighlightColor: '#3b82f6',
+      backgroundColor: '#172554',
+      borderColor: '#93c5fd',
+      glowColor: '#60a5fa',
+    }
+    const passiveBadge = Dnd5eConcentrationTokenBadge({
+      x: 0,
+      y: 0,
+      size: 24,
+      image: {} as HTMLImageElement,
+      mark,
+      onTooltipChange: vi.fn(),
+    })
+    const passiveEvent = { cancelBubble: false }
+
+    ;(elementProps(passiveBadge).onClick as (event: typeof passiveEvent) => void)(passiveEvent)
+
+    expect(passiveEvent.cancelBubble).toBe(false)
+
+    const onClick = vi.fn()
+    const inspectableBadge = Dnd5eConcentrationTokenBadge({
+      x: 0,
+      y: 0,
+      size: 24,
+      image: {} as HTMLImageElement,
+      mark,
+      onClick,
+      onTooltipChange: vi.fn(),
+    })
+    const inspectableEvent = { cancelBubble: false }
+
+    ;(elementProps(inspectableBadge).onClick as (event: typeof inspectableEvent) => void)(inspectableEvent)
+
+    expect(inspectableEvent.cancelBubble).toBe(true)
+    expect(onClick).toHaveBeenCalledOnce()
+  })
 })

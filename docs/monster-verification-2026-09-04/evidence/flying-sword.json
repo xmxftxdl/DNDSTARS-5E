@@ -1,0 +1,119 @@
+{
+  "id": "srd-5.1:flying-sword",
+  "slug": "flying-sword",
+  "name": "飞剑",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：反魔法易感特性原先被怪物自身 schema 拒绝；目录往返解析已通过。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "longsword",
+      "name": "长剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 104,
+      "slug": "flying-sword",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:07:10.654Z",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  getByRole('status')\nExpected: \u001b[32m\"场景已就绪\"\u001b[39m\nReceived: \u001b[31m\"正在准备场景\"\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('status')\u001b[22m\n\u001b[2m    14 × locator resolved to <p id=\"status\" role=\"status\">正在准备场景</p>\u001b[22m\n\u001b[2m       - unexpected value \"正在准备场景\"\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:07:16.818Z",
+      "evidenceFile": "ui-cases/monsters/104-flying-sword.json"
+    },
+    {
+      "index": 257,
+      "slug": "flying-sword",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:04:20.464Z",
+      "name": "飞剑",
+      "actionId": "longsword",
+      "actionName": "长剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/4",
+      "total": 334,
+      "mapId": "verify-ui-flying-sword-longsword-1788570260514",
+      "combatId": "verify-ui-flying-sword-longsword-1788570260514:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "飞剑 使用长剑攻击 验证目标：长剑 → 验证目标 2+3=5 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:04 PM\n攻击\n\n飞剑 使用长剑攻击 验证目标：长剑 → 验证目标 2+3=5 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：长剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 2；最终采用 2；调整值 +3。\n结果 · 5 vs AC 10：未命中。\n飞剑｜消耗动作",
+      "playerLog": "飞剑 使用长剑攻击 验证目标：长剑 → 验证目标 2+3=5 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:04:40.964Z",
+      "evidenceFile": "ui-cases/monsters/257-flying-sword.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "反魔法易感",
+      "automation": "dm-adjudication",
+      "rule": "antimagic-susceptibility",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.incapacitatedInsideAntimagic",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

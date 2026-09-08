@@ -420,21 +420,27 @@ describe('D&D 5e content package V2', () => {
   })
 
   it('uses permanent unified Effects as the runtime authority for race and feat passives', () => {
-    const source = packageValue()
-    source.content.races[0] = {
-      ...source.content.races[0]!,
-      hitPointsPerLevelBonus: 1,
-      naturalOneReroll: true,
-      savingThrowAdvantages: { damageTypes: ['poison'], magicAbilities: ['int', 'wis', 'cha'] },
-    }
-    source.content.feats[0] = {
-      ...source.content.feats[0]!,
-      passiveEffects: [{
-        ...source.content.feats[0]!.passiveEffects![0]!,
-        deliveries: ['weapon-attack'],
-        magical: false,
-        requiresHeavyArmor: true,
-      }],
+    const base = packageValue()
+    const source = {
+      ...base,
+      content: {
+        ...base.content,
+        races: base.content.races.map((race, index) => index === 0 ? {
+          ...race,
+          hitPointsPerLevelBonus: 1,
+          naturalOneReroll: true,
+          savingThrowAdvantages: { damageTypes: ['poison'] as const, magicAbilities: ['int', 'wis', 'cha'] as const },
+        } : race),
+        feats: base.content.feats.map((feat, index) => index === 0 ? {
+          ...feat,
+          passiveEffects: [{
+            ...feat.passiveEffects![0]!,
+            deliveries: ['weapon-attack'] as const,
+            magical: false,
+            requiresHeavyArmor: true,
+          }],
+        } : feat),
+      },
     }
     const definitions = dnd5eContentDefinitionsFromPackageV2(source)
     const race = definitions.find((definition) => definition.kind === 'race')

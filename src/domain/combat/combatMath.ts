@@ -2,6 +2,7 @@ import type {
   Dnd5eClassDamageDefinition,
   Dnd5eClassDamageRolls,
 } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eClassDamageRollId } from '../../rulesets/dnd5e/headlessCombatEngine'
 
 export function dnd5eWeaponDamagePreviewTotal(
   baseDamageTotal: number,
@@ -11,7 +12,8 @@ export function dnd5eWeaponDamagePreviewTotal(
   let additionalDamage = 0
   let weaponDamageReduction = 0
   for (const definition of definitions) {
-    const supplied = rolls.find((entry) => entry.source === definition.source)?.rolls ?? []
+    const supplied = rolls.find((entry) =>
+      dnd5eClassDamageRollId(entry) === dnd5eClassDamageRollId(definition))?.rolls ?? []
     const total = Math.max(0, supplied.reduce((sum, value) => sum + value, 0) + (definition.bonus ?? 0))
     if (definition.operation === 'subtract-from-weapon') weaponDamageReduction += total
     else additionalDamage += total

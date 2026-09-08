@@ -23,6 +23,7 @@ import { SkiaTile } from './SkiaTile'
 import { SkiaMapImage } from './SkiaMapImage'
 import { useTileScheduler } from './useTileScheduler'
 import { cameraForPinch } from './gestureMath'
+import { mobileTokenScreenRadius } from './mobileMapTokenMath'
 
 function tokenAtScreenPoint(tokens: PlayerTokenView[], camera: CameraState, x: number, y: number) {
   return tokens
@@ -263,7 +264,7 @@ export function MobileSkiaMap({
         {snapshot.visibleTokens.map((token) => {
           const x = camera.x + token.x * camera.scale
           const y = camera.y + token.y * camera.scale
-          const radius = Math.max(7, token.radius * camera.scale)
+          const radius = mobileTokenScreenRadius(token.radius, camera.scale)
           const selected = token.id === selectedId
           const activeTurn = token.id === snapshot.initiative?.currentTokenId
           return (
@@ -282,7 +283,7 @@ export function MobileSkiaMap({
         {snapshot.visibleTokens.map((token) => {
           const x = camera.x + token.x * camera.scale
           const y = camera.y + token.y * camera.scale
-          const radius = Math.max(7, token.radius * camera.scale)
+          const radius = mobileTokenScreenRadius(token.radius, camera.scale)
           const inset = Math.min(3, radius / 3)
           return <MapTokenPortrait
             key={`portrait:${token.id}`}
@@ -329,11 +330,28 @@ function MapTokenPortrait({ token, left, top, diameter }: { token: PlayerTokenVi
   const [failedUri, setFailedUri] = useState('')
   const source = token.portraitSource
   const showImage = !!source?.uri && failedUri !== source.uri
-  return <View style={[styles.mapPortrait, { left, top, width: diameter, height: diameter, borderRadius: diameter / 2 }]}>
-    {showImage
-      ? <Image source={source} resizeMode="cover" style={styles.mapPortraitImage} onError={() => setFailedUri(source.uri)} />
-      : <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.mapPortraitFallback, { fontSize: Math.max(8, Math.min(24, diameter * 0.55)) }]}>{token.avatar || token.name.slice(0, 1) || '·'}</Text>}
+  const badges = [
+    ...(token.airborne ? ['飞'] : []),
+    ...(token.concentrating ? ['专'] : []),
+    ...token.conditions.slice(0, 2).map(conditionBadge),
+  ].slice(0, 3)
+  return <View style={[styles.mapPortraitWrap, { left, top, width: diameter, height: diameter }]}>
+    <View style={[styles.mapPortrait, { width: diameter, height: diameter, borderRadius: diameter / 2 }]}>
+      {showImage
+        ? <Image source={source} resizeMode="cover" style={styles.mapPortraitImage} onError={() => setFailedUri(source.uri)} />
+        : <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.mapPortraitFallback, { fontSize: Math.max(8, Math.min(24, diameter * 0.55)) }]}>{token.avatar || token.name.slice(0, 1) || '·'}</Text>}
+    </View>
+    {!!badges.length && <View style={styles.tokenBadges}>{badges.map((badge, index) => <View key={`${badge}:${index}`} style={styles.tokenBadge}><Text style={styles.tokenBadgeText}>{badge}</Text></View>)}</View>}
   </View>
+}
+
+function conditionBadge(value: string): string {
+  const labels: Record<string, string> = {
+    blinded: '盲', charmed: '魅', deafened: '聋', frightened: '惧', grappled: '擒',
+    incapacitated: '失', invisible: '隐', paralyzed: '麻', petrified: '石', poisoned: '毒',
+    prone: '倒', restrained: '缚', stunned: '震', unconscious: '昏', exhaustion: '竭',
+  }
+  return labels[value.toLowerCase()] ?? value.slice(0, 1)
 }
 
 const styles = StyleSheet.create({
@@ -346,9 +364,11 @@ const styles = StyleSheet.create({
   message: { position: 'absolute', left: 50, right: 50, bottom: 94, alignItems: 'center' },
   messageText: { color: colors.text, fontSize: 11, backgroundColor: '#070711dd', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   tokenCard: { position: 'absolute', left: 76, right: 12, bottom: 16, minHeight: 64, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: '#11111dee', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  mapPortrait: { position: 'absolute', overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#11131d' },
+  mapPortraitWrap: { position: 'absolute', overflow: 'visible' },
+  mapPortrait: { overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: '#11131d' },
   mapPortraitImage: { width: '100%', height: '100%' },
   mapPortraitFallback: { color: '#f4f1ff', width: '86%', textAlign: 'center', fontWeight: '900' },
+  tokenBadges: { position: 'absolute', right: -7, top: -6, flexDirection: 'row', gap: 2 }, tokenBadge: { minWidth: 14, height: 14, borderRadius: 7, paddingHorizontal: 3, backgroundColor: '#172033', borderWidth: 1, borderColor: '#67e8f9', alignItems: 'center', justifyContent: 'center' }, tokenBadgeText: { color: '#ecfeff', fontSize: 7, fontWeight: '900' },
   tokenPortrait: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: colors.text },
   tokenDot: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: colors.text },
   tokenName: { color: colors.text, fontSize: 15, fontWeight: '800' },

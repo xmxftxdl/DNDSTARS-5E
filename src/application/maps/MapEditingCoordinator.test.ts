@@ -20,13 +20,15 @@ const terrain: MapGeometryObstacle = {
 
 function createCoordinator(isDm = true, combat = false) {
   const addEntity = vi.fn(() => true)
+  const removeEntity = vi.fn()
   return {
     addEntity,
+    removeEntity,
     coordinator: new MapEditingCoordinator({
       isDm: () => isDm,
       combatActive: () => combat,
       addEntity,
-      removeEntity: vi.fn(),
+      removeEntity,
       setEntityPoints: vi.fn(() => true),
       replaceMap: vi.fn(() => true),
       selectEntity: vi.fn(),
@@ -40,13 +42,16 @@ describe('MapEditingCoordinator', () => {
       .toEqual({ ok: false, reason: 'dm-authority-required' })
   })
 
-  it('locks terrain mutations during combat while leaving ordinary geometry editable', () => {
-    const { coordinator } = createCoordinator(true, true)
+  it('locks terrain creation and point editing during combat but still lets the DM delete it', () => {
+    const { coordinator, removeEntity } = createCoordinator(true, true)
     expect(coordinator.commit('map-1', terrain))
       .toEqual({ ok: false, reason: 'terrain-editing-locked-during-combat' })
     const geometry = createEmptyMapGeometry('map-1')
     geometry.obstacles.push(terrain)
     expect(coordinator.remove('map-1', geometry, terrain.id))
+      .toEqual({ ok: true })
+    expect(removeEntity).toHaveBeenCalledWith('map-1', terrain.id)
+    expect(coordinator.setPoints('map-1', geometry, terrain.id, terrain.points))
       .toEqual({ ok: false, reason: 'terrain-editing-locked-during-combat' })
   })
 })

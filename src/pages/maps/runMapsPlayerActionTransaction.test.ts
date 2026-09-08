@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DmActionTransactionCoordinator } from '../../lib/dmActionTransactionCoordinator'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
-import { runMapsPlayerActionTransaction } from './runMapsPlayerActionTransaction'
+import {
+  mapsPlayerActionAuthorityFailureReason,
+  runMapsPlayerActionTransaction,
+} from './runMapsPlayerActionTransaction'
 
 const action = {
   id: 'action-1',
@@ -13,6 +16,14 @@ const action = {
 } as SharedPlayerActionState
 
 describe('runMapsPlayerActionTransaction', () => {
+  it('keeps the server transaction failure code in the bounded ACK reason', () => {
+    expect(mapsPlayerActionAuthorityFailureReason(
+      new Error('combat-command-settlement-precondition-conflict'),
+    )).toBe('authority-commit-failed:combat-command-settlement-precondition-conflict')
+    expect(mapsPlayerActionAuthorityFailureReason(new Error('fetch failed at https://secret.invalid')))
+      .toBe('authority-commit-failed')
+  })
+
   it('commits only after the authority snapshot commit resolves', async () => {
     const coordinator = new DmActionTransactionCoordinator()
     const activity: Array<[boolean, string | null]> = []
@@ -55,6 +66,34 @@ describe('runMapsPlayerActionTransaction', () => {
     expect(recover).toHaveBeenCalledOnce()
     expect(rejectAfterRecovery).toHaveBeenCalledOnce()
     expect(coordinator.transaction('action-1')?.status).toBe('rolled-back')
+  })
+
+  it('waits for the terminal rejection receipt before recovery completes', async () => {
+    const coordinator = new DmActionTransactionCoordinator()
+    let release!: () => void
+    const terminalReceipt = new Promise<void>((resolve) => { release = resolve })
+    const rejectAfterRecovery = vi.fn(() => terminalReceipt)
+
+    const settled = runMapsPlayerActionTransaction({
+      coordinator,
+      action,
+      run: async () => { throw new Error('shared-state-transaction-conflict') },
+      waitForAuthorityCommit: async () => undefined,
+      readOutcome: () => undefined,
+      clearOutcome: () => undefined,
+      setTransactionActive: () => undefined,
+      recover: async () => undefined,
+      rejectAfterRecovery,
+      now: 1,
+    })
+
+    let finished = false
+    void settled.catch(() => undefined).finally(() => { finished = true })
+    await vi.waitFor(() => expect(rejectAfterRecovery).toHaveBeenCalledOnce())
+    expect(finished).toBe(false)
+    release()
+    await expect(settled).rejects.toThrow('shared-state-transaction-conflict')
+    expect(finished).toBe(true)
   })
 
   it('silently drops an authority replay without recovery or a new transaction', async () => {

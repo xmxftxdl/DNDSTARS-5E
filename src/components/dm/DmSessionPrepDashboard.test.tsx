@@ -35,6 +35,7 @@ describe('DmSessionPrepDashboard', () => {
     )
 
     expect(html).toContain('本次备团')
+    expect(html).toContain('data-session-prep-contrast-surface="true"')
     expect(html).toContain('白鹿小教堂')
     expect(html).toContain('选择本场剧情节点')
     expect(html).toContain('抵达教堂')
@@ -43,6 +44,7 @@ describe('DmSessionPrepDashboard', () => {
     expect(html).toContain('可运行场景')
     expect(html).toContain('登场人物')
     expect(html).toContain('关键线索')
+    expect(html).toContain('查看剧情流程图与原文书签')
     expect(html).not.toContain('<h3 class="text-sm font-semibold text-slate-100">关键人物</h3>')
     expect(html).not.toContain('<h3 class="text-sm font-semibold text-slate-100">关键线索</h3>')
     expect(html).toContain('内容工坊')

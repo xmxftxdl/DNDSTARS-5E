@@ -56,7 +56,7 @@ export function applyRollOptionsMutation(base, index, mutation, now) {
     entry?.characterId === contribution.characterId && entry?.featureId === contribution.featureId &&
     entry?.featureLabel === contribution.featureLabel && entry?.modifierKind === 'choice-reroll')
   const values = options?.values
-  if (current?.kind !== 'roll-confirmation' || !['pending', 'waiting-for-dm'].includes(current.status) ||
+  if (current?.kind !== 'roll-confirmation' || !['pending', 'rolling', 'waiting-for-dm'].includes(current.status) ||
     !contribution || !eligible || !Array.isArray(values) || values.length !== (eligible.additionalDice ?? 1) + 1 ||
     values[0] !== current.payload.originalValue || values.some((value) => !Number.isInteger(value) || value < 1 || value > 20)) {
     return { ok: false, status: 409, error: 'invalid-roll-options' }

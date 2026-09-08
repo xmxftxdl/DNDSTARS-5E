@@ -3,6 +3,7 @@ import { DND5E_STANDARD_CONDITION_IDS } from '../../rulesets/dnd5e/conditions'
 import {
   MAP_SPELL_STATUS_IDS,
   concentrationTokenTooltip,
+  flightTokenTooltip,
   overflowConditionTokenTooltip,
   spellStatusTokenTooltip,
   standardConditionTokenTooltip,
@@ -52,6 +53,13 @@ describe('map Token status tooltips', () => {
     expect(overflowConditionTokenTooltip(['blinded', 'prone'])).toEqual({
       title: '另有 2 个状态',
       description: '目盲、倒地',
+    })
+  })
+
+  it('shows the current height on the flying status', () => {
+    expect(flightTokenTooltip(35)).toEqual({
+      title: '飞行中',
+      description: expect.stringContaining('飞行高度：35 尺'),
     })
   })
 })

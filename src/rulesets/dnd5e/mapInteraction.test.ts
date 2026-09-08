@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
-import { prepareDnd5eMapInteraction, resolveDnd5eMapInteraction } from './mapInteraction'
+import {
+  dnd5eMapInteractionCanOpenDoorDirectly,
+  prepareDnd5eMapInteraction,
+  resolveDnd5eMapInteraction,
+} from './mapInteraction'
 import type { SceneInteractionPoint } from '../../lib/sceneOrchestration'
+import { hashDnd5eArcaneLockPasswordV1 } from './mapObjectState'
 
 const actor = { id: 'hero', type: 'player', characterId: 'char', x: 50, y: 50, size: 1 } as Token
 const map = { id: 'map', width: 500, height: 500, gridSize: 50, feetPerCell: 5, tokens: [actor] } as BattleMap
@@ -72,6 +77,136 @@ describe('D&D 5e map interaction transaction', () => {
       ok: true,
       prepared: { spendAction: false, turnCost: 'object-interaction', automaticSuccess: true },
     })
+  })
+
+  it('enforces an active Arcane Lock and adds ten to lock-pick and break DCs', () => {
+    const arcaneLocked = structuredClone(geometry)
+    arcaneLocked.doors[0]!.dnd5eArcaneLock = {
+      schemaVersion: 1,
+      sourceTokenId: 'caster',
+      sourceActivityId: 'arcane-lock',
+      spellLevel: 2,
+      previousLocked: false,
+    }
+    expect(prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor,
+      payload: { doorId: 'door', operation: 'open' },
+      worldMinute: 20,
+    })).toEqual({ ok: false, reason: 'door-arcane-locked' })
+    const pick = prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor, hasThievesTools: true,
+      payload: { doorId: 'door', operation: 'unlock', method: 'thieves-tools' },
+      worldMinute: 20,
+    })
+    const force = prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor,
+      payload: { doorId: 'door', operation: 'break', method: 'force' },
+      worldMinute: 20,
+    })
+    expect(pick).toMatchObject({ ok: true, prepared: { dc: 27, nextDoorState: 'open' } })
+    expect(force).toMatchObject({ ok: true, prepared: { dc: 30 } })
+  })
+
+  it('lets the Arcane Lock source open the object and honors Knock suppression', () => {
+    const arcaneLocked = structuredClone(geometry)
+    arcaneLocked.doors[0]!.dnd5eArcaneLock = {
+      schemaVersion: 1,
+      sourceTokenId: actor.id,
+      sourceActivityId: 'arcane-lock',
+      spellLevel: 2,
+      previousLocked: false,
+    }
+    expect(prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor,
+      payload: { doorId: 'door', operation: 'open' },
+      worldMinute: 20,
+    })).toMatchObject({ ok: true, prepared: { automaticSuccess: true, nextDoorState: 'open' } })
+    arcaneLocked.doors[0]!.dnd5eArcaneLock.suppression = {
+      kind: 'campaign-time', untilWorldMinute: 30,
+    }
+    arcaneLocked.doors[0]!.state = 'closed'
+    arcaneLocked.doors[0]!.lockState = 'unlocked'
+    expect(prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor: { ...actor, id: 'other' },
+      payload: { doorId: 'door', operation: 'open' },
+      worldMinute: 29,
+    })).toMatchObject({ ok: true, prepared: { automaticSuccess: true } })
+    expect(prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor: { ...actor, id: 'other' },
+      payload: { doorId: 'door', operation: 'open' },
+      worldMinute: 30,
+    })).toEqual({ ok: false, reason: 'door-arcane-locked' })
+  })
+
+  it('lets designated creatures bypass Arcane Lock and suppresses it for one minute on a matching password', () => {
+    const arcaneLocked = structuredClone(geometry)
+    arcaneLocked.doors[0]!.dnd5eArcaneLock = {
+      schemaVersion: 1,
+      sourceTokenId: 'caster',
+      sourceActivityId: 'arcane-lock',
+      spellLevel: 2,
+      previousLocked: false,
+      authorizedTokenIds: ['ally'],
+      passwordDigest: hashDnd5eArcaneLockPasswordV1('  Dawn   Rises  '),
+    }
+    expect(prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor: { ...actor, id: 'ally' },
+      payload: { doorId: 'door', operation: 'open' }, worldMinute: 20,
+    })).toMatchObject({ ok: true, prepared: { automaticSuccess: true } })
+    expect(prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor,
+      payload: { doorId: 'door', operation: 'open', method: 'password', spokenPassword: 'wrong' },
+      worldMinute: 20,
+    })).toEqual({ ok: false, reason: 'arcane-lock-password-invalid' })
+    const password = prepareDnd5eMapInteraction({
+      map, geometry: arcaneLocked, actor,
+      payload: { doorId: 'door', operation: 'open', method: 'password', spokenPassword: 'dawn rises' },
+      worldMinute: 20,
+    })
+    expect(password).toMatchObject({
+      ok: true,
+      prepared: {
+        automaticSuccess: true,
+        nextArcaneLockSuppression: { kind: 'campaign-time', untilWorldMinute: 21 },
+      },
+    })
+    if (!password.ok) return
+    expect(resolveDnd5eMapInteraction({ prepared: password.prepared })).toMatchObject({
+      success: true,
+      nextDoorState: 'open',
+      nextArcaneLockSuppression: { kind: 'campaign-time', untilWorldMinute: 21 },
+    })
+  })
+
+  it('exposes direct opening in the player UI only when the host will accept it', () => {
+    const arcaneLocked = structuredClone(geometry)
+    arcaneLocked.doors[0]!.dnd5eArcaneLock = {
+      schemaVersion: 1,
+      sourceTokenId: 'caster',
+      sourceActivityId: 'arcane-lock',
+      spellLevel: 2,
+      previousLocked: false,
+      authorizedTokenIds: ['ally'],
+    }
+    expect(dnd5eMapInteractionCanOpenDoorDirectly({
+      door: arcaneLocked.doors[0]!, actorTokenId: 'caster', worldMinute: 20,
+    })).toBe(true)
+    expect(dnd5eMapInteractionCanOpenDoorDirectly({
+      door: arcaneLocked.doors[0]!, actorTokenId: 'ally', worldMinute: 20,
+    })).toBe(true)
+    expect(dnd5eMapInteractionCanOpenDoorDirectly({
+      door: arcaneLocked.doors[0]!, actorTokenId: 'other', worldMinute: 20,
+    })).toBe(false)
+    arcaneLocked.doors[0]!.dnd5eArcaneLock.suppression = {
+      kind: 'campaign-time', untilWorldMinute: 30,
+    }
+    arcaneLocked.doors[0]!.lockState = 'unlocked'
+    expect(dnd5eMapInteractionCanOpenDoorDirectly({
+      door: arcaneLocked.doors[0]!, actorTokenId: 'other', worldMinute: 29,
+    })).toBe(true)
+    expect(dnd5eMapInteractionCanOpenDoorDirectly({
+      door: arcaneLocked.doors[0]!, actorTokenId: 'other', worldMinute: 30,
+    })).toBe(false)
   })
 
   it('reveals a secret door only after a successful authority check', () => {

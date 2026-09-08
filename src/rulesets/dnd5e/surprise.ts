@@ -1,4 +1,5 @@
 import type { Dnd5eAction, Dnd5eCombatant } from './headlessCombatEngine'
+import { dnd5eActiveCannotBeSurprisedWhileConscious } from './activeEffects'
 
 type SurpriseState = Pick<
   Dnd5eCombatant,
@@ -8,7 +9,8 @@ type SurpriseState = Pick<
 
 export function dnd5eCombatantIsSurprised(combatant: SurpriseState, combatId: string): boolean {
   if (
-    combatant.cannotBeSurprisedWhileConscious && combatant.currentHp > 0 &&
+    (combatant.cannotBeSurprisedWhileConscious ||
+      dnd5eActiveCannotBeSurprisedWhileConscious(combatant.classState.activeEffects)) && combatant.currentHp > 0 &&
     !combatant.deathSaves.dead && !combatant.conditions.includes('unconscious')
   ) return false
   return combatant.classState.surprisedCombatId === combatId &&

@@ -9,11 +9,14 @@ export interface DiceBoxD20Request {
   value?: number
   requestKey?: string
   flyIndex?: number
+  settledHoldMs?: number
   resolve: (value: number) => void
 }
 
 export interface DiceBoxRollRequest {
   id: number
+  /** Full authoritative pool; `count` may be capped for 3D rendering. */
+  totalCount?: number
   count: number
   sides: number
   label: string
@@ -21,6 +24,7 @@ export interface DiceBoxRollRequest {
   values: number[]
   requestKey?: string
   flyIndex?: number
+  settledHoldMs?: number
   resolve: (values: number[]) => void
 }
 
@@ -52,7 +56,7 @@ export function useDicePresentation(
     const timer = window.setTimeout(() => {
       setDiceBoxD20((current) => (current?.id === request.id ? null : current))
       request.resolve(request.value ?? fallbackD20(request))
-    }, 4500)
+    }, DICE_TIMING.D20_FAILSAFE_MS + (request.settledHoldMs ?? 0) + 1000)
     return () => window.clearTimeout(timer)
   }, [diceBoxD20, fallbackD20])
 
@@ -62,7 +66,7 @@ export function useDicePresentation(
     const timer = window.setTimeout(() => {
       setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
       request.resolve(request.values)
-    }, DICE_TIMING.ROLL_FAILSAFE_MS + 1000)
+    }, DICE_TIMING.ROLL_FAILSAFE_MS + (request.settledHoldMs ?? 0) + 1000)
     return () => window.clearTimeout(timer)
   }, [diceBoxRoll])
 
@@ -80,14 +84,14 @@ export function useDicePresentation(
     request.resolve(value)
     window.setTimeout(() => {
       setDiceBoxD20((current) => (current?.id === request.id ? null : current))
-    }, 600)
+    }, 900)
   }, [])
 
   const completeDiceBoxRoll = useCallback((request: DiceBoxRollRequest, values: number[]) => {
     request.resolve(request.values.length > 0 ? request.values : values)
     window.setTimeout(() => {
       setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
-    }, 3000)
+    }, 1200)
   }, [])
 
   const completeRollRequestPreview = useCallback((id: string, delayMs: number) => {

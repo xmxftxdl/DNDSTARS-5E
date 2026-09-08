@@ -87,8 +87,14 @@ function scaledOperation(
   if ('amount' in scaled && (diceCount !== 0 || flatAmount !== 0)) {
     scaled = { ...scaled, amount: addFlatAmount(addDiceCount(scaled.amount, diceCount), flatAmount) }
   }
+  if (scaled.kind === 'revive' && (diceCount !== 0 || flatAmount !== 0)) {
+    scaled = {
+      ...scaled,
+      hitPoints: addFlatAmount(addDiceCount(scaled.hitPoints, diceCount), flatAmount),
+    }
+  }
   if (durationRounds !== 0) {
-    if (scaled.kind === 'summon' || scaled.kind === 'create-persistent-area') {
+    if (scaled.kind === 'summon' || scaled.kind === 'create-persistent-area' || scaled.kind === 'transform-creature') {
       scaled = { ...scaled, durationRounds: Math.max(1, scaled.durationRounds + durationRounds) }
     } else if (scaled.kind === 'apply-standard-condition' && scaled.duration.kind === 'rounds') {
       scaled = { ...scaled, duration: { ...scaled.duration, rounds: Math.max(1, scaled.duration.rounds + durationRounds) } }
@@ -109,9 +115,14 @@ export function scaleDnd5eActivityDefinitionV1(
   activity: Dnd5eActivityDefinitionV1
   additionalProjectilesByOperationId: ReadonlyMap<string, number>
 } {
+  const castLevelTarget = [...(activity.castLevelTargetProfiles ?? [])]
+    .filter((profile) => profile.minimumCastLevel <= (context.castLevel ?? 0))
+    .sort((left, right) => right.minimumCastLevel - left.minimumCastLevel)[0]?.target
   const totals = new Map<string, { dice: number; flat: number; targets: number; projectiles: number; uses: number; duration: number }>()
+  let extraAreaRadiusFeet = 0
   for (const scaling of activity.scaling ?? []) {
     const steps = scalingSteps(scaling, context)
+    extraAreaRadiusFeet += (scaling.areaRadiusFeetPerStep ?? 0) * steps
     for (const adjustment of scaling.adjustments ?? []) {
       const current = totals.get(adjustment.operationId) ?? { dice: 0, flat: 0, targets: 0, projectiles: 0, uses: 0, duration: 0 }
       current.dice += (adjustment.diceCountPerStep ?? 0) * steps
@@ -137,11 +148,18 @@ export function scaleDnd5eActivityDefinitionV1(
       effectTotals.set(operation.effectId, current)
     }
   }
-  const target = activity.target.kind === 'creature'
-    ? { ...activity.target, count: activity.target.count + extraTargets }
-    : activity.target.kind === 'area'
-      ? { ...activity.target, maximumTargets: activity.target.maximumTargets + extraTargets }
-      : activity.target
+  const profiledTarget = castLevelTarget ?? activity.target
+  const target = profiledTarget.kind === 'creature'
+    ? { ...profiledTarget, count: profiledTarget.count + extraTargets }
+    : profiledTarget.kind === 'area'
+      ? {
+          ...profiledTarget,
+          maximumTargets: profiledTarget.maximumTargets + extraTargets,
+          ...(profiledTarget.radiusFeet != null && extraAreaRadiusFeet !== 0
+            ? { radiusFeet: Math.max(0, profiledTarget.radiusFeet + extraAreaRadiusFeet) }
+            : {}),
+        }
+      : profiledTarget
   return {
     activity: {
       ...activity,
@@ -180,7 +198,17 @@ export function scaleDnd5eActivityDefinitionV1(
                   ),
             }
           : undefined
-        return { ...effect, duration, periodicDamage }
+        const modifiers = effect.modifiers?.map((modifier) => {
+          if (
+            (modifier.kind === 'on-hit-bonus-damage' || modifier.kind === 'damage-reduction') &&
+            (total.dice !== 0 || total.flat !== 0)
+          ) return {
+            ...modifier,
+            amount: addFlatAmount(addDiceCount(modifier.amount, total.dice), total.flat),
+          }
+          return modifier
+        })
+        return { ...effect, duration, periodicDamage, modifiers }
       }),
       outcomes: activity.outcomes.map((outcome) => ({
         ...outcome,

@@ -3,15 +3,37 @@ import { BellRing, CheckCircle2, Coffee, MoonStar, X } from 'lucide-react'
 import {
   formatCampaignTime,
   type CampaignRestRecoveryEntry,
+  type SharedCampaignTimeState,
   type CampaignTimeAdvance,
   type CampaignTimer,
 } from '../lib/campaignTime'
 import { useCampaignTimeStore } from '../store/campaignTime'
-import { useCharacterStore } from '../store/characters'
+import {
+  hasHydratedSharedCharactersForCurrentRoom,
+  useCharacterStore,
+} from '../store/characters'
 import { useMapGeometryStore } from '../store/mapGeometry'
-import { useMapStore } from '../store/maps'
+import { useMapStore, type BattleMap } from '../store/maps'
+import type { Character } from '../types/character'
+import {
+  mapGeometryTerrainElevationAtPoint,
+  type MapGeometryState,
+} from '../lib/mapGeometry'
 import { getRoomSession } from '../lib/roomSession'
 import { roomOwnedPlayerCharacters } from '../lib/playerView'
+import { completeDnd5eWallOfStoneForCampaignTime } from '../rulesets/dnd5e/wallOfStonePermanence'
+import {
+  advanceDnd5eCampaignTimedActiveEffects,
+  dnd5eCampaignTimeControlledDescentDistanceFeet,
+} from '../rulesets/dnd5e/campaignTimeRules'
+import {
+  advanceDnd5eHitPointMaximumReductionDurations,
+  normalizeDnd5eHitPointMaximumReductionLedger,
+} from '../rulesets/dnd5e/hitPointMaximumReductions'
+import {
+  expireDnd5ePluginAreasAtWorldMinute,
+  reconcileDnd5ePluginAreasAndConcentrationOnMap,
+} from '../rulesets/dnd5e/pluginAreas'
 import Dnd5eShortRestRecoveryActions from './Dnd5eShortRestRecoveryActions'
 import {
   campaignRestReceiptBaselineIds,
@@ -58,6 +80,174 @@ function recoveryValue(entry: CampaignRestRecoveryEntry): string | null {
   return `${entry.before} → ${entry.after}${maximum}`
 }
 
+export function canReconcileCampaignTimeCharacters(input: {
+  isDm: boolean
+  clockHydratedRoomId: string | null
+  currentRoomId: string
+  charactersHydrated: boolean
+}): boolean {
+  return input.isDm &&
+    input.clockHydratedRoomId === input.currentRoomId &&
+    input.charactersHydrated
+}
+
+export function campaignTimeCharacterReconciliationKey(
+  roomId: string,
+  clock: SharedCampaignTimeState,
+): string {
+  return `${roomId}:${clock.worldMinute}:${clock.advances.at(-1)?.id ?? ''}:${clock.updatedAt}`
+}
+
+export function projectDnd5eCampaignTimeAirborneTokens(input: {
+  maps: readonly BattleMap[]
+  geometryMaps: readonly MapGeometryState[]
+  characters: readonly Character[]
+  clock: SharedCampaignTimeState
+}): {
+  maps: BattleMap[]
+  airborneCharacterIds: ReadonlySet<string>
+  descendedCharacterIds: ReadonlySet<string>
+} {
+  const charactersById = new Map(input.characters.map((character) => [character.id, character]))
+  const geometryByMapId = new Map(input.geometryMaps.map((geometry) => [geometry.mapId, geometry]))
+  const airborneCharacterIds = new Set<string>()
+  const descendedCharacterIds = new Set<string>()
+  const maps = input.maps.map((map) => {
+    let changed = false
+    const geometry = geometryByMapId.get(map.id)
+    const tokens = map.tokens.map((token) => {
+      if (!token.characterId) return token
+      const character = charactersById.get(token.characterId)
+      if (!character) return token
+      const groundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, token)
+      const elevationFeet = Math.max(groundElevationFeet, token.elevationFeet ?? groundElevationFeet)
+      if (elevationFeet <= groundElevationFeet + 1e-4) return token
+      airborneCharacterIds.add(character.id)
+      const appliedMinute = character.dnd5eWorldTimeAppliedMinute
+      const elapsedMinutes = Number.isSafeInteger(appliedMinute)
+        ? Math.max(0, input.clock.worldMinute - appliedMinute!)
+        : 0
+      const descentDistanceFeet = dnd5eCampaignTimeControlledDescentDistanceFeet(
+        character,
+        elapsedMinutes,
+      )
+      if (descentDistanceFeet <= 0) return token
+      const nextElevationFeet = Math.max(groundElevationFeet, elevationFeet - descentDistanceFeet)
+      if (Math.abs(nextElevationFeet - elevationFeet) <= 1e-4) return token
+      changed = true
+      descendedCharacterIds.add(character.id)
+      return { ...token, elevationFeet: nextElevationFeet }
+    })
+    return changed ? { ...map, tokens } : map
+  })
+  return { maps, airborneCharacterIds, descendedCharacterIds }
+}
+
+export function projectDnd5eCampaignTimeCreatureTokens(input: {
+  maps: readonly BattleMap[]
+  characters: readonly Character[]
+  clock: SharedCampaignTimeState
+}): { maps: BattleMap[]; changed: boolean } {
+  const tokensById = new Map(input.maps.flatMap((map) => map.tokens).map((token) => [token.id, token]))
+  const charactersById = new Map(input.characters.map((character) => [character.id, character]))
+  let changed = false
+  const maps = input.maps.map((map) => {
+    let mapChanged = false
+    const tokens = map.tokens.map((token) => {
+      if (token.characterId || token.type === 'obstacle') return token
+      const effects = token.dnd5eCombatState?.activeEffects ?? []
+      const storedMinute = token.dnd5eWorldTimeAppliedMinute
+      const sourceMinutes = effects.flatMap((effect) => {
+        const sourceToken = effect.source.actorId ? tokensById.get(effect.source.actorId) : undefined
+        const sourceCharacter = sourceToken?.characterId
+          ? charactersById.get(sourceToken.characterId)
+          : undefined
+        const minute = sourceToken?.dnd5eWorldTimeAppliedMinute ?? sourceCharacter?.dnd5eWorldTimeAppliedMinute
+        return Number.isSafeInteger(minute) && Number(minute) >= 0 ? [Number(minute)] : []
+      })
+      const baselineMinute = Number.isSafeInteger(storedMinute) && Number(storedMinute) >= 0
+        ? Number(storedMinute)
+        : sourceMinutes.length > 0
+          ? Math.min(...sourceMinutes)
+          : input.clock.worldMinute
+      const elapsedMinutes = Math.max(0, input.clock.worldMinute - baselineMinute)
+      let nextToken = token
+      if (
+        token.dnd5eSummon?.persistent === true &&
+        token.dnd5eSummon.controlEnded !== true &&
+        Number.isSafeInteger(token.dnd5eSummon.controlExpiresAtWorldMinute) &&
+        input.clock.worldMinute >= Number(token.dnd5eSummon.controlExpiresAtWorldMinute)
+      ) {
+        nextToken = {
+          ...nextToken,
+          dnd5eSummon: { ...nextToken.dnd5eSummon!, controlEnded: true },
+        }
+      }
+      if (elapsedMinutes > 0 && token.dnd5eCombatState) {
+        const maximumReduction = advanceDnd5eHitPointMaximumReductionDurations(
+          normalizeDnd5eHitPointMaximumReductionLedger(
+            token.dnd5eCombatState.hitPointMaximumReductionLedger,
+          ),
+          elapsedMinutes * 10,
+        )
+        const projectedMaximum = maximumReduction.maximum ?? token.maxHp ?? token.hp ?? 1
+        const projected = advanceDnd5eCampaignTimedActiveEffects({
+          id: token.id,
+          name: token.label,
+          rulesetId: 'dnd5e-2014-srd-5.1',
+          currentHp: Math.min(token.hp ?? projectedMaximum, projectedMaximum),
+          maxHp: projectedMaximum,
+          conditions: token.dnd5eCombatState.conditions ?? [],
+          concentrating: token.dnd5eCombatState.concentrationSpellId != null,
+          dnd5eCombatState: {
+            ...token.dnd5eCombatState,
+            hitPointMaximumReductionLedger: maximumReduction.ledger,
+          },
+          dnd5eWorldTimeAppliedMinute: baselineMinute,
+        } as Character, elapsedMinutes)
+        nextToken = {
+          ...nextToken,
+          hp: token.hp == null ? token.hp : projected.currentHp,
+          maxHp: token.maxHp == null ? token.maxHp : projected.maxHp,
+          dnd5eCombatState: {
+            ...token.dnd5eCombatState,
+            ...projected.dnd5eCombatState,
+            conditions: projected.conditions?.length ? [...projected.conditions] : undefined,
+          },
+        }
+      }
+      if (nextToken.dnd5eWorldTimeAppliedMinute !== input.clock.worldMinute) {
+        nextToken = { ...nextToken, dnd5eWorldTimeAppliedMinute: input.clock.worldMinute }
+      }
+      if (nextToken === token) return token
+      mapChanged = true
+      changed = true
+      return nextToken
+    })
+    return mapChanged ? { ...map, tokens } : map
+  })
+  return { maps, changed }
+}
+
+export function projectDnd5eCampaignTimeCreatedObjects(input: {
+  maps: readonly BattleMap[]
+  worldMinute: number
+}): { maps: BattleMap[]; changed: boolean; removedTokenIds: string[] } {
+  let changed = false
+  const removedTokenIds: string[] = []
+  const maps = input.maps.map((map) => {
+    const tokens = map.tokens.filter((token) => {
+      const creation = token.type === 'obstacle' ? token.dnd5eObjectState?.creation : undefined
+      if (!creation || input.worldMinute < creation.expiresAtWorldMinute) return true
+      removedTokenIds.push(token.id)
+      changed = true
+      return false
+    })
+    return tokens.length === map.tokens.length ? map : { ...map, tokens }
+  })
+  return { maps, changed, removedTokenIds }
+}
+
 export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   const clock = useCampaignTimeStore((state) => state.state)
   const hydratedRoomId = useCampaignTimeStore((state) => state.hydratedRoomId)
@@ -70,6 +260,8 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   const seenTimerIds = useRef(new Set<string>())
   const seenRestIds = useRef(readRestReceipts())
   const restBaselineReady = useRef(false)
+  const characterReconciliationKeyRef = useRef<string | null>(null)
+  const creatureTokenReconciliationKeyRef = useRef<string | null>(null)
   const roomSession = getRoomSession()
   const currentRoomId = roomSession?.roomId ?? '__local__'
   const playerOwnedCharacterIds = useMemo(() => {
@@ -79,14 +271,136 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   }, [characters, roomSession?.memberId, roomSession?.role, roomSession?.roomId])
 
   useEffect(() => {
-    if (isDm) {
-      void useCharacterStore.getState().reconcileCampaignTimeAndSave(clock).catch((error) => {
-        console.error('[campaign-time] character reconciliation failed', error)
+    // Both stores are persisted locally. On a document reload they initially
+    // contain old browser snapshots, so reconciling either one before both room
+    // resources hydrate can overwrite newer authoritative character state.
+    const reconciliationKey = campaignTimeCharacterReconciliationKey(currentRoomId, clock)
+    const creatureTokenKey = `${currentRoomId}:${clock.worldMinute}:${maps
+      .flatMap((map) => map.tokens)
+      .filter((token) => !token.characterId && token.type !== 'obstacle')
+      .map((token) => token.id)
+      .sort()
+      .join(',')}`
+    const canReconcile = canReconcileCampaignTimeCharacters({
+      isDm,
+      clockHydratedRoomId: hydratedRoomId,
+      currentRoomId,
+      charactersHydrated: hasHydratedSharedCharactersForCurrentRoom(),
+    })
+    if (canReconcile && (
+      characterReconciliationKeyRef.current !== reconciliationKey ||
+      creatureTokenReconciliationKeyRef.current !== creatureTokenKey
+    )) {
+      // Character/map store updates are also dependencies of this effect so
+      // hydration can open the gate. Once one authoritative clock snapshot has
+      // entered reconciliation, those ordinary updates must not start another
+      // shared-character reload inside a long-cast atomic commit window.
+      characterReconciliationKeyRef.current = reconciliationKey
+      creatureTokenReconciliationKeyRef.current = creatureTokenKey
+      void (async () => {
+        const currentMaps = useMapStore.getState().maps
+        const permanence = completeDnd5eWallOfStoneForCampaignTime({
+          maps: currentMaps,
+          characters: useCharacterStore.getState().characters,
+          worldMinute: clock.worldMinute,
+        })
+        if (permanence.completedAreaIds.length > 0) {
+          const mapStore = useMapStore.getState()
+          for (const completedMap of permanence.maps) {
+            const currentMap = currentMaps.find((map) => map.id === completedMap.id)
+            if (currentMap === completedMap) continue
+            mapStore.applyAuthorityMapUpdate(completedMap.id, {
+              dnd5ePluginAreas: completedMap.dnd5ePluginAreas,
+            })
+          }
+          await mapStore.saveSharedNow()
+        }
+        const mapStore = useMapStore.getState()
+        let expiryCharacters: readonly Character[] = useCharacterStore.getState().characters
+        let expiredAnyArea = false
+        for (const currentMap of mapStore.maps) {
+          const expiredMap = expireDnd5ePluginAreasAtWorldMinute(currentMap, clock.worldMinute)
+          if (expiredMap === currentMap) continue
+          const reconciled = reconcileDnd5ePluginAreasAndConcentrationOnMap(
+            currentMap,
+            expiryCharacters,
+            0,
+            expiredMap,
+          )
+          mapStore.applyAuthorityMapUpdate(currentMap.id, {
+            dnd5ePluginAreas: reconciled.map.dnd5ePluginAreas,
+            tokens: reconciled.map.tokens,
+          })
+          if (reconciled.characters !== expiryCharacters) {
+            for (const character of reconciled.characters) {
+              const previous = expiryCharacters.find((candidate) => candidate.id === character.id)
+              if (previous && JSON.stringify(previous) !== JSON.stringify(character)) {
+                useCharacterStore.getState().applyAuthorityUpdate(character.id, character)
+              }
+            }
+            expiryCharacters = reconciled.characters
+          }
+          expiredAnyArea = true
+        }
+        if (expiredAnyArea) await mapStore.saveSharedNow()
+        const createdObjectProjection = projectDnd5eCampaignTimeCreatedObjects({
+          maps: useMapStore.getState().maps,
+          worldMinute: clock.worldMinute,
+        })
+        if (createdObjectProjection.changed) {
+          const mapStore = useMapStore.getState()
+          for (const projectedMap of createdObjectProjection.maps) {
+            const currentMap = mapStore.maps.find((map) => map.id === projectedMap.id)
+            if (currentMap === projectedMap) continue
+            mapStore.applyAuthorityMapUpdate(projectedMap.id, { tokens: projectedMap.tokens })
+          }
+          await mapStore.saveSharedNow()
+        }
+        const creatureTokenProjection = projectDnd5eCampaignTimeCreatureTokens({
+          maps: useMapStore.getState().maps,
+          characters: useCharacterStore.getState().characters,
+          clock,
+        })
+        if (creatureTokenProjection.changed) {
+          const mapStore = useMapStore.getState()
+          for (const projectedMap of creatureTokenProjection.maps) {
+            const currentMap = mapStore.maps.find((map) => map.id === projectedMap.id)
+            if (currentMap === projectedMap) continue
+            mapStore.applyAuthorityMapUpdate(projectedMap.id, { tokens: projectedMap.tokens })
+          }
+          await mapStore.saveSharedNow()
+        }
+        const airborneProjection = projectDnd5eCampaignTimeAirborneTokens({
+          maps: useMapStore.getState().maps,
+          geometryMaps: useMapGeometryStore.getState().maps,
+          characters: useCharacterStore.getState().characters,
+          clock,
+        })
+        await useCharacterStore.getState().reconcileCampaignTimeAndSave(clock, {
+          airborneCharacterIds: airborneProjection.airborneCharacterIds,
+        })
+        if (airborneProjection.descendedCharacterIds.size > 0) {
+          const mapStore = useMapStore.getState()
+          for (const projectedMap of airborneProjection.maps) {
+            const currentMap = mapStore.maps.find((map) => map.id === projectedMap.id)
+            if (currentMap === projectedMap) continue
+            mapStore.applyAuthorityMapUpdate(projectedMap.id, { tokens: projectedMap.tokens })
+          }
+          await mapStore.saveSharedNow()
+        }
+        useMapStore.getState().expireTimedLights(clock.worldMinute)
+        useMapGeometryStore.getState().expireTimedLights(clock.worldMinute)
+      })().catch((error) => {
+        if (characterReconciliationKeyRef.current === reconciliationKey) {
+          characterReconciliationKeyRef.current = null
+        }
+        if (creatureTokenReconciliationKeyRef.current === creatureTokenKey) {
+          creatureTokenReconciliationKeyRef.current = null
+        }
+        console.error('[campaign-time] reconciliation failed', error)
       })
-      useMapStore.getState().expireTimedLights(clock.worldMinute)
-      useMapGeometryStore.getState().expireTimedLights(clock.worldMinute)
     }
-  }, [characters, clock, geometryMaps, isDm, maps])
+  }, [characters, clock, currentRoomId, geometryMaps, hydratedRoomId, isDm, maps])
 
   useEffect(() => {
     if (notification) return

@@ -37,6 +37,8 @@ export interface Dnd5eMonsterTurnPlan {
     areaTargetOrientation?: 0 | 1 | 2 | 3
     areaTargetElevationFeet?: number
     conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+    /** Off-turn casting is paid by this legendary action, not turn economy. */
+    legendaryActionId?: string
   }
   specialAction?:
     | {
@@ -67,6 +69,7 @@ export interface Dnd5eMonsterTurnPlan {
       }
   areaAction?: {
     actionId: string
+    legendary?: boolean
     variantId?: string
     actionName: string
     targetTokenIds: readonly string[]

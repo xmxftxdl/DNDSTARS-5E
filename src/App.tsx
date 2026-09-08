@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { PanelLeftOpen } from 'lucide-react'
 import AccountAppShell from './components/AccountAppShell'
@@ -14,14 +14,19 @@ import { applyRoomCharacterAssignment, getAssignedPlayerCharacterId, getPlayerCh
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 import { isMapWorkspacePath, nextCampaignRoomPath } from './lib/campaignNavigation'
 import { showAppConfirm } from './lib/appDialog'
+import {
+  closePdfSplitView,
+  subscribePdfSplitView,
+  type PdfSplitViewRequest,
+} from './lib/pdfSplitViewController'
 import { VoiceRoomProvider } from './voice/VoiceRoomContext'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
 const Sidebar = lazy(() => import('./components/Sidebar'))
+const PdfSplitViewPanel = lazy(() => import('./components/dm/PdfSplitViewPanel'))
 const AccountProfilePage = lazy(() => import('./pages/AccountProfilePage'))
 const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
 const PublicCombatPage = lazy(() => import('./pages/PublicCombatPage'))
-const PublicExtensionPage = lazy(() => import('./pages/PublicExtensionPage'))
 const PublicBlogPage = lazy(() => import('./pages/PublicBlogPage'))
 const PublicPricingPage = lazy(() => import('./pages/PublicPricingPage'))
 const PublicLegalPage = lazy(() => import('./pages/PublicLegalPage'))
@@ -67,6 +72,8 @@ export default function App() {
   const navigate = useNavigate()
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
   const [collapsed, setCollapsed] = useState(false)
+  const [pdfSplitRequest, setPdfSplitRequest] = useState<PdfSplitViewRequest | null>(null)
+  const sidebarCollapsedBeforePdfRef = useRef<boolean | null>(null)
   const [account, setAccount] = useState(() => getAccountSession())
   const [roomSession, setRoomSession] = useState(() => getRoomSession())
   const [roomNotice, setRoomNotice] = useState<string | null>(null)
@@ -100,6 +107,18 @@ export default function App() {
 
   useEffect(() => subscribeAccountSession(setAccount), [])
   useEffect(() => subscribeRoomSession(setRoomSession), [])
+  useEffect(() => subscribePdfSplitView((request) => {
+    setPdfSplitRequest(request)
+    setCollapsed((current) => {
+      if (request) {
+        if (sidebarCollapsedBeforePdfRef.current == null) sidebarCollapsedBeforePdfRef.current = current
+        return true
+      }
+      const restore = sidebarCollapsedBeforePdfRef.current
+      sidebarCollapsedBeforePdfRef.current = null
+      return restore ?? current
+    })
+  }), [])
 
   useEffect(() => {
     if (publicWebsiteRequested || !roomSession) return
@@ -264,8 +283,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={lazyPage('星痕产品网站', <PublicLandingPage />)} />
         <Route path="/combat" element={lazyPage('星痕战斗系统', <PublicCombatPage />)} />
-        <Route path="/extension" element={lazyPage('星痕扩展中心', <PublicExtensionPage />)} />
-        <Route path="/extensions" element={<Navigate to="/extension" replace />} />
+        <Route path="/extension" element={<Navigate to="/app/extensions" replace />} />
+        <Route path="/extensions" element={<Navigate to="/app/extensions" replace />} />
         <Route path="/blog" element={lazyPage('星痕博客', <PublicBlogPage />)} />
         <Route path="/pricing" element={lazyPage('星痕价格', <PublicPricingPage />)} />
         <Route path="/privacy" element={lazyPage('星痕隐私政策', <PublicLegalPage kind="privacy" />)} />
@@ -440,7 +459,14 @@ export default function App() {
           />
         </Suspense>
       )}
-      <main className={`relative flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
+      {pdfSplitRequest && (
+        <PageErrorBoundary scope="PDF 分屏阅读器">
+          <Suspense fallback={<div className="grid h-screen w-[clamp(24rem,42vw,48rem)] shrink-0 place-items-center border-r border-white/10 bg-slate-950 text-xs text-slate-500">正在打开 PDF…</div>}>
+            <PdfSplitViewPanel request={pdfSplitRequest} onClose={closePdfSplitView} />
+          </Suspense>
+        </PageErrorBoundary>
+      )}
+      <main className={`relative min-w-0 flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
         {collapsed && (
           <button
             onClick={() => setCollapsed(false)}

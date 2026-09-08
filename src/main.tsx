@@ -9,7 +9,7 @@ import { initializeAppTheme } from './lib/appTheme.ts'
 
 initializeAppTheme()
 
-const publicWebsitePaths = new Set(['/', '/combat', '/extension', '/extensions', '/blog', '/pricing', '/privacy', '/terms'])
+const publicWebsitePaths = new Set(['/', '/combat', '/blog', '/pricing', '/privacy', '/terms'])
 if (!publicWebsitePaths.has(window.location.pathname)) {
   const {
     ensureDnd5eRulesPluginHost,

@@ -91,7 +91,7 @@ export default function DmSessionPrepDashboard({
   }
 
   return (
-    <div className="space-y-4" data-testid="dm-session-prep-dashboard">
+    <div className="space-y-4" data-testid="dm-session-prep-dashboard" data-session-prep-contrast-surface="true">
       <section className="rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-500/[0.08] via-transparent to-cyan-500/[0.025] p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -138,7 +138,7 @@ export default function DmSessionPrepDashboard({
             })}
             {storyEvents.length === 0 && <p className="col-span-full rounded-xl border border-dashed border-white/8 px-3 py-8 text-center text-xs text-slate-600">剧情时间线中没有待处理事件。</p>}
           </div>
-          <button type="button" onClick={onOpenStory} className="mt-3 inline-flex text-[11px] font-semibold text-violet-200">查看极简流程图与原文书签 →</button>
+          <button type="button" onClick={onOpenStory} className="mt-3 inline-flex text-[11px] font-semibold text-violet-200">查看剧情流程图与原文书签 →</button>
         </section>
 
         <section className="rounded-2xl border border-cyan-400/12 bg-cyan-500/[0.025] p-4" data-testid="dm-session-auto-materials">

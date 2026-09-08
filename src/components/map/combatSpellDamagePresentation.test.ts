@@ -56,6 +56,28 @@ describe('combat spell damage presentation', () => {
       .toBe('6d6火焰伤害')
   })
 
+  it('shows Call Lightning existing-storm damage without hiding ordinary upcast scaling', () => {
+    const druid = wizard({
+      id: 'storm-druid',
+      charClass: '德鲁伊',
+      level: 20,
+      abilities: { str: 8, dex: 14, con: 14, int: 12, wis: 20, cha: 10 },
+      dnd5eClassLevels: { druid: 20 },
+    })
+    expect(dnd5eCombatSpellDamagePreview(druid, 'druid', 'call-lightning', 7))
+      .toMatchObject({ summary: '7d10闪电伤害', featureBonuses: [] })
+    expect(dnd5eCombatSpellDamagePreview(
+      druid,
+      'druid',
+      'call-lightning',
+      7,
+      { weather: 'storm' },
+    )).toMatchObject({
+      summary: '8d10闪电伤害',
+      featureBonuses: ['既有暴风雨 +1d10'],
+    })
+  })
+
   it('uses sustained immediate-attack scaling and the casting modifier for Spiritual Weapon', () => {
     const cleric = wizard({
       id: 'cleric',
@@ -70,6 +92,41 @@ describe('combat spell damage presentation', () => {
       .toBe('1d8+4力场伤害')
     expect(dnd5eCombatSpellDamagePreview(cleric, 'cleric', 'spiritual-weapon', 4)?.summary)
       .toBe('2d8+4力场伤害')
+  })
+
+  it('keeps Sunbeam at 6d8 when a higher slot is selected because the spell has no upcast damage', () => {
+    const evoker = wizard({
+      level: 20,
+      abilities: { str: 8, dex: 14, con: 14, int: 20, wis: 12, cha: 10 },
+      dnd5eClassLevels: { wizard: 20 },
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            subclass: 'evocation',
+            selections: { 'spell-prepared': ['sunbeam'] },
+          },
+        },
+      },
+    })
+
+    expect(dnd5eCombatSpellDamagePreview(evoker, 'wizard', 'sunbeam', 6)?.summary)
+      .toBe('6d8+5光耀伤害')
+    expect(dnd5eCombatSpellDamagePreview(evoker, 'wizard', 'sunbeam', 7)?.summary)
+      .toBe('6d8+5光耀伤害')
+  })
+
+  it('shows Produce Flame sustained damage at the caster cantrip tier', () => {
+    const druid = wizard({
+      id: 'druid',
+      name: '德鲁伊',
+      charClass: '德鲁伊',
+      level: 20,
+      abilities: { str: 8, dex: 14, con: 14, int: 12, wis: 20, cha: 10 },
+      dnd5eClassLevels: { druid: 20 },
+    })
+
+    expect(dnd5eCombatSpellDamagePreview(druid, 'druid', 'produce-flame', 0)?.summary)
+      .toBe('持续攻击4d8火焰伤害')
   })
 
   it('shows each legal higher-slot damage allocation for Flame Strike', () => {

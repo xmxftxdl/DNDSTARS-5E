@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { Dnd5eMonsterLegendaryMovementGrant } from '../rulesets/dnd5e/monsterLegendaryMovement'
 import {
   clampTokenPositionToMap,
   defaultTokenSizeForMap,
@@ -25,13 +26,17 @@ import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eSpellAuthorityRecordV1 } from '../rulesets/dnd5e/spellAuthorityState'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
+import type { Dnd5eMinorIllusionConfigV1 } from '../lib/sharedCombatTypes'
 import {
   applyDnd5eEffectiveVisionProfile,
   compileDnd5eEffectiveVisionProfile,
 } from '../../shared/dnd5e-vision-profile.mjs'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../application/combat/dnd5eCombatRules'
 import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
+import type { Dnd5eConditionalDamageDefense } from '../rulesets/dnd5e/damageDefenses'
+import type { Dnd5eLimitedMagicImmunityRule } from '../rulesets/dnd5e/monsterGenericAbilities'
 import type { Dnd5eActivityWeaponAttackGrantV1 } from '../rulesets/dnd5e/activities/dnd5eActivityWeaponAttackGrant'
 import type {
   Dnd5eDamageType,
@@ -48,6 +53,7 @@ import {
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
+  DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS,
   normalizeDnd5ePersistentAreaLighting,
   normalizeDnd5ePersistentAreaBlocking,
   normalizeDnd5ePersistentAreaGrantedActivity,
@@ -57,8 +63,12 @@ import {
   normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   normalizeDnd5ePersistentAreaWeaponHitBonusDamage,
+  normalizeDnd5eHallowAreaState,
+  normalizeDnd5eHallucinatoryTerrainAreaState,
+  normalizeDnd5eProgrammedIllusionAreaState,
   type Dnd5ePersistentAreaAnchorMode,
   type Dnd5ePersistentAreaMovementDeclaration,
+  type Dnd5ePersistentAreaSourceFollower,
   type Dnd5ePersistentAreaTurnLifecycle,
   type Dnd5ePersistentAreaGrantedActivity,
   type Dnd5ePersistentAreaLighting,
@@ -71,6 +81,9 @@ import {
   type Dnd5ePersistentAreaTriggerSnapshot,
   type Dnd5ePersistentAreaVerticalSnapshot,
   type Dnd5ePersistentAreaWeaponHitBonusDamage,
+  type Dnd5eHallowAreaState,
+  type Dnd5eHallucinatoryTerrainAreaState,
+  type Dnd5eProgrammedIllusionAreaState,
 } from '../rulesets/dnd5e/persistentAreaTypes'
 import {
   getDnd5eCoreSpellAreaDeclaration,
@@ -86,6 +99,7 @@ import {
 } from '../lib/monsterTypes'
 import {
   normalizeTokenMovementAnimation,
+  tokenMovementAnimationForObservation,
   type TokenMovementAnimation,
 } from '../lib/tokenMovementAnimation'
 import { campaignLightIsActive, type CampaignLightSourceKind } from '../lib/campaignTime'
@@ -95,6 +109,18 @@ import {
   normalizeDnd5eTokenStatusMarkers,
   type Dnd5eTokenStatusMarker,
 } from '../rulesets/dnd5e/tokenStatusMarkers'
+import {
+  normalizeDnd5eMapObjectStateV1,
+  type Dnd5eMapObjectStateV1,
+} from '../rulesets/dnd5e/mapObjectState'
+import {
+  normalizeDnd5eMagicMouthStateV1,
+  type Dnd5eMagicMouthStateV1,
+} from '../rulesets/dnd5e/magicMouth'
+import {
+  normalizeMapViewportNotes,
+  type MapViewportNote,
+} from '../lib/mapViewportNotes'
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -480,8 +506,13 @@ function tokenPatchUpdatesPersistentAreaAnchor(patch: Partial<Token>): boolean {
 }
 
 function persistentAreaAnchoredToToken(area: Dnd5ePluginArea, tokenId: string): boolean {
+  if (area.sourceFollower && area.sourceTokenId === tokenId) return true
+  if (
+    area.interposition &&
+    (area.sourceTokenId === tokenId || area.interposition.targetTokenId === tokenId)
+  ) return true
   return (
-    area.anchorMode === 'source-token' || area.anchorMode === 'effect-token'
+    area.anchorMode === 'source-token' || area.anchorMode === 'target-token' || area.anchorMode === 'effect-token'
   ) && (area.anchorTokenId ?? area.sourceTokenId) === tokenId
 }
 
@@ -493,16 +524,26 @@ function persistentAreaAnchoredToToken(area: Dnd5ePluginArea, tokenId: string): 
  */
 function reconcilePersistentAreasAnchoredToToken(map: BattleMap, tokenId: string): BattleMap {
   const areas = map.dnd5ePluginAreas ?? []
-  if (!areas.some((area) => persistentAreaAnchoredToToken(area, tokenId))) return map
+  const affectedAreas = areas.filter((area) => persistentAreaAnchoredToToken(area, tokenId))
+  if (affectedAreas.length < 1) return map
   const reconciled = reconcileDnd5ePersistentAreaAnchors(map)
   const reconciledById = new Map((reconciled.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
+  const affectedEffectTokenIds = new Set(affectedAreas.flatMap((area) =>
+    area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : [],
+  ))
+  const reconciledTokenById = new Map(reconciled.tokens.map((token) => [token.id, token]))
   return {
     ...map,
-    dnd5ePluginAreas: areas.map((area) =>
-      persistentAreaAnchoredToToken(area, tokenId)
-        ? reconciledById.get(area.id) ?? area
-        : area,
-    ),
+    tokens: map.tokens.flatMap((token) => {
+      if (!affectedEffectTokenIds.has(token.id)) return [token]
+      const reconciledToken = reconciledTokenById.get(token.id)
+      return reconciledToken ? [reconciledToken] : []
+    }),
+    dnd5ePluginAreas: areas.flatMap((area) => {
+      if (!persistentAreaAnchoredToToken(area, tokenId)) return [area]
+      const reconciledArea = reconciledById.get(area.id)
+      return reconciledArea ? [reconciledArea] : []
+    }),
   }
 }
 
@@ -527,21 +568,35 @@ export function committedTokenAnchorProjectionFromSharedMaps(
   )
   if (!committedMap || !committedPatch) return null
 
-  const tokens = currentMap.tokens.map((token) =>
-    token.id === tokenId ? { ...token, ...committedPatch } : token,
-  )
   if (!tokenPatchUpdatesPersistentAreaAnchor(patch)) {
+    const tokens = currentMap.tokens.map((token) =>
+      token.id === tokenId ? { ...token, ...committedPatch } : token,
+    )
     return { tokens, dnd5ePluginAreas: currentMap.dnd5ePluginAreas }
   }
 
+  const currentAnchors = (currentMap.dnd5ePluginAreas ?? [])
+    .filter((area) => persistentAreaAnchoredToToken(area, tokenId))
   const committedAnchors = (committedMap.dnd5ePluginAreas ?? [])
     .filter((area) => persistentAreaAnchoredToToken(area, tokenId))
   const committedAnchorById = new Map(committedAnchors.map((area) => [area.id, area]))
-  const currentAnchorIds = new Set(
-    (currentMap.dnd5ePluginAreas ?? [])
-      .filter((area) => persistentAreaAnchoredToToken(area, tokenId))
-      .map((area) => area.id),
-  )
+  const currentAnchorIds = new Set(currentAnchors.map((area) => area.id))
+  const linkedEffectTokenIds = new Set([...currentAnchors, ...committedAnchors].flatMap((area) =>
+    area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : [],
+  ))
+  const committedTokenById = new Map(committedMap.tokens.map((token) => [token.id, token]))
+  const currentTokenIds = new Set(currentMap.tokens.map((token) => token.id))
+  const tokens = [
+    ...currentMap.tokens.flatMap((token) => {
+      if (token.id === tokenId) return [{ ...token, ...committedPatch }]
+      if (!linkedEffectTokenIds.has(token.id)) return [token]
+      const committedToken = committedTokenById.get(token.id)
+      return committedToken ? [committedToken] : []
+    }),
+    ...committedMap.tokens.filter((token) =>
+      linkedEffectTokenIds.has(token.id) && !currentTokenIds.has(token.id),
+    ),
+  ]
   const dnd5ePluginAreas = [
     ...(currentMap.dnd5ePluginAreas ?? []).flatMap((area) => {
       if (!persistentAreaAnchoredToToken(area, tokenId)) return [area]
@@ -642,6 +697,7 @@ export async function saveMapsStateWithTokenPatchRetry(input: {
 }
 
 export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps: BattleMap[]): BattleMap[] {
+  const observedAt = Date.now()
   const sharedMapById = new Map(sharedMaps.map((map) => [map.id, map]))
   return localMaps.map((map) => {
     const sharedMap = sharedMapById.get(map.id)
@@ -681,13 +737,30 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           dnd5eCombatState: sharedToken.dnd5eCombatState,
           dnd5eSummon: sharedToken.dnd5eSummon,
           dnd5eSpellEffect: sharedToken.dnd5eSpellEffect,
-          movementAnimation: sharedToken.movementAnimation,
+          movementAnimation: localSharedMovementAnimation({
+            local: token.movementAnimation,
+            shared: sharedToken.movementAnimation,
+            observedAt,
+          }),
         }]
         }),
         ...sharedMap.tokens.filter((token) => !map.tokens.some((local) => local.id === token.id)),
       ],
     }
   })
+}
+
+function localSharedMovementAnimation(input: {
+  local?: TokenMovementAnimation
+  shared?: TokenMovementAnimation
+  observedAt: number
+}): TokenMovementAnimation | undefined {
+  if (!input.shared) return undefined
+  // Preserve a previously rebased local copy while the authoritative event id
+  // is unchanged. Re-running the rebase on every SSE invalidation would keep a
+  // Token moving forever instead of allowing it to reach the final coordinate.
+  if (input.local?.id === input.shared.id) return input.local
+  return tokenMovementAnimationForObservation(input.shared, input.observedAt)
 }
 
 function stripViewerControlProjection(token: Token): Omit<Token, 'viewerControlled'> {
@@ -771,6 +844,12 @@ export interface Token {
   dnd5eSide?: Dnd5eTokenSide
   /** 玩家读取地图时由服务端临时投影；不会作为 DM 地图数据持久化。 */
   viewerControlled?: boolean
+  /** Player-only projection explaining truths perceived through active truesight. */
+  dnd5eTruesightPerception?: {
+    ethereal?: true
+    originalForm?: true
+    visualIllusion?: true
+  }
   creatureTypes?: CreatureType[]
   creatureSize?: CreatureSize
   characterId?: string // 关联的角色（点击 token 即可调出其技能栏）
@@ -780,6 +859,10 @@ export interface Token {
   showHpOnToken?: boolean
   /** 玩家端点击时是否显示怪物详情（DM 始终显示；默认对玩家可见） */
   showDetailOnToken?: boolean
+  /** 已投影到该未关联生物 Token 的权威战役分钟；用于探索态 ActiveEffect 计时。 */
+  dnd5eWorldTimeAppliedMinute?: number
+  /** DM 绑定到 NPC 的商店；玩家地图投影只使用这个短 ID 打开公开店面。 */
+  merchantShopId?: string
   /**
    * Presentation-only map annotations. They never grant a condition, modifier,
    * action, or other Headless rule by themselves.
@@ -809,6 +892,14 @@ export interface Token {
     concentrationId?: string
     side: 'player' | 'enemy'
     persistent?: true
+    persistAfterConcentrationCompletes?: true
+    /** This controlled summon remains until its printed expiry, but becomes hostile if concentration ends. */
+    becomesHostileAfterConcentrationEnds?: true
+    /** True once the permanent creature is no longer commanded by the caster. */
+    controlEnded?: true
+    createdWorldMinute?: number
+    /** Animate Dead command authority ends at this campaign minute unless reasserted. */
+    controlExpiresAtWorldMinute?: number
     minimumMaximumHitPoints?: number
     maximumHitPointBonus?: number
     armorClassBonus?: number
@@ -819,6 +910,59 @@ export interface Token {
     weaponAttacksMagical?: true
     attacksPerAction?: number
     shareSelfSpellsRangeFeet?: number
+    cannotAttack?: true
+    walkingSpeedFeet?: number
+    dismissAfterDamageRounds?: number
+    dismissAtRound?: number
+    /**
+     * Host snapshot of the mapped object replaced by True Polymorph. It is
+     * restored at the creature's current position if the spell ends before
+     * permanence; a completed one-hour concentration discards the snapshot.
+     */
+    truePolymorphOriginalObject?: {
+      schemaVersion: 1
+      id: string
+      label: string
+      x: number
+      y: number
+      color: string
+      emoji: string
+      size: number
+      hp?: number
+      maxHp?: number
+      obstacleKind?: string
+      elevationFeet?: number
+      portraitImageId?: string
+      tokenPortraitImageId?: string
+      showHpOnToken?: boolean
+      showDetailOnToken?: boolean
+      visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
+      lightSource?: Token['lightSource']
+      dnd5eObjectState?: Dnd5eMapObjectStateV1
+    }
+  }
+  /** Persistent duplicate created by the generic duplicate-creature Activity operation. */
+  dnd5eSimulacrum?: {
+    schemaVersion: 1
+    sourceTokenId: string
+    subjectTokenId: string
+    sourceCharacterId: string
+    sourceActivityId: string
+    createdRound: number
+    level: number
+    proficiencyBonus: number
+    abilities: Record<import('../lib/dnd').AbilityKey, number>
+    armorClass: number
+    maximumHitPoints: number
+    speed: number
+    sizeRank: number
+    creatureType?: string
+    saveDc?: number
+    classLevels?: Record<string, number>
+    classResources: Record<string, { current: number; maximum: number }>
+    cannotIncreaseLevel: true
+    cannotRegainSpellSlots: true
+    cannotRegainHitPoints: true
   }
   /** 无战斗属性的核心法术实体；位置与生命周期只由 DM Headless 区域事务控制。 */
   dnd5eSpellEffect?: {
@@ -829,9 +973,26 @@ export interface Token {
     createdRound: number
     expiresAfterRound: number
     concentrationId?: string
+    /** Adds this invisible/movable spell entity as a vision origin for its source character. */
+    shareVisionWithSource?: true
+    /** Keep the authoritative drag hitbox while suppressing the ordinary Token portrait/body. */
+    hiddenBody?: true
+    /** Rendered only to the source character and DM; authority still retains the token. */
+    visibleToSourceOnly?: true
+    /** Non-creature Mirror Image projection; it never becomes an attack target or blocks a cell. */
+    projectionKind?: 'attack-decoy'
+    /** Exact ActiveEffect pool whose remaining count owns this projection. */
+    sourceEffectId?: string
+    /** Stable one-based position inside the authoritative decoy pool. */
+    projectionIndex?: number
   }
+  /** Host-owned lock state for an obstacle used as a container or other map object. */
+  dnd5eObjectState?: Dnd5eMapObjectStateV1
   /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
   dnd5eCombatState?: {
+    activityExtraTurnGroup?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnGroup']
+    activityExtraTurnSuspension?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnSuspension']
+    slowDelayedSpell?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['slowDelayedSpell']
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
     /**
      * An unlinked creature at 0 HP is alive and stable.
@@ -840,6 +1001,11 @@ export interface Token {
     stableAtZero?: true
     /** 权威状态实例；由 DM/Headless 写入并通过房间资源同步。 */
     activeEffects?: Dnd5eActiveEffectInstance[]
+    /** Host-authored long-lived spell authority records. */
+    spellAuthorityRecords?: Record<string, Dnd5eSpellAuthorityRecordV1>
+    spellControlledByActorId?: string
+    spellControlMentalAbilities?: Pick<Record<import('../lib/dnd').AbilityKey, number>, 'int' | 'wis' | 'cha'>
+    spellControlledBodyMentalAbilities?: Pick<Record<import('../lib/dnd').AbilityKey, number>, 'int' | 'wis' | 'cha'>
     caltropsSpeedPenaltyFeet?: number
     /** Stable per-turn attack count used by effects such as Slowing Breath. */
     attacksMadeTurnKey?: string
@@ -872,10 +1038,32 @@ export interface Token {
       requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
+    activeEffectDamageSavePendingModes?: Record<string, 'normal' | 'advantage'>
+    /** Authoritative death/body state retained for unlinked creatures. */
+    deathRound?: number
+    deathInitiativeIndex?: number
+    /** Host-confirmed cause used by resurrection magic that excludes death from old age. */
+    deathCause?: 'other' | 'old-age'
+    /** Host-confirmed state of the soul for magic that requires it to be free and willing. */
+    soulReturnStatus?: 'free-willing' | 'unwilling' | 'not-free'
+    bodyPresent?: boolean
+    missingBodyParts?: string[]
+    /** A missing essential body part or organ prevents revival that cannot restore parts. */
+    vitalBodyPartsMissing?: boolean
+    /** Universal d20 penalty from resurrection magic; recovers on long rests. */
+    resurrectionPenalty?: { value: number; recoveryPerLongRest: number }
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
     temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
     /** Recoverable maximum-HP reductions for this unlinked creature. */
     hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
+    /** Ability reductions are reapplied from the immutable stat block after a map reload. */
+    abilityScoreReductionLedger?: readonly {
+      id: string
+      ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+      amount: number
+      recovery: 'short-or-long-rest' | 'restoration-magic'
+      recoveryGroupId?: string
+    }[]
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
@@ -962,13 +1150,52 @@ export interface Token {
     concentrationSpellLevel?: number
     concentrationTargetIds?: string[]
     concentrationRoundsRemaining?: number
+    concentrationStartedTurnKey?: string
+    lastCompletedConcentration?: {
+      spellId: string
+      completedRound?: number
+      completedWorldMinute?: number
+    }
     concentrationEffectsBySource?: Record<string, string>
+    wildShapeFormId?: string
+    wildShapeMode?: 'wild-shape' | 'polymorph' | 'true-polymorph' | 'animal-shapes' | 'shapechange'
+    wildShapeSourceActorId?: string
+    wildShapeSourceActivityId?: string
+    wildShapeMaximumChallengeRating?: number
+    wildShapeMaximumSizeRank?: number
+    shapechangeEquipmentDisposition?: 'drop' | 'merge' | 'wear'
+    wildShapeCurrentHp?: number
+    wildShapeRoundsRemaining?: number
+    wildShapePermanent?: boolean
+    wildShapePermanentAfterConcentrationCompletes?: boolean
+    wildShapeOriginalCurrentHp?: number
+    wildShapeOriginalMaxHp?: number
+    wildShapeOriginalArmorClass?: number
+    wildShapeOriginalSpeed?: number
+    wildShapeOriginalMovementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number; hover?: boolean }
+    wildShapeOriginalSizeRank?: number
+    wildShapeOriginalAbilities?: Record<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', number>
+    wildShapeOriginalSavingThrowBonuses?: Partial<Record<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', number>>
+    wildShapeOriginalSavingThrowProficiencies?: Array<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'>
+    wildShapeOriginalSkillProficiencies?: string[]
+    wildShapeOriginalPassivePerception?: number
+    wildShapeOriginalStatBlockId?: string
+    wildShapeOriginalCreatureType?: string
+    wildShapeOriginalDamageVulnerabilities?: Dnd5eDamageType[]
+    wildShapeOriginalDamageResistances?: Dnd5eDamageType[]
+    wildShapeOriginalDamageImmunities?: Dnd5eDamageType[]
+    wildShapeOriginalDamageDefenseRules?: Dnd5eConditionalDamageDefense[]
+    wildShapeOriginalMagicResistance?: boolean
+    wildShapeOriginalLimitedMagicImmunity?: Dnd5eLimitedMagicImmunityRule
+    wildShapeOriginalWeaponAttacksMagical?: boolean
+    wildShapeOriginalConditionImmunities?: string[]
     viciousMockeryAttackDisadvantage?: boolean
     helpedAttackSourceId?: string
     helpedAttackSourceTurnKey?: string
     shieldSpellActive?: boolean
     legendaryResistanceUses?: number
     monsterLegendaryActionPoints?: number
+    monsterLegendaryMovement?: Dnd5eMonsterLegendaryMovementGrant
     monsterLairActionRoundUsed?: number
     monsterLairActionLastId?: string
     monsterRechargeReadyByActionId?: Record<string, boolean>
@@ -988,6 +1215,8 @@ export interface Token {
     }
     monsterShapechangeOriginalStatBlockId?: string
     monsterShapechangeFormId?: string
+    /** Moonbeam areas whose light currently prevents another transformation. */
+    shapechangerReversionAreaIds?: string[]
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
     monsterBerserk?: boolean
@@ -1032,6 +1261,8 @@ export interface Token {
     brightRadiusFeet: number
     dimRadiusFeet: number
     color: string
+    /** The light counts as sunlight for rules that consume sunlight exposure. */
+    sunlight?: true
     sourceKind?: CampaignLightSourceKind
     startedAtWorldMinute?: number
     durationMinutes?: number
@@ -1085,6 +1316,8 @@ export interface BattleMap {
   dnd5eItemAreas?: Dnd5eItemArea[]
   /** 由规则包声明、DM Headless 事务创建的持续范围实体。 */
   dnd5ePluginAreas?: Dnd5ePluginArea[]
+  /** 独立于 Konva 世界坐标的屏幕贴层；地图平移与缩放不会移动这些内容。 */
+  viewportNotes?: MapViewportNote[]
   tokens: Token[]
 }
 
@@ -1116,6 +1349,8 @@ export interface Dnd5ePluginArea {
   /** Core spellcasting source captured when the area was created. */
   castingClassId?: Dnd5eClassId
   slotLevel?: number
+  /** Class-derived save DC captured at creation; spell attacks use DC - 8. */
+  sourceSpellSaveDc?: number
   label: string
   color: string
   sourceCharacterId: string
@@ -1123,8 +1358,29 @@ export interface Dnd5ePluginArea {
   cells: Array<{ col: number; row: number }>
   createdRound: number
   expiresAfterRound: number
+  /** Exploration-time creation boundary captured from the authoritative campaign clock. */
+  createdWorldMinute?: number
+  /** Finite areas expire when the authoritative campaign clock reaches this minute. */
+  expiresAtWorldMinute?: number
+  /** Until-dispelled areas ignore the synthetic combat-round expiry sentinel. */
+  permanent?: true
+  /** Host-owned mapped-object enchantment and its bounded open-text payload. */
+  magicMouth?: Dnd5eMagicMouthStateV1
+  /** Host-approved declaration shown with a Minor Illusion map marker. */
+  minorIllusion?: Dnd5eMinorIllusionConfigV1
   /** 到达指定轮次后，在来源 Token 的回合结束边界移除。 */
   expiresAtSourceTurnEndAfterRound?: number
+  /** Core Web-only lifecycle state: unsupported webs collapse at the caster's turn start; ignited cubes burn for one round. */
+  webState?: {
+    unsupportedCollapseAtRound?: number
+    burningCells?: Array<{
+      col: number
+      row: number
+      ignitedRound: number
+      expiresAtRound: number
+      expiresAtTurnTokenId: string
+    }>
+  }
   concentrationId?: string
   /** fixed 保持落点；source-token 跟随施法者；effect-token 跟随独立法术实体。 */
   anchorMode?: Dnd5ePersistentAreaAnchorMode
@@ -1133,6 +1389,8 @@ export interface Dnd5ePluginArea {
   /** Authoritative vertical extent; absent preserves legacy unbounded-column behavior. */
   vertical?: Dnd5ePersistentAreaVerticalSnapshot
   movement?: Dnd5ePersistentAreaMovementDeclaration
+  /** Independent effect-token following and load contract. */
+  sourceFollower?: Dnd5ePersistentAreaSourceFollower
   /** Host-owned source-turn evolution; progress fields make retries idempotent. */
   lifecycle?: Dnd5ePersistentAreaTurnLifecycle
   lifecycleAdvances?: number
@@ -1146,20 +1404,50 @@ export interface Dnd5ePluginArea {
   hiddenFromPlayers?: boolean
   /** 与权威视线判定共享的声明式光照/魔法黑暗。 */
   lighting?: Dnd5ePersistentAreaLighting
+  /** Permanent Hallow choices captured at cast time. */
+  hallow?: Dnd5eHallowAreaState
+  /** Hallucinatory Terrain's selected natural-terrain appearance. */
+  hallucinatoryTerrain?: Dnd5eHallucinatoryTerrainAreaState
+  /** Programmed Illusion's selected form and trigger-sense declaration. */
+  programmedIllusion?: Dnd5eProgrammedIllusionAreaState
+  /** A bounded interior light level that overrides brighter ambient light inside this area. */
+  illuminationOverride?: 'dim' | 'darkness'
   /** Non-light visibility volume, such as smoke, gas or underwater ink. */
   obscuration?: Dnd5ePersistentAreaObscuration
   /** Rules projected only while a creature occupies this area. */
   occupantModifiers?: Dnd5ePersistentAreaOccupantModifiers
   /** Physical blocking supplied by a wall-like area. */
   blocking?: Dnd5ePersistentAreaBlocking
+  /**
+   * Host-resolved movement rule for an entity interposed between its source
+   * and one selected target. The target id and Strength branch are captured
+   * when the command resolves; clients never infer either value from prose.
+   */
+  interposition?: {
+    targetTokenId: string
+    mode: 'blocked' | 'difficult-terrain'
+  }
   /** Host-projected weapon-hit rider for eligible creatures currently in this area. */
   weaponHitBonusDamage?: Dnd5ePersistentAreaWeaponHitBonusDamage
+  /** Closed rules facts for a spell-created map entity such as Unseen Servant. */
+  entityProfile?: {
+    armorClass: number
+    hitPoints: number
+    strength: number
+    dexterity?: number
+    cannotAttack: boolean
+    invisible: boolean
+  }
+  /** Host-owned current HP for a spell-created entity; absent legacy values start at maximum HP. */
+  entityCurrentHitPoints?: number
   /** Host-validated active controls available only while this area exists. */
   grantedActivities?: Dnd5ePersistentAreaGrantedActivity[]
   /** Activity ids whose one-time activate-on-create use has been consumed. */
   grantedActivityUseReceipts?: string[]
   /** Optional independent light origins for one multi-point spell area. */
   lightingAnchorCells?: Array<{ col: number; row: number }>
+  /** Dancing Lights presentation selected at cast time. */
+  dancingLightsForm?: 'lights' | 'humanoid'
   visual?: Dnd5ePersistentAreaVisual
   /** Exact host-approved Wall of Fire placement used by presentation and turn-end damage. */
   wallOfFireGeometry?: {
@@ -1171,10 +1459,14 @@ export interface Dnd5ePluginArea {
   }
   triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
+  /** Remove a fixed area as soon as its source Token leaves it. */
+  sourceExitBehavior?: 'remove-area'
+  /** Remove a source-anchored area if source movement encloses an affected creature. */
+  sourceOverlapBehavior?: 'remove-area'
 }
 
 /** 地图存档 V17：规范化可选、受限的持久区域垂直快照。 */
-export const MAPS_PERSIST_VERSION = 19
+export const MAPS_PERSIST_VERSION = 20
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -1205,6 +1497,41 @@ function normalizeToken(raw: unknown): Token {
     normalizeCreatureSize(t.creatureSize) ?? (type === 'enemy' || type === 'npc' ? sizeFromTokenSize(rawSize) : undefined)
   const creatureTypes = normalizeCreatureTypes(t.creatureTypes)
   const rawSummon = t.dnd5eSummon
+  const rawTruePolymorphObject = rawSummon?.truePolymorphOriginalObject
+  const truePolymorphOriginalObject = rawTruePolymorphObject &&
+    rawTruePolymorphObject.schemaVersion === 1 &&
+    typeof rawTruePolymorphObject.id === 'string' && !!rawTruePolymorphObject.id &&
+    typeof rawTruePolymorphObject.label === 'string' &&
+    Number.isFinite(rawTruePolymorphObject.x) && Number.isFinite(rawTruePolymorphObject.y) &&
+    typeof rawTruePolymorphObject.color === 'string' &&
+    typeof rawTruePolymorphObject.emoji === 'string' &&
+    Number.isFinite(rawTruePolymorphObject.size) && rawTruePolymorphObject.size > 0
+    ? {
+        schemaVersion: 1 as const,
+        id: rawTruePolymorphObject.id,
+        label: rawTruePolymorphObject.label.slice(0, 160),
+        x: Number(rawTruePolymorphObject.x),
+        y: Number(rawTruePolymorphObject.y),
+        color: rawTruePolymorphObject.color,
+        emoji: rawTruePolymorphObject.emoji,
+        size: Number(rawTruePolymorphObject.size),
+        hp: Number.isFinite(rawTruePolymorphObject.hp) ? Math.max(0, Number(rawTruePolymorphObject.hp)) : undefined,
+        maxHp: Number.isFinite(rawTruePolymorphObject.maxHp) ? Math.max(1, Number(rawTruePolymorphObject.maxHp)) : undefined,
+        obstacleKind: typeof rawTruePolymorphObject.obstacleKind === 'string' ? rawTruePolymorphObject.obstacleKind : undefined,
+        elevationFeet: Number.isFinite(rawTruePolymorphObject.elevationFeet) ? Math.max(0, Number(rawTruePolymorphObject.elevationFeet)) : undefined,
+        portraitImageId: typeof rawTruePolymorphObject.portraitImageId === 'string' ? rawTruePolymorphObject.portraitImageId : undefined,
+        tokenPortraitImageId: typeof rawTruePolymorphObject.tokenPortraitImageId === 'string' ? rawTruePolymorphObject.tokenPortraitImageId : undefined,
+        showHpOnToken: typeof rawTruePolymorphObject.showHpOnToken === 'boolean' ? rawTruePolymorphObject.showHpOnToken : undefined,
+        showDetailOnToken: typeof rawTruePolymorphObject.showDetailOnToken === 'boolean' ? rawTruePolymorphObject.showDetailOnToken : undefined,
+        visibilityMode: rawTruePolymorphObject.visibilityMode === 'always' || rawTruePolymorphObject.visibilityMode === 'dm-only' || rawTruePolymorphObject.visibilityMode === 'line-of-sight'
+          ? rawTruePolymorphObject.visibilityMode
+          : undefined,
+        lightSource: rawTruePolymorphObject.lightSource ? { ...rawTruePolymorphObject.lightSource } : undefined,
+        dnd5eObjectState: rawTruePolymorphObject.dnd5eObjectState
+          ? normalizeDnd5eMapObjectStateV1(rawTruePolymorphObject.dnd5eObjectState)
+          : undefined,
+      }
+    : undefined
   const dnd5eSummon = rawSummon && typeof rawSummon === 'object' &&
     rawSummon.schemaVersion === 1 &&
     typeof rawSummon.pluginId === 'string' && !!rawSummon.pluginId &&
@@ -1216,8 +1543,37 @@ function normalizeToken(raw: unknown): Token {
     Number(rawSummon.expiresAfterRound) - Number(rawSummon.createdRound) + 1 <= 14_400 &&
     (rawSummon.concentrationId == null || (typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId)) &&
     (rawSummon.persistent == null || rawSummon.persistent === true) &&
+    (rawSummon.persistAfterConcentrationCompletes == null || rawSummon.persistAfterConcentrationCompletes === true) &&
+    (rawSummon.becomesHostileAfterConcentrationEnds == null || rawSummon.becomesHostileAfterConcentrationEnds === true) &&
+    (rawSummon.controlEnded == null || rawSummon.controlEnded === true) &&
+    (rawSummon.createdWorldMinute == null || (Number.isSafeInteger(rawSummon.createdWorldMinute) && Number(rawSummon.createdWorldMinute) >= 0)) &&
+    (rawSummon.controlExpiresAtWorldMinute == null || (
+      Number.isSafeInteger(rawSummon.controlExpiresAtWorldMinute) &&
+      Number(rawSummon.controlExpiresAtWorldMinute) >= Number(rawSummon.createdWorldMinute ?? 0)
+    )) &&
+    (rawSummon.persistAfterConcentrationCompletes !== true || (
+      typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId && rawSummon.persistent !== true
+    )) &&
+    (rawSummon.becomesHostileAfterConcentrationEnds !== true || (
+      typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId &&
+      rawSummon.persistent !== true && rawSummon.persistAfterConcentrationCompletes !== true
+    )) &&
+    (rawSummon.controlEnded !== true || rawSummon.concentrationId == null) &&
+    (rawSummon.minimumMaximumHitPoints == null || (Number.isInteger(rawSummon.minimumMaximumHitPoints) && Number(rawSummon.minimumMaximumHitPoints) >= 1 && Number(rawSummon.minimumMaximumHitPoints) <= 1_000_000)) &&
     (rawSummon.maximumHitPointBonus == null || (Number.isInteger(rawSummon.maximumHitPointBonus) && Number(rawSummon.maximumHitPointBonus) >= 0 && Number(rawSummon.maximumHitPointBonus) <= 1_000_000)) &&
+    (rawSummon.armorClassBonus == null || (Number.isInteger(rawSummon.armorClassBonus) && Number(rawSummon.armorClassBonus) >= 0 && Number(rawSummon.armorClassBonus) <= 1_000)) &&
+    (rawSummon.weaponAttackBonus == null || (Number.isInteger(rawSummon.weaponAttackBonus) && Number(rawSummon.weaponAttackBonus) >= 0 && Number(rawSummon.weaponAttackBonus) <= 1_000)) &&
     (rawSummon.weaponDamageBonus == null || (Number.isInteger(rawSummon.weaponDamageBonus) && Number(rawSummon.weaponDamageBonus) >= 0 && Number(rawSummon.weaponDamageBonus) <= 1_000_000)) &&
+    (rawSummon.savingThrowBonus == null || (Number.isInteger(rawSummon.savingThrowBonus) && Number(rawSummon.savingThrowBonus) >= 0 && Number(rawSummon.savingThrowBonus) <= 1_000)) &&
+    (rawSummon.proficientSkillCheckBonus == null || (Number.isInteger(rawSummon.proficientSkillCheckBonus) && Number(rawSummon.proficientSkillCheckBonus) >= 0 && Number(rawSummon.proficientSkillCheckBonus) <= 1_000)) &&
+    (rawSummon.weaponAttacksMagical == null || rawSummon.weaponAttacksMagical === true) &&
+    (rawSummon.attacksPerAction == null || (Number.isInteger(rawSummon.attacksPerAction) && Number(rawSummon.attacksPerAction) >= 1 && Number(rawSummon.attacksPerAction) <= 10)) &&
+    (rawSummon.shareSelfSpellsRangeFeet == null || (Number.isInteger(rawSummon.shareSelfSpellsRangeFeet) && Number(rawSummon.shareSelfSpellsRangeFeet) >= 5 && Number(rawSummon.shareSelfSpellsRangeFeet) <= 10_000)) &&
+    (rawSummon.cannotAttack == null || rawSummon.cannotAttack === true) &&
+    (rawSummon.walkingSpeedFeet == null || (Number.isInteger(rawSummon.walkingSpeedFeet) && Number(rawSummon.walkingSpeedFeet) >= 0 && Number(rawSummon.walkingSpeedFeet) <= 1_000)) &&
+    (rawSummon.dismissAfterDamageRounds == null || (Number.isInteger(rawSummon.dismissAfterDamageRounds) && Number(rawSummon.dismissAfterDamageRounds) >= 1 && Number(rawSummon.dismissAfterDamageRounds) <= 10_000)) &&
+    (rawSummon.dismissAtRound == null || (Number.isInteger(rawSummon.dismissAtRound) && Number(rawSummon.dismissAtRound) >= Number(rawSummon.createdRound) && Number(rawSummon.dismissAtRound) <= Number(rawSummon.expiresAfterRound))) &&
+    (rawSummon.truePolymorphOriginalObject == null || truePolymorphOriginalObject != null) &&
     (rawSummon.side === 'player' || rawSummon.side === 'enemy')
     ? {
         schemaVersion: 1 as const,
@@ -1230,11 +1586,35 @@ function normalizeToken(raw: unknown): Token {
         concentrationId: rawSummon.concentrationId,
         side: rawSummon.side,
         persistent: rawSummon.persistent === true ? true as const : undefined,
+        persistAfterConcentrationCompletes: rawSummon.persistAfterConcentrationCompletes === true ? true as const : undefined,
+        becomesHostileAfterConcentrationEnds: rawSummon.becomesHostileAfterConcentrationEnds === true ? true as const : undefined,
+        controlEnded: rawSummon.controlEnded === true ? true as const : undefined,
+        createdWorldMinute: rawSummon.createdWorldMinute,
+        controlExpiresAtWorldMinute: rawSummon.controlExpiresAtWorldMinute,
+        minimumMaximumHitPoints: rawSummon.minimumMaximumHitPoints,
         maximumHitPointBonus: rawSummon.maximumHitPointBonus,
+        armorClassBonus: rawSummon.armorClassBonus,
+        weaponAttackBonus: rawSummon.weaponAttackBonus,
         weaponDamageBonus: rawSummon.weaponDamageBonus,
+        savingThrowBonus: rawSummon.savingThrowBonus,
+        proficientSkillCheckBonus: rawSummon.proficientSkillCheckBonus,
+        weaponAttacksMagical: rawSummon.weaponAttacksMagical === true ? true as const : undefined,
+        attacksPerAction: rawSummon.attacksPerAction,
+        shareSelfSpellsRangeFeet: rawSummon.shareSelfSpellsRangeFeet,
+        cannotAttack: rawSummon.cannotAttack === true ? true as const : undefined,
+        walkingSpeedFeet: rawSummon.walkingSpeedFeet,
+        dismissAfterDamageRounds: rawSummon.dismissAfterDamageRounds,
+        dismissAtRound: rawSummon.dismissAtRound,
+        truePolymorphOriginalObject,
       }
     : undefined
   const rawSpellEffect = t.dnd5eSpellEffect
+  const attackDecoyProjectionValid = rawSpellEffect && typeof rawSpellEffect === 'object' &&
+    rawSpellEffect.projectionKind === 'attack-decoy' &&
+    rawSpellEffect.spellId === 'mirror-image' &&
+    typeof rawSpellEffect.sourceEffectId === 'string' && !!rawSpellEffect.sourceEffectId &&
+    Number.isInteger(rawSpellEffect.projectionIndex) &&
+    Number(rawSpellEffect.projectionIndex) >= 1 && Number(rawSpellEffect.projectionIndex) <= 20
   const dnd5eSpellEffect = rawSpellEffect && typeof rawSpellEffect === 'object' &&
     t.type === 'obstacle' &&
     rawSpellEffect.schemaVersion === 1 &&
@@ -1244,9 +1624,13 @@ function normalizeToken(raw: unknown): Token {
     Number.isInteger(rawSpellEffect.createdRound) && Number(rawSpellEffect.createdRound) >= 0 &&
     Number.isInteger(rawSpellEffect.expiresAfterRound) &&
     Number(rawSpellEffect.expiresAfterRound) >= Number(rawSpellEffect.createdRound) &&
-    Number(rawSpellEffect.expiresAfterRound) - Number(rawSpellEffect.createdRound) + 1 <= 14_400 &&
+    Number(rawSpellEffect.expiresAfterRound) - Number(rawSpellEffect.createdRound) + 1 <= DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS &&
     (rawSpellEffect.concentrationId == null ||
-      (typeof rawSpellEffect.concentrationId === 'string' && !!rawSpellEffect.concentrationId))
+      (typeof rawSpellEffect.concentrationId === 'string' && !!rawSpellEffect.concentrationId)) &&
+    (rawSpellEffect.shareVisionWithSource == null || rawSpellEffect.shareVisionWithSource === true) &&
+    (rawSpellEffect.hiddenBody == null || rawSpellEffect.hiddenBody === true) &&
+    (rawSpellEffect.visibleToSourceOnly == null || rawSpellEffect.visibleToSourceOnly === true) &&
+    (rawSpellEffect.projectionKind == null || attackDecoyProjectionValid)
     ? {
         schemaVersion: 1 as const,
         spellId: rawSpellEffect.spellId,
@@ -1255,7 +1639,36 @@ function normalizeToken(raw: unknown): Token {
         createdRound: rawSpellEffect.createdRound,
         expiresAfterRound: rawSpellEffect.expiresAfterRound,
         concentrationId: rawSpellEffect.concentrationId,
+        shareVisionWithSource: rawSpellEffect.shareVisionWithSource === true ? true as const : undefined,
+        hiddenBody: rawSpellEffect.hiddenBody === true ? true as const : undefined,
+        visibleToSourceOnly: rawSpellEffect.visibleToSourceOnly === true ? true as const : undefined,
+        projectionKind: attackDecoyProjectionValid ? 'attack-decoy' as const : undefined,
+        sourceEffectId: attackDecoyProjectionValid ? rawSpellEffect.sourceEffectId : undefined,
+        projectionIndex: attackDecoyProjectionValid ? Number(rawSpellEffect.projectionIndex) : undefined,
       }
+    : undefined
+  const rawSimulacrum = t.dnd5eSimulacrum
+  const simulacrumAbilitiesValid = rawSimulacrum && typeof rawSimulacrum === 'object' &&
+    ['str', 'dex', 'con', 'int', 'wis', 'cha'].every((ability) =>
+      Number.isInteger(rawSimulacrum.abilities?.[ability as keyof typeof rawSimulacrum.abilities]) &&
+      Number(rawSimulacrum.abilities?.[ability as keyof typeof rawSimulacrum.abilities]) >= 1 &&
+      Number(rawSimulacrum.abilities?.[ability as keyof typeof rawSimulacrum.abilities]) <= 30)
+  const dnd5eSimulacrum = rawSimulacrum && typeof rawSimulacrum === 'object' &&
+    rawSimulacrum.schemaVersion === 1 &&
+    typeof rawSimulacrum.sourceTokenId === 'string' && !!rawSimulacrum.sourceTokenId &&
+    typeof rawSimulacrum.subjectTokenId === 'string' && !!rawSimulacrum.subjectTokenId &&
+    typeof rawSimulacrum.sourceCharacterId === 'string' && !!rawSimulacrum.sourceCharacterId &&
+    typeof rawSimulacrum.sourceActivityId === 'string' && !!rawSimulacrum.sourceActivityId &&
+    Number.isInteger(rawSimulacrum.createdRound) && Number(rawSimulacrum.createdRound) >= 0 &&
+    Number.isInteger(rawSimulacrum.level) && Number(rawSimulacrum.level) >= 0 && Number(rawSimulacrum.level) <= 30 &&
+    Number.isInteger(rawSimulacrum.maximumHitPoints) && Number(rawSimulacrum.maximumHitPoints) >= 1 &&
+    simulacrumAbilitiesValid && rawSimulacrum.cannotIncreaseLevel === true &&
+    rawSimulacrum.cannotRegainSpellSlots === true &&
+    rawSimulacrum.cannotRegainHitPoints === true
+      ? structuredClone(rawSimulacrum)
+      : undefined
+  const dnd5eObjectState = t.type === 'obstacle'
+    ? normalizeDnd5eMapObjectStateV1(t.dnd5eObjectState)
     : undefined
   const invalidCurrentEffects = legacyCombatState?.schemaVersion === DND5E_COMBAT_STATE_SCHEMA_VERSION &&
     !validateDnd5eActiveEffectsStrict(legacyCombatState.activeEffects).ok
@@ -1319,6 +1732,10 @@ function normalizeToken(raw: unknown): Token {
     ),
     size: creatureSize ? creatureSizeToTokenSize(creatureSize) : rawSize,
     type,
+    merchantShopId: type === 'npc' && typeof t.merchantShopId === 'string' &&
+      /^[a-z0-9:._-]{1,180}$/i.test(t.merchantShopId)
+      ? t.merchantShopId
+      : undefined,
     dnd5eSide: t.dnd5eSide === 'player' || t.dnd5eSide === 'enemy'
       ? t.dnd5eSide
       : undefined,
@@ -1327,7 +1744,9 @@ function normalizeToken(raw: unknown): Token {
     dnd5eTargetingPreference: normalizeDnd5eMonsterTargetingPreference(t.dnd5eTargetingPreference),
     dnd5eBehaviorPreference: normalizeDnd5eMonsterBehaviorPreference(t.dnd5eBehaviorPreference),
     dnd5eSummon,
+    dnd5eSimulacrum,
     dnd5eSpellEffect,
+    dnd5eObjectState,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
@@ -1348,6 +1767,7 @@ function normalizeToken(raw: unknown): Token {
           brightRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.brightRadiusFeet)),
           dimRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.dimRadiusFeet)),
           color: /^#[0-9a-f]{6}$/i.test(t.lightSource.color) ? t.lightSource.color : '#fbbf24',
+          ...(t.lightSource.sunlight === true ? { sunlight: true as const } : {}),
           sourceKind: ['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(t.lightSource.sourceKind))
             ? t.lightSource.sourceKind as CampaignLightSourceKind
             : undefined,
@@ -1367,6 +1787,10 @@ function normalizeToken(raw: unknown): Token {
       : undefined,
     perceptionVisibility: t.perceptionVisibility === 'detected-unseen' ? t.perceptionVisibility : undefined,
     movementAnimation: normalizeTokenMovementAnimation(t.movementAnimation),
+    dnd5eWorldTimeAppliedMinute:
+      Number.isSafeInteger(t.dnd5eWorldTimeAppliedMinute) && Number(t.dnd5eWorldTimeAppliedMinute) >= 0
+        ? Number(t.dnd5eWorldTimeAppliedMinute)
+        : undefined,
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {
           ...nativeCombatState,
@@ -1433,7 +1857,11 @@ function normalizeMap(raw: unknown): BattleMap {
           typeof area.featureId !== 'string' || !area.featureId || cells.length < 1 ||
           !Number.isInteger(area.createdRound) || !Number.isInteger(area.expiresAfterRound) ||
           area.createdRound! < 0 || area.expiresAfterRound! < area.createdRound! ||
-          area.expiresAfterRound! - area.createdRound! + 1 > 14_400
+          area.expiresAfterRound! - area.createdRound! + 1 > (
+            area.sourceKind === 'core-spell' || (typeof area.coreSpellId === 'string' && area.coreSpellId.length > 0)
+              ? DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS
+              : 14_400
+          )
         ) return []
         const triggers = Array.isArray(area.triggers)
           ? area.triggers.flatMap((trigger) => {
@@ -1457,6 +1885,12 @@ function normalizeMap(raw: unknown): BattleMap {
                     round: receipt.round,
                     turnKey: receipt.turnKey,
                     transactionId: receipt.transactionId,
+                    damage: Number.isInteger(receipt.damage) && receipt.damage! >= 0 && receipt.damage! <= 1_000_000
+                      ? receipt.damage
+                      : undefined,
+                    savingThrowSucceeded: typeof receipt.savingThrowSucceeded === 'boolean'
+                      ? receipt.savingThrowSucceeded
+                      : undefined,
                   }]
                 : [],
             ).slice(-2_048)
@@ -1468,36 +1902,112 @@ function normalizeMap(raw: unknown): BattleMap {
           ? area.coreSpellId
           : undefined
         if (sourceKind === 'core-spell' && !coreSpellId) return []
+        const createdWorldMinute = Number.isSafeInteger(area.createdWorldMinute) && Number(area.createdWorldMinute) >= 0
+          ? Number(area.createdWorldMinute)
+          : undefined
+        const expiresAtWorldMinute = Number.isSafeInteger(area.expiresAtWorldMinute) &&
+          createdWorldMinute != null && Number(area.expiresAtWorldMinute) > createdWorldMinute
+          ? Number(area.expiresAtWorldMinute)
+          : undefined
+        if (
+          (area.createdWorldMinute != null && createdWorldMinute == null) ||
+          (area.expiresAtWorldMinute != null && expiresAtWorldMinute == null)
+        ) return []
         const castingClassId = sourceKind === 'core-spell' && [
           'barbarian', 'bard', 'cleric', 'druid', 'fighter', 'monk',
           'paladin', 'ranger', 'rogue', 'sorcerer', 'warlock', 'wizard',
         ].includes(String(area.castingClassId))
           ? area.castingClassId as Dnd5eClassId
           : undefined
+        const magicMouth = area.magicMouth
+          ? normalizeDnd5eMagicMouthStateV1(area.magicMouth)
+          : undefined
+        if (area.magicMouth != null && !magicMouth) return []
+        const minorIllusion = (() => {
+          const candidate = area.minorIllusion
+          if (!candidate || (candidate.mode !== 'image' && candidate.mode !== 'sound')) return undefined
+          const description = candidate.description?.trim()
+          if (!description || description.length > 500) return undefined
+          if (candidate.mode === 'image') {
+            if (candidate.soundVolume != null || candidate.soundPattern != null) return undefined
+            return { mode: 'image' as const, description }
+          }
+          if (
+            !['whisper', 'normal', 'scream'].includes(String(candidate.soundVolume)) ||
+            !['continuous', 'intermittent', 'discrete'].includes(String(candidate.soundPattern))
+          ) return undefined
+          return {
+            mode: 'sound' as const,
+            description,
+            soundVolume: candidate.soundVolume!,
+            soundPattern: candidate.soundPattern!,
+          }
+        })()
+        if (area.minorIllusion != null && !minorIllusion) return []
         const anchorMode: Dnd5ePersistentAreaAnchorMode =
-          area.anchorMode === 'source-token' || area.anchorMode === 'effect-token'
+          area.anchorMode === 'source-token' || area.anchorMode === 'target-token' || area.anchorMode === 'effect-token'
             ? area.anchorMode
             : 'fixed'
         const anchorCell = area.anchorCell && Number.isInteger(area.anchorCell.col) && Number.isInteger(area.anchorCell.row)
           ? { col: area.anchorCell.col, row: area.anchorCell.row }
           : { ...cells[0] }
         const movement = area.movement &&
-          (area.movement.economy === 'action' || area.movement.economy === 'bonus-action') &&
+          (area.movement.economy === 'action' || area.movement.economy === 'bonus-action' || area.movement.economy === 'none') &&
           Number.isFinite(area.movement.maximumFeet) && area.movement.maximumFeet > 0 && area.movement.maximumFeet <= 1_000
           ? {
               economy: area.movement.economy,
               maximumFeet: Math.floor(area.movement.maximumFeet),
+              ...(Number.isFinite(area.movement.maximumBarrierHeightFeet) &&
+                Number(area.movement.maximumBarrierHeightFeet) > 0 &&
+                Number(area.movement.maximumBarrierHeightFeet) <= 1_000
+                ? { maximumBarrierHeightFeet: Number(area.movement.maximumBarrierHeightFeet) }
+                : {}),
+              ...(Number.isFinite(area.movement.maximumGapWidthFeet) &&
+                Number(area.movement.maximumGapWidthFeet) > 0 &&
+                Number(area.movement.maximumGapWidthFeet) <= 1_000
+                ? { maximumGapWidthFeet: Number(area.movement.maximumGapWidthFeet) }
+                : {}),
               ...(Number.isFinite(area.movement.maximumDistanceFromSourceFeet) &&
                 Number(area.movement.maximumDistanceFromSourceFeet) > 0 &&
                 Number(area.movement.maximumDistanceFromSourceFeet) <= 10_000
                 ? { maximumDistanceFromSourceFeet: Math.floor(Number(area.movement.maximumDistanceFromSourceFeet)) }
                 : {}),
+              ...(area.movement.endWhenExceedingSourceDistance === true
+                ? { endWhenExceedingSourceDistance: true as const }
+                : {}),
             }
           : undefined
         const lighting = area.lighting ? normalizeDnd5ePersistentAreaLighting(area.lighting) : undefined
         if (area.lighting != null && !lighting) return []
+        const hallow = area.hallow ? normalizeDnd5eHallowAreaState(area.hallow) : undefined
+        if (area.hallow != null && !hallow) return []
+        const hallucinatoryTerrain = area.hallucinatoryTerrain
+          ? normalizeDnd5eHallucinatoryTerrainAreaState(area.hallucinatoryTerrain)
+          : undefined
+        if (area.hallucinatoryTerrain != null && !hallucinatoryTerrain) return []
+        const programmedIllusion = area.programmedIllusion
+          ? normalizeDnd5eProgrammedIllusionAreaState(area.programmedIllusion)
+          : undefined
+        if (area.programmedIllusion != null && !programmedIllusion) return []
         const occupantModifiers = area.occupantModifiers
           ? normalizeDnd5ePersistentAreaOccupantModifiers(area.occupantModifiers)
+          : undefined
+        const sourceFollower = area.sourceFollower &&
+          Number.isFinite(area.sourceFollower.stationaryWithinFeet) &&
+          Number(area.sourceFollower.stationaryWithinFeet) > 0 &&
+          Number.isFinite(area.sourceFollower.maximumSeparationFeet) &&
+          Number(area.sourceFollower.maximumSeparationFeet) > Number(area.sourceFollower.stationaryWithinFeet) &&
+          Number(area.sourceFollower.maximumSeparationFeet) <= 100_000
+          ? {
+              stationaryWithinFeet: Number(area.sourceFollower.stationaryWithinFeet),
+              maximumSeparationFeet: Number(area.sourceFollower.maximumSeparationFeet),
+              ...(Number.isFinite(area.sourceFollower.maximumStepHeightFeet) && Number(area.sourceFollower.maximumStepHeightFeet) > 0
+                ? { maximumStepHeightFeet: Number(area.sourceFollower.maximumStepHeightFeet) }
+                : {}),
+              ...(Number.isFinite(area.sourceFollower.carryingCapacityPounds) && Number(area.sourceFollower.carryingCapacityPounds) > 0
+                ? { carryingCapacityPounds: Number(area.sourceFollower.carryingCapacityPounds) }
+                : {}),
+            }
           : undefined
         const lifecycle = area.lifecycle
           ? normalizeDnd5ePersistentAreaTurnLifecycle(area.lifecycle)
@@ -1508,16 +2018,75 @@ function normalizeMap(raw: unknown): BattleMap {
           ? normalizeDnd5ePersistentAreaBlocking(area.blocking)
           : undefined
         if (area.blocking != null && !blocking) return []
+        const interposition = area.interposition &&
+          typeof area.interposition.targetTokenId === 'string' &&
+          area.interposition.targetTokenId.length > 0 &&
+          area.interposition.targetTokenId.length <= 160 &&
+          (area.interposition.mode === 'blocked' || area.interposition.mode === 'difficult-terrain')
+          ? {
+              targetTokenId: area.interposition.targetTokenId,
+              mode: area.interposition.mode,
+            }
+          : undefined
+        if (area.interposition != null && !interposition) return []
         const weaponHitBonusDamage = area.weaponHitBonusDamage
           ? normalizeDnd5ePersistentAreaWeaponHitBonusDamage(area.weaponHitBonusDamage)
           : undefined
         if (area.weaponHitBonusDamage != null && !weaponHitBonusDamage) return []
+        const entityProfile = area.entityProfile &&
+          Number.isInteger(area.entityProfile.armorClass) && Number(area.entityProfile.armorClass) >= 1 && Number(area.entityProfile.armorClass) <= 40 &&
+          Number.isInteger(area.entityProfile.hitPoints) && Number(area.entityProfile.hitPoints) >= 1 && Number(area.entityProfile.hitPoints) <= 1_000_000 &&
+          Number.isInteger(area.entityProfile.strength) && Number(area.entityProfile.strength) >= 1 && Number(area.entityProfile.strength) <= 30 &&
+          typeof area.entityProfile.cannotAttack === 'boolean' && typeof area.entityProfile.invisible === 'boolean'
+          ? { ...area.entityProfile }
+          : undefined
+        if (area.entityProfile != null && !entityProfile) return []
+        const entityCurrentHitPoints = entityProfile
+          ? area.entityCurrentHitPoints == null
+            ? entityProfile.hitPoints
+            : Number.isInteger(area.entityCurrentHitPoints) &&
+                Number(area.entityCurrentHitPoints) >= 1 &&
+                Number(area.entityCurrentHitPoints) <= entityProfile.hitPoints
+              ? Number(area.entityCurrentHitPoints)
+              : undefined
+          : undefined
+        if (entityProfile && entityCurrentHitPoints == null) return []
+        if (!entityProfile && area.entityCurrentHitPoints != null) return []
         const grantedActivities = Array.isArray(area.grantedActivities)
           ? area.grantedActivities.flatMap((grant) => {
               const normalized = normalizeDnd5ePersistentAreaGrantedActivity(grant)
               return normalized ? [normalized] : []
             }).slice(0, 8)
           : []
+        const areaCellKeys = new Set(cells.map((cell) => `${cell.col}:${cell.row}`))
+        const webState = area.sourceKind === 'core-spell' && area.coreSpellId === 'web' && area.webState
+          ? {
+              unsupportedCollapseAtRound:
+                Number.isInteger(area.webState.unsupportedCollapseAtRound) &&
+                Number(area.webState.unsupportedCollapseAtRound) >= area.createdRound! &&
+                Number(area.webState.unsupportedCollapseAtRound) <= area.expiresAfterRound!
+                  ? Number(area.webState.unsupportedCollapseAtRound)
+                  : undefined,
+              burningCells: Array.isArray(area.webState.burningCells)
+                ? area.webState.burningCells.slice(0, 256).flatMap((cell) =>
+                    Number.isInteger(cell?.col) && Number.isInteger(cell?.row) &&
+                    areaCellKeys.has(`${cell.col}:${cell.row}`) &&
+                    Number.isInteger(cell?.ignitedRound) && Number(cell.ignitedRound) >= area.createdRound! &&
+                    Number.isInteger(cell?.expiresAtRound) && Number(cell.expiresAtRound) >= Number(cell.ignitedRound) &&
+                    Number(cell.expiresAtRound) <= area.expiresAfterRound! &&
+                    typeof cell?.expiresAtTurnTokenId === 'string' && !!cell.expiresAtTurnTokenId
+                      ? [{
+                          col: Number(cell.col),
+                          row: Number(cell.row),
+                          ignitedRound: Number(cell.ignitedRound),
+                          expiresAtRound: Number(cell.expiresAtRound),
+                          expiresAtTurnTokenId: cell.expiresAtTurnTokenId,
+                        }]
+                      : [],
+                  )
+                : undefined,
+            }
+          : undefined
         if (
           area.grantedActivities != null &&
           (!Array.isArray(area.grantedActivities) || grantedActivities.length !== area.grantedActivities.length)
@@ -1566,6 +2135,10 @@ function normalizeMap(raw: unknown): BattleMap {
           slotLevel: Number.isInteger(area.slotLevel) && Number(area.slotLevel) >= 0 && Number(area.slotLevel) <= 9
             ? Number(area.slotLevel)
             : undefined,
+          sourceSpellSaveDc: Number.isInteger(area.sourceSpellSaveDc) &&
+            Number(area.sourceSpellSaveDc) >= 1 && Number(area.sourceSpellSaveDc) <= 40
+              ? Number(area.sourceSpellSaveDc)
+              : undefined,
           label: typeof area.label === 'string' && area.label && area.label.length <= 120 ? area.label : '扩展规则区域',
           color: typeof area.color === 'string' && /^#[0-9a-f]{6}$/i.test(area.color) ? area.color : '#8b5cf6',
           sourceCharacterId: typeof area.sourceCharacterId === 'string' ? area.sourceCharacterId : '',
@@ -1573,12 +2146,23 @@ function normalizeMap(raw: unknown): BattleMap {
           cells,
           createdRound: area.createdRound!,
           expiresAfterRound: area.expiresAfterRound!,
+          createdWorldMinute,
+          expiresAtWorldMinute,
+          permanent: area.permanent === true ? true : undefined,
+          magicMouth,
+          minorIllusion,
           expiresAtSourceTurnEndAfterRound:
             Number.isInteger(area.expiresAtSourceTurnEndAfterRound) &&
             Number(area.expiresAtSourceTurnEndAfterRound) >= area.createdRound! &&
             Number(area.expiresAtSourceTurnEndAfterRound) <= area.expiresAfterRound!
               ? Number(area.expiresAtSourceTurnEndAfterRound)
               : undefined,
+          webState: webState && (
+            webState.unsupportedCollapseAtRound != null || (webState.burningCells?.length ?? 0) > 0
+          ) ? {
+              unsupportedCollapseAtRound: webState.unsupportedCollapseAtRound,
+              burningCells: webState.burningCells?.length ? webState.burningCells : undefined,
+            } : undefined,
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
           anchorMode,
           anchorTokenId: typeof area.anchorTokenId === 'string' && area.anchorTokenId
@@ -1587,6 +2171,7 @@ function normalizeMap(raw: unknown): BattleMap {
           anchorCell,
           vertical,
           movement,
+          sourceFollower,
           lifecycle,
           lifecycleAdvances: Number.isInteger(area.lifecycleAdvances) && Number(area.lifecycleAdvances) >= 0 && Number(area.lifecycleAdvances) <= 14_400
             ? Number(area.lifecycleAdvances)
@@ -1605,6 +2190,12 @@ function normalizeMap(raw: unknown): BattleMap {
             : undefined,
           hiddenFromPlayers: area.hiddenFromPlayers === true,
           lighting,
+          hallow,
+          hallucinatoryTerrain,
+          programmedIllusion,
+          illuminationOverride: area.illuminationOverride === 'dim' || area.illuminationOverride === 'darkness'
+            ? area.illuminationOverride
+            : undefined,
           obscuration: area.obscuration &&
             (area.obscuration.kind === 'light' || area.obscuration.kind === 'heavy') &&
             (area.obscuration.sourceCanSeeThrough == null ||
@@ -1616,6 +2207,9 @@ function normalizeMap(raw: unknown): BattleMap {
             : undefined,
           occupantModifiers,
           blocking,
+          interposition,
+          entityProfile,
+          entityCurrentHitPoints,
           weaponHitBonusDamage,
           grantedActivities: grantedActivities.length > 0 ? grantedActivities : undefined,
           grantedActivityUseReceipts: Array.isArray(area.grantedActivityUseReceipts)
@@ -1628,10 +2222,15 @@ function normalizeMap(raw: unknown): BattleMap {
               ? [{ col: Number(cell.col), row: Number(cell.row) }]
               : [])
             : undefined,
+          dancingLightsForm: coreSpellId === 'dancing-lights' && area.dancingLightsForm === 'humanoid'
+            ? 'humanoid'
+            : coreSpellId === 'dancing-lights' ? 'lights' : undefined,
           visual: visual ? { ...visual } : undefined,
           wallOfFireGeometry,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
+          sourceExitBehavior: area.sourceExitBehavior === 'remove-area' ? 'remove-area' : undefined,
+          sourceOverlapBehavior: area.sourceOverlapBehavior === 'remove-area' ? 'remove-area' : undefined,
         } satisfies Dnd5ePluginArea]
       })
     : []
@@ -1647,6 +2246,7 @@ function normalizeMap(raw: unknown): BattleMap {
     showGrid: typeof m.showGrid === 'boolean' ? m.showGrid : true,
     dnd5eItemAreas,
     dnd5ePluginAreas,
+    viewportNotes: normalizeMapViewportNotes(m.viewportNotes),
     tokens,
   }
 }
@@ -1722,8 +2322,44 @@ export function projectCharacterTokenPresentations(
   characters: readonly CharacterTokenPresentation[],
 ): Token[] {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
+  const tokensById = new Map(tokens.map((token) => [token.id, token]))
   let changed = false
   const projected = tokens.map((token) => {
+    if (
+      token.dnd5eSpellEffect?.spellId === 'mirror-image' &&
+      token.dnd5eSpellEffect.projectionKind === 'attack-decoy'
+    ) {
+      const sourceToken = tokensById.get(token.dnd5eSpellEffect.sourceTokenId)
+      const sourceCharacter = sourceToken?.characterId
+        ? charactersById.get(sourceToken.characterId)
+        : undefined
+      const sourcePresentation = sourceToken?.poolId
+        ? getEnemyVisualPresentation(sourceToken.poolId, sourceToken.visualVariantId)
+        : undefined
+      const emoji = sourceCharacter?.avatar || sourceToken?.emoji || token.emoji
+      const portrait = sourceCharacter?.portrait ?? sourceToken?.portrait ??
+        ((sourceToken?.portraitImageId ?? sourceToken?.tokenPortraitImageId)
+          ? undefined
+          : sourcePresentation?.initiativePortrait)
+      const tokenPortrait = sourceCharacter?.tokenPortrait ?? sourceToken?.tokenPortrait ??
+        ((sourceToken?.tokenPortraitImageId ?? sourceToken?.portraitImageId)
+          ? undefined
+          : sourcePresentation?.tokenPortrait)
+      const visionToken = projectTokenEffectiveVision(token)
+      if (
+        emoji === token.emoji &&
+        portrait === token.portrait &&
+        tokenPortrait === token.tokenPortrait &&
+        visionToken === token
+      ) return token
+      changed = true
+      return {
+        ...visionToken,
+        emoji,
+        portrait,
+        tokenPortrait,
+      }
+    }
     if (!token.characterId) {
       const visionToken = projectTokenEffectiveVision(token)
       const presentation = token.poolId
@@ -1736,7 +2372,9 @@ export function projectCharacterTokenPresentations(
 
       // Room image ids override inline/catalog artwork without distributing the
       // DM-only custom-monster source record to player clients.
-      const portrait = token.portraitImageId ? undefined : presentation.initiativePortrait
+      const portrait = (token.portraitImageId ?? token.tokenPortraitImageId)
+        ? undefined
+        : presentation.initiativePortrait
       const tokenPortrait = (token.tokenPortraitImageId ?? token.portraitImageId)
         ? undefined
         : presentation.tokenPortrait
@@ -1789,7 +2427,7 @@ const TOKEN_PRESETS = {
 interface MapState {
   maps: BattleMap[]
   selectedId: string | null
-  loadShared: () => Promise<void>
+  loadShared: (options?: { force?: boolean }) => Promise<void>
   saveSharedNow: () => Promise<void>
   saveAuthorityTokenPatch: (
     mapId: string,
@@ -1841,7 +2479,7 @@ export const useMapStore = create<MapState>()(
     (set, get) => ({
       maps: [],
       selectedId: null,
-      loadShared: async () => {
+      loadShared: async (options) => {
         const shared = await loadSharedResource<SharedMapsState>('maps')
         if (!shared?.maps) {
           if (canWriteSharedState()) publishMapsState(get())
@@ -1871,7 +2509,7 @@ export const useMapStore = create<MapState>()(
         if (Number.isInteger(incomingRevision)) {
           lastAppliedMapsRevisionByRoom.set(roomKey, Number(incomingRevision))
           lastSharedMapsUpdatedAt = Math.max(lastSharedMapsUpdatedAt, shared.updatedAt ?? 0)
-          if (snapshot === lastSharedMapsSnapshot) return
+          if (snapshot === lastSharedMapsSnapshot && !options?.force) return
           lastSharedMapsSnapshot = snapshot
         } else {
           const prevGuard: MonotonicState = {
@@ -1879,7 +2517,7 @@ export const useMapStore = create<MapState>()(
             lastSnapshot: lastSharedMapsSnapshot,
           }
           const decision = decideApply(prevGuard, shared.updatedAt ?? 0, snapshot)
-          if (!decision.apply) return
+          if (!decision.apply && !options?.force) return
           lastSharedMapsUpdatedAt = decision.next.lastUpdatedAt
           lastSharedMapsSnapshot = decision.next.lastSnapshot
         }
@@ -1967,6 +2605,7 @@ export const useMapStore = create<MapState>()(
           snapMonstersToGrid: true,
           dnd5eItemAreas: [],
           dnd5ePluginAreas: [],
+          viewportNotes: [],
           tokens: [],
         }
         set((s) => ({ maps: [...s.maps, map], selectedId: id }))
@@ -1999,6 +2638,9 @@ export const useMapStore = create<MapState>()(
           token.portraitImageId,
           token.tokenPortraitImageId,
         ].filter((imageId): imageId is string => !!imageId)) ?? [])
+        for (const imageId of removedMap?.viewportNotes?.flatMap((note) => note.imageId ? [note.imageId] : []) ?? []) {
+          removedImageIds.add(imageId)
+        }
         for (const imageId of removedImageIds) {
           void deleteImage(imageId)
         }
@@ -2013,13 +2655,19 @@ export const useMapStore = create<MapState>()(
         const map = get().maps.find((m) => m.id === mapId)
         if (!map) return
         const preset = TOKEN_PRESETS[type]
-        const defaultHp = type === 'enemy' ? 20 : type === 'npc' ? 12 : undefined
+        const defaultHp = type === 'enemy' ? 20 : type === 'npc' ? 12 : type === 'obstacle' ? 10 : undefined
         const tokenSize = defaultTokenSizeForMap(map)
         const creatureSize = type === 'enemy' || type === 'npc' ? '中型' : undefined
-        const spawn = snapTokenToGridCenter(map.width / 2, map.height / 2, { size: tokenSize, creatureSize }, map)
+        const spawnX = type === 'obstacle'
+          ? Math.min(map.width - map.gridSize, map.width / 2 + map.gridSize * 4)
+          : map.width / 2
+        const spawnY = type === 'obstacle'
+          ? Math.min(map.height - map.gridSize, map.height / 2 + map.gridSize * 2)
+          : map.height / 2
+        const spawn = snapTokenToGridCenter(spawnX, spawnY, { size: tokenSize, creatureSize }, map)
         const token: Token = {
           id: uid(),
-          label: type === 'player' ? '玩家' : type === 'enemy' ? '敌人' : 'NPC',
+          label: type === 'player' ? '玩家' : type === 'enemy' ? '敌人' : type === 'obstacle' ? '地图物件' : 'NPC',
           x: spawn.x,
           y: spawn.y,
           color: preset.color,
@@ -2030,6 +2678,9 @@ export const useMapStore = create<MapState>()(
           creatureSize,
           hp: defaultHp,
           maxHp: defaultHp,
+          dnd5eObjectState: type === 'obstacle'
+            ? { schemaVersion: 1, magical: false, wornOrCarried: false }
+            : undefined,
         }
         set((s) => ({
           maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
@@ -2116,6 +2767,12 @@ export const useMapStore = create<MapState>()(
       ) => {
         const map = get().maps.find((m) => m.id === mapId)
         if (!map) return
+        // A character sheet is a single authoritative combatant on a map.
+        // Allowing the same characterId to be placed twice makes both tokens
+        // project back into the same character record; whichever combatant is
+        // applied last can then erase slots, concentration, or active effects
+        // produced by the other token.
+        if (map.tokens.some((token) => token.characterId === characterId)) return
         const preset = TOKEN_PRESETS[type]
         const tokenSize = defaultTokenSizeForMap(map)
         const spawn = snapTokenToGridCenter(map.width / 2, map.height / 2, { size: tokenSize }, map)

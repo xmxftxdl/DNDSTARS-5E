@@ -18,7 +18,7 @@ import {
   type CreatureSize,
   type CreatureType,
 } from '../../lib/monsterTypes'
-import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus, Wrench } from 'lucide-react'
+import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus, Plus, Wrench, ArrowUp } from 'lucide-react'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import Dnd5eTokenStatusMarkerEditor from './Dnd5eTokenStatusMarkerEditor'
 import {
@@ -26,23 +26,33 @@ import {
   dnd5eTokenStatusMarkerOptionsForTarget,
   type Dnd5eMonsterRuntimeStatusId,
 } from '../../rulesets/dnd5e/tokenStatusMarkers'
-import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
+import {
+  dnd5eActiveMaximumAttacksPerTurn,
+  type Dnd5eActiveEffectInstance,
+} from '../../rulesets/dnd5e/activeEffects'
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { generatedImageDataUrlToFile } from '../../lib/generatedImage'
 import { deleteImage, getImage, putImage } from '../../lib/imageStore'
 import AiImageGenerationButton from '../AiImageGenerationButton'
 import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import {
+  dnd5eMonsterMapSpeed,
   getDnd5eSrdMonster,
   type Dnd5eMonsterBehaviorStyle,
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterTargetPriority,
 } from '../../rulesets/dnd5e/monsters'
+import { dnd5eMonsterTokenEffectiveSpeed } from '../../application/combat/monsterMovementProjection'
 import {
   DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS,
   DND5E_MONSTER_TARGET_PRIORITY_OPTIONS,
 } from '../../rulesets/dnd5e/monsterAutomation'
 import { parseLiveHitPointDraft, resolveHitPointDisplay } from './characterHitPoints'
+import type { ManualSettlementOperation } from '../../lib/combatSettlementMode'
+import type { D20RollMode } from '../../rulesets/contracts'
+import DmHitPointAdjustmentControls from './DmHitPointAdjustmentControls'
+import { ManualAttackRollModeControl } from './DmMonsterControlDock'
+import { resolveCompactPortraitImageId } from '../../lib/portraitPresentation'
 import {
   dnd5eManualMonsterMultiattackContinuation,
   type Dnd5eManualMonsterMultiattackContinuation,
@@ -52,11 +62,14 @@ import Dnd5eMonsterWorkshopDialog, {
 } from './Dnd5eMonsterWorkshopDialog'
 import {
   createDnd5eMonsterInstanceOverride,
+  dnd5eMonsterOverrideSaveMatchesEditRequest,
   dnd5eMonsterOverrideTokenPatch,
   dnd5eMonsterOverrideTargets,
   isDnd5eMonsterInstanceOverride,
   type Dnd5eMonsterOverrideScope,
 } from '../../rulesets/dnd5e/monsterInstanceOverride'
+import { dnd5eTruePolymorphObjectFormFromEffects } from '../../rulesets/dnd5e/truePolymorphObjectForms'
+import type { PlayerMapGrantedActivityControl } from './playerMapPersistentAreas'
 
 function SharedMonsterPortrait({
   imageId,
@@ -111,6 +124,7 @@ export default function EnemyDetailPanel({
   encounterParticipantTokenIds,
   updateToken,
   onSetHitPoints,
+  onAdjustHitPoints,
   removeToken,
   canManageConditions = false,
   onConditionsChange,
@@ -122,6 +136,10 @@ export default function EnemyDetailPanel({
   monsterActionPending = false,
   onSelectMonsterAction,
   onSelectMonsterContinuation,
+  grantedActivityControls = [],
+  canUseGrantedActivities = false,
+  grantedActivityPendingId,
+  onUseGrantedActivity,
 }: {
   token: Token
   onClose: () => void
@@ -136,8 +154,10 @@ export default function EnemyDetailPanel({
   onSetHitPoints?: (input: {
     currentHp: number
     maxHp: number
+    temporaryHp?: number
     manuallySetMaximum: boolean
   }) => void | Promise<unknown>
+  onAdjustHitPoints?: (operation: ManualSettlementOperation, amount: number) => void | Promise<unknown>
   removeToken?: (mapId: string, tokenId: string) => void
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
@@ -148,14 +168,24 @@ export default function EnemyDetailPanel({
   canUseMonsterActions?: boolean
   monsterActionUsed?: boolean
   monsterActionPending?: boolean
-  onSelectMonsterAction?: (actionIndex: number, actionName: string) => void
+  onSelectMonsterAction?: (
+    actionIndex: number,
+    actionName: string,
+    rollMode?: D20RollMode,
+  ) => void
   onSelectMonsterContinuation?: (
     continuation: Dnd5eManualMonsterMultiattackContinuation,
+    rollMode?: D20RollMode,
   ) => void
+  grantedActivityControls?: readonly PlayerMapGrantedActivityControl[]
+  canUseGrantedActivities?: boolean
+  grantedActivityPendingId?: string
+  onUseGrantedActivity?: (control: PlayerMapGrantedActivityControl) => void
 }) {
   const portraitInputRef = useRef<HTMLInputElement>(null)
   const [portraitBusy, setPortraitBusy] = useState(false)
   const [portraitError, setPortraitError] = useState('')
+  const [customCreatureTypeDraft, setCustomCreatureTypeDraft] = useState('')
   const [overrideScope, setOverrideScope] = useState<Dnd5eMonsterOverrideScope>('instance')
   const [overrideMessage, setOverrideMessage] = useState('')
   const [overrideEditor, setOverrideEditor] = useState<{
@@ -163,8 +193,42 @@ export default function EnemyDetailPanel({
     scope: Dnd5eMonsterOverrideScope
     editRequest: Dnd5eMonsterWorkshopEditRequest
   }>()
-  const { template, stats } = resolveEnemyDetail(token)
-  const multiattackContinuation = canUseMonsterActions
+  const { template, stats: originalStats } = resolveEnemyDetail(token)
+  const creatureFormState = token.dnd5eCombatState
+  const activeCreatureForm = creatureFormState?.wildShapeFormId
+    ? getDnd5eSrdMonster(creatureFormState.wildShapeFormId)
+    : undefined
+  const activeObjectForm = dnd5eTruePolymorphObjectFormFromEffects(
+    creatureFormState?.activeEffects,
+  )
+  const stats = activeCreatureForm
+    ? getEnemyStatBlock(activeCreatureForm.id) ?? originalStats
+    : originalStats
+  const activeCreatureFormLabel = creatureFormState?.wildShapeMode === 'true-polymorph'
+    ? '完全变形术'
+    : creatureFormState?.wildShapeMode === 'polymorph'
+      ? '变形术'
+      : creatureFormState?.wildShapeMode === 'animal-shapes'
+        ? '动物形态'
+        : creatureFormState?.wildShapeMode === 'shapechange' ? '形体变化' : '荒野形态'
+  const structuredMonster = activeCreatureForm ?? (token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined)
+  const originalCreatureFormMonster = creatureFormState?.wildShapeOriginalStatBlockId
+    ? getDnd5eSrdMonster(creatureFormState.wildShapeOriginalStatBlockId)
+    : undefined
+  const retainsOriginalAlignmentAndPersonality = !activeObjectForm && (creatureFormState?.wildShapeMode === 'true-polymorph' ||
+    creatureFormState?.wildShapeMode === 'polymorph' ||
+    creatureFormState?.wildShapeMode === 'animal-shapes')
+  const displayedAlignment = retainsOriginalAlignmentAndPersonality
+    ? originalCreatureFormMonster?.alignment ?? stats?.alignment
+    : stats?.alignment
+  const effectiveSpeed = structuredMonster
+    ? `${dnd5eMonsterTokenEffectiveSpeed(token, dnd5eMonsterMapSpeed(structuredMonster))} 尺`
+    : stats?.speed
+  const maximumAttacksPerTurn = dnd5eActiveMaximumAttacksPerTurn(
+    token.dnd5eCombatState?.activeEffects,
+  )
+  const multiattackUnavailable = maximumAttacksPerTurn != null && maximumAttacksPerTurn < 2
+  const multiattackContinuation = canUseMonsterActions && !multiattackUnavailable
     ? dnd5eManualMonsterMultiattackContinuation(token)
     : undefined
   const derived = token.poolId ? getEnemyDerivedCombatStats(token.poolId) : undefined
@@ -175,22 +239,44 @@ export default function EnemyDetailPanel({
   const name = token.label || template?.name || '敌人'
   const emoji = token.emoji || template?.emoji || '👹'
   const tokenThumbnail = token.tokenPortrait || template?.tokenPortrait
+  const compactPortraitImageId = resolveCompactPortraitImageId(token)
   const color = token.color || template?.color || '#f87171'
   const templateTags = template?.tags ?? token.playerVisibleEnemyDetail?.tags ?? []
-  const creatureTypes = token.creatureTypes?.length
+  const creatureTypes = activeCreatureForm
+    ? [activeCreatureForm.creatureType as CreatureType]
+    : token.creatureTypes?.length
     ? token.creatureTypes
     : template?.creatureTypes ?? inferCreatureTypesFromTags(templateTags)
-  const creatureSize = token.creatureSize ?? template?.creatureSize ?? inferCreatureSizeFromTags(templateTags)
+  const customCreatureTypes = creatureTypes.filter((type) =>
+    !(CREATURE_TYPES as readonly string[]).includes(type))
+  const creatureSize = activeCreatureForm?.size ??
+    token.creatureSize ?? template?.creatureSize ?? inferCreatureSizeFromTags(templateTags)
   const tags = [
     ...creatureTypes,
     creatureSize,
-    ...templateTags.filter((tag) => !creatureTypes.includes(tag as CreatureType) && tag !== creatureSize),
+    ...(activeObjectForm ? [] : templateTags.filter((tag) => !creatureTypes.includes(tag as CreatureType) && tag !== creatureSize)),
   ]
   const description = template?.description ?? token.playerVisibleEnemyDetail?.description
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
   const monsterCombatState = linked?.dnd5eCombatState ?? token.dnd5eCombatState
+  const legendaryActionMaximum = stats?.legendaryActions?.length
+    ? Math.max(0, stats.legendaryActionPoints ?? 3)
+    : 0
+  const legendaryActionCurrent = legendaryActionMaximum > 0
+    ? Math.max(
+        0,
+        Math.min(
+          legendaryActionMaximum,
+          token.dnd5eCombatState?.monsterLegendaryActionPoints ?? legendaryActionMaximum,
+        ),
+      )
+    : 0
   const authoritativeCurrentHp = linked?.currentHp ?? curHp
   const authoritativeMaxHp = linked?.maxHp ?? maxHp
+  const authoritativeTemporaryHp = Math.max(
+    0,
+    linked?.tempHp ?? token.dnd5eCombatState?.temporaryHp ?? 0,
+  )
   const [currentHpDraft, setCurrentHpDraft] = useState(String(authoritativeCurrentHp))
   const [maxHpDraft, setMaxHpDraft] = useState(String(authoritativeMaxHp))
   const [editingCurrentHp, setEditingCurrentHp] = useState(false)
@@ -210,7 +296,12 @@ export default function EnemyDetailPanel({
     pending: pendingHitPoints,
   })
 
-  const setHitPoints = (currentHp: number, maximumHp: number, manuallySetMaximum: boolean) => {
+  const setHitPoints = (
+    currentHp: number,
+    maximumHp: number,
+    manuallySetMaximum: boolean,
+    temporaryHp = authoritativeTemporaryHp,
+  ) => {
     if (!onSetHitPoints) return
     const nextMaxHp = Math.max(1, Math.floor(maximumHp))
     const nextCurrentHp = Math.max(0, Math.min(nextMaxHp, Math.floor(currentHp)))
@@ -219,6 +310,7 @@ export default function EnemyDetailPanel({
     const result = onSetHitPoints({
       currentHp: nextCurrentHp,
       maxHp: nextMaxHp,
+      temporaryHp,
       manuallySetMaximum,
     })
     if (!result || typeof (result as PromiseLike<unknown>).then !== 'function') {
@@ -231,6 +323,21 @@ export default function EnemyDetailPanel({
     void Promise.resolve(result).then(clearPendingRequest, clearPendingRequest)
   }
   const canEdit = isDM && !!mapId && !!updateToken
+  const addCustomCreatureType = () => {
+    if (!canEdit) return
+    const nextType = Array.from(customCreatureTypeDraft.trim())
+      .filter((character) => {
+        const codePoint = character.codePointAt(0) ?? 0
+        return codePoint >= 32 && codePoint !== 127
+      })
+      .join('')
+      .slice(0, 40)
+    if (!nextType) return
+    if (!creatureTypes.some((type) => type.toLocaleLowerCase('zh-CN') === nextType.toLocaleLowerCase('zh-CN'))) {
+      updateToken!(mapId!, token.id, { creatureTypes: [...creatureTypes, nextType] })
+    }
+    setCustomCreatureTypeDraft('')
+  }
   const standardConditions = linked?.conditions ?? token.dnd5eCombatState?.conditions ?? []
   const monsterDefinition = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
   const monsterRuntimeStatuses = dnd5eMonsterRuntimeStatusCapabilities(monsterDefinition).map((status) => ({
@@ -286,6 +393,15 @@ export default function EnemyDetailPanel({
 
   const applySavedMonsterOverride = async (monster: Dnd5eMonsterStatBlock) => {
     if (!overrideEditor || !mapId || !updateToken) return
+    if (!dnd5eMonsterOverrideSaveMatchesEditRequest({
+      requestedMonsterId: overrideEditor.editRequest.monster.id,
+      savedMonsterId: monster.id,
+    })) {
+      setOverrideMessage(
+        `已保存“${monster.name}”到房间怪物库，但它不是当前 Token 正在编辑的属性块，因此未应用到“${token.label}”。`,
+      )
+      return
+    }
     const targets = dnd5eMonsterOverrideTargets({
       tokens,
       selectedTokenId: token.id,
@@ -357,9 +473,9 @@ export default function EnemyDetailPanel({
           className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-2xl"
           style={{ borderColor: color }}
         >
-          {token.portraitImageId ? (
+          {compactPortraitImageId ? (
             <SharedMonsterPortrait
-              imageId={token.portraitImageId}
+              imageId={compactPortraitImageId}
               name={name}
               fallbackSrc={tokenThumbnail}
               fallbackEmoji={emoji}
@@ -373,7 +489,7 @@ export default function EnemyDetailPanel({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-bold text-slate-100">{name}</h2>
-            {stats && (
+            {stats && !activeObjectForm && (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
                 CR {stats.cr}
               </span>
@@ -381,6 +497,16 @@ export default function EnemyDetailPanel({
             {dnd5eCombatTokenSide(token) === 'player' && (
               <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">
                 玩家友方
+              </span>
+            )}
+            {token.dnd5eSummon?.persistent === true && token.dnd5eSummon.controlEnded === true && (
+              <span className="rounded bg-fuchsia-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-fuchsia-200">
+                永久生物 · DM 控制
+              </span>
+            )}
+            {creatureFormState?.wildShapePermanent === true && (
+              <span className="rounded bg-fuchsia-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-fuchsia-200">
+                永久形态
               </span>
             )}
           </div>
@@ -393,6 +519,20 @@ export default function EnemyDetailPanel({
               ))}
             </div>
           )}
+          {activeCreatureForm ? (
+            <div className="mt-1 text-[11px] font-bold text-emerald-200">
+              当前形态：{activeObjectForm?.profile.label ?? activeCreatureForm.name}（{activeObjectForm ? '完全变形术' : activeCreatureFormLabel}{creatureFormState?.wildShapePermanent === true || activeObjectForm?.permanent ? ' · 永久' : ''}）
+            </div>
+          ) : null}
+          {token.dnd5eTruesightPerception ? (
+            <div data-testid="truesight-perception" className="mt-1 text-[11px] font-bold text-cyan-200">
+              真视察觉：{[
+                token.dnd5eTruesightPerception.ethereal ? '以太位面' : null,
+                token.dnd5eTruesightPerception.originalForm ? '原本形态' : null,
+                token.dnd5eTruesightPerception.visualIllusion ? '视觉幻象' : null,
+              ].filter(Boolean).join(' · ')}
+            </div>
+          ) : null}
         </div>
         {(
           <button
@@ -447,29 +587,69 @@ export default function EnemyDetailPanel({
                 ))}
               </select>
               <span className="text-xs text-slate-500">种类</span>
-              <div className="flex flex-wrap gap-1">
-                {CREATURE_TYPES.map((type) => {
-                  const checked = creatureTypes.includes(type)
-                  return (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-1">
+                  {CREATURE_TYPES.map((type) => {
+                    const checked = creatureTypes.includes(type)
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => {
+                          const next = checked
+                            ? creatureTypes.filter((item) => item !== type)
+                            : [...creatureTypes, type]
+                          updateToken!(mapId!, token.id, { creatureTypes: next })
+                        }}
+                        className={`rounded px-1.5 py-0.5 text-[10px] ${
+                          checked
+                            ? 'bg-arcane-500/30 text-arcane-100'
+                            : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    )
+                  })}
+                  {customCreatureTypes.map((type) => (
                     <button
-                      key={type}
+                      key={`custom:${type}`}
                       type="button"
-                      onClick={() => {
-                        const next = checked
-                          ? creatureTypes.filter((item) => item !== type)
-                          : [...creatureTypes, type]
-                        updateToken!(mapId!, token.id, { creatureTypes: next })
-                      }}
-                      className={`rounded px-1.5 py-0.5 text-[10px] ${
-                        checked
-                          ? 'bg-arcane-500/30 text-arcane-100'
-                          : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300'
-                      }`}
+                      title={`移除自定义生物类型“${type}”`}
+                      onClick={() => updateToken!(mapId!, token.id, {
+                        creatureTypes: creatureTypes.filter((item) => item !== type),
+                      })}
+                      className="inline-flex items-center gap-1 rounded bg-cyan-500/20 px-1.5 py-0.5 text-[10px] text-cyan-100 hover:bg-rose-500/20 hover:text-rose-100"
                     >
-                      {type}
+                      {type}<X className="h-2.5 w-2.5" aria-hidden="true" />
                     </button>
-                  )
-                })}
+                  ))}
+                </div>
+                <div className="flex gap-1">
+                  <input
+                    data-testid="enemy-custom-creature-type-input"
+                    value={customCreatureTypeDraft}
+                    maxLength={40}
+                    placeholder="自定义类型"
+                    aria-label="自定义生物类型"
+                    onChange={(event) => setCustomCreatureTypeDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return
+                      event.preventDefault()
+                      addCustomCreatureType()
+                    }}
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-void-950/70 px-2 py-1 text-[10px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-400/50"
+                  />
+                  <button
+                    type="button"
+                    data-testid="enemy-add-custom-creature-type"
+                    disabled={!customCreatureTypeDraft.trim()}
+                    onClick={addCustomCreatureType}
+                    className="inline-flex items-center gap-1 rounded border border-cyan-300/20 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Plus className="h-3 w-3" />自定义
+                  </button>
+                </div>
               </div>
               <span className="text-xs text-slate-500">HP</span>
               <div className="flex items-center gap-1">
@@ -524,6 +704,14 @@ export default function EnemyDetailPanel({
                   className="w-16 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
               </div>
+              {onAdjustHitPoints ? (
+                <div className="col-span-2">
+                  <DmHitPointAdjustmentControls
+                    temporaryHp={authoritativeTemporaryHp}
+                    onAdjust={onAdjustHitPoints}
+                  />
+                </div>
+              ) : null}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
@@ -706,6 +894,7 @@ export default function EnemyDetailPanel({
               conditions={standardConditions}
               activeEffects={linked?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects}
               targetId={token.id}
+              targetName={token.label}
               sourceOptions={conditionSourceOptions}
               conditionImmunities={stats?.conditionImmunities}
               tacticalStatusOptions={tokenStatusMarkerOptions}
@@ -751,7 +940,7 @@ export default function EnemyDetailPanel({
         ) : (
           <>
             {/* 基础数据 */}
-            <div className="mb-4 grid grid-cols-2 gap-2">
+            <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
                 <Shield className="h-4 w-4 text-sky-400" />
                 <div>
@@ -763,15 +952,22 @@ export default function EnemyDetailPanel({
                 <Footprints className="h-4 w-4 text-emerald-400" />
                 <div className="min-w-0">
                   <p className="text-[10px] text-slate-500">速度</p>
-                  <p className="truncate text-sm font-semibold text-slate-100">{stats.speed}</p>
+                  <p className="truncate text-sm font-semibold text-slate-100">{effectiveSpeed}</p>
+                </div>
+              </div>
+              <div data-testid="enemy-detail-elevation" className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
+                <ArrowUp className="h-4 w-4 text-cyan-300" />
+                <div>
+                  <p className="text-[10px] text-slate-500">高度</p>
+                  <p className="text-sm font-semibold text-slate-100">{Math.max(0, Math.floor(token.elevationFeet ?? 0))} 尺</p>
                 </div>
               </div>
             </div>
 
-            {isStructured5eMonster && (
+            {isStructured5eMonster && !activeObjectForm && (
               <section className="mb-4 space-y-1.5 rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-3 py-2 text-xs text-slate-300">
                 {stats.hitDice && <p><span className="text-slate-500">生命骰 · </span>{stats.hitDice}</p>}
-                {stats.alignment && <p><span className="text-slate-500">阵营 · </span>{stats.alignment}</p>}
+                {displayedAlignment && <p><span className="text-slate-500">阵营 · </span>{displayedAlignment}{retainsOriginalAlignmentAndPersonality ? '（保留自本体；人格保留）' : ''}</p>}
                 <p><span className="text-slate-500">来源 · </span>{stats.source}{stats.sourcePage ? `，第 ${stats.sourcePage} 页` : ''}</p>
                 {stats.damageVulnerabilities?.length ? <p><span className="text-slate-500">伤害易伤 · </span>{stats.damageVulnerabilities.join('、')}</p> : null}
                 {stats.damageResistances?.length ? <p><span className="text-slate-500">伤害抗性 · </span>{stats.damageResistances.join('、')}</p> : null}
@@ -781,7 +977,7 @@ export default function EnemyDetailPanel({
             )}
 
             {/* 主攻击命中 + 伤害：对所有怪物渲染（含 ogre/owlbear 等无装备怪）。 */}
-            {derived?.damageDice && (
+            {!activeObjectForm && derived?.damageDice && (
               <section className="mb-4">
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   <Swords className="h-3.5 w-3.5" />
@@ -803,7 +999,7 @@ export default function EnemyDetailPanel({
               </section>
             )}
 
-            {token.poolId && getEnemyEquipmentSlots(token.poolId).some((s) => s.name) && (
+            {!activeObjectForm && token.poolId && getEnemyEquipmentSlots(token.poolId).some((s) => s.name) && (
               <section className="mb-4">
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   <Backpack className="h-3.5 w-3.5" />
@@ -827,7 +1023,11 @@ export default function EnemyDetailPanel({
             <section className="mb-4">
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">属性</h3>
               <div className="grid grid-cols-3 gap-2">
-                {ABILITIES.map(({ key, label }) => {
+                {activeObjectForm ? (
+                  <p className="col-span-full rounded-xl border border-amber-300/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">
+                    物体没有生物属性、豁免、技能、感官或语言，也不能行动、说话或施法。
+                  </p>
+                ) : ABILITIES.map(({ key, label }) => {
                   const score = stats.abilities[key]
                   const mod = abilityMod(score)
                   return (
@@ -845,7 +1045,7 @@ export default function EnemyDetailPanel({
             </section>
 
             {/* 技能 / 感官 / 语言 */}
-            {(stats.skills?.length || stats.senses || stats.languages) && (
+            {!activeObjectForm && (stats.skills?.length || stats.senses || stats.languages) && (
               <section className="mb-4 space-y-1.5 text-xs text-slate-400">
                 {stats.skills?.map((s) => (
                   <p key={s.name}>
@@ -880,6 +1080,11 @@ export default function EnemyDetailPanel({
                     <li key={t.name} className="rounded-xl bg-violet-500/10 px-3 py-2">
                       <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-violet-200">{t.name}</p>{t.automation && <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${t.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{t.automation === 'headless' ? 'HEADLESS' : 'DM 裁定'}</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{t.description}</p>
+                      {t.automation === 'dm-adjudication' && t.automationReason ? (
+                        <p className="mt-1.5 rounded-lg border border-amber-300/15 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-100/85">
+                          {t.automationReason}
+                        </p>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -896,16 +1101,15 @@ export default function EnemyDetailPanel({
                   {multiattackContinuation.parentActionName} · 第 {multiattackContinuation.occurrenceNumber}/{multiattackContinuation.occurrenceCount} 击：
                   {multiattackContinuation.actionName}
                 </p>
-                <button
-                  type="button"
+                <ManualAttackRollModeControl
+                  actionKey={`enemy-detail-continuation-${multiattackContinuation.parentActionId}-${multiattackContinuation.occurrenceIndex}`}
                   disabled={monsterActionPending}
-                  onClick={() => onSelectMonsterContinuation?.(multiattackContinuation)}
-                  className="mt-2 w-full rounded-lg bg-amber-400/20 px-2 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-400/30 disabled:cursor-wait disabled:opacity-40"
-                >
-                  {monsterActionPending
+                  confirmLabel={monsterActionPending
                     ? '正在结算当前攻击…'
                     : `选择目标 · ${multiattackContinuation.actionName}`}
-                </button>
+                  onConfirm={(rollMode) =>
+                    onSelectMonsterContinuation?.(multiattackContinuation, rollMode)}
+                />
               </section>
             ) : null}
 
@@ -921,22 +1125,86 @@ export default function EnemyDetailPanel({
                     <li key={`${a.name}:${actionIndex}`} className="rounded-xl bg-rose-500/10 px-3 py-2">
                       <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-rose-200">{a.name}</p>{a.automation && <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${a.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{a.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{a.description}</p>
+                      {a.automation === 'dm-adjudication' && a.automationReason ? (
+                        <p className="mt-1.5 rounded-lg border border-amber-300/15 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-100/85">
+                          {a.automationReason}
+                        </p>
+                      ) : null}
                       {canUseMonsterActions && a.automation === 'headless' && (
                         a.kind === 'melee' ||
                         a.kind === 'ranged' ||
+                        a.kind === 'aoe' ||
                         a.kind === 'multiattack'
                       ) ? (
+                        a.kind === 'melee' || a.kind === 'ranged' || a.kind === 'multiattack' ? (
+                        <ManualAttackRollModeControl
+                          actionKey={`enemy-detail-${a.id || actionIndex}`}
+                          confirmTestId={a.id ? `enemy-detail-monster-action-${a.id}` : undefined}
+                          disabled={monsterActionUsed || (a.kind === 'multiattack' && multiattackUnavailable)}
+                          confirmLabel={a.kind === 'multiattack' && multiattackUnavailable
+                            ? '受效果限制：本回合最多一次攻击'
+                            : monsterActionUsed
+                              ? '本回合动作已使用'
+                              : `选择目标 · ${a.name}`}
+                          onConfirm={(rollMode) =>
+                            onSelectMonsterAction?.(actionIndex, a.name, rollMode)}
+                        />
+                        ) : (
                         <button
                           type="button"
+                          data-testid={a.id ? `enemy-detail-monster-action-${a.id}` : undefined}
                           disabled={monsterActionUsed}
-                          onClick={() => onSelectMonsterAction?.(actionIndex, a.name)}
+                          onClick={() => onSelectMonsterAction?.(actionIndex, a.name, 'normal')}
                           className="mt-2 w-full rounded-lg bg-rose-500/20 px-2 py-1.5 text-xs font-semibold text-rose-100 hover:bg-rose-500/30 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          {monsterActionUsed ? '本回合动作已使用' : `选择目标 · ${a.name}`}
+                          {monsterActionUsed
+                            ? '本回合动作已使用'
+                            : `${a.kind === 'aoe' ? '选择范围' : '选择目标'} · ${a.name}`}
                         </button>
+                        )
                       ) : null}
                     </li>
                   ))}
+                </ul>
+              </section>
+            )}
+            {grantedActivityControls.length > 0 && (
+              <section className="mb-4 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-3">
+                <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-200">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  状态授予动作
+                </h3>
+                <ul className="space-y-2">
+                  {grantedActivityControls.map((control) => {
+                    const hasNaturalTarget = control.targeting === 'self' || (
+                      control.targeting === 'creature' && !!control.sourceActorTokenId
+                    )
+                    const pending = grantedActivityPendingId === control.activityId
+                    return (
+                      <li key={`${control.effectId}:${control.activityId}`} className="rounded-lg bg-black/15 px-3 py-2">
+                        <p className="text-sm font-medium text-violet-100">{control.label}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          {control.economy === 'action'
+                            ? '动作'
+                            : control.economy === 'bonus-action'
+                              ? '附赠动作'
+                              : control.economy === 'reaction'
+                                ? '反应'
+                                : '自由动作'}
+                          {' · Host 权威结算'}
+                        </p>
+                        <button
+                          type="button"
+                          data-testid={`enemy-detail-granted-activity-${control.activityId}`}
+                          disabled={!canUseGrantedActivities || !hasNaturalTarget || !!grantedActivityPendingId}
+                          onClick={() => onUseGrantedActivity?.(control)}
+                          className="mt-2 w-full rounded-lg bg-violet-500/20 px-2 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {pending ? '正在结算…' : `执行 · ${control.label}`}
+                        </button>
+                      </li>
+                    )
+                  })}
                 </ul>
               </section>
             )}
@@ -949,7 +1217,6 @@ export default function EnemyDetailPanel({
             {([
               ['附赠动作', stats.bonusActions, 'bg-emerald-500/10', 'text-emerald-200'],
               ['反应', stats.reactions, 'bg-cyan-500/10', 'text-cyan-200'],
-              ['传奇动作', stats.legendaryActions, 'bg-amber-500/10', 'text-amber-200'],
               ['巢穴动作', stats.lairActions, 'bg-fuchsia-500/10', 'text-fuchsia-200'],
             ] as const).map(([label, actions, background, text]) => actions?.length ? (
               <section key={label} className="mb-4">
@@ -957,6 +1224,37 @@ export default function EnemyDetailPanel({
                 <ul className="space-y-2">{actions.map((action) => <li key={action.name} className={`rounded-xl ${background} px-3 py-2`}><div className="flex items-center justify-between gap-2"><p className={`text-sm font-medium ${text}`}>{action.name}</p><span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${action.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{action.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span></div><p className="mt-0.5 text-xs leading-relaxed text-slate-400">{action.description}</p></li>)}</ul>
               </section>
             ) : null)}
+            {stats.legendaryActions?.length ? (
+              <section className="mb-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">传奇动作</h3>
+                  <span
+                    data-testid="enemy-detail-legendary-action-points"
+                    className="rounded-lg border border-amber-300/15 bg-amber-500/10 px-2 py-1 text-[10px] font-bold tabular-nums text-amber-200"
+                  >
+                    传奇动作点 {legendaryActionCurrent} / {legendaryActionMaximum}
+                  </span>
+                </div>
+                <ul className="space-y-2">
+                  {stats.legendaryActions.map((action) => (
+                    <li key={action.name} className="rounded-xl bg-amber-500/10 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-amber-200">{action.name}</p>
+                        <span className="flex items-center gap-1">
+                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">
+                            消耗 {Math.max(1, action.legendaryCost ?? 1)} 点
+                          </span>
+                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${action.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
+                            {action.automation === 'headless' ? 'Headless' : 'DM 裁定'}
+                          </span>
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{action.description}</p>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
           </>
         )}
 

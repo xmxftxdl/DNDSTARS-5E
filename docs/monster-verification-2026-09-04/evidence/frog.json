@@ -1,0 +1,92 @@
+{
+  "id": "srd-5.1:frog",
+  "slug": "frog",
+  "name": "青蛙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [],
+  "ui": [
+    {
+      "index": 105,
+      "slug": "frog",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:07:41.152Z",
+      "name": "青蛙",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-frog-inspect-1788559661262",
+      "combatId": "verify-ui-frog-inspect-1788559661262:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "failed",
+      "error": "TimeoutError: locator.click: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: '展开怪物控制台', exact: true })\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:08:22.641Z",
+      "evidenceFile": "ui-cases/monsters/105-frog.json"
+    },
+    {
+      "index": 323,
+      "slug": "frog",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:16:49.222Z",
+      "name": "青蛙",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "challengeRating": "0",
+      "total": 334,
+      "mapId": "verify-ui-frog-inspect-1788571009267",
+      "combatId": "verify-ui-frog-inspect-1788571009267:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-05T01:16:54.515Z",
+      "evidenceFile": "ui-cases/monsters/323-frog.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "立定跳跃",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 0,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

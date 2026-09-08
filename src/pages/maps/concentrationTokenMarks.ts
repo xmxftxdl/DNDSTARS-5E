@@ -49,7 +49,9 @@ export function buildDnd5eConcentrationTokenMarks(
         spellId,
         backgroundHighlightColor: colors.statusBackgroundHighlightColor,
         backgroundColor: colors.statusBackgroundColor,
-        borderColor: colors.statusBorderColor,
+        // Match other source-attributed map badges: the visible perimeter uses
+        // the class banner's primary color, not the near-white status-frame slot.
+        borderColor: colors.accentColor,
         glowColor: colors.glowColor,
         classId: colors.classId,
       }]

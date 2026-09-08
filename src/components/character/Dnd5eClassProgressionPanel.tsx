@@ -29,7 +29,7 @@ import {
   dnd5ePluginCreatureFormEligibleForCharacter,
   dnd5eMonsterSpeedText,
   dnd5eWarlockMysticArcanumOptions,
-  getDnd5eSrdCombatSpell,
+  dnd5eSrdSpellHasFullHeadlessAutomation,
   applyDnd5eEldritchMaster,
   dnd5eWildShapeDurationHours,
   DND5E_WILD_SHAPE_KNOWN_FORMS_KEY,
@@ -405,10 +405,10 @@ export default function Dnd5eClassProgressionPanel({
                   >
                     <option value="">尚未选择</option>
                     {options.map((spell) => {
-                      const combatSpell = getDnd5eSrdCombatSpell(spell.id)
+                      const fullHeadless = dnd5eSrdSpellHasFullHeadlessAutomation(spell.id)
                       const usedElsewhere = ordinary.has(spell.id) || core.includes(spell.id) || lore.includes(spell.id)
                       return <option key={spell.id} value={spell.id} disabled={usedElsewhere && spell.id !== value}>
-                        {spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.name}{combatSpell ? ' · Headless' : ' · DM裁定'}
+                        {spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.name}{fullHeadless ? ' · Headless' : ' · DM裁定'}
                       </option>
                     })}
                   </select>
@@ -449,7 +449,7 @@ export default function Dnd5eClassProgressionPanel({
               const key = `mystic-arcanum-${spellLevel}`
               const selected = stored.selections?.[key]?.[0] ?? ''
               const options = dnd5eWarlockMysticArcanumOptions(spellLevel)
-              const ready = selected ? !!getDnd5eSrdCombatSpell(selected) : false
+              const ready = selected ? dnd5eSrdSpellHasFullHeadlessAutomation(selected) : false
               return <label key={spellLevel} className="text-xs text-slate-400">秘法奥秘 · {spellLevel}环
                 <select
                   value={selected}
@@ -458,7 +458,7 @@ export default function Dnd5eClassProgressionPanel({
                 >
                   <option value="">尚未选择</option>
                   {options.map((spell) => <option key={spell.id} value={spell.id}>
-                    {spell.name}（{spell.englishName}）{getDnd5eSrdCombatSpell(spell.id) ? ' · Headless' : ' · DM裁定'}
+                    {spell.name}（{spell.englishName}）{dnd5eSrdSpellHasFullHeadlessAutomation(spell.id) ? ' · Headless' : ' · DM裁定'}
                   </option>)}
                 </select>
                 {selected ? <span className={`mt-1 block text-[10px] ${ready ? 'text-emerald-300' : 'text-amber-300'}`}>

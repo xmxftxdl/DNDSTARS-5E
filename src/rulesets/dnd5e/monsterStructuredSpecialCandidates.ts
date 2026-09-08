@@ -27,6 +27,7 @@ import type {
   Dnd5eMonsterBehaviorStyle,
   Dnd5eMonsterStatBlock,
 } from './monsters'
+import { dnd5eMonsterActionUsageId } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 
 export interface MonsterStructuredSpecialCandidateServices {
@@ -78,11 +79,15 @@ export function createMonsterStructuredSpecialActionCandidates(input: {
     (input.requiredActionId == null || action.id === input.requiredActionId) &&
     (
       action.usage?.kind !== 'recharge' ||
-      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[action.id] !== false
+      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ] !== false
     ) &&
     (
       action.usage?.kind !== 'per-day' ||
-      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ??
+      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[
+        dnd5eMonsterActionUsageId(action)
+      ]?.current ??
         action.usage.max) > 0
     ))
   if (actions.length === 0) return []

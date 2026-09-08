@@ -41,7 +41,15 @@ describe('buildDnd5eConcentrationTokenMarks', () => {
     })
 
     expect(buildDnd5eConcentrationTokenMarks([casterToken], [concentrating]))
-      .toMatchObject([{ tokenId: 'wizard-token', spellId: 'flaming-sphere', classId: 'wizard' }])
+      .toMatchObject([{
+        tokenId: 'wizard-token',
+        spellId: 'flaming-sphere',
+        classId: 'wizard',
+        backgroundHighlightColor: '#3B82F6',
+        backgroundColor: '#071A38',
+        borderColor: '#3B82F6',
+        glowColor: '#60A5FA',
+      }])
 
     const switched = character({
       ...concentrating,

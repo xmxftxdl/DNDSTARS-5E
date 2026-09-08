@@ -1,12 +1,28 @@
 import Constants from 'expo-constants'
-import * as Device from 'expo-device'
-import * as Notifications from 'expo-notifications'
+import { requireOptionalNativeModule } from 'expo-modules-core'
 import { Platform } from 'react-native'
 
 export type MobilePushPermissionState = 'unknown' | 'unsupported' | 'denied' | 'enabled'
 
+type NotificationsModule = typeof import('expo-notifications')
+const optionalDeviceModule = requireOptionalNativeModule<{ isDevice?: boolean }>('ExpoDevice')
+const optionalPushTokenManager = requireOptionalNativeModule('ExpoPushTokenManager')
+let notificationsPromise: Promise<NotificationsModule | null> | null = null
+
+function optionalNotifications() {
+  // Importing expo-notifications evaluates every native adapter exported by the
+  // package. Older development builds do not contain those adapters, so even a
+  // caught dynamic import can surface a fatal React Native module error first.
+  // ExpoPushTokenManager is part of every supported native installation and is
+  // therefore used as the capability sentinel before evaluating the package.
+  if (!optionalPushTokenManager) return Promise.resolve(null)
+  notificationsPromise ??= import('expo-notifications').catch(() => null)
+  return notificationsPromise
+}
+
 export async function mobilePushPermissionState(): Promise<MobilePushPermissionState> {
-  if (!Device.isDevice || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return 'unsupported'
+  const Notifications = await optionalNotifications()
+  if (!optionalDeviceModule?.isDevice || !Notifications || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return 'unsupported'
   const permission = await Notifications.getPermissionsAsync()
   if (permission.granted) return 'enabled'
   if (!permission.canAskAgain) return 'denied'
@@ -17,7 +33,8 @@ export async function requestMobilePushToken(): Promise<{
   token: string
   platform: 'ios' | 'android'
 }> {
-  if (!Device.isDevice || (Platform.OS !== 'ios' && Platform.OS !== 'android')) {
+  const Notifications = await optionalNotifications()
+  if (!optionalDeviceModule?.isDevice || !Notifications || (Platform.OS !== 'ios' && Platform.OS !== 'android')) {
     throw new Error('push-real-device-required')
   }
   if (Platform.OS === 'android') {
@@ -39,7 +56,9 @@ export async function requestMobilePushToken(): Promise<{
   return { token: token.data, platform: Platform.OS }
 }
 
-export function installForegroundNotificationHandler() {
+export async function installForegroundNotificationHandler() {
+  const Notifications = await optionalNotifications()
+  if (!Notifications) return
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,

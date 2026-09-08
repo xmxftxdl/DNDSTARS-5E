@@ -9,6 +9,7 @@ import {
   prepareDnd5eLocalContentJson,
 } from './localContentCollection'
 import {
+  dnd5eRoomRuntimeProjectionBytesV2,
   dnd5eRulesPluginFromContentPackageV2,
   parseDnd5eContentPackageV2,
 } from './contentPackageV2'
@@ -342,6 +343,7 @@ describe('本地房间内容合集', () => {
       const result = await compileDnd5eLocalContentCollection(
         localCollectionFiles(LOCAL_PHB_COLLECTION_DIRECTORY),
       )
+      expect(() => dnd5eRoomRuntimeProjectionBytesV2(result.bytes)).not.toThrow()
       const parsed = parseDnd5eContentPackageV2(result.bytes)
       expect(result.audit.complete).toBe(true)
       expect(parsed?.manifest).toMatchObject({
@@ -399,6 +401,9 @@ describe('本地房间内容合集', () => {
       })
       const subclassAbilities = parsed!.content.subclasses.flatMap((subclass) =>
         subclass.abilities.map((ability) => ({ subclassId: subclass.id, ability })))
+      expect(subclassAbilities).toHaveLength(169)
+      expect(subclassAbilities.every(({ ability }) => Boolean(ability.iconAssetId))).toBe(true)
+      expect(new Set(subclassAbilities.map(({ ability }) => ability.iconAssetId)).size).toBe(169)
       expect(subclassAbilities.filter(({ ability }) => ability.automation === 'partial').map(
         ({ subclassId, ability }) => `${subclassId}:${ability.id}`,
       )).toEqual([
@@ -418,6 +423,7 @@ describe('本地房间内容合集', () => {
         ability.automation === 'manual' && ability.effects.length > 0,
       )).toEqual([])
       expect(parsed?.content.spells).toHaveLength(42)
+      expect(parsed?.content.spells.every((spell) => Boolean(spell.iconAssetId))).toBe(true)
       expect(new Set(parsed?.content.spells.map((spell) => spell.id)).size).toBe(42)
       expect(parsed?.content.spells.filter((spell) =>
         DND5E_SRD_SPELL_CATALOG.some((entry) => entry.id === spell.id),
@@ -436,6 +442,15 @@ describe('本地房间内容合集', () => {
         'telepathy', 'tsunami', 'power-word-heal',
       ])
       expect(parsed?.content.feats).toHaveLength(41)
+      expect(parsed?.content.feats.every((feat) => Boolean(feat.iconAssetId))).toBe(true)
+      expect(parsed?.content.features).toHaveLength(13)
+      expect(parsed?.content.features.every((feature) => Boolean(feature.iconAssetId))).toBe(true)
+      expect(parsed?.assets).toHaveLength(265)
+      expect(result.audit.visuals).toEqual({
+        declaredImages: 265,
+        aiGeneratedImages: 265,
+        boundTargets: 265,
+      })
       const combatFeatCoverage = JSON.parse(readFileSync(
         path.join(LOCAL_PHB_COLLECTION_DIRECTORY, 'feats/combat-coverage.json'),
         'utf8',
@@ -647,6 +662,7 @@ describe('本地房间内容合集', () => {
         dispose()
       }
     },
+    120_000,
   )
 
   it('在浏览器内合并 CSV 并将 AI 图片绑定到稳定条目 ID', async () => {

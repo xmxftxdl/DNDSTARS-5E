@@ -71,6 +71,9 @@ export interface SharedRoomGatewayPort {
     options?: SharedResourceWriteOptions & { transactionId?: string },
   ): Promise<SharedResourceTransactionResult>
   appendPlayerActionRequest<T>(action: T): Promise<void>
+  submitPlayerCharacterCommand(
+    command: Record<string, unknown> & { commandId: string },
+  ): Promise<{ revision: number; result: Record<string, unknown> }>
   loadDmUndoHistory(): Promise<DmUndoTransactionSummary[]>
   undoDmTransaction(transactionId?: string): Promise<{
     transaction: DmUndoTransactionSummary

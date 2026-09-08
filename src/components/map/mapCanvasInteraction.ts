@@ -39,7 +39,9 @@ export function mapCanvasAoeGridCell(
 
 export function mapCanvasTokenClickAction(
   areaTargeting: boolean,
-): 'consume-area-click' | 'select-token' {
+  movementTargeting = false,
+): 'consume-area-click' | 'select-movement-destination' | 'select-token' {
+  if (movementTargeting) return 'select-movement-destination'
   return areaTargeting ? 'consume-area-click' : 'select-token'
 }
 
@@ -81,6 +83,19 @@ export function mapCanvasGeometryDrawShouldStart(
   openingAttachedToWall: boolean,
 ): boolean {
   return (tool !== 'door' && tool !== 'window') || openingAttachedToWall
+}
+
+/**
+ * Geometry visibility is independent from geometry interaction. Players must
+ * always see the server-projected walls, doors, and windows even when their
+ * current mode does not allow clicking those entities.
+ */
+export function mapCanvasGeometryOverlayVisible(input: {
+  isDM: boolean
+  hasGeometry: boolean
+  hasDraft: boolean
+}): boolean {
+  return input.isDM || input.hasGeometry || input.hasDraft
 }
 
 /**

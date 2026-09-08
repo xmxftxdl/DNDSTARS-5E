@@ -1,0 +1,181 @@
+{
+  "id": "srd-5.1:young-white-dragon",
+  "slug": "young-white-dragon",
+  "name": "青年白龙",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "cold-breath",
+      "name": "寒冰吐息",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.lengthFeet",
+        "rule.area.aimRangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 84,
+      "slug": "young-white-dragon",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:22:05.206Z",
+      "name": "青年白龙",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "6",
+      "total": 334,
+      "mapId": "verify-ui-young-white-dragon-bite-1788567725261",
+      "combatId": "verify-ui-young-white-dragon-bite-1788567725261:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "青年白龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+7=8 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:22 PM\n攻击\n\n青年白龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+7=8 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 1；最终采用 1；调整值 +7。\n结果 · 8 vs AC 10：未命中。\n青年白龙｜消耗动作",
+      "playerLog": "青年白龙 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+7=8 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:22:24.682Z",
+      "evidenceFile": "ui-cases/monsters/084-young-white-dragon.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "冰面行走",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 11,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

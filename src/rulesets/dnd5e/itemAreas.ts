@@ -17,7 +17,7 @@ import {
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
-import { applyDnd5eInventoryMutation } from './items'
+import { applyDnd5eInventoryMutation, dnd5eInventoryEntryUseAction } from './items'
 
 export type Dnd5eItemAreaPlacementFailure =
   | 'invalid-targeting'
@@ -96,8 +96,9 @@ export function placeDnd5eItemArea(input: {
   actor: Character
   actorToken: Token
   entry: Dnd5eInventoryEntry
+  useActionId?: string
   targetCell: GridCell
-  turnEconomy: Dnd5eTurnEconomyCounts
+  turnEconomy?: Dnd5eTurnEconomyCounts
   areaId: string
   createdAt: number
   receiptId?: string
@@ -113,7 +114,7 @@ export function placeDnd5eItemArea(input: {
       ? rollbackCombatTransaction(input.transaction, reason)
       : undefined,
   })
-  const targeting = input.entry.item.use?.targeting
+  const targeting = dnd5eInventoryEntryUseAction(input.entry, input.useActionId)?.targeting
   if (!targeting || targeting.kind !== 'map-area') return rejected('invalid-targeting')
   const preview = previewDnd5eItemAreaPlacement({
     map: input.map,
@@ -128,6 +129,7 @@ export function placeDnd5eItemArea(input: {
       type: 'use',
       characterId: input.actor.id,
       instanceId: input.entry.instanceId,
+      useActionId: input.useActionId,
       receiptId: input.receiptId,
       expectedInventoryRevision: input.expectedInventoryRevision,
     },

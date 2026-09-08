@@ -20,8 +20,8 @@ import {
   startDnd5eHeadlessCombat,
   type Dnd5eCombatEvent,
 } from './headlessCombatEngine'
-import { dnd5eConditionsFromActiveEffects } from './activeEffects'
-import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { createDnd5eConditionEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { migrateDnd5eCombatStateEffects, migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
 
@@ -44,6 +44,28 @@ describe('D&D 5e 2014 standard condition engine', () => {
     expect(dnd5eStandardConditionId('惊惧')).toBe('frightened')
     expect(dnd5eActiveStandardConditions({ conditions: ['目盲', 'blinded', '束缚'] }))
       .toEqual(['blinded', 'restrained'])
+  })
+
+  it('does not duplicate a custom projection alias already owned by a standard condition effect', () => {
+    const sequester = {
+      ...createDnd5eConditionEffect({
+        id: 'sequester:target:invisible',
+        condition: 'invisible',
+        targetId: 'target',
+        source: { kind: 'spell', rulesId: 'sequester', label: '隔离术' },
+        duration: { type: 'permanent' },
+        appliedAt: 0,
+      }),
+      legacyCondition: '隔离术·假死',
+    }
+    const migrated = migrateDnd5eCombatStateEffects({
+      targetId: 'target',
+      state: { schemaVersion: 2, activeEffects: [sequester] },
+      conditions: ['隔离术·假死'],
+    })
+
+    expect(migrated.activeEffects).toEqual([sequester])
+    expect(migrated.conditions).toEqual(['隔离术·假死'])
   })
 
   it('requires an actor source only for conditions whose rules refer to that source', () => {

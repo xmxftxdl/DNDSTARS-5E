@@ -1,0 +1,130 @@
+{
+  "id": "srd-5.1:noble",
+  "slug": "noble",
+  "name": "贵族",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "rapier",
+      "name": "刺剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "parry",
+      "name": "招架",
+      "automation": "headless",
+      "rule": "parry",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.armorClassBonus",
+        "rule.requiresSight",
+        "rule.requiresWieldedMeleeWeapon"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster Parry in Headless combat applies the exact +2 AC reaction for 'noble'"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 206,
+      "slug": "noble",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:03:01.777Z",
+      "name": "贵族",
+      "actionId": "rapier",
+      "actionName": "刺剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-noble-rapier-1788562981892",
+      "combatId": "verify-ui-noble-rapier-1788562981892:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "贵族 使用刺剑攻击 验证目标：刺剑 → 验证目标 15+3=18 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:03 PM\n结算\n\n贵族 使用刺剑攻击 验证目标：刺剑 → 验证目标 15+3=18 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：刺剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 15；最终采用 15；调整值 +3。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 刺剑（基础伤害·穿刺）｜1d8 骰面：3 = 3｜固定加值 +1｜小计 4\n贵族｜消耗动作\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/贵族 使用刺剑攻击 验证目标：/)\nExpected: \u001b[32m\"贵族 使用刺剑攻击 验证目标：刺剑 → 验证目标 15+3=18 命中；共造成 4 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/贵族 使用刺剑攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T23:03:32.499Z",
+      "evidenceFile": "ui-cases/monsters/206-noble.json"
+    },
+    {
+      "index": 292,
+      "slug": "noble",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:11:43.801Z",
+      "name": "贵族",
+      "actionId": "rapier",
+      "actionName": "刺剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/8",
+      "total": 334,
+      "mapId": "verify-ui-noble-rapier-1788570703879",
+      "combatId": "verify-ui-noble-rapier-1788570703879:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "贵族 使用刺剑攻击 验证目标：刺剑 → 验证目标 10+3=13 命中；共造成 2 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:12 PM\n结算\n\n贵族 使用刺剑攻击 验证目标：刺剑 → 验证目标 10+3=13 命中；共造成 2 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：刺剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +3。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 刺剑（基础伤害·穿刺）｜1d8 骰面：1 = 1｜固定加值 +1｜小计 2\n贵族｜消耗动作\n验证目标｜受到 2 点伤害｜HP 320 → 318",
+      "playerLog": "贵族 使用刺剑攻击 验证目标：刺剑 → 验证目标 10+3=13 命中；共造成 2 点伤害。",
+      "afterHp": 318,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:12:07.444Z",
+      "evidenceFile": "ui-cases/monsters/292-noble.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 4,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

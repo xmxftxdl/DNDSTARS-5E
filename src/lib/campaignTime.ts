@@ -4,6 +4,7 @@ export const CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE = 8 * 60
 export const CAMPAIGN_TIME_TIMER_LIMIT = 256
 export const CAMPAIGN_TIME_ADVANCE_LIMIT = 512
 export const CAMPAIGN_TIME_MAX_ADVANCE_MINUTES = 365 * 24 * 60
+export const CAMPAIGN_TIME_MAX_TIMER_MINUTES = 366 * 24 * 60
 
 export type CampaignTimerKind = 'reminder' | 'concentration'
 export type CampaignTimerStatus = 'active' | 'expired' | 'dismissed' | 'cancelled'
@@ -474,6 +475,62 @@ export function campaignDawnsCrossed(fromWorldMinute: number, toWorldMinute: num
   const from = Math.max(0, Math.floor(fromWorldMinute))
   const to = Math.max(from, Math.floor(toWorldMinute))
   return Math.max(0, Math.floor((to - 360) / 1_440) - Math.floor((from - 360) / 1_440))
+}
+
+/**
+ * Builds the exact authoritative snapshot for an ordinary forward time
+ * advance without publishing it. Long-running player actions use this to put
+ * the clock in the same atomic transaction as their character/map/ACK
+ * snapshots; publishing the clock first leaves an irreversible time advance
+ * behind when the action transaction later conflicts.
+ */
+export function advanceCampaignTimeSnapshot(input: {
+  state: SharedCampaignTimeState
+  minutes: number
+  reason: string
+  now: number
+  advanceId?: string
+}): SharedCampaignTimeState | undefined {
+  const base = normalizeSharedCampaignTime(input.state)
+  const minutes = Math.floor(input.minutes)
+  if (
+    !Number.isSafeInteger(input.minutes) ||
+    minutes < 1 ||
+    minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES
+  ) return undefined
+  const toWorldMinute = base.worldMinute + minutes
+  if (!Number.isSafeInteger(toWorldMinute)) return undefined
+  const expiredTimerIds: string[] = []
+  const timers = base.timers.map((timer) => {
+    if (timer.status !== 'active' || timer.expiresAtWorldMinute > toWorldMinute) return timer
+    expiredTimerIds.push(timer.id)
+    return {
+      ...timer,
+      status: 'expired' as const,
+      expiredAtWorldMinute: timer.expiresAtWorldMinute,
+    }
+  })
+  const advance: CampaignTimeAdvance = {
+    id: input.advanceId ?? (globalThis.crypto?.randomUUID
+      ? `campaign-time-${globalThis.crypto.randomUUID()}`
+      : `campaign-time-${input.now}-${Math.random().toString(36).slice(2)}`),
+    kind: 'advance',
+    fromWorldMinute: base.worldMinute,
+    toWorldMinute,
+    minutes,
+    reason: input.reason.slice(0, 160),
+    dawnsCrossed: campaignDawnsCrossed(base.worldMinute, toWorldMinute),
+    expiredTimerIds,
+    createdAt: input.now,
+  }
+  return {
+    ...base,
+    schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
+    worldMinute: toWorldMinute,
+    timers,
+    advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+    updatedAt: input.now,
+  }
 }
 
 export function canBenefitFromLongRest(lastLongRestWorldMinute: number | undefined, completionWorldMinute: number): boolean {

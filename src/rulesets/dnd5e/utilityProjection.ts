@@ -105,8 +105,8 @@ export function dnd5eSpellOriginProjectionForCharacter(input: {
 export function dnd5eUtilityProjectionMovementEconomy(
   character: Character,
   projectionId: string,
-  fallback: 'action' | 'bonus-action',
-): 'action' | 'bonus-action' {
+  fallback: 'action' | 'bonus-action' | 'none',
+): 'action' | 'bonus-action' | 'none' {
   const overrides = registeredDnd5ePluginFeatures().flatMap((feature) => {
     const mechanic = feature.declarativeAbility?.mechanic
     if (
@@ -119,7 +119,9 @@ export function dnd5eUtilityProjectionMovementEconomy(
       ? 'bonus-action' as const
       : 'action' as const]
   })
-  return overrides.includes('bonus-action') ? 'bonus-action' : fallback
+  return fallback === 'none'
+    ? 'none'
+    : overrides.includes('bonus-action') ? 'bonus-action' : fallback
 }
 
 /** Resolves the largest Host-registered instance count for one projection family. */

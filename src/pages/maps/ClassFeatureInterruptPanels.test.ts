@@ -57,6 +57,7 @@ describe('职业与插件中断面板', () => {
     expect(html).toContain('5s')
     expect(html).toContain('data-testid="shared-plugin-choice-options"')
     expect(html).toContain('overflow-y-auto')
+    expect(html).toContain('z-[160]')
   })
 
   it('激励等投骰修正使用左侧非遮罩侧栏', () => {
@@ -67,6 +68,8 @@ describe('职业与插件中断面板', () => {
       },
     })
     expect(html).toContain('data-testid="roll-adjustment-drawer"')
+    expect(html).toContain('data-testid="bardic-inspiration-roll-owner-notice"')
+    expect(html).toContain('不会修改怪物的攻击骰、伤害骰、传奇动作点或动作效果')
     expect(html).toContain('pointer-events-none')
     expect(html).not.toContain('bg-black/55')
   })

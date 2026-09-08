@@ -1,7 +1,11 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { createD20ChoiceRerollContribution, createD20RollConfirmationInterrupt } from '../../lib/rollConfirmation'
+import {
+  createD20ChoiceRerollContribution,
+  createD20RollConfirmationInterrupt,
+  d20RollConfirmationTimeoutContribution,
+} from '../../lib/rollConfirmation'
 import D20RollConfirmationOverlay from './D20RollConfirmationOverlay'
 
 const handlers = { onContribute: vi.fn(), onContinue: vi.fn() }
@@ -92,5 +96,39 @@ describe('投骰修正侧栏', () => {
     expect(html).toContain('强制重掷')
     expect(html).toContain('额外投掷 1 枚 d20')
     expect(html).not.toContain('必须采用最后一枚结果')
+  })
+
+  it('已提交重掷后超时不会被改写成不使用', () => {
+    const contribution = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id, characterId: 'hero', characterName: '英雄',
+      featureId: 'inspiration', featureLabel: '激励', decision: 'use',
+    })
+    expect(d20RollConfirmationTimeoutContribution({
+      contribution, rollOptions: [8, 16], selectionPolicy: 'highest', hasEligibleFeature: true,
+    })).toBeUndefined()
+    expect(d20RollConfirmationTimeoutContribution({
+      contribution, rollOptions: [8, 16], selectionPolicy: 'owner-chooses', hasEligibleFeature: true,
+    })).toEqual({
+      featureId: 'inspiration', featureLabel: '激励', choiceDecision: 'use', selectedIndex: 0,
+    })
+    expect(d20RollConfirmationTimeoutContribution({
+      hasEligibleFeature: true,
+    })).toEqual({ featureId: '', featureLabel: '', decline: true })
+  })
+
+  it('Host 正在结算第二颗 d20 时锁定按钮且不再运行玩家倒计时', () => {
+    const contribution = createD20ChoiceRerollContribution({
+      interruptId: interrupt.id, characterId: 'hero', characterName: '英雄',
+      featureId: 'fortune', featureLabel: '命运改写', decision: 'use',
+    })
+    const rolling = { ...interrupt, status: 'rolling' as const, contributions: [contribution] }
+    const html = renderToStaticMarkup(createElement(D20RollConfirmationOverlay, {
+      interrupt: rolling, isDM: false, playerCharacter: { id: 'hero', name: '英雄' }, ...handlers,
+    }))
+
+    expect(html).toContain('第二颗 d20 已提交，正在结算…')
+    expect(html).toContain('结算中…')
+    expect(html).not.toContain('data-testid="d20-countdown"')
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(3)
   })
 })

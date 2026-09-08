@@ -1,11 +1,34 @@
 import type { Character } from '../types/character'
 import type { EquipmentItem } from '../types/equipment'
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
+import { dnd5eActiveArmorClassBonus, normalizeDnd5eActiveEffects } from '../rulesets/dnd5e/activeEffects'
+import { dnd5e2014Adapter as rules } from '../rulesets/dnd5e/dnd5e2014Adapter'
 
 export const DEFAULT_ENEMY_AC = 10
 
 export function getAc(character: Character): number {
   return dnd5eArmorClass(character)
+}
+
+/** Current combat AC, including active spell effects that do not alter equipment. */
+export function getEffectiveAc(character: Character): number {
+  const effects = normalizeDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects)
+  const base = dnd5eArmorClass(character)
+  const wearingBodyArmor = character.equipment?.armor?.dnd5e?.kind === 'armor' ||
+    character.equipment?.armor?.ac != null
+  const hasMageArmor = !wearingBodyArmor && effects.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:mage-armor')
+  const hasBarkskin = effects.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:barkskin')
+  const mageArmor = hasMageArmor
+    ? 13 + rules.abilityModifier(character.abilities.dex) +
+      (character.equipment?.offHand?.dnd5e?.kind === 'shield'
+        ? character.equipment.offHand.dnd5e.armorClassBonus
+        : 0)
+    : 0
+  return Math.max(base, hasBarkskin ? 16 : 0, mageArmor) +
+    dnd5eActiveArmorClassBonus(effects) +
+    (character.dnd5eCombatState?.shieldSpellActive ? 5 : 0)
 }
 
 export function formatEquipmentStatLine(item: EquipmentItem): string {

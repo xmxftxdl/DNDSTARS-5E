@@ -1,0 +1,19 @@
+{
+  "slug": "purple-worm",
+  "name": "紫虫",
+  "actionId": "tail-stinger",
+  "actionName": "尾部螫针",
+  "mapId": "monster-ui-catchup-purple-worm-1788607329824",
+  "combatId": "monster-ui-catchup-purple-worm-1788607329824:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "beforeHp": 320,
+  "startedAt": "2026-09-05T11:22:10.324Z",
+  "dmLog": "紫虫 使用尾部螫针攻击 验证目标：尾部螫针 → 验证目标 12+14=26 命中；共造成 44 点伤害。",
+  "playerLog": "紫虫 使用尾部螫针攻击 验证目标：尾部螫针 → 验证目标 12+14=26 命中；共造成 44 点伤害。",
+  "afterHp": 276,
+  "conditions": [],
+  "actionAvailable": 0,
+  "status": "passed",
+  "finishedAt": "2026-09-05T11:22:31.842Z"
+}

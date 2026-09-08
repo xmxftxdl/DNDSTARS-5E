@@ -21,6 +21,18 @@ import {
   type RoomSession,
 } from './roomSession'
 
+const ROOM_REQUEST_TIMEOUT_MS = 5_000
+
+async function fetchRoomCandidate(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), ROOM_REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    globalThis.clearTimeout(timeout)
+  }
+}
+
 interface RoomMemberResponse {
   memberId: string
   roomToken?: string
@@ -233,7 +245,7 @@ async function roomRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let reachedServer = false
   for (const api of sharedLobbyApiCandidates()) {
     try {
-      const response = await fetch(`${api}${path}`, {
+      const response = await fetchRoomCandidate(`${api}${path}`, {
         ...init,
         headers: {
           'Content-Type': 'application/json',
@@ -282,7 +294,7 @@ async function roomBinaryRequest(path: string, init?: RequestInit): Promise<Resp
   let reachedServer = false
   for (const api of sharedLobbyApiCandidates()) {
     try {
-      const response = await fetch(`${api}${path}`, {
+      const response = await fetchRoomCandidate(`${api}${path}`, {
         ...init,
         headers: {
           ...(account ? { 'X-Stars-Account-Token': account.sessionToken } : {}),

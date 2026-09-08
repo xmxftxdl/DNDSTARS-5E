@@ -17,7 +17,6 @@ import {
   fetchMobileAccountCharacters,
   fetchMobileCampaigns,
   fetchMobileRoomRules,
-  fetchRoomResource,
   fetchRoomResourceSnapshot,
   fetchVoiceStatus,
   heartbeatMobileRoom,
@@ -60,6 +59,9 @@ import { buildMobileActionRegistry, prepareMobileRoomPlugins } from '../services
 import { clearMobileRoomPluginRuntime } from '../services/mobileRoomPluginRuntime'
 import { mobileCharacterCompatibilityForRoom } from '../services/mobileCharacterVault'
 import { defaultGameServerUrl, normalizeGameServerUrl } from '../config'
+import { mobileCombatMoveCommand, type MobileMovementIntent } from '../services/mobileActionCommands'
+import { mobileExplorationMoveMutation } from '../services/mobileExplorationMovement'
+import { MobileApiError } from '../services/mobileHttp'
 
 export type MobileConnectionState = 'restoring' | 'offline' | 'connecting' | 'online' | 'error'
 
@@ -72,6 +74,14 @@ type MobileWorkspaceResourceName = typeof RESOURCE_NAMES[number]
 const RESOURCE_NAME_SET = new Set<string>(RESOURCE_NAMES)
 const EVENT_REFRESH_DEBOUNCE_MS = 45
 const EVENT_STREAM_RECOVERY_MS = 30_000
+const INVENTORY_ACK_TIMEOUT_MS = 10_000
+const INVENTORY_ACK_CHANNEL = 'dnd5e-inventory-dm-to-player'
+
+interface PendingInventoryAck {
+  resolve: () => void
+  reject: (cause: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
@@ -102,7 +112,7 @@ export function useMobileWorkspace() {
   const [campaigns, setCampaigns] = useState<MobileCampaignSummary[]>([])
   const [accountCharacters, setAccountCharacters] = useState<MobileAccountCharacterRecord[]>([])
   const [pushPermission, setPushPermission] = useState<MobilePushPermissionState>('unknown')
-  const [credentials, setCredentials] = useState<MobileCredentials | null>(null)
+  const [credentials, setCredentialsState] = useState<MobileCredentials | null>(null)
   const [rules, setRules] = useState<MobileRoomRules | null>(null)
   const [workspace, setWorkspace] = useState<MobilePlayerWorkspace | null>(null)
   const [activeCharacterId, setActiveCharacterIdState] = useState<string | null>(null)
@@ -122,10 +132,24 @@ export function useMobileWorkspace() {
   const rulesRef = useRef(rules)
   const resourceValuesRef = useRef<Record<string, unknown>>({})
   const resourceRevisionsRef = useRef<Record<string, number>>({})
+  const sessionRef = useRef<MobileCredentials | null>(null)
+  const sessionEpochRef = useRef(0)
+  const refreshSequenceRef = useRef(0)
   const serverUrlEditedRef = useRef(false)
   const serverUrlSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  workspaceRef.current = workspace
-  rulesRef.current = rules
+  const pendingInventoryAcksRef = useRef(new Map<string, PendingInventoryAck>())
+  useEffect(() => { workspaceRef.current = workspace }, [workspace])
+  useEffect(() => { rulesRef.current = rules }, [rules])
+
+  const setCredentials = useCallback((next: MobileCredentials | null) => {
+    sessionEpochRef.current += 1
+    sessionRef.current = next
+    resourceValuesRef.current = {}
+    resourceRevisionsRef.current = {}
+    workspaceRef.current = null
+    setWorkspace(null)
+    setCredentialsState(next)
+  }, [])
 
   const setServerUrl = useCallback((value: string) => {
     // Keep the draft untouched while the user is typing. Normalizing every
@@ -148,13 +172,15 @@ export function useMobileWorkspace() {
   }, [notice])
 
   const refreshCampaigns = useCallback(async (server: string, session: MobileAccountSession) => {
+    const epoch = sessionEpochRef.current
     const next = await fetchMobileCampaigns(server, session)
-    if (mounted.current) setCampaigns(next)
+    if (mounted.current && epoch === sessionEpochRef.current) setCampaigns(next)
   }, [])
 
   const refreshAccountCharacters = useCallback(async (server: string, session: MobileAccountSession) => {
+    const epoch = sessionEpochRef.current
     const next = await fetchMobileAccountCharacters(server, session)
-    if (mounted.current) setAccountCharacters(next)
+    if (mounted.current && epoch === sessionEpochRef.current) setAccountCharacters(next)
     return next
   }, [])
 
@@ -164,7 +190,10 @@ export function useMobileWorkspace() {
     requestedNames?: readonly MobileWorkspaceResourceName[],
     deletedNames: ReadonlySet<string> = new Set(),
   ) => {
-    if (!session) return
+    if (!session || session !== sessionRef.current) return
+    const epoch = sessionEpochRef.current
+    const sequence = ++refreshSequenceRef.current
+    const current = () => mounted.current && epoch === sessionEpochRef.current && session === sessionRef.current
     try {
       const fullRefresh = !requestedNames || Object.keys(resourceValuesRef.current).length === 0
       const names = fullRefresh ? RESOURCE_NAMES : [...new Set(requestedNames)]
@@ -174,8 +203,9 @@ export function useMobileWorkspace() {
       }
       const snapshots = await Promise.all(names.map(async (name) => ({
         name,
-        snapshot: await fetchRoomResourceSnapshot<unknown>(session, name).catch(() => null),
+        snapshot: await fetchRoomResourceSnapshot<unknown>(session, name),
       })))
+      if (!current()) return
       for (const entry of snapshots) {
         if (!entry.snapshot || deletedNames.has(entry.name)) continue
         const previousRevision = resourceRevisionsRef.current[entry.name] ?? -1
@@ -188,6 +218,7 @@ export function useMobileWorkspace() {
       const voice = fullRefresh
         ? await fetchVoiceStatus(session).catch(() => null)
         : workspaceRef.current?.voice ?? null
+      if (!current()) return
       let next = buildMobileWorkspace({
         credentials: session,
         rules: rulesRef.current,
@@ -199,8 +230,10 @@ export function useMobileWorkspace() {
       if (selected && selected.id !== preferredCharacterId) {
         setActiveCharacterIdState(selected.id)
         await saveActiveCharacterId(selected.id)
+        if (!current()) return
         const activePlugins = rulesRef.current?.member.ready === true ? rulesRef.current.requiredPlugins : []
         const nextRules = await heartbeatMobileRoom(session, selected, activePlugins)
+        if (!current()) return
         rulesRef.current = nextRules
         setRules(nextRules)
         next = buildMobileWorkspace({ credentials: session, rules: nextRules, activeCharacterId: selected.id, resources, voice })
@@ -213,12 +246,13 @@ export function useMobileWorkspace() {
           rules: next.rules,
         }),
       }
-      if (!mounted.current) return
+      if (!current() || sequence !== refreshSequenceRef.current) return
+      workspaceRef.current = next
       setWorkspace(next)
       setConnection('online')
       setError('')
     } catch (cause) {
-      if (!mounted.current) return
+      if (!current() || sequence !== refreshSequenceRef.current) return
       setConnection('offline')
       setError(cause instanceof Error ? cause.message : '房间同步失败')
     }
@@ -226,36 +260,67 @@ export function useMobileWorkspace() {
 
   useEffect(() => {
     mounted.current = true
+    let disposed = false
+    const restoreEpoch = sessionEpochRef.current
+    const restoreIsCurrent = () => !disposed && restoreEpoch === sessionEpochRef.current
+    const pendingInventoryAcks = pendingInventoryAcksRef.current
     void (async () => {
       const stored = await loadMobileAuthState()
+      if (!restoreIsCurrent()) return
       const server = normalizeGameServerUrl(stored.serverUrl || defaultGameServerUrl)
       if (!serverUrlEditedRef.current) setServerUrlState(server)
       setActiveCharacterIdState(stored.activeCharacterId)
       if (!stored.account) return setConnection('offline')
       try {
         const validAccount = await fetchMobileAccount(server, stored.account)
+        if (!restoreIsCurrent()) return
         setAccount(validAccount)
         await saveMobileAccount(server, validAccount)
+        if (!restoreIsCurrent()) return
         await refreshCampaigns(server, validAccount)
+        if (!restoreIsCurrent()) return
         await refreshAccountCharacters(server, validAccount)
+        if (!restoreIsCurrent()) return
         if (stored.room) {
           const restored = { serverUrl: server, account: validAccount, room: stored.room }
           setCredentials(restored)
           setConnection('connecting')
         } else setConnection('offline')
-      } catch {
-        await clearMobileAccount()
+      } catch (cause) {
+        if (!restoreIsCurrent()) return
+        if (cause instanceof MobileApiError && cause.status === 401) {
+          await clearMobileAccount()
+          if (!restoreIsCurrent()) return
+          setAccount(null)
+          setCredentials(null)
+        } else {
+          // A disconnected phone still owns its saved session. Restoring the
+          // room lets foreground/SSE recovery retry without another login.
+          setAccount(stored.account)
+          if (stored.room) setCredentials({ serverUrl: server, account: stored.account, room: stored.room })
+          setError(cause instanceof Error ? cause.message : '账号恢复失败，请重试')
+        }
         setConnection('offline')
       }
     })()
     return () => {
       mounted.current = false
+      disposed = true
+      sessionEpochRef.current += 1
       if (serverUrlSaveTimerRef.current != null) clearTimeout(serverUrlSaveTimerRef.current)
+      for (const pending of pendingInventoryAcks.values()) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('inventory-authority-cancelled'))
+      }
+      pendingInventoryAcks.clear()
     }
-  }, [refreshAccountCharacters, refreshCampaigns])
+  }, [refreshAccountCharacters, refreshCampaigns, setCredentials])
 
   useEffect(() => {
     if (!credentials) return
+    let disposed = false
+    const epoch = sessionEpochRef.current
+    const current = () => !disposed && mounted.current && epoch === sessionEpochRef.current
     // Never let a restored/new room inherit cached projections or revisions
     // from a previous room identity.
     resourceValuesRef.current = {}
@@ -268,6 +333,7 @@ export function useMobileWorkspace() {
     let rulesRefreshQueued = false
     let flushTimer: ReturnType<typeof setTimeout> | null = null
     const flush = () => {
+      if (!current()) return
       flushTimer = null
       const names = [...pendingNames]
       const deleted = new Set(deletedNames)
@@ -278,10 +344,12 @@ export function useMobileWorkspace() {
       void refreshWorkspace(credentials, activeCharacterId, full ? undefined : names, deleted)
     }
     const schedule = () => {
+      if (!current()) return
       if (flushTimer != null) return
       flushTimer = setTimeout(flush, EVENT_REFRESH_DEBOUNCE_MS)
     }
     const refreshRules = async () => {
+      if (!current()) return
       if (refreshingRules) {
         rulesRefreshQueued = true
         return
@@ -289,12 +357,16 @@ export function useMobileWorkspace() {
       refreshingRules = true
       try {
         const observedRules = await fetchMobileRoomRules(credentials)
+        if (!current()) return
         let nextRules = observedRules
         try {
           await prepareMobileRoomPlugins(credentials, observedRules)
+          if (!current()) return
           const active = workspaceRef.current?.characters.find((candidate) => candidate.id === activeCharacterId) ?? null
           nextRules = await heartbeatMobileRoom(credentials, active, observedRules.requiredPlugins)
+          if (!current()) return
         } catch (cause) {
+          if (!current()) return
           nextRules = locallyUnreadyRules(observedRules)
           if (mounted.current) setNotice(`规则包尚未就绪：${cause instanceof Error ? cause.message : '下载或校验失败'}`)
         }
@@ -303,10 +375,11 @@ export function useMobileWorkspace() {
         pendingFullRecovery = true
         schedule()
       } catch (cause) {
+        if (!current()) return
         if (mounted.current) setNotice(`房间规则同步失败：${cause instanceof Error ? cause.message : '未知错误'}`)
       } finally {
         refreshingRules = false
-        if (rulesRefreshQueued) {
+        if (rulesRefreshQueued && current()) {
           rulesRefreshQueued = false
           void refreshRules()
         }
@@ -314,6 +387,7 @@ export function useMobileWorkspace() {
     }
     const stopEventStream = subscribeMobileRoomEventStream(credentials, {
       onStateChanged: (event) => {
+        if (!current()) return
         if (event.name === '*') pendingFullRecovery = true
         else if (event.name === 'room-rules') {
           void refreshRules()
@@ -326,11 +400,28 @@ export function useMobileWorkspace() {
         schedule()
       },
       onRecoveryRequired: () => {
+        if (!current()) return
         pendingFullRecovery = true
         schedule()
       },
+      onEvent: (channel, payload) => {
+        if (!current()) return
+        if (channel !== INVENTORY_ACK_CHANNEL || !payload || typeof payload !== 'object') return
+        const ack = payload as Record<string, unknown>
+        const requestId = typeof ack.requestId === 'string' ? ack.requestId : ''
+        const pending = pendingInventoryAcksRef.current.get(requestId)
+        if (!pending || ack.recipientMemberId !== credentials.room.memberId) return
+        clearTimeout(pending.timer)
+        pendingInventoryAcksRef.current.delete(requestId)
+        if (ack.status === 'applied') {
+          if (mounted.current) setNotice(typeof ack.message === 'string' ? ack.message : '库存操作已完成')
+          pendingNames.add('characters')
+          schedule()
+          pending.resolve()
+        } else pending.reject(new Error(typeof ack.message === 'string' ? ack.message : '库存操作被 Host 拒绝'))
+      },
       onStatus: (status) => {
-        if (mounted.current) setRoomEventStream(status)
+        if (current()) setRoomEventStream(status)
       },
     })
     // A restored session may not have a current rules snapshot in memory. Fetch
@@ -349,6 +440,7 @@ export function useMobileWorkspace() {
       const active = workspaceRef.current?.characters.find((candidate) => candidate.id === activeCharacterId) ?? null
       void heartbeatMobileRoom(credentials, active, currentRules.requiredPlugins)
         .then((next) => {
+          if (!current()) return
           rulesRef.current = next
           if (mounted.current) setRules(next)
         })
@@ -358,6 +450,8 @@ export function useMobileWorkspace() {
       if (state === 'active') void refreshWorkspace(credentials, activeCharacterId)
     })
     return () => {
+      disposed = true
+      sessionEpochRef.current += 1
       if (flushTimer != null) clearTimeout(flushTimer)
       stopEventStream()
       clearInterval(poll)
@@ -422,22 +516,24 @@ export function useMobileWorkspace() {
     } catch (cause) {
       setConnection('error'); setError(cause instanceof Error ? cause.message : '加入房间失败')
     } finally { setBusy(false) }
-  }, [account, activeCharacterId, credentials, refreshWorkspace, serverUrl])
+  }, [account, activeCharacterId, credentials, refreshWorkspace, serverUrl, setCredentials])
 
   const leaveRoom = useCallback(async () => {
+    setCredentials(null)
     if (credentials) await leaveMobileRoom(credentials).catch(() => undefined)
     clearMobileRoomPluginRuntime()
     await clearMobileRoom()
     setCredentials(null); setRules(null); setWorkspace(null); setActiveCharacterIdState(null); setConnection('offline')
     if (account) await refreshCampaigns(serverUrl, account).catch(() => undefined)
-  }, [account, credentials, refreshCampaigns, serverUrl])
+  }, [account, credentials, refreshCampaigns, serverUrl, setCredentials])
 
   const logout = useCallback(async () => {
+    setCredentials(null)
     if (account) await logoutMobileAccount(serverUrl, account).catch(() => undefined)
     clearMobileRoomPluginRuntime()
     await clearMobileAccount()
     setAccount(null); setCredentials(null); setRules(null); setWorkspace(null); setCampaigns([]); setAccountCharacters([]); setConnection('offline')
-  }, [account, serverUrl])
+  }, [account, serverUrl, setCredentials])
 
   const updateProfile = useCallback(async (input: { displayName: string; avatar?: string }) => {
     if (!account) throw new Error('account-session-required')
@@ -488,7 +584,7 @@ export function useMobileWorkspace() {
     setCampaigns([])
     setAccountCharacters([])
     setConnection('offline')
-  }, [account, serverUrl])
+  }, [account, serverUrl, setCredentials])
 
   const selectCharacter = useCallback(async (id: string) => {
     setActiveCharacterIdState(id); await saveActiveCharacterId(id)
@@ -522,24 +618,32 @@ export function useMobileWorkspace() {
     return action.id
   }, [credentials, refreshWorkspace])
 
-  const moveControlledToken = useCallback(async (tokenId: string, x: number, y: number) => {
+  const moveControlledToken = useCallback(async (
+    tokenId: string,
+    x: number,
+    y: number,
+    intent: MobileMovementIntent = { traversalMode: 'walk' },
+  ) => {
     const current = workspaceRef.current
     const token = current?.scene?.controlledTokens.find((candidate) => candidate.id === tokenId)
     if (!credentials || !current?.scene || !token || !current.activeCharacterId) throw new Error('movement-not-ready')
     if (current.combat?.active) {
-      await submitAction({ type: 'move-token', targetPosition: { x, y } }, '移动')
+      await submitAction(mobileCombatMoveCommand(
+        { x, y },
+        token.elevation ?? 0,
+        intent,
+      ), '移动')
       return
     }
-    const grid = current.scene.mapManifest.grid
-    const toCell = (point: { x: number; y: number }) => ({
-      col: Math.round((point.x - (grid?.offsetX ?? 0)) / Math.max(1, grid?.sizeWorldUnits ?? 70) - 0.5),
-      row: Math.round((point.y - (grid?.offsetY ?? 0)) / Math.max(1, grid?.sizeWorldUnits ?? 70) - 0.5),
-    })
-    await submitExplorationMove(credentials, {
-      mapId: current.scene.sceneId, tokenId, characterId: current.activeCharacterId,
-      expectedPosition: { x: token.x, y: token.y }, targetPosition: { x, y },
-      path: [toCell(token), toCell({ x, y })], updatedAt: Date.now(),
-    })
+    await submitExplorationMove(credentials, mobileExplorationMoveMutation({
+      mapId: current.scene.sceneId,
+      tokenId,
+      characterId: current.activeCharacterId,
+      from: { x: token.x, y: token.y, elevationFeet: token.elevation },
+      to: { x, y },
+      intent,
+      updatedAt: Date.now(),
+    }))
     setNotice('非战斗移动已由 Host 接收')
     await refreshWorkspace(credentials, current.activeCharacterId)
   }, [credentials, refreshWorkspace, submitAction])
@@ -632,6 +736,10 @@ export function useMobileWorkspace() {
     notes?: string
   }) => {
     await submitOwnedCharacterCommand({ type: 'profile', characterId, patch }, '角色资料')
+  }, [submitOwnedCharacterCommand])
+
+  const setCharacterHitPoints = useCallback(async (characterId: string, currentHp: number, temporaryHp: number) => {
+    await submitOwnedCharacterCommand({ type: 'hit-points', characterId, currentHp, temporaryHp }, '生命值')
   }, [submitOwnedCharacterCommand])
 
   const createCharacter = useCallback(async (input: MobileCharacterCreationInput) => {
@@ -842,16 +950,31 @@ export function useMobileWorkspace() {
   const submitInventoryMutation = useCallback(async (mutation: Record<string, unknown>) => {
     if (!credentials) throw new Error('room-session-required')
     const requestId = uid('mobile-inventory')
-    await publishRoomEvent(credentials, 'dnd5e-inventory-player-to-dm', {
+    const acknowledgement = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingInventoryAcksRef.current.delete(requestId)
+        reject(new Error('DM 权威端未在 10 秒内确认库存操作，请确认 DM 在线后重试。'))
+      }, INVENTORY_ACK_TIMEOUT_MS)
+      pendingInventoryAcksRef.current.set(requestId, { resolve, reject, timer })
+    })
+    try {
+      await publishRoomEvent(credentials, 'dnd5e-inventory-player-to-dm', {
       id: requestId,
       roomId: credentials.room.roomId,
       memberId: credentials.room.memberId,
       sourceMode: 'player',
       mutation,
       updatedAt: Date.now(),
-    })
-    setNotice('库存操作已提交给 DM 权威端')
-    setTimeout(() => void refreshWorkspace(credentials, workspaceRef.current?.activeCharacterId ?? null), 350)
+      })
+      setNotice('库存操作已提交，等待 Host 确认')
+      await acknowledgement
+      await refreshWorkspace(credentials, workspaceRef.current?.activeCharacterId ?? null, ['characters'])
+    } catch (cause) {
+      const pending = pendingInventoryAcksRef.current.get(requestId)
+      if (pending) clearTimeout(pending.timer)
+      pendingInventoryAcksRef.current.delete(requestId)
+      throw cause
+    }
   }, [credentials, refreshWorkspace])
 
   const spendHitDie = useCallback(async (characterId: string, poolIndex: number) => {
@@ -867,7 +990,7 @@ export function useMobileWorkspace() {
     connection, roomEventStream, error, notice, busy, login, acceptRegisteredAccount, joinRoom, leaveRoom, logout,
     updateProfile, changePassword, deleteAccount, pushPermission, enablePushNotifications, disablePushNotifications,
     refresh: () => refreshWorkspace(), selectCharacter, submitAction, moveControlledToken, sendChat, mutateSharedNote, answerInterrupt,
-    interactWithPoint, setSpellSlot, setSpellPrepared, levelUpCharacter, rollLevelHitPoints, updateCharacterProfile, submitInventoryMutation, spendHitDie, recoverSpellSlot,
+    interactWithPoint, setSpellSlot, setSpellPrepared, levelUpCharacter, rollLevelHitPoints, updateCharacterProfile, setCharacterHitPoints, submitInventoryMutation, spendHitDie, recoverSpellSlot,
     createCharacter, rollCharacterAbilities, attachAccountCharacter,
   }
 }

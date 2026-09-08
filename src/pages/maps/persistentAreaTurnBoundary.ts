@@ -1,4 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 
@@ -12,6 +14,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+/**
+ * Projects an area trigger's Headless action loss into the shared UI turn
+ * economy. The engine combatant state is ephemeral during a turn-boundary
+ * transaction, so leaving this projection implicit makes the log say the
+ * action was consumed while the real player hotbar still exposes it.
+ */
+export function projectDnd5ePersistentAreaActionConsumption(
+  economy: Dnd5eTurnEconomyCounts,
+  actionConsumed: boolean,
+  turnKey: string = economy.turnKey,
+): Dnd5eTurnEconomyCounts {
+  if (!actionConsumed) return economy
+  if (economy.action.current === 0 && economy.turnKey === turnKey) return economy
+  return {
+    ...economy,
+    turnKey,
+    action: { ...economy.action, current: 0 },
+  }
 }
 
 function mergeUnkeyedArrayDelta(
@@ -290,7 +312,9 @@ export function dnd5ePersistentAreaTurnCursorEquals(
     left.slotId === right.slotId
 }
 
-function turnKey(cursor: Dnd5ePersistentAreaTurnCursor): string {
+export function dnd5ePersistentAreaTurnKey(
+  cursor: Pick<Dnd5ePersistentAreaTurnCursor, 'round' | 'slotId' | 'tokenId'>,
+): string {
   return `${cursor.round}:${cursor.slotId || cursor.tokenId}`
 }
 
@@ -315,14 +339,14 @@ export function planDnd5ePersistentAreaTurnTransition(
       timing: 'turn-end',
       round: previous.round,
       tokenId: previous.tokenId,
-      turnKey: turnKey(previous),
+      turnKey: dnd5ePersistentAreaTurnKey(previous),
     })
   }
   boundaries.push({
     timing: 'turn-start',
     round: current.round,
     tokenId: current.tokenId,
-    turnKey: turnKey(current),
+    turnKey: dnd5ePersistentAreaTurnKey(current),
   })
   return { cursor: current, boundaries }
 }
@@ -354,25 +378,44 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
     boundary: Dnd5ePersistentAreaTurnBoundary
     map: BattleMap
     characters: readonly Character[]
-  }) => Promise<{ map: BattleMap; characters: Character[]; logs: string[] }>
+  }) => Promise<{
+    map: BattleMap
+    characters: Character[]
+    logs: string[]
+    events?: readonly Dnd5eCombatEvent[]
+  }>
   expireBoundary: (input: {
     boundary: Dnd5ePersistentAreaTurnBoundary
     map: BattleMap
     characters: readonly Character[]
-  }) => BattleMap
-}): Promise<{ map: BattleMap; characters: Character[]; logs: string[] }> {
+  }) => BattleMap | { map: BattleMap; characters: Character[]; logs?: string[] }
+}): Promise<{
+  map: BattleMap
+  characters: Character[]
+  logs: string[]
+  events: Dnd5eCombatEvent[]
+}> {
   let map = input.map
   let characters = [...input.characters]
   const logs: string[] = []
+  const events: Dnd5eCombatEvent[] = []
   for (const boundary of input.transition.boundaries) {
     const settled = await input.settleBoundary({ boundary, map, characters })
-    map = input.expireBoundary({
+    const expired = input.expireBoundary({
       boundary,
       map: settled.map,
       characters: settled.characters,
     })
-    characters = settled.characters
+    if ('map' in expired && 'characters' in expired) {
+      map = expired.map
+      characters = expired.characters
+      logs.push(...(expired.logs ?? []))
+    } else {
+      map = expired
+      characters = settled.characters
+    }
     logs.push(...settled.logs)
+    events.push(...(settled.events ?? []))
   }
-  return { map, characters, logs }
+  return { map, characters, logs, events }
 }

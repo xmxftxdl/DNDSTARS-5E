@@ -24,7 +24,13 @@ beforeAll(async () => {
   await mkdir(dist, { recursive: true })
   await writeFile(path.join(dist, 'index.html'), '<!doctype html><title>stars</title>')
   proc = spawn(process.execPath, [serverScript, '--host', '127.0.0.1', '--port', '5492', '--root', dist], {
-    env: { ...process.env, STARS_SHARED_ROOT: sharedRoot, STARS_SHARED_SECRET: '' },
+    env: {
+      ...process.env,
+      STARS_SHARED_ROOT: sharedRoot,
+      STARS_SHARED_SECRET: '',
+      ASTRALTRACE_LOCAL_AI_CONFIG_DIR: path.join(sharedRoot, 'local-ai-config'),
+      ASTRALTRACE_LOCAL_VOICE_CONFIG_DIR: path.join(sharedRoot, 'local-voice-config'),
+    },
     stdio: 'ignore',
   })
   const deadline = Date.now() + 8_000

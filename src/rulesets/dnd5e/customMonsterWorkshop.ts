@@ -56,6 +56,10 @@ export interface Dnd5eCustomMonsterTraitDraft {
     | 'keen-sense'
     | 'ambusher'
     | 'charge-damage'
+    | 'relentless'
+    | 'sneak-attack'
+    | 'surprise-attack'
+    | 'stench'
     | 'magic-resistance'
     | 'limited-magic-immunity'
     | 'magic-weapons'
@@ -79,6 +83,11 @@ export interface Dnd5eCustomMonsterTraitDraft {
   chargeSaveAbility: AbilityKey
   chargeSaveDc: number
   chargeSaveCondition: Dnd5eStandardConditionId
+  relentlessMaximumDamage: number
+  sneakAttackDamageDice: string
+  surpriseAttackDamageDice: string
+  stenchRangeFeet: number
+  stenchSaveDc: number
   limitedMagicImmunityMaximumSpellLevel: number
   limitedMagicImmunityAdvantageAboveMaximum: boolean
   limitedMagicImmunityAllowsWilling: boolean
@@ -342,6 +351,11 @@ export function createDnd5eCustomMonsterTraitDraft(): Dnd5eCustomMonsterTraitDra
     chargeSaveAbility: 'str',
     chargeSaveDc: 13,
     chargeSaveCondition: 'prone',
+    relentlessMaximumDamage: 10,
+    sneakAttackDamageDice: '2d6',
+    surpriseAttackDamageDice: '2d6',
+    stenchRangeFeet: 10,
+    stenchSaveDc: 13,
     limitedMagicImmunityMaximumSpellLevel: 6,
     limitedMagicImmunityAdvantageAboveMaximum: true,
     limitedMagicImmunityAllowsWilling: true,
@@ -1125,6 +1139,58 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                     })()
                   : trait.ruleKind === 'magic-resistance'
                     ? { kind: 'magic-resistance' as const, savingThrowAdvantageAgainstMagic: true as const }
+                    : trait.ruleKind === 'relentless'
+                      ? {
+                          kind: 'relentless' as const,
+                          maximumDamage: Math.max(1, Math.min(
+                            1_000_000,
+                            Math.trunc(trait.relentlessMaximumDamage),
+                          )),
+                        }
+                      : trait.ruleKind === 'sneak-attack'
+                        ? (() => {
+                            const dice = parseDice(trait.sneakAttackDamageDice)
+                            return {
+                              kind: 'sneak-attack' as const,
+                              oncePerTurn: true as const,
+                              allyDistanceFeet: 5,
+                              requireNoDisadvantage: true as const,
+                              advantageOrAdjacentAlly: true as const,
+                              extraDamage: {
+                                average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+                                ...dice,
+                                type: 'inherit-primary' as const,
+                              },
+                            }
+                          })()
+                        : trait.ruleKind === 'surprise-attack'
+                          ? (() => {
+                              const dice = parseDice(trait.surpriseAttackDamageDice)
+                              return {
+                                kind: 'surprise-attack' as const,
+                                requiredRound: 1 as const,
+                                targetState: 'currently-surprised' as const,
+                                applyOn: 'each-qualifying-hit' as const,
+                                extraDamage: {
+                                  average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+                                  ...dice,
+                                  type: 'inherit-primary' as const,
+                                },
+                              }
+                            })()
+                          : trait.ruleKind === 'stench'
+                            ? {
+                                kind: 'turn-start-saving-throw-aura' as const,
+                                ruleId: 'stench',
+                                rangeFeet: Math.max(5, Math.min(1_000, Math.trunc(trait.stenchRangeFeet))),
+                                relation: 'any' as const,
+                                ability: 'con' as const,
+                                dc: Math.max(1, Math.min(100, Math.trunc(trait.stenchSaveDc))),
+                                magical: false,
+                                condition: 'poisoned' as const,
+                                duration: 'until-target-next-turn-start' as const,
+                                successfulSaveImmunityRounds: 14_400,
+                              }
                     : trait.ruleKind === 'limited-magic-immunity'
                       ? {
                           kind: 'limited-magic-immunity' as const,
@@ -1159,6 +1225,10 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       rule?.kind === 'limited-magic-immunity' ||
       rule?.kind === 'magic-weapons' ||
       rule?.kind === 'charge-damage' ||
+      rule?.kind === 'relentless' ||
+      rule?.kind === 'sneak-attack' ||
+      rule?.kind === 'surprise-attack' ||
+      rule?.kind === 'turn-start-saving-throw-aura' ||
       rule?.kind === 'conditional-target-bonus'
     const normalizedTrait: Dnd5eMonsterTrait = {
       name: trait.name.trim(),
@@ -1812,6 +1882,9 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       preservedTrait: structuredClone(trait),
       ruleKind: (() => {
         const kind = trait.rule?.kind
+        if (kind === 'turn-start-saving-throw-aura') {
+          return trait.rule?.ruleId === 'stench' ? 'stench' : 'none'
+        }
         return kind === 'undead-fortitude' ||
           kind === 'regeneration' ||
           kind === 'swarm' ||
@@ -1819,6 +1892,9 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
           kind === 'keen-sense' ||
           kind === 'ambusher' ||
           kind === 'charge-damage' ||
+          kind === 'relentless' ||
+          kind === 'sneak-attack' ||
+          kind === 'surprise-attack' ||
           kind === 'magic-resistance' ||
           kind === 'limited-magic-immunity' ||
           kind === 'magic-weapons' ||
@@ -1867,6 +1943,33 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       chargeSaveCondition: trait.rule?.kind === 'charge-damage'
         ? trait.rule.savingThrowOnHit?.conditionOnFailedSave ?? 'prone'
         : 'prone',
+      relentlessMaximumDamage: trait.rule?.kind === 'relentless'
+        ? trait.rule.maximumDamage
+        : 10,
+      sneakAttackDamageDice: trait.rule?.kind === 'sneak-attack'
+        ? `${trait.rule.extraDamage.count}d${trait.rule.extraDamage.sides}${
+            trait.rule.extraDamage.bonus === 0
+              ? ''
+              : trait.rule.extraDamage.bonus > 0
+                ? `+${trait.rule.extraDamage.bonus}`
+                : trait.rule.extraDamage.bonus
+          }`
+        : '2d6',
+      surpriseAttackDamageDice: trait.rule?.kind === 'surprise-attack'
+        ? `${trait.rule.extraDamage.count}d${trait.rule.extraDamage.sides}${
+            trait.rule.extraDamage.bonus === 0
+              ? ''
+              : trait.rule.extraDamage.bonus > 0
+                ? `+${trait.rule.extraDamage.bonus}`
+                : trait.rule.extraDamage.bonus
+          }`
+        : '2d6',
+      stenchRangeFeet: trait.rule?.kind === 'turn-start-saving-throw-aura' && trait.rule.ruleId === 'stench'
+        ? trait.rule.rangeFeet
+        : 10,
+      stenchSaveDc: trait.rule?.kind === 'turn-start-saving-throw-aura' && trait.rule.ruleId === 'stench'
+        ? trait.rule.dc
+        : 13,
       limitedMagicImmunityMaximumSpellLevel: trait.rule?.kind === 'limited-magic-immunity'
         ? trait.rule.maximumSpellLevel
         : 6,

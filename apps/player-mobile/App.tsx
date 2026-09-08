@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { AppState, Image, Pressable, SafeAreaView, StatusBar as NativeStatusBar, StyleSheet, Text, View } from 'react-native'
+import { AppState, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import * as Device from 'expo-device'
+import { requireOptionalNativeModule } from 'expo-modules-core'
 import { StatusBar } from 'expo-status-bar'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { MobileRenderQuality, PlayerTokenView } from '../../packages/mobile-protocol/src'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
+import type { MobileCombatView, MobileRenderQuality, PlayerTokenView } from '../../packages/mobile-protocol/src'
 import { AuthScreen } from './src/components/AuthScreen'
 import { CharacterScreen } from './src/components/CharacterScreen'
 import { CharacterCreateModal } from './src/components/CharacterCreateModal'
@@ -25,6 +25,8 @@ import { MobileSkiaMap } from './src/map/MobileSkiaMap'
 import { TileDiskCache } from './src/map/TileDiskCache'
 import { colors, loadMobileThemePreference, saveMobileThemePreference, type MobileThemePreference } from './src/theme'
 import { installForegroundNotificationHandler } from './src/services/pushNotifications'
+import type { Dnd5eTraversalMode } from '../../src/rulesets/dnd5e/traversal'
+import { mobileItemUseCommand, type MobileMovementIntent } from './src/services/mobileActionCommands'
 
 type Tab = 'home' | 'map' | 'character' | 'chat' | 'settings'
 
@@ -36,8 +38,9 @@ const tabs: Array<{ id: Tab; icon: string; label: string }> = [
   { id: 'settings', icon: '⚙', label: '设置' },
 ]
 
+const optionalDeviceModule = requireOptionalNativeModule<{ totalMemory?: number }>('ExpoDevice')
+
 function AppBody() {
-  const insets = useSafeAreaInsets()
   const mobile = useMobileWorkspace()
   const [tab, setTab] = useState<Tab>('home')
   const [mapDockMode, setMapDockMode] = useState<'actions' | 'navigation'>('actions')
@@ -46,6 +49,7 @@ function AppBody() {
   const [appIsActive, setAppIsActive] = useState(AppState.currentState === 'active')
   const [theme, setTheme] = useState<MobileThemePreference>('dark')
   const [moving, setMoving] = useState(false)
+  const [movementIntent, setMovementIntent] = useState<MobileMovementIntent>({ traversalMode: 'walk' })
   const [cacheStats, setCacheStats] = useState({ diskBytes: 0, gpuBytes: 0 })
   const [actionSheet, setActionSheet] = useState<{ visible: boolean; tab: ActionTab }>({ visible: false, tab: 'actions' })
   const [pendingTarget, setPendingTarget] = useState<PendingMapTarget | null>(null)
@@ -79,7 +83,7 @@ function AppBody() {
         setQualityState(stored)
         return
       }
-      const totalMemory = Number(Device.totalMemory ?? 0)
+      const totalMemory = Number(optionalDeviceModule?.totalMemory ?? 0)
       setQualityState(totalMemory > 0 && totalMemory < 4.5 * 1024 ** 3 ? 'lite' : 'standard')
     })
   }, [])
@@ -197,7 +201,7 @@ function AppBody() {
   const quickToken = scene?.controlledTokens.find((entry) => entry.characterId === quickCharacter?.id)
   const quickPortrait = quickToken?.portraitSource ?? (quickCharacter?.tokenPortrait || quickCharacter?.portrait ? { uri: quickCharacter.tokenPortrait || quickCharacter.portrait || '' } : undefined)
 
-  return <View style={[styles.app, { paddingTop: insets.top }]}>
+  return <View style={styles.app}>
     {tab !== 'map' && <View style={styles.header}>
       <Text style={styles.headerTitle}>{pageTitle(tab)}</Text>
       <View style={styles.connection}><View style={[styles.connectionDot, { backgroundColor: connectionColor }]} /><Text style={styles.connectionText}>{realtimeOpen ? '实时同步' : connectionLabel(mobile.connection)}</Text></View>
@@ -216,7 +220,7 @@ function AppBody() {
         quality={quality}
         moving={moving}
         onMovingChange={setMoving}
-        onMove={mobile.moveControlledToken}
+        onMove={(tokenId, x, y) => mobile.moveControlledToken(tokenId, x, y, movementIntent)}
         onCacheStats={setCacheStats}
         targeting={pendingTarget?.kind ?? null}
         onTargetToken={(token) => void finishTarget(token)}
@@ -224,6 +228,7 @@ function AppBody() {
         interactionPoints={workspace.interactionPoints}
         onInteract={mobile.interactWithPoint}
       />}
+      {tab === 'map' && workspace.combat?.active && <MobileInitiativeOverlay combat={workspace.combat} />}
       {tab === 'map' && !scene && <EmptyState title="当前没有地图" body="DM 切换地图后，玩家可见场景会自动同步。" />}
       {tab === 'character' && <CharacterScreen
         workspace={workspace}
@@ -234,6 +239,7 @@ function AppBody() {
         onLevelUp={mobile.levelUpCharacter}
         onRollLevelHitPoints={mobile.rollLevelHitPoints}
         onUpdateProfile={mobile.updateCharacterProfile}
+        onSetHitPoints={mobile.setCharacterHitPoints}
         onInventoryMutation={mobile.submitInventoryMutation}
         onSpendHitDie={mobile.spendHitDie}
         onRecoverSpellSlot={mobile.recoverSpellSlot}
@@ -317,13 +323,18 @@ function AppBody() {
           openActions('items')
           return
         }
-        void mobile.submitAction({ type: 'dnd5e-item-use', dnd5eItemUse: { instanceId: entry.instanceId } }, `使用${entry.item.name}`, !workspace.combat?.active)
+        void mobile.submitAction(mobileItemUseCommand({ instanceId: entry.instanceId, useActionId: action.id }), `使用${entry.item.name}`, !workspace.combat?.active)
           .catch((cause) => setLocalNotice(cause instanceof Error ? cause.message : '物品使用失败'))
       }}
     /> : null}
+    {tab === 'map' && scene && moving && !spectator ? <MovementIntentPanel
+      value={movementIntent}
+      currentElevationFeet={quickToken?.elevation ?? 0}
+      onChange={setMovementIntent}
+    /> : null}
     {!!pendingTarget && <View style={styles.targetControls}>{pendingTarget.finish && <Pressable style={styles.finishTarget} onPress={() => void finishOptionalTargeting()}><Text style={styles.finishTargetText}>{pendingTarget.finishLabel || '完成选点'}</Text></Pressable>}<Pressable style={styles.cancelTarget} onPress={() => setPendingTarget(null)}><Text style={styles.cancelTargetText}>{pendingTarget.label} · 取消选点</Text></Pressable></View>}
     {tab === 'map'
-      ? <View style={[styles.mapDock, { paddingBottom: Math.max(5, insets.bottom) }]}>
+      ? <View style={styles.mapDock}>
         {mapDockMode === 'navigation'
           ? <>
             {tabs.map((item) => <Pressable testID={`tab-${item.id}`} accessibilityRole="button" accessibilityLabel={item.label} key={item.id} style={styles.tab} onPress={() => setTab(item.id)}><Text style={[styles.tabIcon, item.id === 'map' && styles.tabActive]}>{item.icon}</Text><Text style={[styles.tabLabel, item.id === 'map' && styles.tabActive]}>{item.label}</Text></Pressable>)}
@@ -340,7 +351,7 @@ function AppBody() {
             <DockSwitch label="导航" icon="☰" onPress={() => setMapDockMode('navigation')} />
           </>}
       </View>
-      : <View style={[styles.tabBar, { paddingBottom: Math.max(7, insets.bottom) }]}>
+      : <View style={styles.tabBar}>
         {tabs.map((item) => <Pressable testID={`tab-${item.id}`} accessibilityRole="button" accessibilityLabel={item.label} key={item.id} style={styles.tab} onPress={() => setTab(item.id)}><Text style={[styles.tabIcon, tab === item.id && styles.tabActive]}>{item.icon}</Text><Text style={[styles.tabLabel, tab === item.id && styles.tabActive]}>{item.label}</Text></Pressable>)}
       </View>}
     <CombatActionSheet
@@ -372,8 +383,50 @@ function RailButton({ assetPath, assetBaseUrl, fallback, label, active, onPress 
   </Pressable>
 }
 
+function MobileInitiativeOverlay({ combat }: { combat: MobileCombatView }) {
+  return <View pointerEvents="box-none" style={styles.initiativeOverlay}>
+    <View style={styles.initiativeRound}><Text style={styles.initiativeRoundText}>R{combat.round}</Text></View>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.initiativeEntries}>
+      {combat.initiativeOrder.map((entry) => {
+        const active = entry.tokenId === combat.currentTokenId
+        return <View key={entry.tokenId} style={[styles.initiativeEntry, active && styles.initiativeEntryActive]}>
+          {entry.portraitSource
+            ? <Image source={entry.portraitSource} style={styles.initiativePortrait} />
+            : <View style={[styles.initiativePortrait, styles.initiativeFallback, { backgroundColor: entry.color || colors.surface }]}><Text numberOfLines={1} style={styles.initiativeFallbackText}>{entry.label.slice(0, 1)}</Text></View>}
+          <View style={styles.initiativeRoll}><Text style={styles.initiativeRollText}>{entry.roll}</Text></View>
+        </View>
+      })}
+    </ScrollView>
+  </View>
+}
+
 function DockSwitch({ label, icon, onPress }: { label: string; icon: string; onPress: () => void }) {
   return <Pressable accessibilityRole="button" accessibilityLabel={`${label}栏`} style={styles.dockSwitch} onPress={onPress}><Text style={styles.dockSwitchIcon}>{icon}</Text><Text style={styles.dockSwitchLabel}>{label}</Text></Pressable>
+}
+
+const movementModes: Array<{ id: Dnd5eTraversalMode; label: string }> = [
+  { id: 'walk', label: '步行' }, { id: 'climb', label: '攀爬' }, { id: 'swim', label: '游泳' },
+  { id: 'fly', label: '飞行' }, { id: 'long-jump-running', label: '助跑跳跃' },
+  { id: 'long-jump-standing', label: '立定跳跃' }, { id: 'fall', label: '坠落' },
+]
+
+function MovementIntentPanel({ value, currentElevationFeet, onChange }: {
+  value: MobileMovementIntent
+  currentElevationFeet: number
+  onChange: (value: MobileMovementIntent) => void
+}) {
+  const elevation = value.targetElevationFeet ?? currentElevationFeet
+  return <View style={styles.movementPanel}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.movementModes}>
+      {movementModes.map((entry) => <Pressable key={entry.id} style={[styles.movementMode, value.traversalMode === entry.id && styles.movementModeActive]} onPress={() => onChange({ ...value, traversalMode: entry.id, ...(entry.id === 'fall' ? { targetElevationFeet: 0 } : {}) })}><Text style={styles.movementModeText}>{entry.label}</Text></Pressable>)}
+    </ScrollView>
+    <View style={styles.movementDetails}>
+      <Pressable style={[styles.movementFlag, value.carefulMovement && styles.movementModeActive]} onPress={() => onChange({ ...value, carefulMovement: !value.carefulMovement })}><Text style={styles.movementModeText}>谨慎移动</Text></Pressable>
+      <Pressable style={[styles.movementFlag, value.standFromProne === false && styles.movementModeActive]} onPress={() => onChange({ ...value, standFromProne: value.standFromProne === false ? undefined : false })}><Text style={styles.movementModeText}>保持倒地</Text></Pressable>
+      {(value.traversalMode === 'fly' || value.traversalMode === 'climb' || value.traversalMode === 'fall') && <TextInput accessibilityLabel="目标海拔" value={String(elevation)} onChangeText={(text) => onChange({ ...value, targetElevationFeet: Number.isFinite(Number(text)) ? Number(text) : currentElevationFeet })} keyboardType="numbers-and-punctuation" style={styles.elevationInput} />}
+      <Text style={styles.elevationLabel}>当前 {currentElevationFeet} 尺</Text>
+    </View>
+  </View>
 }
 
 function LoadingScreen({ label, detail, actionLabel, onAction }: { label: string; detail?: string; actionLabel?: string; onAction?: () => void }) {
@@ -408,8 +461,8 @@ function actionRejectionLabel(reason?: string) {
 }
 
 export default function App() {
-  useEffect(() => { installForegroundNotificationHandler() }, [])
-  return <GestureHandlerRootView style={styles.safe}><SafeAreaProvider><SafeAreaView style={styles.safe}><NativeStatusBar backgroundColor={colors.background} /><StatusBar style="auto" /><AppBody /></SafeAreaView></SafeAreaProvider></GestureHandlerRootView>
+  useEffect(() => { void installForegroundNotificationHandler() }, [])
+  return <SafeAreaProvider initialMetrics={initialWindowMetrics}><GestureHandlerRootView style={styles.safe}><SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}><StatusBar hidden /><AppBody /></SafeAreaView></GestureHandlerRootView></SafeAreaProvider>
 }
 
 const styles = StyleSheet.create({
@@ -419,6 +472,8 @@ const styles = StyleSheet.create({
   tabBar: { minHeight: 62, flexDirection: 'row', backgroundColor: '#0c0c16', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 7 }, tab: { flex: 1, minWidth: 48, alignItems: 'center', justifyContent: 'center', gap: 2 }, tabIcon: { color: colors.muted, fontSize: 19 }, tabLabel: { color: colors.muted, fontSize: 9, fontWeight: '700' }, tabActive: { color: '#b69cff' },
   mapDock: { minHeight: 62, flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#0a0a13f7', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 5, paddingHorizontal: 5, gap: 4 }, railAction: { flex: 1, minWidth: 54, borderRadius: 12, backgroundColor: '#11111df2', borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, railActionActive: { borderColor: colors.teal, backgroundColor: '#123735f2' }, railArtwork: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: '#ffffff24' }, railIcon: { color: colors.primary, fontSize: 17, fontWeight: '900' }, railLabel: { color: colors.text, fontSize: 8, fontWeight: '800', marginTop: 1 }, dockSwitch: { flex: 1, minWidth: 54, borderRadius: 12, borderWidth: 1, borderColor: '#6f54aa', backgroundColor: '#211936', alignItems: 'center', justifyContent: 'center' }, dockSwitchIcon: { color: '#c4b5fd', fontSize: 18, fontWeight: '900' }, dockSwitchLabel: { color: '#d8ccff', fontSize: 8, fontWeight: '900', marginTop: 2 },
   quickCharacterButton: { position: 'absolute', left: 12, bottom: 80, width: 56, height: 56, borderRadius: 28, borderWidth: 2, borderColor: '#c4b5fd', backgroundColor: colors.primarySoft, overflow: 'visible', alignItems: 'center', justifyContent: 'center', shadowColor: '#8b5cf6', shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 0 }, elevation: 12 }, quickCharacterImage: { width: 52, height: 52, borderRadius: 26 }, quickCharacterAvatar: { fontSize: 27 }, quickCharacterBadge: { position: 'absolute', bottom: -8, backgroundColor: '#191628f5', borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 }, quickCharacterBadgeText: { color: '#ddd6fe', fontSize: 7, fontWeight: '900' },
+  movementPanel: { position: 'absolute', left: 76, right: 12, bottom: 72, borderRadius: 14, borderWidth: 1, borderColor: '#38bdf866', backgroundColor: '#090c16f2', padding: 8, gap: 7, elevation: 18 }, movementModes: { gap: 6 }, movementMode: { borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 9, paddingVertical: 7 }, movementModeActive: { borderColor: colors.teal, backgroundColor: '#0b3735' }, movementModeText: { color: colors.text, fontSize: 8, fontWeight: '900' }, movementDetails: { flexDirection: 'row', alignItems: 'center', gap: 6 }, movementFlag: { borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, paddingVertical: 6 }, elevationInput: { width: 58, color: colors.text, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, paddingVertical: 5, fontSize: 9 }, elevationLabel: { color: colors.muted, fontSize: 8 },
+  initiativeOverlay: { position: 'absolute', left: 10, right: 10, top: 7, zIndex: 30, minHeight: 48, flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, borderColor: '#ffffff1f', backgroundColor: '#080912db', paddingHorizontal: 6, paddingVertical: 5, elevation: 16 }, initiativeRound: { minWidth: 30, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 }, initiativeRoundText: { color: colors.warning, fontSize: 10, fontWeight: '900' }, initiativeEntries: { alignItems: 'center', gap: 5, paddingRight: 6 }, initiativeEntry: { width: 38, height: 38, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, overflow: 'visible' }, initiativeEntryActive: { width: 44, height: 44, borderColor: colors.warning, borderWidth: 2, shadowColor: colors.warning, shadowOpacity: .55, shadowRadius: 7, elevation: 8 }, initiativePortrait: { width: '100%', height: '100%', borderRadius: 7 }, initiativeFallback: { alignItems: 'center', justifyContent: 'center' }, initiativeFallbackText: { color: colors.text, fontSize: 15, fontWeight: '900' }, initiativeRoll: { position: 'absolute', right: -4, top: -5, minWidth: 18, height: 18, paddingHorizontal: 3, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.warning, borderWidth: 1, borderColor: '#fff7c2' }, initiativeRollText: { color: '#15110a', fontSize: 8, fontWeight: '900' },
   targetControls: { position: 'absolute', left: 12, right: 74, bottom: 84, flexDirection: 'row', gap: 7 }, cancelTarget: { flex: 1, alignItems: 'center', backgroundColor: '#30220df5', borderColor: colors.warning, borderWidth: 1, borderRadius: 13, padding: 11 }, cancelTargetText: { color: colors.warning, fontWeight: '900', fontSize: 10 }, finishTarget: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b2b2af5', borderColor: colors.teal, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12 }, finishTargetText: { color: colors.teal, fontWeight: '900', fontSize: 10 },
   notice: { position: 'absolute', left: 12, right: 12, bottom: 72, alignItems: 'center' }, noticeText: { color: colors.text, backgroundColor: '#151322f4', borderColor: colors.border, borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8, fontSize: 10, fontWeight: '800' },
   loading: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }, brandMark: { width: 70, height: 70, borderRadius: 24, backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' }, brandGlyph: { color: '#c4b5fd', fontSize: 34 }, brand: { color: colors.text, fontSize: 34, fontWeight: '900', marginTop: 15 }, loadingLabel: { color: colors.muted, marginTop: 8 }, error: { color: colors.danger, fontSize: 11, marginTop: 10, textAlign: 'center' }, secondaryButton: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 10, marginTop: 18 }, secondaryText: { color: colors.text, fontWeight: '800' },

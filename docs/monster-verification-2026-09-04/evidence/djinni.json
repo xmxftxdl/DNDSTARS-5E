@@ -1,0 +1,204 @@
+{
+  "id": "srd-5.1:djinni",
+  "slug": "djinni",
+  "name": "气巨灵",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：制造旋风需要持续、可移动且依赖视线的区域实体，并携带被束缚目标、处理进入触发、营救检定和脱离放置。现有区域规则尚不能完整结算这些关系字段。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "scimitar",
+      "name": "弯刀",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "create-whirlwind",
+      "name": "创造旋风",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "scimitar-thunder",
+      "name": "弯刀（雷鸣）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 48,
+      "slug": "djinni",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:08:56.197Z",
+      "name": "气巨灵",
+      "actionId": "scimitar",
+      "actionName": "弯刀",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "11",
+      "total": 334,
+      "mapId": "verify-ui-djinni-scimitar-1788566936260",
+      "combatId": "verify-ui-djinni-scimitar-1788566936260:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "气巨灵 使用弯刀攻击 验证目标：弯刀 → 验证目标 2+9=11 命中；共造成 17 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:09 PM\n结算\n\n气巨灵 使用弯刀攻击 验证目标：弯刀 → 验证目标 2+9=11 命中；共造成 17 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：弯刀｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 2；最终采用 2；调整值 +9。\n结果 · 11 vs AC 10：命中。\n伤害骰 · 弯刀（基础伤害 1·挥砍）｜2d6 骰面：6 + 3 = 9｜固定加值 +5｜小计 14\n伤害骰 · 弯刀（基础伤害 2·闪电）｜1d6 骰面：3 = 3｜固定加值 +0｜小计 3\n气巨灵｜消耗动作\n验证目标｜受到 17 点伤害｜HP 320 → 303",
+      "playerLog": "气巨灵 使用弯刀攻击 验证目标：弯刀 → 验证目标 2+9=11 命中；共造成 17 点伤害。",
+      "afterHp": 303,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:09:23.750Z",
+      "evidenceFile": "ui-cases/monsters/048-djinni.json"
+    },
+    {
+      "index": 81,
+      "slug": "djinni",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:53:38.795Z",
+      "name": "气巨灵",
+      "actionId": "scimitar",
+      "actionName": "弯刀",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-djinni-scimitar-1788558818848",
+      "combatId": "verify-ui-djinni-scimitar-1788558818848:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "气巨灵 使用弯刀攻击 验证目标：弯刀 → 验证目标 20+9=29 命中；共造成 34 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:54 PM\n结算\n\n气巨灵 使用弯刀攻击 验证目标：弯刀 → 验证目标 20+9=29 命中；共造成 34 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：弯刀｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 20；最终采用 20；调整值 +9。\n结果 · 29 vs AC 10：重击。\n伤害骰 · 弯刀（基础伤害 1·挥砍）｜4d6 骰面：3 + 4 + 6 + 6 = 19｜固定加值 +5｜小计 24\n伤害骰 · 弯刀（基础伤害 2·闪电）｜2d6 骰面：5 + 5 = 10｜固定加值 +0｜小计 10\n气巨灵｜消耗动作\n验证目标｜受到 34 点伤害｜HP 320 → 286",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/气巨灵 使用弯刀攻击 验证目标：/)\nExpected: \u001b[32m\"气巨灵 使用弯刀攻击 验证目标：弯刀 → 验证目标 20+9=29 命中；共造成 34 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/气巨灵 使用弯刀攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:54:13.434Z",
+      "evidenceFile": "ui-cases/monsters/081-djinni.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "元素消亡",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

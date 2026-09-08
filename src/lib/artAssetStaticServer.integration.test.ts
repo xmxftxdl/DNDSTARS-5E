@@ -89,6 +89,8 @@ async function startStaticServer(options: {
       STARS_ACCOUNT_STORAGE: 'json',
       STARS_SECURITY_MODE: 'development',
       STARS_SHARED_ROOT: options.sharedRoot,
+      ASTRALTRACE_LOCAL_AI_CONFIG_DIR: path.join(options.sharedRoot, 'local-ai-config'),
+      ASTRALTRACE_LOCAL_VOICE_CONFIG_DIR: path.join(options.sharedRoot, 'local-voice-config'),
       STARS_ART_ASSET_ROOT: options.artRoot ?? '',
       STARS_ART_ASSET_MANIFEST_PATH: options.manifestPath ?? '',
       STARS_ART_ASSET_MANIFEST_SHA256: options.manifestSha256 ?? '',

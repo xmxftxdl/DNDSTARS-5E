@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
+import { createDnd5eMechanicalEffect } from '../rulesets/dnd5e/activeEffects'
 import {
   createEmptyMapGeometry,
   DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
@@ -7,9 +8,13 @@ import {
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
+  mapGeometryLineOfEffectBlocked,
   mapGeometryLineOfSightBlocked,
   mapGeometryGridSelectionBoundary,
+  dnd5ePersistentAreaTeleportationBlocker,
+  dnd5ePersistentAreaTeleportationBoundary,
   mapGeometryMovementBlocked,
+  mapGeometryOrdinaryProjectileBlocked,
   mapGeometrySegments,
   mapGeometrySimplifyTerrainRegionPoints,
   mapGeometryTokenElevation,
@@ -62,6 +67,37 @@ describe('map geometry', () => {
     })).toBe(false)
   })
 
+  it('opens only the mapped barrier volume covered by a persistent passage', () => {
+    const g = geometry()
+    const walker = token('walker', 50, 75)
+    const passageMap: BattleMap = {
+      ...map,
+      tokens: [walker],
+      dnd5ePluginAreas: [{
+        id: 'passwall-opening', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:passwall',
+        sourceKind: 'core-spell', coreSpellId: 'passwall', label: '穿墙术', color: '#a78bfa',
+        sourceCharacterId: 'caster', sourceTokenId: walker.id,
+        cells: [{ col: 2, row: 1 }], anchorCell: { col: 2, row: 1 }, anchorMode: 'fixed',
+        createdRound: 1, expiresAfterRound: 600,
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 8 },
+        blocking: { suppressesMappedBarriers: true },
+      }],
+    }
+    expect(mapGeometryMovementBlocked({
+      geometry: g, map: passageMap, token: walker, to: { x: 150, y: 75 },
+    }).blocked).toBe(false)
+    expect(mapGeometryLineOfSightBlocked({
+      geometry: g, map: passageMap, from: walker, to: { x: 150, y: 75 },
+    })).toBe(false)
+    expect(mapGeometryLineOfEffectBlocked({
+      geometry: g, map: passageMap, from: walker, to: { x: 150, y: 75 },
+    })).toBe(false)
+
+    expect(mapGeometryMovementBlocked({
+      geometry: g, map: passageMap, token: token('outside-opening', 50, 150), to: { x: 150, y: 150 },
+    })).toMatchObject({ blocked: true, entityId: 'wall' })
+  })
+
   it('treats persistent wall declarations as authoritative movement, vision and effect-line blockers', () => {
     const viewer = token('viewer', 25, 25)
     const target = token('target', 125, 25, { type: 'enemy' })
@@ -93,6 +129,147 @@ describe('map geometry', () => {
       fromElevationFeet: 15,
       toElevationFeet: 15,
     }).blocked).toBe(false)
+  })
+
+  it('supports typed directional ward boundaries without trapping creatures already inside', () => {
+    const caster = token('caster', 75, 25)
+    const livingOutside = token('living', 25, 25, { type: 'enemy', creatureTypes: ['类人生物'] })
+    const livingInside = token('inside', 75, 25, { type: 'enemy', creatureTypes: ['类人生物'] })
+    const undead = token('undead', 25, 25, { type: 'enemy', creatureTypes: ['亡灵'] })
+    const wardMap: BattleMap = {
+      ...map,
+      tokens: [caster, livingOutside, livingInside, undead],
+      dnd5ePluginAreas: [{
+        id: 'antilife-shell', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:antilife-shell',
+        sourceKind: 'core-spell', coreSpellId: 'antilife-shell', label: '防生物力场', color: '#8b5cf6',
+        sourceCharacterId: 'caster-character', sourceTokenId: caster.id,
+        cells: [{ col: 1, row: 0 }], anchorCell: { col: 1, row: 0 }, anchorMode: 'source-token',
+        createdRound: 1, expiresAfterRound: 100,
+        blocking: {
+          movement: true, movementMode: 'enter', excludeSourceToken: true,
+          excludedCreatureTypes: ['construct', 'undead'],
+        },
+      }],
+    }
+    expect(mapGeometryMovementBlocked({ map: wardMap, token: livingOutside, to: { x: 75, y: 25 } }))
+      .toMatchObject({ blocked: true, entityId: 'antilife-shell' })
+    expect(mapGeometryMovementBlocked({ map: wardMap, token: livingInside, to: { x: 25, y: 25 } }).blocked)
+      .toBe(false)
+    expect(mapGeometryMovementBlocked({ map: wardMap, token: undead, to: { x: 75, y: 25 } }).blocked)
+      .toBe(false)
+    expect(mapGeometryMovementBlocked({ map: wardMap, token: caster, to: { x: 25, y: 25 } }).blocked)
+      .toBe(false)
+  })
+
+  it('blocks teleport entry and exit from persistent-area boundary declarations without treating teleport as a path', () => {
+    const outside = token('outside', 25, 25)
+    const inside = token('inside', 75, 25)
+    const wardMap: BattleMap = {
+      ...map,
+      tokens: [outside, inside],
+      dnd5ePluginAreas: [{
+        id: 'private-sanctum', pluginId: 'srd-5.1', featureId: 'spell:private-sanctum',
+        sourceKind: 'core-spell', coreSpellId: 'private-sanctum', label: '秘法圣所', color: '#8b5cf6',
+        sourceCharacterId: 'caster', sourceTokenId: 'caster', cells: [{ col: 1, row: 0 }],
+        createdRound: 1, expiresAfterRound: 100,
+        blocking: { blocksTeleportationEntry: true, blocksTeleportationExit: true },
+      }],
+    }
+    expect(dnd5ePersistentAreaTeleportationBlocker({
+      map: wardMap, token: outside, from: outside, to: inside,
+    })).toBe('private-sanctum')
+    expect(dnd5ePersistentAreaTeleportationBlocker({
+      map: wardMap, token: inside, from: inside, to: outside,
+    })).toBe('private-sanctum')
+    expect(dnd5ePersistentAreaTeleportationBlocker({
+      map: wardMap, token: outside, from: outside, to: { x: 125, y: 25 },
+    })).toBeUndefined()
+  })
+
+  it('returns a bounded saving-throw contract for teleporting out of a ward', () => {
+    const inside = token('inside', 75, 25)
+    const outside = token('outside', 125, 25)
+    const wardMap: BattleMap = {
+      ...map,
+      tokens: [inside],
+      dnd5ePluginAreas: [{
+        id: 'forcecage', pluginId: 'srd-5.1', featureId: 'spell:forcecage',
+        sourceKind: 'core-spell', coreSpellId: 'forcecage', label: '力场囚笼', color: '#8b5cf6',
+        sourceCharacterId: 'caster', sourceTokenId: 'caster', cells: [{ col: 1, row: 0 }],
+        createdRound: 1, expiresAfterRound: 600,
+        blocking: {
+          blocksTeleportationExit: true,
+          teleportationExitSavingThrow: { ability: 'cha', dc: 17 },
+        },
+      }],
+    }
+    expect(dnd5ePersistentAreaTeleportationBoundary({
+      map: wardMap, token: inside, from: inside, to: outside,
+    })).toEqual({
+      areaId: 'forcecage', areaLabel: '力场囚笼',
+      savingThrow: { ability: 'cha', dc: 17 },
+    })
+    expect(dnd5ePersistentAreaTeleportationBlocker({
+      map: wardMap, token: inside, from: inside, to: outside,
+    })).toBe('forcecage')
+  })
+
+  it('enforces Tiny Hut occupant permissions and directional spell/vision boundaries', () => {
+    const authorized = token('authorized', 25, 25)
+    const outsider = token('outsider', 25, 75, { type: 'enemy' })
+    const inside = { x: 75, y: 25 }
+    const hutMap: BattleMap = {
+      ...map,
+      tokens: [authorized, outsider],
+      dnd5ePluginAreas: [{
+        id: 'tiny-hut', pluginId: 'srd-5.1', featureId: 'spell:tiny-hut',
+        sourceKind: 'core-spell', coreSpellId: 'tiny-hut', label: '小屋', color: '#8b5cf6',
+        sourceCharacterId: 'caster', sourceTokenId: 'authorized', cells: [{ col: 1, row: 0 }],
+        createdRound: 1, expiresAfterRound: 4_800,
+        illuminationOverride: 'darkness',
+        blocking: {
+          movement: true,
+          movementMode: 'enter',
+          entryPermission: 'occupants-at-creation',
+          authorizedTokenIds: ['authorized'],
+          blocksTeleportationEntry: true,
+          vision: true,
+          visionMode: 'outside-in',
+          lineOfEffect: true,
+          lineOfEffectMode: 'boundary',
+        },
+      }],
+    }
+
+    expect(mapGeometryMovementBlocked({ map: hutMap, token: authorized, to: inside }).blocked).toBe(false)
+    expect(mapGeometryMovementBlocked({ map: hutMap, token: outsider, to: inside }))
+      .toMatchObject({ blocked: true, entityId: 'tiny-hut' })
+    expect(dnd5ePersistentAreaTeleportationBlocker({
+      map: hutMap, token: authorized, from: authorized, to: inside,
+    })).toBeUndefined()
+    expect(dnd5ePersistentAreaTeleportationBlocker({
+      map: hutMap, token: outsider, from: outsider, to: inside,
+    })).toBe('tiny-hut')
+
+    expect(mapGeometryLineOfEffectBlocked({
+      map: hutMap, from: { x: 60, y: 25 }, to: { x: 90, y: 25 },
+    })).toBe(false)
+    expect(mapGeometryLineOfEffectBlocked({ map: hutMap, from: inside, to: { x: 125, y: 25 } })).toBe(true)
+    expect(mapGeometryLineOfEffectBlocked({ map: hutMap, from: { x: 25, y: 25 }, to: inside })).toBe(true)
+    expect(mapGeometryLineOfSightBlocked({ map: hutMap, from: inside, to: { x: 125, y: 25 } })).toBe(false)
+    expect(mapGeometryLineOfSightBlocked({ map: hutMap, from: { x: 25, y: 25 }, to: inside })).toBe(true)
+    expect(mapGeometryIlluminationAtPoint({ map: hutMap, point: inside })).toBe('darkness')
+    expect(mapGeometryIlluminationAtPoint({ map: hutMap, point: { x: 125, y: 25 } })).toBe('bright')
+    expect(mapGeometryIlluminationAtPoint({
+      map: {
+        ...hutMap,
+        dnd5ePluginAreas: hutMap.dnd5ePluginAreas?.map((area) => ({
+          ...area,
+          illuminationOverride: 'dim' as const,
+        })),
+      },
+      point: inside,
+    })).toBe('dim')
   })
 
   it('blocks ordinary sight through a heavy-obscuration persistent area, including when both endpoints are outside', () => {
@@ -277,6 +454,43 @@ describe('map geometry', () => {
       ...openMap,
       tokens: [attacker, { ...ally, y: 220 }, target],
     })).toMatchObject({ cover: 'none', armorClassBonus: 0 })
+  })
+
+  it('blocks ordinary projectiles and only Small airborne or gaseous creatures at Wind Wall', () => {
+    const wall = {
+      id: 'wind-wall-area', sourceKind: 'core-spell' as const, coreSpellId: 'wind-wall',
+      pluginId: 'srd-5.1', featureId: 'spell:wind-wall', color: '#ffffff',
+      label: 'Wind Wall', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 3, sourceSpellSaveDc: 15, createdRound: 1, expiresAfterRound: 11,
+      anchorMode: 'fixed' as const, cells: [{ col: 2, row: 0 }],
+      vertical: { mode: 'volume' as const, baseElevationFeet: 0, heightFeet: 15 },
+      blocking: { movement: true, movementMode: 'boundary' as const },
+    }
+    const attacker = token('attacker', 25, 25)
+    const target = token('target', 225, 25, { type: 'enemy' })
+    const wallMap = { ...map, tokens: [attacker, target], dnd5ePluginAreas: [wall] }
+    expect(mapGeometryOrdinaryProjectileBlocked({ map: wallMap, from: attacker, to: target })).toBe(true)
+
+    expect(mapGeometryMovementBlocked({
+      map: wallMap,
+      token: token('medium-flyer', 25, 25, { elevationFeet: 5 }),
+      to: { x: 225, y: 25 }, fromElevationFeet: 5, toElevationFeet: 5,
+    }).blocked).toBe(false)
+    expect(mapGeometryMovementBlocked({
+      map: wallMap,
+      token: token('small-flyer', 25, 25, { creatureSize: '小型', elevationFeet: 5 }),
+      to: { x: 225, y: 25 }, fromElevationFeet: 5, toElevationFeet: 5,
+    })).toMatchObject({ blocked: true, entityId: 'wind-wall-area' })
+    expect(mapGeometryMovementBlocked({
+      map: wallMap,
+      token: token('mist', 25, 25, {
+        dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({
+          definitionId: 'srd-5.1:spell:gaseous-form', label: 'Gaseous Form',
+          source: { kind: 'spell', rulesId: 'gaseous-form', magical: true }, targetId: 'mist',
+        })] },
+      }),
+      to: { x: 225, y: 25 },
+    })).toMatchObject({ blocked: true, entityId: 'wind-wall-area' })
   })
 
   it('does not grant creature cover when the attack ray passes above it', () => {
@@ -555,6 +769,19 @@ describe('map geometry', () => {
     expect(normalized?.maps[0].walls[0].material).toBe('stone')
   })
 
+  it('normalizes authoritative weather and overhead space for environmental spell rules', () => {
+    const g = geometry()
+    const explicit = normalizeSharedMapGeometry({
+      schemaVersion: 3,
+      maps: [{ ...g, weather: 'storm', overheadSpace: 'confined' }],
+      updatedAt: 2,
+    })
+    expect(explicit?.maps[0]).toMatchObject({ weather: 'storm', overheadSpace: 'confined' })
+
+    const legacy = normalizeSharedMapGeometry({ schemaVersion: 1, maps: [g], updatedAt: 2 })
+    expect(legacy?.maps[0]).toMatchObject({ weather: 'normal', overheadSpace: 'open' })
+  })
+
   it('uses terrain as the minimum absolute elevation for legacy or stale tokens', () => {
     const g = geometry()
     g.obstacles.push({
@@ -688,5 +915,43 @@ describe('map geometry', () => {
     })).toBeUndefined()
     expect(normalizeSharedMapGeometry({ schemaVersion: '1', maps: [g], updatedAt: 2 })).toBeUndefined()
     expect(normalizeSharedMapGeometry({ schemaVersion: 4, maps: [g], updatedAt: 2 })).toBeUndefined()
+  })
+
+  it('does not block adjacent attacks when both tokens are on the same side of a closed door', () => {
+    const liveMap: BattleMap = {
+      ...map,
+      id: 'roper-map',
+      width: 1024,
+      height: 1024,
+      gridSize: 25,
+      tokens: [],
+    }
+    const liveGeometry: MapGeometryState = {
+      ...createEmptyMapGeometry(liveMap.id, 1),
+      walls: [{
+        id: 'door-wall', kind: 'wall', label: '墙',
+        points: [{ x: 840, y: 490 }, { x: 840, y: 560 }],
+        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+      doors: [{
+        id: 'door', kind: 'door', label: '门',
+        points: [{ x: 840, y: 492.5 }, { x: 840, y: 560 }],
+        state: 'closed', openState: 'closed', lockState: 'unlocked',
+        physicalState: 'intact', secret: false,
+        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+    }
+    const roper = token('roper', 900, 500, { type: 'enemy', size: 2 })
+    const gaseousTarget = token('gaseous-target', 862.5, 562.5)
+    expect(mapGeometryLineOfEffectBlocked({
+      geometry: liveGeometry,
+      map: liveMap,
+      from: roper,
+      to: gaseousTarget,
+      fromElevationFeet: 0,
+      toElevationFeet: 0,
+    })).toBe(false)
   })
 })

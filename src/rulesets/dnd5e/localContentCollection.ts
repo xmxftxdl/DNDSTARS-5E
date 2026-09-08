@@ -22,12 +22,14 @@ export const DND5E_LOCAL_COLLECTION_MAX_FILES = 2048
 export type Dnd5eLocalContentCollectionKey = keyof Dnd5eContentPackageContributionsV2
 type CollectionKey = Dnd5eLocalContentCollectionKey
 type LocalCollectionFileReference = string | readonly string[]
-type ImageTargetCategory = 'race' | 'feature' | 'feat' | 'spell' | 'item' | 'monster'
+type ImageTargetCategory = 'race' | 'feature' | 'feat' | 'spell' | 'item' | 'monster' | 'subclassAbility'
 type ImageTargetSlot = 'icon' | 'portrait' | 'tokenPortrait' | 'initiativePortrait'
 
 interface LocalCollectionImageTarget {
   category: ImageTargetCategory
   id: string
+  /** Required for nested subclass abilities so duplicate ability IDs remain unambiguous. */
+  subclassId?: string
   slot?: ImageTargetSlot
 }
 
@@ -354,6 +356,25 @@ function bindImageTarget(
   assetId: string,
   dataUrl: string,
 ): void {
+  if (target.category === 'subclassAbility') {
+    if (target.slot != null && target.slot !== 'icon') {
+      throw new Error(`subclassAbility:${target.subclassId ?? '?'}:${target.id} 只支持 icon 图片槽`)
+    }
+    if (!target.subclassId) {
+      throw new Error(`图片 ${assetId} 的 subclassAbility target 缺少 subclassId`)
+    }
+    const subclass = content.subclasses.find((candidate) => candidate.id === target.subclassId)
+    if (!subclass) {
+      throw new Error(`图片 ${assetId} 指向不存在的 subclass:${target.subclassId}`)
+    }
+    const abilities = Array.isArray(subclass.abilities) ? subclass.abilities : []
+    const ability = abilities.find((candidate) => plainObject(candidate) && candidate.id === target.id)
+    if (!plainObject(ability)) {
+      throw new Error(`图片 ${assetId} 指向不存在的 subclassAbility:${target.subclassId}:${target.id}`)
+    }
+    ability.iconAssetId = assetId
+    return
+  }
   const key = target.category === 'race'
     ? 'races'
     : target.category === 'feature'
@@ -593,8 +614,10 @@ export async function compileDnd5eLocalContentCollection(
     let needsRegisteredAsset = false
     for (const target of image.targets) {
       if (!plainObject(target) ||
-        !['race', 'feature', 'feat', 'spell', 'item', 'monster'].includes(String(target.category)) ||
+        !['race', 'feature', 'feat', 'spell', 'item', 'monster', 'subclassAbility'].includes(String(target.category)) ||
         typeof target.id !== 'string' ||
+        (target.category === 'subclassAbility' && typeof target.subclassId !== 'string') ||
+        (target.category !== 'subclassAbility' && target.subclassId != null) ||
         (target.slot != null &&
           !['icon', 'portrait', 'tokenPortrait', 'initiativePortrait'].includes(String(target.slot)))
       ) throw new Error(`图片 ${image.id} 包含无效的 target`)

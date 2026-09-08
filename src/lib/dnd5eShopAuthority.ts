@@ -6,7 +6,9 @@ import {
 } from './sharedApi'
 import { getRoomSession } from './roomSession'
 import { useCharacterStore, serializeDnd5eCharacterSnapshot } from '../store/characters'
+import { useMapStore } from '../store/maps'
 import { useDnd5eShopStore } from '../store/dnd5eShops'
+import { validateDnd5eMerchantInteraction } from './dnd5eMerchantInteraction'
 import {
   DND5E_SHOPS_RESOURCE,
   settleDnd5eShopPurchase,
@@ -58,6 +60,10 @@ function validPlayerRequest(request: Dnd5eShopAuthorityRequest, roomId?: string)
     typeof request.shopId === 'string' && !!request.shopId &&
     typeof request.offerId === 'string' && !!request.offerId &&
     typeof request.characterId === 'string' && !!request.characterId &&
+    !!request.merchant &&
+    typeof request.merchant.mapId === 'string' && !!request.merchant.mapId && request.merchant.mapId.length <= 180 &&
+    typeof request.merchant.merchantTokenId === 'string' && !!request.merchant.merchantTokenId && request.merchant.merchantTokenId.length <= 180 &&
+    typeof request.merchant.buyerTokenId === 'string' && !!request.merchant.buyerTokenId && request.merchant.buyerTokenId.length <= 180 &&
     Number.isSafeInteger(request.quantity) && request.quantity >= 1 && request.quantity <= 99 &&
     Number.isFinite(request.updatedAt) && Date.now() - request.updatedAt <= REQUEST_MAX_AGE_MS &&
     (!roomId || (request.roomId === roomId && typeof request.memberId === 'string'))
@@ -65,7 +71,19 @@ function validPlayerRequest(request: Dnd5eShopAuthorityRequest, roomId?: string)
 
 async function executeAuthoritativePurchase(
   request: Dnd5eShopPurchaseRequest,
+  options: { requireMerchantInteraction?: boolean } = {},
 ): Promise<Dnd5eShopSubmitResult> {
+  if (options.requireMerchantInteraction) {
+    const interaction = validateDnd5eMerchantInteraction({
+      maps: useMapStore.getState().maps,
+      context: request.merchant,
+      shopId: request.shopId,
+      characterId: request.characterId,
+    })
+    if (!interaction.ok) {
+      return { status: 'rejected', requestId: request.id, message: interaction.message }
+    }
+  }
   const characterStore = useCharacterStore.getState()
   const shopStore = useDnd5eShopStore.getState()
   const settled: Dnd5eShopPurchaseResult = settleDnd5eShopPurchase(
@@ -139,6 +157,9 @@ export async function submitDnd5eShopPurchase(
   if (session?.role !== 'player') {
     return { status: 'rejected', requestId: id, message: '当前玩家尚未加入可购买商品的房间。' }
   }
+  if (!request.merchant) {
+    return { status: 'rejected', requestId: id, message: '请在地图上靠近商人 NPC 后点击发起交易。' }
+  }
   const envelope: Dnd5eShopAuthorityRequest = {
     ...request,
     roomId: session.roomId,
@@ -184,7 +205,7 @@ export function startDnd5eShopAuthoritySync(): () => void {
       )
       if (!character || !request.memberId || character.roomMemberId !== request.memberId) return
       if (request.roomId && character.roomId && character.roomId !== request.roomId) return
-      void executeAuthoritativePurchase(request).then((result) =>
+      void executeAuthoritativePurchase(request, { requireMerchantInteraction: true }).then((result) =>
         publishSharedEvent(DND5E_SHOP_DM_TO_PLAYER_CHANNEL, {
           requestId: request.id,
           memberId: request.memberId,

@@ -76,6 +76,14 @@ export function dnd5eMonsterRegenerationRule(
     Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined
 }
 
+export function dnd5eMonsterHasAntimagicSusceptibility(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.rule?.kind === 'antimagic-susceptibility' &&
+    trait.rule.incapacitatedInsideAntimagic) === true
+}
+
 export type Dnd5eMonsterFlybyRule = Extract<
   NonNullable<Dnd5eMonsterTrait['rule']>,
   { kind: 'flyby' }

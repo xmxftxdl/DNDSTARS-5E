@@ -39,4 +39,9 @@ describe('shared maps snapshot ordering', () => {
     expect(selectionBody).toContain('set({ selectedId })')
     expect(selectionBody).toContain('if (canWriteSharedState()) publishMapsState(get())')
   })
+
+  it('forces an equal durable snapshot to replay during failed-transaction recovery', () => {
+    expect(mapsStoreSource).toContain('snapshot === lastSharedMapsSnapshot && !options?.force')
+    expect(mapsStoreSource).toContain('loadShared: (options?: { force?: boolean }) => Promise<void>')
+  })
 })

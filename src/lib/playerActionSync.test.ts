@@ -405,6 +405,33 @@ describe('player action sync barrier', () => {
     expect(calls).toEqual(['append', 'publish'])
   })
 
+  it('keeps a durably appended request submitted when best-effort live delivery fails', async () => {
+    const action = buildSharedPlayerAction({
+      mapId: 'map-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      now: 1000,
+      patch: { type: 'end-turn' },
+    })
+    const appendAction = vi.fn(async () => undefined)
+
+    await expect(publishPlayerActionRequest({
+      action,
+      appendAction,
+      loadQueue: async () => null,
+      saveQueue: async () => undefined,
+      publishAction: async () => {
+        throw new Error('live-event-unreachable')
+      },
+    })).resolves.toBeUndefined()
+
+    expect(appendAction).toHaveBeenCalledWith(action)
+  })
+
   it('locks the pending player action before publishing the request', async () => {
     const action = buildSharedPlayerAction({
       mapId: 'map-1',

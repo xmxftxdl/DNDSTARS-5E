@@ -24,7 +24,7 @@ describe('D&D 5e effective vision profile', () => {
       token: {
         darkvisionRangeFeet: -30,
         dnd5eCombatState: {
-          activeEffects: [{ modifiers: { darkvisionRangeFeet: 60 } }],
+          activeEffects: [{ modifiers: { darkvisionRangeFeet: 60, truesightRangeFeet: 120 } }],
         },
         truesightRangeFeet: 99_999,
       },
@@ -36,6 +36,21 @@ describe('D&D 5e effective vision profile', () => {
       darkvisionRangeFeet: 60,
       truesightRangeFeet: 10_000,
     })
+  })
+
+  it('projects temporary spell truesight from either the token or linked character', () => {
+    expect(compileDnd5eEffectiveVisionProfile({
+      token: {
+        dnd5eCombatState: {
+          activeEffects: [{ modifiers: { truesightRangeFeet: 90 } }],
+        },
+      },
+      character: {
+        dnd5eCombatState: {
+          activeEffects: [{ modifiers: { truesightRangeFeet: 120 } }],
+        },
+      },
+    }).truesightRangeFeet).toBe(120)
   })
 
   it('turns Devil\'s Sight into normal sight through both kinds of darkness', () => {

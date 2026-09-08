@@ -7,6 +7,11 @@ import type {
 } from '../../../../packages/mobile-protocol/src'
 import type { MobileCredentials } from './mobileApi'
 import { mobileRoomPluginPackage } from './mobileRoomPluginRuntime'
+import {
+  dnd5eSrdSpellHasFullHeadlessAutomation,
+  dnd5eSustainedSpellControlLabel,
+  getDnd5eSrdCombatSpell,
+} from '../../../../src/rulesets/dnd5e'
 
 export { prepareMobileRoomPlugins } from './mobileRoomPluginRuntime'
 
@@ -18,12 +23,18 @@ const coreActions: MobileActionDescriptorV1[] = [
   core('core.disengage', '撤离', '↩', 'action', 'none', { type: 'disengage' }),
   core('core.dodge', '闪避', '◇', 'action', 'none', { type: 'dodge' }),
   core('core.hide', '躲藏', '◐', 'action', 'none', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'hide' } }),
-  core('core.ready', '准备', '⌛', 'action', 'none', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'ready', trigger: '由玩家声明，DM裁定', actionKind: 'other' } }),
   core('core.help-attack', '协助攻击', '✦', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'help', helpKind: 'attack' } }),
   core('core.help-check', '协助检定', '✦', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'help', helpKind: 'ability-check' } }),
   core('core.wake', '唤醒', '!', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'wake' } }),
-  core('core.grapple', '擒抱', '◎', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'grapple', targetDefense: 'athletics' } }),
-  core('core.shove', '推撞', '➜', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'shove', targetDefense: 'athletics', outcome: 'prone' } }),
+  core('core.grapple-athletics', '擒抱（目标运动）', '◎', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'grapple', targetDefense: 'athletics' } }),
+  core('core.grapple-acrobatics', '擒抱（目标杂技）', '◎', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'grapple', targetDefense: 'acrobatics' } }),
+  core('core.shove-prone-athletics', '推倒（目标运动）', '➜', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'shove', targetDefense: 'athletics', outcome: 'prone' } }),
+  core('core.shove-prone-acrobatics', '推倒（目标杂技）', '➜', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'shove', targetDefense: 'acrobatics', outcome: 'prone' } }),
+  core('core.shove-push-athletics', '推开5尺（目标运动）', '➜', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'shove', targetDefense: 'athletics', outcome: 'push' } }),
+  core('core.shove-push-acrobatics', '推开5尺（目标杂技）', '➜', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'shove', targetDefense: 'acrobatics', outcome: 'push' } }),
+  core('core.release-grapple', '释放擒抱', '◌', 'none', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'release-grapple' } }),
+  core('core.escape-grapple', '挣脱擒抱', '↯', 'action', 'single-creature', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'escape-grapple' } }),
+  core('core.escape-effect', '挣脱束缚效果', '↯', 'action', 'none', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'escape-effect' } }),
   core('core.other-action', '其他（主动）', '…', 'action', 'none', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'other-action' } }),
   core('core.other-bonus-action', '其他（附赠）', '…', 'bonusAction', 'none', { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'other-bonus-action' } }),
 ]
@@ -64,6 +75,21 @@ function pluginDescriptor(pluginId: string, featureId: string, feature: Record<s
   const economy = ['action', 'bonusAction', 'reaction', 'none'].includes(String(action.economy))
     ? action.economy as MobileActionDescriptorV1['economy'] : 'none'
   const manual = automation === 'manual'
+  const declarativeAbility = record(feature.declarativeAbility) ?? feature
+  const choices = array(declarativeAbility.choices).flatMap((rawChoice) => {
+    const choice = record(rawChoice)
+    if (!choice || !text(choice.id) || !text(choice.label)) return []
+    const options = array(choice.options).flatMap((rawOption) => {
+      const option = record(rawOption)
+      return option && text(option.id) && text(option.label)
+        ? [{ id: text(option.id), label: text(option.label), description: text(option.description) || undefined }]
+        : []
+    })
+    return options.length ? [{
+      id: text(choice.id), label: text(choice.label), options,
+      defaultOptionId: text(choice.defaultOptionId) || undefined,
+    }] : []
+  })
   return {
     schemaVersion: 1,
     id: `plugin-action:${featureId}`,
@@ -88,6 +114,7 @@ function pluginDescriptor(pluginId: string, featureId: string, feature: Record<s
         ...(Number.isFinite(Number(targeting.heightFeet)) ? { heightFeet: Number(targeting.heightFeet) } : {}),
       } } : {}),
     },
+    choices: choices.length ? choices : undefined,
     execution: manual
       ? { kind: 'host-command', command: {
           type: 'dnd5e-basic-action',
@@ -292,6 +319,88 @@ export async function buildMobileActionRegistry(input: {
     'single-creature',
     { type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { offHandAttack: true } },
   ))
+  const actor = input.workspace.scene?.controlledTokens?.find((token) => token.characterId === character?.id)
+    ?? input.workspace.scene?.controlledTokens?.[0]
+  const turnEconomy = actor ? input.workspace.combat?.turnEconomy?.[actor.id] : undefined
+  const turnKey = turnEconomy?.turnKey ?? ''
+  for (const grant of character?.combatState?.bonusWeaponAttackGrants ?? []) {
+    if (!turnKey || grant.turnKey !== turnKey) continue
+    actions.push(core(
+      `host-granted-weapon-attack:${grant.id}`,
+      grant.label,
+      '⚔',
+      grant.economy,
+      'single-creature',
+      { type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { ...grant.options } },
+    ))
+  }
+  for (const grant of character?.combatState?.basicActionGrants ?? []) {
+    if (!turnKey || grant.turnKey !== turnKey) continue
+    if (grant.actions.includes('dash')) actions.push(core(
+      `host-granted-basic-action:${grant.grantId}:dash`,
+      `${grant.label}：疾走`, '↟', 'bonusAction', 'none',
+      { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'dash', activityBasicActionGrantId: grant.grantId } },
+    ))
+    if (grant.actions.includes('grapple')) for (const defense of ['athletics', 'acrobatics'] as const) actions.push(core(
+      `host-granted-basic-action:${grant.grantId}:grapple:${defense}`,
+      `${grant.label}：擒抱（目标${defense === 'athletics' ? '运动' : '杂技'}）`,
+      '◎', 'bonusAction', 'single-creature',
+      { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'grapple', targetDefense: defense, activityBasicActionGrantId: grant.grantId } },
+    ))
+    if (grant.actions.includes('shove')) for (const outcome of ['prone', 'push'] as const) actions.push(core(
+      `host-granted-basic-action:${grant.grantId}:shove:${outcome}`,
+      `${grant.label}：${outcome === 'prone' ? '推倒' : '推开'}${outcome === 'push' && grant.shovePushDistanceBonusFeet ? `（额外 ${grant.shovePushDistanceBonusFeet} 尺）` : ''}`,
+      '➜', 'bonusAction', 'single-creature',
+      { type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'shove', targetDefense: 'athletics', outcome, activityBasicActionGrantId: grant.grantId } },
+    ))
+  }
+  const recall = character?.combatState?.linkedEquipmentRecall
+  if (recall) actions.push(core(
+    'feature.linked-equipment-recall', `召回${recall.weaponName}`, '✦', 'bonusAction', 'self',
+    { type: 'dnd5e-class-feature', dnd5eClassFeature: { feature: 'linked-equipment-recall', weaponId: recall.weaponId } },
+  ))
+  const teleport = character?.combatState?.extraActionTeleport
+  if (teleport && turnKey && teleport.turnKey === turnKey && teleport.usedTurnKey !== turnKey) actions.push({
+    schemaVersion: 1,
+    id: 'feature.extra-action-teleport',
+    group: 'features',
+    source: 'class-feature',
+    label: '额外动作传送',
+    description: `动作如潮已开启；在地图选择 ${teleport.rangeFeet} 尺内未占据落点。`,
+    icon: '✦', economy: 'none', automation: 'full',
+    targeting: { kind: 'area', rangeFeet: teleport.rangeFeet },
+    execution: { kind: 'host-command', command: {
+      type: 'dnd5e-class-feature',
+      dnd5eClassFeature: { feature: 'feature-extra-action-teleport' },
+    } },
+  })
+  for (const shapeAction of character?.wildShapeActions ?? []) actions.push(core(
+    `core.wild-shape-attack.${shapeAction.index}`,
+    `${shapeAction.name}（荒野变形）`,
+    '⚔',
+    'action',
+    'single-creature',
+    { type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { wildShapeActionIndex: shapeAction.index } },
+  ))
+  if (character?.combatState?.raging && character.combatState.frenzying &&
+    character.combatState.frenzyStartedTurnKey !== turnEconomy?.turnKey && character.weaponProfile?.mode === 'melee') {
+    actions.push(core('core.frenzy-attack', '狂乱附赠攻击', '⚔', 'bonusAction', 'single-creature', {
+      type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { frenzyAttack: true },
+    }))
+  }
+  if (character?.combatState?.hordeBreakerOpportunityTurnKey &&
+    character.combatState.hordeBreakerOpportunityTurnKey === turnEconomy?.turnKey &&
+    character.combatState.hordeBreakerUsedTurnKey !== turnEconomy?.turnKey) {
+    actions.push(core('core.horde-breaker-attack', '灭群者追加攻击', '⚔', 'none', 'single-creature', {
+      type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { hordeBreakerAttack: true },
+    }))
+  }
+  const rangerMultiattack = character?.dnd5eClassChoices?.classes?.ranger?.selections?.multiattack?.[0]
+  if ((character?.classLevels?.ranger ?? 0) >= 11 && (rangerMultiattack === 'volley' || rangerMultiattack === 'whirlwind-attack')) {
+    actions.push(core(`core.hunter-multiattack.${rangerMultiattack}`, rangerMultiattack === 'volley' ? '万箭齐发' : '旋风攻击', '◎', 'action', 'single-creature', {
+      type: 'dnd5e-weapon-attack', dnd5eWeaponAttackOptions: { hunterMultiattack: rangerMultiattack },
+    }))
+  }
   for (const area of input.workspace.scene?.persistentAreas ?? []) {
     if (area.sourceCharacterId !== character?.id || !area.movement) continue
     actions.push({
@@ -311,6 +420,91 @@ export async function buildMobileActionRegistry(input: {
       },
     })
   }
+  for (const control of character?.sustainedSpellControls ?? []) {
+    if (!dnd5eSrdSpellHasFullHeadlessAutomation(control.spellId)) continue
+    actions.push({
+      schemaVersion: 1,
+      id: `sustained-spell:${control.spellId}:${control.id}`,
+      group: 'features',
+      source: 'spell',
+      label: control.label,
+      description: control.description,
+      icon: '✧',
+      economy: control.economy === 'bonusAction' ? 'bonusAction' : 'action',
+      automation: 'full',
+      targeting: { kind: control.targeting },
+      execution: control.id === 'expeditious-retreat'
+        ? { kind: 'host-command', command: {
+            type: 'dnd5e-basic-action',
+            dnd5eBasicAction: { kind: 'dash', sourceSpellId: 'expeditious-retreat' },
+          } }
+        : { kind: 'host-command', command: {
+            type: 'dnd5e-spell-cast',
+            dnd5eSpellCast: {
+              spellId: control.spellId,
+              slotLevel: control.slotLevel,
+              sustainedEffectAttack: control.id,
+              ...(control.castingClassId ? { castingClassId: control.castingClassId } : {}),
+            },
+          } },
+    })
+  }
+  for (const area of input.workspace.scene?.persistentAreas ?? []) {
+    if (
+      area.sourceKind !== 'core-spell' || area.sourceCharacterId !== character?.id ||
+      !area.coreSpellId || area.slotLevel == null
+    ) continue
+    const spell = getDnd5eSrdCombatSpell(area.coreSpellId)
+    const control = spell?.sustainedAttack
+    if (!spell || !dnd5eSrdSpellHasFullHeadlessAutomation(spell.id) || !control || control.origin === 'caster') continue
+    actions.push({
+      schemaVersion: 1,
+      id: `sustained-spell:${area.id}:${control.id}`,
+      group: 'features',
+      source: 'spell',
+      label: dnd5eSustainedSpellControlLabel(control.id),
+      description: `${control.economy === 'bonus-action' ? '附赠动作' : '动作'} · 操控地图上的现有法术实体，不消耗法术位。`,
+      icon: '✧',
+      economy: control.economy === 'bonus-action' ? 'bonusAction' : 'action',
+      automation: 'full',
+      targeting: { kind: control.resolution === 'saving-throw' ? 'area' : 'single-creature' },
+      execution: { kind: 'host-command', command: {
+        type: 'dnd5e-spell-cast',
+        dnd5eSpellCast: {
+          spellId: spell.id,
+          slotLevel: area.slotLevel,
+          sustainedEffectAttack: control.id,
+          sustainedEffectAreaId: area.id,
+          ...(area.castingClassId ? { castingClassId: area.castingClassId } : {}),
+        },
+      } },
+    })
+  }
+  for (const grant of character?.alternateResourceSpells ?? []) {
+    const coreSpell = getDnd5eSrdCombatSpell(grant.spellId)
+    if (!grant.headless || (coreSpell && !dnd5eSrdSpellHasFullHeadlessAutomation(coreSpell.id))) continue
+    for (const option of grant.castLevelOptions) actions.push({
+      schemaVersion: 1,
+      id: `alternate-resource-spell:${grant.featureId}:${grant.grantId}:${option.slotLevel}`,
+      group: 'features',
+      source: 'plugin',
+      label: `${grant.spellName}${grant.castLevelOptions.length > 1 ? `（${option.slotLevel}环）` : ''}`,
+      description: `${grant.featureName} · 消耗 ${option.resourceCost} 点 ${grant.resourceId}；资格、资源和法术效果由 Host 复核。`,
+      icon: '✧',
+      economy: grant.economy,
+      automation: 'full',
+      targeting: { kind: grant.targeting, rangeFeet: grant.rangeFeet },
+      execution: { kind: 'host-command', command: {
+        type: 'dnd5e-spell-cast',
+        dnd5eSpellCast: {
+          spellId: grant.spellId,
+          slotLevel: option.slotLevel,
+          alternateResourceSpell: { featureId: grant.featureId, grantId: grant.grantId },
+        },
+      } },
+      ownerPluginId: grant.featureId.split(':')[0],
+    })
+  }
   const resolvedOwnedFeatureIds = new Set<string>()
   for (const spell of input.workspace.spells) actions.push({
     schemaVersion: 1, id: `spell:${spell.id}`, group: 'spells', source: 'spell', label: spell.name,
@@ -318,11 +512,27 @@ export async function buildMobileActionRegistry(input: {
     automation: spell.automationLevel, targeting: { kind: spell.area ? 'area' : spell.target === 'ally' && spell.rangeFeet === 0 ? 'self' : 'single-creature', rangeFeet: spell.rangeFeet },
     execution: { kind: 'spell', spellId: spell.id },
   })
-  for (const entry of character?.dnd5eInventory?.entries ?? []) for (const use of entry.item.useActions ?? []) actions.push({
-    schemaVersion: 1, id: `item:${entry.instanceId}:${use.id}`, group: 'items', source: 'item', label: `${entry.item.name} · ${use.label}`,
-    economy: (use.economy === 'bonusAction' ? 'bonusAction' : use.economy === 'reaction' ? 'reaction' : use.economy === 'none' ? 'none' : 'action'),
-    automation: 'full', targeting: { kind: 'none' }, execution: { kind: 'item', instanceId: entry.instanceId, useActionId: use.id },
-  })
+  for (const entry of character?.dnd5eInventory?.entries ?? []) for (const use of entry.item.useActions ?? []) {
+    const targeting = record(use.targeting)
+    const targetKind = targeting?.kind === 'creature'
+      ? 'single-creature'
+      : targeting?.kind === 'map-area'
+        ? 'area'
+        : targeting?.kind === 'self'
+          ? 'self'
+          : 'none'
+    const magicItem = record(entry.item.magicItem)
+    actions.push({
+      schemaVersion: 1, id: `item:${entry.instanceId}:${use.id}`, group: 'items', source: 'item', label: `${entry.item.name} · ${use.label}`,
+      economy: (use.economy === 'bonusAction' ? 'bonusAction' : use.economy === 'reaction' ? 'reaction' : use.economy === 'none' ? 'none' : 'action'),
+      automation: magicItem?.automation === 'headless' || record(use.effect) ? 'full' : 'manual',
+      targeting: {
+        kind: targetKind,
+        ...(Number.isFinite(Number(targeting?.rangeFeet)) ? { rangeFeet: Number(targeting?.rangeFeet) } : {}),
+      },
+      execution: { kind: 'item', instanceId: entry.instanceId, useActionId: use.id },
+    })
+  }
   for (const requirement of input.rules?.member.ready === true ? input.rules.requiredPlugins : []) {
     try {
       const packageValue = input.loadPlugin
@@ -375,4 +585,19 @@ export async function buildMobileActionRegistry(input: {
 
 export function emptyMobileActionRegistry(): MobileActionRegistryV1 {
   return { schemaVersion: 1, generatedAt: Date.now(), actions: [...coreActions], rejectedPluginEntries: [] }
+}
+
+/**
+ * A room projection may briefly contain an empty registry while its plugin
+ * packages are being verified. Core actions are still safe to advertise: the
+ * mobile client only submits their intent and the Host revalidates ownership,
+ * action economy, targets and resources before committing anything.
+ */
+export function mobileBasicActionDescriptors(registry?: MobileActionRegistryV1): MobileActionDescriptorV1[] {
+  const projected = registry?.actions.filter((entry) => entry.group === 'actions') ?? []
+  return projected.length ? projected : coreActions.map((entry) => ({
+    ...entry,
+    targeting: { ...entry.targeting },
+    execution: cloneJson(entry.execution),
+  }))
 }

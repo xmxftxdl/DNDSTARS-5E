@@ -3,6 +3,7 @@ import {
   sharedAuthenticatedSystemRoute,
   sharedPublicSystemRoute,
 } from '../../scripts/shared-server-system-routes.mjs'
+import { desktopReleaseManifestFromEnvironment } from '../../scripts/desktop-release-manifest.mjs'
 
 const publicInput = {
   method: 'GET',
@@ -48,6 +49,39 @@ describe('shared server system routes', () => {
     })).toEqual({
       status: 200,
       body: { serverNow: 9_876 },
+    })
+  })
+
+  it('publishes an optional signed desktop client release without requiring room authentication', () => {
+    const desktopRelease = desktopReleaseManifestFromEnvironment({
+      STARS_DESKTOP_CHANNEL: 'beta',
+      STARS_DESKTOP_CLIENT_VERSION: '0.1.0-beta.2',
+      STARS_DESKTOP_MINIMUM_SHELL_VERSION: '0.1.0-beta.1',
+      STARS_DESKTOP_CLIENT_URL: 'https://downloads.example/AstralTrace-client-win32-x64.zip',
+      STARS_DESKTOP_CLIENT_SHA256: 'a'.repeat(64),
+      STARS_DESKTOP_CLIENT_SIGNATURE: 'signed-package',
+    }, 5)
+    expect(sharedPublicSystemRoute({
+      ...publicInput,
+      pathname: '/api/desktop/releases/latest',
+      desktopRelease,
+    })).toEqual({
+      status: 200,
+      body: expect.objectContaining({
+        available: true,
+        service: 'astraltrace-desktop-client',
+        version: '0.1.0-beta.2',
+        protocolVersion: 5,
+        package: expect.objectContaining({ sha256: 'a'.repeat(64) }),
+      }),
+    })
+  })
+
+  it('keeps the desktop release endpoint available but disables downloads when not configured', () => {
+    expect(desktopReleaseManifestFromEnvironment({}, 5)).toMatchObject({
+      available: false,
+      platform: 'win32',
+      arch: 'x64',
     })
   })
 

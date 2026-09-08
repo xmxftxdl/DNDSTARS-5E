@@ -11,6 +11,7 @@ import {
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
+  DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS,
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaLighting,
   normalizeDnd5ePersistentAreaBlocking,
@@ -32,9 +33,8 @@ import {
 } from './combatInterruptQueue'
 import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
 import { isDnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
-import { isDnd5eMonsterControlStateV1 } from './monsterControlState'
+import { isDnd5eMonsterControlWireStateV1 } from './monsterControlState'
 import { normalizeSharedCombatFlowPause } from './sharedCombatSync'
-import { isDnd5eMonsterTurnProgressV1 } from './monsterTurnProgress'
 import {
   SCENE_ORCHESTRATION_RESOURCE,
   validateSharedSceneOrchestration,
@@ -99,6 +99,7 @@ function validTimedLightState(value: unknown): boolean {
     !Number.isFinite(value.brightRadiusFeet) || Number(value.brightRadiusFeet) < 0 ||
     !Number.isFinite(value.dimRadiusFeet) || Number(value.dimRadiusFeet) < 0 ||
     typeof value.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(value.color) ||
+    (value.sunlight != null && value.sunlight !== true) ||
     (value.sourceKind != null && !['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(value.sourceKind)))) return false
   const timing = [value.startedAtWorldMinute, value.durationMinutes, value.expiresAtWorldMinute]
   const hasTiming = timing.some((entry) => entry != null)
@@ -139,10 +140,17 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
       issues.push(`${areaPath}.label 过长`)
     }
     if (typeof raw.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(raw.color)) issues.push(`${areaPath}.color 无效`)
+    // Core spell areas store the first boundary after their final active round;
+    // plugin-authored areas retain their historical inclusive lifecycle format.
+    const usesExclusiveRoundBoundary = raw.sourceKind === 'core-spell' ||
+      (typeof raw.coreSpellId === 'string' && raw.coreSpellId.length > 0)
     if (
       !Number.isInteger(raw.createdRound) || Number(raw.createdRound) < 0 ||
       !Number.isInteger(raw.expiresAfterRound) || Number(raw.expiresAfterRound) < Number(raw.createdRound) ||
-      Number(raw.expiresAfterRound) - Number(raw.createdRound) + 1 > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS
+      Number(raw.expiresAfterRound) - Number(raw.createdRound) +
+        (usesExclusiveRoundBoundary ? 0 : 1) > (usesExclusiveRoundBoundary
+          ? DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS
+          : DND5E_DECLARATIVE_DURATION_MAX_ROUNDS)
     ) issues.push(`${areaPath} 轮数无效`)
     if (
       raw.expiresAtSourceTurnEndAfterRound != null &&
@@ -166,6 +174,10 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     }
     if (raw.lighting != null && !normalizeDnd5ePersistentAreaLighting(raw.lighting)) {
       issues.push(`${areaPath}.lighting 无效`)
+    }
+    if (raw.illuminationOverride != null &&
+      !['dim', 'darkness'].includes(String(raw.illuminationOverride))) {
+      issues.push(`${areaPath}.illuminationOverride 无效`)
     }
     if (raw.occupantModifiers != null &&
       !normalizeDnd5ePersistentAreaOccupantModifiers(raw.occupantModifiers)) {
@@ -240,8 +252,33 @@ function validateDnd5eSummon(value: unknown, path: string): string[] {
   if (value.concentrationId != null && (typeof value.concentrationId !== 'string' || !value.concentrationId)) {
     issues.push(`${path}.concentrationId 无效`)
   }
+  if (value.shareVisionWithSource != null && value.shareVisionWithSource !== true) {
+    issues.push(`${path}.shareVisionWithSource 无效`)
+  }
+  if (value.hiddenBody != null && value.hiddenBody !== true) {
+    issues.push(`${path}.hiddenBody 无效`)
+  }
   if (value.side !== 'player' && value.side !== 'enemy') issues.push(`${path}.side 无效`)
   if (value.persistent != null && value.persistent !== true) issues.push(`${path}.persistent 无效`)
+  if (value.becomesHostileAfterConcentrationEnds != null && value.becomesHostileAfterConcentrationEnds !== true) {
+    issues.push(`${path}.becomesHostileAfterConcentrationEnds 无效`)
+  }
+  if (value.controlEnded != null && value.controlEnded !== true) issues.push(`${path}.controlEnded 无效`)
+  if (value.becomesHostileAfterConcentrationEnds === true && (
+    typeof value.concentrationId !== 'string' || !value.concentrationId ||
+    value.persistent === true || value.persistAfterConcentrationCompletes === true
+  )) issues.push(`${path}.becomesHostileAfterConcentrationEnds 需要有效专注召唤`)
+  if (value.controlEnded === true && value.concentrationId != null) {
+    issues.push(`${path}.controlEnded 不能保留 concentrationId`)
+  }
+  if (value.createdWorldMinute != null &&
+    (!Number.isSafeInteger(value.createdWorldMinute) || Number(value.createdWorldMinute) < 0)) {
+    issues.push(`${path}.createdWorldMinute 无效`)
+  }
+  if (value.controlExpiresAtWorldMinute != null && (
+    !Number.isSafeInteger(value.controlExpiresAtWorldMinute) ||
+    Number(value.controlExpiresAtWorldMinute) < Number(value.createdWorldMinute ?? 0)
+  )) issues.push(`${path}.controlExpiresAtWorldMinute 无效`)
   for (const key of [
     'minimumMaximumHitPoints', 'maximumHitPointBonus', 'armorClassBonus',
     'weaponAttackBonus', 'weaponDamageBonus', 'savingThrowBonus',
@@ -272,11 +309,21 @@ function validateDnd5eSpellEffect(value: unknown, path: string): string[] {
   if (
     !Number.isInteger(value.createdRound) || Number(value.createdRound) < 0 ||
     !Number.isInteger(value.expiresAfterRound) || Number(value.expiresAfterRound) < Number(value.createdRound) ||
-    Number(value.expiresAfterRound) - Number(value.createdRound) + 1 > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS
+    // Core spell effect Tokens share the exclusive end-round boundary used by
+    // their linked core-spell area. A 24-hour spell created in round 1 therefore
+    // expires at boundary 14,401 while still representing exactly 14,400 rounds.
+    Number(value.expiresAfterRound) - Number(value.createdRound) > DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS
   ) issues.push(`${path} 轮数无效`)
   if (value.concentrationId != null && (typeof value.concentrationId !== 'string' || !value.concentrationId)) {
     issues.push(`${path}.concentrationId 无效`)
   }
+  if (value.projectionKind != null && (
+    value.projectionKind !== 'attack-decoy' ||
+    value.spellId !== 'mirror-image' ||
+    typeof value.sourceEffectId !== 'string' || !value.sourceEffectId ||
+    !Number.isInteger(value.projectionIndex) ||
+    Number(value.projectionIndex) < 1 || Number(value.projectionIndex) > 20
+  )) issues.push(`${path}.projectionKind 无效`)
   return issues
 }
 
@@ -289,16 +336,20 @@ function validateDnd5eSpellEffectLinks(map: Record<string, unknown>, path: strin
     if (token.dnd5eSpellEffect == null) continue
     if (token.type !== 'obstacle') issues.push(`${path}.tokens.${String(token.id)} 必须是 obstacle 效果 Token`)
     const effect = isPlainObject(token.dnd5eSpellEffect) ? token.dnd5eSpellEffect : undefined
+    if (effect?.projectionKind === 'attack-decoy' && effect.spellId === 'mirror-image') continue
     const linked = areas.find((area) =>
-      area.sourceKind === 'core-spell' && area.anchorMode === 'effect-token' && area.anchorTokenId === token.id,
+      area.anchorMode === 'effect-token' && area.anchorTokenId === token.id,
     )
     if (
-      !effect || !linked || linked.coreSpellId !== effect.spellId ||
+      !effect || !linked ||
+      (linked.sourceKind === 'core-spell'
+        ? linked.coreSpellId !== effect.spellId
+        : linked.featureId !== effect.spellId) ||
       linked.sourceCharacterId !== effect.sourceCharacterId || linked.sourceTokenId !== effect.sourceTokenId
     ) issues.push(`${path}.tokens.${String(token.id)} 缺少匹配的核心法术区域`)
   }
   for (const area of areas) {
-    if (area.sourceKind !== 'core-spell' || area.anchorMode !== 'effect-token') continue
+    if (area.anchorMode !== 'effect-token') continue
     if (!tokens.some((token) => token.id === area.anchorTokenId && token.dnd5eSpellEffect != null)) {
       issues.push(`${path}.dnd5ePluginAreas.${String(area.id)} 缺少效果 Token`)
     }
@@ -428,7 +479,24 @@ function migrateDnd5eStateEnvelope(
         validateDnd5eActiveEffectsStrict(state?.activeEffects).effects,
       )
       if (!sameStringArray(rawConditions ?? [], projected)) {
-        issues.push(`${path}.conditions 与 activeEffects 投影不一致`)
+        // `conditions` is only the legacy presentation projection in schema v2;
+        // ActiveEffect instances are the authoritative mechanical state.  Older
+        // clients and interrupted writes can leave this mirror stale.  Rejecting
+        // the whole shared resource here makes an unrelated stale token poison
+        // every subsequent map write, including a DM repairing that same token.
+        // The effects have already passed strict validation above, so rebuilding
+        // the derived mirror is deterministic and cannot manufacture an effect.
+        migrations.push(`${path}.conditions 已按 ActiveEffect 投影修复`)
+        if (conditionsAtEntity) {
+          return { ...entity, conditions: projected }
+        }
+        return {
+          ...entity,
+          dnd5eCombatState: {
+            ...state,
+            conditions: projected.length > 0 ? projected : undefined,
+          },
+        }
       }
       return entity
     }
@@ -587,18 +655,11 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   if (name === 'combat' && input.effectiveRules != null && !isDnd5eEffectiveRulesContextV1(input.effectiveRules)) {
     reasons.push('combat.effectiveRules 规则快照损坏')
   }
-  if (name === 'combat' && input.monsterControl != null && !isDnd5eMonsterControlStateV1(input.monsterControl)) {
+  if (name === 'combat' && input.monsterControl != null && !isDnd5eMonsterControlWireStateV1(input.monsterControl)) {
     reasons.push('combat.monsterControl 怪物控制状态损坏')
   }
   if (name === 'combat' && input.flowPause != null && !normalizeSharedCombatFlowPause(input.flowPause)) {
     reasons.push('combat.flowPause 战斗暂停状态损坏')
-  }
-  if (
-    name === 'combat' &&
-    input.monsterTurnProgress != null &&
-    !isDnd5eMonsterTurnProgressV1(input.monsterTurnProgress)
-  ) {
-    reasons.push('combat.monsterTurnProgress is invalid')
   }
   if (name === 'dm-authority-ready' && typeof input.ready !== 'boolean') {
     reasons.push('dm-authority-ready.ready 不是布尔值')

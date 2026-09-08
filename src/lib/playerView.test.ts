@@ -5,6 +5,7 @@ import {
   getAssignedPlayerCharacterId,
   getPlayerCharacter,
   getRoomCharacterAssignment,
+  playerCharacterPageActiveId,
   playerViewCharacters,
   planRoomCharacterOwnershipRecovery,
   roomCharactersOwnedByMembers,
@@ -67,6 +68,21 @@ describe('player view assignment', () => {
     ]
 
     expect(getPlayerCharacter(characters, { slot: 'player1', assignedCharacterId: 'c2' })?.id).toBe('c2')
+  })
+
+  it('keeps the full player character sheet on the explicit room assignment', () => {
+    const visible = [{ id: 'wizard' }, { id: 'cleric' }]
+
+    expect(playerCharacterPageActiveId(visible, {
+      isDM: false,
+      assignedCharacterId: 'cleric',
+      selectedCharacterId: 'wizard',
+    })).toBe('cleric')
+    expect(playerCharacterPageActiveId(visible, {
+      isDM: true,
+      assignedCharacterId: 'cleric',
+      selectedCharacterId: 'wizard',
+    })).toBe('wizard')
   })
 
   it('does not guess a character when no owner matches and several are visible', () => {

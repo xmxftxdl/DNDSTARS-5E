@@ -67,9 +67,6 @@ export class MapEditingCoordinator {
     if (!this.ports.isDm()) return { ok: false, reason: 'dm-authority-required' }
     const entity = findGeometryEntity(geometry, entityId)
     if (!entity) return { ok: false, reason: 'entity-not-found' }
-    if (this.ports.combatActive() && terrainMutationLocked(entity)) {
-      return { ok: false, reason: 'terrain-editing-locked-during-combat' }
-    }
     this.ports.removeEntity(mapId, entityId)
     return { ok: true }
   }

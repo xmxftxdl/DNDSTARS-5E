@@ -174,6 +174,21 @@ export interface MobileCharacterFeatureView {
   resourceId?: string
 }
 
+export interface MobileActiveEffectView {
+  id: string
+  definitionId: string
+  label: string
+  conditionId?: string
+  source?: { actorId?: string; actorName?: string; rulesId?: string; label?: string; spellLevel?: number }
+  duration: {
+    type: 'permanent' | 'rounds' | 'until-turn-boundary' | 'concentration'
+    remainingRounds?: number
+    boundary?: string
+  }
+  repeatSave?: { ability: string; dc: number; timing: string }
+  suspended?: boolean
+}
+
 export interface MobileLevelUpChoiceRequirement {
   key: string
   name: string
@@ -277,6 +292,55 @@ export interface MobileLevelAdvancementRecordView {
   grantedFeatures: MobileCharacterFeatureView[]
 }
 
+/** Host-projected control granted by an already active spell effect. */
+export interface MobileSustainedSpellControlView {
+  id: string
+  spellId: string
+  label: string
+  description: string
+  economy: 'action' | 'bonusAction'
+  targeting: 'self' | 'single-creature' | 'area'
+  slotLevel: number
+  castingClassId?: string
+}
+
+/** A Host-registered spell grant that spends a class/plugin resource instead of a spell slot. */
+export interface MobileAlternateResourceSpellView {
+  featureId: string
+  featureName: string
+  grantId: string
+  spellId: string
+  spellName: string
+  classId: string
+  resourceId: string
+  castLevelOptions: Array<{ slotLevel: number; resourceCost: number }>
+  ignoreMaterialComponents: boolean
+  headless: boolean
+  economy: 'action' | 'bonusAction' | 'reaction'
+  targeting: 'self' | 'single-creature' | 'area'
+  rangeFeet?: number
+}
+
+/** Host-projected, player-owned modifier that may be armed for one spell cast. */
+export interface MobileSpellModifierIntentView {
+  id: string
+  label: string
+  description: string
+  operation:
+    | 'sculpt-spell'
+    | 'overchannel'
+    | 'metamagic'
+    | 'empowered-spell'
+    | 'draconic-elemental-resistance'
+    | 'repelling-blast'
+    | 'declarative-damage-maximization'
+  featureId?: string
+  compatibleDamageTypes?: string[]
+  available: boolean
+  unavailableReason?: string
+  resource?: { label: string; current: number; maximum?: number }
+}
+
 export interface MobileCharacterView {
   id: string
   name: string
@@ -317,13 +381,95 @@ export interface MobileCharacterView {
   maxHp: number
   currentHp: number
   tempHp: number
+  deathSaveSuccesses: number
+  deathSaveFailures: number
+  deathSaveStable: boolean
+  exhaustionLevel: number
+  inspiration: number
   ac: number
   speed: number
+  movementSpeeds?: {
+    walk: number
+    climb?: number
+    swim?: number
+    fly?: number
+    hover?: boolean
+  }
+  inventoryLoad?: {
+    itemWeightLb: number
+    currencyWeightLb: number
+    totalWeightLb: number
+    carryingCapacityLb: number
+    encumberedThresholdLb: number
+    heavilyEncumberedThresholdLb: number
+    status: 'normal' | 'encumbered' | 'heavily-encumbered' | 'over-capacity'
+    speedPenaltyFeet: 0 | 10 | 20
+  }
   initiativeBonus: number
   saveDC: number
   passivePerception: number
   conditions: string[]
+  activeEffects?: MobileActiveEffectView[]
   concentrating?: boolean
+  /** Host-projected combat flags used only to expose legal player choices. */
+  combatState?: {
+    raging?: boolean
+    frenzying?: boolean
+    frenzyStartedTurnKey?: string
+    recklessAttackTurnKey?: string
+    foeSlayerTurnKey?: string
+    hordeBreakerOpportunityTurnKey?: string
+    hordeBreakerUsedTurnKey?: string
+    wildShapeFormId?: string
+    wildShapeCurrentHp?: number
+    quiveringPalmTargetId?: string
+    bonusProneEligibleTargetIds?: string[]
+    rageFeatureOperations?: Array<'rage-mobile-defense' | 'bonus-prone-on-hit'>
+    /** Host-matched, turn-scoped weapon attack credentials. */
+    bonusWeaponAttackGrants?: Array<{
+      id: string
+      label: string
+      turnKey: string
+      economy: 'bonusAction' | 'none'
+      options: {
+        featureBonusWeaponAttack?: boolean
+        featureBonusWeaponAttackId?: string
+        activityWeaponAttackGrantId?: string
+        activityWeaponAttackWeaponSlot?: 'main-hand' | 'off-hand'
+      }
+    }>
+    /** Host-issued Activity credentials that may replace a grapple/shove action cost. */
+    basicActionGrants?: Array<{
+      grantId: string
+      label: string
+      turnKey: string
+      actions: Array<'dash' | 'grapple' | 'shove'>
+      shovePushDistanceBonusFeet?: number
+    }>
+    linkedEquipmentRecall?: { weaponId: string; weaponName: string }
+    extraActionTeleport?: {
+      turnKey: string
+      usedTurnKey?: string
+      rangeFeet: number
+    }
+  }
+  weaponProfile?: {
+    weaponName: string
+    mode: 'melee' | 'ranged'
+    attackAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+  }
+  /** Host-derived choice exposed only while the equipped weapon is affected by Shillelagh. */
+  shillelaghAttackChoice?: {
+    spellcastingAbility: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+    spellcastingModifier: number
+    strengthModifier: number
+  }
+  wildShapeActions?: Array<{
+    index: number
+    id: string
+    name: string
+    kind: 'weapon-attack' | 'multiattack'
+  }>
   classResources?: Record<string, { current: number; max: number }>
   hitPointDice?: Array<{ sides: number; current: number; max: number }>
   dnd5eClassChoices?: {
@@ -342,6 +488,9 @@ export interface MobileCharacterView {
   dnd5ePluginFeatureIds?: string[]
   dnd5eFeatIds?: string[]
   features?: MobileCharacterFeatureView[]
+  sustainedSpellControls?: MobileSustainedSpellControlView[]
+  alternateResourceSpells?: MobileAlternateResourceSpellView[]
+  spellModifierIntents?: MobileSpellModifierIntentView[]
   levelUpPlans?: MobileLevelUpPlan[]
   levelAdvancements?: MobileLevelAdvancementRecordView[]
   dnd5eInventory?: {
@@ -394,6 +543,7 @@ export interface MobileSpellView {
     concentration: boolean
   }
   rangeFeet?: number
+  damageType?: string
   target?: 'hostile' | 'ally' | 'creature' | 'area'
   requiresVisibleTarget?: boolean | 'primary' | 'placement'
   area?: {
@@ -469,10 +619,13 @@ export interface MobileCombatView {
   }>
   currentTokenId?: string
   turnEconomy?: Record<string, {
-    action?: number
-    bonusAction?: number
-    reaction?: number
-    movementFeet?: number
+    turnKey?: string
+    attacksUsed?: number
+    action?: { current: number; max: number }
+    bonusAction?: { current: number; max: number }
+    reaction?: { current: number; max: number }
+    objectInteraction?: { current: number; max: number }
+    movement?: { current: number; max: number }
     [key: string]: unknown
   }>
 }
@@ -545,6 +698,12 @@ export interface MobileActionDescriptorV1 {
     maximumTargets?: number
     template?: Record<string, unknown>
   }
+  choices?: Array<{
+    id: string
+    label: string
+    options: Array<{ id: string; label: string; description?: string }>
+    defaultOptionId?: string
+  }>
   execution:
     | { kind: 'host-command'; command: Record<string, unknown> }
     | { kind: 'spell'; spellId: string }
@@ -699,9 +858,12 @@ export interface PlayerTokenView extends WorldPoint {
   hp: number
   maxHp: number
   elevation?: number
+  airborne?: boolean
+  concentrating?: boolean
   controlled: boolean
   friendly: boolean
   conditions: string[]
+  activeEffects?: MobileActiveEffectView[]
 }
 
 export interface FogChunk {
@@ -729,6 +891,9 @@ export interface MobilePersistentAreaView {
   sourceCharacterId?: string
   sourceTokenId?: string
   coreSpellId?: string
+  sourceKind?: string
+  slotLevel?: number
+  castingClassId?: string
   cells: Array<{ col: number; row: number }>
   anchorCell?: { col: number; row: number }
   movement?: { economy: 'action' | 'bonus-action'; maximumFeet: number }
@@ -771,6 +936,8 @@ export interface PlayerSceneSnapshot {
   visibleTokens: PlayerTokenView[]
   opaqueSegments: OpaqueSegment[]
   persistentAreas?: MobilePersistentAreaView[]
+  /** Host-approved projections from which this character may originate a spell. */
+  spellOriginAreas?: Array<{ id: string; label: string }>
   terrainElevations?: MobileTerrainElevationView[]
   lights?: MobileMapLightView[]
   fogChunks: FogChunk[]
@@ -786,7 +953,7 @@ export interface PlayerSceneSnapshot {
 
 export type PlayerSceneDelta =
   | { type: 'token-moved'; revision: number; tokenId: string; x: number; y: number; elevation?: number }
-  | { type: 'token-updated'; revision: number; tokenId: string; patch: Partial<Pick<PlayerTokenView, 'hp' | 'maxHp' | 'conditions'>> }
+  | { type: 'token-updated'; revision: number; tokenId: string; patch: Partial<Pick<PlayerTokenView, 'hp' | 'maxHp' | 'conditions' | 'activeEffects' | 'airborne' | 'concentrating'>> }
   | { type: 'token-revealed'; revision: number; token: PlayerTokenView }
   | { type: 'token-hidden'; revision: number; tokenId: string }
   | { type: 'door-state'; revision: number; segmentId: string; open: boolean }

@@ -26,6 +26,9 @@ export function dnd5eInventoryDropDecision(
     }
     return { accepted: true, action: 'assign-quickbar' }
   }
+  if (entry.equippedSlot === destination.slot) {
+    return { accepted: false, reason: '该物品已经位于这个穿戴槽。' }
+  }
   if (entry.identified === false) return { accepted: false, reason: '未鉴定物品不能装备。' }
   if (!entry.item.equipment) return { accepted: false, reason: '该物品不是可穿戴装备。' }
   if (!equipmentSlotAcceptsItemSlot(

@@ -6,6 +6,7 @@ import { useCharacterStore } from '../store/characters'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
 
 export const DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL = 'dnd5e-inventory-player-to-dm'
+export const DND5E_INVENTORY_DM_TO_PLAYER_CHANNEL = 'dnd5e-inventory-dm-to-player'
 
 export interface Dnd5eInventoryAuthorityRequest {
   id: string
@@ -18,18 +19,28 @@ export interface Dnd5eInventoryAuthorityRequest {
 
 export interface Dnd5eInventorySubmitResult {
   status: 'applied' | 'submitted' | 'rejected'
+  requestId?: string
   result?: Dnd5eInventoryMutationResult
   message: string
 }
 
-const INVENTORY_REQUEST_MAX_AGE_MS = 5 * 60 * 1000
-const seenRequestIds = new Set<string>()
-let started = false
-let stop: (() => void) | null = null
+export interface Dnd5eInventoryAuthorityAck {
+  requestId: string
+  recipientMemberId: string
+  status: 'applied' | 'rejected'
+  message: string
+  updatedAt: number
+}
 
-export function submitDnd5eInventoryMutation(
+const INVENTORY_REQUEST_MAX_AGE_MS = 5 * 60 * 1000
+const INVENTORY_ACK_TIMEOUT_MS = 20_000
+const seenRequestIds = new Set<string>()
+let activeAuthorityStop: (() => void) | null = null
+let inventoryAuthorityQueue: Promise<void> = Promise.resolve()
+
+export async function submitDnd5eInventoryMutation(
   mutation: Exclude<Dnd5eInventoryMutation, { type: 'grant' }>,
-): Dnd5eInventorySubmitResult {
+): Promise<Dnd5eInventorySubmitResult> {
   const session = getRoomSession()
   const mode = session?.role ?? modeFromPort()
   if (mode !== 'player') {
@@ -59,42 +70,145 @@ export function submitDnd5eInventoryMutation(
     mutation: sanitizeDnd5ePlayerInventoryMutation(mutation),
     updatedAt: Date.now(),
   }
-  void publishSharedEvent(DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL, request).catch((error) => {
-    console.error('[inventory-authority] request event publication failed', error)
+  return new Promise((resolve) => {
+    let settled = false
+    let unsubscribe = () => {}
+    let timeout: ReturnType<typeof globalThis.setTimeout> | undefined
+    const finish = (result: Dnd5eInventorySubmitResult) => {
+      if (settled) return
+      settled = true
+      if (timeout != null) globalThis.clearTimeout(timeout)
+      unsubscribe()
+      void (async () => {
+        if (result.status === 'applied') {
+          try {
+            // The targeted receipt may arrive before the ordinary shared-state
+            // invalidation refresh has painted the player UI. Join an explicit
+            // post-commit hydration so a success notice and the visible slots
+            // can never disagree.
+            await useCharacterStore.getState().loadShared({ force: true })
+          } catch (error) {
+            console.error('[inventory-authority] post-ack inventory refresh failed', error)
+          }
+        }
+        resolve(result)
+      })()
+    }
+    unsubscribe = subscribeSharedEvent<Dnd5eInventoryAuthorityAck>(
+      DND5E_INVENTORY_DM_TO_PLAYER_CHANNEL,
+      (ack) => {
+        if (!dnd5eInventoryAuthorityAckMatches(ack, request.id, request.memberId)) return
+        finish({ status: ack.status, requestId: request.id, message: ack.message })
+      },
+    )
+    timeout = globalThis.setTimeout(() => finish({
+      status: 'rejected',
+      requestId: request.id,
+      message: '库存请求等待 DM 权威端超时；请确认 DM 在线后重试。',
+    }), INVENTORY_ACK_TIMEOUT_MS)
+    void publishSharedEvent(DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL, request).catch((error) => {
+      console.error('[inventory-authority] request event publication failed', error)
+      finish({
+        status: 'rejected',
+        requestId: request.id,
+        message: '库存请求发送失败，请检查房间连接后重试。',
+      })
+    })
   })
-  return { status: 'submitted', message: '已提交给 DM 权威端，完成后库存会自动同步。' }
 }
 
 export function startDnd5eInventoryAuthoritySync(): () => void {
-  if (started) return () => {}
   const session = getRoomSession()
   if ((session?.role ?? modeFromPort()) !== 'dm') return () => {}
-  started = true
-  stop = subscribeSharedEvent<Dnd5eInventoryAuthorityRequest>(
+  // App effects can be restarted by StrictMode, room-session refreshes and HMR.
+  // Always replace the previous DM subscription and make each cleanup own only
+  // the subscription it created; an older cleanup must never stop a newer one.
+  activeAuthorityStop?.()
+  const localStop = subscribeSharedEvent<Dnd5eInventoryAuthorityRequest>(
     DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL,
     (request) => {
       if (!validRequest(request, session?.roomId)) return
       seenRequestIds.add(request.id)
       if (seenRequestIds.size > 500) seenRequestIds.clear()
-      const state = useCharacterStore.getState()
-      const mutation = sanitizeDnd5ePlayerInventoryMutation(request.mutation)
-      const source = state.characters.find((character) => character.id === mutation.characterId)
-      if (!source || (request.memberId && source.roomMemberId !== request.memberId)) return
-      if (request.roomId && source.roomId && source.roomId !== request.roomId) return
-      if (mutation.type === 'transfer') {
-        const target = state.characters.find((character) => character.id === mutation.targetCharacterId)
-        if (!target || (source.roomId && target.roomId && source.roomId !== target.roomId)) return
-      }
-      state.applyInventoryMutation(
-        mutation.type === 'use' ? withAuthorityUseContext(mutation, request.id) : mutation,
-      )
+      inventoryAuthorityQueue = inventoryAuthorityQueue
+        .then(() => settleDnd5eInventoryAuthorityRequest(request))
+        .catch((error) => {
+          console.error('[inventory-authority] request settlement failed', error)
+        })
     },
   )
+  activeAuthorityStop = localStop
   return () => {
-    stop?.()
-    stop = null
-    started = false
+    if (activeAuthorityStop !== localStop) return
+    localStop()
+    activeAuthorityStop = null
   }
+}
+
+async function settleDnd5eInventoryAuthorityRequest(
+  request: Dnd5eInventoryAuthorityRequest,
+): Promise<void> {
+  const acknowledge = async (status: Dnd5eInventoryAuthorityAck['status'], message: string) => {
+    if (!request.memberId) return
+    try {
+      await publishSharedEvent(DND5E_INVENTORY_DM_TO_PLAYER_CHANNEL, {
+        requestId: request.id,
+        recipientMemberId: request.memberId,
+        status,
+        message,
+        updatedAt: Date.now(),
+      } satisfies Dnd5eInventoryAuthorityAck)
+    } catch (error) {
+      console.error('[inventory-authority] acknowledgement publication failed', error)
+    }
+  }
+  const state = useCharacterStore.getState()
+  const mutation = sanitizeDnd5ePlayerInventoryMutation(request.mutation)
+  const source = state.characters.find((character) => character.id === mutation.characterId)
+  if (!source || (request.memberId && source.roomMemberId !== request.memberId)) {
+    await acknowledge('rejected', inventoryFailureMessage('unauthorized'))
+    return
+  }
+  if (request.roomId && source.roomId && source.roomId !== request.roomId) {
+    await acknowledge('rejected', inventoryFailureMessage('unauthorized'))
+    return
+  }
+  if (mutation.type === 'transfer') {
+    const target = state.characters.find((character) => character.id === mutation.targetCharacterId)
+    if (!target || (source.roomId && target.roomId && source.roomId !== target.roomId)) {
+      await acknowledge('rejected', inventoryFailureMessage(target ? 'invalid-target' : 'target-not-found'))
+      return
+    }
+  }
+  const previousCharacters = structuredClone(state.characters)
+  const result = state.applyInventoryMutation(
+    mutation.type === 'use' ? withAuthorityUseContext(mutation, request.id) : mutation,
+  )
+  if (!result.ok) {
+    await acknowledge('rejected', inventoryFailureMessage(result.reason))
+    return
+  }
+  try {
+    // The ACK is a commit receipt: never report success until the authoritative
+    // shared character snapshot (including the inventory revision) is durable.
+    await useCharacterStore.getState().saveSharedNow()
+  } catch (error) {
+    useCharacterStore.setState({ characters: previousCharacters })
+    console.error('[inventory-authority] authoritative character save failed', error)
+    await acknowledge('rejected', '库存权威快照保存失败；本次操作已回滚，请重试。')
+    return
+  }
+  await acknowledge('applied', result.message ?? '物品变更已完成。')
+}
+
+export function dnd5eInventoryAuthorityAckMatches(
+  ack: Dnd5eInventoryAuthorityAck | null | undefined,
+  requestId: string,
+  recipientMemberId?: string,
+): boolean {
+  return !!ack && typeof recipientMemberId === 'string' &&
+    ack.requestId === requestId && ack.recipientMemberId === recipientMemberId &&
+    (ack.status === 'applied' || ack.status === 'rejected')
 }
 
 export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['reason']): string {
@@ -139,11 +253,13 @@ function withAuthorityUseContext(
   receiptId: string,
 ): Extract<Dnd5eInventoryMutation, { type: 'use' }> {
   const character = useCharacterStore.getState().characters.find((candidate) => candidate.id === mutation.characterId)
-  const item = character?.dnd5eInventory?.entries.find((entry) => entry.instanceId === mutation.instanceId)?.item
+  const item = character
+    ? normalizeDnd5eInventory(character).entries.find((entry) => entry.instanceId === mutation.instanceId)?.item
+    : undefined
   return {
     ...mutation,
     targetCharacterId: mutation.targetCharacterId ?? mutation.characterId,
-    healingRolls: item ? rollDnd5eInventoryHealing(item) : [],
+    healingRolls: item ? rollDnd5eInventoryHealing(item, mutation.useActionId) : [],
     receiptId,
     expectedInventoryRevision: character ? normalizeDnd5eInventory(character).revision : undefined,
   }
@@ -156,6 +272,7 @@ export function sanitizeDnd5ePlayerInventoryMutation(
     type: 'use',
     characterId: mutation.characterId,
     instanceId: mutation.instanceId,
+    useActionId: mutation.useActionId,
     spellSlotLevel: mutation.spellSlotLevel,
     healingRolls: undefined,
   }

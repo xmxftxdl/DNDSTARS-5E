@@ -1,0 +1,173 @@
+{
+  "id": "srd-5.1:octopus",
+  "slug": "octopus",
+  "name": "章鱼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tentacles",
+      "name": "触手群攻",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "ink-cloud",
+      "name": "墨汁云",
+      "automation": "headless",
+      "rule": "persistent-area",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.durationRounds",
+        "rule.concentration",
+        "rule.anchorMode",
+        "rule.vertical.mode",
+        "rule.vertical.heightFeet",
+        "rule.vertical.anchorOffsetFeet",
+        "rule.relation",
+        "rule.includeSelf",
+        "rule.requiredEnvironment",
+        "rule.obscuration.kind",
+        "rule.color",
+        "rule.visual.preset",
+        "rule.visual.intensity",
+        "rule.followUp.kind",
+        "rule.followUp.grantId",
+        "rule.followUp.label",
+        "rule.followUp.economy",
+        "rule.followUp.expires",
+        "rule.followUp.actions[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "wrong-environment"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 332,
+      "slug": "octopus",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:18:35.051Z",
+      "name": "章鱼",
+      "actionId": "tentacles",
+      "actionName": "触手群攻",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "0",
+      "total": 334,
+      "mapId": "verify-ui-octopus-tentacles-1788571115101",
+      "combatId": "verify-ui-octopus-tentacles-1788571115101:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "章鱼 使用触手群攻攻击 验证目标：触手群攻 → 验证目标 13+4=17 命中；共造成 1 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:18 PM\n结算\n\n章鱼 使用触手群攻攻击 验证目标：触手群攻 → 验证目标 13+4=17 命中；共造成 1 点伤害。\n\n查看 Headless 结算依据（10）\n怪物动作：触手群攻｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +4。\n结果 · 17 vs AC 10：命中。\n章鱼｜消耗动作\n验证目标｜受到 1 点伤害｜HP 320 → 319\n验证目标｜获得状态：擒抱｜来源：章鱼\n验证目标｜效果生效：擒抱\n章鱼｜monster:srd-5.1:octopus:tentacles:tentacles-grapple生效｜目标 验证目标",
+      "playerLog": "章鱼 使用触手群攻攻击 验证目标：触手群攻 → 验证目标 13+4=17 命中；共造成 1 点伤害。",
+      "afterHp": 319,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:18:55.625Z",
+      "evidenceFile": "ui-cases/monsters/332-octopus.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "屏息",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "水下伪装",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "水下呼吸",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

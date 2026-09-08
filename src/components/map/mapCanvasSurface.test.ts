@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAP_CANVAS_LIGHT_MATTE_COLOR,
   MAP_CANVAS_MATTE_COLOR,
   MAP_CANVAS_UNMEASURED_SIZE,
+  mapCanvasMatteColor,
   mapCanvasViewportCanRender,
   measureMapCanvasViewport,
 } from './mapCanvasSurface'
@@ -13,8 +15,11 @@ describe('map canvas refresh surface', () => {
     expect(mapCanvasViewportCanRender({ width: 1440, height: 900 })).toBe(true)
   })
 
-  it('uses a theme-independent dark matte while the map image loads', () => {
+  it('uses a workspace-colored matte for each application theme', () => {
     expect(MAP_CANVAS_MATTE_COLOR).toBe('#0a0b16')
+    expect(MAP_CANVAS_LIGHT_MATTE_COLOR).toBe('#f1f5f9')
+    expect(mapCanvasMatteColor('dark')).toBe(MAP_CANVAS_MATTE_COLOR)
+    expect(mapCanvasMatteColor('light')).toBe(MAP_CANVAS_LIGHT_MATTE_COLOR)
   })
 
   it('measures the real container and clamps unavailable dimensions', () => {

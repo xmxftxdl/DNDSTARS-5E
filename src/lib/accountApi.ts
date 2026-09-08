@@ -64,7 +64,7 @@ export interface AccountCampaignPrepChecklistItemV1 {
   completed: boolean
 }
 
-export type AccountStoryEventStatusV1 = 'planned' | 'active' | 'completed' | 'skipped'
+export type AccountStoryEventStatusV1 = 'planned' | 'active' | 'completed' | 'skipped' | 'not-triggered'
 export type AccountStoryEventSourceV1 = 'analysis-timeline' | 'analysis-scene' | 'dm' | 'session-log'
 
 export interface AccountStoryEventGraphPositionV1 {
@@ -96,6 +96,14 @@ export interface AccountStoryTimelineMarkerV1 {
   y: number
   label: string
   gameTimeWorldMinute?: number
+  /** Analysis markers are synchronized by sourceKey; legacy/unspecified markers remain manual. */
+  source?: 'analysis' | 'manual'
+  sourceKey?: string
+  sourceEventIds?: string[]
+  relativeOffsetMinutes?: number
+  timelineKind?: 'history' | 'current' | 'deadline' | 'conditional'
+  /** Analysis refreshes preserve only marker fields explicitly adjusted by the DM. */
+  dmEditedFields?: Array<'y' | 'label' | 'gameTimeWorldMinute'>
 }
 
 export interface AccountStoryEventV1 {
@@ -108,6 +116,8 @@ export interface AccountStoryEventV1 {
   timeLabel: string
   gameTimeWorldMinute?: number
   status: AccountStoryEventStatusV1
+  /** Identifies a reversible status derived from branch reachability rather than a DM ruling. */
+  statusAutomation?: 'branch'
   source: AccountStoryEventSourceV1
   sourceEventIds: string[]
   sceneIds: string[]
@@ -178,6 +188,9 @@ export interface AccountCampaignStoryWorkspaceV1 {
   graphLinksClearedByDm?: boolean
   graphLayoutVersion?: 2 | 3 | 4
   timelineMarkers?: AccountStoryTimelineMarkerV1[]
+  dismissedTimelineMarkerSourceKeys?: string[]
+  /** Absolute campaign minute used to bind relative clues such as “第一小时”. */
+  storyStartWorldMinute?: number
   personStates: AccountCampaignPersonStateV1[]
   clueStates: AccountCampaignClueStateV1[]
   activeSession?: AccountCampaignActiveSessionV1

@@ -48,6 +48,21 @@ async function putRoomState(
   expect(response.ok(), `${name} should save in room`).toBeTruthy()
 }
 
+async function getRoomState<T>(
+  request: APIRequestContext,
+  room: RoomMembershipResponse,
+  name: string,
+): Promise<T> {
+  const response = await request.get(`${DM}/api/state/${name}?room=${room.roomId}`, {
+    headers: {
+      'X-Stars-Member': room.member.memberId,
+      'X-Stars-Room-Token': room.member.roomToken,
+    },
+  })
+  expect(response.ok(), `${name} should load in room`).toBeTruthy()
+  return response.json() as Promise<T>
+}
+
 async function enterRoom(page: import('@playwright/test').Page, origin: string, room: RoomMembershipResponse) {
   await page.addInitScript(
     ([key, value]) => localStorage.setItem(key, JSON.stringify(value)),
@@ -471,6 +486,18 @@ test('room-owned character regains control after its prior end-turn command and 
     await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 10_000 })
     await expect(player.locator('[data-combat-banner="turn"]')).toBeVisible({ timeout: 10_000 })
     await expect(player.getByTestId(`initiative-token-${heroTokenId}`)).toHaveAttribute('data-active-turn', 'true')
+    const combatLog = await getRoomState<{ entries?: Array<{ text?: string; details?: string[] }> }>(
+      request,
+      room,
+      'combat-log',
+    )
+    expect(combatLog.entries ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        details: expect.arrayContaining([
+          expect.stringMatching(/authority-commit-failed|combat-command-settlement-precondition-conflict/),
+        ]),
+      }),
+    ]))
   } finally {
     await Promise.all([dmContext.close(), playerContext.close()])
   }

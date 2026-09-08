@@ -1,0 +1,198 @@
+{
+  "id": "srd-5.1:purple-worm",
+  "slug": "purple-worm",
+  "name": "紫虫",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：尾部螫针已有完整的命中、穿刺伤害、DC 19 体质豁免、12d6 毒素伤害及成功减半结算，却被安全名单误降级。现已恢复为 Headless。",
+    "已修复：啃咬的吞咽关系现已覆盖 DC 19 敏捷豁免、体内外全掩护、6d6 胃酸、30 点体内伤害触发的 DC 21 反刍，以及紫虫死亡后花费 20 尺移动离开尸体并倒地；啃咬及多重攻击现可由 Headless 完整结算。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].regurgitation.damageThreshold",
+        "attack.onHitEffects[].regurgitation.ability",
+        "attack.onHitEffects[].regurgitation.dc",
+        "attack.onHitEffects[].regurgitation.ejects",
+        "attack.onHitEffects[].regurgitation.applyProne",
+        "attack.onHitEffects[].regurgitation.placementWithinFeet",
+        "attack.onHitEffects[].sourceDeathEscape.movementCostFeet",
+        "attack.onHitEffects[].sourceDeathEscape.applyProne",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "swallow relation, total cover, internal attack, source death, movement-cost corpse exit, prone"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail-stinger",
+      "name": "尾部螫针",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].damage[].average",
+        "attack.onHitEffects[].damage[].count",
+        "attack.onHitEffects[].damage[].sides",
+        "attack.onHitEffects[].damage[].bonus",
+        "attack.onHitEffects[].damage[].type",
+        "attack.onHitEffects[].damageOnSuccessfulSave",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 28,
+      "slug": "purple-worm",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:00:38.086Z",
+      "name": "紫虫",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "challengeRating": "15",
+      "total": 334,
+      "mapId": "verify-ui-purple-worm-inspect-1788566438143",
+      "combatId": "verify-ui-purple-worm-inspect-1788566438143:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-05T00:00:44.476Z",
+      "evidenceFile": "ui-cases/monsters/028-purple-worm.json"
+    },
+    {
+      "slug": "purple-worm",
+      "name": "紫虫",
+      "actionId": "tail-stinger",
+      "actionName": "尾部螫针",
+      "mapId": "monster-ui-catchup-purple-worm-1788607329824",
+      "combatId": "monster-ui-catchup-purple-worm-1788607329824:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "beforeHp": 320,
+      "startedAt": "2026-09-05T11:22:10.324Z",
+      "dmLog": "紫虫 使用尾部螫针攻击 验证目标：尾部螫针 → 验证目标 12+14=26 命中；共造成 44 点伤害。",
+      "playerLog": "紫虫 使用尾部螫针攻击 验证目标：尾部螫针 → 验证目标 12+14=26 命中；共造成 44 点伤害。",
+      "afterHp": 276,
+      "conditions": [],
+      "actionAvailable": 0,
+      "status": "passed",
+      "finishedAt": "2026-09-05T11:22:31.842Z",
+      "mode": "weapon-ui-catchup"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "掘穴者",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 8,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

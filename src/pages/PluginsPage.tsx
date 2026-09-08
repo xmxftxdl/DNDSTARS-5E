@@ -2,23 +2,43 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowRight,
+  BookOpen,
+  Bot,
+  Boxes,
   CheckCircle2,
+  Clock3,
   Cloud,
   Download,
   FileUp,
   Flag,
+  Flame,
   Globe2,
+  GraduationCap,
+  Image as ImageIcon,
+  LayoutGrid,
   LockKeyhole,
+  Medal,
   PackageCheck,
   Puzzle,
   RefreshCw,
   ReceiptText,
+  ScrollText,
   Search,
   ShieldCheck,
+  Skull,
+  Sparkles,
   Trash2,
   Upload,
   Users,
 } from 'lucide-react'
+import {
+  DND5E_PLUGIN_CONTENT_CATEGORIES,
+  DND5E_PLUGIN_CONTENT_CATEGORY_IDS,
+  dnd5ePluginContentCategoryDefinition,
+  dnd5ePluginContentCategoryLabel,
+  type Dnd5ePluginContentCategory,
+} from '../../shared/plugin-content-category.mjs'
 import AccountAuthPanel from '../components/AccountAuthPanel'
 import MarketplacePublicationDialog, {
   type MarketplacePublicationInput,
@@ -56,7 +76,7 @@ import { dnd5ePluginCapabilityLabel } from '../rulesets/dnd5e/pluginCapabilityLa
 import {
   downloadPublicPlugin,
   loadMarketplaceCapabilities,
-  loadPluginCatalog,
+  loadPluginCatalogSnapshot,
   loadPluginModerationQueue,
   moderateMarketplaceCreator,
   moderateMarketplacePayout,
@@ -67,6 +87,7 @@ import {
   type PluginCatalogEntry,
   type PluginCatalogVersion,
   type MarketplaceCapabilities,
+  type PluginCatalogFacets,
   type PluginModerationQueue,
 } from '../lib/pluginCatalogApi'
 import { formatMarketplacePrice } from '../../shared/marketplace-publication.mjs'
@@ -79,6 +100,30 @@ const EMPTY_LIBRARY: AccountPluginLibrary = {
     maxTotalBytes: 128 * 1024 * 1024,
     maxPackageBytes: 8 * 1024 * 1024,
   },
+}
+
+const EMPTY_CATALOG_FACETS: PluginCatalogFacets = {
+  total: 0,
+  categories: Object.fromEntries(
+    DND5E_PLUGIN_CONTENT_CATEGORY_IDS.map((category) => [category, 0]),
+  ) as Record<Dnd5ePluginContentCategory, number>,
+}
+
+const PLUGIN_CATALOG_PAGE_SIZE = 24
+
+const PLUGIN_CATEGORY_ICONS: Record<Dnd5ePluginContentCategory, typeof Puzzle> = {
+  adventure: BookOpen,
+  monsters: Skull,
+  items: PackageCheck,
+  classes: GraduationCap,
+  subclasses: Puzzle,
+  spells: Sparkles,
+  feats: Medal,
+  races: Users,
+  backgrounds: ScrollText,
+  rules: Bot,
+  assets: ImageIcon,
+  mixed: Boxes,
 }
 
 function formatBytes(bytes: number): string {
@@ -97,6 +142,28 @@ function formatDate(timestamp: number): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(timestamp))
+}
+
+function latestCatalogVersion(plugin: PluginCatalogEntry): PluginCatalogVersion | undefined {
+  return plugin.versions[0]
+}
+
+function catalogPublishedAt(plugin: PluginCatalogEntry): number {
+  const latest = latestCatalogVersion(plugin)
+  return latest?.publishedAt ?? latest?.submittedAt ?? plugin.updatedAt ?? plugin.createdAt
+}
+
+function catalogPopularityScore(plugin: PluginCatalogEntry): number {
+  const popularity = plugin.popularity
+  if (!popularity) return 0
+  return popularity.views + popularity.downloads * 3 + popularity.installs * 8 + popularity.activeInstallations * 5
+}
+
+function formatCatalogMetric(value: number): string {
+  return new Intl.NumberFormat('zh-CN', {
+    notation: value >= 1_000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1,
+  }).format(Math.max(0, Number(value) || 0))
 }
 
 function downloadBytes(bytes: ArrayBuffer, fileName: string) {
@@ -132,30 +199,91 @@ function PluginCatalogBrowser({
   ) => Promise<string>
 }) {
   const [plugins, setPlugins] = useState<PluginCatalogEntry[]>([])
+  const [discoveryPlugins, setDiscoveryPlugins] = useState<PluginCatalogEntry[]>([])
   const [query, setQuery] = useState('')
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState<Dnd5ePluginContentCategory | ''>('')
+  const [catalogFacets, setCatalogFacets] = useState<PluginCatalogFacets>(EMPTY_CATALOG_FACETS)
+  const [resultFacets, setResultFacets] = useState<PluginCatalogFacets>(EMPTY_CATALOG_FACETS)
+  const [hasMoreResults, setHasMoreResults] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [appending, setAppending] = useState(false)
   const [capabilities, setCapabilities] = useState<MarketplaceCapabilities | null>(null)
+  const searchSectionRef = useRef<HTMLElement>(null)
+  const searchRequestIdRef = useRef(0)
 
-  const search = async () => {
-    setLoading(true)
+  const search = async (next: {
+    query?: string
+    category?: Dnd5ePluginContentCategory | ''
+    initializeDiscovery?: boolean
+    append?: boolean
+  } = {}) => {
+    const requestId = ++searchRequestIdRef.current
+    if (next.append) setAppending(true)
+    else {
+      setLoading(true)
+      setAppending(false)
+    }
     try {
-      setPlugins(await loadPluginCatalog({ query, category }))
+      const snapshot = await loadPluginCatalogSnapshot({
+        query: next.query ?? query,
+        category: next.category === '' ? undefined : ((next.category ?? category) || undefined),
+        offset: next.append ? plugins.length : 0,
+        limit: PLUGIN_CATALOG_PAGE_SIZE,
+      })
+      if (requestId !== searchRequestIdRef.current) return
+      setPlugins((current) => next.append
+        ? [...new Map([...current, ...snapshot.plugins].map((plugin) => [plugin.id, plugin])).values()]
+        : snapshot.plugins)
+      setResultFacets(snapshot.facets)
+      setHasMoreResults(snapshot.pagination.hasMore)
+      if (next.initializeDiscovery) {
+        const discoveryCandidates = snapshot.discovery
+          ? [...snapshot.discovery.newest, ...snapshot.discovery.hot]
+          : snapshot.plugins
+        setDiscoveryPlugins([...new Map(discoveryCandidates.map((plugin) => [plugin.id, plugin])).values()])
+        setCatalogFacets(snapshot.facets)
+      }
       onError(null)
     } catch (cause) {
+      if (requestId !== searchRequestIdRef.current) return
       onError(accountApiErrorMessage(cause))
     } finally {
-      setLoading(false)
+      if (requestId === searchRequestIdRef.current) {
+        if (next.append) setAppending(false)
+        else setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void search()
+    void search({ query: '', category: '', initializeDiscovery: true })
     void loadMarketplaceCapabilities().then(setCapabilities).catch(() => undefined)
     // Initial public catalog load; later searches are explicitly submitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const newestPlugins = [...discoveryPlugins]
+    .sort((left, right) => catalogPublishedAt(right) - catalogPublishedAt(left) || left.id.localeCompare(right.id))
+    .slice(0, 5)
+  const hotPlugins = [...discoveryPlugins]
+    .sort((left, right) =>
+      catalogPopularityScore(right) - catalogPopularityScore(left) ||
+      catalogPublishedAt(right) - catalogPublishedAt(left) ||
+      left.id.localeCompare(right.id))
+    .slice(0, 4)
+  const featuredPlugin = newestPlugins[0]
+  const featuredVersion = featuredPlugin ? latestCatalogVersion(featuredPlugin) : undefined
+  const selectedCategoryLabel = category
+    ? dnd5ePluginContentCategoryLabel(category)
+    : '全部分类'
+  const resultTotal = category ? resultFacets.categories[category] : resultFacets.total
+  const browseCategory = (nextCategory: Dnd5ePluginContentCategory | '') => {
+    setQuery('')
+    setCategory(nextCategory)
+    void search({ query: '', category: nextCategory })
+    window.requestAnimationFrame(() => searchSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 
   const downloadVersion = async (plugin: PluginCatalogEntry, version: PluginCatalogVersion) => {
     const key = `catalog:${plugin.id}@${version.version}`
@@ -223,141 +351,270 @@ function PluginCatalogBrowser({
   }
 
   return (
-    <section>
+    <section className="space-y-6">
       {capabilities?.marketMode === 'free-beta' && (
-        <div className="mb-4 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.05] px-4 py-3 text-sm text-cyan-50/90">
+        <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.05] px-4 py-3 text-sm text-cyan-50/90">
           <strong>免费扩展市场 Beta</strong>
           <span className="ml-2 text-cyan-100/60">当前只开放免费扩展；付费发布、购买和提现不会产生真实交易。</span>
         </div>
       )}
-      <form
-        className="mb-5 grid gap-2 rounded-2xl border border-white/8 bg-black/15 p-3 sm:grid-cols-[1fr_180px_auto]"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void search()
-        }}
-      >
-        <label className="relative">
-          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-600" />
-          <input
-            aria-label="搜索插件"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索名称、ID、发布者或标签"
-            className="w-full rounded-xl border border-white/10 bg-void-900/80 py-2.5 pl-9 pr-3 text-sm text-slate-100"
-          />
-        </label>
-        <select
-          aria-label="插件分类"
-          value={category}
-          onChange={(event) => setCategory(event.target.value)}
-          className="rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-200"
-        >
-          <option value="">全部分类</option>
-          <option value="rules">规则</option>
-          <option value="subclasses">子职</option>
-          <option value="spells">法术</option>
-          <option value="items">物品</option>
-          <option value="monsters">怪物</option>
-          <option value="adventure">冒险</option>
-          <option value="mixed">混合内容</option>
-        </select>
-        <button type="submit" disabled={loading} className="rounded-xl bg-arcane-500/15 px-4 py-2.5 text-sm font-semibold text-arcane-100">
-          {loading ? '正在搜索…' : '搜索'}
-        </button>
-      </form>
-      {loading ? (
-        <div className="flex min-h-52 items-center justify-center gap-2 text-sm text-slate-400">
-          <RefreshCw className="h-4 w-4 animate-spin" />正在读取公开目录…
+
+      <section aria-labelledby="plugin-new-content-title" className="rounded-3xl border border-white/8 bg-black/15 p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-arcane-200">
+              <Clock3 className="h-4 w-4" />
+              <h2 id="plugin-new-content-title" className="text-base font-bold text-slate-100">新内容</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">按实际上架时间展示刚刚发布或更新的内容。</p>
+          </div>
+          <button type="button" disabled={loading} onClick={() => browseCategory('')} className="inline-flex items-center gap-1.5 text-xs font-semibold text-arcane-300 hover:text-arcane-100 disabled:opacity-50">
+            查看全部 <ArrowRight className="h-3.5 w-3.5" />
+          </button>
         </div>
-      ) : plugins.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-white/10 px-6 py-16 text-center text-sm text-slate-500">
-          暂时没有符合条件的已审核插件。
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {plugins.map((plugin) => {
-            const latest = plugin.versions[0]
-            if (!latest) return null
-            return (
-              <article key={plugin.id} className="rounded-2xl border border-white/8 bg-black/15 p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="font-semibold text-slate-100 hover:text-arcane-200">{plugin.name}</Link>
-                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
-                        v{latest.version}
-                      </span>
-                      <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200">
-                        {plugin.contentCategory}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-mono text-xs text-slate-600">{plugin.id}</p>
+        {loading && !featuredPlugin ? (
+          <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-slate-500">
+            <RefreshCw className="h-4 w-4 animate-spin" />正在读取新上架内容…
+          </div>
+        ) : featuredPlugin && featuredVersion ? (
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(17rem,0.8fr)]">
+            <Link
+              to={`/app/extensions/catalog/${encodeURIComponent(featuredPlugin.id)}`}
+              className="group relative flex min-h-72 overflow-hidden rounded-2xl border border-arcane-300/15 bg-gradient-to-br from-arcane-500/25 via-slate-950/85 to-cyan-500/10 p-6 transition hover:border-arcane-300/35"
+            >
+              <div className="absolute -right-12 -top-16 h-56 w-56 rounded-full bg-arcane-400/15 blur-3xl" />
+              <div className="absolute -bottom-20 left-1/4 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
+              <div className="relative flex min-w-0 flex-1 flex-col justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    <span className="rounded-full bg-arcane-300/15 px-2.5 py-1 font-bold text-arcane-100">最新上架</span>
+                    <span className="rounded-full bg-white/5 px-2.5 py-1 text-slate-300">{dnd5ePluginContentCategoryLabel(featuredPlugin.contentCategory)}</span>
+                    <span className="rounded-full bg-white/5 px-2.5 py-1 text-slate-400">v{featuredVersion.version}</span>
                   </div>
-                  <div className="text-right">
-                    <Globe2 className="ml-auto h-5 w-5 text-emerald-300" />
-                    {latest.marketplace && (
-                      <p className="mt-2 text-sm font-bold text-emerald-200">
-                        {formatMarketplacePrice(latest.marketplace.pricing)}
-                      </p>
-                    )}
-                  </div>
+                  <h3 className="mt-6 max-w-2xl text-2xl font-black tracking-tight text-white sm:text-3xl">{featuredPlugin.name}</h3>
+                  <p className="mt-3 max-w-2xl line-clamp-3 text-sm leading-6 text-slate-300/85">{featuredVersion.storeDescription || featuredPlugin.description || '发布者未填写说明。'}</p>
                 </div>
-                <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="mt-3 block line-clamp-3 text-sm leading-6 text-slate-400 hover:text-slate-200">{latest.storeDescription || plugin.description || '发布者未填写说明。'}</Link>
-                <p className="mt-3 text-xs text-slate-500">
-                  发布者：
-                  <Link
-                    to={`/app/extensions/publishers/${encodeURIComponent(plugin.publisher.accountId)}`}
-                    className="text-arcane-300 hover:text-arcane-200"
-                  >
-                    {plugin.publisher.displayName}
-                  </Link>
-                  {' '}· 许可证：{latest.license}
-                </p>
-                {latest.changelog && <p className="mt-2 text-xs text-slate-600">更新：{latest.changelog}</p>}
-                {latest.marketplace && (
-                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                    <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-cyan-200">
-                      {latest.marketplace.rightsStatus === 'creator-declared' ? '作者已提交权利声明' : '旧版内容'}
+                <div className="mt-8 flex flex-wrap items-end justify-between gap-3">
+                  <div className="text-xs text-slate-400">
+                    <p>发布者：{featuredPlugin.publisher.displayName}</p>
+                    <p className="mt-1">{formatDate(catalogPublishedAt(featuredPlugin))}</p>
+                  </div>
+                  <span className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white transition group-hover:bg-white/15">
+                    查看内容 <ArrowRight className="h-4 w-4" />
+                  </span>
+                </div>
+              </div>
+            </Link>
+            <div className="grid content-start gap-3">
+              {newestPlugins.slice(1, 4).map((plugin) => {
+                const latest = latestCatalogVersion(plugin)
+                if (!latest) return null
+                const definition = dnd5ePluginContentCategoryDefinition(plugin.contentCategory)
+                const CategoryIcon = PLUGIN_CATEGORY_ICONS[definition.id]
+                return (
+                  <Link key={plugin.id} to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="group flex min-w-0 items-center gap-3 rounded-2xl border border-white/8 bg-white/[0.025] p-3 transition hover:border-white/15 hover:bg-white/[0.045]">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-arcane-500/20 to-cyan-500/10 text-arcane-200">
+                      <CategoryIcon className="h-5 w-5" />
                     </span>
-                    {latest.marketplace.rightsManifest?.containsAi && (
-                      <span className="rounded-full bg-violet-500/10 px-2 py-1 text-violet-200">含 AI 辅助内容</span>
-                    )}
-                  </div>
-                )}
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {latest.marketplace?.pricing.kind === 'paid' ? (
-                    <Link
-                      to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`}
-                      className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100"
-                    >
-                      <ReceiptText className="h-4 w-4" />查看付费商品
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void downloadVersion(plugin, latest)}
-                      className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-50"
-                    >
-                      {accountId ? <Cloud className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-                      {accountId ? '安装并激活' : '下载'}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void report(plugin, latest)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs text-slate-500 disabled:opacity-50"
-                  >
-                    <Flag className="h-3.5 w-3.5" />举报
-                  </button>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-slate-200 group-hover:text-white">{plugin.name}</span>
+                      <span className="mt-1 block truncate text-[11px] text-slate-500">{definition.label} · v{latest.version} · {formatDate(catalogPublishedAt(plugin))}</span>
+                    </span>
+                    <ArrowRight className="h-4 w-4 shrink-0 text-slate-600 transition group-hover:translate-x-0.5 group-hover:text-arcane-300" />
+                  </Link>
+                )
+              })}
+              {newestPlugins.length <= 1 && (
+                <div className="rounded-2xl border border-dashed border-white/10 px-5 py-10 text-center text-xs leading-5 text-slate-600">
+                  更多新内容通过审核后会出现在这里。
                 </div>
-              </article>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-white/10 px-6 py-16 text-center text-sm text-slate-500">目前还没有已上架内容。</div>
+        )}
+      </section>
+
+      <section aria-labelledby="plugin-hot-content-title" className="rounded-3xl border border-white/8 bg-black/15 p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Flame className="h-4 w-4 text-orange-300" />
+              <h2 id="plugin-hot-content-title" className="text-base font-bold text-slate-100">热点内容</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">综合近 30 天浏览、下载、安装与当前活跃安装排序。</p>
+          </div>
+          <span className="text-[11px] text-slate-600">匿名聚合数据，不展示玩家明细</span>
+        </div>
+        {hotPlugins.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {hotPlugins.map((plugin, index) => {
+              const latest = latestCatalogVersion(plugin)
+              if (!latest) return null
+              const definition = dnd5ePluginContentCategoryDefinition(plugin.contentCategory)
+              const CategoryIcon = PLUGIN_CATEGORY_ICONS[definition.id]
+              return (
+                <Link key={plugin.id} to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="group relative overflow-hidden rounded-2xl border border-white/8 bg-gradient-to-br from-white/[0.05] to-transparent p-4 transition hover:-translate-y-0.5 hover:border-orange-300/25">
+                  <span className="absolute right-3 top-2 text-4xl font-black text-white/[0.035]">{String(index + 1).padStart(2, '0')}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-200"><CategoryIcon className="h-4 w-4" /></span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-bold text-slate-200 group-hover:text-white">{plugin.name}</span>
+                      <span className="mt-0.5 block text-[11px] text-slate-500">{definition.label} · v{latest.version}</span>
+                    </span>
+                  </div>
+                  <p className="mt-4 line-clamp-2 min-h-10 text-xs leading-5 text-slate-500">{latest.storeDescription || plugin.description || '发布者未填写说明。'}</p>
+                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/6 pt-3 text-[11px] text-slate-500">
+                    <span className="inline-flex items-center gap-1"><Download className="h-3 w-3" />{formatCatalogMetric(plugin.popularity?.downloads ?? 0)} 下载</span>
+                    <span>{formatCatalogMetric(plugin.popularity?.activeInstallations ?? 0)} 活跃安装</span>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-white/10 px-6 py-12 text-center text-sm text-slate-600">积累浏览与安装数据后会生成热点排行。</div>
+        )}
+      </section>
+
+      <section aria-labelledby="plugin-content-category-title" className="rounded-3xl border border-white/8 bg-black/15 p-4 sm:p-5">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <LayoutGrid className="h-4 w-4 text-cyan-300" />
+              <h2 id="plugin-content-category-title" className="text-base font-bold text-slate-100">内容分类</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">模组、怪物、装备道具、职业、法术等内容独立归类；点击后直接进入对应结果。</p>
+          </div>
+          <span className="text-xs text-slate-500">共 {catalogFacets.total} 项</span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <button type="button" aria-pressed={category === ''} disabled={loading} onClick={() => browseCategory('')} className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-3 text-left transition disabled:opacity-60 ${category === '' ? 'border-arcane-400/35 bg-arcane-500/15 text-arcane-100' : 'border-white/8 bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-slate-200'}`}>
+            <Globe2 className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold">全部分类</span>
+            <span className="text-[11px] tabular-nums opacity-70">{catalogFacets.total}</span>
+          </button>
+          {DND5E_PLUGIN_CONTENT_CATEGORIES.map((definition) => {
+            const Icon = PLUGIN_CATEGORY_ICONS[definition.id]
+            const active = category === definition.id
+            return (
+              <button key={definition.id} type="button" aria-pressed={active} title={definition.description} disabled={loading} onClick={() => browseCategory(definition.id)} className={`flex min-w-0 items-center gap-2 rounded-xl border px-3 py-3 text-left transition disabled:opacity-60 ${active ? 'border-arcane-400/35 bg-arcane-500/15 text-arcane-100' : 'border-white/8 bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-slate-200'}`}>
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold">{definition.label}</span>
+                <span className="text-[11px] tabular-nums opacity-70">{catalogFacets.categories[definition.id]}</span>
+              </button>
             )
           })}
         </div>
-      )}
+      </section>
+
+      <section ref={searchSectionRef} id="plugin-catalog-search" aria-labelledby="plugin-catalog-search-title" className="scroll-mt-24 rounded-3xl border border-white/8 bg-black/15 p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Search className="h-4 w-4 text-arcane-300" />
+              <h2 id="plugin-catalog-search-title" className="text-base font-bold text-slate-100">搜索全部内容</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">先选择分类，再按名称、ID、发布者或标签继续缩小范围。</p>
+          </div>
+          <span aria-live="polite" className="text-xs text-slate-500">{selectedCategoryLabel} · {resultTotal} 项</span>
+        </div>
+        <form className="grid gap-2 rounded-2xl border border-white/8 bg-void-950/40 p-3 md:grid-cols-[minmax(11rem,0.36fr)_minmax(16rem,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); void search() }}>
+          <label className="relative">
+            <LayoutGrid className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-600" />
+            <select
+              aria-label="选择内容分类"
+              value={category}
+              disabled={loading}
+              onChange={(event) => {
+                const nextCategory = event.target.value as Dnd5ePluginContentCategory | ''
+                setCategory(nextCategory)
+                void search({ category: nextCategory })
+              }}
+              className="w-full appearance-none rounded-xl border border-white/10 bg-void-900/80 py-2.5 pl-9 pr-8 text-sm text-slate-200 disabled:opacity-60"
+            >
+              <option value="">全部分类（{catalogFacets.total}）</option>
+              {DND5E_PLUGIN_CONTENT_CATEGORIES.map((definition) => (
+                <option key={definition.id} value={definition.id}>{definition.label}（{catalogFacets.categories[definition.id]}）</option>
+              ))}
+            </select>
+          </label>
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-600" />
+            <input aria-label="搜索扩展内容" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、ID、发布者或标签" className="w-full rounded-xl border border-white/10 bg-void-900/80 py-2.5 pl-9 pr-3 text-sm text-slate-100" />
+          </label>
+          <button type="submit" disabled={loading} className="rounded-xl bg-arcane-500/15 px-5 py-2.5 text-sm font-semibold text-arcane-100 disabled:opacity-50">{loading ? '正在搜索…' : '查看内容'}</button>
+        </form>
+        {(query || category) && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+            <span>当前条件：{selectedCategoryLabel}{query ? ` · “${query}”` : ''}</span>
+            <button type="button" disabled={loading} onClick={() => browseCategory('')} className="text-arcane-300 hover:text-arcane-100 disabled:opacity-50">清除筛选</button>
+          </div>
+        )}
+
+        <div className="mt-5">
+          {loading ? (
+            <div className="flex min-h-52 items-center justify-center gap-2 text-sm text-slate-400"><RefreshCw className="h-4 w-4 animate-spin" />正在读取公开目录…</div>
+          ) : plugins.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/10 px-6 py-16 text-center text-sm text-slate-500">该分类下暂时没有符合条件的已审核内容。</div>
+          ) : (
+            <>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {plugins.map((plugin) => {
+                const latest = latestCatalogVersion(plugin)
+                if (!latest) return null
+                const contentCategory = dnd5ePluginContentCategoryDefinition(plugin.contentCategory)
+                const CategoryIcon = PLUGIN_CATEGORY_ICONS[contentCategory.id]
+                return (
+                  <article key={plugin.id} className="rounded-2xl border border-white/8 bg-black/15 p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="truncate font-semibold text-slate-100 hover:text-arcane-200">{plugin.name}</Link>
+                          <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">v{latest.version}</span>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200"><CategoryIcon className="h-3 w-3" />{contentCategory.label}</span>
+                        </div>
+                        <p className="mt-1 truncate font-mono text-xs text-slate-600">{plugin.id}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <Globe2 className="ml-auto h-5 w-5 text-emerald-300" />
+                        {latest.marketplace && <p className="mt-2 text-sm font-bold text-emerald-200">{formatMarketplacePrice(latest.marketplace.pricing)}</p>}
+                      </div>
+                    </div>
+                    <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="mt-3 block line-clamp-3 text-sm leading-6 text-slate-400 hover:text-slate-200">{latest.storeDescription || plugin.description || '发布者未填写说明。'}</Link>
+                    <p className="mt-3 text-xs text-slate-500">发布者：<Link to={`/app/extensions/publishers/${encodeURIComponent(plugin.publisher.accountId)}`} className="text-arcane-300 hover:text-arcane-200">{plugin.publisher.displayName}</Link>{' '}· 许可证：{latest.license}</p>
+                    {latest.changelog && <p className="mt-2 text-xs text-slate-600">更新：{latest.changelog}</p>}
+                    {latest.marketplace && (
+                      <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                        <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-cyan-200">{latest.marketplace.rightsStatus === 'creator-declared' ? '作者已提交权利声明' : '旧版内容'}</span>
+                        {latest.marketplace.rightsManifest?.containsAi && <span className="rounded-full bg-violet-500/10 px-2 py-1 text-violet-200">含 AI 辅助内容</span>}
+                      </div>
+                    )}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {latest.marketplace?.pricing.kind === 'paid' ? (
+                        <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100"><ReceiptText className="h-4 w-4" />查看付费商品</Link>
+                      ) : (
+                        <button type="button" disabled={busy} onClick={() => void downloadVersion(plugin, latest)} className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-50">{accountId ? <Cloud className="h-4 w-4" /> : <Download className="h-4 w-4" />}{accountId ? '安装并激活' : '下载'}</button>
+                      )}
+                      <button type="button" disabled={busy} onClick={() => void report(plugin, latest)} className="inline-flex items-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs text-slate-500 disabled:opacity-50"><Flag className="h-3.5 w-3.5" />举报</button>
+                    </div>
+                  </article>
+                )
+                })}
+              </div>
+              {hasMoreResults && (
+                <div className="mt-5 flex justify-center">
+                  <button type="button" disabled={appending} onClick={() => void search({ append: true })} className="inline-flex items-center gap-2 rounded-xl border border-arcane-300/20 bg-arcane-500/10 px-5 py-2.5 text-sm font-semibold text-arcane-100 disabled:opacity-50">
+                    {appending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4 rotate-90" />}
+                    {appending ? '正在加载…' : `加载更多（已显示 ${plugins.length}/${resultTotal}）`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </section>
     </section>
   )
 }
@@ -1172,6 +1429,9 @@ export default function PluginsPage() {
                             <div className="flex flex-wrap items-center gap-2">
                               <h2 className="font-semibold text-slate-100">{plugin.name}</h2>
                               <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">v{plugin.version}</span>
+                              <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200">
+                                {dnd5ePluginContentCategoryLabel(plugin.contentCategory)}
+                              </span>
                               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200">
                                 <LockKeyhole className="h-3 w-3" /> 私有
                               </span>
@@ -1191,7 +1451,7 @@ export default function PluginsPage() {
                               <div><dt className="inline text-slate-600">许可证：</dt><dd className="inline">{plugin.license}</dd></div>
                               <div><dt className="inline text-slate-600">状态版本：</dt><dd className="inline">v{plugin.stateSchemaVersion}</dd></div>
                               <div><dt className="inline text-slate-600">最低协议：</dt><dd className="inline">v{plugin.minimumGameProtocolVersion}</dd></div>
-                              <div><dt className="inline text-slate-600">内容分类：</dt><dd className="inline">{plugin.contentCategory}</dd></div>
+                              <div><dt className="inline text-slate-600">内容分类：</dt><dd className="inline">{dnd5ePluginContentCategoryLabel(plugin.contentCategory)}</dd></div>
                               <div><dt className="inline text-slate-600">分发策略：</dt><dd className="inline">{plugin.distributionPolicy}</dd></div>
                               {plugin.workshopOrigin && <div><dt className="inline text-slate-600">上传来源：</dt><dd className="inline">已验证 DM 工坊{plugin.workshopOrigin.campaignId ? ` · 战役 ${plugin.workshopOrigin.campaignId}` : ''}</dd></div>}
                               <div><dt className="inline text-slate-600">大小：</dt><dd className="inline">{formatBytes(plugin.sizeBytes)}</dd></div>

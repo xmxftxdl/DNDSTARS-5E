@@ -16,9 +16,17 @@ import type {
   Dnd5eActivityTargetV1,
 } from './dnd5eActivityContracts'
 import { registerDnd5eUnifiedContentPackageV1 } from './dnd5eUnifiedContentRegistry'
+import {
+  dnd5eSrdAuditedFullContentDefinitionsV1,
+  dnd5eSrdAuditedManualContentDefinitionsV1,
+  dnd5eSrdAuditedPartialContentDefinitionsV1,
+  dnd5eSrdAuditedCoreOverrideSpellActivityV1,
+} from './dnd5eSrdAuditedSpellActivities'
 
 export const DND5E_CORE_SPELL_PACKAGE_ID = 'srd-5.1'
-export const DND5E_CORE_SPELL_PACKAGE_VERSION = '1.0.0'
+// Bump whenever the built-in Activity definitions change so an already-open
+// room cannot retain a stale same-version rule package.
+export const DND5E_CORE_SPELL_PACKAGE_VERSION = '1.0.3'
 
 const FULL_AUTOMATION = automationCapabilityFromLegacyStatus('full')
 
@@ -94,6 +102,16 @@ function spellScaling(spell: Dnd5eSrdSpellDefinition): Dnd5eActivityDefinitionV1
     spell.areaRadiusFeetPerHigherSlot != null || spell.additionalDamageComponents?.some((entry) => entry.dice.perHigherSlot != null)
   return hasSlotScaling ? [{
     basis: 'slot-level', baseLevel: spell.level,
+    adjustments: [
+      ...(spell.additionalTargetsPerHigherSlot != null ? [{
+        operationId: 'host-settlement',
+        additionalTargetsPerStep: spell.additionalTargetsPerHigherSlot,
+      }] : []),
+      ...(spell.additionalProjectilesPerHigherSlot != null ? [{
+        operationId: 'host-settlement',
+        additionalProjectilesPerStep: spell.additionalProjectilesPerHigherSlot,
+      }] : []),
+    ],
     notes: 'Host spell transaction applies the structured higher-slot fields from the registered payload.',
   }] : undefined
 }
@@ -106,7 +124,7 @@ export function dnd5eCoreSpellActivityV1(spell: Dnd5eSrdSpellDefinition): Dnd5eA
       ? { kind: 'reaction' as const, cost: 1, reactionEvent: 'reaction-window' }
       : { kind: 'action' as const, cost: 1 }
   return dnd5eActivityWithDerivedAutomationV1({
-    schemaVersion: 1,
+    schemaVersion: 1 as const,
     id: `spell:${spell.id}`,
     name: spell.name,
     description: spell.description,
@@ -137,12 +155,49 @@ export function dnd5eCoreSpellActivityV1(spell: Dnd5eSrdSpellDefinition): Dnd5eA
 }
 
 function coreSpellDefinitions(): readonly RegisteredContentDefinition[] {
-  return DND5E_SRD_COMBAT_SPELLS.map((spell) => ({
-    schemaVersion: 1,
+  const legacyCoreSpellIds = new Set(DND5E_SRD_COMBAT_SPELLS.map((spell) => spell.id))
+  const adoptCorePackageIdentity = (definition: RegisteredContentDefinition): RegisteredContentDefinition => ({
+    ...definition,
+    namespace: DND5E_CORE_SPELL_PACKAGE_ID,
+    version: DND5E_CORE_SPELL_PACKAGE_VERSION,
+    source: {
+      ...definition.source,
+      packageId: DND5E_CORE_SPELL_PACKAGE_ID,
+      packageVersion: DND5E_CORE_SPELL_PACKAGE_VERSION,
+    },
+  })
+  const coreOverrideDefinitions = DND5E_SRD_COMBAT_SPELLS.flatMap((spell) => {
+    const activity = dnd5eSrdAuditedCoreOverrideSpellActivityV1(spell.id)
+    if (!activity) return []
+    return [{
+      schemaVersion: 1 as const,
+      id: spell.id,
+      namespace: DND5E_CORE_SPELL_PACKAGE_ID,
+      version: DND5E_CORE_SPELL_PACKAGE_VERSION,
+      kind: 'spell' as const,
+      name: spell.name,
+      description: spell.description,
+      source: {
+        packageId: DND5E_CORE_SPELL_PACKAGE_ID,
+        packageVersion: DND5E_CORE_SPELL_PACKAGE_VERSION,
+      },
+      payload: structuredClone(spell),
+      activities: [activity],
+      automation: activity.automation,
+    }]
+  })
+  return [
+    ...DND5E_SRD_COMBAT_SPELLS
+      // Minor Illusion used to be a narrative-only racial placeholder in the
+      // legacy combat list. Its audited Activity below is now the sole runtime
+      // definition, while the catalog entry remains available to race grants.
+      .filter((spell) => spell.id !== 'minor-illusion')
+    .map((spell) => ({
+    schemaVersion: 1 as const,
     id: spell.id,
     namespace: DND5E_CORE_SPELL_PACKAGE_ID,
     version: DND5E_CORE_SPELL_PACKAGE_VERSION,
-    kind: 'spell',
+    kind: 'spell' as const,
     name: spell.name,
     description: spell.description,
     source: {
@@ -152,7 +207,18 @@ function coreSpellDefinitions(): readonly RegisteredContentDefinition[] {
     payload: structuredClone(spell),
     activities: [dnd5eCoreSpellActivityV1(spell)],
     automation: FULL_AUTOMATION,
-  }))
+    })),
+    ...coreOverrideDefinitions,
+    ...dnd5eSrdAuditedFullContentDefinitionsV1()
+      .filter((definition) => !legacyCoreSpellIds.has(definition.id))
+      .map(adoptCorePackageIdentity),
+    ...dnd5eSrdAuditedPartialContentDefinitionsV1()
+      .filter((definition) => !legacyCoreSpellIds.has(definition.id))
+      .map(adoptCorePackageIdentity),
+    ...dnd5eSrdAuditedManualContentDefinitionsV1()
+      .filter((definition) => !legacyCoreSpellIds.has(definition.id))
+      .map(adoptCorePackageIdentity),
+  ]
 }
 
 /** Re-establishes the built-in package after test/HMR registry resets. */

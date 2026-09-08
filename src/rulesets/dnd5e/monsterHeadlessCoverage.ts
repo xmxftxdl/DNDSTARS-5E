@@ -171,16 +171,32 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
   schemaVersion: 1,
   monsterCount: 334,
   actions: {
-    total: 1078,
-    headlessMinimum: 1027,
-    dmAdjudicationMaximum: 0,
-    unstructuredMaximum: 36,
+    total: 1088,
+    // Semantic audit gaps are deliberately removed from the executable set.
+    // Raising this floor again requires implementing the missing prose, not
+    // merely changing the action's automation badge.
+    // Four impossible Vampire-form legendary options were removed, not
+    // downgraded: mist cannot act, and bat cannot use humanoid Unarmed Strike.
+    // monsterVampireFormVerification.test.ts checks authoritative rejection.
+    // Aboleth Tentacle now resolves an indexed persistent disease save for
+    // every hit, so its three-Tentacle Multiattack is executable as one action.
+    // Kraken and Purple Worm Bite now keep the full swallow lifecycle inside
+    // the authoritative engine, restoring Purple Worm's final Multiattack.
+    // Mummy Lord Whirlwind of Sand now owns its exact 60-foot protected
+    // legendary-movement window instead of pausing for DM adjudication.
+    // Nightmare Ethereal Stride now exposes its legal zero-passenger choice as
+    // a self-only Headless sibling while retaining the passenger action for DM.
+    // Blink Dog Teleport now exposes its legal no-Bite choice as a bounded
+    // teleport-only sibling while retaining attack ordering for DM.
+    headlessMinimum: 1048,
+    dmAdjudicationMaximum: 25,
+    unstructuredMaximum: 0,
     nonCombatExact: 15,
     blockedByChildMaximum: 0,
     invalidMaximum: 0,
     multiattack: {
-      total: 240,
-      headlessMinimum: 240,
+      total: 246,
+      headlessMinimum: 246,
       incompleteMaximum: 0,
       unparsedMaximum: 0,
     },
@@ -190,15 +206,15 @@ export const DND5E_MONSTER_HEADLESS_COVERAGE_RATCHET = {
     // Produce Flame now models its held-flame lifecycle truthfully. The generic
     // monster spell path cannot yet issue the later throw control, so that one
     // occurrence is deliberately manual instead of being counted as full.
-    fullMinimum: 102,
-    definedMinimum: 159,
-    missingMaximum: 154,
+    fullMinimum: 111,
+    definedMinimum: 167,
+    missingMaximum: 146,
   },
   traits: {
     total: 551,
-    headlessWithRuleMinimum: 169,
+    headlessWithRuleMinimum: 172,
     headlessWithoutRuleMaximum: 0,
-    dmAdjudicationMaximum: 382,
+    dmAdjudicationMaximum: 379,
   },
 } as const
 
@@ -483,6 +499,12 @@ function auditAction(
   } else if (baseAutomation === 'invalid') {
     effectiveAutomation = 'invalid'
     reasonCodes.push('invalid-action')
+  } else if (declaredAutomation === 'dm-adjudication') {
+    // An explicit semantic-safety downgrade is itself the authoritative
+    // boundary. Missing structure and blocked children explain why it was
+    // downgraded, but must not leave the public status looking ambiguous.
+    effectiveAutomation = 'dm-adjudication'
+    reasonCodes.push('explicit-dm-adjudication')
   } else if (blockers.childIds.length > 0) {
     effectiveAutomation = 'blocked-by-child'
   } else if (baseAutomation === 'headless') {

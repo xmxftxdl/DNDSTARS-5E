@@ -1,0 +1,157 @@
+{
+  "id": "srd-5.1:deep-gnome-svirfneblin",
+  "slug": "deep-gnome-svirfneblin",
+  "name": "地底侏儒（斯涅布力）",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "war-pick",
+      "name": "战镐",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "poisoned-dart",
+      "name": "毒镖",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "dart-poisoned:apply",
+        "dart-poisoned:save",
+        "dart-poisoned:condition-immune"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 77,
+      "slug": "deep-gnome-svirfneblin",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:51:00.954Z",
+      "name": "地底侏儒（斯涅布力）",
+      "actionId": "war-pick",
+      "actionName": "战镐",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-deep-gnome-svirfneblin-war-pick-1788558661059",
+      "combatId": "verify-ui-deep-gnome-svirfneblin-war-pick-1788558661059:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "地底侏儒（斯涅布力） 使用战镐攻击 验证目标：战镐 → 验证目标 10+4=14 命中；共造成 7 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:51 PM\n结算\n\n地底侏儒（斯涅布力） 使用战镐攻击 验证目标：战镐 → 验证目标 10+4=14 命中；共造成 7 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：战镐｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +4。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 战镐（基础伤害·穿刺）｜1d8 骰面：5 = 5｜固定加值 +2｜小计 7\n地底侏儒（斯涅布力）｜消耗动作\n验证目标｜受到 7 点伤害｜HP 320 → 313",
+      "playerLog": "地底侏儒（斯涅布力） 使用战镐攻击 验证目标：战镐 → 验证目标 10+4=14 命中；共造成 7 点伤害。",
+      "afterHp": 313,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:51:27.632Z",
+      "evidenceFile": "ui-cases/monsters/077-deep-gnome-svirfneblin.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "岩石伪装",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "侏儒狡黠",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 9,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

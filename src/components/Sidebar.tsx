@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   Check,
+  BookOpenText,
   ChevronDown,
   Copy,
   Crown,
@@ -18,6 +19,7 @@ import type { RoomSession } from '../lib/roomSession'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 import CampaignTimeWidget from './CampaignTimeWidget'
 import { sidebarDmAssistantItems, sidebarNavItems } from './sidebarNavigation'
+import { requestPdfSplitView } from '../lib/pdfSplitViewController'
 
 export default function Sidebar({
   onCollapse,
@@ -143,6 +145,14 @@ export default function Sidebar({
                     <span>{label}</span>
                   </NavLink>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => requestPdfSplitView()}
+                  className="group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition-all hover:bg-sky-500/10 hover:text-sky-100"
+                >
+                  <BookOpenText className="h-4 w-4" />
+                  <span>PDF 分屏</span>
+                </button>
               </div>
             )}
           </div>
@@ -173,6 +183,11 @@ export default function Sidebar({
             <span className="font-mono text-base font-bold tracking-[0.18em] text-slate-100">{roomSession.roomId}</span>
             {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4 text-slate-500" />}
           </button>
+          <CampaignTimeWidget mode={mode} />
+        </div>
+      )}
+      {!roomSession && (
+        <div className="mx-3 mb-3">
           <CampaignTimeWidget mode={mode} />
         </div>
       )}

@@ -4,6 +4,7 @@ import {
   type Dnd5ePluginDeclaredCapability,
   type Dnd5eRulesPluginManifest,
 } from './pluginManifestContracts'
+import { isDnd5ePluginContentCategory } from '../../../../shared/plugin-content-category.mjs'
 
 function validId(value: string): boolean {
   return /^[a-z0-9][a-z0-9._-]*$/.test(value)
@@ -58,8 +59,7 @@ export function validateDnd5eRulesPluginManifest(manifest: Dnd5eRulesPluginManif
     !['room-distributable', 'room-ephemeral', 'account-entitled', 'local-only'].includes(manifest.distributionPolicy)) {
     throw new Error(`Invalid plugin distribution policy: ${manifest.id}`)
   }
-  if (manifest.contentCategory != null &&
-    !['rules', 'classes', 'subclasses', 'feats', 'spells', 'items', 'monsters', 'adventure', 'mixed'].includes(manifest.contentCategory)) {
+  if (manifest.contentCategory != null && !isDnd5ePluginContentCategory(manifest.contentCategory)) {
     throw new Error(`Invalid plugin content category: ${manifest.id}`)
   }
   if (!(DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS as readonly number[]).includes(manifest.apiVersion)) {

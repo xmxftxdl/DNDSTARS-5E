@@ -1,0 +1,188 @@
+{
+  "id": "srd-5.1:blink-dog",
+  "slug": "blink-dog",
+  "name": "闪现犬",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "已修复：传送原文中的啃咬是可选项，因此新增“不啃咬、仅传送”的完整 Headless 分支。普通怪物传送现已接入地图落点选择，并由 Host 重新检查 40 尺范围、可见、未占据、地图边界和几何阻挡；成功后消耗动作与充能。原先包含传送前／后啃咬顺序的复合入口仍由 DM 裁定。7073/7074 双端真实 UI 已验证移动 40 尺、HP 不变、充能消耗和日志同步。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "teleport",
+      "name": "传送",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "teleport-only",
+      "name": "传送：仅传送",
+      "automation": "headless",
+      "rule": "teleport",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "sharedUsageActionId",
+        "rule.kind",
+        "rule.target",
+        "rule.rangeFeet",
+        "rule.requiresVisibleDestination",
+        "rule.requiresUnoccupiedDestination"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "structured monster Teleport and Invisibility settles the Blink Dog teleport-only choice without fabricating its optional Bite"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 47,
+      "slug": "blink-dog",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:28:52.522Z",
+      "name": "闪现犬",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-blink-dog-bite-1788557332581",
+      "combatId": "verify-ui-blink-dog-bite-1788557332581:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "闪现犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+3=18 命中；共造成 5 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:29 PM\n结算\n\n闪现犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+3=18 命中；共造成 5 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 15；最终采用 15；调整值 +3。\n结果 · 18 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：4 = 4｜固定加值 +1｜小计 5\n闪现犬｜消耗动作\n验证目标｜受到 5 点伤害｜HP 320 → 315",
+      "playerLog": "闪现犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+3=18 命中；共造成 5 点伤害。",
+      "afterHp": 315,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:29:33.847Z",
+      "evidenceFile": "ui-cases/monsters/047-blink-dog.json"
+    },
+    {
+      "mapId": "blink-dog-teleport-ui-1788606752326",
+      "combatId": "blink-dog-teleport-ui-1788606752326:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "startedAt": "2026-09-05T11:12:32.854Z",
+      "before": {
+        "x": 175,
+        "y": 245,
+        "hp": 22
+      },
+      "prompt": "为“传送：仅传送 · 选择落点”选择移动终点（0/1）。\n取消本次 Activity",
+      "after": {
+        "id": "actor",
+        "label": "闪现犬",
+        "x": 735,
+        "y": 245,
+        "color": "#7c3aed",
+        "emoji": "B",
+        "size": 1,
+        "creatureSize": "中型",
+        "type": "enemy",
+        "poolId": "srd-5.1:blink-dog",
+        "hp": 22,
+        "maxHp": 22,
+        "dnd5eCombatState": {
+          "schemaVersion": 2,
+          "turnStartResolvedTurnKey": "blink-dog-teleport-ui-1788606752326:combat:1:actor",
+          "monsterRechargeReadyByActionId": {
+            "teleport": false
+          },
+          "monsterActionUsesByActionId": {}
+        },
+        "dnd5eWorldTimeAppliedMinute": 480
+      },
+      "actionAvailable": 0,
+      "dmLog": "闪现犬使用传送：仅传送，传送 40 尺。",
+      "playerLog": "闪现犬使用传送：仅传送，传送 40 尺。",
+      "status": "passed",
+      "finishedAt": "2026-09-05T11:12:54.984Z",
+      "mode": "teleport-only-special",
+      "actionId": "teleport-only"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐听觉与嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 7,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

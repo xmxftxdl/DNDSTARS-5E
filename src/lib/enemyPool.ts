@@ -1,4 +1,3 @@
-import { enemyHasDerivedCombat, getEnemyMaxHp } from './enemyCombatStats'
 import {
   creatureSizeToTokenSize,
   inferCreatureSizeFromTags,
@@ -5981,13 +5980,20 @@ export function getEnemyVisualPresentation(
 }
 
 function srdCreatureTypes(type: string): CreatureType[] {
-  if (type === '野兽') return ['动物']
+  if (type === '异怪') return ['异怪']
+  if (type === '野兽') return ['野兽']
+  if (type === '天界生物') return ['天界生物']
+  if (type === '构装体') return ['构装体']
   if (type === '龙') return ['龙']
   if (type === '精类') return ['精类']
-  if (type === '元素生物') return ['元素']
-  if (type === '构装体') return ['机械']
+  if (type === '元素生物') return ['元素生物']
+  if (type === '邪魔') return ['邪魔']
+  if (type === '巨人') return ['巨人']
+  if (type === '类人生物') return ['类人生物']
+  if (type === '怪兽') return ['怪兽']
+  if (type === '泥怪') return ['泥怪']
   if (type === '植物') return ['植物']
-  if (type === '类人生物' || type === '巨人') return ['人类']
+  if (type === '亡灵') return ['亡灵']
   return ['魔物']
 }
 
@@ -6061,9 +6067,10 @@ export function searchEnemyPool(query: string, pool: readonly EnemyTemplate[] = 
 }
 
 export function enemyTemplateToTokenPatch(template: EnemyTemplate): Partial<TokenFields> {
-  const maxHp = enemyHasDerivedCombat(template.id)
-    ? getEnemyMaxHp(template.id)
-    : template.maxHp
+  // EnemyTemplate is already the normalized stat-block projection. Reaching
+  // back through combatStats here creates an equipment/plugin/headless import
+  // cycle when the summon map adapter is loaded in isolation.
+  const maxHp = template.maxHp
   const hp = template.hp ?? maxHp
   const creatureTypes = template.creatureTypes ?? inferCreatureTypesFromTags(template.tags)
   const creatureSize = template.creatureSize ?? inferCreatureSizeFromTags(template.tags)

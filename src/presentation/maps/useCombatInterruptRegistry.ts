@@ -1,5 +1,8 @@
 import { useRef } from 'react'
-import type { DmAdjudicationInterruptResponse } from '../../lib/combatInterruptProtocol'
+import type {
+  CounterspellInterruptResponse,
+  DmAdjudicationInterruptResponse,
+} from '../../lib/combatInterruptProtocol'
 import type { Dnd5ePostD20AdjustmentUse } from '../../application/combat/dnd5eCombatRules'
 
 /**
@@ -29,7 +32,7 @@ export function useCombatInterruptRegistry() {
   const pendingSharedCounterspellRef = useRef<{
     id: string
     actorCharId: string
-    resolve: (accepted: boolean) => void
+    resolve: (response: CounterspellInterruptResponse) => void
   } | null>(null)
   const pendingSharedUncannyDodgeRef = useRef<{
     id: string

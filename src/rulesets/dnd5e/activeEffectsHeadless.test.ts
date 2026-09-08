@@ -152,6 +152,67 @@ describe('ActiveEffectInstance Headless 生命周期', () => {
       .toEqual(expect.arrayContaining(['makes-attack', 'targeted-by-attack', 'hit-by-attack', 'takes-damage']))
   })
 
+  it('ends a source-linked charm when its own source harms the target', () => {
+    const friendshipCharm = createDnd5eConditionEffect({
+      condition: 'charmed',
+      targetId: 'target',
+      source: { kind: 'spell', actorId: 'source', rulesId: 'animal-friendship' },
+      removal: { sourceLink: { targetHarmedBySourceAlly: true } },
+    })
+    const state = startDnd5eHeadlessCombat('source-harms-linked-target', [
+      combatant('source', 20),
+      combatant('target', 10, {
+        controller: 'dm',
+        position: { x: 5, y: 0 },
+        classState: { activeEffects: [friendshipCharm] },
+      }),
+    ])
+
+    const attacked = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'source', targetId: 'target', attackModifier: 8, d20: 15,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [2] },
+    })
+
+    expect(attacked.ok).toBe(true)
+    if (!attacked.ok) return
+    expect(attacked.state.combatants.target.classState.activeEffects).toBeUndefined()
+    expect(attacked.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'target', reason: 'harmful-action',
+    }))
+  })
+
+  it('keeps a source-linked charm when the source misses the target', () => {
+    const friendshipCharm = createDnd5eConditionEffect({
+      condition: 'charmed',
+      targetId: 'target',
+      source: { kind: 'spell', actorId: 'source', rulesId: 'animal-friendship' },
+      removal: { sourceLink: { targetHarmedBySourceAlly: true } },
+    })
+    const state = startDnd5eHeadlessCombat('source-misses-linked-target', [
+      combatant('source', 20),
+      combatant('target', 10, {
+        controller: 'dm',
+        armorClass: 20,
+        position: { x: 5, y: 0 },
+        classState: { activeEffects: [friendshipCharm] },
+      }),
+    ])
+
+    const missed = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'source', targetId: 'target', attackModifier: 0, d20: 2,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [2] },
+    })
+
+    expect(missed.ok).toBe(true)
+    if (!missed.ok) return
+    expect(missed.state.combatants.target.classState.activeEffects).toContainEqual(
+      expect.objectContaining({ definitionId: 'condition:charmed' }),
+    )
+    expect(missed.events).not.toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'target', reason: 'harmful-action',
+    }))
+  })
+
   it('removes pre-existing effects when their actor spends an action', () => {
     const untilAction = createDnd5eConditionEffect({
       condition: 'invisible', targetId: 'actor', source: { kind: 'feature' },
@@ -278,6 +339,8 @@ describe('ActiveEffectInstance Headless 生命周期', () => {
       type: 'saving-throw-resolved',
       targetId: 'actor',
       d20: 20,
+      d20Rolls: [1, 20],
+      rollMode: 'advantage',
       success: true,
     }))
     expect(resolved.state.combatants.actor.conditions).not.toContain('poisoned')

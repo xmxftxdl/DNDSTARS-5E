@@ -23,14 +23,17 @@ export type PdfKnowledgeTabV1 =
   | 'timeline'
   | 'maps'
   | 'monsters'
-  | 'relationships'
+  | 'bookmarks'
   | 'imports'
 
 export interface PdfMonsterCodexEntryV1 {
   name: string
   description: string
+  monsterStatBlockText: string
   source: 'import-candidate' | 'encounter-reference'
   automation: PdfImportCandidateV1['automation'] | 'unreviewed'
+  importCandidateIndex?: number
+  encounterIndexes: number[]
   encounterNames: string[]
   citations: PdfSourceCitationV1[]
 }
@@ -137,32 +140,39 @@ export function buildPdfEventIndex(analysis: PdfCampaignAnalysisView): PdfEventI
 
 export function buildPdfMonsterCodex(analysis: PdfCampaignAnalysisView): PdfMonsterCodexEntryV1[] {
   const byName = new Map<string, PdfMonsterCodexEntryV1>()
-  for (const candidate of analysis.importCandidates.filter((entry) => entry.kind === 'monster')) {
+  for (const [importCandidateIndex, candidate] of analysis.importCandidates.entries()) {
+    if (candidate.kind !== 'monster') continue
     const key = normalized(candidate.name)
     if (!key) continue
     byName.set(key, {
       name: candidate.name,
       description: candidate.description,
+      monsterStatBlockText: candidate.monsterStatBlockText?.trim() ?? '',
       source: 'import-candidate',
       automation: candidate.automation,
+      importCandidateIndex,
+      encounterIndexes: [],
       encounterNames: [],
       citations: [...candidate.citations],
     })
   }
-  for (const encounter of analysis.encounters) {
+  for (const [encounterIndex, encounter] of analysis.encounters.entries()) {
     for (const creature of encounter.creatures) {
       const key = normalized(creature)
       if (!key) continue
       const current = byName.get(key)
       byName.set(key, current ? {
         ...current,
+        encounterIndexes: [...new Set([...current.encounterIndexes, encounterIndex])],
         encounterNames: [...new Set([...current.encounterNames, encounter.name])],
         citations: mergeCitations(current.citations, encounter.citations),
       } : {
         name: creature,
         description: `在“${encounter.name}”中出现，尚未提取为可导入的结构化怪物。`,
+        monsterStatBlockText: '',
         source: 'encounter-reference',
         automation: 'unreviewed',
+        encounterIndexes: [encounterIndex],
         encounterNames: [encounter.name],
         citations: [...encounter.citations],
       })
@@ -234,7 +244,7 @@ export function pdfKnowledgeTabCounts(analysis: PdfCampaignAnalysisView): Record
     timeline: analysis.timelineEvents?.length ?? 0,
     maps: buildPdfMapIndex(analysis).length,
     monsters: buildPdfMonsterCodex(analysis).length,
-    relationships: analysis.relationships.length,
+    bookmarks: analysis.bookmarks?.length ?? 0,
     imports: analysis.importCandidates.length,
   }
 }

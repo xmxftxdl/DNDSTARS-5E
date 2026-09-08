@@ -27,9 +27,45 @@ const TACTICAL_MARKER_STYLES: Readonly<Record<
   protected: { glyph: '◇', fill: '#14532d', stroke: '#4ade80', text: '#f0fdf4' },
   exposed: { glyph: '!', fill: '#7c2d12', stroke: '#fdba74', text: '#fff7ed' },
   hidden: { glyph: '◐', fill: '#134e4a', stroke: '#5eead4', text: '#f0fdfa' },
+  disguised: {
+    glyph: '幻',
+    icon: '/assets/icons/disguise-self-spell-action.png',
+    fill: '#4c1d95',
+    stroke: '#c4b5fd',
+    text: '#faf5ff',
+  },
   'fire-averse': { glyph: '火', icon: '/assets/icons/conditions/condition-fire-averse.svg', fill: '#581c87', stroke: '#f0abfc', text: '#fdf4ff' },
   attached: { glyph: '⛓', fill: '#3f3f46', stroke: '#d4d4d8', text: '#fafafa' },
   suffocating: { glyph: '◌', fill: '#164e63', stroke: '#a5f3fc', text: '#ecfeff' },
+  'truth-bound': { glyph: '真', fill: '#1e3a8a', stroke: '#93c5fd', text: '#eff6ff' },
+  imprisoned: {
+    glyph: '禁',
+    icon: '/assets/icons/imprisonment-spell-action.png',
+    fill: '#312e81',
+    stroke: '#c4b5fd',
+    text: '#faf5ff',
+  },
+  'frozen-statue': {
+    glyph: '冰',
+    icon: '/assets/icons/cone-of-cold-spell-action.png',
+    fill: '#0c4a6e',
+    stroke: '#7dd3fc',
+    text: '#f0f9ff',
+  },
+  nondetection: {
+    glyph: '避',
+    icon: '/assets/icons/nondetection-spell-action.png',
+    fill: '#172554',
+    stroke: '#60a5fa',
+    text: '#eff6ff',
+  },
+  'plane-shifted': {
+    glyph: '界',
+    icon: '/assets/icons/plane-shift-spell-action.png',
+    fill: '#312e81',
+    stroke: '#a78bfa',
+    text: '#f5f3ff',
+  },
 }
 
 export function dnd5eTokenStatusMarkerStyle(
@@ -38,7 +74,12 @@ export function dnd5eTokenStatusMarkerStyle(
   if (STANDARD_CONDITION_IDS.has(statusId)) {
     return DND5E_CONDITION_MARKERS[statusId as keyof typeof DND5E_CONDITION_MARKERS]
   }
-  return TACTICAL_MARKER_STYLES[statusId as Dnd5eTacticalTokenStatusMarkerId]
+  return TACTICAL_MARKER_STYLES[statusId as Dnd5eTacticalTokenStatusMarkerId] ?? {
+    glyph: '自',
+    fill: '#312e81',
+    stroke: '#c4b5fd',
+    text: '#f5f3ff',
+  }
 }
 
 export function dnd5eTokenStatusMarkerTooltip(

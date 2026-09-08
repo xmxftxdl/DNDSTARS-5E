@@ -874,6 +874,8 @@ export interface DeclarativeSubclassAbilityV1 {
   id: string
   name: string
   description: string
+  /** Optional package-owned image asset used by the compiled feature presentation. */
+  iconAssetId?: string
   level: number
   trigger: DeclarativeSubclassTriggerV1
   predicates?: DeclarativeSubclassPredicatesV1
@@ -1273,11 +1275,12 @@ function validateHostRollRecipe(
 
 export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能力'): asserts value is DeclarativeSubclassAbilityV1 {
   if (!record(value)) throw new Error(`${path}无效`)
-  assertKeys(value, ['schemaVersion', 'id', 'name', 'description', 'level', 'trigger', 'predicates', 'requirements', 'cost', 'targeting', 'rolls', 'choices', 'effects', 'activityEffects', 'limits', 'duration', 'mechanic', 'canModifyEnemyD20', 'automation'], path)
+  assertKeys(value, ['schemaVersion', 'id', 'name', 'description', 'iconAssetId', 'level', 'trigger', 'predicates', 'requirements', 'cost', 'targeting', 'rolls', 'choices', 'effects', 'activityEffects', 'limits', 'duration', 'mechanic', 'canModifyEnemyD20', 'automation'], path)
   if (value.schemaVersion !== 1) throw new Error(`${path} schemaVersion 不受支持`)
   assertId(value.id, path)
   assertText(value.name, `${path}名称`, 160)
   assertText(value.description, `${path}说明`)
+  if (value.iconAssetId != null) assertId(value.iconAssetId, `${path}图标资源`)
   if (!finiteInteger(value.level, 1, 20)) throw new Error(`${path}等级无效`)
   const trigger = value.trigger
   if (!record(trigger) || !['active-use', 'before-attack-roll', 'after-attack-roll', 'after-attack-hit', 'after-attack-miss', 'after-d20-roll', 'before-spell-effect', 'before-damage-taken', 'after-damage-taken', 'after-spell-cast', 'after-condition-attempted', 'after-condition-applied', 'before-drop-to-zero', 'turn-start', 'turn-end', 'short-rest-complete', 'long-rest-complete'].includes(String(trigger.kind))) throw new Error(`${path}触发器无效`)

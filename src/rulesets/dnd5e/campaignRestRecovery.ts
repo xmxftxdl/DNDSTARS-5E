@@ -64,14 +64,25 @@ function reportFeatureResources(
     const previous = getClassResource(before, definition.key)
     const next = getClassResource(after, definition.key)
     if (!previous || !next) return []
+    const resetDetail = definition.resetOn === 'short-rest'
+      ? '短休或长休恢复'
+      : definition.resetOn === 'combat'
+        ? '战斗／长休恢复'
+        : '长休恢复'
+    const hasProtocolUnboundedValue = [previous.current, next.current, next.max]
+      .some((value) => value > 1_000_000_000)
     return [{
       category: 'feature-resource' as const,
       label: definition.label,
       outcome: outcome(previous.current, next.current),
-      before: previous.current,
-      after: next.current,
-      maximum: next.max,
-      detail: definition.resetOn === 'short-rest' ? '短休或长休恢复' : definition.resetOn === 'combat' ? '战斗／长休恢复' : '长休恢复',
+      ...(hasProtocolUnboundedValue
+        ? { detail: `${resetDetail}；恢复后为无限次` }
+        : {
+            before: previous.current,
+            after: next.current,
+            maximum: next.max,
+            detail: resetDetail,
+          }),
     }]
   })
 }

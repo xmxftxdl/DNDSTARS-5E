@@ -28,44 +28,45 @@ export default function SecretDiceOverrideOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-[121] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
+      className="pointer-events-none fixed inset-y-0 left-0 z-[121] flex w-[min(23rem,calc(100vw-1rem))] items-center p-3"
+      data-layout="left-drawer"
       role="dialog"
-      aria-modal="true"
       aria-label="DM 暗骰确认"
       data-testid="secret-dice-override"
     >
-      <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-fuchsia-300/25 bg-void-950 shadow-[0_28px_100px_rgba(0,0,0,0.72)]">
-        <header className="flex items-start gap-4 border-b border-white/10 bg-gradient-to-r from-fuchsia-500/20 via-rose-500/10 to-transparent px-6 py-5">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-fuchsia-500/20 text-fuchsia-100">
-            <EyeOff className="h-6 w-6" />
+      <section className="pointer-events-auto max-h-[min(38rem,calc(100vh-1.5rem))] w-full overflow-y-auto rounded-2xl border border-violet-300/30 bg-void-950/96 shadow-[0_22px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl">
+        <header className="flex items-start gap-3 border-b border-white/10 bg-gradient-to-r from-violet-500/20 to-transparent p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/20 text-violet-200">
+            <EyeOff className="h-5 w-5" />
           </div>
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-fuchsia-300">暗骰待 DM 确认</p>
-            <h2 className="mt-1 truncate text-xl font-bold text-slate-50">{label}</h2>
-            {targetName ? <p className="mt-1 text-sm text-slate-400">目标：{targetName}</p> : null}
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-300">暗骰待 DM 确认</p>
+            <h2 className="mt-0.5 truncate text-base font-bold text-slate-50">{label}</h2>
+            {targetName ? <p className="truncate text-xs text-slate-400">目标：{targetName}</p> : null}
           </div>
-          <span className="ml-auto rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm font-black text-fuchsia-100">
+          <span className="ml-auto rounded-xl border border-violet-300/20 bg-black/25 px-3 py-1.5 text-sm font-black text-violet-100">
             {values.length}d{sides}
           </span>
         </header>
 
-        <div className="space-y-4 px-6 py-5">
+        <div className="space-y-3 p-4">
           <p className="text-xs leading-5 text-slate-400">
             这些骰面不会发送到玩家端。DM 可以修正任意一枚骰子，确认后的值将交给 Headless 继续结算。
           </p>
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
             {draft.map((value, index) => (
-              <label key={index} className="text-center text-[10px] font-semibold text-slate-500">
+              <label key={index} className="min-w-0 text-center text-[10px] font-semibold text-slate-500">
                 第 {index + 1} 枚
                 <input
-                  type="number"
-                  min={1}
-                  max={sides}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  aria-label={`第 ${index + 1} 枚 d${sides} 骰面`}
                   value={value}
                   onChange={(event) => setDraft((current) => current.map(
                     (item, itemIndex) => itemIndex === index ? event.target.value : item,
                   ))}
-                  className="mt-1 w-full rounded-xl border border-fuchsia-400/25 bg-black/25 px-2 py-2 text-center text-lg font-black tabular-nums text-fuchsia-100 outline-none focus:border-fuchsia-300/60"
+                  className="mt-1 min-w-0 w-full rounded-xl border border-fuchsia-400/25 bg-black/25 px-1 py-2 text-center text-lg font-black tabular-nums text-fuchsia-100 outline-none focus:border-fuchsia-300/60"
                 />
               </label>
             ))}
@@ -80,7 +81,7 @@ export default function SecretDiceOverrideOverlay({
             采用暗骰并继续结算
           </button>
         </div>
-      </div>
+      </section>
     </div>
   )
 }

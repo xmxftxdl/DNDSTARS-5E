@@ -56,4 +56,22 @@ describe('D&D 5e plugin declarative dice', () => {
       expect.objectContaining({ id: 'save-d20:enemy-b', label: '敌人 B · 敏捷豁免' }),
     ])
   })
+
+  it('rerolls closed random-table faces and rejects a submitted forbidden face', async () => {
+    const roller = vi.fn()
+      .mockResolvedValueOnce([8])
+      .mockResolvedValueOnce([6])
+    const declaration = {
+      id: 'ray', label: '虹光光束', count: 1, sides: 8,
+      rerollValues: [8],
+    }
+
+    await expect(executeDnd5ePluginDiceRolls({ rolls: [declaration] }, roller)).resolves.toEqual({
+      ray: { values: [6], modifier: 0, total: 6 },
+    })
+    expect(roller).toHaveBeenCalledTimes(2)
+    expect(validateDnd5ePluginDiceRolls({ rolls: [declaration] }, {
+      ray: { values: [8], modifier: 0, total: 8 },
+    })).toBe(false)
+  })
 })

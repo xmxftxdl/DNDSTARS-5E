@@ -30,6 +30,10 @@ import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import VoiceRoomPanel from '../components/VoiceRoomPanel'
 import { combatantDamagePerTurn } from '../lib/combatStatistics'
+import {
+  dnd5eTelepathicBondNetworksForMap,
+  type Dnd5eTelepathicBondNetwork,
+} from '../lib/dnd5eTelepathicBondCommunications'
 import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../lib/roomApi'
 import {
   type RoomChatChannel,
@@ -41,6 +45,7 @@ import {
 import { getRoomSession } from '../lib/roomSession'
 import { browserSharedRoomService } from '../composition/browserSharedRoomService'
 import { useCombatStatisticsStore } from '../store/combatStatistics'
+import { useCharacterStore } from '../store/characters'
 import { useMapStore } from '../store/maps'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 
@@ -58,6 +63,7 @@ const channelLabels: Record<RoomChatChannel, string> = {
   ic: 'IC · 角色内',
   ooc: 'OOC · 角色外',
   'dm-private': '私聊 DM',
+  'telepathic-bond': '心灵联结',
 }
 
 const noteLabels: Record<SharedNoteKind, string> = {
@@ -78,6 +84,8 @@ function errorMessage(error: unknown): string {
     'invalid-roll-command': '骰子指令无效。示例：/roll 2d6+3 搜索暗门',
     'invalid-private-recipient': '请选择当前房间内的私聊玩家。',
     'invalid-npc-persona': '所选 NPC 已不在地图上，请重新选择。',
+    'telepathic-sender-not-linked': '当前角色不在这条心灵联结中，或联结已经结束。',
+    'telepathic-network-unavailable': '心灵联结当前没有可接收讯息的参与者。',
     'empty-message': '消息不能为空。',
     'invalid-audience': '请至少选择一名讲义接收者。',
     'dm-only': '该操作仅限 DM。',
@@ -136,7 +144,13 @@ export default function CommunicationsPage() {
   const mutateJournal = useRoomCommunicationsStore((state) => state.mutateJournal)
   const markHandoutsRead = useRoomCommunicationsStore((state) => state.markHandoutsRead)
   const maps = useMapStore((state) => state.maps)
+  const selectedMapId = useMapStore((state) => state.selectedId)
+  const characters = useCharacterStore((state) => state.characters)
   const sessions = useCombatStatisticsStore((state) => state.sessions)
+  const telepathicNetworks = useMemo(() => dnd5eTelepathicBondNetworksForMap(
+    characters,
+    maps.find((map) => map.id === selectedMapId),
+  ), [characters, maps, selectedMapId])
 
   const selectTab = (nextTab: CommunicationsTab) => {
     const nextSearchParams = new URLSearchParams(searchParams)
@@ -213,6 +227,7 @@ export default function CommunicationsPage() {
           messages={chat.messages}
           roster={roster}
           maps={maps}
+          telepathicNetworks={telepathicNetworks}
           busy={busy}
           onSend={async (input) => {
             setBusy(true)
@@ -279,23 +294,46 @@ export default function CommunicationsPage() {
   )
 }
 
-function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
+function ChatPanel({ isDm, memberId, messages, roster, maps, telepathicNetworks, busy, onSend }: {
   isDm: boolean
   memberId: string
   messages: ReturnType<typeof useRoomCommunicationsStore.getState>['chat']['messages']
   roster: RoomRosterMember[]
   maps: ReturnType<typeof useMapStore.getState>['maps']
+  telepathicNetworks: Dnd5eTelepathicBondNetwork[]
   busy: boolean
-  onSend: (input: { channel: RoomChatChannel; text: string; recipientMemberId?: string; npcTokenId?: string }) => Promise<void>
+  onSend: (input: {
+    channel: RoomChatChannel
+    text: string
+    recipientMemberId?: string
+    npcTokenId?: string
+    telepathicNetworkKey?: string
+    telepathicSenderCharacterId?: string
+  }) => Promise<void>
 }) {
   const [channel, setChannel] = useState<RoomChatChannel>('ic')
   const [text, setText] = useState('')
   const [recipientMemberId, setRecipientMemberId] = useState('')
   const [npcTokenId, setNpcTokenId] = useState('')
+  const [telepathicNetworkKey, setTelepathicNetworkKey] = useState('')
   const endRef = useRef<HTMLDivElement | null>(null)
   const npcTokens = useMemo(() => maps.flatMap((map) => map.tokens)
     .filter((token) => token.type === 'npc' || token.type === 'enemy'), [maps])
-  const visibleMessages = messages.filter((message) => message.channel === channel)
+  const activeTelepathicNetwork = telepathicNetworks.find((network) => network.key === telepathicNetworkKey)
+  const telepathicSenderCharacter = activeTelepathicNetwork?.participants.find(
+    (participant) => participant.roomMemberId === memberId,
+  )
+  const visibleMessages = messages.filter((message) =>
+    message.channel === channel && (
+      channel !== 'telepathic-bond' || message.telepathicNetworkKey === telepathicNetworkKey
+    ))
+
+  useEffect(() => {
+    if (telepathicNetworks.some((network) => network.key === telepathicNetworkKey)) return
+    const first = telepathicNetworks[0]
+    setTelepathicNetworkKey(first?.key ?? '')
+    if (!first && channel === 'telepathic-bond') setChannel('ic')
+  }, [channel, telepathicNetworkKey, telepathicNetworks])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -308,6 +346,10 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
       text,
       ...(isDm && channel === 'dm-private' ? { recipientMemberId } : {}),
       ...(isDm && channel === 'ic' && npcTokenId ? { npcTokenId } : {}),
+      ...(channel === 'telepathic-bond' && activeTelepathicNetwork && telepathicSenderCharacter ? {
+        telepathicNetworkKey: activeTelepathicNetwork.key,
+        telepathicSenderCharacterId: telepathicSenderCharacter.id,
+      } : {}),
     })
     setText('')
   }
@@ -316,7 +358,7 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
     <section className="grid min-h-[650px] gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
       <aside className="rounded-2xl border border-white/8 bg-slate-950/45 p-3">
         <p className="px-2 pb-2 text-xs font-bold uppercase tracking-wider text-slate-600">频道</p>
-        {(Object.keys(channelLabels) as RoomChatChannel[]).map((id) => (
+        {(Object.keys(channelLabels) as RoomChatChannel[]).filter((id) => id !== 'telepathic-bond').map((id) => (
           <button
             key={id}
             type="button"
@@ -332,6 +374,30 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
             {channelLabels[id]}
           </button>
         ))}
+        {telepathicNetworks.map((network) => (
+          <button
+            key={network.key}
+            type="button"
+            onClick={() => {
+              setChannel('telepathic-bond')
+              setTelepathicNetworkKey(network.key)
+              setNpcTokenId('')
+            }}
+            className={`mb-1 flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition ${
+              channel === 'telepathic-bond' && telepathicNetworkKey === network.key
+                ? 'bg-cyan-500/15 text-cyan-100'
+                : 'text-slate-400 hover:bg-white/5'
+            }`}
+          >
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong className="block font-semibold">心灵联结</strong>
+              <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">
+                {network.participants.map((participant) => participant.name).join('、')}
+              </span>
+            </span>
+          </button>
+        ))}
         <div className="mt-4 rounded-xl border border-white/6 bg-black/20 p-3 text-xs leading-5 text-slate-500">
           输入 <code className="text-arcane-300">/roll 2d6+3</code> 掷骰。骰点由房间服务端生成，公共频道结果同时进入战斗日志。
         </div>
@@ -339,10 +405,17 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
 
       <div className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-white/8 bg-slate-950/45">
         <div className="border-b border-white/8 px-5 py-4">
-          <h3 className="font-semibold text-slate-100">{channelLabels[channel]}</h3>
+          <h3 className="font-semibold text-slate-100">
+            {channel === 'telepathic-bond' && activeTelepathicNetwork
+              ? `心灵联结 · ${activeTelepathicNetwork.participants.map((participant) => participant.name).join('、')}`
+              : channelLabels[channel]}
+          </h3>
           <p className="mt-1 text-xs text-slate-500">
             {channel === 'ic' ? '以当前角色身份发言；DM 可以选择地图上的 NPC 代言。' :
-              channel === 'ooc' ? '玩家身份的场外讨论。' : '只有相关玩家与 DM 能看到这些消息。'}
+              channel === 'ooc' ? '玩家身份的场外讨论。' :
+                channel === 'telepathic-bond'
+                  ? '同一存在位面内不受距离与共同语言限制；只有当前联结参与者与 DM 可见。'
+                  : '只有相关玩家与 DM 能看到这些消息。'}
           </p>
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -367,6 +440,7 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
                     <span className="font-bold text-slate-200">{message.persona.name}</span>
                     {message.persona.kind === 'npc' && <span className="rounded bg-amber-400/10 px-1.5 py-0.5 text-amber-200">NPC</span>}
                     {channel === 'dm-private' && <span className="text-violet-300">与 {privatePeer ?? '玩家'} 的纸条</span>}
+                    {channel === 'telepathic-bond' && <span className="text-cyan-300">心灵感应</span>}
                     <span className="text-slate-600">{formatTime(message.createdAt)}</span>
                   </div>
                   {message.roll ? (
@@ -415,10 +489,21 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
               }}
               maxLength={1_000}
               rows={2}
-              placeholder={channel === 'dm-private' ? '写一张只有 DM 与你能看到的纸条…' : '输入消息，Shift + Enter 换行…'}
+              disabled={channel === 'telepathic-bond' && !telepathicSenderCharacter}
+              placeholder={channel === 'dm-private'
+                ? '写一张只有 DM 与你能看到的纸条…'
+                : channel === 'telepathic-bond'
+                  ? telepathicSenderCharacter
+                    ? `以 ${telepathicSenderCharacter.name} 发送心灵讯息…`
+                    : 'DM 可旁观此权威联结，但必须由联结中的角色发送。'
+                  : '输入消息，Shift + Enter 换行…'}
               className="min-w-0 flex-1 resize-none rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-arcane-400/40"
             />
-            <button disabled={busy || !text.trim() || (isDm && channel === 'dm-private' && !recipientMemberId)} className="flex w-12 items-center justify-center rounded-xl bg-arcane-500 text-white transition hover:bg-arcane-400 disabled:cursor-not-allowed disabled:opacity-40">
+            <button disabled={
+              busy || !text.trim() ||
+              (isDm && channel === 'dm-private' && !recipientMemberId) ||
+              (channel === 'telepathic-bond' && !telepathicSenderCharacter)
+            } className="flex w-12 items-center justify-center rounded-xl bg-arcane-500 text-white transition hover:bg-arcane-400 disabled:cursor-not-allowed disabled:opacity-40">
               <Send className="h-5 w-5" />
             </button>
           </div>

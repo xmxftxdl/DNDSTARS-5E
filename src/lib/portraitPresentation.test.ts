@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   resolveAvailablePortraitSource,
+  resolveCompactPortraitImageId,
   resolveInitiativePortrait,
+  resolveInitiativePortraitImageId,
   resolveMapTokenPortrait,
 } from './portraitPresentation'
 
@@ -26,6 +28,17 @@ describe('portrait presentation resolution', () => {
     expect(resolveInitiativePortrait(character, token)).toBe('character-initiative.png')
     expect(resolveInitiativePortrait({ portrait: character.portrait }, token)).toBe('character-full.png')
     expect(resolveInitiativePortrait(undefined, token)).toBe('token-initiative.png')
+  })
+
+  it('keeps compact and initiative room-image fallbacks on the same monster artwork', () => {
+    const shared = {
+      portraitImageId: 'initiative-image',
+      tokenPortraitImageId: 'token-image',
+    }
+    expect(resolveCompactPortraitImageId(shared)).toBe('token-image')
+    expect(resolveInitiativePortraitImageId(shared)).toBe('initiative-image')
+    expect(resolveCompactPortraitImageId({ portraitImageId: 'only-image' })).toBe('only-image')
+    expect(resolveInitiativePortraitImageId({ tokenPortraitImageId: 'only-token' })).toBe('only-token')
   })
 
   it('falls back from a failed catalog portrait to a shared image and then to no image', () => {

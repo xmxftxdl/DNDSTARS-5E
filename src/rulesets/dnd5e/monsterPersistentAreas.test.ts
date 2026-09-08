@@ -18,6 +18,7 @@ import {
 import { validateDnd5eMonsterSchema } from './monsterSchema'
 import { getDnd5eSrdMonster } from './monsters'
 import { planDnd5eMonsterTurn } from './monsterTurnPlanner'
+import { resolveDnd5eHeadlessAction } from './headlessCombatEngine'
 
 function token(patch: Partial<Token>): Token {
   return {
@@ -63,6 +64,8 @@ describe('monster persistent areas and turn-boundary triggers', () => {
     const cases = [
       ['darkmantle', 'actions', 'darkness-aura'],
       ['dretch', 'actions', 'fetid-cloud'],
+      ['giant-octopus', 'actions', 'ink-cloud'],
+      ['octopus', 'actions', 'ink-cloud'],
       ['kraken', 'legendaryActions', 'ink-cloud-costs-3-actions'],
     ] as const
     for (const [slug, section, actionId] of cases) {
@@ -282,6 +285,78 @@ describe('monster persistent areas and turn-boundary triggers', () => {
     expect(settled.application?.characters[0].currentHp).toBe(25)
     expect(settled.application?.map.dnd5ePluginAreas?.[0].triggerReceipts).toHaveLength(1)
   })
+
+  it.each([
+    ['giant-octopus', 20, 40, -20],
+    ['octopus', 5, 10, -5],
+  ] as const)(
+    'creates %s ink as heavy obscuration and grants one bonus-action Dash',
+    (slug, radiusFeet, heightFeet, anchorOffsetFeet) => {
+      const octopus = token({
+        id: slug, label: slug, poolId: `srd-5.1:${slug}`,
+      })
+      const hero = token({
+        id: 'hero', label: 'Hero', type: 'player', characterId: 'hero-character', x: 425,
+      })
+      const map = battleMap([octopus, hero], `${slug}-ink-map`)
+      const input = {
+        combatId: `${slug}-ink-combat`, round: 2, map, characters: [character()],
+        initiativeOrder: initiative(map.tokens), actorTokenId: octopus.id,
+        actionId: 'ink-cloud',
+      }
+      expect(prepareDnd5eMonsterSpecialAction(input)).toMatchObject({
+        ok: false, reason: 'invalid-destination',
+      })
+
+      setMapGeometryRuntime([{
+        ...createEmptyMapGeometry(map.id), environment: 'underwater',
+      }])
+      const prepared = prepareDnd5eMonsterSpecialAction(input)
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.action.rule).toMatchObject({
+        kind: 'persistent-area',
+        area: { radiusFeet },
+        durationRounds: 10,
+        obscuration: { kind: 'heavy' },
+        followUp: { kind: 'grant-basic-action', actions: ['dash'] },
+      })
+
+      const cast = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared })
+      expect(cast.result.ok, cast.result.ok ? undefined : cast.result.reason).toBe(true)
+      if (!cast.result.ok) return
+      expect(cast.application?.map.dnd5ePluginAreas).toEqual([
+        expect.objectContaining({
+          sourceTokenId: octopus.id,
+          expiresAfterRound: 12,
+          anchorMode: 'fixed',
+          vertical: {
+            mode: 'volume', baseElevationFeet: anchorOffsetFeet,
+            heightFeet, anchorOffsetFeet,
+          },
+          obscuration: { kind: 'heavy' },
+        }),
+      ])
+      expect(cast.result.state.combatants[octopus.id].classState
+        .activityBasicActionGrants?.['ink-cloud-dash'])
+        .toMatchObject({ actions: ['dash'], economy: 'bonus-action' })
+
+      const dashed = resolveDnd5eHeadlessAction(cast.result.state, {
+        type: 'dash', actorId: octopus.id,
+      })
+      expect(dashed.ok, dashed.ok ? undefined : dashed.reason).toBe(true)
+      if (!dashed.ok) return
+      expect(dashed.state.combatants[octopus.id].turn).toMatchObject({
+        actionAvailable: false,
+        bonusActionAvailable: false,
+      })
+      expect(dashed.state.combatants[octopus.id].classState.activityBasicActionGrants)
+        .toBeUndefined()
+      expect(dashed.events).toContainEqual(expect.objectContaining({
+        type: 'turn-resource-spent', actorId: octopus.id, resource: 'bonusAction',
+      }))
+    },
+  )
 
   it('makes a heavy ink volume block ordinary sight while exempting the Kraken viewer', () => {
     const kraken = token({ id: 'kraken', x: 225, poolId: 'srd-5.1:kraken', size: 4 })

@@ -1,0 +1,240 @@
+{
+  "id": "srd-5.1:cloaker",
+  "slug": "cloaker",
+  "name": "披风怪",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：幻象需要在非明亮光照下创建三个分身，并同时拦截攻击与有害法术；分身还要独立使用斗篷怪 AC／豁免并在进入明亮光照时消失。现有镜影拦截器只完整覆盖攻击，尚未覆盖有害法术与光照生命周期，因此不能安全开放整项 Headless。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].relation.attackAdvantageAgainstLinkedTarget",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].rootLegacyCondition",
+        "attack.onHitEffects[].conditionsWhenAttackHasAdvantage[].condition",
+        "attack.onHitEffects[].dependentLegacyConditionsWhenAttackHasAdvantage[].condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "moan",
+      "name": "哀嚎",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.targetCreatureTypeExclusions[]",
+        "rule.ability",
+        "rule.dc",
+        "rule.requiresTargetCanHearSource",
+        "rule.conditionOnFailedSave.condition",
+        "rule.conditionOnFailedSave.durationRounds",
+        "rule.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.conditionOnFailedSave.expiresAtSourceTurnEnd",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "phantasms",
+      "name": "幻象",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 64,
+      "slug": "cloaker",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:40:01.169Z",
+      "name": "披风怪",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-cloaker-bite-1788558001262",
+      "combatId": "verify-ui-cloaker-bite-1788558001262:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "披风怪 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+6=20 命中；共造成 13 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:40 PM\n结算\n\n披风怪 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+6=20 命中；共造成 13 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 14；最终采用 14；调整值 +6。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜2d6 骰面：5 + 5 = 10｜固定加值 +3｜小计 13\n披风怪｜消耗动作\n验证目标｜受到 13 点伤害｜HP 320 → 307\n验证目标｜效果生效：monster:srd-5.1:cloaker:bite:bite-attachment:attached",
+      "playerLog": "披风怪 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+6=20 命中；共造成 13 点伤害。",
+      "afterHp": 307,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "attached"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:40:26.494Z",
+      "evidenceFile": "ui-cases/monsters/064-cloaker.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "伤害转移",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "畏光",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 10,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

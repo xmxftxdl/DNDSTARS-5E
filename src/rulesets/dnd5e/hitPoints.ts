@@ -7,6 +7,7 @@ import {
   normalizeDnd5eHitPointMaximumReductionLedger,
   rebaseDnd5eHitPointMaximumReductionLedger,
 } from './hitPointMaximumReductions'
+import { dnd5eActiveHitPointMaximumBonus } from './activeEffects'
 
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
 
@@ -329,10 +330,14 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
     baseMaxHp,
   )
   const maxHp = dnd5eEffectiveHitPointMaximum(baseMaxHp, reductionLedger)
+  const activeMaximumBonus = dnd5eActiveHitPointMaximumBonus(
+    character.dnd5eCombatState?.activeEffects,
+  )
+  const effectiveMaxHp = maxHp + activeMaximumBonus
   const previousCurrent = Math.max(0, Math.floor(Number(character.currentHp) || 0))
   const currentHp = previousCurrent > 0 && maxHp > previousMaximum
-    ? Math.min(maxHp, previousCurrent + (maxHp - previousMaximum))
-    : Math.min(maxHp, previousCurrent)
+    ? Math.min(effectiveMaxHp, previousCurrent + (maxHp - previousMaximum))
+    : Math.min(effectiveMaxHp, previousCurrent)
 
   return {
     ...character,

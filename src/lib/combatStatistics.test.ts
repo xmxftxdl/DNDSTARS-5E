@@ -21,6 +21,7 @@ import {
   deleteCombatStatisticsLog,
   formatCombatLogArchiveText,
   normalizeSharedCombatStatistics,
+  restoreCombatStatisticsSession,
   type CombatStatisticsSide,
 } from './combatStatistics'
 
@@ -220,6 +221,27 @@ describe('Headless combat statistics', () => {
       ...shared,
       sessions: [{ ...replayed, combatants: { fighter: { ...replayed.combatants.fighter, damageDealt: -1 } } }],
     })).toBeUndefined()
+  })
+
+  it('restores only the rejected encounter statistics snapshot', () => {
+    const before = createCombatStatisticsSession({ combatId: 'combat-1', mapId: 'map-1', now: 1 })
+    const optimistic = {
+      ...before,
+      updatedAt: 2,
+      receipts: ['optimistic-damage'],
+    }
+    const unrelated = createCombatStatisticsSession({ combatId: 'combat-2', mapId: 'map-2', now: 3 })
+
+    expect(restoreCombatStatisticsSession(
+      [optimistic, unrelated],
+      'combat-1',
+      before,
+    )).toEqual([unrelated, before])
+    expect(restoreCombatStatisticsSession(
+      [optimistic, unrelated],
+      'combat-1',
+      undefined,
+    )).toEqual([unrelated])
   })
 
   it('counts direct and death-save instant deaths without duplicating ordinary monster damage kills', () => {

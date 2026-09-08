@@ -1,5 +1,5 @@
 import { FileCheck2, Plus, Save, Trash2, X } from 'lucide-react'
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   PdfClueRecordV1,
   PdfEncounterRecordV1,
@@ -36,7 +36,7 @@ import PdfSourceEvidenceDrawer, {
 import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
 import PdfTimelineGameTimeField from './PdfTimelineGameTimeField'
 
-type EditorTab =
+export type PdfCampaignAnalysisEditorTab =
   | 'overview'
   | 'people'
   | 'relationships'
@@ -49,6 +49,13 @@ type EditorTab =
   | 'imports'
   | 'tips'
   | 'warnings'
+
+export interface PdfCampaignAnalysisEditorTarget {
+  tab: PdfCampaignAnalysisEditorTab
+  index?: number
+}
+
+type EditorTab = PdfCampaignAnalysisEditorTab
 
 const EDITOR_TABS: Array<{ id: EditorTab; label: string }> = [
   { id: 'overview', label: '总览' },
@@ -70,6 +77,7 @@ interface PdfCampaignAnalysisEditorProps {
   onChange: (analysis: PdfCampaignAnalysisView) => void
   onClose: () => void
   onExport?: () => void
+  initialTarget?: PdfCampaignAnalysisEditorTarget
 }
 
 function tabCount(analysis: PdfCampaignAnalysisView, tab: EditorTab): number | null {
@@ -82,6 +90,7 @@ function tabCount(analysis: PdfCampaignAnalysisView, tab: EditorTab): number | n
 }
 
 const PdfCitationOpenContext = createContext<(citation: PdfViewCitation) => void>(() => undefined)
+const PdfEditorTargetIndexContext = createContext<number | null>(null)
 
 function Evidence({ citations }: { citations: readonly PdfSourceCitationV1[] }) {
   const onOpen = useContext(PdfCitationOpenContext)
@@ -138,8 +147,10 @@ function RecordCard({ title, index, citations, onRemove, children }: {
   onRemove: () => void
   children: ReactNode
 }) {
+  const targetIndex = useContext(PdfEditorTargetIndexContext)
+  const targeted = targetIndex === index
   return (
-    <article className="rounded-2xl border border-white/8 bg-black/20 p-4">
+    <article data-pdf-editor-record-index={index} className={`rounded-2xl border bg-black/20 p-4 ${targeted ? 'border-violet-300/55 ring-2 ring-violet-400/20' : 'border-white/8'}`}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-[10px] text-slate-600">条目 {index + 1}</p>
@@ -163,10 +174,11 @@ function replaceAt<T>(entries: readonly T[], index: number, value: T): T[] {
   return entries.map((entry, entryIndex) => entryIndex === index ? value : entry)
 }
 
-export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose, onExport }: PdfCampaignAnalysisEditorProps) {
-  const [activeTab, setActiveTab] = useState<EditorTab>('overview')
-  const [selectedPersonIndex, setSelectedPersonIndex] = useState(0)
+export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose, onExport, initialTarget }: PdfCampaignAnalysisEditorProps) {
+  const [activeTab, setActiveTab] = useState<EditorTab>(initialTarget?.tab ?? 'overview')
+  const [selectedPersonIndex, setSelectedPersonIndex] = useState(initialTarget?.tab === 'people' ? initialTarget.index ?? 0 : 0)
   const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const campaignClock = useCampaignTimeStore((state) => state.state)
   const mergedPeople = useMemo(() => mergePdfPersonRecords(analysis.people), [analysis.people])
   const duplicatePeopleCount = analysis.people.length - mergedPeople.length
@@ -183,6 +195,16 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
+
+  useEffect(() => {
+    if (initialTarget?.index === undefined || initialTarget.tab !== activeTab) return
+    const frame = window.requestAnimationFrame(() => {
+      dialogRef.current
+        ?.querySelector<HTMLElement>(`[data-pdf-editor-record-index="${initialTarget.index}"]`)
+        ?.scrollIntoView({ block: 'center' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeTab, initialTarget])
 
   const remove = async (collection: keyof PdfCampaignAnalysisView, index: number) => {
     if (!await showAppConfirm({
@@ -216,7 +238,7 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
 
   return (
     <PdfCitationOpenContext.Provider value={setSelectedCitation}>
-    <div className="fixed inset-0 z-[180] flex bg-slate-950/90 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="DM 分析结果编辑器">
+    <div ref={dialogRef} className="fixed inset-0 z-[180] flex bg-slate-950/90 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="DM 分析结果编辑器">
       <div className="m-auto flex h-[94vh] w-[min(1500px,96vw)] flex-col overflow-hidden rounded-3xl border border-violet-400/20 bg-[#0b0d17] shadow-2xl shadow-black/60">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-5 py-4">
           <div>
@@ -287,6 +309,7 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
                   )}
                 </div>
               </div>
+              <PdfEditorTargetIndexContext.Provider value={initialTarget?.tab === activeTab ? initialTarget.index ?? null : null}>
               <div className="space-y-4">
                 {activeTab === 'overview' && (
                   <section className="rounded-2xl border border-white/8 bg-black/20 p-4">
@@ -366,6 +389,7 @@ export default function PdfCampaignAnalysisEditor({ analysis, onChange, onClose,
                   <div className="rounded-2xl border border-dashed border-white/10 py-12 text-center text-xs text-slate-600">当前分类没有条目。DM 可以点击“新增条目”补充。</div>
                 )}
               </div>
+              </PdfEditorTargetIndexContext.Provider>
             </div>
           </main>
         </div>
@@ -444,7 +468,7 @@ function EncounterEditor({ record, index, onChange, onRemove }: { record: PdfEnc
 }
 
 function ImportEditor({ record, index, onChange, onRemove }: { record: PdfImportCandidateV1; index: number; onChange: (value: PdfImportCandidateV1) => void; onRemove: () => void }) {
-  return <RecordCard title={record.name} index={index} citations={record.citations} onRemove={onRemove}><Field label="资源名称" value={record.name} onChange={(name) => onChange({ ...record, name })} /><div className="grid gap-3 md:grid-cols-2"><SelectField label="资源类型" value={record.kind} onChange={(kind) => onChange({ ...record, kind: kind as PdfImportCandidateV1['kind'] })}><option value="monster">怪物</option><option value="npc">NPC</option><option value="item">物品</option><option value="spell">法术</option><option value="map">地图</option><option value="handout">讲义</option><option value="rule">规则</option></SelectField><SelectField label="预期自动化" value={record.automation} onChange={(automation) => onChange({ ...record, automation: automation as PdfImportCandidateV1['automation'] })}><option value="full">完全自动</option><option value="partial">半自动</option><option value="manual">DM 裁定</option></SelectField></div><Field label="资源说明" value={record.description} multiline onChange={(description) => onChange({ ...record, description })} /></RecordCard>
+  return <RecordCard title={record.name} index={index} citations={record.citations} onRemove={onRemove}><Field label="资源名称" value={record.name} onChange={(name) => onChange({ ...record, name })} /><div className="grid gap-3 md:grid-cols-2"><SelectField label="资源类型" value={record.kind} onChange={(kind) => onChange({ ...record, kind: kind as PdfImportCandidateV1['kind'], ...(kind === 'monster' ? {} : { monsterStatBlockText: '' }) })}><option value="monster">怪物</option><option value="npc">NPC</option><option value="item">物品</option><option value="spell">法术</option><option value="map">地图</option><option value="handout">讲义</option><option value="rule">规则</option></SelectField><SelectField label="预期自动化" value={record.automation} onChange={(automation) => onChange({ ...record, automation: automation as PdfImportCandidateV1['automation'] })}><option value="full">完全自动</option><option value="partial">半自动</option><option value="manual">DM 裁定</option></SelectField></div><Field label="资源说明" value={record.description} multiline onChange={(description) => onChange({ ...record, description })} />{record.kind === 'monster' && <><Field label="怪物完整属性块" value={record.monsterStatBlockText ?? ''} multiline onChange={(monsterStatBlockText) => onChange({ ...record, monsterStatBlockText })} /><p className="text-[10px] leading-5 text-slate-500">这里应包含 AC、HP、属性、抗性、特质、施法、动作、附赠动作、反应、传奇与巢穴动作；进入怪物工坊时会由共享解析器自动转换并标出需要人工复核的部分。</p></>}</RecordCard>
 }
 
 function PrepTipEditor({ record, index, onChange, onRemove }: { record: PdfPrepTipV1; index: number; onChange: (value: PdfPrepTipV1) => void; onRemove: () => void }) {

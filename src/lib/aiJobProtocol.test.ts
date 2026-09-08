@@ -96,6 +96,40 @@ describe('AI Job V2 协议', () => {
     expect(normalizePdfCampaignAnalysisArtifact(analysisArtifact())?.schemaVersion).toBe(1)
   })
 
+  it('接受安全的短引书签，并拒绝整页原文或越界页码', () => {
+    const base = structuredClone(analysisArtifactV2())
+    const artifact = {
+      ...base,
+      payload: {
+        ...base.payload,
+        bookmarks: [{
+          schemaVersion: 1,
+          id: `bm_${'d'.repeat(24)}`,
+          documentId: base.payload.documents[0]!.id,
+          documentName: base.payload.documents[0]!.name,
+          page: 2,
+          kind: 'person',
+          label: '艾莉首次登场',
+          quote: '艾莉在暮钟旅馆秘密接待来客。',
+          note: '准备旅店主人的声线。',
+          origin: 'ai',
+          entityId: base.payload.people[0]!.id,
+          entityName: '艾莉',
+          createdAt: 1,
+        }],
+      },
+    }
+    expect(normalizePdfCampaignAnalysisArtifactV2(artifact)).not.toBeNull()
+
+    const oversized = structuredClone(artifact)
+    oversized.payload.bookmarks[0]!.quote = '原'.repeat(501)
+    expect(normalizePdfCampaignAnalysisArtifactV2(oversized)).toBeNull()
+
+    const pageOverflow = structuredClone(artifact)
+    pageOverflow.payload.bookmarks[0]!.page = 99
+    expect(normalizePdfCampaignAnalysisArtifactV2(pageOverflow)).toBeNull()
+  })
+
   it('拒绝悬空证据、越界页码和被夹带的 PDF 页全文', () => {
     const danglingEvidence = structuredClone(analysisArtifactV2())
     danglingEvidence.payload.people[0]!.evidenceIds = ['ev_missing']

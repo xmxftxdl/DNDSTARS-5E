@@ -7,10 +7,7 @@ import {
 } from './enemyAi'
 import { getEnemyStatBlock } from './enemyStatBlocks'
 import type { BattleMap, Token } from '../store/maps'
-import {
-  DND5E_SRD_MONSTERS,
-  getDnd5eSrdMonster,
-} from '../rulesets/dnd5e/monsters'
+import { DND5E_SRD_MONSTERS } from '../rulesets/dnd5e/monsters'
 import { dnd5eMonsterActionAutomation } from '../rulesets/dnd5e/monsterSchema'
 import { dnd5eMonsterMultiattackRuntimeActionIds } from '../rulesets/dnd5e/monsterDynamicMultiattack'
 import type { Dnd5eMonsterTurnPlan } from '../rulesets/dnd5e/monsterTurnPlanner'
@@ -112,6 +109,39 @@ describe('[T7/AC1] buildEnemyAttack 按怪物真实结构化攻击数据投骰',
     expect(buildSelectedEnemyAttack(enemy, player, -1)).toBeUndefined()
   })
 
+  it('preserves a Headless attack that applies conditions without damage dice', () => {
+    const enemy = token({
+      id: 'enemy:roper-tendril',
+      type: 'enemy',
+      poolId: 'srd-5.1:roper',
+    })
+    const player = token({
+      id: 'player:roper-target',
+      type: 'player',
+      characterId: 'hero',
+      x: 75,
+      y: 25,
+    })
+    const actions = getEnemyStatBlock(enemy.poolId!)?.actions ?? []
+    const tendrilIndex = actions.findIndex((action) => action.name === '卷须')
+    expect(tendrilIndex).toBeGreaterThanOrEqual(0)
+    expect(actions[tendrilIndex]?.damageDice).toBeUndefined()
+
+    const result = buildSelectedEnemyAttack(enemy, player, tendrilIndex)
+
+    expect(result).toMatchObject({
+      attacked: true,
+      attackerTokenId: enemy.id,
+      targetTokenId: player.id,
+      targetCharacterId: player.characterId,
+      attackTargetTokenIds: [player.id],
+      actionIndex: tendrilIndex,
+      monsterResourceKind: 'action',
+    })
+    expect(result?.attack).toBeUndefined()
+    expect(result?.damage).toBeUndefined()
+  })
+
   it('preserves the explicitly selected parent Multiattack action index', () => {
     for (const poolId of [
       'srd-5.1:roper',
@@ -167,42 +197,20 @@ describe('[T7/AC1] buildEnemyAttack 按怪物真实结构化攻击数据投骰',
     expect(result?.attackTargetTokenIds).not.toBe(occurrenceTargets)
   })
 
-  it('keeps all-special composite parents even without a legacy attack preview', () => {
-    const poolId = 'srd-5.1:kraken'
-    const enemy = token({ id: 'enemy:kraken', type: 'enemy', poolId })
-    const primary = token({ id: 'player:a', type: 'player', x: 75, y: 25 })
-    const monster = getDnd5eSrdMonster(poolId)
-    const parentIndex = monster?.actions.findIndex((action) =>
-      action.id === 'multiattack-flings') ?? -1
-    expect(parentIndex).toBeGreaterThanOrEqual(0)
-
-    const occurrenceTargets = ['player:a', 'player:b', 'player:c'] as const
-    const result = buildSelectedEnemyAttack(
-      enemy,
-      primary,
-      parentIndex,
-      occurrenceTargets,
-    )
-
-    expect(result).toMatchObject({
-      attacked: true,
-      attackerTokenId: enemy.id,
-      targetTokenId: primary.id,
-      attackTargetTokenIds: occurrenceTargets,
-      actionIndex: parentIndex,
-    })
-    expect(result?.attack).toBeUndefined()
-    expect(result?.damage).toBeUndefined()
-  })
-
-  it('preserves parent index and occurrence targets for all 240 catalog Multiattacks', () => {
-    const parents = DND5E_SRD_MONSTERS.flatMap((monster) =>
+  it('preserves parent index and occurrence targets for every audited Headless Multiattack', () => {
+    const allParents = DND5E_SRD_MONSTERS.flatMap((monster) =>
       monster.actions.flatMap((action, actionIndex) =>
-        action.kind === 'multiattack' &&
-        dnd5eMonsterActionAutomation(action) === 'headless'
+        action.kind === 'multiattack'
           ? [{ monster, action, actionIndex }]
           : []))
-    expect(parents).toHaveLength(240)
+    const parents = allParents.filter(({ action }) =>
+      dnd5eMonsterActionAutomation(action) === 'headless')
+    const adjudicatedParents = allParents.filter(({ action }) =>
+      dnd5eMonsterActionAutomation(action) === 'dm-adjudication')
+
+    expect(allParents).toHaveLength(246)
+    expect(parents).toHaveLength(allParents.length)
+    expect(adjudicatedParents).toEqual([])
     expect(parents
       .filter(({ action }) => action.randomRepeat != null)
       .map(({ monster, action }) => `${monster.slug}:${action.id}`))

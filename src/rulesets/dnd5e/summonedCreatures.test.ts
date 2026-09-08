@@ -4,6 +4,7 @@ import type { Character } from '../../types/character'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import {
   planDnd5eSummonedCreature,
+  markDnd5eSummonsDamaged,
   rebaseDnd5eSummonedCreatureTokens,
   reconcileDnd5eSummonedCreatures,
 } from './summonedCreatures'
@@ -64,6 +65,8 @@ describe('D&D 5e summoned creature lifecycle', () => {
         armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
         savingThrowBonus: 3, proficientSkillCheckBonus: 3,
         weaponAttacksMagical: true, attacksPerAction: 2, shareSelfSpellsRangeFeet: 30,
+        cannotAttack: true,
+        walkingSpeedFeet: 100, dismissAfterDamageRounds: 10,
       },
     })
     expect(result.ok).toBe(true)
@@ -79,9 +82,74 @@ describe('D&D 5e summoned creature lifecycle', () => {
         armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
         savingThrowBonus: 3, proficientSkillCheckBonus: 3,
         weaponAttacksMagical: true, attacksPerAction: 2, shareSelfSpellsRangeFeet: 30,
+        cannotAttack: true,
+        walkingSpeedFeet: 100, dismissAfterDamageRounds: 10,
       },
     })
     expect(result.plan.initiativeEntry).toMatchObject({ tokenId: 'plugin-summon:action-1', roll: 14 })
+  })
+
+  it('starts a summon damage-dismissal timer once and removes it at the authoritative round', () => {
+    const planned = planDnd5eSummonedCreature({
+      map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'spell:phantom-steed', pluginId: 'srd-5.1', actionId: 'phantom-steed', round: 2,
+      targetCell: { col: 2, row: 1 }, initiativeD20: 12,
+      summon: {
+        monsterId: 'srd-5.1:riding-horse', durationRounds: 600, side: 'ally',
+        walkingSpeedFeet: 100, dismissAfterDamageRounds: 10,
+      },
+    })
+    expect(planned.ok).toBe(true)
+    if (!planned.ok) return
+    const placed = map([actor, planned.plan.token])
+    const damaged = markDnd5eSummonsDamaged(placed, new Set([planned.plan.token.id]), 3)
+    expect(damaged.tokens[1].dnd5eSummon).toMatchObject({ dismissAtRound: 13 })
+    expect(markDnd5eSummonsDamaged(damaged, new Set([planned.plan.token.id]), 7)).toBe(damaged)
+    expect(reconcileDnd5eSummonedCreatures({ map: damaged, characters: [source()], round: 12 }).removedTokenIds).toEqual([])
+    expect(reconcileDnd5eSummonedCreatures({ map: damaged, characters: [source()], round: 13 }).removedTokenIds)
+      .toEqual([planned.plan.token.id])
+  })
+
+  it('keeps a True Polymorph creature only after completed concentration and ends caster control', () => {
+    const planned = planDnd5eSummonedCreature({
+      map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'spell:true-polymorph', pluginId: 'srd-5.1', actionId: 'true-polymorph',
+      concentrationId: 'true-polymorph', createdWorldMinute: 480, round: 2,
+      targetCell: { col: 2, row: 1 }, initiativeD20: 12,
+      summon: {
+        monsterId: 'srd-5.1:brown-bear', durationRounds: 600,
+        concentration: true, side: 'ally', persistAfterConcentrationCompletes: true,
+      },
+    })
+    expect(planned.ok).toBe(true)
+    if (!planned.ok) return
+    expect(planned.plan.token.dnd5eSummon).toMatchObject({
+      concentrationId: 'true-polymorph', createdWorldMinute: 480,
+      persistAfterConcentrationCompletes: true,
+    })
+
+    const interrupted = reconcileDnd5eSummonedCreatures({
+      map: map([actor, planned.plan.token]), characters: [source()], round: 3,
+    })
+    expect(interrupted.removedTokenIds).toEqual([planned.plan.token.id])
+
+    const completedSource = source()
+    completedSource.dnd5eCombatState = {
+      lastCompletedConcentration: {
+        spellId: 'true-polymorph', completedWorldMinute: 540,
+      },
+    }
+    const completed = reconcileDnd5eSummonedCreatures({
+      map: map([actor, planned.plan.token]), characters: [completedSource], round: 3,
+    })
+    expect(completed.removedTokenIds).toEqual([])
+    expect(completed.promotedTokenIds).toEqual([planned.plan.token.id])
+    expect(completed.map.tokens.find((token) => token.id === planned.plan.token.id)?.dnd5eSummon)
+      .toMatchObject({
+        persistent: true, controlEnded: true,
+        concentrationId: undefined,
+        persistAfterConcentrationCompletes: undefined,
+      })
   })
 
   it('rotates a summon to the next unused portrait for the same monster', () => {
@@ -201,5 +269,30 @@ describe('D&D 5e summoned creature lifecycle', () => {
       map: { ...activeMap, tokens: [actor, { ...planned.plan.token, hp: 0 }] },
       characters: [source('plugin-summon:action-1')], round: 2,
     }).removedTokenIds).toEqual(['plugin-summon:action-1'])
+  })
+
+  it('keeps a Conjure Elemental summon and flips it hostile when concentration ends', () => {
+    const planned = planDnd5eSummonedCreature({
+      map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'spell:conjure-elemental', pluginId: 'srd-5.1',
+      actionId: 'conjure-elemental-cast', concentrationId: 'conjure-elemental', round: 1,
+      targetCell: { col: 2, row: 0 }, initiativeD20: 10,
+      summon: {
+        monsterId: 'srd-5.1:fire-elemental', durationRounds: 600,
+        concentration: true, side: 'ally', becomesHostileAfterConcentrationEnds: true,
+      },
+    })
+    if (!planned.ok) throw new Error(planned.reason)
+    const activeMap = map([actor, planned.plan.token])
+    const reconciled = reconcileDnd5eSummonedCreatures({
+      map: activeMap, characters: [source()], round: 2,
+    })
+    expect(reconciled.removedTokenIds).toEqual([])
+    expect(reconciled.hostileTokenIds).toEqual([planned.plan.token.id])
+    expect(reconciled.map.tokens.find((token) => token.id === planned.plan.token.id)?.dnd5eSummon)
+      .toMatchObject({
+        side: 'enemy', controlEnded: true, expiresAfterRound: 600,
+        concentrationId: undefined, becomesHostileAfterConcentrationEnds: undefined,
+      })
   })
 })

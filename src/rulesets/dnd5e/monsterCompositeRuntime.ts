@@ -26,6 +26,39 @@ export interface Dnd5eMonsterCompositeRuntimePlan {
   children: readonly Dnd5eMonsterCompositeRuntimeChild[]
 }
 
+/**
+ * Maximum distance that ordered children before `sequenceIndex` can pull the
+ * selected target toward the actor. This is deliberately derived from the
+ * same source-linked relation used by the later weapon child: a generic Reel
+ * must not make an unrelated attack look reachable.
+ *
+ * The authoritative composite resolver still re-checks the real distance
+ * after every child. This projection is only for map/preparation validation,
+ * where rejecting a Roper Bite at the initial position would incorrectly
+ * discard the preceding Tendril -> Reel sequence.
+ */
+export function dnd5eMonsterCompositePriorPullFeet(input: {
+  plan: Dnd5eMonsterCompositeRuntimePlan | undefined
+  sequenceIndex: number
+}): number {
+  const child = input.plan?.children[input.sequenceIndex]
+  const requirement = child?.action.relationRequirement
+  if (
+    !child ||
+    child.kind !== 'weapon' ||
+    requirement?.kind !== 'target-linked-to-source'
+  ) return 0
+  return input.plan!.children
+    .slice(0, input.sequenceIndex)
+    .reduce((total, prior) => {
+      const rule = prior.action.rule
+      return rule?.kind === 'source-linked-reel' &&
+        rule.slotGroup === requirement.slotGroup
+        ? total + Math.max(0, rule.maximumDistanceFeet)
+        : total
+    }, 0)
+}
+
 export type Dnd5eMonsterCompositeConditionalSkipReason =
   | 'resource-unavailable'
   | 'relation-unavailable'

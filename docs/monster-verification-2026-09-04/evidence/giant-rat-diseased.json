@@ -1,0 +1,134 @@
+{
+  "id": "srd-5.1:giant-rat-diseased",
+  "slug": "giant-rat-diseased",
+  "name": "染病巨鼠",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：命中特效声明的每 24 小时降低生命值上限原先被运行状态丢弃，时钟也未执行。现已覆盖状态持久化、时间边界、重复同步去重、连续两次恶化、重施不推迟原时钟、治愈后的上限恢复，以及木乃伊诅咒将上限降至零时的遗体毁灭。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].modifiers.preventNonmagicalHealing",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.intervalHours",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.average",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.count",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.sides",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.reduction.bonus",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.execution",
+        "attack.onHitEffects[].campaignPeriodicHitPointMaximumReduction.recovery",
+        "attack.onHitEffects[].removal.onMagicalHealing",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "diseased-bite:apply",
+        "diseased-bite:save",
+        "calendar-boundary-replay-and-cure"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 131,
+      "slug": "giant-rat-diseased",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:21:50.474Z",
+      "name": "染病巨鼠",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-rat-diseased-bite-1788560510556",
+      "combatId": "verify-ui-giant-rat-diseased-bite-1788560510556:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "染病巨鼠 使用啃咬攻击 验证目标：啃咬 → 验证目标 10+4=14 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:22 PM\n结算\n\n染病巨鼠 使用啃咬攻击 验证目标：啃咬 → 验证目标 10+4=14 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +4。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d4 骰面：2 = 2｜固定加值 +2｜小计 4\n染病巨鼠｜消耗动作\n验证目标｜体质豁免 d20 16 +10 = 26 vs DC 10｜成功\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "playerLog": "染病巨鼠 使用啃咬攻击 验证目标：啃咬 → 验证目标 10+4=14 命中；共造成 4 点伤害。",
+      "afterHp": 316,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:22:24.113Z",
+      "evidenceFile": "ui-cases/monsters/131-giant-rat-diseased.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "集群战术",
+      "automation": "headless",
+      "rule": "pack-tactics",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.allyDistanceFeet",
+        "rule.requiresAllyNotIncapacitated"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "adjacent-ally",
+        "distant-ally",
+        "dead-ally",
+        "incapacitated-ally"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 10,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

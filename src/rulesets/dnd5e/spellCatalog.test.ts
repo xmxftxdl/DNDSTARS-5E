@@ -26,11 +26,11 @@ describe('official SRD 5.1 spell-list catalog', () => {
   })
 
   it('gives all 319 spells an audited visibility requirement', () => {
-    expect(DND5E_REQUIRED_SIGHT_SPELL_IDS.size).toBe(83)
+    expect(DND5E_REQUIRED_SIGHT_SPELL_IDS.size).toBe(84)
     expect(DND5E_CONDITIONAL_SIGHT_SPELL_IDS.size).toBe(8)
-    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'required')).toHaveLength(83)
+    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'required')).toHaveLength(84)
     expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'conditional')).toHaveLength(8)
-    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'not-required')).toHaveLength(228)
+    expect(DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.visibilityRequirement === 'not-required')).toHaveLength(227)
     expect(getDnd5eSrdSpellCatalogEntry('magic-missile')?.visibilityRequirement).toBe('required')
     expect(getDnd5eSrdSpellCatalogEntry('call-lightning')?.visibilityRequirement).toBe('required')
     expect(getDnd5eSrdSpellCatalogEntry('detect-thoughts')?.visibilityRequirement).toBe('conditional')
@@ -73,7 +73,7 @@ describe('official SRD 5.1 spell-list catalog', () => {
   })
 
   it('requires every mechanically implemented combat spell to agree with the official catalog', () => {
-    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(122)
+    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(123)
     for (const spell of DND5E_SRD_COMBAT_SPELLS) {
       const catalog = getDnd5eSrdSpellCatalogEntry(spell.id)
       expect(catalog, spell.id).toBeDefined()
@@ -96,12 +96,31 @@ describe('official SRD 5.1 spell-list catalog', () => {
     expect(dnd5eSpellAreaAtSlot(fogCloud, 4)).toMatchObject({ shape: 'circle', radiusFeet: 80 })
   })
 
+  it('keeps Acid Splash on visible multi-target selection instead of guessed-cell targeting', () => {
+    const acidSplash = getDnd5eSrdCombatSpell('acid-splash')
+    expect(acidSplash).toMatchObject({
+      requiresVisibleTarget: true,
+      maximumTargets: 2,
+      maximumTargetSeparationFeet: 5,
+    })
+    expect(acidSplash?.allowsGuessedTargetCell).toBeUndefined()
+    expect(getDnd5eSrdSpellCatalogEntry('acid-splash')?.visibilityRequirement).toBe('required')
+  })
+
   it('keeps Fireball at 8d6 for its base 3rd-level cast and adds only one die at 4th level', () => {
     const fireball = getDnd5eSrdCombatSpell('fireball')
     expect(fireball).toBeDefined()
     if (!fireball) return
     expect(dnd5eSpellDiceCount(fireball, 7, 3)).toBe(8)
     expect(dnd5eSpellDiceCount(fireball, 7, 4)).toBe(9)
+  })
+
+  it('scales Ray of Frost only at the 5th, 11th, and 17th character-level thresholds', () => {
+    const rayOfFrost = getDnd5eSrdCombatSpell('ray-of-frost')
+    expect(rayOfFrost).toBeDefined()
+    if (!rayOfFrost) return
+    expect([1, 4, 5, 10, 11, 16, 17, 20].map((level) =>
+      dnd5eSpellDiceCount(rayOfFrost, level, 0))).toEqual([1, 1, 2, 2, 3, 3, 4, 4])
   })
 
   it('exposes every 2014 Warlock Mystic Arcanum option at its exact spell level with Chinese labels', () => {

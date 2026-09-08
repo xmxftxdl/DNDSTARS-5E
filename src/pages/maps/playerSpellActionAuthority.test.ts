@@ -53,10 +53,33 @@ describe('resolvePlayerSpellActionSubmission', () => {
     }))).toBeUndefined()
   })
 
-  it('fails closed while authority is unavailable or combat state is transitioning', () => {
+  it('returns the assigned caster for a Host-opened reaction during another creature turn', () => {
+    expect(resolvePlayerSpellActionSubmission(input({
+      combatActive: true,
+      combatActiveSnapshot: true,
+      turnCharacter: other,
+      currentInitiativeToken: { ...heroToken, type: 'enemy', characterId: undefined },
+      allowTriggeredReaction: true,
+    }))).toEqual({ character: hero, token: heroToken })
+  })
+
+  it('fails closed while authority is unavailable or live combat is paused/transitioning', () => {
     expect(resolvePlayerSpellActionSubmission(input({ authorityReady: false }))).toBeUndefined()
     expect(resolvePlayerSpellActionSubmission(input({ combatActiveSnapshot: true }))).toBeUndefined()
-    expect(resolvePlayerSpellActionSubmission(input({ combatFlowPaused: true }))).toBeUndefined()
+    expect(resolvePlayerSpellActionSubmission(input({
+      combatActive: true,
+      combatActiveSnapshot: true,
+      combatFlowPaused: true,
+      turnCharacter: hero,
+      currentInitiativeToken: heroToken,
+    }))).toBeUndefined()
+  })
+
+  it('ignores a stale combat-flow pause outside combat', () => {
+    expect(resolvePlayerSpellActionSubmission(input({ combatFlowPaused: true }))).toEqual({
+      character: hero,
+      token: heroToken,
+    })
   })
 })
 
@@ -66,6 +89,17 @@ describe('playerSpellTargetingMatchesAuthority', () => {
       combatActive: false,
       targetingCharacterId: hero.id,
       playerCharacterId: hero.id,
+    })).toBe(true)
+  })
+
+  it('keeps a Host-opened reaction targeter during another creature turn', () => {
+    expect(playerSpellTargetingMatchesAuthority({
+      combatActive: true,
+      targetingCharacterId: hero.id,
+      playerCharacterId: hero.id,
+      turnCharacterId: other.id,
+      currentInitiativeToken: { ...heroToken, type: 'enemy', characterId: undefined },
+      allowTriggeredReaction: true,
     })).toBe(true)
   })
 

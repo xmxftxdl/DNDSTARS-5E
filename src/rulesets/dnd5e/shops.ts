@@ -135,6 +135,12 @@ export interface SharedDnd5eShopsState {
   }
 }
 
+export interface Dnd5eShopMerchantContext {
+  mapId: string
+  merchantTokenId: string
+  buyerTokenId: string
+}
+
 export interface Dnd5eShopPurchaseRequest {
   id: string
   shopId: string
@@ -144,6 +150,8 @@ export interface Dnd5eShopPurchaseRequest {
   expectedShopRevision?: number
   expectedInventoryRevision?: number
   expectedUnitPriceCopper?: number
+  /** Required for player-authored requests; DM storefront purchases may omit it. */
+  merchant?: Dnd5eShopMerchantContext
 }
 
 export type Dnd5eShopPurchaseFailure =
@@ -512,48 +520,56 @@ function stockQuantity(template: Dnd5eInventoryItemTemplate, random: () => numbe
   return randomInteger(1, 4, random)
 }
 
-function shuffleTemplates(
-  templates: readonly Dnd5eInventoryItemTemplate[],
-  random: () => number,
-): Dnd5eInventoryItemTemplate[] {
-  const shuffled = [...templates]
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const target = randomInteger(0, index, random)
-    const held = shuffled[index]
-    shuffled[index] = shuffled[target]
-    shuffled[target] = held
-  }
-  return shuffled
+const RANDOM_STOCK_RARITY_WEIGHT: Readonly<Record<Dnd5eMagicItemRarity, number>> = {
+  common: 18,
+  uncommon: 8,
+  rare: 3,
+  'very-rare': 1,
+  legendary: 0.15,
+  artifact: 0,
+  varies: 0.05,
+}
+const RANDOM_STOCK_RARITIES: readonly Dnd5eMagicItemRarity[] = [
+  'common', 'uncommon', 'rare', 'very-rare', 'legendary', 'varies', 'artifact',
+]
+
+/**
+ * Every random storefront uses the same rarity decay. Mundane goods have no
+ * rules rarity and intentionally share the common-item weight.
+ */
+export function dnd5eShopRandomStockWeight(template: Dnd5eInventoryItemTemplate): number {
+  return RANDOM_STOCK_RARITY_WEIGHT[template.magicItem?.rarity ?? 'common']
 }
 
-function arcaneScrollWeight(template: Dnd5eInventoryItemTemplate): number {
-  if (template.magicItem?.kind !== 'scroll') return 0
-  if (template.magicItem.rarity === 'common') return 18
-  if (template.magicItem.rarity === 'uncommon') return 8
-  if (template.magicItem.rarity === 'rare') return 3
-  if (template.magicItem.rarity === 'very-rare') return 1
-  if (template.magicItem.rarity === 'legendary') return 0.15
-  return 0.05
+function templateRarity(template: Dnd5eInventoryItemTemplate): Dnd5eMagicItemRarity {
+  return template.magicItem?.rarity ?? 'common'
 }
 
-function weightedScrollSelection(
+function weightedTemplateSelection(
   templates: readonly Dnd5eInventoryItemTemplate[],
   count: number,
   random: () => number,
 ): Dnd5eInventoryItemTemplate[] {
-  const remaining = [...templates]
+  const remaining = templates.filter((template) => dnd5eShopRandomStockWeight(template) > 0)
   const selected: Dnd5eInventoryItemTemplate[] = []
   while (remaining.length > 0 && selected.length < count) {
-    const totalWeight = remaining.reduce((sum, template) => sum + arcaneScrollWeight(template), 0)
+    // Roll the rarity tier first so a large catalog cannot make a rare tier
+    // more common merely by contributing more individual templates.
+    const availableRarities = RANDOM_STOCK_RARITIES.filter((rarity) =>
+      RANDOM_STOCK_RARITY_WEIGHT[rarity] > 0 && remaining.some((template) => templateRarity(template) === rarity))
+    const totalWeight = availableRarities.reduce((sum, rarity) => sum + RANDOM_STOCK_RARITY_WEIGHT[rarity], 0)
     let roll = Math.max(0, Math.min(0.999999999, Number(random()) || 0)) * totalWeight
-    let selectedIndex = remaining.length - 1
-    for (let index = 0; index < remaining.length; index += 1) {
-      roll -= arcaneScrollWeight(remaining[index])
+    let selectedRarity = availableRarities[availableRarities.length - 1]
+    for (const rarity of availableRarities) {
+      roll -= RANDOM_STOCK_RARITY_WEIGHT[rarity]
       if (roll < 0) {
-        selectedIndex = index
+        selectedRarity = rarity
         break
       }
     }
+    const candidateIndexes = remaining.flatMap((template, index) =>
+      templateRarity(template) === selectedRarity ? [index] : [])
+    const selectedIndex = candidateIndexes[randomInteger(0, candidateIndexes.length - 1, random)]
     selected.push(remaining.splice(selectedIndex, 1)[0])
   }
   return selected
@@ -565,16 +581,16 @@ function restockSelection(
   count: number,
   random: () => number,
 ): Dnd5eInventoryItemTemplate[] {
-  if (kind !== 'arcane' || count < 1) return shuffleTemplates(pool, random).slice(0, count)
+  if (kind !== 'arcane' || count < 1) return weightedTemplateSelection(pool, count, random)
 
   const scrolls = pool.filter((template) => template.magicItem?.kind === 'scroll')
   const otherGoods = pool.filter((template) => template.magicItem?.kind !== 'scroll')
   const preferredScrollCount = Math.min(scrolls.length, count, Math.max(1, Math.round(count * 0.3)))
-  const selectedScrolls = weightedScrollSelection(scrolls, preferredScrollCount, random)
-  const selectedOtherGoods = shuffleTemplates(otherGoods, random).slice(0, count - selectedScrolls.length)
+  const selectedScrolls = weightedTemplateSelection(scrolls, preferredScrollCount, random)
+  const selectedOtherGoods = weightedTemplateSelection(otherGoods, count - selectedScrolls.length, random)
   const missing = count - selectedScrolls.length - selectedOtherGoods.length
   const extraScrolls = missing > 0
-    ? weightedScrollSelection(
+    ? weightedTemplateSelection(
         scrolls.filter((template) => !selectedScrolls.some((selected) => selected.id === template.id)),
         missing,
         random,
@@ -601,6 +617,38 @@ function offerFromTemplate(
     sourceLabel: template.source.book,
     quantity,
     basePriceCopper: dnd5eShopBasePriceCopper(template),
+    updatedAt: now,
+  }
+}
+
+/** DM-authored stock bypasses shop-type and random-rarity filters, but still uses the canonical item snapshot. */
+export function addDnd5eShopOffer(
+  shop: Dnd5eShopDefinition,
+  template: Dnd5eInventoryItemTemplate,
+  quantity: number,
+  now = Date.now(),
+): Dnd5eShopDefinition {
+  const addedQuantity = Number.isFinite(quantity)
+    ? Math.max(1, Math.min(999, Math.floor(quantity)))
+    : 1
+  const existing = shop.offers.find((offer) => offer.templateId === template.id)
+  const nextOffer = existing
+    ? {
+        ...offerFromTemplate(template, 0, now),
+        id: existing.id,
+        quantity: Math.min(999, existing.quantity + addedQuantity),
+        ...(existing.priceOverrideCopper != null
+          ? { priceOverrideCopper: existing.priceOverrideCopper }
+          : {}),
+      }
+    : offerFromTemplate(template, addedQuantity, now)
+  return {
+    ...shop,
+    offers: [
+      ...shop.offers.filter((offer) => offer.templateId !== template.id),
+      nextOffer,
+    ].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')),
+    revision: shop.revision + 1,
     updatedAt: now,
   }
 }

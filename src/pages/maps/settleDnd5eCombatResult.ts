@@ -12,9 +12,12 @@ import {
   dnd5ePostSpellRandomTablePlan,
   dnd5eSavingThrowMode,
   getDnd5eSrdMonster,
+  markDnd5eSummonsDamaged,
   planDnd5eMapResultApplication,
   previewDnd5eUnsupportedAirborneFalls,
+  previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
   resolveDnd5eHeadlessAction,
+  resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
   type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
@@ -32,9 +35,14 @@ import {
 
 export async function settleDnd5eConcentrationChecks(input: {
   result: Extract<Dnd5eActionResult, { ok: true }>
+  /** State immediately before a non-action authority adjustment changed support. */
+  priorState?: Dnd5eHeadlessCombatState
   map: BattleMap
   characters: readonly Character[]
-  priorApplication?: Pick<Dnd5eMapResultPlan, 'changedTokenIds' | 'changedCharacterIds'>
+  priorApplication?: Pick<
+    Dnd5eMapResultPlan,
+    'changedTokenIds' | 'changedCharacterIds' | 'tokenPatches' | 'characterPatches'
+  >
   characterIdByCombatantId: Readonly<Record<string, string>>
   rollD20: (
     label: string,
@@ -116,6 +124,34 @@ export async function settleDnd5eConcentrationChecks(input: {
   let state = input.result.state
   let map = input.map
   const events = [...input.result.events]
+  if (input.priorState) {
+    const falls = previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
+      input.priorState,
+      state,
+    )
+    if (falls.length > 0) {
+      const fallDamageRollsByCombatantId: Record<string, readonly number[]> = {}
+      for (const fall of falls) {
+        if (fall.fallingDamageDice < 1) continue
+        const targetName = input.map.tokens.find((token) => token.id === fall.combatantId)?.label ??
+          state.combatants[fall.combatantId]?.name ?? fall.combatantId
+        fallDamageRollsByCombatantId[fall.combatantId] = await input.rollDice(
+          fall.fallingDamageDice,
+          6,
+          '失去飞行支撑·坠落伤害',
+          targetName,
+        )
+      }
+      const fallen = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
+        input.priorState,
+        state,
+        fallDamageRollsByCombatantId,
+      )
+      if (!fallen.ok) throw new Error(`unsupported-airborne-fall:${fallen.reason}`)
+      state = fallen.state
+      events.push(...fallen.events)
+    }
+  }
   const resolveWithUnsupportedAirborneFalls = async (
     source: typeof state,
     action: Dnd5eAction,
@@ -545,7 +581,14 @@ export async function settleDnd5eConcentrationChecks(input: {
     const combatant = state.combatants[check.targetId]
     if (!combatant?.concentrating) continue
     const targetName = input.map.tokens.find((token) => token.id === check.targetId)?.label ?? combatant.name
-    const mode = dnd5eSavingThrowMode(combatant, 'con', { effectVisible: true })
+    const baseMode = dnd5eSavingThrowMode(combatant, 'con', { effectVisible: true })
+    const mode = resolveDnd5eRollMode({
+      requestedMode: baseMode,
+      disadvantage: [{
+        active: combatant.classState.concentrationCheckDisadvantagePendingSourceId != null,
+        reason: 'concentration-check-disadvantage',
+      }],
+    }).mode
     const interrupted = await resolveSavingThrowInterrupts({
       combatant,
       targetName,
@@ -801,17 +844,47 @@ export async function settleDnd5eConcentrationChecks(input: {
       events.push(...nested.result.events.slice(triggered.events.length))
     }
   }
-  const result = { ok: true as const, state, events }
+  map = markDnd5eSummonsDamaged(
+    map,
+    new Set(events.flatMap((event) =>
+      event.type === 'damage-applied' && event.amount > 0 ? [event.targetId] : [])),
+    state.round,
+  )
+  // Concentration/reaction follow-ups replace state and append events, but
+  // they must not erase map-owned Activity handoffs prepared by the original
+  // atomic action. Dropping these fields spends the spell slot and starts
+  // concentration while silently losing its persistent area or summon.
+  const result: Extract<Dnd5eActionResult, { ok: true }> = {
+    ...input.result,
+    ok: true,
+    state,
+    events,
+  }
   const application = planDnd5eMapResultApplication({
     state,
     map,
     characters: input.characters,
     characterIdByCombatantId: input.characterIdByCombatantId,
+    events,
   })
   return {
     result,
     application: {
       ...application,
+      // The follow-up planner compares against the already-materialized map and
+      // character snapshots from the first pass. An entity changed only by the
+      // original action therefore has no new patch in this pass even though it
+      // must still be committed. Preserve those original deltas, while allowing
+      // a later concentration/reaction settlement to replace any field it
+      // actually changed.
+      tokenPatches: {
+        ...(input.priorApplication?.tokenPatches ?? {}),
+        ...(application.tokenPatches ?? {}),
+      },
+      characterPatches: {
+        ...(input.priorApplication?.characterPatches ?? {}),
+        ...(application.characterPatches ?? {}),
+      },
       changedTokenIds: [...new Set([
         ...(input.priorApplication?.changedTokenIds ?? []),
         ...application.changedTokenIds,

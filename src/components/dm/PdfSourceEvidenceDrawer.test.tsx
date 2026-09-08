@@ -29,4 +29,19 @@ describe('PdfSourceEvidenceDrawer', () => {
     expect(html).toContain('V1 历史引用')
     expect(html).not.toContain('此设备没有对应原文页缓存')
   })
+
+  it('V2 引用提供精确页定位与原文书签工作区入口', () => {
+    const html = renderToStaticMarkup(<PdfSourceEvidenceDrawer citation={{
+      documentId: 'pdf_1234567890abcdef12345678',
+      documentName: '模组原文.pdf',
+      page: 12,
+      evidenceId: 'ev_1234567890abcdef12345678',
+      quote: '瑟维迪尔在鹿灯驿馆交付秘密来信。',
+      verification: 'exact',
+      pageRegion: [0.1, 0.2, 0.8, 0.32],
+    }} onClose={() => undefined} onOpenWorkspace={() => undefined} />)
+    expect(html).toContain('原始 PDF · 引用定位')
+    expect(html).toContain('第 12 页')
+    expect(html).toContain('在原文与书签中打开')
+  })
 })

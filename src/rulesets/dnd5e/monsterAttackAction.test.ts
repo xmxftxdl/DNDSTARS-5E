@@ -14,6 +14,7 @@ import {
   prepareDnd5eMonsterAfterHitMechanics,
   prepareDnd5eMonsterAttack,
   previewDnd5eMonsterAttack,
+  dnd5ePreparedMonsterAttackIsAutomaticCritical,
   dnd5ePreparedMonsterTraitDamageDefinitions,
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
@@ -33,6 +34,180 @@ describe('SRD monster map action adapter', () => {
   afterEach(() => {
     setDnd5eRoomMonsterCatalog([])
     setMapGeometryRuntime([])
+  })
+
+  it('lets a player-side animated object make its Headless melee attack against an enemy monster', () => {
+    const animatedObject = token({
+      id: 'animated-object',
+      label: '微型活化物件',
+      x: 5,
+      y: 5,
+      poolId: 'srd-5.1:animated-object:tiny:fly-hover:slashing',
+      hp: 20,
+      maxHp: 20,
+      dnd5eSummon: {
+        schemaVersion: 1,
+        pluginId: 'srd-5.1',
+        featureId: 'spell:animate-objects',
+        sourceCharacterId: 'wizard',
+        sourceTokenId: 'wizard-token',
+        concentrationId: 'animate-objects',
+        createdRound: 1,
+        expiresAfterRound: 11,
+        side: 'player',
+      },
+    })
+    const goblin = token({
+      id: 'goblin',
+      label: '地精',
+      x: 15,
+      y: 5,
+      poolId: 'srd-5.1:goblin',
+      hp: 7,
+      maxHp: 7,
+    })
+    const map: BattleMap = {
+      id: 'animated-object-attack-map',
+      name: 'Animated object attack',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [animatedObject, goblin],
+    }
+    const initiativeOrder = [animatedObject, goblin].map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: '',
+      color: '',
+      roll: 20 - index,
+    }))
+
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'animated-object-attack',
+      map,
+      characters: [],
+      initiativeOrder,
+      actorTokenId: animatedObject.id,
+      targetTokenId: goblin.id,
+      targetTokenIds: [goblin.id],
+      actionIndex: 0,
+    })
+
+    expect(prepared).toMatchObject({ ok: true })
+    if (!prepared.ok) return
+    expect(prepared.prepared.attacks[0]?.attack).toMatchObject({
+      toHit: 8,
+      damage: [{ count: 1, sides: 4, bonus: 4, type: 'slashing' }],
+    })
+  })
+
+  it('keeps an explicitly selected ape fist single and resolves it as critical damage against an unconscious target within 5 feet', () => {
+    const unconscious = createDnd5eConditionEffect({
+      condition: 'unconscious',
+      targetId: 'hero-token',
+      source: { kind: 'dm' },
+    })
+    const hero: Character = {
+      ...character(),
+      conditions: ['unconscious'],
+      dnd5eCombatState: { activeEffects: [unconscious] },
+    }
+    const apeMonster = getDnd5eSrdMonster('srd-5.1:ape')!
+    const ape = token({
+      id: 'ape', label: '猿', x: 0, y: 0, poolId: apeMonster.id,
+      hp: apeMonster.hitPoints.average, maxHp: apeMonster.hitPoints.average,
+    })
+    const heroToken = token({
+      id: 'hero-token', label: hero.name, x: 10, y: 0,
+      type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+      dnd5eCombatState: { activeEffects: [unconscious] },
+    })
+    const map: BattleMap = {
+      id: 'ape-unconscious-critical', name: 'Ape unconscious critical',
+      width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [ape, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: map.id,
+      map,
+      characters: [hero],
+      initiativeOrder: [ape, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: ape.id,
+      targetTokenId: heroToken.id,
+      actionIndex: apeMonster.actions.findIndex((action) => action.id === 'fist'),
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+
+    expect(prepared.prepared.action.id).toBe('fist')
+    expect(prepared.prepared.attacks).toHaveLength(1)
+    expect(prepared.prepared.attackModes).toEqual(['advantage'])
+    expect(prepared.prepared.attackModeResolutions?.[0]?.advantageReasons)
+      .toContain('目标处于昏迷状态')
+    expect(prepared.prepared.attacks.every((_, index) =>
+      dnd5ePreparedMonsterAttackIsAutomaticCritical(prepared.prepared, index),
+    )).toBe(true)
+    expect(prepared.prepared.attacks.map((_, index) =>
+      previewDnd5eMonsterAttack(prepared.prepared, index, 12, 4).critical,
+    )).toEqual([true])
+
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 12, d20Second: 4, damageRolls: [[1, 2]] }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events.filter((event) =>
+      event.type === 'attack-resolved' && event.critical)).toHaveLength(1)
+    expect(resolved.application?.characters[0].currentHp).toBe(34)
+  })
+
+  it('builds a direct weapon sequence from the authoritative occurrence target', () => {
+    const animatedObject = token({
+      id: 'animated-object', x: 5, y: 5,
+      poolId: 'srd-5.1:animated-object:tiny:fly-hover:slashing',
+      hp: 20, maxHp: 20,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'srd-5.1', featureId: 'spell:animate-objects',
+        sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token',
+        createdRound: 1, expiresAfterRound: 11, side: 'player',
+      },
+    })
+    const preferred = token({
+      id: 'preferred', x: 95, y: 5, poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7,
+    })
+    const occurrence = token({
+      id: 'occurrence', x: 15, y: 5, poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7,
+    })
+    const map: BattleMap = {
+      id: 'authoritative-occurrence-map', name: 'Authoritative occurrence',
+      width: 120, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [animatedObject, preferred, occurrence],
+    }
+    const initiativeOrder = [animatedObject, preferred, occurrence].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'authoritative-occurrence', map, characters: [], initiativeOrder,
+      actorTokenId: animatedObject.id,
+      targetTokenId: preferred.id,
+      targetTokenIds: [occurrence.id],
+      actionIndex: 0,
+    })
+
+    expect(prepared).toMatchObject({ ok: true })
+    if (!prepared.ok) return
+    expect(prepared.prepared.attacks).toHaveLength(1)
+    expect(prepared.prepared.attacks[0]?.targetToken.id).toBe(occurrence.id)
   })
 
   it('prepares a generic summoned companion profile as repeated magical attacks with Host bonuses', () => {
@@ -103,6 +278,218 @@ describe('SRD monster map action adapter', () => {
     expect(swimmingAttack.ok).toBe(true)
     if (!swimmingAttack.ok) return
     expect(swimmingAttack.prepared.attackModes[0]).toBe('normal')
+  })
+
+  it('blocks ordinary monster projectiles across Wind Wall but exempts a giant thrown rock', () => {
+    const hero = character()
+    const heroToken = token({ id: 'hero-token', x: 105, y: 5, type: 'player', characterId: hero.id })
+    const windWall = {
+      id: 'wind-wall', sourceKind: 'core-spell' as const, coreSpellId: 'wind-wall',
+      pluginId: 'srd-5.1', featureId: 'spell:wind-wall', color: '#ffffff',
+      label: '风墙术', sourceCharacterId: 'druid', sourceTokenId: 'druid-token',
+      slotLevel: 3, sourceSpellSaveDc: 15, createdRound: 1, expiresAfterRound: 11,
+      anchorMode: 'fixed' as const, cells: [{ col: 5, row: 0 }],
+      vertical: { mode: 'volume' as const, baseElevationFeet: 0, heightFeet: 15 },
+      blocking: { movement: true, movementMode: 'boundary' as const },
+    }
+    const goblinMonster = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const goblin = token({ id: 'goblin', x: 5, y: 5, poolId: goblinMonster.id })
+    const goblinMap: BattleMap = {
+      id: 'wind-wall-monster-map', name: 'Wind Wall', width: 200, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [goblin, heroToken], dnd5ePluginAreas: [windWall],
+    }
+    const goblinRangedIndex = goblinMonster.actions.findIndex((entry) => entry.attack?.mode === 'ranged')
+    expect(prepareDnd5eMonsterAttack({
+      combatId: 'wind-wall-goblin', map: goblinMap, characters: [hero],
+      initiativeOrder: [goblin, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: goblin.id, targetTokenId: heroToken.id, actionIndex: goblinRangedIndex,
+    })).toEqual({ ok: false, reason: 'projectile-blocked-by-wind-wall' })
+
+    const giantMonster = getDnd5eSrdMonster('srd-5.1:hill-giant')!
+    const giant = token({
+      id: 'giant', x: 5, y: 5, size: 3, creatureSize: '大型', poolId: giantMonster.id,
+      hp: giantMonster.hitPoints.average, maxHp: giantMonster.hitPoints.average,
+    })
+    const giantRangedIndex = giantMonster.actions.findIndex((entry) => entry.attack?.mode === 'ranged')
+    expect(prepareDnd5eMonsterAttack({
+      combatId: 'wind-wall-giant', map: { ...goblinMap, tokens: [giant, heroToken] },
+      characters: [hero],
+      initiativeOrder: [giant, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: giant.id, targetTokenId: heroToken.id, actionIndex: giantRangedIndex,
+    }).ok).toBe(true)
+  })
+
+  it('applies defender-linked creature-type disadvantage to prepared and committed monster attacks', () => {
+    const protection = createDnd5eMechanicalEffect({
+      definitionId: 'activity:protection-from-evil-and-good',
+      label: 'Protection from Evil and Good',
+      source: { kind: 'spell', actorId: 'hero', rulesId: 'protection-from-evil-and-good' },
+      targetId: 'hero-token',
+      modifiers: { attacksAgainstTargetDisadvantageCreatureTypes: ['undead'] },
+    })
+    const hero = {
+      ...character(),
+      dnd5eCombatState: { activeEffects: [protection] },
+    }
+    const heroToken = token({
+      id: 'hero-token', x: 10, type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const zombieMonster = getDnd5eSrdMonster('srd-5.1:zombie')!
+    const zombie = token({
+      id: 'zombie', label: '僵尸', x: 0, poolId: zombieMonster.id,
+      hp: zombieMonster.hitPoints.average, maxHp: zombieMonster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'typed-protection-map', name: 'Typed protection', width: 100, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [zombie, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: map.id, map, characters: [hero],
+      initiativeOrder: [zombie, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: zombie.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackModes[0]).toBe('disadvantage')
+
+    const damageRolls = prepared.prepared.attacks[0]!.attack.damage.map((damage) =>
+      Array(damage.count).fill(1))
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{
+        targetId: heroToken.id, mode: 'normal', d20: 18, d20Second: 2, damageRolls,
+      }],
+    })
+    expect(resolved.result.ok).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: zombie.id, targetId: heroToken.id, d20: 2,
+    }))
+  })
+
+  it('applies magic-circle persistent-area creature-type disadvantage to monster attacks', () => {
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token', x: 10, type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const skeletonMonster = getDnd5eSrdMonster('srd-5.1:skeleton')!
+    const skeleton = token({
+      id: 'skeleton', label: '骷髅', x: 0, poolId: skeletonMonster.id,
+      hp: skeletonMonster.hitPoints.average, maxHp: skeletonMonster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'magic-circle-typed-protection-map', name: 'Magic circle typed protection',
+      width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [skeleton, heroToken],
+      dnd5ePluginAreas: [{
+        id: 'magic-circle', pluginId: 'srd-5.1', featureId: 'spell:magic-circle',
+        sourceKind: 'core-spell', coreSpellId: 'magic-circle', label: '防护法阵',
+        color: '#8b5cf6', sourceCharacterId: hero.id, sourceTokenId: heroToken.id,
+        cells: [{ col: 1, row: 0 }], createdRound: 1, expiresAfterRound: 600,
+        relation: 'any', includeSelf: true,
+        occupantModifiers: {
+          attacksAgainstOccupantDisadvantageCreatureTypes: ['undead'],
+        },
+      }],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: map.id, map, characters: [hero],
+      initiativeOrder: [skeleton, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: skeleton.id, targetTokenId: heroToken.id,
+      actionIndex: skeletonMonster.actions.findIndex((action) => action.id === 'shortbow'),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackModes[0]).toBe('disadvantage')
+    expect(prepared.prepared.attacks[0]?.targetAttackModeResolution?.disadvantageReasons)
+      .toContain('防护法阵令该攻击具有劣势')
+  })
+
+  it('treats the DM monster roll ruling as the final authoritative attack mode', () => {
+    const prone = createDnd5eConditionEffect({
+      condition: 'prone',
+      source: { kind: 'system', rulesId: 'test:dm-roll-mode-prone' },
+      targetId: 'hero-token',
+    })
+    const hero = {
+      ...character(),
+      conditions: ['prone' as const],
+      dnd5eCombatState: { activeEffects: [prone] },
+    }
+    const heroToken = token({
+      id: 'hero-token', x: 10, type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const goblinMonster = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const goblin = token({
+      id: 'goblin', x: 0, poolId: goblinMonster.id,
+      hp: goblinMonster.hitPoints.average, maxHp: goblinMonster.hitPoints.average,
+    })
+    const map: BattleMap = {
+      id: 'dm-final-roll-mode', name: 'DM final roll mode', width: 100, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, tokens: [goblin, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: map.id,
+      map,
+      characters: [hero],
+      initiativeOrder: [goblin, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: goblin.id,
+      targetTokenId: heroToken.id,
+      actionIndex: goblinMonster.actions.findIndex((action) => action.id === 'scimitar'),
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackModes[0]).toBe('advantage')
+
+    const damageRolls = prepared.prepared.attacks[0]!.attack.damage.map((damage) =>
+      Array(damage.count).fill(1))
+    expect(previewDnd5eMonsterAttack(
+      prepared.prepared,
+      0,
+      2,
+      18,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      'disadvantage',
+    ).roll.d20).toBe(2)
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{
+        d20: 2,
+        d20Second: 18,
+        mode: 'advantage',
+        dmFinalMode: 'disadvantage',
+        damageRolls,
+      }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: goblin.id,
+      targetId: heroToken.id,
+      d20: 2,
+      hit: false,
+    }))
   })
 
   it('prepares Charge dice and its save rider from persisted Host movement evidence', () => {
@@ -237,7 +624,66 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.result.state.combatants[lion.id].turn.actionAvailable).toBe(true)
   })
 
-  it('keeps a mixed Roper Multiattack selected by either the parent or Tendril child', () => {
+  it('resolves a targeted legendary attack off turn and spends only legendary points', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:aboleth')!
+    const aboleth = token({
+      id: 'aboleth', label: monster.name, poolId: monster.id, x: 0,
+      hp: monster.hitPoints.average, maxHp: monster.hitPoints.average,
+      dnd5eCombatState: { monsterLegendaryActionPoints: 2 },
+    })
+    const heroToken = token({
+      id: 'hero-token', label: hero.name, type: 'player', characterId: hero.id,
+      x: 10, hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const battleMap: BattleMap = {
+      id: 'legendary-attack-map', name: 'Legendary attack', width: 100, height: 100,
+      gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, tokens: [aboleth, heroToken],
+    }
+    const actionIndex = monster.legendaryActions?.findIndex((action) =>
+      action.id === 'tail-swipe') ?? -1
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'legendary-attack', round: 1, map: battleMap, characters: [hero],
+      initiativeOrder: [aboleth, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      currentInitiativeIndex: 1,
+      actorTokenId: aboleth.id,
+      targetTokenId: heroToken.id,
+      actionIndex,
+      resourceKind: 'legendary-action',
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      resourceKind: 'legendary-action',
+      resourceAction: { id: 'tail-swipe' },
+      action: { id: 'tail' },
+      state: { initiativeIndex: 1 },
+    })
+    const damageRolls = prepared.prepared.attacks[0]!.attack.damage.map((damage) =>
+      Array(damage.count).fill(1))
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 10, damageRolls }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants[aboleth.id]).toMatchObject({
+      classState: { monsterLegendaryActionPoints: 1 },
+      turn: { actionAvailable: true },
+    })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-legendary-action-used',
+      actorId: aboleth.id,
+      actionId: 'tail-swipe',
+      cost: 1,
+      remaining: 1,
+    }))
+  })
+
+  it('keeps the Roper parent Multiattack and explicit Tendril selection distinct', () => {
     const hero = character()
     const monster = getDnd5eSrdMonster('srd-5.1:roper')!
     const roper = token({
@@ -274,24 +720,181 @@ describe('SRD monster map action adapter', () => {
     ]
     const parentIndex = monster.actions.findIndex((action) => action.id === 'multiattack')
     const childIndex = monster.actions.findIndex((action) => action.id === 'tendril')
-    for (const actionIndex of [parentIndex, childIndex]) {
-      const prepared = prepareDnd5eMonsterAttack({
-        combatId: `roper-composite-${actionIndex}`,
-        map,
-        characters: [hero],
-        initiativeOrder,
-        actorTokenId: roper.id,
-        targetTokenId: heroToken.id,
-        actionIndex,
-      })
-      expect(prepared.ok, `action index ${actionIndex}`).toBe(true)
-      if (!prepared.ok) continue
-      expect(prepared.prepared.action.id).toBe('multiattack')
-      expect(prepared.prepared.compositeRuntime?.children.map((child) => child.kind))
-        .toEqual(['weapon', 'weapon', 'weapon', 'weapon', 'special', 'weapon'])
-      expect(prepared.prepared.attacks.map((attack) => attack.sequenceIndex))
-        .toEqual([0, 1, 2, 3, 5])
+    const parent = prepareDnd5eMonsterAttack({
+      combatId: `roper-composite-${parentIndex}`,
+      map,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: roper.id,
+      targetTokenId: heroToken.id,
+      actionIndex: parentIndex,
+    })
+    expect(parent.ok).toBe(true)
+    if (!parent.ok) return
+    expect(parent.prepared.action.id).toBe('multiattack')
+    expect(parent.prepared.compositeRuntime?.children.map((child) => child.kind))
+      .toEqual(['weapon', 'weapon', 'weapon', 'weapon', 'special', 'weapon'])
+    expect(parent.prepared.attacks.map((attack) => attack.sequenceIndex))
+      .toEqual([0, 1, 2, 3, 5])
+
+    const child = prepareDnd5eMonsterAttack({
+      combatId: `roper-composite-${childIndex}`,
+      map,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: roper.id,
+      targetTokenId: heroToken.id,
+      actionIndex: childIndex,
+    })
+    expect(child.ok).toBe(true)
+    if (!child.ok) return
+    expect(child.prepared.action.id).toBe('tendril')
+    expect(child.prepared.attacks.map((attack) => attack.id)).toEqual(['tendril'])
+  })
+
+  it('lets Reel bring the live-map target into range before the Roper Bite', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:roper')!
+    const roper = token({
+      id: 'roper-live',
+      label: monster.name,
+      x: 900,
+      y: 500,
+      size: 2,
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const heroToken = token({
+      id: 'hero-live',
+      label: hero.name,
+      x: 862.5,
+      y: 562.5,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'roper-live-map',
+      name: 'Roper live map',
+      width: 1024,
+      height: 1024,
+      gridSize: 25,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [roper, heroToken],
     }
+    const initiativeOrder = [
+      { tokenId: roper.id, label: roper.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const parentIndex = monster.actions.findIndex((action) =>
+      action.id === 'multiattack')
+    const expectedTargets = Array.from({ length: 6 }, () => heroToken.id)
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: `roper-live-${parentIndex}`,
+      map,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: roper.id,
+      targetTokenId: heroToken.id,
+      targetTokenIds: expectedTargets,
+      actionIndex: parentIndex,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.action.id).toBe('multiattack')
+    expect(prepared.prepared.attacks.find((attack) =>
+      attack.id === 'bite')?.distanceFeet).toBeGreaterThan(5)
+  })
+
+  it.each([
+    {
+      monsterId: 'srd-5.1:ogre',
+      actionId: 'greatclub',
+      actorX: 50,
+      targetX: 35,
+      expectedDistanceFeet: 5,
+    },
+    {
+      monsterId: 'srd-5.1:elephant',
+      actionId: 'gore',
+      actorX: 55,
+      targetX: 35,
+      expectedDistanceFeet: 5,
+    },
+    {
+      monsterId: 'srd-5.1:ancient-red-dragon',
+      actionId: 'bite',
+      actorX: 60,
+      targetX: 15,
+      expectedDistanceFeet: 15,
+    },
+  ])('uses the $monsterId stat-block footprint for melee range', ({
+    monsterId,
+    actionId,
+    actorX,
+    targetX,
+    expectedDistanceFeet,
+  }) => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster(monsterId)!
+    const actor = token({
+      id: `actor:${monsterId}`,
+      label: monster.name,
+      x: actorX,
+      y: 50,
+      size: 1,
+      creatureSize: undefined,
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const heroToken = token({
+      id: `target:${monsterId}`,
+      label: hero.name,
+      x: targetX,
+      y: 55,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const sizedMap: BattleMap = {
+      id: `size-range:${monsterId}`,
+      name: 'Size range',
+      width: 200,
+      height: 120,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [actor, heroToken],
+    }
+    const initiativeOrder = [
+      { tokenId: actor.id, label: actor.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    const actionIndex = monster.actions.findIndex((action) => action.id === actionId)
+    expect(actionIndex).toBeGreaterThanOrEqual(0)
+
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: `size-range:${monsterId}`,
+      map: sizedMap,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: actor.id,
+      targetTokenId: heroToken.id,
+      actionIndex,
+    })
+
+    expect(prepared.ok, `${monsterId}:${actionId}`).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attacks[0]?.distanceFeet).toBe(expectedDistanceFeet)
   })
 
   it('prepares and submits one stable target per Tyrannosaurus occurrence', () => {
@@ -621,6 +1224,9 @@ describe('SRD monster map action adapter', () => {
     const behir = token({
       id: 'behir',
       label: 'Behir',
+      x: 35,
+      y: 35,
+      creatureSize: '超大型',
       poolId: 'srd-5.1:behir',
       hp: 168,
       maxHp: 168,
@@ -628,7 +1234,8 @@ describe('SRD monster map action adapter', () => {
     const heroToken = token({
       id: 'hero-token',
       label: hero.name,
-      x: 20,
+      x: 5,
+      y: 35,
       type: 'player',
       characterId: hero.id,
       hp: hero.currentHp,
@@ -870,7 +1477,7 @@ describe('SRD monster map action adapter', () => {
       })
     }
 
-    const melee = prepareAt(10, 1)
+    const melee = prepareAt(10, 0)
     expect(melee.ok).toBe(true)
     if (!melee.ok) return
     expect(melee.prepared.action).toMatchObject({
@@ -893,7 +1500,7 @@ describe('SRD monster map action adapter', () => {
     })
   })
 
-  it('upgrades each Barbed Devil attack mode to its complete Headless Multiattack', () => {
+  it('keeps explicit Barbed Devil attacks distinct from its Multiattack choices', () => {
     const hero = character()
     const monster = getDnd5eSrdMonster('srd-5.1:barbed-devil')!
     const barbedDevil = token({
@@ -943,21 +1550,27 @@ describe('SRD monster map action adapter', () => {
       })
     }
 
+    const melee = prepareAt(10, 'multiattack')
+    expect(melee.ok).toBe(true)
+    if (!melee.ok) return
+    expect(melee.prepared.action).toMatchObject({
+      id: 'multiattack',
+      kind: 'multiattack',
+      automation: 'headless',
+    })
+    expect(melee.prepared.attacks.map((attack) => attack.id))
+      .toEqual(['tail', 'claw', 'claw'])
+    expect(melee.prepared.attacks.every(({ attack }) => attack.mode === 'melee')).toBe(true)
+
     for (const actionId of ['tail', 'claw']) {
-      const melee = prepareAt(10, actionId)
-      expect(melee.ok, actionId).toBe(true)
-      if (!melee.ok) continue
-      expect(melee.prepared.action).toMatchObject({
-        id: 'multiattack',
-        kind: 'multiattack',
-        automation: 'headless',
-      })
-      expect(melee.prepared.attacks.map((attack) => attack.id))
-        .toEqual(['tail', 'claw', 'claw'])
-      expect(melee.prepared.attacks.every(({ attack }) => attack.mode === 'melee')).toBe(true)
+      const child = prepareAt(10, actionId)
+      expect(child.ok, actionId).toBe(true)
+      if (!child.ok) continue
+      expect(child.prepared.action.id).toBe(actionId)
+      expect(child.prepared.attacks.map((attack) => attack.id)).toEqual([actionId])
     }
 
-    const ranged = prepareAt(100, 'hurl-flame')
+    const ranged = prepareAt(100, 'multiattack-hurl-flame')
     expect(ranged.ok).toBe(true)
     if (ranged.ok) {
       expect(ranged.prepared.action).toMatchObject({
@@ -970,7 +1583,15 @@ describe('SRD monster map action adapter', () => {
       expect(ranged.prepared.attacks.every(({ attack }) => attack.mode === 'ranged')).toBe(true)
     }
 
-    expect(prepareAt(320, 'hurl-flame')).toEqual({
+    const singleRanged = prepareAt(100, 'hurl-flame')
+    expect(singleRanged.ok).toBe(true)
+    if (singleRanged.ok) {
+      expect(singleRanged.prepared.action.id).toBe('hurl-flame')
+      expect(singleRanged.prepared.attacks.map((attack) => attack.id))
+        .toEqual(['hurl-flame'])
+    }
+
+    expect(prepareAt(320, 'multiattack-hurl-flame')).toEqual({
       ok: false,
       reason: 'target-out-of-range',
     })
@@ -1015,7 +1636,7 @@ describe('SRD monster map action adapter', () => {
       ],
       actorTokenId: barbedDevil.id,
       targetTokenId: heroToken.id,
-      actionIndex: monster.actions.findIndex((action) => action.id === 'tail'),
+      actionIndex: monster.actions.findIndex((action) => action.id === 'multiattack'),
     })
 
     expect(prepared.ok).toBe(true)
@@ -1060,6 +1681,45 @@ describe('SRD monster map action adapter', () => {
     if (!prepared.ok) return
     expect(prepared.prepared.packTactics).toBe(true)
     expect(prepared.prepared.targetAttackMode).toBe('advantage')
+  })
+
+  it('cancels Pack Tactics when Bestow Curse gives attacks against its source disadvantage', () => {
+    const hero = character()
+    const heroToken = token({
+      id: 'hero-token', x: 10, type: 'player', characterId: hero.id,
+      hp: hero.currentHp, maxHp: hero.maxHp,
+    })
+    const curse = createDnd5eMechanicalEffect({
+      definitionId: 'activity:bestow-curse:bestow-curse-attacks-against-source:modifiers:0',
+      label: '降咒·攻击施法者劣势',
+      tags: ['curse', 'bestow-curse', 'bestow-curse.attacks-against-source'],
+      source: { kind: 'spell', actorId: heroToken.id, rulesId: 'bestow-curse', magical: true },
+      targetId: 'wolf',
+      duration: { type: 'rounds', remainingRounds: 14_400, tickOn: 'target-turn-end' },
+    })
+    const wolf = token({
+      id: 'wolf', x: 0, poolId: 'srd-5.1:wolf',
+      dnd5eCombatState: { activeEffects: [curse] },
+    })
+    const ally = token({ id: 'ally', x: 20, poolId: 'srd-5.1:wolf' })
+    const map: BattleMap = {
+      id: 'bestow-curse-pack-tactics-map', name: 'Bestow Curse pack tactics',
+      width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [wolf, ally, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'bestow-curse-pack-tactics', map, characters: [hero],
+      initiativeOrder: [wolf, ally, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: wolf.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.packTactics).toBe(true)
+    expect(prepared.prepared.attackModes[0]).toBe('normal')
+    expect(prepared.prepared.targetAttackMode).toBe('normal')
   })
 
   it('applies a structured attack and damage bonus against frightened or stunned targets', () => {
@@ -1140,7 +1800,8 @@ describe('SRD monster map action adapter', () => {
       ],
       actorTokenId: owlbear.id,
       targetTokenId: heroToken.id,
-      actionIndex: 1,
+      actionIndex: getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+        .findIndex((action) => action.id === 'multiattack'),
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1661,7 +2322,10 @@ describe('SRD monster map action adapter', () => {
         { tokenId: owlbear.id, label: owlbear.label, emoji: '', color: '', roll: 20 },
         { tokenId: rogueToken.id, label: rogueToken.label, emoji: '', color: '', roll: 10 },
       ],
-      actorTokenId: owlbear.id, targetTokenId: rogueToken.id, actionIndex: 1,
+      actorTokenId: owlbear.id,
+      targetTokenId: rogueToken.id,
+      actionIndex: getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+        .findIndex((action) => action.id === 'multiattack'),
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1701,7 +2365,10 @@ describe('SRD monster map action adapter', () => {
         { tokenId: bardToken.id, label: bardToken.label, emoji: '', color: '', roll: 15 },
         { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
       ],
-      actorTokenId: owlbear.id, targetTokenId: heroToken.id, actionIndex: 1,
+      actorTokenId: owlbear.id,
+      targetTokenId: heroToken.id,
+      actionIndex: getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+        .findIndex((action) => action.id === 'multiattack'),
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1746,7 +2413,10 @@ describe('SRD monster map action adapter', () => {
         { tokenId: bardToken.id, label: bardToken.label, emoji: '', color: '', roll: 15 },
         { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
       ],
-      actorTokenId: owlbear.id, targetTokenId: heroToken.id, actionIndex: 1,
+      actorTokenId: owlbear.id,
+      targetTokenId: heroToken.id,
+      actionIndex: getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+        .findIndex((action) => action.id === 'multiattack'),
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1788,7 +2458,10 @@ describe('SRD monster map action adapter', () => {
         { tokenId: owlbear.id, label: owlbear.label, emoji: '', color: '', roll: 20 },
         { tokenId: wizardToken.id, label: wizardToken.label, emoji: '', color: '', roll: 10 },
       ],
-      actorTokenId: owlbear.id, targetTokenId: wizardToken.id, actionIndex: 1,
+      actorTokenId: owlbear.id,
+      targetTokenId: wizardToken.id,
+      actionIndex: getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+        .findIndex((action) => action.id === 'multiattack'),
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1831,7 +2504,10 @@ describe('SRD monster map action adapter', () => {
         { tokenId: protectorToken.id, label: protectorToken.label, emoji: '', color: '', roll: 15 },
         { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
       ],
-      actorTokenId: owlbear.id, targetTokenId: heroToken.id, actionIndex: 1,
+      actorTokenId: owlbear.id,
+      targetTokenId: heroToken.id,
+      actionIndex: getDnd5eSrdMonster('srd-5.1:owlbear')!.actions
+        .findIndex((action) => action.id === 'multiattack'),
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return

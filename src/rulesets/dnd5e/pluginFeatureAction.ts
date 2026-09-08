@@ -22,8 +22,13 @@ import type {
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  normalizeDnd5eActiveEffects,
+  type Dnd5eActiveEffectInstance,
+} from './activeEffects'
+import {
   dnd5eCharacterHasPluginFeature,
   dnd5ePluginFeatureDefinition,
+  dnd5ePluginGrantedActivityDefinitionV1,
   dnd5ePluginHeadlessActionDefinition,
   missingDnd5eRulesPluginRequirements,
   type Dnd5ePluginAction,
@@ -31,6 +36,7 @@ import {
   type RegisteredDnd5ePluginFeature,
 } from './pluginApi'
 import {
+  dnd5eHeadlessTurnKey,
   resolveDnd5eSandboxedPluginCapabilities,
   type Dnd5eActionFailure,
   type Dnd5eActionResult,
@@ -44,7 +50,9 @@ import {
 import { resolveDnd5eSandboxedPluginAction } from './pluginSandbox'
 import {
   createDnd5eMapCombatSnapshot,
+  dnd5eRequestedInitiativeActorIndex,
   planDnd5eMapResultApplication,
+  prepareDnd5eExplorationActor,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { planDnd5eSummonedCreature } from './summonedCreatures'
@@ -54,6 +62,10 @@ import {
   dnd5eInstantAoeAffectsTokenVertically,
   dnd5eTokenToPointDistanceFeet,
 } from './verticalCombatGeometry'
+import { DND5E_SRD_AUDITED_SPELL_PACKAGE_ID } from './activities/dnd5eSrdAuditedSpellActivities'
+import { dnd5eActivityManualAdjudicationOperationsV1 } from './activities/dnd5eActivityHeadlessCompiler'
+import { dnd5eActivityActorSnapshotFromCombatantV1 } from './activities/dnd5eActivityCombatAuthority'
+import { dnd5eActivityRootRequirementsSatisfiedV1 } from './activities/dnd5eActivityExecutor'
 
 export type Dnd5ePluginFeatureActionRejectReason =
   | 'invalid-action'
@@ -70,6 +82,7 @@ export type Dnd5ePluginFeatureActionRejectReason =
   | 'action-unavailable'
   | 'bonus-action-unavailable'
   | 'reaction-unavailable'
+  | 'feature-already-used'
   | 'combatant-missing'
 
 export interface PreparedDnd5ePluginFeatureAction {
@@ -225,6 +238,26 @@ function persistentAreaGrantForAction(input: {
   }
 }
 
+function activeEffectGrantForAction(input: {
+  activeEffects: readonly Dnd5eActiveEffectInstance[] | undefined
+  feature: RegisteredDnd5ePluginFeature
+  payload: NonNullable<SharedPlayerActionState['dnd5ePluginAction']>
+}) {
+  const raw = input.payload.payload
+  const effectId = raw && typeof raw === 'object' && !Array.isArray(raw) &&
+    typeof raw.activeEffectId === 'string'
+    ? raw.activeEffectId
+    : undefined
+  if (!effectId || !input.feature.action) return undefined
+  return normalizeDnd5eActiveEffects(input.activeEffects).find((effect) =>
+    effect.id === effectId &&
+    !effect.suspendedBy?.length &&
+    (effect.source.pluginId ?? (effect.source.kind === 'spell'
+      ? DND5E_SRD_AUDITED_SPELL_PACKAGE_ID
+      : undefined)) === input.feature.ownerPluginId &&
+    effect.grantedActivities?.includes(input.feature.action!.id))
+}
+
 function persistentAreaDistanceFeet(input: {
   map: BattleMap
   areaCells: readonly GridCell[]
@@ -257,45 +290,106 @@ export function prepareDnd5ePluginFeatureAction(input: {
   if (action.type !== 'dnd5e-plugin-action' || !payload?.featureId) {
     return { ok: false, reason: 'invalid-action' }
   }
-  const feature = dnd5ePluginFeatureDefinition(payload.featureId)
-  if (!feature) return { ok: false, reason: 'plugin-missing' }
+  const registeredFeature = dnd5ePluginFeatureDefinition(payload.featureId)
+  if (!registeredFeature) return { ok: false, reason: 'plugin-missing' }
+  let feature: RegisteredDnd5ePluginFeature = registeredFeature
   if (input.roomRequiredPlugins === null) return { ok: false, reason: 'room-rules-unavailable' }
   if (input.roomRequiredPlugins) {
-    const roomRequirement = input.roomRequiredPlugins.find((plugin) => plugin.id === feature.ownerPluginId)
-    if (!roomRequirement) return { ok: false, reason: 'plugin-not-enabled-for-room' }
-    if (missingDnd5eRulesPluginRequirements([roomRequirement]).length > 0) {
-      return { ok: false, reason: 'plugin-version-mismatch' }
+    if (feature.ownerPluginId !== DND5E_SRD_AUDITED_SPELL_PACKAGE_ID) {
+      const roomRequirement = input.roomRequiredPlugins.find((plugin) => plugin.id === feature.ownerPluginId)
+      if (!roomRequirement) return { ok: false, reason: 'plugin-not-enabled-for-room' }
+      if (missingDnd5eRulesPluginRequirements([roomRequirement]).length > 0) {
+        return { ok: false, reason: 'plugin-version-mismatch' }
+      }
     }
   }
   if (!feature.action || feature.automation === 'manual') {
     return { ok: false, reason: 'feature-unavailable' }
   }
-  if (feature.action.trigger && feature.action.trigger.kind !== 'active-use') {
+  const rawFeaturePayload = payload.payload
+  const activityChoices = rawFeaturePayload && typeof rawFeaturePayload === 'object' &&
+    !Array.isArray(rawFeaturePayload) && rawFeaturePayload.activityChoices &&
+    typeof rawFeaturePayload.activityChoices === 'object' && !Array.isArray(rawFeaturePayload.activityChoices)
+    ? Object.fromEntries(Object.entries(rawFeaturePayload.activityChoices).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ))
+    : undefined
+  const grantedActivityDefinition = dnd5ePluginGrantedActivityDefinitionV1(feature.id)
+  if (
+    feature.action.interrupt && grantedActivityDefinition && activityChoices &&
+    dnd5eActivityManualAdjudicationOperationsV1(grantedActivityDefinition, activityChoices).length === 0
+  ) {
+    const { interrupt: _unusedInterrupt, ...actionWithoutInterrupt } = feature.action
+    feature = { ...feature, action: actionWithoutInterrupt }
+  }
+  const featureAction = feature.action
+  if (!featureAction) return { ok: false, reason: 'feature-unavailable' }
+  if (featureAction.trigger && featureAction.trigger.kind !== 'active-use') {
     return { ok: false, reason: 'feature-unavailable' }
   }
-  const actor = input.characters.find((character) => character.id === action.characterId)
-  const actorToken = input.map.tokens.find((token) =>
-    token.id === action.actorTokenId && token.characterId === action.characterId,
-  )
-  if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  const persistentAreaGrant = persistentAreaGrantForAction({
-    map: input.map,
-    actor,
-    actorToken,
+  const linkedActor = input.characters.find((character) => character.id === action.characterId)
+  const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId)
+  if (
+    !actorToken || actorToken.type === 'obstacle' ||
+    (linkedActor ? actorToken.characterId !== linkedActor.id : action.sourceMode !== 'dm')
+  ) return { ok: false, reason: 'invalid-actor' }
+  const actorHitPoints = linkedActor?.currentHp ?? actorToken.hp ?? actorToken.maxHp ?? 0
+  if (actorHitPoints <= 0) return { ok: false, reason: 'invalid-actor' }
+  // DM-controlled monsters have no Character row. A narrow synthetic view is
+  // sufficient for an action granted by that token's authoritative Effect;
+  // the map snapshot and result application continue to use the real Token.
+  const actor = linkedActor ?? ({
+    id: action.characterId,
+    name: actorToken.label,
+    currentHp: actorHitPoints,
+    maxHp: actorToken.maxHp ?? actorHitPoints,
+    tempHp: actorToken.dnd5eCombatState?.temporaryHp ?? 0,
+    saveDC: 10,
+    dnd5eCombatState: actorToken.dnd5eCombatState,
+  } as Character)
+  const persistentAreaGrant = linkedActor
+    ? persistentAreaGrantForAction({
+        map: input.map,
+        actor,
+        actorToken,
+        feature,
+        payload,
+      })
+    : undefined
+  const ownedActiveEffectGrant = activeEffectGrantForAction({
+    activeEffects: linkedActor?.dnd5eCombatState?.activeEffects ?? actorToken.dnd5eCombatState?.activeEffects,
     feature,
     payload,
   })
-  if (!persistentAreaGrant && !dnd5eCharacterHasPluginFeature(actor, feature.id)) {
+  const requestedTargetToken = action.targetTokenId
+    ? input.map.tokens.find((token) => token.id === action.targetTokenId)
+    : undefined
+  const externalActiveEffectGrant = requestedTargetToken
+    ? activeEffectGrantForAction({
+        activeEffects: requestedTargetToken.characterId
+          ? input.characters.find((character) => character.id === requestedTargetToken.characterId)
+              ?.dnd5eCombatState?.activeEffects ?? requestedTargetToken.dnd5eCombatState?.activeEffects
+          : requestedTargetToken.dnd5eCombatState?.activeEffects,
+        feature,
+        payload,
+      })
+    : undefined
+  const authorizedExternalActiveEffectGrant = externalActiveEffectGrant
+    ?.tags?.includes('externally-usable-activity')
+    ? externalActiveEffectGrant
+    : undefined
+  const activeEffectGrant = ownedActiveEffectGrant ?? authorizedExternalActiveEffectGrant
+  if (!persistentAreaGrant && !activeEffectGrant && !dnd5eCharacterHasPluginFeature(actor, feature.id)) {
     return { ok: false, reason: feature.grantedBySubclass ? 'feature-unavailable' : 'feature-not-selected' }
   }
   const grantedActivity = persistentAreaGrant?.area.grantedActivities?.find((grant) =>
-    grant.activityId === feature.action!.id,
+    grant.activityId === featureAction.id,
   )
   const waiveActionEconomy = grantedActivity?.activateOnCreate === true &&
-    !persistentAreaGrant?.area.grantedActivityUseReceipts?.includes(feature.action.id)
+    !persistentAreaGrant?.area.grantedActivityUseReceipts?.includes(featureAction.id)
   const economyFailure = waiveActionEconomy
     ? undefined
-    : economyRejectReason(feature.action.economy, input.turnEconomy)
+    : economyRejectReason(featureAction.economy, input.turnEconomy)
   if (economyFailure) return { ok: false, reason: economyFailure }
 
   let targetToken: Token | undefined
@@ -306,23 +400,23 @@ export function prepareDnd5ePluginFeatureAction(input: {
   let activityAreaPlacement: Dnd5eActivityAreaPlacementV1 | undefined
   let distanceFeet = 0
   const distanceFeetByTargetId: Record<string, number> = {}
-  if (feature.action.targeting.kind === 'self') {
+  if (featureAction.targeting.kind === 'self') {
     if (action.targetTokenId && action.targetTokenId !== actorToken.id) {
       return { ok: false, reason: 'invalid-target' }
     }
     targetToken = actorToken
     targetTokens = [actorToken]
-  } else if (feature.action.targeting.kind === 'single-creature') {
+  } else if (featureAction.targeting.kind === 'single-creature') {
     targetToken = input.map.tokens.find((token) => token.id === action.targetTokenId)
     if (!targetToken || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
-    if (targetToken.id === actorToken.id && feature.action.targeting.includeSelf !== true) {
+    if (targetToken.id === actorToken.id && featureAction.targeting.includeSelf !== true) {
       return { ok: false, reason: 'invalid-target' }
     }
     const opposed = areOpposedCombatTokens(actorToken, targetToken)
-    if (feature.action.targeting.relation === 'ally' && opposed) {
+    if (featureAction.targeting.relation === 'ally' && opposed) {
       return { ok: false, reason: 'invalid-target' }
     }
-    if (feature.action.targeting.relation === 'enemy' && !opposed) {
+    if (featureAction.targeting.relation === 'enemy' && !opposed) {
       return { ok: false, reason: 'invalid-target' }
     }
     distanceFeet = persistentAreaGrant
@@ -334,15 +428,15 @@ export function prepareDnd5ePluginFeatureAction(input: {
       : tokenFootprintDistanceCells(actorToken, targetToken, input.map) *
         Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
     if (
-      feature.action.targeting.rangeFeet != null &&
-      distanceFeet > feature.action.targeting.rangeFeet
+      featureAction.targeting.rangeFeet != null &&
+      distanceFeet > featureAction.targeting.rangeFeet
     ) {
       return { ok: false, reason: 'target-out-of-range' }
     }
     distanceFeetByTargetId[targetToken.id] = distanceFeet
     targetTokens = [targetToken]
-  } else if (feature.action.targeting.kind === 'multiple-creatures') {
-    const targeting = feature.action.targeting
+  } else if (featureAction.targeting.kind === 'multiple-creatures') {
+    const targeting = featureAction.targeting
     const uniqueIds = [...new Set(action.targetTokenIds ?? [])]
     if (uniqueIds.length < 1 || uniqueIds.length > targeting.maximumTargets) {
       return { ok: false, reason: 'invalid-target' }
@@ -378,7 +472,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
     }
     targetToken = targetTokens[0]
   } else {
-    const targeting = feature.action.targeting
+    const targeting = featureAction.targeting
     const geometry = mapGeometryRuntimeForMap(input.map.id)
     const casterCell = persistentAreaGrant?.anchorCell ?? pixelToCell(actorToken.x, actorToken.y, input.map)
     targetCell = action.targetCell ?? (targeting.template.shape === 'circle' && targeting.template.origin === 'self'
@@ -490,13 +584,19 @@ export function prepareDnd5ePluginFeatureAction(input: {
       })
       .slice(0, targeting.maximumTargets ?? 64)
     targetToken = targetTokens[0]
-    const permitsEmptyArea = (!!feature.action.persistentArea || !!feature.action.summon) &&
-      feature.action.interrupt?.audience !== 'target'
+    const permitsEmptyArea = (
+      !!featureAction.persistentArea ||
+      !!featureAction.summon ||
+      !!persistentAreaGrant ||
+      !!activeEffectGrant
+    ) &&
+      featureAction.interrupt?.audience !== 'target'
     if (!targetToken && !permitsEmptyArea) return { ok: false, reason: 'invalid-target' }
-    // 持续区域可以放在当前没有生物的格子上。Prepared 的展示目标使用施法者，
-    // 但传给 Headless 的 targetIds 仍为空，避免把施法者伪装成区域目标。
+    // 持续区域的创建、召唤以及区域授予的移动/重塑控制都可以落在当前没有
+    // 生物的格子上。Prepared 的展示目标使用施法者，但传给 Headless 的
+    // targetIds 仍为空，避免把施法者伪装成区域目标。
     targetToken ??= actorToken
-    if (feature.action.summon && targetCell) {
+    if (featureAction.summon && targetCell) {
       const summonPlacement = planDnd5eSummonedCreature({
         map: input.map,
         actorToken,
@@ -507,7 +607,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
         round: action.round,
         targetCell,
         initiativeD20: 1,
-        summon: feature.action.summon,
+        summon: featureAction.summon,
       })
       if (!summonPlacement.ok) return {
         ok: false,
@@ -524,11 +624,66 @@ export function prepareDnd5ePluginFeatureAction(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  // Exploration uses the same atomic Headless resolver without a live combat
+  // identity.  The synthetic snapshot must therefore be executable for this
+  // one transaction; the applied map/character projection does not start a
+  // real combat.
+  if (!action.combatId?.trim()) prepareDnd5eExplorationActor(snapshot.state, actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   const targetCombatants = targetTokens.map((token) => snapshot.state.combatants[token.id])
   if (actorIndex < 0 || !actorCombatant || targetCombatants.some((target) => !target)) {
     return { ok: false, reason: 'combatant-missing' }
+  }
+  const currentTurnKey = dnd5eHeadlessTurnKey(snapshot.state, actorToken.id)
+  const oncePerTurnKeys = featureAction.oncePerTurnKeys ??
+    (grantedActivityDefinition?.requirements ?? []).flatMap((requirement) =>
+      requirement.kind === 'once-per-turn' ? [requirement.key] : [])
+  if (oncePerTurnKeys.some((key) =>
+    actorCombatant.classState.declarativeUsedTurnKeys?.[key] === currentTurnKey ||
+    input.turnEconomy?.usedOncePerTurnKeys?.includes(key))) {
+    return { ok: false, reason: 'feature-already-used' }
+  }
+  if (grantedActivityDefinition) {
+    const actorSnapshot = dnd5eActivityActorSnapshotFromCombatantV1(actorCombatant, actorCombatant)
+    const targetSnapshots = targetCombatants.map((target) =>
+      dnd5eActivityActorSnapshotFromCombatantV1(target!, actorCombatant))
+    if (!dnd5eActivityRootRequirementsSatisfiedV1({
+      activity: grantedActivityDefinition,
+      actor: actorSnapshot,
+      targets: targetSnapshots,
+      combatants: Object.values(snapshot.state.combatants).map((combatant) =>
+        dnd5eActivityActorSnapshotFromCombatantV1(combatant, actorCombatant)),
+      castLevel: persistentAreaGrant?.area.slotLevel ?? activeEffectGrant?.source.spellLevel,
+      rolls: {},
+      choices: activityChoices,
+      distanceFeetByTargetId: Object.fromEntries(targetSnapshots.map((target) => [
+        target.id,
+        target.id === actorSnapshot.id ? 0 : distanceFeetByTargetId[target.id] ?? distanceFeet,
+      ])),
+      areaPlacement: activityAreaPlacement,
+      areaPlacementDistanceFeet: distanceFeet,
+      usedTurnKeys: new Set(oncePerTurnKeys.filter((key) =>
+        actorCombatant.classState.declarativeUsedTurnKeys?.[key] === currentTurnKey ||
+        input.turnEconomy?.usedOncePerTurnKeys?.includes(key))),
+    })) return { ok: false, reason: 'feature-unavailable' }
+  }
+  // A spell-granted follow-up Activity must retain the spell save DC captured
+  // when its controller effect was created.  Character.saveDC is a legacy,
+  // user-editable snapshot and can lag behind the live class-derived DC (for
+  // example, a level-20 INT 20 Wizard may still carry saveDC 12).
+  const grantedSpellSaveDc = persistentAreaGrant?.area.sourceSpellSaveDc ??
+    ownedActiveEffectGrant?.source.spellSaveDc
+  if (
+    Number.isInteger(grantedSpellSaveDc) &&
+    grantedSpellSaveDc! >= 1 &&
+    grantedSpellSaveDc! <= 40
+  ) {
+    actorCombatant.saveDc = grantedSpellSaveDc!
   }
   if (targetCombatants.some((target) => target && target.currentHp <= 0)) return { ok: false, reason: 'invalid-target' }
   if (input.turnEconomy) {
@@ -559,7 +714,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
       headlessAction: {
         type: 'plugin',
         pluginId: feature.ownerPluginId,
-        actionId: feature.action.id,
+        actionId: featureAction.id,
         transactionId: action.id,
         featureId: feature.id,
         modifierFeatureIds: payload.modifierFeatureIds
@@ -573,9 +728,12 @@ export function prepareDnd5ePluginFeatureAction(input: {
         distanceFeet,
         activityAreaPlacement,
         activityAreaPlacementDistanceFeet: distanceFeet,
+        castLevel: persistentAreaGrant?.area.slotLevel ?? activeEffectGrant?.source.spellLevel,
         payload: payload.payload,
         hostEntitlement: persistentAreaGrant
           ? { kind: 'persistent-area', areaId: persistentAreaGrant.area.id }
+          : activeEffectGrant
+            ? { kind: 'active-effect', effectId: activeEffectGrant.id }
           : undefined,
         hostDistanceFeetByTargetId: persistentAreaGrant
           ? distanceFeetByTargetId
@@ -586,7 +744,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
         ? {
             areaId: persistentAreaGrant.area.id,
             anchorCell: { ...persistentAreaGrant.anchorCell },
-            activityId: feature.action.id,
+            activityId: featureAction.id,
             waiveActionEconomy,
           }
         : undefined,
@@ -653,6 +811,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   interruptChoiceId?: string
   summonInitiativeD20?: number
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+  attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): Promise<{
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -693,6 +852,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
     payload: input.authoritativePayload ?? input.prepared.headlessAction.payload,
     rolls: input.rolls,
     interruptChoiceId: input.interruptChoiceId,
+    attackDecoyRolls: input.attackDecoyRolls,
   }
   let result: Dnd5eActionResult
   let airborneFalls: readonly Dnd5eAirborneFallPreview[] | undefined
@@ -749,6 +909,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
     map: input.prepared.map,
     characters: input.prepared.characters,
     characterIdByCombatantId: input.prepared.characterIdByCombatantId,
+    events: [...result.events],
   })
   const persistentArea = input.prepared.feature.action?.persistentArea
   if (persistentArea && input.prepared.targetCells.length > 0) {
@@ -766,7 +927,10 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
         ? {
             ...trigger.savingThrow,
             dc: trigger.savingThrow.dc === 'source-save-dc'
-              ? Math.max(1, Math.min(40, input.prepared.actor.saveDC))
+              ? Math.max(1, Math.min(40,
+                  input.prepared.state.combatants[input.prepared.actorToken.id]?.saveDc ??
+                  input.prepared.actor.saveDC,
+                ))
               : trigger.savingThrow.dc,
           }
         : undefined,

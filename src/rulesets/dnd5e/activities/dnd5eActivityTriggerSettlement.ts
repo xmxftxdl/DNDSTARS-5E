@@ -1,5 +1,6 @@
 import type { Character } from '../../../types/character'
 import {
+  dnd5eAbilityCheckRollMode,
   type Dnd5eActionResult,
   type Dnd5eActivityAuthorityCommitResult,
   type Dnd5eHeadlessCombatState,
@@ -43,7 +44,7 @@ export interface Dnd5eActivityTriggerRollRequestV1 {
   actorId: string
   targetId?: string
   targetName: string
-  kind: 'formula' | 'attack-roll' | 'saving-throw' | 'ability-check'
+  kind: 'formula' | 'attack-roll' | 'saving-throw' | 'ability-check' | 'random-roll'
 }
 
 export interface Dnd5eActivityTriggerDiagnosticV1 {
@@ -77,6 +78,7 @@ export interface Dnd5eActivityTriggerMapHandoffRequestV1 {
   packageId: string
   activity: Dnd5eActivityDefinitionV1
   actorId: string
+  castLevel?: number
   triggerContext: Dnd5eActivityTriggerContextV1
   committed: Extract<Dnd5eActivityAuthorityCommitResult, { ok: true }>
 }
@@ -221,6 +223,81 @@ async function authoritativeRolls(input: {
       if (!target) return { unsupported: `check-target-missing:${check.id}` }
       const checkKey = check.scope === 'per-target' ? `${check.id}:${targetId}` : check.id
       const rollKey = check.scope === 'per-target' ? `${check.rollId}:${targetId}` : check.rollId
+      if (check.kind === 'random-roll') {
+        rolls[rollKey] = {
+          values: [...await input.roll({
+            id: rollKey,
+            label: `${input.available.activity.name} · 随机表`,
+            count: check.count,
+            sides: check.sides,
+            actorId: input.actorId,
+            targetId,
+            targetName: target.name,
+            kind: 'random-roll',
+          })],
+        }
+        continue
+      }
+      if (check.kind === 'opposed-ability-check') {
+        const actor = input.state.combatants[input.actorId]
+        if (!actor) return { unsupported: `check-actor-missing:${check.id}` }
+        const proficiencyRank = (skill: string | undefined): number => !skill
+          ? 0
+          : target.classSelections.expertise?.includes(skill)
+            ? 2
+            : target.skillProficiencies.includes(skill)
+              ? 1
+              : 0
+        const targetModifier = (option: typeof check.targetOptions[number]): number =>
+          Math.floor((target.abilities[option.ability] - 10) / 2) +
+          target.proficiencyBonus * proficiencyRank(option.skill)
+        const targetOption = check.targetOptions.reduce((best, candidate) =>
+          targetModifier(candidate) > targetModifier(best) ? candidate : best,
+        check.targetOptions[0]!)
+        const sourceDeclared = check.sourceRollMode === 'host-derived'
+          ? dnd5eAbilityCheckRollMode(actor, { ability: check.sourceAbility })
+          : check.sourceRollMode ?? 'normal'
+        const sizeMode = check.sourceRollModeByTargetSizeRank &&
+          (check.sourceRollModeByTargetSizeRank.minimum == null || target.sizeRank >= check.sourceRollModeByTargetSizeRank.minimum) &&
+          (check.sourceRollModeByTargetSizeRank.maximum == null || target.sizeRank <= check.sourceRollModeByTargetSizeRank.maximum)
+          ? check.sourceRollModeByTargetSizeRank.mode
+          : undefined
+        const sourceModes: ('normal' | 'advantage' | 'disadvantage')[] = [sourceDeclared, ...(sizeMode ? [sizeMode] : [])]
+        const sourceMode = sourceModes.includes('advantage') && sourceModes.includes('disadvantage')
+          ? 'normal'
+          : sourceModes.find((mode) => mode !== 'normal') ?? 'normal'
+        const targetMode = check.targetRollMode === 'host-derived'
+          ? dnd5eAbilityCheckRollMode(target, { ability: targetOption.ability, skill: targetOption.skill })
+          : check.targetRollMode ?? 'normal'
+        checkRollModes[`${checkKey}:source`] = sourceMode
+        checkRollModes[`${checkKey}:target`] = targetMode
+        rolls[rollKey] = {
+          values: [...await input.roll({
+            id: rollKey,
+            label: `${input.available.activity.name} · ${check.sourceAbility.toUpperCase()} 对抗检定`,
+            count: sourceMode === 'normal' ? 1 : 2,
+            sides: 20,
+            actorId: input.actorId,
+            targetId,
+            targetName: target.name,
+            kind: 'ability-check',
+          })],
+        }
+        const opposedRollKey = `${check.opposedRollId}:${targetId}`
+        rolls[opposedRollKey] = {
+          values: [...await input.roll({
+            id: opposedRollKey,
+            label: `${input.available.activity.name} · 目标对抗检定`,
+            count: targetMode === 'normal' ? 1 : 2,
+            sides: 20,
+            actorId: input.actorId,
+            targetId,
+            targetName: target.name,
+            kind: 'ability-check',
+          })],
+        }
+        continue
+      }
       const creatureTypeOverride = check.kind === 'saving-throw' && target.creatureType &&
         check.rollModeByCreatureType?.creatureTypes.some((type) =>
           type.trim().toLocaleLowerCase() === target.creatureType!.trim().toLocaleLowerCase())
@@ -447,6 +524,12 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
           })
           continue
         }
+        const inheritedCastLevel = inheritedActivityCastLevel(
+          state,
+          actorId,
+          available.activity,
+          triggerContext,
+        )
         const committed = resolveRegisteredDnd5eActivityInCombatV1({
           state,
           combatRevision,
@@ -460,7 +543,7 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
             targetIds,
             areaPlacement: areaSelection?.areaPlacement,
             choices: activityChoices,
-            castLevel: inheritedActivityCastLevel(state, actorId, available.activity, triggerContext),
+            castLevel: inheritedCastLevel,
             expectedRevision: combatRevision,
             triggerEventId: triggerContext.eventId,
           },
@@ -505,6 +588,7 @@ export async function settleDnd5eActivityTriggerWindowsV1(input: {
             packageId: available.packageId,
             activity: available.activity,
             actorId,
+            castLevel: inheritedCastLevel,
             triggerContext,
             committed: committed.result,
           })

@@ -1,0 +1,285 @@
+{
+  "id": "srd-5.1:pit-fiend",
+  "slug": "pit-fiend",
+  "name": "深狱炼魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].standardCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].repeatSave.ability",
+        "attack.onHitEffects[].repeatSave.dc",
+        "attack.onHitEffects[].repeatSave.timing",
+        "attack.onHitEffects[].repeatSave.onSuccess",
+        "attack.onHitEffects[].modifiers.preventHealing",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "bite-poison:apply",
+        "bite-poison:save"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "mace",
+      "name": "硬头锤",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 12,
+      "slug": "pit-fiend",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:53:19.613Z",
+      "name": "深狱炼魔",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "20",
+      "total": 334,
+      "mapId": "verify-ui-pit-fiend-bite-1788565999660",
+      "combatId": "verify-ui-pit-fiend-bite-1788565999660:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "深狱炼魔 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+14=29 命中；共造成 21 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:53 PM\n结算\n\n深狱炼魔 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+14=29 命中；共造成 21 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 15；最终采用 15；调整值 +14。\n结果 · 29 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜4d6 骰面：5 + 1 + 5 + 2 = 13｜固定加值 +8｜小计 21\n深狱炼魔｜消耗动作\n验证目标｜体质豁免 d20 20 +10 = 30 vs DC 21｜成功\n验证目标｜受到 21 点伤害｜HP 320 → 299",
+      "playerLog": "深狱炼魔 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+14=29 命中；共造成 21 点伤害。",
+      "afterHp": 299,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:53:47.243Z",
+      "evidenceFile": "ui-cases/monsters/012-pit-fiend.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "恐惧灵光",
+      "automation": "headless",
+      "rule": "turn-start-saving-throw-aura",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.ruleId",
+        "rule.rangeFeet",
+        "rule.relation",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.condition",
+        "rule.duration",
+        "rule.successfulSaveImmunityRounds"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "successful-save",
+        "failed-save",
+        "outside-range"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 22,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

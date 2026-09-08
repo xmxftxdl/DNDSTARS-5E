@@ -12,6 +12,7 @@ export interface SharedPublicSystemRouteInput {
   buildId: string
   startedAt: number
   now?: number
+  desktopRelease?: object
 }
 
 export interface SharedAuthenticatedSystemRouteInput {

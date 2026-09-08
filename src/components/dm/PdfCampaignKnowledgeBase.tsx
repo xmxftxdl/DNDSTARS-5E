@@ -1,5 +1,6 @@
 import {
   BookOpenText,
+  Bookmark,
   Bot,
   Boxes,
   CalendarClock,
@@ -7,7 +8,6 @@ import {
   ChevronRight,
   ExternalLink,
   FileSearch,
-  GitBranch,
   ImagePlus,
   KeyRound,
   LoaderCircle,
@@ -33,7 +33,7 @@ import type {
   PdfSceneRecordV1,
   PdfSourceCitationV1,
 } from '../../lib/pdfCampaignAnalysis'
-import type { PdfCampaignAnalysisView } from '../../lib/pdfCampaignAnalysisV2'
+import type { PdfCampaignAnalysisView, PdfSourceBookmarkV1 } from '../../lib/pdfCampaignAnalysisV2'
 import {
   campaignDay,
   campaignDisplayMinute,
@@ -44,13 +44,14 @@ import {
   type SharedCampaignTimeState,
 } from '../../lib/campaignTime'
 import { useCampaignTimeStore } from '../../store/campaignTime'
-import { canonicalizePdfPersonRelationships, mergePdfPersonRecords } from '../../lib/pdfPersonDeduplication'
+import { mergePdfPersonRecords } from '../../lib/pdfPersonDeduplication'
 import { PDF_TIMELINE_KIND_LABELS, pdfTimelineTimeLabel, schedulePdfCampaignTimeline } from '../../lib/pdfCampaignTimeline'
-import PdfRelationshipGraph from './PdfRelationshipGraph'
+import PdfSourceBookmarkWorkspace, { type PdfSourceBookmarkTargetV1 } from './PdfSourceBookmarkWorkspace'
 import PdfSourceEvidenceDrawer, {
   PdfCitationButtons,
 } from './PdfSourceEvidenceDrawer'
 import type { PdfViewCitation } from './pdfSourceEvidenceViewModel'
+import type { PdfCampaignAnalysisEditorTarget } from './PdfCampaignAnalysisEditor'
 import PdfTimelineGameTimeField from './PdfTimelineGameTimeField'
 import { commaSeparatedValues, emptyPdfTimelineEvent } from './pdfCampaignAnalysisEditorModel'
 import { showAppConfirm } from '../../lib/appDialog'
@@ -63,6 +64,7 @@ import {
   pdfKnowledgeTabCounts,
   recordSearchText,
   type PdfKnowledgeTabV1,
+  type PdfMonsterCodexEntryV1,
 } from './pdfCampaignKnowledgeBaseModel'
 
 const KNOWLEDGE_TABS: Array<{
@@ -71,6 +73,7 @@ const KNOWLEDGE_TABS: Array<{
   icon: typeof BookOpenText
 }> = [
   { id: 'overview', label: '总览', icon: BookOpenText },
+  { id: 'bookmarks', label: '原文与书签', icon: Bookmark },
   { id: 'people', label: '人物', icon: UserRound },
   { id: 'factions', label: '组织与势力', icon: Shield },
   { id: 'locations', label: '地点', icon: MapPinned },
@@ -79,7 +82,6 @@ const KNOWLEDGE_TABS: Array<{
   { id: 'timeline', label: '时间线', icon: CalendarClock },
   { id: 'maps', label: '地图', icon: MapPinned },
   { id: 'monsters', label: '怪物图鉴', icon: Swords },
-  { id: 'relationships', label: '人物关系图', icon: GitBranch },
   { id: 'imports', label: '待导入资源', icon: Boxes },
 ]
 
@@ -88,7 +90,7 @@ export type PdfKnowledgeSectionV1 = 'all' | 'story' | 'world' | 'resources'
 const KNOWLEDGE_SECTION_TABS: Record<PdfKnowledgeSectionV1, PdfKnowledgeTabV1[]> = {
   all: KNOWLEDGE_TABS.map((tab) => tab.id),
   story: ['timeline', 'events', 'clues'],
-  world: ['people', 'relationships', 'factions', 'locations'],
+  world: ['people', 'factions', 'locations', 'bookmarks'],
   resources: ['maps', 'monsters', 'imports'],
 }
 
@@ -121,15 +123,19 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <div className="rounded-2xl border border-dashed border-white/10 px-5 py-12 text-center text-xs text-slate-600">{children}</div>
 }
 
-function KnowledgeCard({ title, description, citations, children }: {
+function KnowledgeCard({ title, description, citations, action, children }: {
   title: string
   description: string
   citations?: readonly PdfSourceCitationV1[]
+  action?: ReactNode
   children?: ReactNode
 }) {
   return (
     <article className="rounded-2xl border border-white/8 bg-white/[0.018] p-4 sm:p-5 transition hover:border-violet-400/20 hover:bg-violet-500/[0.025]">
-      <h4 className="text-base font-semibold leading-6 text-slate-100">{title}</h4>
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="text-base font-semibold leading-6 text-slate-100">{title}</h4>
+        {action}
+      </div>
       {description && <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-300">{description}</p>}
       {children}
       {!!citations?.length && <EvidenceButtons citations={citations} />}
@@ -416,10 +422,13 @@ function TimelineEventDetail({ scene, campaignClock, onEdit }: { scene: PdfScene
 interface PdfCampaignKnowledgeBaseProps {
   analysis: PdfCampaignAnalysisView
   mapHref: string
-  onEdit: () => void
+  onEdit: (target?: PdfCampaignAnalysisEditorTarget) => void
+  onEditMonster?: (monster: PdfMonsterCodexEntryV1) => void
   onPortraitChange: (personName: string, portraitDataUrl: string) => void
   onTimelineEventsChange?: (events: PdfSceneRecordV1[]) => void
   onTimelineEventsCommit?: (events: PdfSceneRecordV1[]) => Promise<boolean>
+  onBookmarksChange?: (bookmarks: PdfSourceBookmarkV1[]) => void
+  sourceTarget?: PdfSourceBookmarkTargetV1
   initialTab?: PdfKnowledgeTabV1
   section?: PdfKnowledgeSectionV1
   compactHeader?: boolean
@@ -429,15 +438,18 @@ export default function PdfCampaignKnowledgeBase({
   analysis,
   mapHref,
   onEdit,
+  onEditMonster,
   onPortraitChange,
   onTimelineEventsChange,
   onTimelineEventsCommit,
+  onBookmarksChange,
+  sourceTarget,
   initialTab = 'overview',
   section = 'all',
   compactHeader = false,
 }: PdfCampaignKnowledgeBaseProps) {
   const allowedTabs = KNOWLEDGE_SECTION_TABS[section]
-  const [requestedActiveTab, setActiveTab] = useState<PdfKnowledgeTabV1>(() => allowedTabs.includes(initialTab) ? initialTab : allowedTabs[0])
+  const [requestedActiveTab, setActiveTab] = useState<PdfKnowledgeTabV1>(() => sourceTarget && allowedTabs.includes('bookmarks') ? 'bookmarks' : allowedTabs.includes(initialTab) ? initialTab : allowedTabs[0])
   const activeTab = allowedTabs.includes(requestedActiveTab) ? requestedActiveTab : allowedTabs[0]
   const [query, setQuery] = useState('')
   const [searchScope, setSearchScope] = useState<'current' | 'all'>('current')
@@ -447,12 +459,9 @@ export default function PdfCampaignKnowledgeBase({
   const [timelineCommitBusy, setTimelineCommitBusy] = useState(false)
   const [selectedImport, setSelectedImport] = useState<PdfImportCandidateV1 | null>(null)
   const [selectedCitation, setSelectedCitation] = useState<PdfViewCitation | null>(null)
+  const [drawerSourceTarget, setDrawerSourceTarget] = useState<PdfSourceBookmarkTargetV1 | null>(null)
   const campaignClock = useCampaignTimeStore((state) => state.state)
   const normalizedPeople = useMemo(() => mergePdfPersonRecords(analysis.people), [analysis.people])
-  const normalizedRelationships = useMemo(
-    () => canonicalizePdfPersonRelationships(analysis.relationships, normalizedPeople),
-    [analysis.relationships, normalizedPeople],
-  )
   const counts = useMemo(() => pdfKnowledgeTabCounts({ ...analysis, people: normalizedPeople }), [analysis, normalizedPeople])
   const monsterCodex = useMemo(() => buildPdfMonsterCodex(analysis), [analysis])
   const mapIndex = useMemo(() => buildPdfMapIndex(analysis), [analysis])
@@ -462,13 +471,12 @@ export default function PdfCampaignKnowledgeBase({
   const factions = filterRecords(analysis.factions, query)
   const locations = filterRecords(analysis.locations, query)
   const clues = filterRecords(analysis.clues, query, (clue) => [clue.source, clue.discovery, clue.failForward])
-  const scenes = filterRecords(analysis.scenes, query, (scene) => [scene.location, scene.npcs, scene.monsters])
   const timelineEvents = filterRecords(analysis.timelineEvents ?? [], query, (event) => [event.time, event.timelineKind, event.tags, event.location, event.npcs, event.monsters])
   const events = eventIndex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.location, entry.npcs, entry.creatures, entry.notes))
-  const imports = filterRecords(analysis.importCandidates, query, (entry) => [entry.kind, entry.automation, KIND_LABELS[entry.kind], KIND_LABELS[entry.automation]])
-  const monsters = monsterCodex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.encounterNames, KIND_LABELS[entry.automation]))
+  const imports = filterRecords(analysis.importCandidates, query, (entry) => [entry.kind, entry.automation, entry.monsterStatBlockText, KIND_LABELS[entry.kind], KIND_LABELS[entry.automation]])
+  const monsters = monsterCodex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.monsterStatBlockText, entry.encounterNames, KIND_LABELS[entry.automation]))
   const maps = mapIndex.filter((entry) => pdfKnowledgeMatches(query, entry.name, entry.description, entry.sceneNames))
-  const relationships = normalizedRelationships.filter((entry) => pdfKnowledgeMatches(query, entry.from, entry.to, entry.type, entry.description))
+  const bookmarks = (analysis.bookmarks ?? []).filter((entry) => pdfKnowledgeMatches(query, entry.label, entry.note, entry.quote, entry.documentName, entry.page))
   const hasGlobalQuery = searchScope === 'all' && query.trim().length > 0
 
   const renderNamedRecords = (records: readonly PdfNamedRecordV1[], empty: string) => records.length === 0
@@ -484,7 +492,7 @@ export default function PdfCampaignKnowledgeBase({
       { title: '关键时间线', entries: timelineEvents.map((entry) => ({ title: entry.name, description: entry.description, meta: pdfTimelineTimeLabel(entry) })) },
       { title: '线索', entries: clues.map((entry) => ({ title: entry.name, description: entry.description, meta: '线索' })) },
       { title: '怪物图鉴', entries: monsters.map((entry) => ({ title: entry.name, description: entry.description, meta: KIND_LABELS[entry.automation] })) },
-      { title: '关系', entries: relationships.map((entry) => ({ title: `${entry.from} → ${entry.to}`, description: entry.description, meta: entry.type })) },
+      { title: '原文书签', entries: bookmarks.map((entry) => ({ title: entry.label, description: entry.note || entry.quote, meta: `${entry.documentName} · 第 ${entry.page} 页` })) },
       { title: '待导入资源', entries: imports.map((entry) => ({ title: entry.name, description: entry.description, meta: KIND_LABELS[entry.kind] })) },
     ].filter((group) => group.entries.length > 0)
     if (groups.length === 0) return <EmptyState>全库没有找到与“{query}”匹配的内容。</EmptyState>
@@ -712,8 +720,23 @@ export default function PdfCampaignKnowledgeBase({
       )
     }
     if (activeTab === 'maps') return maps.length === 0 ? <EmptyState>没有识别到地图或可建立场景的地点。</EmptyState> : <div className="space-y-3"><div className="flex justify-end"><Link to={mapHref} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-2 text-[10px] font-semibold text-emerald-100 hover:bg-emerald-500/20"><ExternalLink className="h-3.5 w-3.5" />进入地图与场景编排</Link></div><div className="grid gap-3 lg:grid-cols-2">{maps.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200">{entry.source === 'map-candidate' ? '地图资源' : '地点索引'}</span>{entry.sceneNames.map((scene) => <span key={scene} className="rounded-full bg-white/[0.04] px-2 py-1 text-[9px] text-slate-400">{scene}</span>)}</div></KnowledgeCard>)}</div></div>
-    if (activeTab === 'monsters') return monsters.length === 0 ? <EmptyState>没有识别到怪物。遭遇中的生物和怪物导入候选都会显示在这里。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{monsters.map((entry, index) => <KnowledgeCard key={`${entry.name}:${index}`} title={entry.name} description={entry.description} citations={entry.citations}><div className="mt-3 flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-[9px] ${entry.automation === 'full' ? 'bg-emerald-500/10 text-emerald-200' : entry.automation === 'partial' ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-500/10 text-slate-400'}`}>{KIND_LABELS[entry.automation]}</span>{entry.encounterNames.map((encounter) => <span key={encounter} className="rounded-full bg-rose-500/10 px-2 py-1 text-[9px] text-rose-200">{encounter}</span>)}</div></KnowledgeCard>)}</div>
-    if (activeTab === 'relationships') return <PdfRelationshipGraph people={people} factions={factions} locations={locations} relationships={relationships} scenes={scenes} onPortraitChange={onPortraitChange} onCitationOpen={setSelectedCitation} />
+    if (activeTab === 'monsters') return monsters.length === 0 ? <EmptyState>没有识别到怪物。遭遇中的生物和怪物导入候选都会显示在这里。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{monsters.map((entry, index) => {
+      const editTarget: PdfCampaignAnalysisEditorTarget = entry.importCandidateIndex !== undefined
+        ? { tab: 'imports', index: entry.importCandidateIndex }
+        : { tab: 'encounters', index: entry.encounterIndexes[0] ?? 0 }
+      return <KnowledgeCard
+        key={`${entry.name}:${index}`}
+        title={entry.name}
+        description={entry.description}
+        citations={entry.citations}
+        action={<button type="button" data-monster-workshop-entry={entry.name} data-edit-tab={onEditMonster ? undefined : editTarget.tab} data-edit-index={onEditMonster ? undefined : editTarget.index} onClick={() => onEditMonster ? onEditMonster(entry) : onEdit(editTarget)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-violet-400/20 bg-violet-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-violet-100 hover:bg-violet-500/15"><PencilLine className="h-3 w-3" />{onEditMonster ? '怪物工坊' : '编辑'}</button>}
+      ><div className="mt-3 flex flex-wrap gap-2"><span className={`rounded-full px-2 py-1 text-[9px] ${entry.automation === 'full' ? 'bg-emerald-500/10 text-emerald-200' : entry.automation === 'partial' ? 'bg-amber-500/10 text-amber-200' : 'bg-slate-500/10 text-slate-400'}`}>{KIND_LABELS[entry.automation]}</span><span className={`rounded-full px-2 py-1 text-[9px] ${entry.monsterStatBlockText ? 'bg-sky-500/10 text-sky-200' : 'bg-amber-500/10 text-amber-200'}`}>{entry.monsterStatBlockText ? '含完整能力属性块' : '仅基础资料'}</span>{entry.encounterNames.map((encounter) => <span key={encounter} className="rounded-full bg-rose-500/10 px-2 py-1 text-[9px] text-rose-200">{encounter}</span>)}</div></KnowledgeCard>
+    })}</div>
+    if (activeTab === 'bookmarks') {
+      const target = drawerSourceTarget ?? sourceTarget
+      const targetKey = target ? `${target.documentId}:${target.page}:${target.quote?.slice(0, 48) ?? ''}` : 'default'
+      return <PdfSourceBookmarkWorkspace key={targetKey} analysis={analysis} bookmarks={analysis.bookmarks ?? []} onChange={onBookmarksChange} target={target} />
+    }
     return imports.length === 0 ? <EmptyState>没有匹配的待导入资源。</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{imports.map((entry, index) => (
       <button
         key={`${entry.kind}:${entry.name}:${index}`}
@@ -754,7 +777,7 @@ export default function PdfCampaignKnowledgeBase({
               <option value="current">当前分类</option>
               <option value="all">全库搜索模式</option>
             </select>
-            <button type="button" onClick={onEdit} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"><PencilLine className="h-3.5 w-3.5" />编辑知识库</button>
+            <button type="button" onClick={() => onEdit()} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"><PencilLine className="h-3.5 w-3.5" />编辑知识库</button>
           </div>
         </div>
       </header>
@@ -789,18 +812,45 @@ export default function PdfCampaignKnowledgeBase({
               <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[10px] text-slate-300">预期自动化：{KIND_LABELS[selectedImport.automation]}</span>
             </div>
             <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{selectedImport.description || '没有提取到进一步说明。'}</p>
+            {selectedImport.kind === 'monster' && <div className={`mt-4 rounded-2xl border p-4 ${selectedImport.monsterStatBlockText ? 'border-sky-400/20 bg-sky-500/[0.04]' : 'border-amber-400/20 bg-amber-500/[0.05]'}`}>
+              <p className={`text-xs font-semibold ${selectedImport.monsterStatBlockText ? 'text-sky-100' : 'text-amber-100'}`}>{selectedImport.monsterStatBlockText ? '已提取完整怪物属性块' : '尚未提取怪物能力'}</p>
+              {selectedImport.monsterStatBlockText
+                ? <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-6 text-slate-300">{selectedImport.monsterStatBlockText}</pre>
+                : <p className="mt-2 text-xs leading-6 text-amber-200/90">当前记录只能生成基础草稿。请重新分析 PDF，或进入怪物工坊后粘贴完整属性块。</p>}
+            </div>}
             <div className={`mt-4 rounded-2xl border p-4 text-xs leading-6 ${likelyCombatNpc(selectedImport) ? 'border-amber-400/20 bg-amber-500/[0.06] text-amber-100' : 'border-sky-400/15 bg-sky-500/[0.045] text-sky-100'}`}>
               {importTypeExplanation(selectedImport)}
               {likelyCombatNpc(selectedImport) && <span className="mt-1 block text-amber-200">该条目包含明显战斗语义，建议 DM 检查 AI 是否误把怪物或敌对战斗单位归类成 NPC。</span>}
             </div>
             {!!selectedImport.citations.length && <EvidenceButtons citations={selectedImport.citations} />}
             <div className="mt-5 flex justify-end">
-              <button type="button" onClick={() => { setSelectedImport(null); onEdit() }} className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-semibold text-white hover:bg-violet-400"><PencilLine className="h-3.5 w-3.5" />编辑类型与内容</button>
+              <button type="button" onClick={() => {
+                const index = analysis.importCandidates.indexOf(selectedImport)
+                setSelectedImport(null)
+                const monsterEntry = selectedImport.kind === 'monster'
+                  ? monsterCodex.find((entry) => entry.importCandidateIndex === index)
+                  : undefined
+                if (monsterEntry && onEditMonster) {
+                  onEditMonster(monsterEntry)
+                  return
+                }
+                onEdit({ tab: 'imports', index: Math.max(0, index) })
+              }} className="inline-flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-semibold text-white hover:bg-violet-400"><PencilLine className="h-3.5 w-3.5" />{selectedImport.kind === 'monster' && onEditMonster ? '进入怪物工坊' : '编辑类型与内容'}</button>
             </div>
           </section>
         </div>
       )}
-      <PdfSourceEvidenceDrawer citation={selectedCitation} onClose={() => setSelectedCitation(null)} />
+      <PdfSourceEvidenceDrawer
+        citation={selectedCitation}
+        onClose={() => setSelectedCitation(null)}
+        onOpenWorkspace={allowedTabs.includes('bookmarks') ? (citation) => {
+          setDrawerSourceTarget({ documentId: citation.documentId, page: citation.page, quote: citation.quote })
+          setSearchScope('current')
+          setQuery('')
+          setActiveTab('bookmarks')
+          setSelectedCitation(null)
+        } : undefined}
+      />
     </section>
     </PdfCitationOpenContext.Provider>
   )

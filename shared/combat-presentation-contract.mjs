@@ -96,6 +96,7 @@ export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
   'freezing-sphere': Object.freeze({ shape: 'circle', radiusFeet: 60 }),
   'meteor-swarm': Object.freeze({ shape: 'circle', radiusFeet: 40 }),
   'color-spray': Object.freeze({ shape: 'cone', lengthFeet: 15, widthFeet: 15 }),
+  'prismatic-spray': Object.freeze({ shape: 'cone', lengthFeet: 60, widthFeet: 60 }),
   'faerie-fire': Object.freeze({ shape: 'rect', widthFeet: 20, heightFeet: 20 }),
   sleep: Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   entangle: Object.freeze({ shape: 'rect', widthFeet: 20, heightFeet: 20 }),

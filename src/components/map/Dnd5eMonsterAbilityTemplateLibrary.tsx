@@ -55,7 +55,7 @@ export default function Dnd5eMonsterAbilityTemplateLibrary({
         <div>
           <h2 className="text-lg font-semibold text-slate-50">Headless 怪物能力模板库</h2>
           <p className="mt-1 text-xs leading-relaxed text-slate-400">
-            从已验证的怪物图鉴复制完整规则。共享空间、吞没、携带、逃脱、持续伤害等复杂结构会被完整保留；依赖动作、多重攻击顺序和使用次数也会一起复制。
+            相同 Headless 规则已经按机制去重；说明中的“【名称】”会在加入时替换为当前怪物名称。冲锋等通用能力会合并为可填写模板，其他参数、依赖动作、范围或触发不同的能力仍分别保留。
           </p>
         </div>
         <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="关闭能力模板库">
@@ -104,7 +104,9 @@ export default function Dnd5eMonsterAbilityTemplateLibrary({
                     <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">Headless</span>
                   </div>
                   <p className="mt-1 text-[11px] text-slate-500">
-                    {template.sourceMonsterName}{template.sourceMonsterEnglishName && template.sourceMonsterEnglishName !== template.sourceMonsterName ? ` / ${template.sourceMonsterEnglishName}` : ''}
+                    {template.sourceCount > 1
+                      ? `通用模板 · ${template.sourceCount} 个图鉴来源`
+                      : <>{template.sourceMonsterName}{template.sourceMonsterEnglishName && template.sourceMonsterEnglishName !== template.sourceMonsterName ? ` / ${template.sourceMonsterEnglishName}` : ''}</>}
                     {' · '}{template.ruleKind}
                     {template.dependencyCount > 0 ? ` · 自动带入 ${template.dependencyCount} 个依赖动作` : ''}
                   </p>
@@ -126,7 +128,7 @@ export default function Dnd5eMonsterAbilityTemplateLibrary({
             </article>)}
           </div>}
         {filtered.length > MAX_VISIBLE_RESULTS && <p className="mt-4 text-center text-xs text-slate-500">
-          当前显示前 {MAX_VISIBLE_RESULTS} 项，共 {filtered.length} 项；继续输入名称或来源怪物可缩小范围。
+          当前显示前 {MAX_VISIBLE_RESULTS} 项，共 {filtered.length} 项；继续输入名称、机制或来源怪物可缩小范围。
         </p>}
       </div>
     </div>

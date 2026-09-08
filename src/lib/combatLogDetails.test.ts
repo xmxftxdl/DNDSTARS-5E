@@ -3,10 +3,157 @@ import {
   createDnd5eCombatant,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
+  type Dnd5eCombatEvent,
 } from '../rulesets/dnd5e/headlessCombatEngine'
-import { formatDnd5eCombatLogDetails } from './combatLogDetails'
+import {
+  formatDnd5eCombatLogDetails,
+  formatDnd5eSecretCombatOutcomeDetails,
+} from './combatLogDetails'
 
 describe('formatDnd5eCombatLogDetails', () => {
+  const resolveName = (id: string) => ({
+    hero: '艾莉雅',
+    wizard: '新冒险者',
+    target: '针刺魔',
+    wolf: '恐狼',
+    'barbed-devil': '针刺魔',
+  })[id] ?? id
+
+  it('expands a Blink random-condition result with the actual die and trigger threshold', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'active-effect-random-condition-resolved',
+      targetId: 'wizard', effectId: 'blink', roll: 17,
+      dieSides: 20, minimum: 11, condition: 'banished', triggered: true,
+    }], { resolveName })).toEqual([
+      '新冒险者｜回合结束随机状态 1d20 = 17 vs 触发下限 11｜触发 banished',
+    ])
+  })
+
+  it('暗骰玩家投影保留命中、最终伤害、HP 与状态，但不泄露骰值、加值、AC 或 DC', () => {
+    const details = formatDnd5eSecretCombatOutcomeDetails([
+      {
+        type: 'attack-resolved', actorId: 'barbed-devil', targetId: 'hero',
+        d20: 18, total: 24, armorClass: 16, hit: true, critical: false,
+      },
+      {
+        type: 'saving-throw-resolved', targetId: 'hero', ability: 'dex',
+        d20: 4, modifier: 3, total: 7, dc: 14, success: false,
+      },
+      {
+        type: 'damage-applied', sourceId: 'barbed-devil', targetId: 'hero', amount: 11,
+        hpBefore: 31, hpAfter: 22, temporaryHpBefore: 2, temporaryHpAfter: 0,
+      },
+      {
+        type: 'condition-applied', actorId: 'barbed-devil', targetId: 'hero', condition: 'poisoned',
+      },
+    ], { resolveName })
+
+    expect(details).toEqual([
+      '针刺魔 → 艾莉雅｜攻击结果：命中',
+      '艾莉雅｜敏捷豁免结果：失败',
+      '艾莉雅｜受到 11 点伤害｜HP 31 → 22｜临时 HP 2 → 0',
+      '艾莉雅｜获得状态：中毒｜来源：针刺魔',
+    ])
+    expect(details.join('\n')).not.toMatch(/d20|AC|DC|\+3|总值/)
+  })
+
+  it('暗骰玩家投影明确公开未命中且不会伪造伤害', () => {
+    const details = formatDnd5eSecretCombatOutcomeDetails([{
+      type: 'attack-resolved', actorId: 'barbed-devil', targetId: 'hero',
+      d20: 2, total: 8, armorClass: 16, hit: false, critical: false,
+    }], { resolveName })
+
+    expect(details).toEqual(['针刺魔 → 艾莉雅｜攻击结果：未命中'])
+    expect(details.join('\n')).not.toMatch(/d20|AC|8|16/)
+  })
+
+  it('preserves the declared text of an authoritative basic action in the combat log', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'basic-action-adjudication-requested',
+      actorId: 'wizard',
+      economy: 'bonusAction',
+      description: '向受控骷髅下达同一心灵命令：守卫这里。',
+    }], { resolveName: () => '法师' })).toEqual([
+      '法师｜附赠动作声明：向受控骷髅下达同一心灵命令：守卫这里。',
+    ])
+  })
+
+  it('describes instant death without falsely classifying every source as massive damage', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'instant-death', sourceId: 'caster', targetId: 'target', hpBefore: 100,
+    }], { resolveName: (id) => id === 'target' ? '丘陵巨人' : id })
+
+    expect(details).toContain('丘陵巨人｜立即死亡（死亡前 100 HP）')
+    expect(details.some((line) => line.includes('伤害'))).toBe(false)
+  })
+
+  it('explains creature-form overflow damage across the restored hit-point pool', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'class-state-changed', actorId: 'target',
+        stateKey: 'creature-form:polymorph', active: false,
+      },
+      {
+        type: 'damage-applied', sourceId: 'caster', targetId: 'target', amount: 33,
+        hpBefore: 1, hpAfter: 12, temporaryHpBefore: 0, temporaryHpAfter: 0,
+        creatureFormHpBefore: 1, creatureFormOverflowDamage: 32, creatureFormOriginalHpBefore: 44,
+      },
+    ], { resolveName: (id) => id === 'target' ? '丘陵巨人' : id })
+
+    expect(details).toContain(
+      '丘陵巨人｜受到 33 点伤害｜形态 HP 1 → 0，恢复原形｜32 点溢出伤害，原形 HP 44 → 12',
+    )
+  })
+
+  it('keeps the exact original hit points when overflow damage also drops the original form to zero', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'class-state-changed', actorId: 'target',
+        stateKey: 'creature-form:polymorph', active: false,
+      },
+      {
+        type: 'damage-applied', sourceId: 'caster', targetId: 'target', amount: 33,
+        hpBefore: 1, hpAfter: 0, temporaryHpBefore: 0, temporaryHpAfter: 0,
+        creatureFormHpBefore: 1, creatureFormOverflowDamage: 32, creatureFormOriginalHpBefore: 12,
+      },
+    ], { resolveName: (id) => id === 'target' ? '丘陵巨人' : id })
+
+    expect(details).toContain(
+      '丘陵巨人｜受到 33 点伤害｜形态 HP 1 → 0，恢复原形｜32 点溢出伤害，原形 HP 12 → 0',
+    )
+  })
+
+  it('does not reinterpret later falling damage as a second creature-form reversion', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'damage-applied', sourceId: 'minotaur', targetId: 'target', amount: 22,
+        hpBefore: 15, hpAfter: 58, temporaryHpBefore: 0, temporaryHpAfter: 0,
+        creatureFormHpBefore: 15, creatureFormOverflowDamage: 7, creatureFormOriginalHpBefore: 65,
+      },
+      {
+        type: 'class-state-changed', actorId: 'target',
+        stateKey: 'creature-form:polymorph', active: false,
+      },
+      {
+        type: 'damage-applied', targetId: 'target', amount: 10,
+        hpBefore: 58, hpAfter: 48, temporaryHpBefore: 0, temporaryHpAfter: 0,
+        damageTypes: ['bludgeoning'],
+      },
+      {
+        type: 'falling-damage-resolved', actorId: 'target', distanceFeet: 40,
+        dice: 4, rolls: [5, 1, 2, 2], damage: 10, landedProne: true,
+      },
+    ], { resolveName: (id) => id === 'target' ? '新冒险者' : id })
+
+    expect(details).toContain(
+      '新冒险者｜受到 22 点伤害｜形态 HP 15 → 0，恢复原形｜7 点溢出伤害，原形 HP 65 → 58',
+    )
+    expect(details).toContain('新冒险者｜受到 10 点伤害｜HP 58 → 48')
+    expect(details).not.toContain(
+      '新冒险者｜受到 10 点伤害｜形态 HP 58 → 0，恢复原形｜0 点溢出伤害，原形 HP 48 → 48',
+    )
+  })
+
   it('does not repeat attack-resolved when a full attack trace is supplied', () => {
     const details = formatDnd5eCombatLogDetails([{
       type: 'attack-resolved',
@@ -31,13 +178,17 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details.some((line) => line.includes('命中检定 d20 18'))).toBe(false)
   })
 
-  const resolveName = (id: string) => ({
-    hero: '艾莉雅',
-    wizard: '新冒险者',
-    target: '针刺魔',
-    wolf: '恐狼',
-    'barbed-devil': '针刺魔',
-  })[id] ?? id
+  it('shows the independent attack-decoy roll, decoy AC, and remaining count', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'attack-decoy-resolved', actorId: 'hero', targetId: 'wolf',
+      effectId: 'mirror', redirectD20: 8, minimumD20: 6, redirected: true,
+      attackTotal: 14, decoyArmorClass: 12, decoyHit: true, remaining: 2,
+    }], { resolveName })
+
+    expect(details).toContain(
+      '艾莉雅 → 恐狼｜攻击诱饵重定向 d20 8 vs 6｜命中诱饵（攻击 14 vs AC 12），剩余 2',
+    )
+  })
 
   it('展开命中、伤害、生命值和豁免过程', () => {
     const details = formatDnd5eCombatLogDetails([
@@ -49,6 +200,104 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('艾莉雅 → 恐狼｜命中检定 d20 14，总值 19 vs AC 15｜命中')
     expect(details).toContain('恐狼｜受到 8 点伤害｜HP 22 → 14｜临时 HP 2 → 0')
     expect(details).toContain('恐狼｜力量豁免 d20 7 +3 = 10 vs DC 13｜失败')
+  })
+
+  it('明确区分同阵营目标未抵抗与骰值判定失败', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'saving-throw-resolved', targetId: 'wolf', ability: 'con',
+      d20: 19, modifier: 4, total: 23, dc: 19, success: false,
+      automaticOutcome: 'allied-unresisted-failure',
+    }], { resolveName })
+
+    expect(details).toContain(
+      '恐狼｜同阵营目标未抵抗｜体质豁免自动视为失败（d20 19 +4 = 23 未参与判定）',
+    )
+  })
+
+  it('把持续区域的触发、豁免、伤害和 HP 变化保留在同一组明细中', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'saving-throw-resolved', targetId: 'target', ability: 'dex',
+        d20: 7, modifier: 2, total: 9, dc: 15, success: false,
+      },
+      {
+        type: 'damage-applied', sourceId: 'wizard', targetId: 'target', amount: 20,
+        hpBefore: 40, hpAfter: 20, temporaryHpBefore: 0, temporaryHpAfter: 0,
+        damageTypes: ['fire'],
+      },
+      {
+        type: 'persistent-area-triggered', actorId: 'wizard', targetId: 'target',
+        areaId: 'core-spell-area:wall', triggerId: 'wall-of-fire-create',
+        timing: 'on-create', saveSuccess: false, damage: 20,
+        damageResolution: {
+          damageType: 'fire',
+          roll: { sides: 8, rolls: [3, 6, 4, 2, 5], modifier: 0, total: 20 },
+          damageBeforeSavingThrow: 20,
+          damageAfterSavingThrow: 20,
+          damageAfterDefenses: 20,
+          damageAfterDmAdjustment: 20,
+          finalDamage: 20,
+          defenses: [],
+        },
+      },
+    ], { resolveName })
+
+    expect(details).toContain('针刺魔｜敏捷豁免 d20 7 +2 = 9 vs DC 15｜失败')
+    expect(details.some((line) => line.includes('针刺魔｜受到 20 点伤害'))).toBe(false)
+    expect(details).toContain(
+      '新冒险者 → 针刺魔｜持续区域 wall-of-fire-create（首次创建）｜豁免失败｜最终伤害 20',
+    )
+    expect(details).toContain(
+      '针刺魔｜火焰伤害明细｜5d8 骰面：3 + 6 + 4 + 2 + 5 = 20｜固定加值 +0｜原始伤害 20｜最终伤害 20｜HP 40 → 20',
+    )
+  })
+
+  it('解释持续区域发出的心灵与声音通知', () => {
+    const base = {
+      type: 'persistent-area-triggered' as const,
+      actorId: 'wizard', targetId: 'target', areaId: 'alarm-zone',
+      timing: 'on-enter' as const, damage: 0,
+    }
+    const details = formatDnd5eCombatLogDetails([
+      { ...base, triggerId: 'alarm-mental', notification: { delivery: 'mental-to-source' as const } },
+      { ...base, triggerId: 'alarm-audible', notification: { delivery: 'audible' as const, audibleRadiusFeet: 60 } },
+    ], { resolveName })
+
+    expect(details).toContain(
+      '新冒险者 → 针刺魔｜持续区域 alarm-mental（进入区域）｜向来源发出心灵警报',
+    )
+    expect(details).toContain(
+      '新冒险者 → 针刺魔｜持续区域 alarm-audible（进入区域）｜发出声音警报（60 尺内可听）',
+    )
+  })
+
+  it('逐段解释持续区域的固定加值、豁免、防御、DM 与减伤调整', () => {
+    const details = formatDnd5eCombatLogDetails([
+      {
+        type: 'damage-applied', sourceId: 'wizard', targetId: 'target', amount: 1,
+        hpBefore: 80, hpAfter: 79, temporaryHpBefore: 0, temporaryHpAfter: 0,
+        damageTypes: ['fire'],
+      },
+      {
+        type: 'persistent-area-triggered', actorId: 'wizard', targetId: 'target',
+        areaId: 'plugin-area:test', triggerId: 'test-trigger', timing: 'turn-start',
+        saveSuccess: true, damage: 1,
+        damageResolution: {
+          damageType: 'fire',
+          roll: { sides: 6, rolls: [4, 5], modifier: 3, total: 12 },
+          damageBeforeSavingThrow: 12,
+          damageAfterSavingThrow: 6,
+          damageAfterDefenses: 3,
+          damageAfterDmAdjustment: 2,
+          finalDamage: 1,
+          defenses: [],
+        },
+      },
+    ], { resolveName })
+
+    expect(details).toContain(
+      '针刺魔｜火焰伤害明细｜2d6 骰面：4 + 5 = 9｜固定加值 +3｜原始伤害 12｜豁免调整 12 → 6｜防御调整 6 → 3｜DM 调整 3 → 2｜减伤/中断调整 2 → 1｜最终伤害 1｜HP 80 → 79',
+    )
   })
 
   it('解释范围法术成功豁免减半后被伤害免疫归零', () => {
@@ -86,6 +335,28 @@ describe('formatDnd5eCombatLogDetails', () => {
 
     expect(details).toContain('燃烧之手火焰伤害骰 3d6：6 + 4 + 5 = 15')
     expect(details).toContain('燃烧之手伤害 15；豁免成功减半为 7；针刺魔火焰免疫，最终 0')
+  })
+
+  it('展开法术攻击命中的逐枚伤害骰与最终伤害', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-attack-damage-resolved',
+      actorId: 'wizard',
+      targetId: 'target',
+      spellId: 'ray-of-frost',
+      slotLevel: 0,
+      critical: false,
+      damageType: 'cold',
+      roll: {
+        sides: 8,
+        rolls: [6, 2, 7, 5],
+        bonus: 5,
+        total: 25,
+      },
+      damageAfterAttackAdjustments: 25,
+      finalDamage: 25,
+    }], { resolveName })
+
+    expect(details).toContain('冷冻射线寒冷伤害骰 4d8+5：6 + 2 + 7 + 5 +5 = 25')
   })
 
   it('解释普通武器伤害被血肉魔像免疫而归零', () => {
@@ -428,6 +699,40 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('恐狼｜坠落 20 尺｜2d6 = 8 点伤害｜落地倒地')
   })
 
+  it('records Feather Fall as prevented damage instead of an impossible zero dice total', () => {
+    const events: Dnd5eCombatEvent[] = [
+      {
+        type: 'spell-cast', actorId: 'hero', targetId: 'wolf',
+        spellId: 'feather-fall', slotLevel: 1,
+      },
+      {
+        type: 'falling-damage-resolved', actorId: 'wolf', distanceFeet: 40,
+        dice: 4, damage: 0, landedProne: false,
+        prevention: {
+          kind: 'controlled-descent',
+          definitionId: 'activity:srd-5.1:spell:feather-fall:modifiers:0',
+          label: '羽落术',
+        },
+      },
+    ]
+    const details = formatDnd5eCombatLogDetails(events, { resolveName })
+    const secretDetails = formatDnd5eSecretCombatOutcomeDetails(events, { resolveName })
+
+    expect(details).toContain('艾莉雅 → 恐狼｜施放 羽落术｜使用 1 环法术位')
+    expect(details).toContain('恐狼｜坠落 40 尺｜羽落术保护｜原为 4d6，未投掷｜实际 0 点｜安全落地')
+    expect(details.join('\n')).not.toContain('4d6 = 0')
+    expect(secretDetails).toContain('恐狼｜坠落 40 尺｜羽落术保护｜坠落伤害未投掷｜实际 0 点｜安全落地')
+  })
+
+  it('shows every actual falling-damage die when Feather Fall is not used', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'falling-damage-resolved', actorId: 'wolf', distanceFeet: 40,
+      dice: 4, rolls: [2, 5, 3, 6], damage: 16, landedProne: true,
+    }], { resolveName })).toContain(
+      '恐狼｜坠落 40 尺｜4d6 骰面：2 + 5 + 3 + 6 = 16｜实际 16 点伤害｜落地倒地',
+    )
+  })
+
   it('records Host random-table checks and distinguishes a no-slot core spell', () => {
     const details = formatDnd5eCombatLogDetails([
       {
@@ -521,5 +826,121 @@ describe('formatDnd5eCombatLogDetails', () => {
       amount: 6,
       dice: { sides: 6, rolls: [4], bonus: 2 },
     }], { resolveName })).toContain('艾莉雅｜守护腰带 减免 6 点伤害｜减伤骰 d6(4) +2')
+  })
+
+  it('shows every die in an Activity healing formula', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'activity-formula-roll-resolved',
+      actorId: 'hero', targetId: 'wolf', activityId: 'spell:regenerate',
+      operationId: 'regenerate-initial-healing', kind: 'healing', castLevel: 8,
+      total: 36, formulaAdjustment: 15,
+      dice: [{
+        rollId: 'regenerate-initial-healing', count: 4, sides: 8,
+        values: [2, 7, 4, 8],
+      }],
+    }], { resolveName })).toContain('艾莉雅 → 恐狼｜再生术治疗骰 4d8 [2, 7, 4, 8] +15 = 36')
+  })
+
+  it('labels a cantrip as slot-free instead of inventing a 0-level spell slot', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-cast', actorId: 'hero', targetId: 'wolf',
+      spellId: 'produce-flame', slotLevel: 0,
+    }], { resolveName })
+
+    expect(details).toContain('艾莉雅 → 恐狼｜施放 produce-flame｜使用戏法（不消耗法术位）')
+    expect(details.some((line) => line.includes('0 环法术位'))).toBe(false)
+  })
+
+  it('shows Dispel Magic checks, failures, and higher-slot automatic dispels', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-dispelled', actorId: 'hero', targetId: 'wolf',
+      spellId: 'haste', spellLevel: 5, effectId: 'haste-effect',
+      dc: 15, total: 20, success: true,
+    }, {
+      type: 'spell-dispelled', actorId: 'hero', targetId: 'wolf',
+      spellId: 'haste', spellLevel: 5, effectId: 'haste-effect',
+      dc: 15, total: 13, success: false,
+    }, {
+      type: 'spell-dispelled', actorId: 'hero', targetId: 'wolf',
+      spellId: 'haste', spellLevel: 5, effectId: 'haste-effect',
+      success: true,
+    }], { resolveName })
+
+    expect(details).toContain('艾莉雅 → 恐狼｜解除加速术（5环）｜施法属性检定 20 vs DC 15｜成功')
+    expect(details).toContain('艾莉雅 → 恐狼｜解除加速术（5环）｜施法属性检定 13 vs DC 15｜失败，效果保留')
+    expect(details).toContain('艾莉雅 → 恐狼｜解除加速术（5环）｜目标法术 5 环不高于解除魔法所用环位｜自动结束')
+  })
+
+  it('explains when antimagic consumes a cast but suppresses its effect', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-effect-suppressed-by-area',
+      actorId: 'hero',
+      targetId: 'wolf',
+      spellId: 'fire-bolt',
+      spellLevel: 0,
+      reason: 'antimagic',
+    }], { resolveName })
+
+    expect(details).toEqual([
+      '艾莉雅 → 恐狼｜fire-bolt效果被反魔法力场压制｜未产生法术效果',
+    ])
+  })
+
+  it('exposes an audible Activity event and its exact radius', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'audible-event-emitted',
+      actorId: 'hero',
+      activityId: 'knock',
+      label: '敲击术巨响',
+      audibleRadiusFeet: 300,
+    }], { resolveName })
+
+    expect(details).toEqual(['艾莉雅｜敲击术巨响｜可听范围 300 尺'])
+  })
+
+  it('shows persistent spell-detection targets, distances, schools, and sources', () => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'spell-detection-updated',
+      actorId: 'hero',
+      spellId: 'detect-magic',
+      mode: 'magic',
+      revealAuras: true,
+      presences: [{
+        targetId: 'wizard',
+        distanceFeet: 15,
+        categories: ['magic'],
+        spellSchools: ['divination', 'transmutation'],
+        sourceRulesIds: ['detect-magic', 'longstrider'],
+      }],
+    }], { resolveName })
+
+    expect(details).toContain('艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 detect-magic、longstrider）')
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'spell-detection-updated',
+      actorId: 'hero',
+      spellId: 'detect-magic',
+      mode: 'magic',
+      presences: [{
+        targetId: 'wizard', distanceFeet: 15, categories: ['magic'],
+        spellSchools: ['transmutation'], sourceRulesIds: ['longstrider'],
+      }],
+    }], { resolveName })).toContain('艾莉雅｜侦测魔法更新｜30 尺内感知到魔法存在；需另用一个动作显化可见目标的灵光并辨识学派')
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'spell-detection-updated',
+      actorId: 'hero',
+      spellId: 'detect-magic',
+      mode: 'magic',
+      presences: [],
+    }], { resolveName })).toContain('艾莉雅｜侦测魔法更新｜30 尺内未感知到魔法存在')
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'spell-detection-updated',
+      actorId: 'hero',
+      spellId: 'detect-poison-and-disease',
+      mode: 'poison-disease',
+      presences: [{
+        targetId: 'wizard', distanceFeet: 15,
+        categories: ['poisonous-creature'], sourceRulesIds: [],
+      }],
+    }], { resolveName })).toContain('艾莉雅｜侦测毒性和疾病更新｜新冒险者（15 尺；带毒生物）')
   })
 })

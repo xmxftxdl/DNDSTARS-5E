@@ -7,8 +7,10 @@ import {
   Coins,
   FlaskConical,
   PackageOpen,
+  Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Shield,
   ShoppingBag,
   Sparkles,
@@ -28,7 +30,11 @@ import {
 } from '../lib/dnd5eShopAuthority'
 import { getPlayerCharacter } from '../lib/playerView'
 import { getRoomSession } from '../lib/roomSession'
-import { dnd5eInventoryItemTemplate, normalizeDnd5eInventory } from '../rulesets/dnd5e/items'
+import {
+  dnd5eInventoryItemTemplate,
+  listDnd5eInventoryItemTemplates,
+  normalizeDnd5eInventory,
+} from '../rulesets/dnd5e/items'
 import { DND5E_MAGIC_ITEM_RARITY_LABELS } from '../rulesets/dnd5e/magicItems'
 import {
   DND5E_SHOP_PRESETS,
@@ -186,6 +192,106 @@ function ShopOfferPriceEditor({
   )
 }
 
+function ShopManualOfferAdder({
+  shop,
+  disabled,
+  onAdd,
+}: {
+  shop: Pick<Dnd5eShopDefinition, 'id' | 'name'>
+  disabled: boolean
+  onAdd: (templateId: string, quantity: number) => void
+}) {
+  const catalog = useMemo(() => [...listDnd5eInventoryItemTemplates()]
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')), [])
+  const [query, setQuery] = useState('')
+  const [templateId, setTemplateId] = useState(catalog[0]?.id ?? '')
+  const [quantity, setQuantity] = useState(1)
+  const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
+  const matches = useMemo(() => normalizedQuery
+    ? catalog.filter((template) => [template.name, template.englishName, template.id]
+        .some((value) => value?.toLocaleLowerCase('zh-CN').includes(normalizedQuery)))
+    : catalog, [catalog, normalizedQuery])
+  const effectiveTemplateId = matches.some((template) => template.id === templateId)
+    ? templateId
+    : (matches[0]?.id ?? '')
+  const effectiveTemplate = catalog.find((template) => template.id === effectiveTemplateId)
+
+  return (
+    <form
+      className="border-b border-white/10 bg-cyan-400/[0.025] px-5 py-3"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!effectiveTemplateId) return
+        onAdd(effectiveTemplateId, quantity)
+        setTemplateId(effectiveTemplateId)
+      }}
+    >
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-52 flex-1">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300/75">
+            手动添加商品
+          </span>
+          <span className="flex items-center rounded-lg border border-white/10 bg-slate-950 px-2.5">
+            <Search className="h-3.5 w-3.5 text-slate-500" />
+            <input
+              aria-label={`${shop.name}搜索商品目录`}
+              value={query}
+              disabled={disabled}
+              placeholder="搜索中文名、英文名或模板 ID"
+              onChange={(event) => setQuery(event.target.value)}
+              className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-slate-100 outline-none placeholder:text-slate-600"
+            />
+          </span>
+        </label>
+        <label className="min-w-64 flex-[1.5]">
+          <span className="mb-1 block text-[10px] text-slate-500">匹配目录（{matches.length}）</span>
+          <select
+            aria-label={`${shop.name}选择手动商品`}
+            value={effectiveTemplateId}
+            disabled={disabled || matches.length === 0}
+            onChange={(event) => setTemplateId(event.target.value)}
+            className="w-full rounded-lg border border-white/10 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 outline-none"
+          >
+            {matches.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}{template.magicItem?.rarity
+                  ? ` · ${DND5E_MAGIC_ITEM_RARITY_LABELS[template.magicItem.rarity]}`
+                  : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="mb-1 block text-[10px] text-slate-500">数量</span>
+          <input
+            aria-label={`${shop.name}手动添加数量`}
+            type="number"
+            min={1}
+            max={999}
+            value={quantity}
+            disabled={disabled}
+            onChange={(event) => setQuantity(Math.max(1, Math.min(999, Math.floor(Number(event.target.value) || 1))))}
+            className="w-20 rounded-lg border border-white/10 bg-slate-950 px-2.5 py-2 text-right text-xs font-semibold text-slate-100 outline-none"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={disabled || !effectiveTemplate}
+          className="flex items-center gap-1.5 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/25 disabled:opacity-40"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          加入库存
+        </button>
+      </div>
+      {effectiveTemplate && (
+        <p className="mt-1.5 truncate text-[10px] text-slate-600">
+          {effectiveTemplate.source.book} · {effectiveTemplate.id}
+        </p>
+      )}
+    </form>
+  )
+}
+
 function requestId(): string {
   return globalThis.crypto?.randomUUID?.() ??
     `shop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -201,6 +307,7 @@ export default function ShopsPage() {
   const updateShop = useDnd5eShopStore((state) => state.updateShop)
   const updateOfferPrice = useDnd5eShopStore((state) => state.updateOfferPrice)
   const restockShop = useDnd5eShopStore((state) => state.restockShop)
+  const addOffer = useDnd5eShopStore((state) => state.addOffer)
   const clearShop = useDnd5eShopStore((state) => state.clearShop)
   const removeShop = useDnd5eShopStore((state) => state.removeShop)
   const [buyerId, setBuyerId] = useState(selectedCharacterId ?? characters[0]?.id ?? '')
@@ -524,6 +631,17 @@ export default function ShopsPage() {
                     </div>
                   )}
                 </div>
+
+                {isDm && (
+                  <ShopManualOfferAdder
+                    shop={shop}
+                    disabled={busyKey != null}
+                    onAdd={(templateId, quantity) => void runManagement(
+                      `add-offer:${shop.id}`,
+                      () => addOffer(shop.id, templateId, quantity),
+                    )}
+                  />
+                )}
 
                 {shop.offers.length === 0 ? (
                   <p className="px-5 py-10 text-center text-sm text-slate-500">

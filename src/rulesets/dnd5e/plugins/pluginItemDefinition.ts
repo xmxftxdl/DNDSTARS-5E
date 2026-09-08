@@ -54,6 +54,18 @@ export function clonePluginItemDefinition(
     definition.cost.amount < 0 || definition.cost.amount > 1_000_000_000 ||
     !['cp', 'sp', 'gp'].includes(definition.cost.currency)
   )) throw new Error(`Invalid plugin item cost: ${itemId}`)
+  const spellcastingMaterial = definition.spellcastingMaterial
+  if (spellcastingMaterial && (
+    !Array.isArray(spellcastingMaterial.tags) || spellcastingMaterial.tags.length < 1 ||
+    spellcastingMaterial.tags.length > 32 || spellcastingMaterial.tags.some((tag) =>
+      typeof tag !== 'string' || !/^[a-z0-9][a-z0-9._:-]{0,159}$/.test(tag)
+    ) ||
+    (spellcastingMaterial.unitValueGp != null && (
+      typeof spellcastingMaterial.unitValueGp !== 'number' ||
+      !Number.isFinite(spellcastingMaterial.unitValueGp) ||
+      spellcastingMaterial.unitValueGp < 0 || spellcastingMaterial.unitValueGp > 1_000_000_000
+    ))
+  )) throw new Error(`Invalid plugin spellcasting material metadata: ${itemId}`)
 
   const magicItem = definition.magicItem
   if (magicItem && (
@@ -147,6 +159,14 @@ export function clonePluginItemDefinition(
       ? { containerCapacityWeightLb: definition.containerCapacityWeightLb }
       : {}),
     stackable: definition.stackable,
+    ...(spellcastingMaterial ? {
+      spellcastingMaterial: {
+        tags: [...new Set(spellcastingMaterial.tags)],
+        ...(spellcastingMaterial.unitValueGp != null
+          ? { unitValueGp: spellcastingMaterial.unitValueGp }
+          : {}),
+      },
+    } : {}),
     ...(equipment ? { equipment } : {}),
     ...(magicItem ? { magicItem: { ...magicItem } } : {}),
     ...(resources?.length ? { resources } : {}),

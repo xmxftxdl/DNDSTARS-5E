@@ -37,6 +37,7 @@ export function resolveDnd5eAuthoritativeItemUse(input: {
   sourceCharacterId: string
   targetCharacterId?: string
   instanceId: string
+  useActionId?: string
   healingRolls?: number[]
   spellSlotLevel?: number
   turnEconomy?: Dnd5eTurnEconomyCounts
@@ -57,6 +58,7 @@ export function resolveDnd5eAuthoritativeItemUse(input: {
     characterId: source.id,
     targetCharacterId,
     instanceId: input.instanceId,
+    useActionId: input.useActionId,
     healingRolls: input.healingRolls,
     spellSlotLevel: input.spellSlotLevel,
     receiptId: input.transaction.id,

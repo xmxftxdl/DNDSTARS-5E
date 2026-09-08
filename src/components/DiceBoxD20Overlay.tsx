@@ -14,6 +14,8 @@ interface DiceBoxD20OverlayProps {
   value?: number
   requestId?: string
   flyIndex?: number
+  settledHoldMs?: number
+  layout?: 'center' | 'left-drawer'
   onComplete: (value: number) => void
 }
 
@@ -31,6 +33,8 @@ export default function DiceBoxD20Overlay({
   value,
   requestId: forcedRequestId,
   flyIndex,
+  settledHoldMs = 0,
+  layout = 'center',
   onComplete,
 }: DiceBoxD20OverlayProps) {
   void _label
@@ -70,7 +74,11 @@ export default function DiceBoxD20Overlay({
       completedRef.current = true
       const finalValue = clampD20(value)
       log('finish', { finalValue })
-      const delay = Math.max(0, MIN_VISIBLE_ROLL_MS - (Date.now() - startedAt))
+      const delay = Math.max(
+        0,
+        MIN_VISIBLE_ROLL_MS - (Date.now() - startedAt),
+        Math.max(0, settledHoldMs),
+      )
       window.setTimeout(() => {
         if (!cancelled) onCompleteRef.current(finalValue)
       }, delay)
@@ -87,7 +95,7 @@ export default function DiceBoxD20Overlay({
     const timeout = window.setTimeout(() => {
       console.warn('DiceBox iframe D20 roll timed out; using fallback D20 roll')
       finish(value ?? 1 + Math.floor(Math.random() * 20))
-    }, 22000)
+    }, DICE_TIMING.D20_FAILSAFE_MS)
 
     const handleMessage = (event: MessageEvent) => {
       if (event.source !== iframeRef.current?.contentWindow) return
@@ -123,16 +131,16 @@ export default function DiceBoxD20Overlay({
       window.clearTimeout(retry)
       window.removeEventListener('message', handleMessage)
     }
-  }, [active, requestId, value])
+  }, [active, requestId, settledHoldMs, value])
 
   return (
-    <DiceOverlayPortal>
+    <DiceOverlayPortal layer={layout === 'left-drawer' ? 'dice' : 'foreground'}>
       <div className={`absolute inset-0 ${active ? '' : 'dice-box-d20-stage--idle'}`}>
         <iframe
           ref={iframeRef}
           title="D20 dice roller"
           src="/dice-box-frame.html?badge=0"
-          className={`dice-box-d20-frame ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
+          className={`dice-box-d20-frame ${layout === 'left-drawer' ? 'dice-box-frame--left-drawer' : ''} ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
           style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />

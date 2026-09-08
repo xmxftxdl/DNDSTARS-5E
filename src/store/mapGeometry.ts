@@ -29,7 +29,11 @@ import {
 import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 import { campaignLightIsActive } from '../lib/campaignTime'
-import type { Dnd5eMapEnvironment } from '../rulesets/dnd5e/environmentRules'
+import type {
+  Dnd5eMapEnvironment,
+  Dnd5eMapWeather,
+  Dnd5eOverheadSpace,
+} from '../rulesets/dnd5e/environmentRules'
 
 interface MapGeometryStoreState {
   maps: MapGeometryState[]
@@ -47,6 +51,8 @@ interface MapGeometryStoreState {
   applyAuthorityDoorState: (mapId: string, doorId: string, state: MapGeometryDoorState) => void
   setVision: (mapId: string, patch: Partial<MapGeometryVisionSettings>) => void
   setEnvironment: (mapId: string, environment: Dnd5eMapEnvironment) => void
+  setWeather: (mapId: string, weather: Dnd5eMapWeather) => void
+  setOverheadSpace: (mapId: string, overheadSpace: Dnd5eOverheadSpace) => void
   clearMap: (mapId: string) => void
   duplicateEntity: (mapId: string, entityId: string, offset?: number) => string | undefined
   replaceMap: (mapId: string, geometry: MapGeometryState) => boolean
@@ -409,6 +415,24 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
         set((state) => {
           const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
           const maps = mutateMap(state.maps, mapId, (map) => ({ ...map, environment }))
+          setMapGeometryRuntime(maps)
+          return { maps, ...pushHistory(state, mapId, current) }
+        })
+        publish(get())
+      },
+      setWeather: (mapId, weather) => {
+        set((state) => {
+          const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          const maps = mutateMap(state.maps, mapId, (map) => ({ ...map, weather }))
+          setMapGeometryRuntime(maps)
+          return { maps, ...pushHistory(state, mapId, current) }
+        })
+        publish(get())
+      },
+      setOverheadSpace: (mapId, overheadSpace) => {
+        set((state) => {
+          const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          const maps = mutateMap(state.maps, mapId, (map) => ({ ...map, overheadSpace }))
           setMapGeometryRuntime(maps)
           return { maps, ...pushHistory(state, mapId, current) }
         })

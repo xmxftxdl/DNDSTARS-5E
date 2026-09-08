@@ -7,13 +7,14 @@ import type {
   Dnd5eWeaponAttackOptions,
 } from './sharedCombatTypes'
 import type { Dnd5eSpellModifierIntentId } from '../rulesets/dnd5e/spellModifierIntents'
+import type { Dnd5eMagicMouthConfigV1 } from '../rulesets/dnd5e/magicMouth'
 
 export const DND5E_COMBAT_ACTION_DESCRIPTOR_SCHEMA_VERSION = 1 as const
 
 export type Dnd5eCombatActionSourceKind = 'system' | 'weapon' | 'feature' | 'spell' | 'item'
 export type Dnd5eCombatActionEconomy = 'action' | 'bonus-action' | 'reaction' | 'movement' | 'none' | 'special'
 export type Dnd5eCombatActionTargeting = 'none' | 'self' | 'creature' | 'area' | 'map-position' | 'configure'
-export type Dnd5eCombatActionPanel = 'inventory' | 'features' | 'spells' | 'skills'
+export type Dnd5eCombatActionPanel = 'inventory' | 'features' | 'skills'
 
 export interface Dnd5eCombatSpellOptions {
   /** UI-selected Host-owned projection to use as this cast's geometric origin. */
@@ -29,6 +30,12 @@ export interface Dnd5eCombatSpellOptions {
   sculptSpell?: boolean
   /** Hotbar casts resolve immediately after a legal map target/area is selected. */
   autoSubmitOnTargetSelection?: boolean
+  /** UI intent only; ritual eligibility and completion remain Host/DM-authoritative. */
+  ritual?: true
+  /** Open-text Magic Mouth intent; the Host normalizes every field again. */
+  magicMouth?: Dnd5eMagicMouthConfigV1
+  /** Explicit hybrid-spell branch: settle an ordinary-object cast by voice narrative. */
+  narrativeObject?: true
 }
 
 export type Dnd5eCombatSpellModifier = Dnd5eSpellModifierIntentId
@@ -37,6 +44,7 @@ export type Dnd5eCombatActionCommand =
   | { kind: 'select-move' }
   | { kind: 'select-weapon-target'; options?: Dnd5eWeaponAttackOptions }
   | { kind: 'basic-action'; action: 'dash' | 'hide'; sourceSpellId?: 'expeditious-retreat' }
+  | { kind: 'set-flame-blade-manifestation'; effectId: string; manifested: boolean }
   | { kind: 'escape-grapple'; grapplerTokenId: string }
   | { kind: 'dodge' }
   | { kind: 'disengage' }
@@ -54,7 +62,12 @@ export type Dnd5eCombatActionCommand =
   | { kind: 'use-class-feature'; payload: Dnd5eClassFeaturePayload }
   | { kind: 'select-extra-action-teleport-destination' }
   | { kind: 'move-persistent-area'; areaId: string }
-  | { kind: 'use-persistent-area-activity'; areaId: string; featureId: string }
+  | {
+      kind: 'use-persistent-area-activity'
+      featureId: string
+      areaId?: string
+      effectId?: string
+    }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
   | { kind: 'use-item'; instanceId: string; useActionId?: string }
   | { kind: 'end-turn' }
@@ -80,6 +93,7 @@ export interface Dnd5eCombatActionDescriptorV1 {
   targeting: Dnd5eCombatActionTargeting
   resource?: Dnd5eCombatActionResourceBadge
   availableSlotLevels?: readonly number[]
+  ritualAvailable?: boolean
   enabled: boolean
   disabledReason?: string
   command: Dnd5eCombatActionCommand
@@ -106,6 +120,11 @@ export function resolveDnd5eCombatSpellSlotSelection(
   if (descriptor.command.kind !== 'cast-spell') return { ok: false, reason: '该动作不是法术施放。' }
   const explicitlyConfigured = configuredSlotLevel != null
   const slotLevel = explicitlyConfigured ? configuredSlotLevel : descriptor.command.slotLevel
+  // Sustained controls reuse an already-authorized spell effect. Their stored
+  // slot level is potency/scaling data, not a request to spend another slot.
+  if (descriptor.command.sustainedEffectAttack || descriptor.command.sustainedEffectAreaId) {
+    return { ok: true, slotLevel, explicitlyConfigured }
+  }
   if (!(descriptor.availableSlotLevels ?? []).includes(slotLevel)) {
     return {
       ok: false,
@@ -118,8 +137,20 @@ export function resolveDnd5eCombatSpellSlotSelection(
 }
 
 export function groupDnd5eCombatHotbarDescriptors(descriptors: readonly Dnd5eCombatActionDescriptorV1[]) {
+  const spells = descriptors
+    .filter((entry) => entry.sourceKind === 'spell')
+    .sort((left, right) => {
+      const levelDifference = (left.resource?.current ?? Number.MAX_SAFE_INTEGER) -
+        (right.resource?.current ?? Number.MAX_SAFE_INTEGER)
+      if (levelDifference !== 0) return levelDifference
+      const labelDifference = left.label.localeCompare(right.label, 'zh-CN')
+      return labelDifference !== 0 ? labelDifference : left.id.localeCompare(right.id)
+    })
   return {
-    spells: descriptors.filter((entry) => entry.sourceKind === 'spell'),
+    // Spell placement is structural rather than a remembered drag preference:
+    // cantrips first, then 1st through 9th level. This keeps a large spellbook
+    // searchable across pages even when localStorage contains an old hotbar order.
+    spells,
     items: descriptors.filter((entry) => entry.sourceKind === 'item'),
     features: descriptors.filter((entry) => entry.sourceKind === 'feature'),
     basics: descriptors.filter((entry) => entry.sourceKind !== 'spell' && entry.sourceKind !== 'item' && entry.sourceKind !== 'feature'),
@@ -138,6 +169,7 @@ export interface Dnd5eCombatActionSpellSource {
   /** 左键普通施放使用的环位；标准施法为法术基础环位，契约魔法为当前固定契约环位。 */
   defaultSlotLevel: number
   availableSlotLevels: readonly number[]
+  ritualAvailable?: boolean
   available: boolean
   unavailableReason?: string
 }
@@ -185,6 +217,9 @@ export interface BuildDnd5eCombatActionDescriptorsInput {
   actionRemaining: number
   bonusActionRemaining: number
   movementRemaining: number
+  restrictedExtraActionKinds?: readonly (
+    'weapon-attack' | 'dash' | 'disengage' | 'hide' | 'use-object'
+  )[]
   weaponLabel?: string
   grappleEscapes?: readonly {
     grapplerTokenId: string
@@ -196,11 +231,20 @@ export interface BuildDnd5eCombatActionDescriptorsInput {
   items?: readonly Dnd5eCombatActionItemSource[]
 }
 
-function availability(input: BuildDnd5eCombatActionDescriptorsInput, economy: Dnd5eCombatActionEconomy, sourceAvailable = true, sourceReason?: string) {
+function availability(
+  input: BuildDnd5eCombatActionDescriptorsInput,
+  economy: Dnd5eCombatActionEconomy,
+  sourceAvailable = true,
+  sourceReason?: string,
+  restrictedExtraActionKind?: 'weapon-attack' | 'dash' | 'disengage' | 'hide' | 'use-object',
+) {
   if (input.pending) return { enabled: false, disabledReason: '正在等待 DM 结算上一项操作。' }
   if (!input.canAct) return { enabled: false, disabledReason: '当前不是该角色的可行动回合。' }
   if (!sourceAvailable) return { enabled: false, disabledReason: sourceReason ?? '当前资源不足或不满足使用条件。' }
-  if (economy === 'action' && input.actionRemaining <= 0) return { enabled: false, disabledReason: '本回合动作已用尽。' }
+  if (
+    economy === 'action' && input.actionRemaining <= 0 &&
+    (!restrictedExtraActionKind || !input.restrictedExtraActionKinds?.includes(restrictedExtraActionKind))
+  ) return { enabled: false, disabledReason: '本回合动作已用尽。' }
   if (economy === 'bonus-action' && input.bonusActionRemaining <= 0) return { enabled: false, disabledReason: '本回合附赠动作已用尽。' }
   if (economy === 'movement' && input.movementRemaining <= 0) return { enabled: false, disabledReason: '本回合移动力已用尽。' }
   return { enabled: true, disabledReason: undefined }
@@ -220,7 +264,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       description: '选择地图上的目标，由 Headless 校验武器、熟练、距离、掩护、弹药与本回合攻击次数。',
       icon: dnd5eSystemActionIcon('weapon-attack', 'melee-attack'), economy: 'action', targeting: 'creature',
       command: { kind: 'select-weapon-target' },
-    }, availability(input, 'action')),
+    }, availability(input, 'action', true, undefined, 'weapon-attack')),
     descriptor({
       id: 'system:move', sourceKind: 'system', label: '移动', description: '显示本回合剩余移动范围，并在地图上选择合法落点。',
       icon: dnd5eSystemActionIcon('move', 'move'), economy: 'movement', targeting: 'map-position', command: { kind: 'select-move' },
@@ -229,7 +273,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
     descriptor({
       id: 'system:dash', sourceKind: 'system', label: '疾走', description: '消耗一个动作，使本回合可用移动力增加等同于当前有效速度的数值。',
       icon: dnd5eSystemActionIcon('dash', 'dash'), economy: 'action', targeting: 'none', command: { kind: 'basic-action', action: 'dash' },
-    }, availability(input, 'action')),
+    }, availability(input, 'action', true, undefined, 'dash')),
     descriptor({
       id: 'system:dodge', sourceKind: 'system', label: '闪避', description: '消耗一个动作；直到你的下一回合开始，针对你的可见攻击具有劣势，并使敏捷豁免具有优势。',
       icon: dnd5eSystemActionIcon('dodge', 'dodge'), economy: 'action', targeting: 'self', command: { kind: 'dodge' },
@@ -237,11 +281,11 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
     descriptor({
       id: 'system:disengage', sourceKind: 'system', label: '撤离', description: '消耗一个动作；你在本回合的移动不会触发借机攻击。',
       icon: dnd5eSystemActionIcon('disengage', 'disengage'), economy: 'action', targeting: 'self', command: { kind: 'disengage' },
-    }, availability(input, 'action')),
+    }, availability(input, 'action', true, undefined, 'disengage')),
     descriptor({
       id: 'system:hide', sourceKind: 'system', label: '躲藏', description: '消耗一个动作并进行敏捷（隐匿）检定；Headless 会与敌人的被动察觉比较。',
       icon: dnd5eSystemActionIcon('hide', 'illusion'), economy: 'action', targeting: 'none', command: { kind: 'basic-action', action: 'hide' },
-    }, availability(input, 'action')),
+    }, availability(input, 'action', true, undefined, 'hide')),
     descriptor({
       id: 'feature:class-actions', sourceKind: 'feature', label: '职业特性', description: '打开当前职业、子职与插件授予的 Headless 主动能力；被动能力仍由结算引擎自动应用。',
       icon: dnd5eSystemActionIcon('other-actions', 'control'), economy: 'special', targeting: 'configure', command: { kind: 'open-panel', panel: 'skills' },
@@ -283,6 +327,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       targeting: spell.targeting,
       resource: { label: spell.level === 0 ? '戏法' : '环', current: spell.level },
       availableSlotLevels: [...spell.availableSlotLevels],
+      ritualAvailable: spell.ritualAvailable === true,
       command: {
         kind: 'cast-spell',
         spellId: spell.id,

@@ -53,6 +53,8 @@ export function raycastGeometry(input: {
   fromEyeHeightFeet?: number
   toEyeHeightFeet?: number
   ignoreStart?: boolean
+  /** Return true to ignore one otherwise-blocking segment intersection. */
+  ignoreSegment?: (segment: KernelSegment, t: number, heightFeet: number) => boolean
 }): { segment: KernelSegment; t: number } | null
 export function compileGeometry(geometry: any, options?: { bucketSize?: number }): CompiledGeometry
 export function compileGeometryCached(geometry: any, options?: { bucketSize?: number }): CompiledGeometry

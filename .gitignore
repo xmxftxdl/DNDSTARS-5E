@@ -12,6 +12,7 @@ lerna-debug.log*
 .stars-shared
 .cache/
 .codex/
+.codex-temp/
 node_modules
 dist
 dist-ssr

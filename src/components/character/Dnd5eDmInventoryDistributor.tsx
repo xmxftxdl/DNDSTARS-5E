@@ -38,6 +38,14 @@ const ITEM_CURRENCY_LABELS = {
   pp: '铂金币',
 } as const
 
+export function resolveDmInventoryDistributorSelection(
+  currentId: string,
+  options: readonly { id: string }[],
+): string {
+  if (options.some((option) => option.id === currentId)) return currentId
+  return options.length === 1 ? options[0]!.id : ''
+}
+
 export default function Dnd5eDmInventoryDistributor({
   players,
 }: {
@@ -57,6 +65,7 @@ export default function Dnd5eDmInventoryDistributor({
     dnd5eRulesPluginRegistrySnapshot,
   )
   void pluginRevision
+  const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
   const allTemplates = [...DND5E_SRD_ITEM_TEMPLATES, ...registeredDnd5ePluginItems()]
 
   const currentMemberIds = useMemo(
@@ -66,25 +75,26 @@ export default function Dnd5eDmInventoryDistributor({
   const targets = useMemo(
     () => session
       ? roomCharactersOwnedByMembers(characters, session.roomId, currentMemberIds)
-      : [],
-    [characters, currentMemberIds, session],
+      : bypassRoomLobby ? characters : [],
+    [bypassRoomLobby, characters, currentMemberIds, session],
   )
   const query = filter.trim().toLocaleLowerCase('zh-CN')
   const templates = allTemplates.filter((item) => !query ||
     item.name.toLocaleLowerCase('zh-CN').includes(query) ||
     item.englishName?.toLocaleLowerCase('en').includes(query))
-  const selectedTemplate = allTemplates.find((item) => item.id === templateId)
-  const validCharacterId = targets.some((character) => character.id === characterId) ? characterId : ''
+  const validTemplateId = resolveDmInventoryDistributorSelection(templateId, templates)
+  const selectedTemplate = allTemplates.find((item) => item.id === validTemplateId)
+  const validCharacterId = resolveDmInventoryDistributorSelection(characterId, targets)
 
   const distribute = async () => {
-    if (!validCharacterId || !templateId) {
+    if (!validCharacterId || !validTemplateId) {
       setNotice('请先选择角色和物品。')
       return
     }
     const result = await mutateRoomCharacterInventory({
       type: 'grant',
       characterId: validCharacterId,
-      templateId,
+      templateId: validTemplateId,
       quantity,
       identified: selectedTemplate?.magicItem ? identified : true,
     })
@@ -131,7 +141,7 @@ export default function Dnd5eDmInventoryDistributor({
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-600" />
             <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="筛选中英文名称" className="mb-1.5 w-full rounded-lg border border-white/10 bg-void-900/70 py-2 pl-8 pr-3 text-xs text-slate-100 outline-none focus:border-amber-400/50" />
           </div>
-          <select value={templates.some((item) => item.id === templateId) ? templateId : ''} onChange={(event) => setTemplateId(event.target.value)} className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400/50">
+          <select value={validTemplateId} onChange={(event) => setTemplateId(event.target.value)} className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400/50">
             <option value="">选择物品…</option>
             <optgroup label="魔法物品">
               {templates.filter((item) => !!item.magicItem).map((item) => <option key={item.id} value={item.id}>{item.name} · {DND5E_MAGIC_ITEM_RARITY_LABELS[item.magicItem!.rarity]} · {item.magicItem!.automation === 'headless' ? 'Headless' : 'DM 裁定'}</option>)}
@@ -149,7 +159,7 @@ export default function Dnd5eDmInventoryDistributor({
           <input type="number" min={1} max={999} value={quantity} onChange={(event) => setQuantity(Math.min(999, Math.max(1, Math.floor(Number(event.target.value) || 1))))} className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400/50" />
         </label>
         <div className="flex items-end">
-          <button type="button" onClick={distribute} disabled={!validCharacterId || !templateId} className="flex w-full items-center justify-center gap-2 rounded-lg border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={distribute} disabled={!validCharacterId || !validTemplateId} className="flex w-full items-center justify-center gap-2 rounded-lg border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-40">
             <PackagePlus className="h-4 w-4" />
             分发
           </button>

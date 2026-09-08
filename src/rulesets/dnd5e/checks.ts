@@ -5,8 +5,17 @@ import { dnd5eUnproficientAbilityCheckBonus } from './classes'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eCharacterClassLevel } from './multiclass'
-import { dnd5eActiveStrengthRollFlags, type Dnd5eActiveEffectInstance } from './activeEffects'
+import {
+  dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveAbilityCheckDisadvantages,
+  dnd5eActivePerceptionDisadvantageApplies,
+  dnd5eActiveSkillCheckAdvantages,
+  dnd5eActiveSkillCheckDisadvantages,
+  dnd5eActiveStrengthRollFlags,
+  type Dnd5eActiveEffectInstance,
+} from './activeEffects'
 import { dnd5eCharacterBuildTagsV1 } from './buildChoices'
+import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
 
 export type Dnd5eCheckProficiencyRank = 0 | 1 | 2
 
@@ -40,7 +49,7 @@ export function dnd5eSkillCheckProficiencyRank(
 }
 
 export function dnd5eAbilityCheckModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'dnd5eCombatState'>,
   ability: AbilityKey,
   proficiencyRank: Dnd5eCheckProficiencyRank = 0,
 ): number {
@@ -48,11 +57,12 @@ export function dnd5eAbilityCheckModifier(
   const proficiencyModifier = proficiencyRank > 0
     ? proficiencyBonus * proficiencyRank
     : dnd5eUnproficientAbilityCheckBonus(character, ability)
-  return rules.abilityModifier(abilityScore(character, ability)) + proficiencyModifier
+  return rules.abilityModifier(abilityScore(character, ability)) + proficiencyModifier +
+    Math.min(0, Math.floor(character.dnd5eCombatState?.resurrectionPenalty?.value ?? 0))
 }
 
 export function dnd5eSkillCheckModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'skills' | 'dnd5eClassChoices' | 'dnd5eContentChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'skills' | 'dnd5eClassChoices' | 'dnd5eContentChoices' | 'dnd5eCombatState'>,
   skillKey: string,
 ): number {
   const skill = SKILLS.find((candidate) => candidate.key === skillKey)
@@ -62,17 +72,36 @@ export function dnd5eSkillCheckModifier(
 
 export function dnd5eAbilityCheckMode(
   character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'exhaustionLevel'> & {
+    conditions?: readonly string[]
     dnd5eCombatState?: { activeEffects?: readonly Dnd5eActiveEffectInstance[] }
   },
-  context: { initiative?: boolean; ability?: AbilityKey } = {},
+  context: {
+    initiative?: boolean
+    ability?: AbilityKey
+    skill?: string
+    perceivedTargetId?: string
+    requestedMode?: D20RollMode
+  } = {},
 ): D20RollMode {
+  const effects = character.dnd5eCombatState?.activeEffects
   const strengthEffect = context.ability === 'str'
-    ? dnd5eActiveStrengthRollFlags(character.dnd5eCombatState?.activeEffects)
+    ? dnd5eActiveStrengthRollFlags(effects)
     : { advantage: false, disadvantage: false }
   const advantage = (context.initiative === true && dnd5eCharacterClassLevel(character, 'barbarian') >= 7) ||
+    (context.ability != null && dnd5eActiveAbilityCheckAdvantages(effects).includes(context.ability)) ||
+    (context.skill != null && dnd5eActiveSkillCheckAdvantages(effects).includes(context.skill)) ||
     strengthEffect.advantage
-  const disadvantage = (character.exhaustionLevel ?? 0) >= 1 || strengthEffect.disadvantage
+  const disadvantage = (character.exhaustionLevel ?? 0) >= 1 ||
+    dnd5eConditionAbilityCheckDisadvantage(character) ||
+    (context.ability != null && dnd5eActiveAbilityCheckDisadvantages(effects).includes(context.ability)) ||
+    (context.skill != null && dnd5eActiveSkillCheckDisadvantages(effects).includes(context.skill)) ||
+    (context.skill === 'perception' && dnd5eActivePerceptionDisadvantageApplies(
+      effects,
+      context.perceivedTargetId,
+    )) ||
+    strengthEffect.disadvantage
   return resolveDnd5eRollMode({
+    requestedMode: context.requestedMode,
     advantage: [{ active: advantage, reason: 'initiative-advantage' }],
     disadvantage: [{ active: disadvantage, reason: 'exhaustion' }],
   }).mode
@@ -102,7 +131,7 @@ export function previewDnd5eSavingThrowRoll(input: {
 }
 
 export function resolveDnd5eAbilityCheck(input: {
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'exhaustionLevel'>
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'exhaustionLevel' | 'dnd5eCombatState'>
   ability: AbilityKey
   rolls: readonly number[]
   proficiencyRank?: Dnd5eCheckProficiencyRank
@@ -132,13 +161,13 @@ export function resolveDnd5eAbilityCheck(input: {
 }
 
 export function dnd5eStoredCharacterInitiativeModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'dnd5eCombatState'>,
 ): number {
   return dnd5eAbilityCheckModifier(character, 'dex') + Math.floor(character.initiativeBonus)
 }
 
 export function resolveDnd5eInitiative(input: {
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'exhaustionLevel'>
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'exhaustionLevel' | 'dnd5eCombatState'>
   rolls: readonly number[]
 }): Dnd5eAbilityCheckResult {
   return resolveDnd5eAbilityCheck({

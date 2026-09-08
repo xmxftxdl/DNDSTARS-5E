@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   loadSharedResource,
+  mutateSharedCombatInterrupt,
   resetSharedResourceReadCacheForTests,
   SHARED_STATE_CHANGED_CHANNEL,
   subscribeSharedResourceInvalidation,
@@ -157,6 +158,30 @@ describe('shared resource invalidation', () => {
     expect(FakeEventSource.instances[0].closed).toBe(false)
     stopCharacters()
     expect(FakeEventSource.instances[0].closed).toBe(true)
+  })
+
+  it('refreshes combat interrupts immediately after this client mutates them', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      mapId: 'map', interrupts: [], updatedAt: 42, revision: 1,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const refresh = vi.fn(async () => undefined)
+    const stop = subscribeSharedResourceInvalidation('combat-interrupts', refresh)
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await mutateSharedCombatInterrupt({
+      operation: 'finish', mapId: 'map', id: 'interrupt', response: { decision: 'continue' },
+    })
+    await flushAsync()
+
+    expect(refresh).toHaveBeenCalledTimes(2)
+    stop()
   })
 
   it('can recover while hidden and refresh immediately when visibility is restored', async () => {

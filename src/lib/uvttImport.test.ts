@@ -48,6 +48,7 @@ describe('UVTT/DD2VTT geometry import', () => {
       endT: 0.6,
       openState: 'closed',
       lockState: 'unlocked',
+      passageGapInches: 1,
     })
     expect(result.geometry.lights?.[0]).toMatchObject({
       points: [{ x: 200, y: 200 }],

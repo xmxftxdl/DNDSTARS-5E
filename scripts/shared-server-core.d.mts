@@ -96,7 +96,7 @@ export function createMarketplaceCheckout(
 }>
 export function applySecurityHeaders(
   res: { setHeader(name: string, value: string): void },
-  options?: { production?: boolean; env?: Record<string, string | undefined> },
+  options?: { production?: boolean; env?: Record<string, string | undefined>; crossOriginResourcePolicy?: 'same-origin' | 'same-site' | 'cross-origin' },
 ): void
 export function applyCors(
   req: { headers?: Record<string, string | string[] | undefined> } | null | undefined,
@@ -126,7 +126,7 @@ export function projectMapsForPlayer<T>(
   fogState?: unknown,
   worldMinute?: number | null,
 ): T
-export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null, worldMinute?: number | null): T
+export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null, worldMinute?: number | null, perceptionContext?: unknown): T
 export function projectMapExplorationForPlayer<T>(value: T, memberId?: string | null): T
 export function fogPointState(fog: unknown, x: number, y: number): 'covered' | 'revealed' | 'neutral'
 
@@ -231,8 +231,10 @@ export function applyPlayerCharacterCommand(
   member: Record<string, any>,
   options?: {
     roomId?: string
+    combatActive?: boolean
     now?: number
     rollDie?: (sides: number) => number
+    concentrationSourceActorIds?: readonly string[]
   },
 ): any
 export function sendExpoPushMessages(
@@ -316,6 +318,9 @@ export function atomicWriteJsonStateCasLocked(
   | { ok: true; revision: number; value: Record<string, unknown>; writtenAt: number }
   | { ok: false; conflict?: boolean; stale?: boolean; invalid?: boolean; reason?: string; currentRevision: number; current: unknown }
 >
+export function removeCharacterConcentrationEffectsFromMaps<T>(
+  currentState: T, characterId: string, endedSpellId?: string, revertedCreatureForms?: readonly Record<string, unknown>[],
+): { changed: boolean; next: T; removedEffectIds: string[]; sourceActorIds: string[] }
 export function mergePlayerCharactersStateForAuthority(
   currentState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null } | null,
   incomingState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null; [key: string]: unknown },

@@ -52,6 +52,10 @@ let lastAppliedCharactersUpdatedAt = 0
 // Cross-device ordering must use the server-issued revision. Client wall clocks
 // are not comparable and can otherwise make an authoritative HP update look stale.
 const lastAppliedCharactersRevisionByRoom = new Map<string, number>()
+// Deliberately kept outside Zustand persistence. A persisted "hydrated" bit would
+// be stale after a document reload and could let startup effects publish the
+// browser's old character cache before the room snapshot has been read.
+let hydratedSharedCharactersRoomKey: string | null = null
 let characterSaveSeq = 0
 const LOCAL_CHARACTER_CREATE_TTL_MS = 60000
 const pendingLocalCharacterCreations = new Map<string, number>()
@@ -63,7 +67,15 @@ const LOCAL_CHARACTER_HIT_POINT_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY = 'stars-character-hit-point-edits-v1'
 type PendingLocalCharacterHitPointEdit = Partial<Pick<
   Character,
-  'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls' | 'hitPointDice'
+  | 'currentHp'
+  | 'maxHp'
+  | 'tempHp'
+  | 'hitPointMaximumMode'
+  | 'hitPointRolls'
+  | 'hitPointDice'
+  | 'deathSaveSuccesses'
+  | 'deathSaveFailures'
+  | 'deathSaveStable'
 >> & {
   updatedAt: number
 }
@@ -77,6 +89,83 @@ type PendingLocalCharacterClassResourceEdit = {
 }
 const pendingLocalCharacterClassResourceEdits = new Map<string, PendingLocalCharacterClassResourceEdit>()
 let pendingLocalCharacterClassResourceEditsHydrated = false
+const AUTHORITY_CHARACTER_PATCH_TTL_MS = 30000
+type PendingAuthorityCharacterPatch = {
+  patch: Partial<Character>
+  updatedAt: number
+}
+const pendingAuthorityCharacterPatches = new Map<string, PendingAuthorityCharacterPatch>()
+
+function characterFieldSnapshot(value: unknown): string | undefined {
+  return JSON.stringify(value)
+}
+
+function gcPendingAuthorityCharacterPatches(now: number = Date.now()): void {
+  for (const [id, pending] of pendingAuthorityCharacterPatches) {
+    if (now - pending.updatedAt > AUTHORITY_CHARACTER_PATCH_TTL_MS) {
+      pendingAuthorityCharacterPatches.delete(id)
+    }
+  }
+}
+
+function markPendingAuthorityCharacterPatch(
+  id: string,
+  current: Character,
+  patch: Partial<Character>,
+  now: number = Date.now(),
+): void {
+  gcPendingAuthorityCharacterPatches(now)
+  const changedEntries = Object.entries(patch).filter(([key, value]) =>
+    characterFieldSnapshot(current[key as keyof Character]) !== characterFieldSnapshot(value))
+  if (changedEntries.length === 0) return
+  const previous = pendingAuthorityCharacterPatches.get(id)?.patch ?? {}
+  pendingAuthorityCharacterPatches.set(id, {
+    patch: { ...previous, ...Object.fromEntries(changedEntries) } as Partial<Character>,
+    updatedAt: now,
+  })
+}
+
+export function clearPendingAuthorityCharacterPatchesForTest(): void {
+  pendingAuthorityCharacterPatches.clear()
+}
+
+export function mergePendingAuthorityCharacterPatches(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingAuthorityCharacterPatches(now)
+  if (pendingAuthorityCharacterPatches.size === 0) return sharedCharacters
+  return sharedCharacters.map((character) => {
+    const pending = pendingAuthorityCharacterPatches.get(character.id)
+    if (!pending) return character
+    const unacknowledgedEntries = Object.entries(pending.patch).filter(([key, value]) =>
+      characterFieldSnapshot(character[key as keyof Character]) !== characterFieldSnapshot(value))
+    if (unacknowledgedEntries.length === 0) {
+      pendingAuthorityCharacterPatches.delete(character.id)
+      return character
+    }
+    const unacknowledgedPatch = Object.fromEntries(unacknowledgedEntries) as Partial<Character>
+    pendingAuthorityCharacterPatches.set(character.id, {
+      patch: unacknowledgedPatch,
+      updatedAt: pending.updatedAt,
+    })
+    return { ...character, ...unacknowledgedPatch }
+  })
+}
+
+export function pendingAuthorityCharacterPatchesNeedRepublish(
+  incomingCharacters: readonly Character[],
+  protectedCharacters: readonly Character[],
+): boolean {
+  if (incomingCharacters.length !== protectedCharacters.length) return true
+  return protectedCharacters.some((character, index) =>
+    characterFieldSnapshot(character) !== characterFieldSnapshot(incomingCharacters[index]))
+}
+
+function hasPendingAuthorityCharacterPatches(now: number = Date.now()): boolean {
+  gcPendingAuthorityCharacterPatches(now)
+  return pendingAuthorityCharacterPatches.size > 0
+}
 
 function pendingLocalCharacterEditStorage(): Storage | null {
   if (typeof window === 'undefined') return null
@@ -219,6 +308,13 @@ function hydratePendingLocalCharacterHitPointEdits(): void {
       if (Number.isFinite(pending.currentHp)) normalized.currentHp = Math.max(0, Math.floor(pending.currentHp!))
       if (Number.isFinite(pending.maxHp)) normalized.maxHp = Math.max(1, Math.floor(pending.maxHp!))
       if (Number.isFinite(pending.tempHp)) normalized.tempHp = Math.max(0, Math.floor(pending.tempHp!))
+      if (Number.isFinite(pending.deathSaveSuccesses)) {
+        normalized.deathSaveSuccesses = Math.max(0, Math.min(3, Math.floor(pending.deathSaveSuccesses!)))
+      }
+      if (Number.isFinite(pending.deathSaveFailures)) {
+        normalized.deathSaveFailures = Math.max(0, Math.min(3, Math.floor(pending.deathSaveFailures!)))
+      }
+      if (typeof pending.deathSaveStable === 'boolean') normalized.deathSaveStable = pending.deathSaveStable
       if (pending.hitPointMaximumMode === 'fixed' || pending.hitPointMaximumMode === 'manual') {
         normalized.hitPointMaximumMode = pending.hitPointMaximumMode
       }
@@ -236,6 +332,7 @@ function hydratePendingLocalCharacterHitPointEdits(): void {
       }))
       if (
         normalized.currentHp == null && normalized.maxHp == null && normalized.tempHp == null &&
+        normalized.deathSaveSuccesses == null && normalized.deathSaveFailures == null && normalized.deathSaveStable == null &&
         normalized.hitPointMaximumMode == null && normalized.hitPointRolls == null && normalized.hitPointDice == null
       ) continue
       pendingLocalCharacterHitPointEdits.set(id, normalized)
@@ -263,14 +360,34 @@ function gcPendingLocalCharacterHitPointEdits(now: number = Date.now()): void {
 
 export function markPendingLocalCharacterHitPointEdit(
   id: string,
-  patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls' | 'hitPointDice'>>,
+  patch: Partial<Pick<Character,
+    | 'currentHp'
+    | 'maxHp'
+    | 'tempHp'
+    | 'hitPointMaximumMode'
+    | 'hitPointRolls'
+    | 'hitPointDice'
+    | 'deathSaveSuccesses'
+    | 'deathSaveFailures'
+    | 'deathSaveStable'
+  >>,
   now: number = Date.now(),
 ): void {
   hydratePendingLocalCharacterHitPointEdits()
-  const pending: PendingLocalCharacterHitPointEdit = { updatedAt: now }
+  const pending: PendingLocalCharacterHitPointEdit = {
+    ...pendingLocalCharacterHitPointEdits.get(id),
+    updatedAt: now,
+  }
   if (Number.isFinite(patch.currentHp)) pending.currentHp = Math.max(0, Math.floor(patch.currentHp!))
   if (Number.isFinite(patch.maxHp)) pending.maxHp = Math.max(1, Math.floor(patch.maxHp!))
   if (Number.isFinite(patch.tempHp)) pending.tempHp = Math.max(0, Math.floor(patch.tempHp!))
+  if (Number.isFinite(patch.deathSaveSuccesses)) {
+    pending.deathSaveSuccesses = Math.max(0, Math.min(3, Math.floor(patch.deathSaveSuccesses!)))
+  }
+  if (Number.isFinite(patch.deathSaveFailures)) {
+    pending.deathSaveFailures = Math.max(0, Math.min(3, Math.floor(patch.deathSaveFailures!)))
+  }
+  if (typeof patch.deathSaveStable === 'boolean') pending.deathSaveStable = patch.deathSaveStable
   if (patch.hitPointMaximumMode === 'fixed' || patch.hitPointMaximumMode === 'manual') {
     pending.hitPointMaximumMode = patch.hitPointMaximumMode
   }
@@ -282,6 +399,7 @@ export function markPendingLocalCharacterHitPointEdit(
   }
   if (
     pending.currentHp == null && pending.maxHp == null && pending.tempHp == null &&
+    pending.deathSaveSuccesses == null && pending.deathSaveFailures == null && pending.deathSaveStable == null &&
     pending.hitPointMaximumMode == null && pending.hitPointRolls == null && pending.hitPointDice == null
   ) return
   pendingLocalCharacterHitPointEdits.set(id, pending)
@@ -321,6 +439,9 @@ export function mergePendingLocalCharacterHitPointEdits(
       (pending.currentHp == null || character.currentHp === pending.currentHp) &&
       (pending.maxHp == null || character.maxHp === pending.maxHp) &&
       (pending.tempHp == null || character.tempHp === pending.tempHp) &&
+      (pending.deathSaveSuccesses == null || character.deathSaveSuccesses === pending.deathSaveSuccesses) &&
+      (pending.deathSaveFailures == null || character.deathSaveFailures === pending.deathSaveFailures) &&
+      (pending.deathSaveStable == null || character.deathSaveStable === pending.deathSaveStable) &&
       (pending.hitPointMaximumMode == null || character.hitPointMaximumMode === pending.hitPointMaximumMode) &&
       (pending.hitPointRolls == null || JSON.stringify(character.hitPointRolls ?? []) === JSON.stringify(pending.hitPointRolls)) &&
       (pending.hitPointDice == null || JSON.stringify(character.hitPointDice ?? []) === JSON.stringify(pending.hitPointDice))
@@ -333,6 +454,9 @@ export function mergePendingLocalCharacterHitPointEdits(
       ...(pending.currentHp == null ? {} : { currentHp: pending.currentHp }),
       ...(pending.maxHp == null ? {} : { maxHp: pending.maxHp }),
       ...(pending.tempHp == null ? {} : { tempHp: pending.tempHp }),
+      ...(pending.deathSaveSuccesses == null ? {} : { deathSaveSuccesses: pending.deathSaveSuccesses }),
+      ...(pending.deathSaveFailures == null ? {} : { deathSaveFailures: pending.deathSaveFailures }),
+      ...(pending.deathSaveStable == null ? {} : { deathSaveStable: pending.deathSaveStable }),
       ...(pending.hitPointMaximumMode == null ? {} : { hitPointMaximumMode: pending.hitPointMaximumMode }),
       ...(pending.hitPointRolls == null ? {} : { hitPointRolls: [...pending.hitPointRolls] }),
       ...(pending.hitPointDice == null ? {} : { hitPointDice: pending.hitPointDice.map((pool) => ({ ...pool })) }),
@@ -1071,6 +1195,10 @@ function sharedCharactersRoomKey(): string {
   return getRoomSession()?.roomId ?? '__local__'
 }
 
+export function hasHydratedSharedCharactersForCurrentRoom(): boolean {
+  return hydratedSharedCharactersRoomKey === sharedCharactersRoomKey()
+}
+
 export function shouldApplySharedCharactersSnapshot(input: {
   incomingRevision?: number
   lastAppliedRevision?: number
@@ -1087,22 +1215,77 @@ export function shouldApplySharedCharactersSnapshot(input: {
   return (input.incomingUpdatedAt ?? 0) >= (input.lastAppliedUpdatedAt ?? 0)
 }
 
+function latestDmAdvancementRevisionAt(character: Character): number {
+  let latest = 0
+  for (const record of character.dnd5eLevelAdvancements ?? []) {
+    for (const revision of record.revisions ?? []) {
+      if (revision.revisedBy === 'dm' && Number.isFinite(revision.revisedAt)) {
+        latest = Math.max(latest, revision.revisedAt)
+      }
+    }
+  }
+  return latest
+}
+
+function shouldAcceptSharedDmAdvancementRevision(local: Character, shared: Character): boolean {
+  const sharedRevisionAt = latestDmAdvancementRevisionAt(shared)
+  if (sharedRevisionAt <= latestDmAdvancementRevisionAt(local)) return false
+  hydratePendingLocalAdvancements()
+  gcPendingLocalAdvancements()
+  const pending = pendingLocalAdvancements.get(local.id)
+  return !pending || pending.updatedAt < sharedRevisionAt
+}
+
 export function mergePlayerWritableCharacter(local: Character, shared: Character): Character {
   const projectedEffects = projectDnd5eActiveEffectState(shared.dnd5eCombatState?.activeEffects)
+  const localConcentrationSpellId = local.dnd5eCombatState?.concentrationSpellId?.trim()
+  const sharedConcentrationSpellId = shared.dnd5eCombatState?.concentrationSpellId?.trim()
   const hasStructuredConcentration = Boolean(
-    local.dnd5eCombatState?.concentrationSpellId?.trim() ||
-    shared.dnd5eCombatState?.concentrationSpellId?.trim(),
+    localConcentrationSpellId || sharedConcentrationSpellId,
   )
+  const acceptSharedDmAdvancement = shouldAcceptSharedDmAdvancementRevision(local, shared)
   return {
     ...local,
+    ...(acceptSharedDmAdvancement ? {
+      level: shared.level,
+      dnd5eClassLevels: shared.dnd5eClassLevels
+        ? structuredClone(shared.dnd5eClassLevels)
+        : undefined,
+      dnd5eClassContentBindings: shared.dnd5eClassContentBindings
+        ? structuredClone(shared.dnd5eClassContentBindings)
+        : undefined,
+      abilities: { ...shared.abilities },
+      skills: [...shared.skills],
+      savingThrows: [...shared.savingThrows],
+      dnd5eClassChoices: shared.dnd5eClassChoices
+        ? structuredClone(shared.dnd5eClassChoices)
+        : undefined,
+      dnd5eFeatIds: shared.dnd5eFeatIds ? [...shared.dnd5eFeatIds] : undefined,
+      dnd5eContentChoices: shared.dnd5eContentChoices
+        ? structuredClone(shared.dnd5eContentChoices)
+        : undefined,
+      dnd5eLevelAdvancements: shared.dnd5eLevelAdvancements
+        ? structuredClone(shared.dnd5eLevelAdvancements)
+        : undefined,
+      hitPointMaximumMode: shared.hitPointMaximumMode,
+      hitPointRolls: shared.hitPointRolls ? [...shared.hitPointRolls] : undefined,
+      hitPointDice: shared.hitPointDice?.map((pool) => ({ ...pool })),
+      hitDice: shared.hitDice,
+    } : {}),
     currentHp: shared.currentHp,
     maxHp: shared.maxHp,
     tempHp: shared.tempHp,
-    // Headless concentration is DM-authoritative, including the short window
-    // where one side has already cleared the spell id. When neither snapshot
-    // has a structured spell, retain the legacy/manual sheet toggle instead
-    // of making that existing player control impossible to save.
-    concentrating: hasStructuredConcentration ? shared.concentrating : local.concentrating,
+    // The structured spell id is the authority for automated concentration.
+    // Some Headless commits publish it one snapshot before the legacy boolean;
+    // deriving the player projection from the id prevents the status badge and
+    // quick sheet from disappearing during that synchronization window. When
+    // neither side has a structured spell, retain the legacy/manual sheet
+    // toggle instead of making that existing player control impossible to save.
+    concentrating: sharedConcentrationSpellId
+      ? true
+      : hasStructuredConcentration
+        ? false
+        : local.concentrating,
     conditions: projectedEffects.conditions,
     classResources: shared.classResources,
     dnd5eCombatState: shared.dnd5eCombatState
@@ -1334,7 +1517,7 @@ function reconcileDnd5eClassLevelPatch(current: Character, patch: Partial<Charac
 interface CharacterState {
   characters: Character[]
   selectedId: string | null
-  loadShared: () => Promise<void>
+  loadShared: (options?: { force?: boolean }) => Promise<void>
   saveSharedNow: (updatedAt?: number) => Promise<number>
   select: (id: string | null) => void
   add: (name?: string) => string
@@ -1351,6 +1534,8 @@ interface CharacterState {
     options?: {
       protectHitPointsUntilAcknowledged?: boolean
       protectClassResourcesUntilAcknowledged?: boolean
+      protectClassChoicesUntilAcknowledged?: boolean
+      protectPatchUntilAcknowledged?: boolean
     },
   ) => void
   applyInventoryMutation: (mutation: Dnd5eInventoryMutation) => Dnd5eInventoryMutationResult
@@ -1363,13 +1548,17 @@ interface CharacterState {
   remove: (id: string) => void
   shortRestAll: () => void
   longRestAll: () => void
-  reconcileCampaignTime: (clock: SharedCampaignTimeState) => {
+  reconcileCampaignTime: (clock: SharedCampaignTimeState, options?: {
+    airborneCharacterIds?: ReadonlySet<string>
+  }) => {
     changed: boolean
     dawnsApplied: number
     longRestsApplied: number
     longRestsBlocked: number
   }
-  reconcileCampaignTimeAndSave: (clock: SharedCampaignTimeState) => Promise<{
+  reconcileCampaignTimeAndSave: (clock: SharedCampaignTimeState, options?: {
+    airborneCharacterIds?: ReadonlySet<string>
+  }) => Promise<{
     changed: boolean
     dawnsApplied: number
     longRestsApplied: number
@@ -1410,6 +1599,7 @@ export const useCharacterStore = create<CharacterState>()(
         longRestsApplied: number
         longRestsBlocked: number
       }> | null = null
+      let authorityCharacterMutationEpoch = 0
 
       const saveCharacters = () => {
         const seq = ++characterSaveSeq
@@ -1468,13 +1658,15 @@ export const useCharacterStore = create<CharacterState>()(
       return {
         characters: [],
         selectedId: null,
-        loadShared: async () => {
+        loadShared: async (options) => {
           const shared = await loadSharedResource<SharedCharactersState>('characters')
           if (!shared?.characters) {
+            hydratedSharedCharactersRoomKey = sharedCharactersRoomKey()
             saveCharacters()
             return
           }
           const roomKey = sharedCharactersRoomKey()
+          hydratedSharedCharactersRoomKey = roomKey
           const incomingRevision = shared._sync?.revision
           const lastAppliedRevision = lastAppliedCharactersRevisionByRoom.get(roomKey)
           if (!shouldApplySharedCharactersSnapshot({
@@ -1521,6 +1713,20 @@ export const useCharacterStore = create<CharacterState>()(
             sharedCharactersWithPendingClassResources,
             Date.now(),
           )
+          const sharedCharactersWithPendingAuthority = mergePendingAuthorityCharacterPatches(
+            sharedCharactersWithPendingAdvancements,
+            Date.now(),
+          )
+          // A room-authority combat patch can race an older full-array save
+          // from another client. Keeping the patch only in memory makes the UI
+          // look correct for the 30-second protection window, then allows HP,
+          // slots, or effects to jump backwards when the protection expires.
+          // Republish the protected winner until the shared snapshot actually
+          // acknowledges every changed field.
+          const pendingAuthorityMustBeRepublished = pendingAuthorityCharacterPatchesNeedRepublish(
+            sharedCharactersWithPendingAdvancements,
+            sharedCharactersWithPendingAuthority,
+          )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
             (character, index) => character.level !== filteredSharedCharacters[index]?.level,
           )
@@ -1542,6 +1748,9 @@ export const useCharacterStore = create<CharacterState>()(
               return !!incoming && (
                 character.currentHp !== incoming.currentHp || character.maxHp !== incoming.maxHp ||
                 character.tempHp !== incoming.tempHp ||
+                character.deathSaveSuccesses !== incoming.deathSaveSuccesses ||
+                character.deathSaveFailures !== incoming.deathSaveFailures ||
+                character.deathSaveStable !== incoming.deathSaveStable ||
                 character.hitPointMaximumMode !== incoming.hitPointMaximumMode ||
                 JSON.stringify(character.hitPointRolls ?? []) !== JSON.stringify(incoming.hitPointRolls ?? []) ||
                 JSON.stringify(character.hitPointDice ?? []) !== JSON.stringify(incoming.hitPointDice ?? [])
@@ -1562,10 +1771,14 @@ export const useCharacterStore = create<CharacterState>()(
             pendingLevelMustBeRepublished || pendingFighterChoicesMustBeRepublished ||
             pendingClassChoicesMustBeRepublished || pendingPluginFeaturesMustBeRepublished ||
             pendingHitPointsMustBeRepublished || pendingClassResourcesMustBeRepublished ||
-            pendingAdvancementsMustBeRepublished
+            pendingAdvancementsMustBeRepublished || pendingAuthorityMustBeRepublished
           const snapshot = JSON.stringify(shared)
           // 普通重复快照可短路；若它仍落后于持久化的本地编辑，则必须重新应用并重试保存。
-          if (snapshot === lastSharedCharactersSnapshot && !pendingCharacterEditMustBeRepublished) {
+          if (
+            snapshot === lastSharedCharactersSnapshot &&
+            !pendingCharacterEditMustBeRepublished &&
+            !options?.force
+          ) {
             // saveCharacters 会在 PUT 前记录本地 snapshot；服务端回显该 snapshot 时仍须推进
             // 单调水位，否则玩家端随后可能接受夹在旧水位与本次 ACK 之间的乱序快照。
             lastAppliedCharactersUpdatedAt = incomingUpdatedAt
@@ -1584,7 +1797,7 @@ export const useCharacterStore = create<CharacterState>()(
           const currentRoomSession = getRoomSession()
           const currentAccount = getAccountSession()
           let accountOwnershipMustBeRepublished = false
-          const sharedCharacters = sharedCharactersWithPendingAdvancements.map(finalizeCharacter).map((character) => {
+          const sharedCharacters = sharedCharactersWithPendingAuthority.map(finalizeCharacter).map((character) => {
             if (
               currentRoomSession?.role === 'player' && currentAccount &&
               character.roomId === currentRoomSession.roomId &&
@@ -1714,7 +1927,8 @@ export const useCharacterStore = create<CharacterState>()(
           if (patch.level != null) markPendingLocalCharacterLevelEdit(id, patch.level)
           if (
             patch.currentHp != null || patch.maxHp != null || patch.tempHp != null ||
-            patch.hitPointMaximumMode != null || patch.hitPointRolls != null || patch.hitPointDice != null
+            patch.hitPointMaximumMode != null || patch.hitPointRolls != null || patch.hitPointDice != null ||
+            patch.deathSaveSuccesses != null || patch.deathSaveFailures != null || patch.deathSaveStable != null
           ) {
             markPendingLocalCharacterHitPointEdit(id, patch)
           }
@@ -1760,6 +1974,19 @@ export const useCharacterStore = create<CharacterState>()(
           updateChar(id, () => next)
         },
         applyAuthorityUpdate: (id, patch, options) => {
+          const current = get().characters.find((character) => character.id === id)
+          authorityCharacterMutationEpoch += 1
+          if (current && options?.protectPatchUntilAcknowledged) {
+            markPendingAuthorityCharacterPatch(id, current, patch)
+          }
+          if (options?.protectClassChoicesUntilAcknowledged) {
+            if (patch.dnd5eClassChoices?.fighter) {
+              markPendingLocalFighterChoices(id, patch.dnd5eClassChoices.fighter)
+            }
+            if (patch.dnd5eClassChoices?.classes) {
+              markPendingLocalClassChoices(id, patch.dnd5eClassChoices.classes)
+            }
+          }
           if (patch.currentHp != null || patch.maxHp != null || patch.tempHp != null) {
             if (options?.protectHitPointsUntilAcknowledged) {
               markPendingLocalCharacterHitPointEdit(id, patch)
@@ -1833,11 +2060,15 @@ export const useCharacterStore = create<CharacterState>()(
           }))
           saveCharacters()
         },
-        reconcileCampaignTime: (clock) => {
+        reconcileCampaignTime: (clock, options) => {
           let dawnsApplied = 0
           let longRestsApplied = 0
           let longRestsBlocked = 0
-          const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(character, clock))
+          const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(
+            character,
+            clock,
+            { airborne: options?.airborneCharacterIds?.has(character.id) === true },
+          ))
           const changed = results.some((result) => result.changed)
           for (const result of results) {
             dawnsApplied += result.dawnsApplied
@@ -1848,31 +2079,84 @@ export const useCharacterStore = create<CharacterState>()(
           if (changed) saveCharacters()
           return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
         },
-        reconcileCampaignTimeAndSave: async (clock) => {
-          if (campaignTimeReconcileAndSavePromise) {
-            await campaignTimeReconcileAndSavePromise
+        reconcileCampaignTimeAndSave: async (clock, options) => {
+          // React can schedule several reconciliation effects for the same
+          // atomic clock/character update. Every caller must join the active
+          // operation; awaiting it and then starting another creates a herd of
+          // stale full-snapshot PUTs that all conflict with the first winner.
+          if (campaignTimeReconcileAndSavePromise) return campaignTimeReconcileAndSavePromise
+          const localResults = get().characters.map((character) =>
+            reconcileDnd5eCharacterCampaignTime(character, clock, {
+              airborne: options?.airborneCharacterIds?.has(character.id) === true,
+            }))
+          if (!localResults.some((result) => result.changed)) {
+            // CampaignTimeSystem also reacts to ordinary character updates. A
+            // long-cast transaction applies its completion-time character
+            // snapshot before the matching clock snapshot is published. When
+            // the still-old clock cannot change any local character, loading
+            // the shared resource here can race the pending atomic commit and
+            // replace spent slots/new effects with the pre-cast snapshot.
+            return {
+              changed: false,
+              dawnsApplied: localResults.reduce((total, result) => total + result.dawnsApplied, 0),
+              longRestsApplied: localResults.reduce((total, result) => total + result.longRestsApplied, 0),
+              longRestsBlocked: localResults.reduce((total, result) => total + result.longRestsBlocked, 0),
+            }
           }
-          campaignTimeReconcileAndSavePromise = (async () => {
-            let dawnsApplied = 0
-            let longRestsApplied = 0
-            let longRestsBlocked = 0
-            const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(character, clock))
-            const changed = results.some((result) => result.changed)
-            for (const result of results) {
-              dawnsApplied += result.dawnsApplied
-              longRestsApplied += result.longRestsApplied
-              longRestsBlocked += result.longRestsBlocked
-            }
-            if (changed) {
+          const operation = (async () => {
+            const startingAuthorityMutationEpoch = authorityCharacterMutationEpoch
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              // A spell transaction can update campaign-time and characters in
+              // one commit. Rebase before projecting elapsed time so this
+              // follow-up never starts from the pre-transaction character list.
+              await get().loadShared({ force: true })
+              // A room-authority action may have completed while this older
+              // reconciliation was waiting for its rebase snapshot. The
+              // action's changed fields remain protected until the atomic
+              // shared snapshot acknowledges them; an older time job must not
+              // publish a full character array across that transaction.
+              if (
+                authorityCharacterMutationEpoch !== startingAuthorityMutationEpoch ||
+                hasPendingAuthorityCharacterPatches()
+              ) {
+                return { changed: false, dawnsApplied: 0, longRestsApplied: 0, longRestsBlocked: 0 }
+              }
+              let dawnsApplied = 0
+              let longRestsApplied = 0
+              let longRestsBlocked = 0
+              const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(
+                character,
+                clock,
+                { airborne: options?.airborneCharacterIds?.has(character.id) === true },
+              ))
+              const changed = results.some((result) => result.changed)
+              for (const result of results) {
+                dawnsApplied += result.dawnsApplied
+                longRestsApplied += result.longRestsApplied
+                longRestsBlocked += result.longRestsBlocked
+              }
+              if (!changed) {
+                return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
+              }
               set({ characters: results.map((result) => result.character) })
-              await publishCharactersSnapshot()
+              try {
+                await publishCharactersSnapshot()
+                return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
+              } catch (error) {
+                if (attempt > 0 || !(error instanceof Error) || !error.message.includes('characters-save-rejected:conflict')) {
+                  throw error
+                }
+              }
             }
-            return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
+            return { changed: false, dawnsApplied: 0, longRestsApplied: 0, longRestsBlocked: 0 }
           })()
+          campaignTimeReconcileAndSavePromise = operation
           try {
-            return await campaignTimeReconcileAndSavePromise
+            return await operation
           } finally {
-            campaignTimeReconcileAndSavePromise = null
+            if (campaignTimeReconcileAndSavePromise === operation) {
+              campaignTimeReconcileAndSavePromise = null
+            }
           }
         },
 

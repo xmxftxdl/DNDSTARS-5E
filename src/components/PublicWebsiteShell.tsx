@@ -8,7 +8,7 @@ import ThemeToggle from './ThemeToggle'
 const publicNavigation = [
   { to: '/', label: '产品' },
   { to: '/combat', label: '战斗' },
-  { to: '/extension', label: '扩展市场' },
+  { to: '/app/extensions', label: '扩展市场' },
   { to: '/blog', label: '博客' },
   { to: '/pricing', label: '价格' },
 ] as const

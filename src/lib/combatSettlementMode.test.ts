@@ -5,7 +5,6 @@ import {
   normalizeCombatSettlementMode,
   supportsDmBattlefieldAdjustment,
   supportsManualDice,
-  usesAutomatedMonsterSettlement,
   usesAutomatedPlayerSettlement,
 } from './combatSettlementMode'
 
@@ -13,20 +12,19 @@ describe('combat settlement modes', () => {
   it('keeps automatic as the backwards-compatible default', () => {
     expect(normalizeCombatSettlementMode(undefined)).toBe('automatic')
     expect(usesAutomatedPlayerSettlement('automatic')).toBe(true)
-    expect(usesAutomatedMonsterSettlement('automatic')).toBe(true)
   })
 
-  it('separates automatic and manual authority', () => {
-    expect(usesAutomatedPlayerSettlement('manual')).toBe(false)
-    expect(usesAutomatedMonsterSettlement('manual')).toBe(false)
-    expect(supportsManualDice('manual', 'player')).toBe(true)
+  it('normalizes legacy room modes into per-action automatic routing', () => {
+    expect(usesAutomatedPlayerSettlement('manual')).toBe(true)
+    expect(supportsManualDice('manual', 'player')).toBe(false)
     expect(supportsManualDice('manual', 'dm')).toBe(true)
     expect(supportsManualDice('automatic', 'dm')).toBe(true)
     expect(supportsManualDice('automatic', 'player')).toBe(false)
   })
 
-  it('migrates the removed semi-automatic mode to manual', () => {
-    expect(normalizeCombatSettlementMode('semi-automatic')).toBe('manual')
+  it('migrates every removed global mode to automatic capability routing', () => {
+    expect(normalizeCombatSettlementMode('manual')).toBe('automatic')
+    expect(normalizeCombatSettlementMode('semi-automatic')).toBe('automatic')
   })
 
   it.each(['automatic', 'manual'] as const)(
@@ -37,13 +35,15 @@ describe('combat settlement modes', () => {
     },
   )
 
-  it('allows ending a turn without enabling automated actions in manual mode', () => {
+  it('does not globally disable individual action routes for legacy manual snapshots', () => {
     expect(allowsPlayerActionInSettlementMode('manual', 'end-turn')).toBe(true)
     expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-map-interaction')).toBe(true)
     expect(allowsPlayerActionInSettlementMode('manual', 'move-token', false)).toBe(true)
-    expect(allowsPlayerActionInSettlementMode('manual', 'move-token', true)).toBe(false)
-    expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-weapon-attack')).toBe(false)
-    expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-spell')).toBe(false)
+    expect(allowsPlayerActionInSettlementMode('manual', 'move-token', true)).toBe(true)
+    expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-weapon-attack')).toBe(true)
+    expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-spell-cast')).toBe(true)
+    expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-adjudicated-spell')).toBe(true)
+    expect(allowsPlayerActionInSettlementMode('manual', 'dnd5e-persistent-area-move')).toBe(true)
     expect(allowsPlayerActionInSettlementMode('automatic', 'dnd5e-weapon-attack')).toBe(true)
   })
 

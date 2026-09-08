@@ -13,6 +13,16 @@ export interface Dnd5eActiveSustainedSpellControl {
   slotLevel: number
 }
 
+export const DND5E_FLAME_BLADE_RELEASED_SUSPENSION = 'srd-5.1:spell:flame-blade:released'
+
+export interface Dnd5eFlameBladeManifestationControl {
+  effectId: string
+  manifested: boolean
+  label: string
+  description: string
+  economy: 'none' | 'bonus-action'
+}
+
 const CONTROL_LABELS: Readonly<Record<Dnd5eSustainedSpellControlId, string>> = {
   'flame-blade': '火焰刀攻击',
   'spiritual-weapon': '移动并攻击：灵体武器',
@@ -52,7 +62,7 @@ export function dnd5eActiveSustainedSpellControl(
         character.dnd5eCombatState?.concentrationSpellId === spell.id
       : effect.duration.type !== 'concentration'),
   )
-  if (!activeEffect || activeEffect.potency == null) return undefined
+  if (!activeEffect || activeEffect.potency == null || activeEffect.suspendedBy?.length) return undefined
   return {
     id: control.id,
     spellId: spell.id,
@@ -62,6 +72,46 @@ export function dnd5eActiveSustainedSpellControl(
     targeting: controlTargeting(spell),
     slotLevel: activeEffect.potency,
   }
+}
+
+/**
+ * Flame Blade remains a concentration effect after the caster lets go of it.
+ * Only this closed suspension marker can be reversed by the re-evocation control;
+ * unrelated suppressions never become player-toggleable.
+ */
+export function dnd5eFlameBladeManifestationControl(
+  character: Character,
+  spell: Dnd5eSrdSpellDefinition,
+): Dnd5eFlameBladeManifestationControl | undefined {
+  if (spell.id !== 'flame-blade') return undefined
+  const effect = character.dnd5eCombatState?.activeEffects?.find((candidate) =>
+    candidate.source.kind === 'spell' &&
+    candidate.source.rulesId === spell.id &&
+    candidate.definitionId === 'srd-5.1:spell:flame-blade' &&
+    candidate.duration.type === 'concentration' &&
+    character.dnd5eCombatState?.concentrationSpellId === spell.id,
+  )
+  if (!effect) return undefined
+  const suspensions = effect.suspendedBy ?? []
+  if (suspensions.length === 0) {
+    return {
+      effectId: effect.id,
+      manifested: true,
+      label: '放开火焰刀',
+      description: '放开刀刃使其消失；不结束专注，也不消耗动作。',
+      economy: 'none',
+    }
+  }
+  if (suspensions.length === 1 && suspensions[0] === DND5E_FLAME_BLADE_RELEASED_SUSPENSION) {
+    return {
+      effectId: effect.id,
+      manifested: false,
+      label: '重新唤出火焰刀',
+      description: '消耗附赠动作，在空手中重新唤出仍在专注维持的火焰刀。',
+      economy: 'bonus-action',
+    }
+  }
+  return undefined
 }
 
 export function dnd5eSustainedSpellControlLabel(id: Dnd5eSustainedSpellControlId): string {

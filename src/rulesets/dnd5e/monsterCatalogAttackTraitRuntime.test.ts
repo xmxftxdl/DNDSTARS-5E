@@ -7,6 +7,7 @@ import {
   type Dnd5eCombatant,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import {
   getDnd5eSrdMonster,
   setDnd5eRoomMonsterCatalog,
@@ -75,9 +76,9 @@ function weaponDamageRolls(
 function twoStrikeHobgoblin(): Dnd5eMonsterStatBlock {
   const hobgoblin = getDnd5eSrdMonster('srd-5.1:hobgoblin')
   if (!hobgoblin) throw new Error('missing SRD Hobgoblin')
-  const longsword = hobgoblin.actions.find((action) => action.id === 'longsword')
-  if (!longsword?.attack || longsword.automation !== 'headless') {
-    throw new Error('Hobgoblin longsword is not Headless')
+  const longbow = hobgoblin.actions.find((action) => action.id === 'longbow')
+  if (!longbow?.attack || longbow.automation !== 'headless') {
+    throw new Error('Hobgoblin longbow is not Headless')
   }
   return {
     ...hobgoblin,
@@ -86,9 +87,9 @@ function twoStrikeHobgoblin(): Dnd5eMonsterStatBlock {
     actions: [{
       id: 'test-multiattack',
       name: 'Test Multiattack',
-      description: 'The hobgoblin makes two longsword attacks.',
+      description: 'The hobgoblin makes two longbow attacks to test once-per-turn Martial Advantage.',
       kind: 'multiattack',
-      sequence: ['longsword', 'longsword'],
+      sequence: ['longbow', 'longbow'],
       automation: 'headless',
     }, ...hobgoblin.actions],
   }
@@ -202,6 +203,83 @@ describe('SRD precision attack traits in the Headless runtime', () => {
       expect(hit.state.combatants[target.id].conditions).toContain('prone')
     },
   )
+
+  it('lets Feather Fall safely settle a Minotaur Charge forced fall without fall-damage dice', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:minotaur')!
+    const actor = monsterCombatant(monster, {
+      speed: 40,
+      position: { x: 550, y: 450 },
+      elevationFeet: 40,
+      groundElevationFeet: 40,
+    })
+    const target = combatant('target', 'player', 10, {
+      position: { x: 337.5, y: 437.5 },
+      elevationFeet: 40,
+      groundElevationFeet: 40,
+    })
+    target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'activity:srd-5.1:spell:feather-fall:modifiers:0',
+      label: '羽落术',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'feather-fall', magical: true },
+      targetId: target.id,
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        safeFallFeet: 600,
+        controlledDescent: {
+          maximumFeetPerRound: 60,
+          safeLanding: true,
+          endsOnLanding: true,
+        },
+      },
+    })]
+    const state = startDnd5eHeadlessCombat('minotaur-charge-feather-fall', [actor, target])
+    state.gridDistance = {
+      cellUnits: 25,
+      feetPerCell: 5,
+      offsetX: 0,
+      offsetY: 0,
+      footprintCellsByCombatantId: { [actor.id]: 2, [target.id]: 1 },
+    }
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: actor.id, to: { x: 375, y: 450 }, distance: 35,
+    })
+    expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+    if (!moved.ok) return
+    setDistance(moved.state, actor.id, target.id, 5)
+
+    const hit = resolveDnd5eHeadlessAction(moved.state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: 'gore',
+      rolls: [{
+        targetId: target.id,
+        d20: 10,
+        damageRolls: weaponDamageRolls(monster, 'gore'),
+        traitDamageRolls: [{ traitId: 'charge-damage', rolls: [4, 5] }],
+        onHitEffectRolls: [{
+          effectId: 'charge:gore:forced-movement',
+          d20: 1,
+          forcedMovement: {
+            targetId: target.id,
+            to: { x: 287.5, y: 437.5 },
+            distanceFeet: 10,
+            toElevationFeet: 0,
+            toGroundElevationFeet: 0,
+            fallingDamageRolls: [],
+          },
+        }],
+      }],
+    })
+
+    expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+    if (!hit.ok) return
+    expect(hit.state.combatants[target.id].elevationFeet).toBe(0)
+    expect(hit.state.combatants[target.id].airborne).toBe(false)
+    expect(hit.state.combatants[target.id].conditions).toContain('prone')
+    expect(hit.events).toContainEqual(expect.objectContaining({
+      type: 'falling-damage-resolved', actorId: target.id, damage: 0, landedProne: false,
+    }))
+  })
 
   it.each([
     ['lion', 20, 'claw', 13, 'pounce-bite-bonus-action', 'bite'],
@@ -448,7 +526,7 @@ describe('SRD precision attack traits in the Headless runtime', () => {
       label: 'Hobgoblin Martial Advantage',
       slug: 'hobgoblin',
       traitId: 'martial-advantage',
-      childActionId: 'longsword',
+      childActionId: 'longbow',
       multiattackActionId: 'test-multiattack',
     },
     {
@@ -467,14 +545,15 @@ describe('SRD precision attack traits in the Headless runtime', () => {
       if (slug === 'hobgoblin') setDnd5eRoomMonsterCatalog([monster])
       const combatId = `${slug}-trait-runtime`
       const actor = monsterCombatant(monster)
+      const distance = slug === 'hobgoblin' ? 30 : 5
       const target = combatant('target', 'player', 10, {
-        position: { x: 5, y: 0 },
+        position: { x: distance, y: 0 },
       })
       const ally = combatant('ally', 'dm', 5, {
-        position: { x: 10, y: 0 },
+        position: { x: distance + 5, y: 0 },
       })
       const state = startDnd5eHeadlessCombat(combatId, [actor, target, ally])
-      setDistance(state, actor.id, target.id, 5)
+      setDistance(state, actor.id, target.id, distance)
       setDistance(state, ally.id, target.id, 5)
 
       const first = resolveDnd5eHeadlessAction(state, {

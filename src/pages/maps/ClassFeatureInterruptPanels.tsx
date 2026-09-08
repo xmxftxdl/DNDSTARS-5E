@@ -64,7 +64,7 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
   return (
     <>
       {sharedPluginChoicePrompt && (
-        <div className="absolute inset-0 z-[62] flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+        <div className="absolute inset-0 z-[160] flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-labelledby="shared-plugin-choice-title"
@@ -137,6 +137,12 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
             </h3>
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
               {`${sharedBardicInspirationPrompt.targetChar.name} 的${sharedBardicInspirationPrompt.rollType}当前结果为 ${sharedBardicInspirationPrompt.total}，目标值为 ${sharedBardicInspirationPrompt.targetNumber}。\n\n是否使用${sharedBardicInspirationPrompt.source === 'active-effect' ? `“${sharedBardicInspirationPrompt.sourceLabel ?? '奖励骰'}”的` : '一枚'} d${sharedBardicInspirationPrompt.dieSides}${sharedBardicInspirationPrompt.source === 'peerless-skill' ? ' 吟游激励骰发动超凡技艺' : sharedBardicInspirationPrompt.source === 'held-inspiration' || sharedBardicInspirationPrompt.source == null ? ' 吟游激励骰' : ' 奖励骰'}并加入结果？`}
+            </p>
+            <p
+              data-testid="bardic-inspiration-roll-owner-notice"
+              className="mt-3 rounded-lg border border-amber-300/15 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-100/80"
+            >
+              该骰只修正 {sharedBardicInspirationPrompt.targetChar.name} 自己的{sharedBardicInspirationPrompt.rollType}；不会修改怪物的攻击骰、伤害骰、传奇动作点或动作效果。
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button

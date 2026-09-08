@@ -1,0 +1,69 @@
+{
+  "mapId": "nightmare-ethereal-ui-1788605272652",
+  "combatId": "nightmare-ethereal-ui-1788605272652:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T10:47:53.267Z",
+  "actorAfter": {
+    "id": "actor",
+    "label": "梦魇兽",
+    "x": 210,
+    "y": 280,
+    "color": "#7c2d12",
+    "emoji": "N",
+    "size": 2,
+    "creatureSize": "大型",
+    "type": "enemy",
+    "poolId": "srd-5.1:nightmare",
+    "hp": 68,
+    "maxHp": 68,
+    "dnd5eCombatState": {
+      "schemaVersion": 2,
+      "activeEffects": [
+        {
+          "schemaVersion": 1,
+          "id": "monster_3Asrd-5.1_3Anightmare_3Aethereal-stride-self-only_3Aplanar-phase:actor:actor",
+          "definitionId": "monster:srd-5.1:nightmare:ethereal-stride-self-only:planar-phase",
+          "label": "以太步行：仅自身",
+          "tags": [
+            "etherealness",
+            "planar-phase",
+            "movement-mode",
+            "cross-plane-suppression"
+          ],
+          "kind": "debuff",
+          "source": {
+            "kind": "monster",
+            "actorId": "actor",
+            "actorName": "梦魇兽",
+            "rulesId": "monster:srd-5.1:nightmare:ethereal-stride-self-only",
+            "magical": true
+          },
+          "appliedAt": 1788605293385,
+          "duration": {
+            "type": "permanent"
+          },
+          "stackingKey": "monster:srd-5.1:nightmare:ethereal-stride-self-only:actor",
+          "stackingPolicy": "replace",
+          "visibility": "public",
+          "modifiers": {
+            "planarPhase": {
+              "plane": "ethereal",
+              "ignoresMaterialCollision": true,
+              "suppressCrossPlaneEffects": true,
+              "unrestrictedVerticalMovement": true
+            }
+          }
+        }
+      ],
+      "turnStartResolvedTurnKey": "nightmare-ethereal-ui-1788605272652:combat:1:actor",
+      "monsterActionUsesByActionId": {}
+    },
+    "dnd5eWorldTimeAppliedMinute": 480
+  },
+  "actionAvailable": 0,
+  "dmLog": "梦魇兽使用以太步行：仅自身，进入以太位面。",
+  "playerLog": "梦魇兽使用以太步行：仅自身，进入以太位面。",
+  "status": "passed",
+  "finishedAt": "2026-09-05T10:48:17.546Z"
+}

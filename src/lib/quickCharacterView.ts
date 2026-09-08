@@ -12,6 +12,24 @@ export interface QuickCharacterRulesSource {
   }
 }
 
+export type QuickCharacterCreatureFormMode = 'wild-shape' | 'polymorph' | 'true-polymorph' | 'animal-shapes' | 'shapechange'
+
+export interface QuickCharacterCreatureFormSource {
+  abilities: Record<QuickCharacterAbilityKey, number>
+  savingThrows?: Partial<Record<QuickCharacterAbilityKey, number>>
+  skills?: readonly { key: string; bonus: number }[]
+  passivePerception: number
+}
+
+export interface QuickCharacterCreatureFormState {
+  wildShapeMode?: QuickCharacterCreatureFormMode
+  wildShapeOriginalAbilities?: Record<QuickCharacterAbilityKey, number>
+  wildShapeOriginalSavingThrowBonuses?: Partial<Record<QuickCharacterAbilityKey, number>>
+  wildShapeOriginalSavingThrowProficiencies?: readonly QuickCharacterAbilityKey[]
+  wildShapeOriginalSkillProficiencies?: readonly string[]
+  wildShapeOriginalPassivePerception?: number
+}
+
 export const QUICK_CHARACTER_ABILITIES = [
   { key: 'str', label: '力量' },
   { key: 'dex', label: '敏捷' },
@@ -119,4 +137,129 @@ export function quickCharacterSkillRows(character: QuickCharacterRulesSource) {
       modifier: quickAbilityModifier(character.abilities[definition.ability]) + proficiency * rank,
     }
   })
+}
+
+/**
+ * Mirrors the authoritative creature-form stat projection used by the headless
+ * combat engine. Polymorph replaces the complete stat block; Wild Shape,
+ * Animal Shapes, and Shapechange retain mental scores and take the better of
+ * the creature's and the character's adjusted proficiencies.
+ */
+export function quickCreatureFormAbilityRows(
+  character: QuickCharacterRulesSource,
+  form: QuickCharacterCreatureFormSource,
+  state: QuickCharacterCreatureFormState | undefined,
+) {
+  const mode = state?.wildShapeMode ?? 'wild-shape'
+  if (mode === 'polymorph' || mode === 'true-polymorph') {
+    return QUICK_CHARACTER_ABILITIES.map((definition) => {
+      const score = form.abilities[definition.key]
+      const modifier = quickAbilityModifier(score)
+      const explicitSave = form.savingThrows?.[definition.key]
+      return {
+        ...definition,
+        score,
+        modifier,
+        saveProficient: explicitSave != null && explicitSave > modifier,
+        savingThrowModifier: explicitSave ?? modifier,
+      }
+    })
+  }
+
+  const proficiency = quickProficiencyBonus(character.level)
+  const originalAbilities = state?.wildShapeOriginalAbilities ?? character.abilities
+  const originalSavingThrowProficiencies = new Set(
+    state?.wildShapeOriginalSavingThrowProficiencies ??
+      character.savingThrows.filter((key): key is QuickCharacterAbilityKey =>
+        QUICK_CHARACTER_ABILITIES.some((definition) => definition.key === key)),
+  )
+  const formAbilities = {
+    ...originalAbilities,
+    str: form.abilities.str,
+    dex: form.abilities.dex,
+    con: form.abilities.con,
+  }
+
+  return QUICK_CHARACTER_ABILITIES.map((definition) => {
+    const ability = definition.key
+    const score = formAbilities[ability]
+    const modifier = quickAbilityModifier(score)
+    const originalModifier = quickAbilityModifier(originalAbilities[ability])
+    const originalProficiency = originalSavingThrowProficiencies.has(ability) ? proficiency : 0
+    const originalBonus = state?.wildShapeOriginalSavingThrowBonuses?.[ability] ??
+      originalModifier + originalProficiency
+    const additionalBonus = originalBonus - originalModifier - originalProficiency
+    const retainedBonus = modifier + originalProficiency + additionalBonus
+    const monsterBonus = form.savingThrows?.[ability] ?? modifier
+    const monsterProficient = form.savingThrows?.[ability] != null &&
+      form.savingThrows[ability]! > quickAbilityModifier(form.abilities[ability])
+    return {
+      ...definition,
+      score,
+      modifier,
+      saveProficient: originalSavingThrowProficiencies.has(ability) || monsterProficient,
+      savingThrowModifier: Math.max(retainedBonus, monsterBonus),
+    }
+  })
+}
+
+export function quickCreatureFormSkillRows(
+  character: QuickCharacterRulesSource,
+  form: QuickCharacterCreatureFormSource,
+  state: QuickCharacterCreatureFormState | undefined,
+) {
+  const mode = state?.wildShapeMode ?? 'wild-shape'
+  if (mode === 'polymorph' || mode === 'true-polymorph') {
+    return QUICK_CHARACTER_SKILLS.map((definition) => {
+      const explicitSkill = form.skills?.find((entry) => entry.key === definition.key)
+      return {
+        ...definition,
+        proficient: explicitSkill != null,
+        expertise: false,
+        modifier: explicitSkill?.bonus ?? quickAbilityModifier(form.abilities[definition.ability]),
+      }
+    })
+  }
+
+  const originalAbilities = state?.wildShapeOriginalAbilities ?? character.abilities
+  const originalSkills = new Set(state?.wildShapeOriginalSkillProficiencies ?? character.skills)
+  const originalRows = new Map(quickCharacterSkillRows({
+    ...character,
+    abilities: originalAbilities,
+    skills: [...originalSkills],
+  }).map((row) => [row.key, row] as const))
+  const formAbilities = {
+    ...originalAbilities,
+    str: form.abilities.str,
+    dex: form.abilities.dex,
+    con: form.abilities.con,
+  }
+
+  return QUICK_CHARACTER_SKILLS.map((definition) => {
+    const original = originalRows.get(definition.key)!
+    const retainedBonus = original.modifier +
+      quickAbilityModifier(formAbilities[definition.ability]) -
+      quickAbilityModifier(originalAbilities[definition.ability])
+    const monsterSkill = form.skills?.find((entry) => entry.key === definition.key)
+    const monsterBonus = monsterSkill?.bonus ?? quickAbilityModifier(formAbilities[definition.ability])
+    const retainedWins = retainedBonus >= monsterBonus
+    return {
+      ...definition,
+      proficient: originalSkills.has(definition.key) || monsterSkill != null,
+      expertise: retainedWins && original.expertise,
+      modifier: Math.max(retainedBonus, monsterBonus),
+    }
+  })
+}
+
+export function quickCreatureFormPassivePerception(
+  characterPassivePerception: number,
+  form: QuickCharacterCreatureFormSource,
+  state: QuickCharacterCreatureFormState | undefined,
+): number {
+  if (state?.wildShapeMode === 'polymorph' || state?.wildShapeMode === 'true-polymorph') return form.passivePerception
+  return Math.max(
+    state?.wildShapeOriginalPassivePerception ?? characterPassivePerception,
+    form.passivePerception,
+  )
 }

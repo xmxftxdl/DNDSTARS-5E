@@ -9,6 +9,7 @@ import {
   syncDnd5ePrimalChampion,
 } from './hitPoints'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -50,6 +51,27 @@ function fighter(patch: Partial<Character> = {}): Character {
     ...patch,
   }
 }
+
+it('preserves current HP above the base maximum while an Aid-style maximum bonus is active', () => {
+  const aid = createDnd5eMechanicalEffect({
+    definitionId: 'activity:aid:aid:modifiers:0',
+    label: '援助术',
+    targetId: 'fighter',
+    source: { kind: 'spell', actorId: 'cleric', rulesId: 'aid', spellLevel: 2 },
+    duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+    modifiers: { hitPointMaximumBonus: 5 },
+  })
+  const aided = syncDnd5eHitPoints(fighter({
+    currentHp: 15,
+    maxHp: 10,
+    dnd5eCombatState: { activeEffects: [aid] },
+  }))
+  expect(aided).toMatchObject({ currentHp: 15, maxHp: 10 })
+  expect(syncDnd5eHitPoints({
+    ...aided,
+    dnd5eCombatState: { ...aided.dnd5eCombatState, activeEffects: [] },
+  })).toMatchObject({ currentHp: 10, maxHp: 10 })
+})
 
 describe('D&D 5e 2014 character hit points', () => {
   it('repairs an impossible level-12 fighter 1/1 save with the fixed HP rule', () => {

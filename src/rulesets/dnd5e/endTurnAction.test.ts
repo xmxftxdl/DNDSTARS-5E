@@ -9,6 +9,7 @@ import { resolveDnd5eBeginTurn } from './beginTurnAction'
 import { prepareDnd5ePlayerEndTurn, resolveDnd5ePlayerEndTurn } from './endTurnAction'
 import { DND5E_AVERTED_GAZE_DEFINITION_ID } from './headlessCombatEngine'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
+import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 
 function barbarian(sustained: boolean): Character {
   return {
@@ -52,6 +53,48 @@ describe('D&D 5e map end-turn authority bridge', () => {
     })
   })
 
+  it('projects the live UI turn economy into the authoritative end-turn snapshot', () => {
+    const input = fixture(barbarian(false))
+    const turnEconomy = createDnd5eTurnEconomyCounts('combat:3:barbarian-token', 30)
+    turnEconomy.action.current = 0
+    turnEconomy.bonusAction.current = 0
+    turnEconomy.reaction.current = 0
+    turnEconomy.objectInteraction!.current = 0
+    turnEconomy.movement.current = 0
+
+    const prepared = prepareDnd5ePlayerEndTurn({ ...input, turnEconomy })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.state.combatants['barbarian-token'].turn).toEqual({
+      actionAvailable: false,
+      bonusActionAvailable: false,
+      reactionAvailable: false,
+      objectInteractionAvailable: false,
+      movementRemaining: 0,
+    })
+  })
+
+  it('advances an explicit one-slot map combat instead of treating it as ended', () => {
+    const input = fixture(barbarian(false))
+    input.map.tokens = [input.map.tokens[0]]
+    input.initiativeOrder = [input.initiativeOrder[0]]
+
+    const resolved = resolveDnd5ePlayerEndTurn({
+      ...input,
+      deferNextTurnStart: true,
+    })
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.state).toMatchObject({
+      active: true,
+      round: 4,
+      initiativeIndex: 0,
+      initiativeOrder: ['barbarian-token'],
+    })
+  })
+
   it('persists a sustained Rage countdown through the map application', () => {
     const resolved = resolveDnd5ePlayerEndTurn(fixture(barbarian(true)))
     expect(resolved.ok).toBe(true)
@@ -59,6 +102,65 @@ describe('D&D 5e map end-turn authority bridge', () => {
     expect(resolved.application.characters[0].dnd5eCombatState).toMatchObject({
       raging: true, rageTurnsRemaining: 9, rageSustainedThisTurn: false,
     })
+  })
+
+  it('removes a persisted Activity one-shot slot when that extra turn ends', () => {
+    const actor = barbarian(false)
+    const extraSlotIds = [
+      'activity-extra-turns:combat:3:barbarian-token:actor:time-stop:1',
+      'activity-extra-turns:combat:3:barbarian-token:actor:time-stop:2',
+    ]
+    actor.dnd5eCombatState = {
+      ...actor.dnd5eCombatState,
+      activityExtraTurnGroup: {
+        groupId: 'activity-extra-turns:combat:3:barbarian-token:actor:time-stop',
+        slotIds: extraSlotIds,
+        endOnAffectOther: true,
+      },
+    }
+    const input = fixture(actor)
+    input.initiativeOrder = [
+      { ...input.initiativeOrder[0], slotId: 'barbarian-token:normal' },
+      { ...input.initiativeOrder[0], slotId: extraSlotIds[0] },
+      { ...input.initiativeOrder[0], slotId: extraSlotIds[1] },
+      { ...input.initiativeOrder[1], slotId: 'enemy-token:normal' },
+    ]
+    input.action.initiativeIndex = 1
+
+    const resolved = resolveDnd5ePlayerEndTurn(input)
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.state.initiativeSlotIds).toEqual([
+      'barbarian-token:normal',
+      extraSlotIds[1],
+      'enemy-token:normal',
+    ])
+    expect(resolved.result.state.oneShotInitiativeSlotIds).toEqual([extraSlotIds[1]])
+    expect(resolved.result.state.initiativeIndex).toBe(1)
+  })
+
+  it('treats an Activity slot id as one-shot when shared presentation metadata was filtered', () => {
+    const actor = barbarian(false)
+    const input = fixture(actor)
+    const extraSlotId = 'activity-extra-turns:combat:3:barbarian-token:actor:time-stop:1'
+    input.initiativeOrder = [
+      { ...input.initiativeOrder[0], slotId: 'barbarian-token:normal' },
+      { ...input.initiativeOrder[0], slotId: extraSlotId },
+      { ...input.initiativeOrder[1], slotId: 'enemy-token:normal' },
+    ]
+    input.action.initiativeIndex = 1
+
+    const resolved = resolveDnd5ePlayerEndTurn(input)
+
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.state.initiativeSlotIds).toEqual([
+      'barbarian-token:normal',
+      'enemy-token:normal',
+    ])
+    expect(resolved.result.state.oneShotInitiativeSlotIds).toBeUndefined()
+    expect(resolved.result.state.initiativeIndex).toBe(1)
   })
 
   it('ends Rage when the turn had neither an attack nor incoming damage', () => {
@@ -89,6 +191,132 @@ describe('D&D 5e map end-turn authority bridge', () => {
     actor.currentHp = 0
     actor.dnd5eCombatState = undefined
     expect(resolveDnd5ePlayerEndTurn(fixture(actor))).toMatchObject({ ok: true })
+  })
+
+  it('completes a persisted Slow-delayed spell when a preceding dead actor is skipped', () => {
+    const mage = barbarian(false)
+    mage.id = 'dead-mage'
+    mage.name = '法师'
+    mage.currentHp = 0
+    mage.dnd5eCombatState = undefined
+    const druid = barbarian(false)
+    druid.id = 'delayed-druid'
+    druid.name = '德鲁伊'
+    druid.charClass = '德鲁伊'
+    druid.dnd5eClassLevels = { druid: 5 }
+    druid.dnd5eClassChoices = {
+      classes: { druid: { selections: { 'spell-cantrips': ['guidance'] } } },
+    }
+    const mageToken: Token = {
+      id: 'dead-mage-token', label: mage.name, x: 25, y: 25, color: '', emoji: '', size: 1,
+      type: 'player', characterId: mage.id,
+    }
+    const druidToken: Token = {
+      id: 'delayed-druid-token', label: druid.name, x: 75, y: 25, color: '', emoji: '', size: 1,
+      type: 'player', characterId: druid.id,
+    }
+    const slow = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:slow', label: '缓慢术', targetId: druidToken.id,
+      source: { kind: 'spell', actorId: 'slow-source', rulesId: 'slow', spellSaveDc: 19 },
+      duration: { type: 'permanent' },
+      modifiers: {
+        actionOrBonusActionOnly: true,
+        actionSpellDelay: { dieSides: 20, delayMinimum: 11 },
+      },
+    })
+    druid.dnd5eCombatState = {
+      activeEffects: [slow],
+      slowDelayedSpell: {
+        schemaVersion: 1,
+        createdTurnKey: 'combat:4:delayed-druid-token',
+        action: {
+          type: 'cast-spell', actorId: druidToken.id, targetId: druidToken.id,
+          targetIds: [druidToken.id], spellId: 'guidance', slotLevel: 0,
+          slowSpellDelayD20: 12, effectRolls: [],
+        },
+      },
+    }
+    const map: BattleMap = {
+      id: 'slow-delay-map', name: 'Slow delay map', width: 200, height: 200,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [mageToken, druidToken],
+    }
+    const initiativeOrder: InitiativeEntry[] = [mageToken, druidToken].map((token, index) => ({
+      slotId: `${token.id}:normal`, tokenId: token.id, label: token.label,
+      emoji: '', color: '', roll: 20 - index,
+    }))
+    const action: SharedPlayerActionState = {
+      id: 'skip-dead-mage', mapId: map.id, combatId: 'combat', sourceMode: 'dm', status: 'pending',
+      type: 'end-turn', actorTokenId: mageToken.id, characterId: mage.id,
+      round: 5, initiativeIndex: 0, seq: 1, updatedAt: 1,
+    }
+
+    const resolved = resolveDnd5ePlayerEndTurn({ action, map, characters: [mage, druid], initiativeOrder })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.events).toContainEqual({
+      type: 'slow-delayed-spell-completed', actorId: druidToken.id,
+      spellId: 'guidance', slotLevel: 0,
+    })
+    const liveDruid = resolved.result.state.combatants[druidToken.id]
+    expect(liveDruid.turn).toMatchObject({ actionAvailable: false, bonusActionAvailable: false })
+    expect(resolved.application.characters.find((entry) => entry.id === druid.id)
+      ?.dnd5eCombatState?.slowDelayedSpell).toBeUndefined()
+    expect(resolved.application.characters.find((entry) => entry.id === druid.id)
+      ?.dnd5eCombatState?.activeEffects).toEqual(expect.arrayContaining([
+        expect.objectContaining({ definitionId: 'srd-5.1:spell:guidance' }),
+      ]))
+  })
+
+  it('prepares and Host-validates closed turn-end random-condition dice', () => {
+    const actor = barbarian(false)
+    const effect = createDnd5eMechanicalEffect({
+      id: 'blink-random-condition',
+      definitionId: 'srd-5.1:spell:blink:turn-end',
+      label: '闪现术',
+      source: { kind: 'spell', actorId: 'barbarian-token', rulesId: 'blink', spellLevel: 3 },
+      targetId: 'barbarian-token',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      legacyCondition: 'turn-end-random-condition:20:11:banished',
+    })
+    actor.dnd5eCombatState = {
+      ...actor.dnd5eCombatState,
+      schemaVersion: 2,
+      activeEffects: [effect],
+    }
+    const input = fixture(actor)
+    const prepared = prepareDnd5ePlayerEndTurn(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.activeEffectRandomConditions).toEqual([{
+      effect: expect.objectContaining({ id: effect.id }),
+      dieSides: 20,
+      minimum: 11,
+      condition: 'banished',
+    }])
+    expect(resolveDnd5ePlayerEndTurn(input)).toMatchObject({
+      ok: false, reason: 'invalid-action',
+    })
+    expect(resolveDnd5ePlayerEndTurn({
+      ...input,
+      activeEffectRandomConditionRolls: [{ effectId: effect.id, roll: 21 }],
+    })).toMatchObject({ ok: false, reason: 'invalid-action' })
+    const resolved = resolveDnd5ePlayerEndTurn({
+      ...input,
+      activeEffectRandomConditionRolls: [{ effectId: effect.id, roll: 11 }],
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.application.characters[0].dnd5eCombatState?.activeEffects)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ legacyCondition: 'banished' }),
+      ]))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-random-condition-resolved',
+      effectId: effect.id,
+      roll: 11,
+      triggered: true,
+    }))
   })
 
   it('resolves monster regeneration and recharge at the next turn boundary', () => {

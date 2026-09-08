@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BadgeDollarSign, ChevronDown, Download, FolderOpen, Plus, Save, Trash2, Upload, X } from 'lucide-react'
+import { DND5E_PLUGIN_CONTENT_CATEGORIES } from '../../../shared/plugin-content-category.mjs'
 import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   buildDnd5eCustomRulesContentPackageV2,
@@ -152,6 +153,7 @@ interface PersistentAreaTriggerEditorDraft {
   timing: Dnd5ePersistentAreaTriggerTiming
   oncePerRound: boolean
   oncePerTurn: boolean
+  oncePerTarget: boolean
   savingThrowEnabled: boolean
   savingThrowAbility: AbilityKey
   savingThrowDcMode: 'source-save-dc' | 'fixed'
@@ -169,6 +171,9 @@ interface PersistentAreaTriggerEditorDraft {
   conditionRounds: number
   conditionSaveAbility: AbilityKey
   conditionSaveDc: number
+  notificationEnabled: boolean
+  notificationDelivery: 'mental-to-source' | 'audible'
+  notificationAudibleRadiusFeet: number
   dmAdjustable: boolean
   /** Preserves newer trigger fields that this compact editor does not expose yet. */
   sourceDeclaration?: Dnd5ePersistentAreaTriggerDeclaration
@@ -654,10 +659,8 @@ const PLUGIN_DISTRIBUTION_POLICIES = [
   ['account-entitled', '每个账号需单独授权'],
   ['local-only', '仅本机使用'],
 ] as const
-const PLUGIN_CONTENT_CATEGORIES = [
-  ['mixed', '混合内容'], ['rules', '规则'], ['classes', '职业'], ['subclasses', '子职'], ['feats', '专长'], ['spells', '法术'],
-  ['items', '物品'], ['monsters', '怪物'], ['adventure', '冒险'],
-] as const
+const PLUGIN_CONTENT_CATEGORIES: readonly (readonly [Dnd5ePluginContentCategory, string])[] =
+  DND5E_PLUGIN_CONTENT_CATEGORIES.map((category) => [category.id, category.label] as const)
 const PLUGIN_CAPABILITIES: readonly Dnd5ePluginDeclaredCapability[] = [
   'damage', 'healing', 'temporary-hit-points', 'standard-condition', 'movement',
   'resource', 'summon', 'persistent-area', 'spell-transaction', 'interrupt',
@@ -733,6 +736,7 @@ const EFFECT_DURATION_BOUNDARIES = [
 ] as const
 const EFFECT_BREAK_EVENTS: readonly [NonNullable<Dnd5eEffectDefinitionV1['breakOn']>[number], string][] = [
   ['takes-damage', '受到伤害'],
+  ['targeted-by-spell', '成为法术目标'],
   ['targeted-by-attack', '成为攻击目标'],
   ['hit-by-attack', '被攻击命中'],
   ['makes-attack', '发起攻击'],
@@ -1078,6 +1082,7 @@ function newPersistentAreaTrigger(index: number): PersistentAreaTriggerEditorDra
     timing: 'on-enter',
     oncePerRound: true,
     oncePerTurn: false,
+    oncePerTarget: false,
     savingThrowEnabled: true,
     savingThrowAbility: 'con',
     savingThrowDcMode: 'source-save-dc',
@@ -1094,6 +1099,9 @@ function newPersistentAreaTrigger(index: number): PersistentAreaTriggerEditorDra
     conditionRounds: 1,
     conditionSaveAbility: 'con',
     conditionSaveDc: 12,
+    notificationEnabled: false,
+    notificationDelivery: 'mental-to-source',
+    notificationAudibleRadiusFeet: 60,
     dmAdjustable: false,
   }
 }
@@ -1793,6 +1801,7 @@ function importedHeadlessEffectDraft(
       timing: trigger.timing as PersistentAreaTriggerEditorDraft['timing'],
       oncePerRound: trigger.oncePerRound ?? false,
       oncePerTurn: trigger.oncePerTurn ?? false,
+      oncePerTarget: trigger.oncePerTarget ?? false,
       savingThrowEnabled: !!trigger.savingThrow,
       savingThrowAbility: trigger.savingThrow?.ability ?? 'con',
       savingThrowDcMode: trigger.savingThrow?.dc === 'source-save-dc' ? 'source-save-dc' : 'fixed',
@@ -1810,6 +1819,11 @@ function importedHeadlessEffectDraft(
       conditionRounds: trigger.condition?.duration.remainingRounds ?? 1,
       conditionSaveAbility: trigger.condition?.duration.saveAbility ?? 'con',
       conditionSaveDc: trigger.condition?.duration.saveDc ?? 10,
+      notificationEnabled: !!trigger.notification,
+      notificationDelivery: trigger.notification?.delivery ?? 'mental-to-source',
+      notificationAudibleRadiusFeet: trigger.notification?.delivery === 'audible'
+        ? trigger.notification.audibleRadiusFeet
+        : 60,
       dmAdjustable: trigger.dmAdjustable ?? false,
       sourceDeclaration: structuredClone(trigger),
       })),
@@ -3152,8 +3166,9 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
               id: trigger.id.trim(),
               label: trigger.label.trim(),
               timing: trigger.timing,
-              oncePerRound: trigger.oncePerTurn ? false : trigger.oncePerRound,
-              oncePerTurn: trigger.oncePerTurn,
+              oncePerRound: trigger.oncePerTarget || trigger.oncePerTurn ? false : trigger.oncePerRound,
+              oncePerTurn: trigger.oncePerTarget ? false : trigger.oncePerTurn,
+              oncePerTarget: trigger.oncePerTarget,
               ...(trigger.savingThrowEnabled ? {
                 savingThrow: {
                   ability: trigger.savingThrowAbility,
@@ -3185,6 +3200,14 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
                   },
                 },
               } : {}),
+              notification: trigger.notificationEnabled
+                ? trigger.notificationDelivery === 'audible'
+                  ? {
+                      delivery: 'audible' as const,
+                      audibleRadiusFeet: trigger.notificationAudibleRadiusFeet,
+                    }
+                  : { delivery: 'mental-to-source' as const }
+                : undefined,
               dmAdjustable: trigger.dmAdjustable,
             })),
           } : {}),
@@ -5987,8 +6010,9 @@ function HeadlessEffectEditor({
                         <BuilderInput label="触发名称" value={trigger.label} onChange={(label) => patchPersistentAreaTrigger(index, { label })} />
                         <BuilderSelect label="触发时点" value={trigger.timing} options={PERSISTENT_AREA_TRIGGER_TIMINGS} onChange={(timing) => patchPersistentAreaTrigger(index, { timing: timing as PersistentAreaTriggerEditorDraft['timing'] })} />
                         <div className="flex flex-wrap items-end gap-2 pb-0.5">
-                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound, oncePerTurn: oncePerRound ? false : trigger.oncePerTurn })} />
-                          <Toggle label="同一目标每回合一次" value={trigger.oncePerTurn} onChange={(oncePerTurn) => patchPersistentAreaTrigger(index, { oncePerTurn, oncePerRound: oncePerTurn ? false : trigger.oncePerRound })} />
+                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound, oncePerTurn: oncePerRound ? false : trigger.oncePerTurn, oncePerTarget: oncePerRound ? false : trigger.oncePerTarget })} />
+                          <Toggle label="同一目标每回合一次" value={trigger.oncePerTurn} onChange={(oncePerTurn) => patchPersistentAreaTrigger(index, { oncePerTurn, oncePerRound: oncePerTurn ? false : trigger.oncePerRound, oncePerTarget: oncePerTurn ? false : trigger.oncePerTarget })} />
+                          <Toggle label="同一目标整个区域只触发一次" value={trigger.oncePerTarget} onChange={(oncePerTarget) => patchPersistentAreaTrigger(index, { oncePerTarget, oncePerRound: oncePerTarget ? false : trigger.oncePerRound, oncePerTurn: oncePerTarget ? false : trigger.oncePerTurn })} />
                           <Toggle label="提交前由 DM 调整" value={trigger.dmAdjustable} onChange={(dmAdjustable) => patchPersistentAreaTrigger(index, { dmAdjustable })} />
                         </div>
                       </div>
@@ -6030,7 +6054,19 @@ function HeadlessEffectEditor({
                           </div>}
                         </fieldset>
                       </div>
-                      {!trigger.damageEnabled && !trigger.conditionEnabled && <p className="mt-3 rounded-lg border border-rose-300/15 bg-rose-500/5 px-3 py-2 text-[11px] text-rose-100">触发效果至少需要伤害或标准状态。</p>}
+                      <fieldset className={`mt-3 rounded-lg border p-3 ${trigger.notificationEnabled ? 'border-cyan-300/15 bg-cyan-500/[0.025]' : 'border-white/8 bg-black/10'}`}>
+                        <legend className="px-1"><Toggle label="触发通知" value={trigger.notificationEnabled} onChange={(notificationEnabled) => patchPersistentAreaTrigger(index, { notificationEnabled })} /></legend>
+                        {trigger.notificationEnabled && <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <BuilderSelect
+                            label="通知方式"
+                            value={trigger.notificationDelivery}
+                            options={[["mental-to-source", "仅向来源发出心灵通知"], ["audible", "发出可听见的声音"]]}
+                            onChange={(notificationDelivery) => patchPersistentAreaTrigger(index, { notificationDelivery: notificationDelivery as PersistentAreaTriggerEditorDraft['notificationDelivery'] })}
+                          />
+                          {trigger.notificationDelivery === 'audible' && <BuilderNumber label="可听半径（尺）" value={trigger.notificationAudibleRadiusFeet} min={1} max={10000} onChange={(notificationAudibleRadiusFeet) => patchPersistentAreaTrigger(index, { notificationAudibleRadiusFeet })} />}
+                        </div>}
+                      </fieldset>
+                      {!trigger.damageEnabled && !trigger.conditionEnabled && !trigger.notificationEnabled && <p className="mt-3 rounded-lg border border-rose-300/15 bg-rose-500/5 px-3 py-2 text-[11px] text-rose-100">触发效果至少需要伤害、标准状态或通知。</p>}
                     </article>
                   ))}
                 </div>

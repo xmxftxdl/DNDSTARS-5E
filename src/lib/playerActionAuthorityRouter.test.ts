@@ -4,6 +4,7 @@ import type { Character } from '../types/character'
 import {
   canSubmitPlayerCombatAction,
   canSubmitPlayerSpellAction,
+  canSubmitPlayerTriggeredReactionSpellAction,
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
   type PlayerActionAuthorityAction,
@@ -135,7 +136,7 @@ describe('player action authority router', () => {
     )).toEqual({ status: 'rejected', reason: 'stale-combat' })
   })
 
-  it.each(['dnd5e-spell-cast', 'dnd5e-adjudicated-spell', 'dnd5e-persistent-area-move'])(
+  it.each(['dnd5e-ability-check', 'dnd5e-spell-cast', 'dnd5e-adjudicated-spell', 'dnd5e-persistent-area-move', 'dnd5e-class-feature', 'dnd5e-plugin-action', 'dnd5e-item-use'])(
     'allows an owned %s request outside combat without weakening combat turns',
     (type) => {
       expect(preflightPlayerActionAuthority(
@@ -170,6 +171,32 @@ describe('player action authority router', () => {
     )
 
     expect(result).toEqual({ status: 'rejected', reason: 'stale-turn' })
+  })
+
+  it('accepts an owned out-of-turn actor only when the Host has validated that exact reaction Token', () => {
+    const enemyToken = makeToken({ id: 'enemy-token', type: 'enemy', characterId: undefined })
+    const action = makeAction({ type: 'dnd5e-spell-cast' })
+    const context = makeContext({
+      activeMap: makeMap([makeToken(), enemyToken]),
+      currentTokenId: enemyToken.id,
+      authorizedOutOfTurnActorTokenId: action.actorTokenId,
+    })
+    const result = preflightPlayerActionAuthority(action, context)
+    expect(result.status).toBe('accepted')
+    if (result.status === 'accepted') expect(result.currentToken.id).toBe(action.actorTokenId)
+  })
+
+  it('accepts an owned Message reply outside the target creature\'s initiative turn', () => {
+    const enemyToken = makeToken({ id: 'enemy-token', type: 'enemy', characterId: undefined })
+    const result = preflightPlayerActionAuthority(
+      makeAction({ type: 'dnd5e-spell-whisper-reply' }),
+      makeContext({
+        activeMap: makeMap([makeToken(), enemyToken]),
+        currentTokenId: enemyToken.id,
+      }),
+    )
+    expect(result.status).toBe('accepted')
+    if (result.status === 'accepted') expect(result.currentToken.id).toBe('hero-token')
   })
 
   it('rejects actions that do not match the current initiative actor', () => {
@@ -335,6 +362,25 @@ describe('player action authority router', () => {
       combatActiveSnapshot: true,
       turnCharacter: makeCharacter(),
       currentInitiativeToken: makeToken({ type: 'enemy' }),
+    })).toBe(false)
+  })
+
+  it('allows only an alive assigned caster to answer a Host-opened spell reaction out of turn', () => {
+    const base = {
+      activeMap: makeMap(),
+      mode: 'player' as const,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      pendingAction: null,
+      playerCharacter: makeCharacter(),
+      characters: [makeCharacter()],
+    }
+    expect(canSubmitPlayerTriggeredReactionSpellAction(base)).toBe(true)
+    expect(canSubmitPlayerTriggeredReactionSpellAction({ ...base, combatActiveSnapshot: false })).toBe(false)
+    expect(canSubmitPlayerTriggeredReactionSpellAction({ ...base, pendingAction: { id: 'pending' } })).toBe(false)
+    expect(canSubmitPlayerTriggeredReactionSpellAction({
+      ...base,
+      characters: [makeCharacter({ currentHp: 0 })],
     })).toBe(false)
   })
 })

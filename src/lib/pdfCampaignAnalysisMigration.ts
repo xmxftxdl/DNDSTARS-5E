@@ -16,6 +16,7 @@ import type {
   PdfPrepTipV2,
   PdfRelationshipRecordV2,
   PdfSourceCitationV2,
+  PdfSourceBookmarkV1,
   PdfSourceEvidenceV2,
 } from './pdfCampaignAnalysisV2'
 import {
@@ -194,6 +195,7 @@ export function migratePdfCampaignAnalysisV1ToV2(analysis: PdfCampaignAnalysisV1
     encounters: disambiguatePdfEntityIds(mergePdfEncounterRecords(analysis.encounters).map((entry) => migrateNamed(entry, 'encounter', legacy.citation, legacy.evidence))),
     importCandidates: disambiguatePdfEntityIds(analysis.importCandidates.map((entry) => migrateNamed(entry, 'import-candidate', legacy.citation, legacy.evidence))),
     prepTips: disambiguatePdfEntityIds(analysis.prepTips.map((entry) => migratePrepTip(entry, legacy.citation, legacy.evidence))),
+    bookmarks: [],
     warnings: [...analysis.warnings],
     analyzedChunks: analysis.analyzedChunks,
     ...(analysis.analysisDepth ? { analysisDepth: analysis.analysisDepth } : {}),
@@ -286,12 +288,37 @@ export function normalizeDmEditedPdfCampaignAnalysisV2(analysis: PdfCampaignAnal
     }
     return { ...base, id: base.id || createStablePdfRelationshipId(base) }
   })
+  const documentById = new Map(analysis.documents.map((document) => [document.id, document]))
+  const bookmarkIds = new Set<string>()
+  const bookmarks = (analysis.bookmarks ?? []).flatMap((entry): PdfSourceBookmarkV1[] => {
+    const document = documentById.get(entry.documentId)
+    const id = typeof entry.id === 'string' ? entry.id.trim().slice(0, 120) : ''
+    if (!document || !id || bookmarkIds.has(id) || !Number.isSafeInteger(entry.page) || entry.page < 1 || entry.page > document.pageCount) return []
+    bookmarkIds.add(id)
+    const kinds = new Set<PdfSourceBookmarkV1['kind']>(['person', 'location', 'faction', 'clue', 'event', 'monster', 'note'])
+    return [{
+      schemaVersion: 1,
+      id,
+      documentId: document.id,
+      documentName: document.name,
+      page: entry.page,
+      kind: kinds.has(entry.kind) ? entry.kind : 'note',
+      label: `${entry.label ?? ''}`.trim().slice(0, 160) || `第 ${entry.page} 页`,
+      quote: `${entry.quote ?? ''}`.trim().slice(0, 500),
+      note: `${entry.note ?? ''}`.trim().slice(0, 2_000),
+      origin: entry.origin === 'ai' ? 'ai' : 'dm',
+      ...(entry.entityId ? { entityId: `${entry.entityId}`.slice(0, 120) } : {}),
+      ...(entry.entityName ? { entityName: `${entry.entityName}`.trim().slice(0, 160) } : {}),
+      createdAt: Number.isSafeInteger(entry.createdAt) && entry.createdAt > 0 ? entry.createdAt : 1,
+    }]
+  })
   return {
     ...analysis,
     people,
     locations,
     factions,
     relationships: resolvePdfRelationshipEndpoints({ people, locations, factions, relationships: disambiguatePdfRelationshipIds(relationships) }),
+    bookmarks,
     clues: disambiguatePdfEntityIds(analysis.clues.map((entry) => named(entry, 'clue'))),
     timelineEvents: disambiguatePdfEntityIds((analysis.timelineEvents ?? []).map((entry) => named(entry, 'scene'))),
     scenes: disambiguatePdfEntityIds(mergePdfSceneRecords(analysis.scenes).map((entry) => named(entry, 'scene'))),

@@ -154,6 +154,7 @@ export function importUvttGeometry(value: unknown, options: UvttImportOptions): 
       lockState: 'unlocked',
       physicalState: 'intact',
       secret: false,
+      passageGapInches: 1,
       blocksVision: true,
       blocksMovement: true,
       blocksLineOfEffect: true,

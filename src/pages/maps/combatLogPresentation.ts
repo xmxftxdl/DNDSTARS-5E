@@ -5,6 +5,9 @@ import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import { dnd5eCharacterPresentationColors } from '../../presentation/dnd5e/characterPresentation'
+import { dnd5eSpellAttackDelivery, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from '../../rulesets/dnd5e/spells'
+import { DND5E_DAMAGE_TYPE_LABELS } from '../../rulesets/dnd5e/damageTypes'
+import type { Dnd5ePersistentAreaTriggerSnapshot } from '../../rulesets/dnd5e/persistentAreaTypes'
 export { dnd5eCharacterPresentationColors } from '../../presentation/dnd5e/characterPresentation'
 
 const FALLBACK_PRESENTATION = {
@@ -34,6 +37,112 @@ export interface CombatLogSubjectPresentation {
   classId?: string
   side: 'player' | 'monster' | 'neutral'
   resolution: CombatLogSubjectResolution
+}
+
+export function dnd5eSpellAttackAuditPresentation(
+  spell: Dnd5eSrdSpellDefinition,
+  sustained: boolean,
+): { deliveryLabel: '近战' | '远程'; rangeFeet: number } {
+  const sustainedAttack = sustained ? spell.sustainedAttack : undefined
+  return {
+    deliveryLabel: dnd5eSpellAttackDelivery(spell, sustainedAttack) === 'ranged' ? '远程' : '近战',
+    rangeFeet: sustainedAttack?.rangeFeet ?? spell.rangeFeet,
+  }
+}
+
+export function dnd5eDamageDiceAuditPresentation(input: {
+  rolls: readonly number[]
+  sides: number
+  bonus?: number
+}): string | undefined {
+  if (input.rolls.length < 1) return undefined
+  const diceTotal = input.rolls.reduce((total, roll) => total + roll, 0)
+  const bonus = input.bonus ?? 0
+  const signedBonus = bonus === 0 ? '' : bonus > 0 ? ` + ${bonus}` : ` - ${Math.abs(bonus)}`
+  return `伤害掷骰：${input.rolls.length}d${input.sides} [${input.rolls.join(', ')}] = ${diceTotal}${signedBonus}${bonus === 0 ? '' : ` = ${diceTotal + bonus}`}`
+}
+
+/**
+ * The Headless result is authoritative for damage components: a spell can
+ * apply more than one type after riders or transformations. Keep the log
+ * summary aligned with those events instead of inventing a generic type.
+ */
+export function dnd5eSpellDamageTypeLabel(events: readonly unknown[]): string {
+  const types = new Set<keyof typeof DND5E_DAMAGE_TYPE_LABELS>()
+  for (const event of events) {
+    if (event == null || typeof event !== 'object') continue
+    const candidate = event as { type?: unknown; damageTypes?: unknown }
+    if (candidate.type !== 'damage-applied' || !Array.isArray(candidate.damageTypes)) continue
+    for (const damageType of candidate.damageTypes) {
+      if (typeof damageType === 'string' && damageType in DND5E_DAMAGE_TYPE_LABELS) {
+        types.add(damageType as keyof typeof DND5E_DAMAGE_TYPE_LABELS)
+      }
+    }
+  }
+  return [...types].map((damageType) => DND5E_DAMAGE_TYPE_LABELS[damageType]).join('、')
+}
+
+export function dnd5eCounterspelledSpellOutcome(
+  events: readonly unknown[],
+  spellName: string,
+): string | undefined {
+  const counterspelled = events.some((event) =>
+    event != null &&
+    typeof event === 'object' &&
+    (event as { type?: unknown }).type === 'counterspell-resolved' &&
+    (event as { success?: unknown }).success === true,
+  )
+  return counterspelled ? `${spellName}被法术反制，未产生效果` : undefined
+}
+
+export function dnd5eStabilizationSpellOutcome(
+  spell: Pick<Dnd5eSrdSpellDefinition, 'effect'>,
+  targetLabel: string,
+): string | undefined {
+  return spell.effect === 'stabilize'
+    ? `${targetLabel} 伤势稳定；死亡豁免成功与失败均重置为 0`
+    : undefined
+}
+
+export function dnd5eDelayedSpellDamageLogMessages(
+  events: readonly unknown[],
+  tokens: readonly Token[],
+): string[] {
+  const labels = new Map(tokens.map((token) => [token.id, token.label]))
+  return events.flatMap((event) => {
+    if (
+      event == null || typeof event !== 'object' ||
+      (event as { type?: unknown }).type !== 'delayed-spell-damage-triggered'
+    ) return []
+    const delayed = event as {
+      sourceId?: string
+      targetId?: string
+      spellId?: string
+      amount?: number
+    }
+    if (!delayed.targetId || !delayed.spellId || !Number.isFinite(delayed.amount)) return []
+    const spell = getDnd5eSrdCombatSpell(delayed.spellId)
+    const sourceName = delayed.sourceId ? labels.get(delayed.sourceId) ?? '法术来源' : '法术来源'
+    const targetName = labels.get(delayed.targetId) ?? '目标'
+    const spellName = spell?.name ?? delayed.spellId
+    const damageType = spell?.delayedDamage?.damageType ?? spell?.damageType
+    const damageLabel = damageType ? DND5E_DAMAGE_TYPE_LABELS[damageType] : ''
+    return [`${sourceName} 的${spellName}在 ${targetName} 的回合结束时触发，造成 ${delayed.amount} 点${damageLabel}伤害。`]
+  })
+}
+
+export function dnd5ePersistentAreaNotificationLogSuffix(
+  notification: Dnd5ePersistentAreaTriggerSnapshot['notification'] | undefined,
+): string {
+  if (!notification) return ''
+  if (notification.delivery === 'mental-to-source') {
+    return notification.message
+      ? `；向施法者发出心灵警报：“${notification.message}”`
+      : '；向施法者发出心灵警报'
+  }
+  return notification.message
+    ? `；发出声音（${notification.audibleRadiusFeet} 尺内可听）：“${notification.message}”`
+    : `；发出声音警报（${notification.audibleRadiusFeet} 尺内可听）`
 }
 
 interface SubjectCandidate {

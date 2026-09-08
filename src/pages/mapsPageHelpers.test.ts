@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Character } from '../types/character'
+import type { Token } from '../store/maps'
 import {
+  abilityCheckRollLogDetail,
   buildInitiativeOrder,
+  dnd5eTokenCannotBeMarkedSurprised,
+  eligibleDnd5eSurprisedTokenIds,
   initiativeResultLogDetails,
   initiativeOrderForRound,
   insertInitiativeEntriesPreservingActive,
+  initiativeJoinLogMessage,
+  insertMapTokensIntoInitiativePreservingActive,
   migrateLegacyApCombatLogText,
   placeableRoomCharacters,
+  projectHeadlessInitiativeOrder,
   rollInitiative,
 } from './mapsPageHelpers'
 import type { RoomSession } from '../lib/roomSession'
+import { createDnd5eMechanicalEffect } from '../rulesets/dnd5e/activeEffects'
 
 function champion(): Character {
   return {
@@ -28,6 +36,16 @@ function champion(): Character {
 afterEach(() => vi.restoreAllMocks())
 
 describe('D&D 5e map helpers', () => {
+  it('shows both d20 faces and the kept result for an advantaged Foresight ability check', () => {
+    expect(abilityCheckRollLogDetail({
+      rolls: [4, 17],
+      selectedD20: 17,
+      mode: 'advantage',
+      modifier: 3,
+      total: 20,
+    })).toBe('d20（4、17，优势取高 17） + 调整值（+3） = 20')
+  })
+
   it('only offers characters belonging to current room members in the DM placement menu', () => {
     const session: RoomSession = {
       roomId: 'ABC234',
@@ -74,6 +92,59 @@ describe('D&D 5e map helpers', () => {
     vi.restoreAllMocks()
     vi.spyOn(Math, 'random').mockReturnValue(0.4) // one roll: 9, advantage and disadvantage cancel
     expect(rollInitiative({} as never, { ...barbarian, exhaustionLevel: 1 })).toBe(11)
+  })
+
+  it('rolls Foresight initiative with two d20s because initiative is a Dexterity check', () => {
+    const foresight = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:foresight', label: '预警术', targetId: 'champion',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'foresight' },
+      modifiers: { abilityCheckAdvantages: ['dex'] },
+    })
+    const affected = {
+      ...champion(),
+      dnd5eCombatState: { activeEffects: [foresight] },
+    }
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.15).mockReturnValueOnce(0.8) // 4, 17
+    const token = {
+      id: 'foresight-token', label: affected.name, emoji: '🛡️', color: '#fff', type: 'player',
+      characterId: affected.id, x: 0, y: 0, size: 1,
+    } satisfies Token
+
+    const order = buildInitiativeOrder([token], [affected])
+
+    expect(order[0]).toMatchObject({
+      roll: 21,
+      initiativeCalculation: { rolls: [4, 17], d20: 17, modifier: 4, mode: 'advantage' },
+    })
+    expect(initiativeResultLogDetails(order)).toEqual([
+      '1. 勇士：d20（4、17，优势取高 17） + 先攻调整值（+4） = 21',
+    ])
+    expect(Math.random).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let combat setup mark a conscious Foresight target as surprised', () => {
+    const foresight = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:foresight', label: '预警术', targetId: 'champion',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'foresight' },
+      modifiers: { cannotBeSurprisedWhileConscious: true },
+    })
+    const protectedCharacter = {
+      ...champion(),
+      dnd5eCombatState: { activeEffects: [foresight] },
+    }
+    const token = {
+      id: 'foresight-token', label: protectedCharacter.name, emoji: '🛡️', color: '#fff', type: 'player',
+      characterId: protectedCharacter.id, x: 0, y: 0, size: 1,
+    } satisfies Token
+
+    expect(dnd5eTokenCannotBeMarkedSurprised(token, [protectedCharacter])).toBe(true)
+    expect(eligibleDnd5eSurprisedTokenIds(
+      [token], [protectedCharacter], [token.id],
+    )).toEqual([])
+    expect(dnd5eTokenCannotBeMarkedSurprised(token, [{
+      ...protectedCharacter,
+      currentHp: 0,
+    }])).toBe(false)
   })
 
   it('uses the monster Dexterity modifier for initiative instead of a random bonus', () => {
@@ -151,6 +222,58 @@ describe('D&D 5e map helpers', () => {
     ])
   })
 
+  it('projects Activity one-shot turns into the shared initiative tracker', () => {
+    const current = [
+      { slotId: 'wizard:normal', tokenId: 'wizard', label: '法师', emoji: 'W', color: '#00f', roll: 18 },
+      { slotId: 'golem:normal', tokenId: 'golem', label: '铁魔像', emoji: 'G', color: '#777', roll: 10 },
+    ]
+    expect(projectHeadlessInitiativeOrder({
+      current,
+      state: {
+        round: 1,
+        initiativeOrder: ['wizard', 'wizard', 'wizard', 'golem'],
+        initiativeSlotIds: [
+          'wizard:normal',
+          'activity-extra-turns:group:1',
+          'activity-extra-turns:group:2',
+          'golem:normal',
+        ],
+        oneShotInitiativeSlotIds: [
+          'activity-extra-turns:group:1',
+          'activity-extra-turns:group:2',
+        ],
+      },
+    })).toEqual([
+      current[0],
+      { ...current[0], slotId: 'activity-extra-turns:group:1', firstRoundOnly: undefined, turnKind: 'activity-extra-turn' },
+      { ...current[0], slotId: 'activity-extra-turns:group:2', firstRoundOnly: undefined, turnKind: 'activity-extra-turn' },
+      current[1],
+    ])
+  })
+
+  it('removes Activity slots omitted by a resolved Headless action', () => {
+    const current = [
+      { slotId: 'wizard:normal', tokenId: 'wizard', label: '法师', emoji: 'W', color: '#00f', roll: 18 },
+      { slotId: 'activity-extra-turns:group:1', tokenId: 'wizard', label: '法师', emoji: 'W', color: '#00f', roll: 18, turnKind: 'activity-extra-turn' as const },
+      { slotId: 'activity-extra-turns:group:2', tokenId: 'wizard', label: '法师', emoji: 'W', color: '#00f', roll: 18, turnKind: 'activity-extra-turn' as const },
+      { slotId: 'golem:normal', tokenId: 'golem', label: '铁魔像', emoji: 'G', color: '#777', roll: 10 },
+    ]
+
+    expect(projectHeadlessInitiativeOrder({
+      current,
+      state: {
+        round: 1,
+        initiativeOrder: ['wizard', 'wizard', 'golem'],
+        initiativeSlotIds: [
+          'wizard:normal',
+          'activity-extra-turns:group:1',
+          'golem:normal',
+        ],
+        oneShotInitiativeSlotIds: ['activity-extra-turns:group:1'],
+      },
+    })).toEqual([current[0], current[1], current[3]])
+  })
+
   it('formats the final initiative order for the shared combat log', () => {
     expect(initiativeResultLogDetails([
       {
@@ -226,6 +349,114 @@ describe('D&D 5e map helpers', () => {
     ])
     expect(inserted.order.map((entry) => entry.tokenId)).toEqual(['summon', 'hero', 'enemy'])
     expect(inserted.index).toBe(2)
+  })
+
+  it('describes a simulacrum initiative as the source turn instead of a reroll', () => {
+    const entry = {
+      slotId: 'sim:source-companion', tokenId: 'sim', label: '法师·拟像', emoji: 'S',
+      color: '#0ff', roll: 15, turnKind: 'source-companion' as const,
+    }
+    expect(initiativeJoinLogMessage([entry])).toBe('拟像已加入施法者的先攻轮次（1 名）；不独立掷先攻。')
+    expect(initiativeResultLogDetails([entry])).toEqual([
+      '1. 法师·拟像：先攻 15（与施法者同轮行动）',
+    ])
+  })
+
+  it('describes a shared initiative roll for grouped summons', () => {
+    const entries = ['first', 'second'].map((tokenId) => ({
+      tokenId, label: '艾泽', emoji: '', color: '#f90', roll: 14,
+    }))
+    expect(initiativeJoinLogMessage(entries, true))
+      .toBe('召唤生物已共用一次先攻掷骰并加入同一先攻轮次（2 名）。')
+  })
+
+  it('keeps one grouped-summon initiative roll when combat starts after exploration casting', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.75) // one shared d20 = 16
+    const azers = ['first', 'second', 'third'].map((id, index) => ({
+      id: `azer-${id}`,
+      label: '艾泽', emoji: '🔥', color: '#f97316', type: 'player',
+      poolId: 'srd-5.1:azer', x: index * 50, y: 0, size: 1,
+      dnd5eSummon: {
+        schemaVersion: 1,
+        pluginId: 'dnd5e-srd-spells',
+        featureId: 'spell:conjure-minor-elementals',
+        sourceCharacterId: 'druid',
+        sourceTokenId: 'druid-token',
+        createdRound: 1,
+        expiresAfterRound: 600,
+        concentrationId: 'concentration:shared-cast',
+        side: 'player',
+      },
+    })) as never
+
+    const order = buildInitiativeOrder(azers, [])
+    expect(order.map((entry) => ({
+      tokenId: entry.tokenId,
+      roll: entry.roll,
+      d20: entry.initiativeCalculation?.d20,
+    }))).toEqual([
+      { tokenId: 'azer-first', roll: 17, d20: 16 },
+      { tokenId: 'azer-second', roll: 17, d20: 16 },
+      { tokenId: 'azer-third', roll: 17, d20: 16 },
+    ])
+    expect(Math.random).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts an exploration-created simulacrum on its caster initiative without another d20', () => {
+    const caster = champion()
+    const casterToken = {
+      id: 'caster-token', label: caster.name, emoji: 'H', color: '#fff', type: 'player',
+      characterId: caster.id, x: 0, y: 0, size: 1,
+    } satisfies Token
+    const simulacrumToken = {
+      ...casterToken,
+      id: 'simulacrum-token', label: `${caster.name}·拟像`, x: 50,
+      dnd5eSimulacrum: {
+        schemaVersion: 1, sourceTokenId: casterToken.id, subjectTokenId: casterToken.id, sourceCharacterId: caster.id,
+        sourceActivityId: 'spell:simulacrum', createdRound: 1, level: caster.level, proficiencyBonus: 2,
+        abilities: caster.abilities, armorClass: caster.ac, maximumHitPoints: 10, speed: caster.speed, sizeRank: 2,
+        classResources: {}, cannotIncreaseLevel: true, cannotRegainSpellSlots: true, cannotRegainHitPoints: true,
+      },
+    } satisfies Token
+    vi.spyOn(Math, 'random').mockReturnValue(0.45) // the caster's only d20 is 10
+
+    const order = buildInitiativeOrder([casterToken, simulacrumToken], [caster])
+    expect(order.map((entry) => ({
+      tokenId: entry.tokenId,
+      roll: entry.roll,
+      turnKind: entry.turnKind,
+      d20: entry.initiativeCalculation?.d20,
+    }))).toEqual([
+      { tokenId: casterToken.id, roll: 14, turnKind: undefined, d20: 10 },
+      { tokenId: simulacrumToken.id, roll: 14, turnKind: 'source-companion', d20: undefined },
+    ])
+  })
+
+  it('joins newly placed combat tokens to a live initiative without changing the active turn', () => {
+    const current = [
+      { slotId: 'hero:normal', tokenId: 'hero', label: '英雄', emoji: 'H', color: '#fff', roll: 15 },
+      { slotId: 'enemy:normal', tokenId: 'enemy', label: '敌人', emoji: 'E', color: '#f00', roll: 8 },
+    ]
+    vi.spyOn(Math, 'random').mockReturnValue(0.45) // d20 10
+    const joined = insertMapTokensIntoInitiativePreservingActive({
+      order: current,
+      activeIndex: 1,
+      round: 3,
+      characters: [],
+      tokens: [
+        { id: 'hero', type: 'player' },
+        {
+          id: 'dragon', label: '远古红龙', emoji: '🐉', color: '#f00', type: 'enemy',
+          poolId: 'srd-5.1:ancient-red-dragon', x: 0, y: 0, size: 4,
+        },
+        { id: 'spectator', label: '旁观 NPC', type: 'npc' },
+      ] as never,
+    })
+    expect(joined.additions).toMatchObject([
+      { tokenId: 'dragon', slotId: 'dragon:normal', label: '远古红龙', roll: 10 },
+    ])
+    expect(joined.order.map((entry) => entry.tokenId)).toEqual(['hero', 'dragon', 'enemy'])
+    expect(joined.index).toBe(2)
   })
 
   it('migrates a persisted AP movement log without losing the action detail', () => {

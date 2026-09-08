@@ -22,6 +22,7 @@ import {
 } from '../activities/dnd5eEffectContracts'
 import { dnd5eActivityRequiredPhases } from '../activities/dnd5eActivityValidation'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../damageTypes'
+import { DND5E_STANDARD_CONDITIONS, DND5E_STANDARD_CONDITION_IDS } from '../conditions'
 
 export type Dnd5eMechanicHandlerComponentV1 =
   | `activation:${Dnd5eActivityDefinitionV1['activation']['kind']}`
@@ -34,7 +35,7 @@ export type Dnd5eMechanicHandlerComponentV1 =
   | `operation:${Dnd5eActivityOperationV1['kind']}`
   | `effect-modifier:${Dnd5eEffectModifierV1['kind']}`
   | `effect-duration:${NonNullable<Dnd5eActivityDefinitionV1['effects']>[number]['duration']['kind']}`
-  | `effect-lifecycle:${'break-on' | 'escape-check' | 'periodic-damage'}`
+  | `effect-lifecycle:${'break-on' | 'escape-check' | 'escape-saving-throw' | 'on-damage-condition' | 'after-effect-ends' | 'periodic-damage' | 'periodic-healing' | 'body-restoration' | 'calendar-repeat-save' | 'movement-repeat-save' | 'planar-banishment'}`
   | `mechanic:${string}`
   | `authority:${NonNullable<Dnd5eActivityDefinitionV1['authorityBinding']>['execution']}`
 
@@ -291,7 +292,14 @@ function activityComponents(activity: Dnd5eActivityDefinitionV1): readonly Dnd5e
   for (const consumption of activity.consumption ?? []) addComponent(result, `consumption:${consumption.kind}`)
   const effectById = new Map((activity.effects ?? []).map((effect) => [effect.id, effect]))
   for (const operation of activity.outcomes.flatMap((outcome) => outcome.operations)) {
-    if (operation.kind === 'mechanic') addComponent(result, `mechanic:${operation.handlerId}`)
+    if (operation.kind === 'mechanic') {
+      const ruleStateId = operation.handlerId === 'core.rule-state'
+        ? operation.parameters?.['state-id']
+        : undefined
+      addComponent(result, typeof ruleStateId === 'string'
+        ? `mechanic:core.rule-state:${ruleStateId}`
+        : `mechanic:${operation.handlerId}`)
+    }
     else addComponent(result, `operation:${operation.kind}`)
     if (operation.kind !== 'apply-effect') continue
     const effect = effectById.get(operation.effectId)
@@ -304,7 +312,15 @@ function activityComponents(activity: Dnd5eActivityDefinitionV1): readonly Dnd5e
     }
     if (effect.breakOn?.length) addComponent(result, 'effect-lifecycle:break-on')
     if (effect.escapeCheck) addComponent(result, 'effect-lifecycle:escape-check')
+    if (effect.escapeSavingThrow) addComponent(result, 'effect-lifecycle:escape-saving-throw')
+    if (effect.onDamageCondition) addComponent(result, 'effect-lifecycle:on-damage-condition')
+    if (effect.afterEffectEnds) addComponent(result, 'effect-lifecycle:after-effect-ends')
     if (effect.periodicDamage) addComponent(result, 'effect-lifecycle:periodic-damage')
+    if (effect.periodicHealing) addComponent(result, 'effect-lifecycle:periodic-healing')
+    if (effect.bodyRestoration) addComponent(result, 'effect-lifecycle:body-restoration')
+    if (effect.calendarRepeatSave) addComponent(result, 'effect-lifecycle:calendar-repeat-save')
+    if (effect.repeatSaveAfterMovement) addComponent(result, 'effect-lifecycle:movement-repeat-save')
+    if (effect.planarBanishment) addComponent(result, 'effect-lifecycle:planar-banishment')
   }
   if (activity.authorityBinding) addComponent(result, `authority:${activity.authorityBinding.execution}`)
   return result
@@ -319,7 +335,7 @@ function componentFallbackPhases(component: Dnd5eMechanicHandlerComponentV1): re
   if (component.startsWith('predicate:')) return ['eligibility']
   if (component.startsWith('trigger:')) return ['interrupt', 'persistence']
   if (component === 'operation:damage') return ['damage']
-  if (component === 'operation:healing' || component === 'operation:temporary-hit-points') return ['healing']
+  if (component === 'operation:healing' || component === 'operation:temporary-hit-points' || component === 'operation:revive') return ['healing']
   if (component === 'operation:resource') return ['cost']
   if (component === 'operation:manual-adjudication') return ['effects']
   if (component.startsWith('effect-duration:')) return ['duration']
@@ -405,7 +421,15 @@ export function dnd5eEffectAutomationAnalysisV1(
   }
   if (effect.breakOn?.length) addComponent(components, 'effect-lifecycle:break-on')
   if (effect.escapeCheck) addComponent(components, 'effect-lifecycle:escape-check')
+  if (effect.escapeSavingThrow) addComponent(components, 'effect-lifecycle:escape-saving-throw')
+  if (effect.onDamageCondition) addComponent(components, 'effect-lifecycle:on-damage-condition')
+  if (effect.afterEffectEnds) addComponent(components, 'effect-lifecycle:after-effect-ends')
   if (effect.periodicDamage) addComponent(components, 'effect-lifecycle:periodic-damage')
+  if (effect.periodicHealing) addComponent(components, 'effect-lifecycle:periodic-healing')
+  if (effect.bodyRestoration) addComponent(components, 'effect-lifecycle:body-restoration')
+  if (effect.calendarRepeatSave) addComponent(components, 'effect-lifecycle:calendar-repeat-save')
+  if (effect.repeatSaveAfterMovement) addComponent(components, 'effect-lifecycle:movement-repeat-save')
+  if (effect.planarBanishment) addComponent(components, 'effect-lifecycle:planar-banishment')
   const missing = components.filter((component) => !(handlers.get(component)?.size))
   if (missing.length === 0) return {
     schemaVersion: 1,
@@ -478,13 +502,15 @@ registerCore('invocation:triggered', ['eligibility', 'interrupt', 'persistence']
 for (const kind of ['self', 'creature', 'area'] as const) registerCore(`target:${kind}`, ['targeting'])
 registerCore('check:attack-roll', ['attack-roll'])
 registerCore('check:saving-throw', ['saving-throw'])
+registerCore('check:random-roll', ['eligibility'])
+registerCore('check:opposed-ability-check', ['eligibility'])
 for (const kind of ['ability-check', 'skill-check', 'concentration-check'] as const) registerCore(`check:${kind}`, ['eligibility'])
 for (const kind of ['action-economy', 'spell-slot', 'resource', 'item-charge', 'ammo', 'hit-die', 'hp', 'movement'] as const) {
   registerCore(`consumption:${kind}`, ['cost'])
 }
 for (const kind of [
   'minimum-level', 'class-level', 'hp-percentage', 'hp-value', 'ability-score', 'condition',
-  'illumination', 'target-relation', 'target-identity', 'active-effect', 'distance', 'resource',
+  'illumination', 'airborne-state', 'target-relation', 'target-identity', 'owned-companion', 'can-hear-source', 'active-effect', 'distance', 'resource',
   'resource-capacity', 'once-per-turn', 'event-source', 'activity-definition', 'weapon-property',
   'attack-proficiency', 'attack-weapon', 'attack-origin', 'attack-hands', 'attack-mode', 'attack-result', 'attack-outcome', 'damage-type', 'damage-event', 'size-rank', 'creature-type', 'movement-distance', 'movement-property',
   'spell-used', 'skill-used', 'action-economy-available', 'armor-equipped', 'armor-proficiency', 'held-item', 'free-hands',
@@ -492,23 +518,34 @@ for (const kind of [
 ] as const) registerCore(`predicate:${kind}`, ['eligibility'])
 for (const event of DND5E_TRIGGER_EVENT_IDS_V1) registerCore(`trigger:${event}`, ['interrupt', 'persistence'])
 for (const kind of [
-  'damage', 'healing', 'temporary-hit-points', 'stabilize', 'stand-up', 'apply-standard-condition', 'apply-effect',
-  'remove-standard-condition', 'remove-effect', 'resource', 'move', 'summon', 'dispel-area',
+  'damage', 'healing', 'temporary-hit-points', 'revive', 'stabilize', 'instant-death', 'stand-up', 'apply-standard-condition', 'apply-effect',
+  'remove-standard-condition', 'remove-effect', 'remove-effects-by-tag', 'adjust-exhaustion',
+  'lower-ability-score', 'recover-ability-score', 'recover-hit-point-maximum', 'resource', 'move', 'set-directional-command', 'summon', 'duplicate-creature', 'dispel-area',
+  'relocate-granting-area',
+  'reshape-granting-area',
+  'set-granting-area-senses',
+  'detonate-granting-area',
+  'transform-creature', 'grant-extra-turns', 'grant-inventory-item', 'establish-spell-authority', 'identify-inventory-item', 'purify-inventory-item', 'break-inventory-item-attunement',
+  'transition-spell-authority',
+  'emit-sound', 'open-communication', 'modify-map-object-lock', 'enchant-map-object-light',
+  'purify-map-consumables',
   'command-owned-companion', 'grant-weapon-attack', 'grant-basic-action', 'create-persistent-area', 'invoke-activity',
 ] as const) registerCore(`operation:${kind}`, componentFallbackPhases(`operation:${kind}`))
 for (const kind of ['instantaneous', 'rounds', 'save-ends', 'concentration', 'permanent'] as const) {
   registerCore(`effect-duration:${kind}`, kind === 'instantaneous' ? ['effects'] : ['effects', 'duration', 'persistence'])
 }
 for (const kind of [
-  'armor-class', 'speed', 'attack-roll', 'attack-target-lock', 'ability-check', 'weapon-damage-roll', 'weapon-enchantment', 'weapon-damage-replacement', 'movement-boundary-save', 'saving-throw',
-  'saving-throw-proficiency', 'damage-resistance', 'damage-immunity', 'damage-vulnerability',
-  'condition-immunity', 'character-capability', 'racial-saving-throw-advantage',
-  'prohibit-reaction', 'forced-flee-from-source',
-  'maximum-attacks-per-turn', 'darkvision', 'flight-speed', 'see-invisible',
+  'armor-class', 'attacks-against-source-armor-class', 'speed', 'attack-roll', 'attacks-against-target', 'cannot-be-surprised-while-conscious', 'attack-target-lock', 'ability-check', 'perception-target-lock', 'skill-check-bonus-aura', 'minimum-ability-check-d20', 'weapon-damage-roll', 'weapon-damage-multiplier', 'weapon-enchantment', 'weapon-damage-replacement', 'movement-boundary-save', 'saving-throw', 'death-saving-throw', 'maximize-healing-dice',
+  'saving-throw-proficiency', 'damage-resistance', 'conditional-damage-resistance', 'damage-immunity', 'damage-vulnerability',
+  'condition-immunity', 'condition-immunity-by-source-creature-type', 'saving-throw-advantage-by-source-creature-type', 'condition-immunity-by-source-magic', 'attacks-against-target-by-creature-type', 'character-capability', 'racial-saving-throw-advantage',
+  'prohibit-reaction', 'prevent-actions', 'forced-flee-from-source',
+  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'truesight', 'spell-targeting-immunity',
+  'flight-speed', 'magically-held-aloft', 'safe-fall', 'controlled-descent', 'automatic-escape', 'ignore-magical-speed-reductions', 'action-restriction', 'see-invisible', 'emitted-light', 'language-capability', 'language-restriction', 'attack-decoys', 'planar-phase', 'tracking-capability', 'environmental-capability',
+  'hit-point-maximum',
   'spell-save-disadvantage-aura', 'spell-action-as-bonus-action', 'attack-profile',
   'damage-reduction', 'on-hit-bonus-damage', 'attack-roll-reroll', 'death-prevention',
 ] as const) registerCore(`effect-modifier:${kind}`, ['effects', 'persistence'])
-for (const kind of ['break-on', 'escape-check', 'periodic-damage'] as const) {
+for (const kind of ['break-on', 'escape-check', 'escape-saving-throw', 'on-damage-condition', 'after-effect-ends', 'periodic-damage', 'periodic-healing', 'body-restoration', 'calendar-repeat-save', 'movement-repeat-save', 'planar-banishment'] as const) {
   registerCore(`effect-lifecycle:${kind}`, ['duration', 'persistence'])
 }
 for (const execution of ['plugin-headless-action', 'headless-event-engine'] as const) {
@@ -517,6 +554,317 @@ for (const execution of ['plugin-headless-action', 'headless-event-engine'] as c
     component: `authority:${execution}`,
     phases: ['effects', 'persistence'],
     legacyAdapter: true,
+  })
+}
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.resolve-only',
+  label: '仅完成结算',
+  description: '确认 Activity 已完成，但不写入目标、状态、地图或通讯结果；适用于只消费既定行动资源的通用能力。',
+  phases: ['effects'],
+  parameters: [],
+  resolve() {
+    return []
+  },
+})
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.prismatic-spray',
+  label: '虹光喷射光束表',
+  description: '按逐目标 d8 结果结算虹光喷射伤害、靛色石化进度与紫色位面放逐。',
+  phases: ['effects', 'duration', 'persistence'],
+  parameters: [],
+  resolve({ operation, execution, target }) {
+    const targetCheck = (checkId: string) => execution.resolvedChecks?.find((check) =>
+      check.checkId === checkId && check.targetId === target.id)
+    const savingThrow = targetCheck('spell-save')
+    const primaryRay = targetCheck('prismatic-ray')?.total
+    if (!savingThrow || primaryRay == null) throw new Error('prismatic spray checks are incomplete')
+    const rays = primaryRay === 8
+      ? [
+          { ray: targetCheck('prismatic-extra-ray-a')?.total, damageCheckId: 'prismatic-extra-damage-a', suffix: 'a' },
+          { ray: targetCheck('prismatic-extra-ray-b')?.total, damageCheckId: 'prismatic-extra-damage-b', suffix: 'b' },
+        ]
+      : [{ ray: primaryRay, damageCheckId: 'prismatic-primary-damage', suffix: 'primary' }]
+    if (rays.some((entry) => entry.ray == null || entry.ray < 1 || entry.ray > 7)) {
+      throw new Error('prismatic spray ray table is incomplete')
+    }
+    const damageTypes: readonly (Dnd5eDamageType | undefined)[] = [
+      undefined, 'fire', 'acid', 'lightning', 'poison', 'cold',
+    ]
+    const proposals: Dnd5eActivityCapabilityProposal[] = []
+    const appliedConditions = new Set<number>()
+    for (const entry of rays) {
+      const ray = entry.ray!
+      const damageType = damageTypes[ray]
+      if (damageType) {
+        const damage = targetCheck(entry.damageCheckId)?.total
+        if (damage == null) throw new Error('prismatic spray damage roll is incomplete')
+        proposals.push({
+          kind: 'deal-damage',
+          operationId: `${operation.id}-${entry.suffix}-ray-${ray}`,
+          targetId: target.id,
+          amount: savingThrow.success
+            ? target.successfulSpellSaveNegatesDamage === true ? 0 : Math.floor(damage / 2)
+            : damage,
+          damageType,
+          magical: true,
+        })
+        continue
+      }
+      if (savingThrow.success || appliedConditions.has(ray)) continue
+      appliedConditions.add(ray)
+      const saveDc = Math.max(1, Math.floor(execution.actor.spellSaveDc ?? 8))
+      if (ray === 6) {
+        proposals.push({
+          kind: 'apply-effect',
+          operationId: `${operation.id}-${entry.suffix}-indigo`,
+          targetId: target.id,
+          effectId: 'prismatic-spray-indigo',
+          name: '虹光喷射·靛色束缚',
+          disposition: 'debuff',
+          tags: ['spell', 'prismatic-spray', 'indigo', 'petrification'],
+          duration: {
+            kind: 'save-ends', maximumRounds: 10, timing: 'target-turn-end',
+            ability: 'con', dc: saveDc,
+            successesRequired: 3, failuresRequired: 3,
+            onFailureThreshold: {
+              replaceWithCondition: 'petrified', duration: 'permanent',
+            },
+          },
+          conditions: ['restrained'],
+          modifierGroups: [],
+          magical: true,
+          concentration: false,
+          stacking: 'replace',
+        })
+      } else if (ray === 7) {
+        proposals.push({
+          kind: 'apply-effect',
+          operationId: `${operation.id}-${entry.suffix}-violet`,
+          targetId: target.id,
+          effectId: 'prismatic-spray-violet',
+          name: '虹光喷射·紫色目盲',
+          disposition: 'debuff',
+          tags: ['spell', 'prismatic-spray', 'violet', 'planar-transport'],
+          duration: {
+            kind: 'save-ends', maximumRounds: 1, timing: 'target-turn-start',
+            ability: 'wis', dc: saveDc,
+            successesRequired: 1, failuresRequired: 1,
+            onFailureThreshold: {
+              // The destination remains a DM narrative decision. Retain the
+              // authoritative violet marker and stop further repeat saves.
+              outcome: 'retain-effect',
+            },
+          },
+          conditions: ['blinded'],
+          extensionCondition: 'prismatic-spray-violet-dm-planar-destination',
+          modifierGroups: [],
+          magical: true,
+          concentration: false,
+          stacking: 'replace',
+        })
+      }
+    }
+    return proposals
+  },
+})
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.rule-state',
+  label: '持续规则状态',
+  description: '在权威目标上写入带来源和生命周期的白名单规则状态；法术、物品、特性与专长共用同一原语。',
+  phases: ['effects', 'duration', 'persistence'],
+  parameters: [
+    {
+      key: 'state-id', label: '规则状态 ID', kind: 'string', required: true,
+      maximumLength: 160, pattern: '^[a-z0-9][a-z0-9._:-]{0,159}$',
+    },
+    {
+      key: 'duration-kind', label: '持续类型', kind: 'select', required: true,
+      defaultValue: 'rounds',
+      options: [
+        { value: 'rounds', label: '固定轮数' },
+        { value: 'concentration', label: '专注' },
+        { value: 'permanent', label: '永久/直至解除' },
+      ],
+    },
+    { key: 'duration-rounds', label: '持续轮数', kind: 'number', defaultValue: 1, minimum: 1, maximum: 5_256_000, integer: true },
+    {
+      key: 'stacking', label: '叠加策略', kind: 'select', defaultValue: 'replace',
+      options: [
+        { value: 'replace', label: '替换' },
+        { value: 'refresh-duration', label: '刷新持续时间' },
+        { value: 'stack', label: '允许叠加' },
+      ],
+    },
+    { key: 'magical', label: '魔法来源', kind: 'boolean', defaultValue: true },
+  ],
+  resolve({ operation, target }) {
+    const stateId = String(operation.parameters?.['state-id'] ?? '')
+    const durationKind = String(operation.parameters?.['duration-kind'] ?? 'rounds')
+    const durationRounds = Math.max(1, Math.floor(Number(operation.parameters?.['duration-rounds'] ?? 1)))
+    const duration = durationKind === 'permanent'
+      ? { kind: 'permanent' as const }
+      : durationKind === 'concentration'
+        ? { kind: 'concentration' as const, maximumRounds: durationRounds }
+        : { kind: 'rounds' as const, rounds: durationRounds, expiresAt: 'target-turn-end' as const }
+    const stackingValue = String(operation.parameters?.stacking ?? 'replace')
+    const stacking = stackingValue === 'stack' || stackingValue === 'refresh-duration'
+      ? stackingValue
+      : 'replace'
+    return [{
+      kind: 'apply-effect',
+      operationId: operation.id,
+      targetId: target.id,
+      effectId: `rule-state:${stateId}`,
+      name: stateId,
+      duration,
+      conditions: [],
+      extensionCondition: `rule-state:${stateId}`,
+      modifierGroups: [],
+      magical: operation.parameters?.magical !== false,
+      concentration: durationKind === 'concentration',
+      stacking,
+    }]
+  },
+})
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.turn-end-random-condition',
+  label: '回合结束随机状态',
+  description: '在每个目标回合结束时要求 Host 掷一次封闭骰表；达到阈值时附加直到其下一回合开始的状态。',
+  phases: ['effects', 'duration', 'persistence'],
+  parameters: [
+    { key: 'die-sides', label: '骰面', kind: 'number', required: true, defaultValue: 20, minimum: 2, maximum: 100, integer: true },
+    { key: 'minimum', label: '触发下限', kind: 'number', required: true, defaultValue: 11, minimum: 1, maximum: 100, integer: true },
+    {
+      key: 'condition', label: '触发状态', kind: 'select', required: true, defaultValue: 'banished',
+      options: [
+        { value: 'banished', label: '暂离当前位面' },
+        ...DND5E_STANDARD_CONDITION_IDS.map((value) => ({
+          value, label: DND5E_STANDARD_CONDITIONS[value].label,
+        })),
+      ],
+    },
+    { key: 'duration-rounds', label: '机制持续轮数', kind: 'number', required: true, defaultValue: 10, minimum: 1, maximum: 14_400, integer: true },
+    {
+      key: 'dismiss-action-label', label: '主动解除动作名称', kind: 'string',
+      maximumLength: 80,
+    },
+  ],
+  resolve({ operation, target }) {
+    const dieSides = Math.floor(Number(operation.parameters?.['die-sides'] ?? 20))
+    const minimum = Math.floor(Number(operation.parameters?.minimum ?? 11))
+    const condition = String(operation.parameters?.condition ?? 'banished')
+    const durationRounds = Math.floor(Number(operation.parameters?.['duration-rounds'] ?? 10))
+    const dismissActionLabel = String(operation.parameters?.['dismiss-action-label'] ?? '').trim()
+    if (minimum > dieSides) throw new Error('random-condition threshold exceeds die sides')
+    return [{
+      kind: 'apply-effect', operationId: operation.id, targetId: target.id,
+      effectId: `turn-end-random-condition:${operation.id}`, name: operation.id,
+      duration: { kind: 'rounds', rounds: durationRounds, expiresAt: 'target-turn-end' },
+      conditions: [], modifierGroups: [],
+      extensionCondition: `turn-end-random-condition:${dieSides}:${minimum}:${condition}`,
+      removalAction: dismissActionLabel ? {
+        label: dismissActionLabel,
+        economy: 'action',
+        maxDistanceFeet: 0,
+      } : undefined,
+      magical: true, concentration: false, stacking: 'replace',
+    }]
+  },
+})
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.persistent-detection',
+  label: '持续侦测',
+  description: '在持续时间内由 Host 根据地图距离和权威目标数据返回符合条件的生物、魔法、毒素或疾病存在。',
+  phases: ['effects', 'duration', 'persistence'],
+  parameters: [
+    {
+      key: 'mode', label: '侦测类别', kind: 'select', required: true, defaultValue: 'magic',
+      options: [
+        { value: 'magic', label: '魔法存在与学派' },
+        { value: 'planar-creatures', label: '异界/亡灵生物' },
+        { value: 'poison-disease', label: '毒素、毒性生物与疾病' },
+      ],
+    },
+    { key: 'range-feet', label: '范围（尺）', kind: 'number', required: true, defaultValue: 30, minimum: 5, maximum: 10_000, integer: true },
+    { key: 'duration-rounds', label: '持续轮数', kind: 'number', required: true, defaultValue: 100, minimum: 1, maximum: 14_400, integer: true },
+  ],
+  resolve({ operation, target }) {
+    const mode = String(operation.parameters?.mode ?? 'magic')
+    const rangeFeet = Math.floor(Number(operation.parameters?.['range-feet'] ?? 30))
+    const durationRounds = Math.floor(Number(operation.parameters?.['duration-rounds'] ?? 100))
+    if (!['magic', 'planar-creatures', 'poison-disease'].includes(mode)) {
+      throw new Error('unsupported persistent detection mode')
+    }
+    return [{
+      kind: 'apply-effect', operationId: operation.id, targetId: target.id,
+      effectId: `persistent-detection:${operation.id}`, name: operation.id,
+      grantedActivities: mode === 'magic' ? ['spell:detect-magic:reveal-auras'] : undefined,
+      duration: { kind: 'concentration', maximumRounds: durationRounds },
+      conditions: [], modifierGroups: [],
+      extensionCondition: `persistent-detection:${mode}:${rangeFeet}`,
+      magical: true, concentration: true, stacking: 'replace',
+    }]
+  },
+})
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.reveal-persistent-detection',
+  label: '显化持续侦测结果',
+  description: '确认由持续侦测效果授予的动作；具体目标、可见性、距离与学派由 Host 在提交后的最终权威状态中读取。',
+  phases: ['effects', 'persistence'],
+  parameters: [],
+  resolve() {
+    return []
+  },
+})
+
+registerDnd5eMechanicOperationHandlerV1({
+  id: 'core.shared-senses',
+  label: '共享伙伴感官',
+  description: '在来源下回合开始前，将受 Host 所有权校验的伙伴设为视觉/听觉源，并暂停行动者自身的视觉与听觉。',
+  phases: ['effects', 'duration', 'persistence'],
+  parameters: [],
+  resolve({ operation, execution, target }) {
+    const companion = execution.targets[0]
+    if (
+      !companion || companion.summonedPersistent !== true ||
+      companion.summonedSourceCombatantId !== execution.actor.id
+    ) throw new Error('shared senses requires an owned persistent companion')
+    return [{
+      kind: 'apply-effect', operationId: operation.id, targetId: target.id,
+      effectId: 'shared-senses', name: '共享感官',
+      duration: { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-start' },
+      conditions: ['blinded', 'deafened'], modifierGroups: [],
+      extensionCondition: `shared-senses-token:${companion.id}`,
+      magical: true, concentration: false, stacking: 'replace',
+    }]
+  },
+})
+
+/**
+ * Durable state storage is not automation by itself. These exact consumers
+ * are registered only after a runtime path reads the state and changes an
+ * authoritative result. Unknown/custom states therefore remain assisted.
+ */
+for (const stateId of [
+  'spell:true-strike:target-linked-effect',
+  'spell:glibness:minimum-roll',
+  'spell:pass-without-trace:source-aura',
+  'spell:ray-of-enfeeblement:damage-multiplier',
+  'spell:holy-aura:roll-mode-modifier',
+  'spell:protection-from-evil-and-good:roll-mode-modifier',
+  'spell:stoneskin:damage-resistance',
+  'spell:beacon-of-hope:maximum-healing',
+] as const) {
+  registerDnd5eMechanicHandlerV1({
+    id: `core.rule-state.consumer.${stateId.replaceAll(':', '.')}`,
+    component: `mechanic:core.rule-state:${stateId}`,
+    phases: ['effects', 'persistence'],
   })
 }
 

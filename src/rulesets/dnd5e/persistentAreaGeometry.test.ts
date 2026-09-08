@@ -109,4 +109,56 @@ describe('legacy persistent-area vertical migration', () => {
       position: tooLarge,
     })).toMatchObject({ preventsVerbalComponents: false, damageImmunities: [] })
   })
+
+  it('projects source-qualified typed protection from eligible areas', () => {
+    const ward: Dnd5ePluginArea = {
+      ...legacyArea('magic-circle'),
+      occupantModifiers: {
+        attacksAgainstOccupantDisadvantageCreatureTypes: ['fiend'],
+        conditionImmunitiesBySourceCreatureType: [{
+          conditions: ['charmed'], sourceCreatureTypes: ['fiend'],
+        }],
+        savingThrowAdvantagesBySourceCreatureType: [{
+          conditions: ['any'], sourceCreatureTypes: ['fiend'],
+        }],
+      },
+    }
+    const inside = token(0)
+    expect(dnd5ePersistentAreaOccupantModifiersAt({
+      map: { ...map, tokens: [inside], dnd5ePluginAreas: [ward] },
+      token: inside,
+      position: inside,
+    })).toMatchObject({
+      attacksAgainstOccupantDisadvantageCreatureTypes: ['fiend'],
+      attacksAgainstOccupantDisadvantageSources: [{
+        areaId: 'legacy-magic-circle', label: 'magic-circle', creatureTypes: ['fiend'],
+      }],
+      conditionImmunitiesBySourceCreatureType: [{
+        conditions: ['charmed'], sourceCreatureTypes: ['fiend'],
+      }],
+      savingThrowAdvantagesBySourceCreatureType: [{
+        conditions: ['any'], sourceCreatureTypes: ['fiend'],
+      }],
+    })
+  })
+
+  it('keeps a Reverse Gravity target supported exactly at the volume top', () => {
+    const reverseGravity: Dnd5ePluginArea = {
+      ...legacyArea('reverse-gravity'),
+      vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 100 },
+      occupantModifiers: { magicallyHeldAloft: true },
+    }
+    const atTop = token(100)
+    const aboveTop = token(100.01)
+    expect(dnd5ePersistentAreaOccupantModifiersAt({
+      map: { ...map, tokens: [atTop], dnd5ePluginAreas: [reverseGravity] },
+      token: atTop,
+      position: atTop,
+    }).magicallyHeldAloft).toBe(true)
+    expect(dnd5ePersistentAreaOccupantModifiersAt({
+      map: { ...map, tokens: [aboveTop], dnd5ePluginAreas: [reverseGravity] },
+      token: aboveTop,
+      position: aboveTop,
+    }).magicallyHeldAloft).toBe(false)
+  })
 })

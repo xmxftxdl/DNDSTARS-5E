@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MobileCredentials } from './mobileApi'
 import type { MobilePlayerWorkspace, MobileRoomRules } from '../../../../packages/mobile-protocol/src'
-import { buildMobileActionRegistry } from './actionRegistry'
+import { buildMobileActionRegistry, mobileBasicActionDescriptors } from './actionRegistry'
 
 const credentials = {
   serverUrl: 'https://example.test',
@@ -20,6 +20,15 @@ const rules = {
 } as MobileRoomRules
 
 describe('mobile action registry', () => {
+  it('keeps Host-validated core actions visible while the projected registry is temporarily empty', () => {
+    const actions = mobileBasicActionDescriptors({ schemaVersion: 1, generatedAt: 1, actions: [], rejectedPluginEntries: [] })
+    expect(actions.find((entry) => entry.id === 'core.weapon-attack')).toMatchObject({
+      group: 'actions',
+      execution: { kind: 'host-command', command: { type: 'dnd5e-weapon-attack' } },
+    })
+    expect(actions.some((entry) => entry.id === 'core.dash')).toBe(true)
+  })
+
   it('loads a pure-data package and exposes only the owned Host command', async () => {
     const registry = await buildMobileActionRegistry({ workspace, credentials, rules, loadPlugin: async () => ({
       format: 'dndstars5e-content', schemaVersion: 2,
@@ -56,11 +65,17 @@ describe('mobile action registry', () => {
         schemaVersion: 1, id: 'arc-bolt', name: '秘法箭', description: '结构化能力', level: 3,
         trigger: { kind: 'active-use' }, cost: { economy: 'bonusAction' },
         targeting: { kind: 'area', relation: 'enemy', shape: 'circle', rangeFeet: 60, radiusFeet: 10 },
+        choices: [{ id: 'element', label: '元素', defaultOptionId: 'lightning', options: [
+          { id: 'lightning', label: '闪电' }, { id: 'thunder', label: '雷鸣' },
+        ] }],
         effects: [], automation: 'partial',
       }] }] },
     }) })
     expect(registry.actions.find((entry) => entry.id === 'plugin-action:demo.plugin:arcane.arc-bolt')).toMatchObject({
       label: '秘法箭', economy: 'bonusAction', automation: 'partial', targeting: { kind: 'area', rangeFeet: 60 },
+      choices: [{ id: 'element', label: '元素', defaultOptionId: 'lightning', options: [
+        { id: 'lightning', label: '闪电' }, { id: 'thunder', label: '雷鸣' },
+      ] }],
     })
 
     const underLevel = await buildMobileActionRegistry({
@@ -247,6 +262,128 @@ describe('mobile action registry', () => {
       execution: { command: { dnd5ePluginAction: {
         featureId: 'demo.plugin:area-control', payload: { persistentAreaId: 'vine-area' },
       } } },
+    })
+  })
+
+  it('registers only fully Headless sustained spell controls without spending another spell slot', async () => {
+    const sustainedWorkspace = {
+      ...workspace,
+      characters: [{
+        ...workspace.characters[0],
+        sustainedSpellControls: [{
+          id: 'flame-blade', spellId: 'flame-blade', label: '火焰刀攻击',
+          description: '附赠动作 · 使用现有效果', economy: 'bonusAction',
+          targeting: 'single-creature', slotLevel: 3, castingClassId: 'druid',
+        }],
+      }],
+      scene: {
+        persistentAreas: [{
+          id: 'core-spell-area:storm', label: '招雷术雷云', color: '#38bdf8',
+          sourceKind: 'core-spell', sourceCharacterId: 'hero', coreSpellId: 'call-lightning',
+          slotLevel: 4, castingClassId: 'druid', cells: [{ col: 3, row: 4 }],
+        }],
+      },
+    } as unknown as MobilePlayerWorkspace
+    const registry = await buildMobileActionRegistry({ workspace: sustainedWorkspace, credentials, rules: null })
+    expect(registry.actions.find((entry) => entry.id === 'sustained-spell:flame-blade:flame-blade')).toMatchObject({
+      economy: 'bonusAction', targeting: { kind: 'single-creature' },
+      execution: { command: { dnd5eSpellCast: {
+        spellId: 'flame-blade', slotLevel: 3, sustainedEffectAttack: 'flame-blade', castingClassId: 'druid',
+      } } },
+    })
+    expect(registry.actions.find((entry) => entry.id === 'sustained-spell:core-spell-area:storm:call-lightning'))
+      .toBeUndefined()
+  })
+
+  it('registers every Host-approved resource-spell cast level as a distinct action', async () => {
+    const grantWorkspace = {
+      ...workspace,
+      characters: [{
+        ...workspace.characters[0],
+        alternateResourceSpells: [{
+          featureId: 'demo.plugin:rune-magic', featureName: '符文魔法', grantId: 'bolt',
+          spellId: 'magic-missile', spellName: '魔法飞弹', classId: 'wizard',
+          resourceId: 'demo.plugin:runes', castLevelOptions: [
+            { slotLevel: 1, resourceCost: 1 }, { slotLevel: 2, resourceCost: 2 },
+          ],
+          ignoreMaterialComponents: false, headless: true, economy: 'action',
+          targeting: 'single-creature', rangeFeet: 120,
+        }],
+      }],
+    } as unknown as MobilePlayerWorkspace
+    const registry = await buildMobileActionRegistry({ workspace: grantWorkspace, credentials, rules: null })
+    const casts = registry.actions.filter((entry) => entry.id.startsWith('alternate-resource-spell:'))
+    expect(casts).toHaveLength(2)
+    expect(casts[1]).toMatchObject({
+      label: '魔法飞弹（2环）', targeting: { kind: 'single-creature', rangeFeet: 120 },
+      execution: { command: { dnd5eSpellCast: {
+        spellId: 'magic-missile', slotLevel: 2,
+        alternateResourceSpell: { featureId: 'demo.plugin:rune-magic', grantId: 'bolt' },
+      } } },
+    })
+  })
+
+  it('exposes only current-turn Host grants and preserves their authority credentials', async () => {
+    const grantedWorkspace = {
+      ...workspace,
+      characters: [{
+        ...workspace.characters[0],
+        combatState: {
+          bonusWeaponAttackGrants: [{
+            id: 'follow-up', label: '追击', turnKey: '2:1', economy: 'bonusAction',
+            options: { activityWeaponAttackGrantId: 'follow-up', activityWeaponAttackWeaponSlot: 'main-hand' },
+          }, {
+            id: 'expired', label: '过期攻击', turnKey: '1:0', economy: 'bonusAction', options: {},
+          }],
+          basicActionGrants: [{
+            grantId: 'charger', label: '冲锋者', turnKey: '2:1', actions: ['shove'], shovePushDistanceBonusFeet: 10,
+          }, {
+            grantId: 'burst', label: '疾走许可', turnKey: '2:1', actions: ['dash'],
+          }, {
+            grantId: 'old-burst', label: '过期疾走', turnKey: '1:0', actions: ['dash'],
+          }],
+          linkedEquipmentRecall: { weaponId: 'bonded-sword', weaponName: '联结长剑' },
+          extraActionTeleport: { turnKey: '2:1', rangeFeet: 30 },
+        },
+      }],
+      combat: {
+        active: true,
+        turnEconomy: {
+          'hero-token': {
+            turnKey: '2:1',
+            action: { current: 1, maximum: 1 }, bonusAction: { current: 1, maximum: 1 },
+            reaction: { current: 1, maximum: 1 }, movement: { current: 30, maximum: 30 },
+          },
+        },
+      },
+      scene: { controlledTokens: [{ id: 'hero-token', characterId: 'hero' }], visibleTokens: [] },
+    } as unknown as MobilePlayerWorkspace
+    const registry = await buildMobileActionRegistry({ workspace: grantedWorkspace, credentials, rules: null })
+
+    expect(registry.actions.find((entry) => entry.id === 'host-granted-weapon-attack:follow-up')).toMatchObject({
+      economy: 'bonusAction',
+      execution: { command: { dnd5eWeaponAttackOptions: {
+        activityWeaponAttackGrantId: 'follow-up', activityWeaponAttackWeaponSlot: 'main-hand',
+      } } },
+    })
+    expect(registry.actions.some((entry) => entry.label === '过期攻击')).toBe(false)
+    expect(registry.actions.find(entry => entry.id === 'host-granted-basic-action:burst:dash')).toMatchObject({
+      economy: 'bonusAction', targeting: { kind: 'none' },
+      execution: { command: { dnd5eBasicAction: { kind: 'dash', activityBasicActionGrantId: 'burst' } } },
+    })
+    expect(registry.actions.some(entry => entry.id.includes('old-burst'))).toBe(false)
+    expect(registry.actions.find((entry) => entry.id === 'host-granted-basic-action:charger:shove:push')).toMatchObject({
+      economy: 'bonusAction',
+      execution: { command: { dnd5eBasicAction: {
+        kind: 'shove', outcome: 'push', activityBasicActionGrantId: 'charger',
+      } } },
+    })
+    expect(registry.actions.find((entry) => entry.id === 'feature.linked-equipment-recall')).toMatchObject({
+      execution: { command: { dnd5eClassFeature: { feature: 'linked-equipment-recall', weaponId: 'bonded-sword' } } },
+    })
+    expect(registry.actions.find((entry) => entry.id === 'feature.extra-action-teleport')).toMatchObject({
+      targeting: { kind: 'area', rangeFeet: 30 },
+      execution: { command: { dnd5eClassFeature: { feature: 'feature-extra-action-teleport' } } },
     })
   })
 

@@ -4,6 +4,7 @@ import { canWriteSharedState } from '../lib/appMode'
 import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import {
   DND5E_SHOPS_RESOURCE,
+  addDnd5eShopOffer,
   createDnd5eShop,
   dnd5eRestockedSpellScrollNames,
   dnd5eShopSpellScrollNames,
@@ -15,6 +16,7 @@ import {
   type Dnd5eShopKind,
   type SharedDnd5eShopsState,
 } from '../rulesets/dnd5e/shops'
+import { dnd5eInventoryItemTemplate } from '../rulesets/dnd5e/items'
 
 export interface Dnd5eShopStoreResult {
   ok: boolean
@@ -40,6 +42,7 @@ interface Dnd5eShopStore {
     priceOverrideCopper?: number,
   ) => Promise<Dnd5eShopStoreResult>
   restockShop: (shopId: string, count: number) => Promise<Dnd5eShopStoreResult>
+  addOffer: (shopId: string, templateId: string, quantity: number) => Promise<Dnd5eShopStoreResult>
   clearShop: (shopId: string) => Promise<Dnd5eShopStoreResult>
   removeShop: (shopId: string) => Promise<Dnd5eShopStoreResult>
 }
@@ -155,6 +158,13 @@ export const useDnd5eShopStore = create<Dnd5eShopStore>()(
           ? `已随机补充库存；本次卷轴：${scrollNames.join('、')}。`
           : '已随机补充库存；本次没有抽到法术卷轴。'
       }),
+      addOffer: (shopId, templateId, quantity) => commit((current) => {
+        const target = current.shops.find((shop) => shop.id === shopId)
+        const template = dnd5eInventoryItemTemplate(templateId)
+        if (!target || !template) return null
+        const updated = addDnd5eShopOffer(target, template, quantity)
+        return nextShared(current, current.shops.map((shop) => shop.id === shopId ? updated : shop))
+      }, '商品已手动加入商店库存。'),
       clearShop: (shopId) => commit((current) => {
         const target = current.shops.find((shop) => shop.id === shopId)
         if (!target) return null

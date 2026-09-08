@@ -22,6 +22,7 @@ export interface BuildPlayerActionAckInput {
   acceptedPosition?: { x: number; y: number }
   acceptedElevationFeet?: number
   dnd5eDeclarativeAttackIntents?: SharedPlayerActionAckState['dnd5eDeclarativeAttackIntents']
+  spellWhisper?: SharedPlayerActionAckState['spellWhisper']
   before?: PlayerActionResultBaseline
   after?: PlayerActionResultBaseline
 }
@@ -52,6 +53,7 @@ export function buildPlayerActionAck(input: BuildPlayerActionAckInput): SharedPl
             consumedFeatureIds: [...input.dnd5eDeclarativeAttackIntents.consumedFeatureIds],
           }
         : undefined,
+    spellWhisper: input.status === 'accepted' ? input.spellWhisper : undefined,
     round: input.round,
     initiativeIndex: input.initiativeIndex,
     updatedAt: input.appliedAt,

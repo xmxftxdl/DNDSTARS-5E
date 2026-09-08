@@ -2,6 +2,7 @@ import { Clock3, Crosshair, Footprints, HeartPulse, PackageOpen, RotateCcw, Shie
 import {
   FIGHTER_RESOURCE_KEYS,
   dnd5eArmorClass,
+  dnd5eAvailableRestrictedExtraActionKinds,
   dnd5eMartialSpellSynergyForCharacter,
   dnd5eMartialSpellBonusAttackAvailable,
   dnd5eEscapableGrapples,
@@ -35,9 +36,18 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
   const profile = dnd5eWeaponAttackProfile(character)
   const offHandProfile = dnd5eOffHandWeaponAttackProfile(character)
   const attacksPerAction = fighterAttacksPerAttackAction(character.level)
+  const restrictedExtraActionKinds = dnd5eAvailableRestrictedExtraActionKinds({
+    effects: character.dnd5eCombatState?.activeEffects,
+    usesByEffect: character.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
+    turnKey: turnEconomy.turnKey,
+  })
+  const restrictedWeaponAttackAvailable = restrictedExtraActionKinds.includes('weapon-attack')
+  const restrictedDisengageAvailable = restrictedExtraActionKinds.includes('disengage')
   const attackLimit = attacksPerAction * Math.max(1, turnEconomy.action.max)
   const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
-  const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (turnEconomy.action.current > 0 || canContinueAttackAction)
+  const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (
+    turnEconomy.action.current > 0 || canContinueAttackAction || restrictedWeaponAttackAvailable
+  )
   const offHandAttackAvailable = !!offHandProfile && turnEconomy.attacksUsed > 0 && turnEconomy.bonusAction.current > 0
   const featureBonusAttackAvailable =
     !!profile &&
@@ -67,12 +77,13 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
             {canAct ? '你的回合' : '回合外'}
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
           <EconomyCard icon={Sword} label="主动动作" pool={turnEconomy.action} detail="攻击等" />
           <EconomyCard icon={Sparkles} label="附赠动作" pool={turnEconomy.bonusAction} detail="回气等" />
           <EconomyCard icon={RotateCcw} label="反应" pool={turnEconomy.reaction} detail="借机攻击等" />
           <EconomyCard icon={Footprints} label="移动" pool={turnEconomy.movement} detail="独立于动作" suffix="尺" />
           <EconomyCard icon={PackageOpen} label="物件交互" pool={turnEconomy.objectInteraction ?? { current: 1, max: 1 }} detail="每回合一次免费" />
+          {restrictedExtraActionKinds.length > 0 ? <EconomyCard icon={Sparkles} label="加速动作" pool={{ current: 1, max: 1 }} detail="攻击、疾走、撤离或躲藏" /> : null}
         </div>
       </section>
       <div className="rounded-xl border border-white/10 bg-void-900/45 p-4">
@@ -120,7 +131,7 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
           <Sparkles className="h-4 w-4" />特性附赠武器攻击
         </button> : null}
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <button type="button" onClick={onDisengage} disabled={!canAct || pending || turnEconomy.action.current < 1} className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={onDisengage} disabled={!canAct || pending || (turnEconomy.action.current < 1 && !restrictedDisengageAvailable)} className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
             <Footprints className="h-4 w-4" />撤离
           </button>
           <button type="button" onClick={onDodge} disabled={!canAct || pending || turnEconomy.action.current < 1} className="flex items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40">
@@ -175,11 +186,9 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
       <Dnd5eBasicActionsPanel
-        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction || (
-          turnEconomy.bonusAction.current > 0 &&
-          Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
-            .some((grant) => grant.appliedTurnKey === turnEconomy.turnKey)
-        ))}
+        canAct={canAct}
+        actionAvailable={turnEconomy.action.current > 0 || canContinueAttackAction}
+        bonusActionAvailable={turnEconomy.bonusAction.current > 0}
         pending={pending}
         targets={basicActionTargets}
         basicActionGrants={Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
@@ -188,6 +197,10 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
           grapplerTokenId: grapple.grapplerId,
           dc: grapple.dc,
         }))}
+        dismissibleEffects={(character.dnd5eCombatState?.activeEffects ?? []).flatMap((effect) =>
+          effect.removal?.action?.economy === 'action' && effect.removal.action.maxDistanceFeet >= 0
+            ? [{ effectId: effect.id, label: effect.label, actionLabel: effect.removal.action.label }]
+            : [])}
         onAction={onBasicAction}
       />
     </div>

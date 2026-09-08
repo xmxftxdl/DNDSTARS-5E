@@ -1,0 +1,72 @@
+{
+  "id": "srd-5.1:shrieker",
+  "slug": "shrieker",
+  "name": "尖叫蕈",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "shriek",
+      "name": "尖啸",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 311,
+      "slug": "shrieker",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:15:05.079Z",
+      "name": "尖叫蕈",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "challengeRating": "0",
+      "total": 334,
+      "mapId": "verify-ui-shrieker-inspect-1788570905137",
+      "combatId": "verify-ui-shrieker-inspect-1788570905137:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-05T01:15:10.414Z",
+      "evidenceFile": "ui-cases/monsters/311-shrieker.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "虚假外表",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 0,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

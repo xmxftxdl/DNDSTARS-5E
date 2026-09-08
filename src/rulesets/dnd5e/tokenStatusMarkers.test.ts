@@ -40,7 +40,8 @@ describe('D&D 5e Token status markers', () => {
       { id: 'effect:disease', label: '腐败疫病', legacyCondition: 'disease' },
       { id: 'effect:disease-copy', label: '另一种疾病', legacyCondition: '疾病' },
       { id: 'effect:curse', label: '休眠诅咒', legacyCondition: 'curse', suspendedBy: ['shapechange'] },
-      { id: 'effect:standard', label: '中毒', legacyCondition: 'poisoned' },
+      { id: 'effect:standard', label: '中毒', legacyCondition: 'poisoned', standardCondition: 'poisoned' },
+      { id: 'effect:invisible', label: '隐形术', legacyCondition: 'invisibility', standardCondition: 'invisible' },
       { id: 'effect:attached', label: '附着', legacyCondition: 'attached' },
       { id: 'effect:suffocating', label: '无法呼吸', legacyCondition: 'unable-to-breathe' },
     ])).toEqual([
@@ -60,6 +61,153 @@ describe('D&D 5e Token status markers', () => {
       }),
       expect.objectContaining({ id: 'headless:effect:attached', statusId: 'attached' }),
       expect.objectContaining({ id: 'headless:effect:suffocating', statusId: 'suffocating' }),
+    ])
+  })
+
+  it('projects disguise self as a dedicated disguise badge instead of invisibility', () => {
+    const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
+      id: 'activity:disguise-self:appearance',
+      definitionId: 'srd-5.1:spell:disguise-self:appearance',
+      label: '易容术',
+      legacyCondition: '易容术',
+      source: { actorId: 'hero', rulesId: 'disguise-self' },
+    }])
+
+    expect(markers).toEqual([
+      expect.objectContaining({
+        id: 'headless:activity:disguise-self:appearance',
+        statusId: 'disguised',
+        label: '易容术',
+        activeEffectId: 'activity:disguise-self:appearance',
+        mechanical: true,
+      }),
+    ])
+    expect(dnd5eTokenStatusMarkerDefinition('disguised')).toMatchObject({
+      label: '易容',
+    })
+    expect(markers[0]?.statusId).not.toBe('hidden')
+  })
+
+  it('projects all five Imprisonment modes as one spell badge with distinct labels', () => {
+    const modes = [
+      ['burial', '埋葬'],
+      ['chaining', '锁链'],
+      ['hedged-prison', '封闭监牢'],
+      ['minimus-containment', '微缩收容'],
+      ['slumber', '沉眠'],
+    ] as const
+
+    for (const [mode, label] of modes) {
+      expect(dnd5eTokenStatusMarkersFromActiveEffects([{
+        id: `activity:imprisonment:${mode}`,
+        definitionId: `activity:imprisonment:imprisonment-${mode}:extension`,
+        label: `禁锢术：${label}`,
+        legacyCondition: `imprisonment-${mode}`,
+        source: { actorId: 'archmage', rulesId: 'imprisonment' },
+      }])).toEqual([
+        expect.objectContaining({
+          statusId: 'imprisoned',
+          label: `禁锢术：${label}`,
+          mechanical: true,
+        }),
+      ])
+    }
+    expect(dnd5eTokenStatusMarkerDefinition('imprisoned').description).toBe(
+      '权威效果：目标正受到禁锢术影响。',
+    )
+  })
+
+  it('projects the Cone of Cold frozen statue ActiveEffect as a removable Token badge', () => {
+    const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
+      id: 'effect:cone-of-cold:frozen-statue:target',
+      definitionId: 'srd-5.1:spell:cone-of-cold:frozen-statue',
+      label: '寒冰锥：冰冻塑像（直至解冻）',
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'cone-of-cold' },
+    }])
+
+    expect(markers).toEqual([expect.objectContaining({
+      statusId: 'frozen-statue',
+      label: '寒冰锥：冰冻塑像（直至解冻）',
+      activeEffectId: 'effect:cone-of-cold:frozen-statue:target',
+      sourceActorId: 'wizard',
+      sourceLabel: '法师',
+      mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkerDefinition('frozen-statue')).toMatchObject({
+      label: '冰冻塑像',
+      description: '权威效果：该生物被寒冰锥杀死并化为冰冻塑像，持续至解冻。',
+    })
+  })
+
+  it('projects Nondetection as a dedicated removable spell badge', () => {
+    const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
+      id: 'activity:nondetection:target',
+      definitionId: 'srd-5.1:spell:nondetection',
+      label: '回避侦测',
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'nondetection' },
+    }])
+
+    expect(markers).toEqual([expect.objectContaining({
+      statusId: 'nondetection',
+      label: '回避侦测',
+      activeEffectId: 'activity:nondetection:target',
+      sourceActorId: 'wizard',
+      sourceLabel: '法师',
+      mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkerDefinition('nondetection')).toMatchObject({
+      label: '回避侦测',
+      description: expect.stringContaining('无法成为预言系法术的目标'),
+    })
+  })
+
+  it('projects a failed Plane Shift save as a removable transported Token badge', () => {
+    const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
+      id: 'effect:plane-shift:transferred:target',
+      definitionId: 'srd-5.1:spell:plane-shift-transferred',
+      label: '异界传送：已被传送',
+      legacyCondition: 'plane-shifted',
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'plane-shift' },
+    }])
+
+    expect(markers).toEqual([expect.objectContaining({
+      statusId: 'plane-shifted',
+      label: '异界传送：已被传送',
+      activeEffectId: 'effect:plane-shift:transferred:target',
+      sourceActorId: 'wizard',
+      sourceLabel: '法师',
+      mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkerDefinition('plane-shifted')).toMatchObject({
+      label: '已被异界传送',
+      description: '权威效果：该生物因异界传送豁免失败，已被送往施法者指定的存在位面。',
+    })
+  })
+
+  it('projects a DM custom ActiveEffect as a removable generic Token badge', () => {
+    const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
+      id: 'dm:target:custom-status:tracked:1',
+      definitionId: 'dm:custom-status:tracked',
+      label: '被星界猎手追踪',
+      legacyCondition: '被星界猎手追踪',
+      source: { actorId: 'dm', label: 'DM 裁定' },
+    }])
+
+    expect(markers).toEqual([
+      expect.objectContaining({
+        id: 'headless:dm:target:custom-status:tracked:1',
+        activeEffectId: 'dm:target:custom-status:tracked:1',
+        statusId: expect.stringMatching(/^custom:/),
+        label: '被星界猎手追踪',
+        mechanical: true,
+      }),
+    ])
+    expect(markers[0]?.detailDescription).toBeUndefined()
+    expect(normalizeDnd5eTokenStatusMarkers(markers)).toEqual([
+      expect.objectContaining({
+        statusId: expect.stringMatching(/^custom:/),
+        label: '被星界猎手追踪',
+      }),
     ])
   })
 

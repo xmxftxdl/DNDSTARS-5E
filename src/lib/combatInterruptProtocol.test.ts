@@ -332,6 +332,56 @@ describe('combatInterruptProtocol', () => {
     }).canAnswer).toBe(true)
   })
 
+  it("does not route a DM-controlled monster's Bardic Inspiration decision to its linked player", () => {
+    const linked = baseCharacter({
+      id: 'linked-monster-character',
+      roomMemberId: 'member-player',
+      dmNotes: 'private',
+    })
+    const monsterToken: Token = {
+      id: 'sphinx-token',
+      label: '斯芬克斯',
+      type: 'enemy',
+      characterId: linked.id,
+      poolId: 'srd-5.1:gynosphinx',
+      x: 0,
+      y: 0,
+      size: 2,
+      color: '#fff',
+      emoji: 'S',
+    }
+    const interrupt = createCombatInterrupt({
+      id: 'monster-bardic-1',
+      mapId: 'map',
+      kind: 'bardic-inspiration',
+      targetCharId: linked.id,
+      payload: {
+        targetName: monsterToken.label,
+        rollerTokenId: monsterToken.id,
+        dieSides: 8,
+        rollType: '攻击检定' as const,
+        total: 14,
+        targetNumber: 16,
+      },
+      now: 100,
+    })
+
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [linked],
+      visibleCharacters: [linked],
+      assignedCharacterId: linked.id,
+      roomMemberId: 'member-player',
+      tokens: [monsterToken],
+      authority: 'player',
+    }).canAnswer).toBe(false)
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [linked],
+      visibleCharacters: [linked],
+      tokens: [monsterToken],
+      authority: 'dm',
+    }).canAnswer).toBe(true)
+  })
+
   it("routes Dark One's Own Luck to the Fiend warlock making the roll", () => {
     const target = baseCharacter({ id: 'warlock', dmNotes: 'private' })
     const interrupt = createCombatInterrupt({

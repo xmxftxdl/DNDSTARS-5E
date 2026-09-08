@@ -35,4 +35,38 @@ describe('Dnd5eInventoryTile', () => {
     expect(html).toContain('data-inventory-glyph="sword"')
     expect(html).toContain('data-icon-tone="multicolor"')
   })
+
+  it('keeps a long magic-item name and the DM badge in separate flow rows', () => {
+    const entry: Dnd5eInventoryEntry = {
+      instanceId: 'water-elemental-bowl',
+      templateId: 'srd-5.1:magic-item:bowl-of-commanding-water-elementals',
+      quantity: 1,
+      acquiredAt: 1,
+      item: {
+        id: 'srd-5.1:magic-item:bowl-of-commanding-water-elementals',
+        name: '控水元素之碗',
+        category: 'magic-item',
+        icon: 'generic',
+        description: '召唤水元素。',
+        rulesText: '具体召唤结果由 DM 裁定。',
+        stackable: false,
+        magicItem: {
+          kind: 'wondrous-item',
+          rarity: 'rare',
+          attunement: 'none',
+          automation: 'dm-adjudication',
+        },
+        source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(Dnd5eInventoryTile, {
+      entry,
+      compact: true,
+    }))
+
+    expect(html).toContain('控水元素之碗')
+    expect(html).toContain('data-testid="inventory-tile-status-row"')
+    expect(html).toContain('DM 裁定')
+    expect(html).not.toContain('absolute bottom-2 right-2')
+  })
 })

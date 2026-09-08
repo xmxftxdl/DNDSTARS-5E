@@ -1,0 +1,264 @@
+{
+  "id": "srd-5.1:dryad",
+  "slug": "dryad",
+  "name": "树精",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：怪物核心法术现在能完整施放橡棍术，把 10 回合效果绑定到德鲁伊长棍或树精短棒，并记录各自的施法属性。强化攻击分支只有在该来源效果实际存在时才开放；未施法、效果过期或伪造分支会在扣除动作前被拒绝。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "club",
+      "name": "木棒",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "fey-charm",
+      "name": "精类魅惑",
+      "automation": "headless",
+      "rule": "saving-throw-condition",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.rangeFeet",
+        "rule.ability",
+        "rule.dc",
+        "rule.condition",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.requiresTargetCanSeeSource",
+        "rule.durationRounds",
+        "rule.requiredTargetCreatureTypes[]",
+        "rule.repeatSaveOnDamage.mode",
+        "rule.repeatSaveOnDamage.sourceFilter",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.durationRounds",
+        "rule.immunityOnSuccessfulSaveOrEffectEnd.scope.kind",
+        "rule.sourceTargetLimit.maximum",
+        "rule.sourceTargetLimit.replaceOldest",
+        "rule.sourceTargetLimit.partitionByRequiredCreatureType"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "out-of-range",
+        "source-blinded",
+        "target-blinded",
+        "wrong-target-type"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "club-shillelagh",
+      "name": "木棒 (Shillelagh)",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "automation",
+        "requiredActiveEffectDefinitionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 89,
+      "slug": "dryad",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:58:14.215Z",
+      "name": "树精",
+      "actionId": "club",
+      "actionName": "木棒",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-dryad-club-1788559094257",
+      "combatId": "verify-ui-dryad-club-1788559094257:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "树精 使用木棒攻击 验证目标：木棒 → 验证目标 19+2=21 命中；共造成 2 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:58 PM\n结算\n\n树精 使用木棒攻击 验证目标：木棒 → 验证目标 19+2=21 命中；共造成 2 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：木棒｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +2。\n结果 · 21 vs AC 10：命中。\n伤害骰 · 木棒（基础伤害·钝击）｜1d4 骰面：2 = 2｜固定加值 +0｜小计 2\n树精｜消耗动作\n验证目标｜受到 2 点伤害｜HP 320 → 318",
+      "playerLog": "树精 使用木棒攻击 验证目标：木棒 → 验证目标 19+2=21 命中；共造成 2 点伤害。",
+      "afterHp": 318,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:58:39.897Z",
+      "evidenceFile": "ui-cases/monsters/089-dryad.json"
+    },
+    {
+      "mapId": "dryad-shillelagh-ui-1788598177141",
+      "combatId": "dryad-shillelagh-ui-1788598177141:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "startedAt": "2026-09-05T08:49:37.856Z",
+      "beforeSpell": {
+        "enhancedAttackDisabled": true,
+        "remainingUses": 1
+      },
+      "afterSpell": {
+        "remainingUses": 0,
+        "effect": {
+          "schemaVersion": 1,
+          "id": "srd-5.1_3Aspell_3Ashillelagh:actor:actor",
+          "definitionId": "srd-5.1:spell:shillelagh",
+          "label": "橡棍术：武器伤害骰变为 d8，并使用施法属性攻击",
+          "kind": "debuff",
+          "source": {
+            "kind": "spell",
+            "actorId": "actor",
+            "actorName": "树精",
+            "rulesId": "shillelagh",
+            "spellLevel": 0,
+            "spellSaveDc": 14
+          },
+          "appliedAt": 1788598186237,
+          "appliedTurnKey": "dryad-shillelagh-ui-1788598177141:combat:1:actor",
+          "duration": {
+            "type": "rounds",
+            "remainingRounds": 10,
+            "tickOn": "target-turn-end"
+          },
+          "stackingKey": "srd-5.1:spell:shillelagh",
+          "stackingPolicy": "refresh-duration",
+          "visibility": "public",
+          "modifiers": {
+            "shillelagh": {
+              "weaponId": "club",
+              "spellcastingAbility": "cha",
+              "spellcastingModifier": 4
+            }
+          }
+        }
+      },
+      "afterAttack": {
+        "currentHp": 112,
+        "maxHp": 120
+      },
+      "dmLog": "树精 使用木棒 (Shillelagh)攻击 验证目标：木棒 (Shillelagh) → 验证目标 10+6=16 命中；共造成 8 点伤害。",
+      "playerLog": "树精 使用木棒 (Shillelagh)攻击 验证目标：木棒 (Shillelagh) → 验证目标 10+6=16 命中；共造成 8 点伤害。",
+      "status": "passed",
+      "finishedAt": "2026-09-05T08:50:01.259Z",
+      "mode": "spell-action-special",
+      "actionId": "club-shillelagh"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "与动植物交谈",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "树跃",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 15,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

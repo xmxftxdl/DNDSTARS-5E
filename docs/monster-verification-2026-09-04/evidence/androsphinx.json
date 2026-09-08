@@ -1,0 +1,304 @@
+{
+  "id": "srd-5.1:androsphinx",
+  "slug": "androsphinx",
+  "name": "雄性斯芬克斯",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：传奇动作“施放法术”现在是交互式 Headless 选择入口。选中的每一道法术独立检查处理器与剩余法术位；完整处理器直接结算目标、骰子、效果、法术位和 3 点传奇动作，叙事或缺少处理器的法术只把该次选择交给 DM。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claw",
+      "name": "爪击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "roar",
+      "name": "咆哮",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.max",
+        "rule.kind",
+        "rule.orderedVariantIds[]",
+        "rule.variants[].id",
+        "rule.variants[].name",
+        "rule.variants[].area.shape",
+        "rule.variants[].area.origin",
+        "rule.variants[].area.radiusFeet",
+        "rule.variants[].target",
+        "rule.variants[].ability",
+        "rule.variants[].dc",
+        "rule.variants[].magical",
+        "rule.variants[].requiresTargetCanHearSource",
+        "rule.variants[].conditionOnFailedSave.condition",
+        "rule.variants[].conditionOnFailedSave.durationRounds",
+        "rule.variants[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "rule.variants[].additionalConditionsOnFailedSave[].condition",
+        "rule.variants[].additionalConditionsOnFailedSave[].durationRounds",
+        "rule.variants[].additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "rule.variants[].additionalConditionsOnFailedSave[].dependsOnCondition",
+        "rule.variants[].damage.average",
+        "rule.variants[].damage.count",
+        "rule.variants[].damage.sides",
+        "rule.variants[].damage.bonus",
+        "rule.variants[].damage.type",
+        "rule.variants[].damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "claw-attack",
+      "name": "爪击攻击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "referencedActionId",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "teleport-costs-2-actions",
+      "name": "传送（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "teleport",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.target",
+        "rule.rangeFeet",
+        "rule.requiresVisibleDestination",
+        "rule.requiresUnoccupiedDestination"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "cast-a-spell-costs-3-actions",
+      "name": "施展法术（消耗 3 动作）",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "monster core spell map action spends legendary points instead of turn economy for an off-turn Sphinx spell"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 19,
+      "slug": "androsphinx",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:56:29.901Z",
+      "name": "雄性斯芬克斯",
+      "actionId": "claw",
+      "actionName": "爪击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "17",
+      "total": 334,
+      "mapId": "verify-ui-androsphinx-claw-1788566189962",
+      "combatId": "verify-ui-androsphinx-claw-1788566189962:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "雄性斯芬克斯 使用爪击攻击 验证目标：爪击 → 验证目标 19+12=31 命中；共造成 14 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n06:56 PM\n结算\n\n雄性斯芬克斯 使用爪击攻击 验证目标：爪击 → 验证目标 19+12=31 命中；共造成 14 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：爪击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +12。\n结果 · 31 vs AC 10：命中。\n伤害骰 · 爪击（基础伤害·挥砍）｜2d10 骰面：5 + 3 = 8｜固定加值 +6｜小计 14\n雄性斯芬克斯｜消耗动作\n验证目标｜受到 14 点伤害｜HP 320 → 306",
+      "playerLog": "雄性斯芬克斯 使用爪击攻击 验证目标：爪击 → 验证目标 19+12=31 命中；共造成 14 点伤害。",
+      "afterHp": 306,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T23:56:54.541Z",
+      "evidenceFile": "ui-cases/monsters/019-androsphinx.json"
+    },
+    {
+      "index": 23,
+      "slug": "androsphinx",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:14:36.075Z",
+      "name": "雄性斯芬克斯",
+      "actionId": "claw",
+      "actionName": "爪击",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-androsphinx-claw-1788556476131",
+      "combatId": "verify-ui-androsphinx-claw-1788556476131:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "雄性斯芬克斯 使用爪击攻击 验证目标：爪击 → 验证目标 14+12=26 命中；共造成 21 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:14 PM\n结算\n\n雄性斯芬克斯 使用爪击攻击 验证目标：爪击 → 验证目标 14+12=26 命中；共造成 21 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：爪击｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 14；最终采用 14；调整值 +12。\n结果 · 26 vs AC 10：命中。\n伤害骰 · 爪击（基础伤害·挥砍）｜2d10 骰面：8 + 7 = 15｜固定加值 +6｜小计 21\n雄性斯芬克斯｜消耗动作\n验证目标｜受到 21 点伤害｜HP 320 → 299",
+      "playerLog": "雄性斯芬克斯 使用爪击攻击 验证目标：爪击 → 验证目标 14+12=26 命中；共造成 21 点伤害。",
+      "afterHp": 299,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:15:00.842Z",
+      "evidenceFile": "ui-cases/monsters/023-androsphinx.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "无法窥测",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 25,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

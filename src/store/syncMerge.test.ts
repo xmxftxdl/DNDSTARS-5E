@@ -8,6 +8,7 @@ import {
   clearPendingLocalCharacterClassResourceEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
   clearPendingLocalAdvancementsForTest,
+  clearPendingAuthorityCharacterPatchesForTest,
   filterLegacySampleCharacters,
   mergeCharactersForSharedSave,
   mergePendingLocalFighterChoices,
@@ -17,6 +18,8 @@ import {
   mergePendingLocalCharacterHitPointEdits,
   mergePendingLocalCharacterClassResourceEdits,
   mergePendingLocalAdvancements,
+  mergePendingAuthorityCharacterPatches,
+  pendingAuthorityCharacterPatchesNeedRepublish,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
   markPendingLocalCharacterHitPointEdit,
@@ -163,6 +166,17 @@ describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', (
     expect(started.concentrating).toBe(true)
     expect(started.dnd5eCombatState?.concentrationSpellId).toBe('flaming-sphere')
 
+    const structuredBeforeLegacyBoolean = mergePlayerWritableCharacter(
+      char({ concentrating: false, dnd5eCombatState: undefined }),
+      char({
+        concentrating: false,
+        dnd5eCombatState: { concentrationSpellId: 'flaming-sphere' },
+      }),
+    )
+    expect(structuredBeforeLegacyBoolean.concentrating).toBe(true)
+    expect(structuredBeforeLegacyBoolean.dnd5eCombatState?.concentrationSpellId)
+      .toBe('flaming-sphere')
+
     const ended = mergePlayerWritableCharacter(
       started,
       char({ concentrating: false, dnd5eCombatState: {} }),
@@ -185,6 +199,82 @@ describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', (
     expect(merged.name).toBe('玩家改的名字') // 非白名单字段保留本地。
     expect(merged.currentHp).toBe(12) // 白名单字段取对端。
   })
+
+  it('accepts a newer DM advancement revision instead of republishing stale player cantrips', () => {
+    clearPendingLocalAdvancementsForTest()
+    const oldSelections = {
+      wizard: { selections: { 'spell-cantrips': ['fire-bolt', 'ray-of-frost'] } },
+    }
+    const revisedSelections = {
+      wizard: { selections: { 'spell-cantrips': ['fire-bolt', 'prestidigitation'] } },
+    }
+    const before = char({
+      level: 19,
+      abilities: { str: 8, dex: 14, con: 14, int: 20, wis: 12, cha: 10 },
+      skills: ['arcana'],
+      savingThrows: ['int', 'wis'],
+      dnd5eClassChoices: { classes: oldSelections },
+    })
+    const after = char({
+      level: 20,
+      abilities: { str: 8, dex: 14, con: 14, int: 20, wis: 12, cha: 10 },
+      skills: ['arcana'],
+      savingThrows: ['int', 'wis'],
+      dnd5eClassChoices: { classes: revisedSelections },
+    })
+    const revisedRecord = {
+      schemaVersion: 1,
+      id: 'wizard-20',
+      fromLevel: 19,
+      toLevel: 20,
+      classId: 'wizard',
+      fromClassLevel: 19,
+      toClassLevel: 20,
+      completedAt: 2_000,
+      completedBy: 'dm',
+      decision: {
+        schemaVersion: 1,
+        classId: 'wizard',
+        levelsGained: 1,
+        hitPointMethod: 'fixed',
+        hitPointRolls: [],
+        asiChoices: [],
+        spellSelections: { cantrips: ['fire-bolt', 'prestidigitation'], wizardSpellbook: [] },
+      },
+      grantedFeatureIds: [],
+      before,
+      after,
+      revisions: [{
+        revisedAt: 2_000,
+        revisedBy: 'dm',
+        previousDecision: {
+          schemaVersion: 1,
+          classId: 'wizard',
+          levelsGained: 1,
+          hitPointMethod: 'fixed',
+          hitPointRolls: [],
+          asiChoices: [],
+          spellSelections: { cantrips: ['fire-bolt', 'ray-of-frost'], wizardSpellbook: [] },
+        },
+      }],
+    } as unknown as NonNullable<Character['dnd5eLevelAdvancements']>[number]
+    const local = char({
+      ...before,
+      dnd5eLevelAdvancements: [],
+    })
+    const shared = char({
+      ...after,
+      dnd5eLevelAdvancements: [revisedRecord],
+    })
+
+    const merged = mergePlayerWritableCharacter(local, shared)
+
+    expect(merged.dnd5eClassChoices?.classes?.wizard?.selections?.['spell-cantrips'])
+      .toEqual(['fire-bolt', 'prestidigitation'])
+    expect(merged.dnd5eLevelAdvancements).toEqual([revisedRecord])
+    expect(merged.level).toBe(20)
+  })
+
 })
 
 
@@ -415,6 +505,40 @@ describe('pending local character-sheet hit point edits', () => {
       hitPointDice: [{ sides: 10, current: 3, max: 3 }],
     })], 1_003)[0].hitPointDice).toEqual([{ sides: 10, current: 3, max: 3 }])
   })
+
+  it('preserves a zero-HP death-save edit until the room snapshot acknowledges both fields', () => {
+    markPendingLocalCharacterHitPointEdit('hero', { currentHp: 0 }, 1_000)
+    markPendingLocalCharacterHitPointEdit('hero', {
+      deathSaveSuccesses: 0,
+      deathSaveFailures: 3,
+      deathSaveStable: false,
+    }, 1_001)
+
+    const stale = mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 12,
+      deathSaveSuccesses: 0,
+      deathSaveFailures: 0,
+      deathSaveStable: false,
+    })], 1_002)[0]
+    expect(stale).toMatchObject({
+      currentHp: 0,
+      deathSaveSuccesses: 0,
+      deathSaveFailures: 3,
+      deathSaveStable: false,
+    })
+
+    const acknowledged = mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 0,
+      deathSaveSuccesses: 0,
+      deathSaveFailures: 3,
+      deathSaveStable: false,
+    })], 1_003)[0]
+    expect(acknowledged).toMatchObject({ currentHp: 0, deathSaveFailures: 3 })
+    expect(mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 10,
+      deathSaveFailures: 0,
+    })], 1_004)[0]).toMatchObject({ currentHp: 10, deathSaveFailures: 0 })
+  })
 })
 
 describe('pending local character class-resource edits', () => {
@@ -569,6 +693,94 @@ describe('pending local SRD class choices', () => {
       .toEqual(choices.ranger.selections)
     expect(values.size).toBe(0)
   })
+
+  it('keeps a room-authority spell selection protected during its server save window', () => {
+    const classes = {
+      wizard: {
+        subclass: 'evocation',
+        selections: {
+          'wizard-spellbook': ['magic-missile', 'planar-binding'],
+          'spell-prepared': ['magic-missile'],
+        },
+      },
+    }
+    useCharacterStore.setState({
+      characters: [char({ id: 'hero', dnd5eClassChoices: { classes: {} } })],
+      selectedId: 'hero',
+    })
+    useCharacterStore.getState().applyAuthorityUpdate(
+      'hero',
+      { dnd5eClassChoices: { classes } },
+      { protectClassChoicesUntilAcknowledged: true },
+    )
+
+    const stale = mergePendingLocalClassChoices([
+      char({ id: 'hero', dnd5eClassChoices: { classes: {} } }),
+    ])
+    expect(stale[0].dnd5eClassChoices?.classes?.wizard.selections?.['wizard-spellbook'])
+      .toEqual(['magic-missile', 'planar-binding'])
+
+    const acknowledged = mergePendingLocalClassChoices([
+      char({ id: 'hero', dnd5eClassChoices: { classes } }),
+    ])
+    expect(acknowledged[0].dnd5eClassChoices?.classes?.wizard.selections?.['wizard-spellbook'])
+      .toEqual(['magic-missile', 'planar-binding'])
+  })
+})
+
+describe('pending room-authority character patches', () => {
+  afterEach(() => clearPendingAuthorityCharacterPatchesForTest())
+
+  it('keeps spent spell slots and newly applied effects until the atomic snapshot acknowledges them', () => {
+    const cloud = createDnd5eConditionEffect({
+      id: 'wind-walk-cloud',
+      condition: 'incapacitated',
+      targetId: 'hero',
+      source: { kind: 'spell', rulesId: 'wind-walk', label: '御风而行' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+    })
+    const before = char({
+      id: 'hero',
+      currentHp: 40,
+      maxHp: 40,
+      classResources: { 'spell-slot-7': { current: 2, max: 2 } },
+      dnd5eCombatState: { activeEffects: [] },
+    })
+    const resolved = char({
+      id: 'hero',
+      currentHp: 45,
+      maxHp: 40,
+      classResources: { 'spell-slot-7': { current: 1, max: 2 } },
+      dnd5eCombatState: { activeEffects: [{
+        ...cloud,
+        modifiers: { hitPointMaximumBonus: 5 },
+      }] },
+    })
+    useCharacterStore.setState({ characters: [before], selectedId: 'hero' })
+    useCharacterStore.getState().applyAuthorityUpdate(
+      'hero',
+      resolved,
+      { protectPatchUntilAcknowledged: true },
+    )
+
+    const [protectedCharacter] = mergePendingAuthorityCharacterPatches([before], 1_000)
+    expect(protectedCharacter.currentHp).toBe(45)
+    expect(protectedCharacter.classResources?.['spell-slot-7']?.current).toBe(1)
+    expect(protectedCharacter.dnd5eCombatState?.activeEffects).toEqual(resolved.dnd5eCombatState?.activeEffects)
+    expect(pendingAuthorityCharacterPatchesNeedRepublish([before], [protectedCharacter])).toBe(true)
+
+    const [acknowledged] = mergePendingAuthorityCharacterPatches([resolved], 1_001)
+    expect(acknowledged.classResources?.['spell-slot-7']?.current).toBe(1)
+    expect(acknowledged.dnd5eCombatState?.activeEffects).toEqual(resolved.dnd5eCombatState?.activeEffects)
+    expect(pendingAuthorityCharacterPatchesNeedRepublish([resolved], [acknowledged])).toBe(false)
+
+    const laterAuthority = char({
+      id: 'hero',
+      classResources: { 'spell-slot-7': { current: 0, max: 2 } },
+      dnd5eCombatState: { activeEffects: [] },
+    })
+    expect(mergePendingAuthorityCharacterPatches([laterAuthority], 1_002)[0]).toEqual(laterAuthority)
+  })
 })
 
 describe('pending local plugin feature choices', () => {
@@ -690,6 +902,8 @@ describe('pending local level advancement receipts', () => {
 })
 
 describe('T13/AC6 mergePlayerTokenCombatFields preserves DM-authoritative token positions', () => {
+  afterEach(() => vi.restoreAllMocks())
+
   it('keeps DM-authored item areas when a player publishes an unrelated map write', () => {
     const localMap = map({ dnd5eItemAreas: [] })
     const sharedArea = {
@@ -747,6 +961,32 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM-authoritative token 
     }
     const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 20, y: 10, movementAnimation })] })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
+    expect(result.tokens[0].movementAnimation).toEqual(movementAnimation)
+  })
+
+  it('rebases a recently late authoritative movement once so the player still sees it', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2_000)
+    const localMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 10, y: 10 })] })
+    const movementAnimation = {
+      id: 'late-move', points: [{ x: 10, y: 10 }, { x: 20, y: 10 }], durationMs: 500, issuedAt: 1_400,
+    }
+    const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 20, y: 10, movementAnimation })] })
+    const [first] = mergePlayerTokenCombatFields([localMap], [sharedMap])
+    const [second] = mergePlayerTokenCombatFields([first], [sharedMap])
+
+    expect(first.tokens[0].movementAnimation?.issuedAt).toBe(2_000)
+    expect(second.tokens[0].movementAnimation).toBe(first.tokens[0].movementAnimation)
+  })
+
+  it('does not replay an old authoritative movement when a player refreshes later', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(10_000)
+    const localMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 10, y: 10 })] })
+    const movementAnimation = {
+      id: 'old-move', points: [{ x: 10, y: 10 }, { x: 20, y: 10 }], durationMs: 500, issuedAt: 1_000,
+    }
+    const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 20, y: 10, movementAnimation })] })
+    const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
+
     expect(result.tokens[0].movementAnimation).toEqual(movementAnimation)
   })
 
@@ -1011,6 +1251,112 @@ describe('地图 Token 权威补丁重试', () => {
       anchorCell: { col: 4, row: 3 },
       cells: [{ col: 4, row: 3 }],
     })
+  })
+
+  it('移动来源 Token 时原子跟随浮碟并投影效果 Token', async () => {
+    const diskArea = anchoredArea({
+      id: 'floating-disk-area',
+      featureId: 'srd-5.1:spell:floating-disk',
+      coreSpellId: 'floating-disk',
+      label: '浮碟术',
+      sourceTokenId: 'wizard-token',
+      anchorTokenId: 'disk',
+      sourceFollower: {
+        stationaryWithinFeet: 20,
+        maximumSeparationFeet: 100,
+        maximumStepHeightFeet: 10,
+        carryingCapacityPounds: 500,
+      },
+    })
+    const original = map({
+      id: 'map-1',
+      width: 2_000,
+      tokens: [
+        token({ id: 'wizard-token', type: 'player', x: 75, y: 75 }),
+        token({ id: 'disk', type: 'obstacle', x: 75, y: 75 }),
+      ],
+      dnd5ePluginAreas: [diskArea],
+    })
+    const save = vi.fn(async () => ({ status: 'saved' as const, revision: 4 }))
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: { maps: [original], selectedId: 'map-1', updatedAt: 1_000 },
+      mapId: 'map-1',
+      tokenId: 'wizard-token',
+      patch: { x: 425, y: 75 },
+      save,
+      load: vi.fn(async () => null),
+    })
+
+    const committedMap = outcome.payload.maps[0]
+    expect(committedMap.tokens.find((candidate) => candidate.id === 'wizard-token'))
+      .toMatchObject({ x: 425, y: 75 })
+    expect(committedMap.tokens.find((candidate) => candidate.id === 'disk'))
+      .toMatchObject({ x: 225, y: 75 })
+    expect(committedMap.dnd5ePluginAreas?.[0]).toMatchObject({
+      id: 'floating-disk-area',
+      anchorCell: { col: 4, row: 1 },
+      sourceFollower: { carryingCapacityPounds: 500 },
+    })
+
+    const projection = committedTokenAnchorProjectionFromSharedMaps(
+      original,
+      outcome.payload.maps,
+      'wizard-token',
+      { x: 425, y: 75 },
+    )
+    expect(projection?.tokens.find((candidate) => candidate.id === 'wizard-token'))
+      .toMatchObject({ x: 425, y: 75 })
+    expect(projection?.tokens.find((candidate) => candidate.id === 'disk'))
+      .toMatchObject({ x: 225, y: 75 })
+    expect(projection?.dnd5ePluginAreas?.[0]).toMatchObject({
+      id: 'floating-disk-area',
+      anchorCell: { col: 4, row: 1 },
+    })
+  })
+
+  it('移动来源 Token 超过浮碟最大分离距离时原子移除浮碟', async () => {
+    const original = map({
+      id: 'map-1',
+      width: 2_000,
+      tokens: [
+        token({ id: 'wizard-token', type: 'player', x: 75, y: 75 }),
+        token({ id: 'disk', type: 'obstacle', x: 75, y: 75 }),
+      ],
+      dnd5ePluginAreas: [anchoredArea({
+        id: 'floating-disk-area',
+        coreSpellId: 'floating-disk',
+        sourceTokenId: 'wizard-token',
+        anchorTokenId: 'disk',
+        sourceFollower: {
+          stationaryWithinFeet: 20,
+          maximumSeparationFeet: 100,
+          maximumStepHeightFeet: 10,
+          carryingCapacityPounds: 500,
+        },
+      })],
+    })
+    const save = vi.fn(async () => ({ status: 'saved' as const, revision: 5 }))
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: { maps: [original], selectedId: 'map-1', updatedAt: 1_000 },
+      mapId: 'map-1',
+      tokenId: 'wizard-token',
+      patch: { x: 1_425, y: 75 },
+      save,
+      load: vi.fn(async () => null),
+    })
+
+    expect(outcome.payload.maps[0].tokens.map((candidate) => candidate.id))
+      .toEqual(['wizard-token'])
+    expect(outcome.payload.maps[0].dnd5ePluginAreas).toEqual([])
+
+    const projection = committedTokenAnchorProjectionFromSharedMaps(
+      original,
+      outcome.payload.maps,
+      'wizard-token',
+      { x: 1_425, y: 75 },
+    )
+    expect(projection?.tokens.map((candidate) => candidate.id)).toEqual(['wizard-token'])
+    expect(projection?.dnd5ePluginAreas).toEqual([])
   })
 
   it('本地权威位置投影在保存完成前已同步效果 Token 与区域', () => {

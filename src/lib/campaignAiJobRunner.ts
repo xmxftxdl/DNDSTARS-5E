@@ -266,10 +266,10 @@ export async function runCampaignPdfAnalysisJob(input: {
     const result = await finalizePdfCampaignAnalysisV2({ analysis: legacyAnalysis, documents })
     try {
       const records = new Map(result.documents.map((document) => [document.id, document]))
-      for (const document of documents) {
+      for (const [index, document] of documents.entries()) {
         const record = records.get(document.id)
         if (!record || !document.pages) continue
-        await pdfSourceRepository.saveDocument(record, document.pages)
+        await pdfSourceRepository.saveDocument(record, document.pages, input.files[index])
       }
     } catch {
       result.warnings = [...new Set([

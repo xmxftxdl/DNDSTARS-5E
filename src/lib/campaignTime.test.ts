@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  advanceCampaignTimeSnapshot,
   campaignDawnsCrossed,
   campaignGregorianDate,
   campaignLightIsActive,
@@ -17,6 +18,46 @@ describe('campaign time model', () => {
     expect(formatCampaignTime(1_440 + 75)).toBe('第 2 日 01:15')
     expect(campaignDawnsCrossed(5 * 60, 6 * 60)).toBe(1)
     expect(campaignDawnsCrossed(8 * 60, 1_440 + 8 * 60)).toBe(1)
+  })
+
+  it('prepares a deterministic forward snapshot for an atomic long cast', () => {
+    const state = normalizeSharedCampaignTime({
+      schemaVersion: 2,
+      worldMinute: 350,
+      displayMode: 'campaign-day',
+      displayMinuteOffset: 0,
+      timers: [{
+        id: 'spell-timer', kind: 'concentration', label: '旧法术',
+        createdAtWorldMinute: 300, expiresAtWorldMinute: 360,
+        status: 'active', createdAt: 1,
+      }],
+      advances: [],
+      updatedAt: 1,
+    })
+    const next = advanceCampaignTimeSnapshot({
+      state,
+      minutes: 60,
+      reason: '完成长时施法',
+      now: 100,
+      advanceId: 'campaign-time:action-1',
+    })
+
+    expect(next).toMatchObject({
+      worldMinute: 410,
+      updatedAt: 100,
+      timers: [{ id: 'spell-timer', status: 'expired', expiredAtWorldMinute: 360 }],
+      advances: [{
+        id: 'campaign-time:action-1',
+        kind: 'advance',
+        fromWorldMinute: 350,
+        toWorldMinute: 410,
+        minutes: 60,
+        dawnsCrossed: 1,
+        expiredTimerIds: ['spell-timer'],
+      }],
+    })
+    expect(state.worldMinute).toBe(350)
+    expect(state.timers[0].status).toBe('active')
   })
 
   it('formats a Gregorian campaign clock without using the browser timezone', () => {

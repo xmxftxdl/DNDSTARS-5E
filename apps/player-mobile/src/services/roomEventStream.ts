@@ -56,6 +56,11 @@ interface ParsedSseEvent {
 export interface MobileRoomEventStreamHandlers {
   onStateChanged(event: MobileRoomStateChangedEventV1): void
   onRecoveryRequired(reason: 'sequence-gap' | 'stream-restarted' | 'replay-incomplete'): void
+  /**
+   * Authenticated, server-projected room event. Callers may use this for
+   * private ACKs, but gameplay state must still be re-read from Host resources.
+   */
+  onEvent?(channel: string, payload: unknown): void
   onStatus?(status: MobileRoomEventStreamStatusV1): void
 }
 
@@ -220,9 +225,12 @@ export function subscribeMobileRoomEventStream(
         clearReplayTimer()
       }
     }
-    if (payload.channel !== MOBILE_SHARED_STATE_CHANGED_CHANNEL) return
-    const event = stateChangedPayload(payload.payload)
-    if (event) handlers.onStateChanged(event)
+    if (payload.channel === MOBILE_SHARED_STATE_CHANGED_CHANNEL) {
+      const event = stateChangedPayload(payload.payload)
+      if (event) handlers.onStateChanged(event)
+      return
+    }
+    if (payload.channel !== '_private') handlers.onEvent?.(payload.channel, payload.payload)
   }
 
   const consume = () => {

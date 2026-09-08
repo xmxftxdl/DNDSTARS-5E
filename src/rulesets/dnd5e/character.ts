@@ -1,6 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
-import type { Dnd5eInventoryHeadlessEffectSnapshot, Dnd5eInventoryReactionSpellSnapshot } from '../../types/inventory'
+import type { Dnd5eInventoryHeadlessEffectSnapshot, Dnd5eInventoryMagicDetectionSnapshot, Dnd5eInventoryReactionSpellSnapshot } from '../../types/inventory'
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant, hydrateDnd5eWildShapeCombatant } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
@@ -64,6 +64,7 @@ import {
   dnd5ePluginClassResourceDefinitions,
   dnd5ePluginFeatResourceDefinitions,
 } from './plugins/pluginContentCatalog'
+import { dnd5eActiveHitPointMaximumBonus } from './activeEffects'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -101,6 +102,7 @@ export interface Dnd5eCharacter {
   conditions: readonly string[]
   classResources: Record<string, { current: number; max: number }>
   inventoryHeadlessEffects?: readonly Dnd5eInventoryHeadlessEffectSnapshot[]
+  inventoryMagicItems?: readonly Dnd5eInventoryMagicDetectionSnapshot[]
   inventoryReactionSpells?: readonly Dnd5eInventoryReactionSpellSnapshot[]
   pluginFeaturePassiveEffects?: readonly Dnd5ePluginFeaturePassiveEffectSnapshot[]
   inventoryRevision?: number
@@ -440,6 +442,13 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     staticModifiers.flatMap((modifier) => modifier.damageImmunities ?? []),
   ) ?? []
   const inventory = normalizeDnd5eInventory(character)
+  const wearingWardingBondRing = inventory.entries.some((entry) =>
+    entry.quantity > 0 &&
+    entry.identified !== false &&
+    entry.equippedSlot != null &&
+    entry.item.spellcastingMaterial?.tags.includes('platinum-ring') === true &&
+    (entry.item.spellcastingMaterial.unitValueGp ?? 0) >= 50,
+  )
   const baseAbilities = character.rulesetId
     ? { ...character.abilities }
     : normalizeLegacyAbilities(character.abilities)
@@ -496,6 +505,18 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       }
     : undefined
   const activitySpellcasting = dnd5eBaseSpellcastingCapabilityV1(character)
+  const activeHitPointMaximumBonus = dnd5eActiveHitPointMaximumBonus(
+    character.dnd5eCombatState?.activeEffects,
+  )
+  const currentHitPoints = exhaustionLevel >= 6
+    ? 0
+    : Math.max(0, Math.min(effectiveMaxHp + activeHitPointMaximumBonus, character.currentHp))
+  const deathSaveSuccesses = currentHitPoints === 0
+    ? Math.max(0, Math.min(3, Math.floor(character.deathSaveSuccesses ?? 0)))
+    : 0
+  const deathSaveFailures = currentHitPoints === 0
+    ? Math.max(0, Math.min(3, Math.floor(character.deathSaveFailures ?? 0)))
+    : 0
   return {
     id: character.id,
     name: character.name,
@@ -525,7 +546,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       : Math.max(0, dnd5eArmorClass(character) - armorClassPenalty)) +
       staticModifierTotal(staticModifiers, 'armorClassBonus') + mediumArmorDexterityCapBonus +
       dualWieldMeleeArmorClassBonus,
-    currentHp: exhaustionLevel >= 6 ? 0 : Math.max(0, Math.min(effectiveMaxHp, character.currentHp)),
+    currentHp: currentHitPoints,
     maxHp: effectiveMaxHp,
     temporaryHp: Math.max(0, Math.floor(character.tempHp)),
     exhaustionLevel,
@@ -541,12 +562,27 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     hitPointDice: character.hitPointDice?.length
       ? character.hitPointDice.map((pool) => ({ ...pool }))
       : [{ sides: hitDieSides, current: level, max: level }],
-    deathSaves: { successes: 0, failures: 0, stable: false, dead: false },
+    deathSaves: {
+      successes: deathSaveSuccesses,
+      failures: deathSaveFailures,
+      stable: currentHitPoints === 0 && deathSaveFailures < 3 && character.deathSaveStable === true,
+      dead: currentHitPoints === 0 && deathSaveFailures >= 3,
+    },
     concentrating: character.concentrating ?? false,
     inspiration: character.inspiration > 0,
     conditions: [...character.conditions],
     classResources: dnd5eClassResources(character),
     inventoryHeadlessEffects: dnd5eInventoryHeadlessEffectSnapshots(character),
+    inventoryMagicItems: inventory.entries.flatMap((entry) =>
+      entry.quantity > 0 && entry.item.magicItem && entry.planarState !== 'ethereal'
+        ? [{
+            instanceId: entry.instanceId,
+            templateId: entry.templateId,
+            displayName: entry.identified === false ? '未鉴定魔法物品' : entry.item.name,
+            equippedSlot: entry.equippedSlot,
+            containerInstanceId: entry.containerInstanceId,
+          }]
+        : []),
     inventoryReactionSpells: dnd5eInventoryReactionSpellSnapshots(character),
     pluginFeaturePassiveEffects: dnd5ePluginFeaturePassiveEffectSnapshots(selectedPluginFeatures),
     inventoryRevision: inventory.revision ?? 0,
@@ -683,7 +719,11 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       capable: activitySpellcasting.capable || racialRules.innateSpells.length > 0,
       classIds: activitySpellcasting.classIds,
     },
-    classState: { ...character.dnd5eCombatState },
+    classState: {
+      ...character.dnd5eCombatState,
+      wardingBondMaterialEquipped: wearingWardingBondRing,
+      wardingBondParticipantCharacterId: character.id,
+    },
     savingThrowEquipmentBonus: dnd5eEquippedEffectTotal(character, 'savingThrowBonus'),
     savingThrowPluginBonus: staticModifierTotal(staticModifiers, 'savingThrowBonus'),
   }
@@ -709,6 +749,13 @@ export function createCombatantFromDnd5eCharacter(input: {
       (character.savingThrowEquipmentBonus ?? 0) +
       (character.savingThrowPluginBonus ?? 0),
   ]))
+  // `migrateCharacterToDnd5e` projects persisted ability reductions into the
+  // effective character abilities used by sheets and simulation previews.
+  // Do not feed the same ledger into `createDnd5eCombatant` until after its
+  // construction, otherwise the generic persistence boundary would subtract
+  // every reduction a second time on map reconnect.
+  const persistedAbilityScoreReductions = character.classState.abilityScoreReductionLedger
+    ?.map((entry) => ({ ...entry }))
   const combatant = createDnd5eCombatant({
     id: character.id,
     name: character.name,
@@ -744,6 +791,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     raceId: character.raceId,
     classResources: character.classResources,
     inventoryHeadlessEffects: character.inventoryHeadlessEffects,
+    inventoryMagicItems: character.inventoryMagicItems,
     inventoryReactionSpells: character.inventoryReactionSpells,
     pluginFeaturePassiveEffects: character.pluginFeaturePassiveEffects,
     inventoryRevision: character.inventoryRevision,
@@ -802,12 +850,24 @@ export function createCombatantFromDnd5eCharacter(input: {
     conditionImmunities: character.conditionImmunities,
     classState: {
       ...character.classState,
+      abilityScoreReductionLedger: undefined,
       wildShapeOriginalDamageVulnerabilities: normalizedDamageTypes(character.classState.wildShapeOriginalDamageVulnerabilities),
       wildShapeOriginalDamageResistances: normalizedDamageTypes(character.classState.wildShapeOriginalDamageResistances),
       wildShapeOriginalDamageImmunities: normalizedDamageTypes(character.classState.wildShapeOriginalDamageImmunities),
+      wildShapeOriginalDamageDefenseRules: character.classState.wildShapeOriginalDamageDefenseRules
+        ?.map((defense) => ({
+          ...defense,
+          damageTypes: normalizedDamageTypes(defense.damageTypes) ?? [],
+        })),
+      wildShapeOriginalLimitedMagicImmunity: character.classState.wildShapeOriginalLimitedMagicImmunity
+        ? { ...character.classState.wildShapeOriginalLimitedMagicImmunity }
+        : undefined,
     },
     conditions: character.conditions,
   })
+  combatant.classState.abilityScoreReductionLedger = persistedAbilityScoreReductions?.length
+    ? persistedAbilityScoreReductions
+    : undefined
   if (
     combatant.concentrating && combatant.classState.huntersMarkTargetId &&
     !combatant.classState.concentrationSpellId

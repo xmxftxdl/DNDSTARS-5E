@@ -8,6 +8,7 @@ const JOB_SOURCE_STORE = 'pdf-job-sources-v1'
 const DOCUMENT_INDEX = 'documentId'
 const MAX_DOCUMENTS = 12
 const MAX_TOTAL_CHARACTERS = 80 * 1024 * 1024
+const MAX_TOTAL_SOURCE_BYTES = 512 * 1024 * 1024
 const MAX_JOB_SOURCES = 4
 const MAX_JOB_SOURCE_BYTES = 256 * 1024 * 1024
 const JOB_SOURCE_TTL_MS = 14 * 24 * 60 * 60 * 1_000
@@ -15,6 +16,13 @@ const JOB_SOURCE_TTL_MS = 14 * 24 * 60 * 60 * 1_000
 interface StoredPdfDocumentV2 extends PdfDocumentRecordV2 {
   lastAccessedAt: number
   characterCount: number
+  sourceFile?: {
+    name: string
+    type: string
+    size: number
+    lastModified: number
+    blob: Blob
+  }
 }
 
 interface StoredPdfSourcePageV2 extends PdfSourcePageV2 {
@@ -37,9 +45,12 @@ interface StoredPdfJobSourceV1 {
 }
 
 export interface PdfSourceRepository {
-  saveDocument(document: PdfDocumentRecordV2, pages: PdfSourcePageV2[]): Promise<void>
+  saveDocument(document: PdfDocumentRecordV2, pages: PdfSourcePageV2[], sourceFile?: File): Promise<void>
+  listDocuments(): Promise<PdfDocumentRecordV2[]>
   loadDocument(documentId: string): Promise<PdfDocumentRecordV2 | null>
   loadPage(documentId: string, page: number): Promise<PdfSourcePageV2 | null>
+  loadOriginalFile(documentId: string): Promise<File | null>
+  saveOriginalFile(documentId: string, file: File): Promise<void>
   deleteDocument(documentId: string): Promise<void>
   saveJobFiles(campaignId: string, jobId: string, files: readonly File[]): Promise<void>
   loadJobFiles(campaignId: string, jobId: string): Promise<File[] | null>
@@ -149,6 +160,28 @@ function validJobFiles(files: readonly File[]): boolean {
   return totalBytes <= MAX_JOB_SOURCE_BYTES
 }
 
+function validOriginalPdf(file: File): boolean {
+  return file instanceof Blob && file.name.length > 0 && file.name.length <= 500 &&
+    file.size > 0 && file.size <= 100 * 1024 * 1024 &&
+    (!file.type || file.type === 'application/pdf')
+}
+
+function storedOriginalPdf(file: File): NonNullable<StoredPdfDocumentV2['sourceFile']> {
+  return {
+    name: file.name,
+    type: file.type || 'application/pdf',
+    size: file.size,
+    lastModified: file.lastModified,
+    blob: file.slice(0, file.size, file.type || 'application/pdf'),
+  }
+}
+
+function restoredOriginalPdf(source: StoredPdfDocumentV2['sourceFile']): File | null {
+  if (!source || !(source.blob instanceof Blob) || source.blob.size !== source.size) return null
+  const file = new File([source.blob], source.name, { type: source.type || 'application/pdf', lastModified: source.lastModified })
+  return validOriginalPdf(file) ? file : null
+}
+
 function restoredJobFiles(record: StoredPdfJobSourceV1): File[] | null {
   if (!record || !Array.isArray(record.files) || record.files.length < 1 || record.files.length > 12) return null
   const files: File[] = []
@@ -165,22 +198,38 @@ function restoredJobFiles(record: StoredPdfJobSourceV1): File[] | null {
 
 export function createIndexedDbPdfSourceRepository(): PdfSourceRepository {
   return {
-    async saveDocument(document, pages) {
+    async saveDocument(document, pages, sourceFile) {
       const database = await openDatabase()
       if (!database) throw new Error('pdf-source-repository-unavailable')
       if (pages.some((page) => page.documentId !== document.id || page.documentSha256 !== document.sha256)) {
         throw new Error('invalid-pdf-source-pages')
       }
+      if (sourceFile && !validOriginalPdf(sourceFile)) throw new Error('invalid-pdf-original-file')
       const transaction = database.transaction([DOCUMENT_STORE, PAGE_STORE], 'readwrite')
       transaction.objectStore(DOCUMENT_STORE).put({
         ...document,
         lastAccessedAt: Date.now(),
         characterCount: pages.reduce((sum, page) => sum + page.text.length, 0),
+        ...(sourceFile ? { sourceFile: storedOriginalPdf(sourceFile) } : {}),
       } satisfies StoredPdfDocumentV2)
       const pageStore = transaction.objectStore(PAGE_STORE)
       for (const page of pages) pageStore.put({ ...page, key: pageKey(page.documentId, page.page) } satisfies StoredPdfSourcePageV2)
       await transactionComplete(transaction)
       await this.prune()
+    },
+
+    async listDocuments() {
+      const database = await openDatabase()
+      if (!database) return []
+      const documents = await new Promise<StoredPdfDocumentV2[]>((resolve, reject) => {
+        const transaction = database.transaction(DOCUMENT_STORE, 'readonly')
+        const request = transaction.objectStore(DOCUMENT_STORE).getAll()
+        request.onsuccess = () => resolve(request.result as StoredPdfDocumentV2[])
+        request.onerror = () => reject(request.error)
+      })
+      return documents
+        .sort((left, right) => right.lastAccessedAt - left.lastAccessedAt)
+        .map(publicDocument)
     },
 
     async loadDocument(documentId) {
@@ -209,6 +258,37 @@ export function createIndexedDbPdfSourceRepository(): PdfSourceRepository {
       if (!value) return null
       await touchDocument(database, documentId).catch(() => undefined)
       return publicPage(value)
+    },
+
+    async loadOriginalFile(documentId) {
+      const database = await openDatabase()
+      if (!database) return null
+      const value = await new Promise<StoredPdfDocumentV2 | undefined>((resolve, reject) => {
+        const transaction = database.transaction(DOCUMENT_STORE, 'readonly')
+        const request = transaction.objectStore(DOCUMENT_STORE).get(documentId)
+        request.onsuccess = () => resolve(request.result as StoredPdfDocumentV2 | undefined)
+        request.onerror = () => reject(request.error)
+      })
+      if (!value) return null
+      await touchDocument(database, documentId).catch(() => undefined)
+      return restoredOriginalPdf(value.sourceFile)
+    },
+
+    async saveOriginalFile(documentId, file) {
+      if (!validOriginalPdf(file)) throw new Error('invalid-pdf-original-file')
+      const database = await openDatabase()
+      if (!database) throw new Error('pdf-source-repository-unavailable')
+      const current = await new Promise<StoredPdfDocumentV2 | undefined>((resolve, reject) => {
+        const transaction = database.transaction(DOCUMENT_STORE, 'readonly')
+        const request = transaction.objectStore(DOCUMENT_STORE).get(documentId)
+        request.onsuccess = () => resolve(request.result as StoredPdfDocumentV2 | undefined)
+        request.onerror = () => reject(request.error)
+      })
+      if (!current) throw new Error('pdf-source-document-missing')
+      const transaction = database.transaction(DOCUMENT_STORE, 'readwrite')
+      transaction.objectStore(DOCUMENT_STORE).put({ ...current, sourceFile: storedOriginalPdf(file), lastAccessedAt: Date.now() })
+      await transactionComplete(transaction)
+      await this.prune()
     },
 
     async deleteDocument(documentId) {
@@ -293,10 +373,12 @@ export function createIndexedDbPdfSourceRepository(): PdfSourceRepository {
       })
       const newestFirst = [...documents].sort((left, right) => right.lastAccessedAt - left.lastAccessedAt)
       let keptCharacters = 0
+      let keptSourceBytes = 0
       const expiredIds: string[] = []
       newestFirst.forEach((document, index) => {
         keptCharacters += document.characterCount
-        if (index >= MAX_DOCUMENTS || keptCharacters > MAX_TOTAL_CHARACTERS) expiredIds.push(document.id)
+        keptSourceBytes += document.sourceFile?.size ?? 0
+        if (index >= MAX_DOCUMENTS || keptCharacters > MAX_TOTAL_CHARACTERS || keptSourceBytes > MAX_TOTAL_SOURCE_BYTES) expiredIds.push(document.id)
       })
       for (const documentId of expiredIds) await deleteDocumentFromDatabase(database, documentId)
 
@@ -328,12 +410,18 @@ export function createIndexedDbPdfSourceRepository(): PdfSourceRepository {
 export const pdfSourceRepository = createIndexedDbPdfSourceRepository()
 
 export function createMemoryPdfSourceRepositoryForTests(options: { maxDocuments?: number } = {}): PdfSourceRepository {
-  const documents = new Map<string, { document: PdfDocumentRecordV2; pages: Map<number, PdfSourcePageV2>; accessed: number }>()
+  const documents = new Map<string, { document: PdfDocumentRecordV2; pages: Map<number, PdfSourcePageV2>; sourceFile?: File; accessed: number }>()
   const jobSources = new Map<string, { campaignId: string; files: File[]; accessed: number }>()
   return {
-    async saveDocument(document, pages) {
-      documents.set(document.id, { document: structuredClone(document), pages: new Map(pages.map((page) => [page.page, structuredClone(page)])), accessed: Date.now() })
+    async saveDocument(document, pages, sourceFile) {
+      if (sourceFile && !validOriginalPdf(sourceFile)) throw new Error('invalid-pdf-original-file')
+      documents.set(document.id, { document: structuredClone(document), pages: new Map(pages.map((page) => [page.page, structuredClone(page)])), sourceFile: sourceFile ? new File([sourceFile], sourceFile.name, { type: sourceFile.type, lastModified: sourceFile.lastModified }) : undefined, accessed: Date.now() })
       await this.prune()
+    },
+    async listDocuments() {
+      return [...documents.values()]
+        .sort((left, right) => right.accessed - left.accessed)
+        .map((entry) => structuredClone(entry.document))
     },
     async loadDocument(documentId) {
       const found = documents.get(documentId)
@@ -346,6 +434,20 @@ export function createMemoryPdfSourceRepositoryForTests(options: { maxDocuments?
       if (!found) return null
       found.accessed = Date.now()
       return structuredClone(found.pages.get(page) ?? null)
+    },
+    async loadOriginalFile(documentId) {
+      const found = documents.get(documentId)
+      if (!found?.sourceFile) return null
+      found.accessed = Date.now()
+      return new File([found.sourceFile], found.sourceFile.name, { type: found.sourceFile.type, lastModified: found.sourceFile.lastModified })
+    },
+    async saveOriginalFile(documentId, file) {
+      if (!validOriginalPdf(file)) throw new Error('invalid-pdf-original-file')
+      const found = documents.get(documentId)
+      if (!found) throw new Error('pdf-source-document-missing')
+      found.sourceFile = new File([file], file.name, { type: file.type, lastModified: file.lastModified })
+      found.accessed = Date.now()
+      await this.prune()
     },
     async deleteDocument(documentId) { documents.delete(documentId) },
     async saveJobFiles(campaignId, jobId, files) {

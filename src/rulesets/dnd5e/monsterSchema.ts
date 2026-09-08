@@ -346,10 +346,11 @@ function campaignPeriodicHitPointMaximumReductionIsValid(
       key === 'intervalHours' ||
       key === 'reduction' ||
       key === 'execution' ||
-      key === 'recovery') ||
+      key === 'recovery' || key === 'onMaximumZero') ||
     !finiteInteger(raw.intervalHours, 1, 24 * 365 * 100) ||
     raw.execution !== 'campaign-time-only' ||
     raw.recovery !== 'when-effect-removed' ||
+    (raw.onMaximumZero != null && raw.onMaximumZero !== 'destroy-body') ||
     !isRecord(raw.reduction)
   ) return false
   return Object.keys(raw.reduction).every((key) =>
@@ -361,6 +362,35 @@ function campaignPeriodicHitPointMaximumReductionIsValid(
     finiteInteger(raw.reduction.count, 1, 1_000) &&
     finiteInteger(raw.reduction.sides, 2, 1_000_000) &&
     finiteInteger(raw.reduction.bonus, -1_000_000, 1_000_000)
+}
+
+function calendarRepeatSaveIsValid(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  const reduction = raw.maximumHitPointReductionOnFailure
+  return Object.keys(raw).every((key) => [
+    'intervalMinutes',
+    'ability',
+    'dc',
+    'onSuccess',
+    'maximumHitPointReductionOnFailure',
+    'nextWorldMinute',
+    'lastResolvedWorldMinute',
+  ].includes(key)) &&
+    finiteInteger(raw.intervalMinutes, 1, 5_256_000) &&
+    ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
+    finiteInteger(raw.dc, 1, 100) &&
+    (raw.onSuccess === 'remove' || raw.onSuccess === 'retain') &&
+    isRecord(reduction) &&
+    Object.keys(reduction).every((key) => [
+      'average', 'count', 'sides', 'bonus', 'recovery',
+    ].includes(key)) &&
+    finiteInteger(reduction.average, 0, 1_000_000) &&
+    finiteInteger(reduction.count, 1, 1_000) &&
+    finiteInteger(reduction.sides, 2, 1_000_000) &&
+    finiteInteger(reduction.bonus, -1_000_000, 1_000_000) &&
+    reduction.recovery === 'when-effect-removed' &&
+    (raw.nextWorldMinute == null || finiteInteger(raw.nextWorldMinute, 0, Number.MAX_SAFE_INTEGER)) &&
+    (raw.lastResolvedWorldMinute == null || finiteInteger(raw.lastResolvedWorldMinute, 0, Number.MAX_SAFE_INTEGER))
 }
 
 function activeEffectRemovalIsValid(raw: unknown): boolean {
@@ -446,6 +476,7 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
     'modifiers',
     'periodicDamage',
     'regurgitation',
+    'sourceDeathEscape',
     'removal',
   ])
   if (
@@ -519,6 +550,16 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
         ) ||
         raw.regurgitation.applyProne !== true ||
         !finiteInteger(raw.regurgitation.placementWithinFeet, 1, 100)
+      )
+    ) ||
+    (
+      raw.sourceDeathEscape != null &&
+      (
+        !isRecord(raw.sourceDeathEscape) ||
+        !Object.keys(raw.sourceDeathEscape).every((key) =>
+          key === 'movementCostFeet' || key === 'applyProne') ||
+        !finiteInteger(raw.sourceDeathEscape.movementCostFeet, 1, 100) ||
+        raw.sourceDeathEscape.applyProne !== true
       )
     ) ||
     (
@@ -622,7 +663,10 @@ function sourceLinkedConditionEffectIsValid(raw: Record<string, unknown>): boole
       ? raw.escapeDc != null
       : !finiteInteger(raw.escapeDc, 1, 100)
   ) return false
-  if (raw.regurgitation != null && relation.kind !== 'swallowed') return false
+  if (
+    (raw.regurgitation != null || raw.sourceDeathEscape != null) &&
+    relation.kind !== 'swallowed'
+  ) return false
   if (
     relation.kind === 'attachment'
       ? raw.rootLegacyCondition !== 'attached'
@@ -832,6 +876,7 @@ function onHitEffectIsValid(raw: unknown): boolean {
       'standardCondition',
       'periodicDamage',
       'campaignPeriodicHitPointMaximumReduction',
+      'calendarRepeatSave',
       'repeatSave',
       'escapeCheck',
       'modifiers',
@@ -851,6 +896,10 @@ function onHitEffectIsValid(raw: unknown): boolean {
         !campaignPeriodicHitPointMaximumReductionIsValid(
           raw.campaignPeriodicHitPointMaximumReduction,
         )
+      ) ||
+      (
+        raw.calendarRepeatSave != null &&
+        !calendarRepeatSaveIsValid(raw.calendarRepeatSave)
       ) ||
       (
         raw.ailment != null &&
@@ -1031,6 +1080,7 @@ function onHitEffectIsValid(raw: unknown): boolean {
       'targetRaceExclusions',
       'conditionOnFailedSave',
       'additionalConditionsOnFailedSave',
+      'sharedDurationOnFailureMargin',
     ])
     return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
       ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
@@ -1059,6 +1109,20 @@ function onHitEffectIsValid(raw: unknown): boolean {
       failedSaveConditionSetIsValid(
         raw.conditionOnFailedSave,
         raw.additionalConditionsOnFailedSave,
+      ) &&
+      (
+        raw.sharedDurationOnFailureMargin == null ||
+        (
+          isRecord(raw.sharedDurationOnFailureMargin) &&
+          Object.keys(raw.sharedDurationOnFailureMargin).every((key) =>
+            key === 'minimumFailureMargin' || key === 'count' || key === 'sides' ||
+            key === 'bonus' || key === 'roundsPerUnit') &&
+          finiteInteger(raw.sharedDurationOnFailureMargin.minimumFailureMargin, 1, 100) &&
+          finiteInteger(raw.sharedDurationOnFailureMargin.count, 1, 100) &&
+          finiteInteger(raw.sharedDurationOnFailureMargin.sides, 2, 1_000) &&
+          finiteInteger(raw.sharedDurationOnFailureMargin.bonus, 0, 1_000_000) &&
+          finiteInteger(raw.sharedDurationOnFailureMargin.roundsPerUnit, 1, 1_000_000)
+        )
       )
   }
   const allowedKeys = new Set([
@@ -1392,6 +1456,7 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   if (!isRecord(action) || !requiredText(action.id, 120) || !requiredText(action.name, 240) ||
     !requiredText(action.description) || typeof action.kind !== 'string' || !ACTION_KINDS.has(action.kind)) return false
   if (action.automation != null && action.automation !== 'headless' && action.automation !== 'dm-adjudication') return false
+  if (action.automationReason != null && !requiredText(action.automationReason, 1_000)) return false
   if (action.sequence != null && (!Array.isArray(action.sequence) || action.sequence.some((entry) => !requiredText(entry, 120)))) return false
   if (action.randomRepeat != null) {
     if (
@@ -1433,6 +1498,7 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
       if (!finiteInteger(action.usage.max, 1, 99)) return false
     } else return false
   }
+  if (action.sharedUsageActionId != null && !requiredText(action.sharedUsageActionId, 120)) return false
   if (action.legendaryCost != null && !finiteInteger(action.legendaryCost, 1, 10)) return false
   if (
     action.economy != null &&
@@ -1484,6 +1550,14 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         !finiteInteger(action.rule.rangeFeet, 1, 100_000) ||
         action.rule.requiresVisibleDestination !== true ||
         action.rule.requiresUnoccupiedDestination !== true
+      ) return false
+    } else if (action.rule.kind === 'toggle-planar-phase') {
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' || key === 'target' || key === 'plane' || key === 'magical') ||
+        action.rule.target !== 'self' ||
+        action.rule.plane !== 'ethereal' ||
+        (action.rule.magical != null && typeof action.rule.magical !== 'boolean')
       ) return false
     } else if (action.rule.kind === 'summon') {
       const count = isRecord(action.rule.count) ? action.rule.count : undefined
@@ -1722,6 +1796,32 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         typeof action.rule.requireSameSource !== 'boolean' ||
         !validateDamage(action.rule.damage)
       ) return false
+    } else if (action.rule.kind === 'saving-throw-damage-and-max-hp-reduction') {
+      const reduction = isRecord(action.rule.maximumHitPointReduction)
+        ? action.rule.maximumHitPointReduction
+        : undefined
+      if (
+        !Object.keys(action.rule).every((key) =>
+          key === 'kind' || key === 'rangeFeet' || key === 'ability' || key === 'dc' ||
+          key === 'magical' || key === 'requiredCondition' || key === 'requireSameSource' ||
+          key === 'allowWillingTarget' || key === 'damage' ||
+          key === 'damageOnSuccessfulSave' || key === 'maximumHitPointReduction') ||
+        !finiteInteger(action.rule.rangeFeet, 1, 100_000) ||
+        !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
+        !finiteInteger(action.rule.dc, 1, 100) ||
+        typeof action.rule.magical !== 'boolean' ||
+        !STANDARD_CONDITIONS.has(String(action.rule.requiredCondition)) ||
+        typeof action.rule.requireSameSource !== 'boolean' ||
+        action.rule.allowWillingTarget !== true ||
+        !isRecord(action.rule.damage) || !validateDamage(action.rule.damage) ||
+        action.rule.damageOnSuccessfulSave !== 'half' ||
+        !reduction ||
+        !Object.keys(reduction).every((key) =>
+          key === 'basis' || key === 'recovery' || key === 'deathAtZero') ||
+        reduction.basis !== 'damage-taken' ||
+        reduction.recovery !== 'long-rest' ||
+        reduction.deathAtZero !== true
+      ) return false
     } else if (action.rule.kind === 'self-healing') {
       const healing = action.rule.healing
       if (
@@ -1749,16 +1849,37 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
         (action.rule.magical != null && typeof action.rule.magical !== 'boolean')
       ) return false
     } else if (action.rule.kind === 'grant-movement') {
+      const speedFraction = action.rule.maximumSpeedFraction
+      const fixedDistance = action.rule.maximumDistanceFeet
+      const conditionImmunities = action.rule.temporaryConditionImmunities
       if (
         !Object.keys(action.rule).every((key) =>
           key === 'kind' ||
           key === 'maximumSpeedFraction' ||
-          key === 'provokesOpportunityAttacks') ||
-        typeof action.rule.maximumSpeedFraction !== 'number' ||
-        !Number.isFinite(action.rule.maximumSpeedFraction) ||
-        action.rule.maximumSpeedFraction <= 0 ||
-        action.rule.maximumSpeedFraction > 1 ||
+          key === 'maximumDistanceFeet' ||
+          key === 'provokesOpportunityAttacks' ||
+          key === 'temporaryDamageImmunity' ||
+          key === 'temporaryConditionImmunities') ||
+        ((speedFraction == null) === (fixedDistance == null)) ||
+        (speedFraction != null && (
+          typeof speedFraction !== 'number' ||
+          !Number.isFinite(speedFraction) ||
+          speedFraction <= 0 ||
+          speedFraction > 1
+        )) ||
+        (fixedDistance != null && !finiteInteger(fixedDistance, 1, 100_000)) ||
         typeof action.rule.provokesOpportunityAttacks !== 'boolean'
+        || (action.rule.temporaryDamageImmunity != null &&
+          action.rule.temporaryDamageImmunity !== 'all')
+        || (conditionImmunities != null && (
+          !Array.isArray(conditionImmunities) ||
+          conditionImmunities.length < 1 ||
+          conditionImmunities.length > 5 ||
+          new Set(conditionImmunities).size !== conditionImmunities.length ||
+          conditionImmunities.some((condition) => ![
+            'grappled', 'petrified', 'prone', 'restrained', 'stunned',
+          ].includes(condition))
+        ))
       ) return false
     } else if (action.rule.kind === 'automatic-area-active-effect') {
       const modifiers = isRecord(action.rule.modifiers)
@@ -2104,6 +2225,7 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
 function traitShapeIsValid(raw: unknown): boolean {
   if (!isRecord(raw) || !requiredText(raw.name, 240) || !requiredText(raw.description)) return false
   if (raw.automation != null && raw.automation !== 'headless' && raw.automation !== 'dm-adjudication') return false
+  if (raw.automationReason != null && !requiredText(raw.automationReason, 1_000)) return false
   if (raw.rule == null) return true
   if (!isRecord(raw.rule) || typeof raw.rule.kind !== 'string') return false
   if (raw.rule.kind === 'legendary-resistance') {
@@ -2219,12 +2341,17 @@ function traitShapeIsValid(raw: unknown): boolean {
       key === 'extraDamage') &&
       raw.rule.requiresAdjacentAlly === true
   }
+  if (raw.rule.kind === 'antimagic-susceptibility') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' || key === 'incapacitatedInsideAntimagic') &&
+      raw.rule.incapacitatedInsideAntimagic === true
+  }
   if (raw.rule.kind === 'reckless') {
     const outgoing = raw.rule.outgoing
     const incoming = raw.rule.incoming
     return Object.keys(raw.rule).every((key) =>
       key === 'kind' || key === 'activation' || key === 'outgoing' || key === 'incoming') &&
-      raw.rule.activation === 'turn-start-tactical-default' &&
+      raw.rule.activation === 'optional-on-turn' &&
       isRecord(outgoing) &&
       Object.keys(outgoing).every((key) =>
         key === 'delivery' || key === 'mode' || key === 'rollMode' || key === 'duration') &&
@@ -2414,6 +2541,29 @@ function traitShapeIsValid(raw: unknown): boolean {
         finiteInteger(raw.rule.immediateFailureMargin, 1, 100)
       )
   }
+  if (raw.rule.kind === 'turn-start-saving-throw-aura') {
+    return Object.keys(raw.rule).every((key) =>
+      key === 'kind' ||
+      key === 'ruleId' ||
+      key === 'rangeFeet' ||
+      key === 'relation' ||
+      key === 'ability' ||
+      key === 'dc' ||
+      key === 'magical' ||
+      key === 'condition' ||
+      key === 'duration' ||
+      key === 'successfulSaveImmunityRounds') &&
+      requiredText(raw.rule.ruleId, 120) &&
+      /^[a-z][a-z0-9-]*$/.test(String(raw.rule.ruleId)) &&
+      finiteInteger(raw.rule.rangeFeet, 1, 10_000) &&
+      (raw.rule.relation === 'enemy' || raw.rule.relation === 'any') &&
+      ABILITY_KEYS.includes(raw.rule.ability as typeof ABILITY_KEYS[number]) &&
+      finiteInteger(raw.rule.dc, 1, 100) &&
+      typeof raw.rule.magical === 'boolean' &&
+      STANDARD_CONDITIONS.has(String(raw.rule.condition)) &&
+      raw.rule.duration === 'until-target-next-turn-start' &&
+      finiteInteger(raw.rule.successfulSaveImmunityRounds, 1, 14_400)
+  }
   return false
 }
 
@@ -2427,7 +2577,7 @@ function persistentAreaRuleIsValid(raw: Record<string, unknown>): boolean {
     'kind', 'area', 'durationRounds', 'expiresAtSourceNextTurnEnd',
     'concentration', 'anchorMode', 'vertical', 'movement', 'relation',
     'includeSelf', 'requiredEnvironment', 'movementCostMultiplier',
-    'lighting', 'obscuration', 'color', 'visual', 'triggers',
+    'lighting', 'obscuration', 'color', 'visual', 'triggers', 'followUp',
   ])
   const vertical = raw.vertical
   const verticalIsValid = vertical == null || (
@@ -2450,13 +2600,33 @@ function persistentAreaRuleIsValid(raw: Record<string, unknown>): boolean {
     (movement.maximumDistanceFromSourceFeet == null ||
       finiteInteger(movement.maximumDistanceFromSourceFeet, 1, 10_000))
   )
+  const followUp = raw.followUp
+  const followUpIsValid = followUp == null || (
+    isRecord(followUp) &&
+    Object.keys(followUp).every((key) => [
+      'kind', 'grantId', 'label', 'economy', 'expires', 'actions',
+      'shovePushDistanceBonusFeet',
+    ].includes(key)) &&
+    followUp.kind === 'grant-basic-action' &&
+    requiredText(followUp.grantId, 96) &&
+    /^[a-z][a-z0-9-]*$/.test(String(followUp.grantId)) &&
+    requiredText(followUp.label, 120) &&
+    followUp.economy === 'bonus-action' &&
+    followUp.expires === 'turn-end' &&
+    Array.isArray(followUp.actions) &&
+    followUp.actions.length >= 1 && followUp.actions.length <= 3 &&
+    followUp.actions.every((action) => ['dash', 'grapple', 'shove'].includes(String(action))) &&
+    new Set(followUp.actions.map(String)).size === followUp.actions.length &&
+    (followUp.shovePushDistanceBonusFeet == null ||
+      finiteInteger(followUp.shovePushDistanceBonusFeet, 0, 1_000))
+  )
   return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
     areaTargetingIsValid(raw.area) &&
     finiteInteger(raw.durationRounds, 1, 1_000_000) &&
     (raw.expiresAtSourceNextTurnEnd == null || typeof raw.expiresAtSourceNextTurnEnd === 'boolean') &&
     typeof raw.concentration === 'boolean' &&
     (raw.anchorMode === 'fixed' || raw.anchorMode === 'source-token') &&
-    verticalIsValid && movementIsValid &&
+    verticalIsValid && movementIsValid && followUpIsValid &&
     (raw.relation == null || raw.relation === 'any' || raw.relation === 'ally' || raw.relation === 'enemy') &&
     (raw.includeSelf == null || typeof raw.includeSelf === 'boolean') &&
     (raw.requiredEnvironment == null || raw.requiredEnvironment === 'underwater') &&
@@ -2640,7 +2810,15 @@ export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eM
   if (action.referencedActionId) {
     return action.automation === 'headless' ? 'headless' : 'dm-adjudication'
   }
-  if (action.kind === 'other') return action.automation === 'headless' && action.rule ? 'headless' : action.automation === 'headless' ? 'invalid' : 'dm-adjudication'
+  if (action.kind === 'other') {
+    const spellSelection = action.id === 'cantrip' ||
+      /(?:^|-)cast-a-spell(?:-|$)/.test(action.id)
+    return action.automation === 'headless' && (action.rule || spellSelection)
+      ? 'headless'
+      : action.automation === 'headless'
+        ? 'invalid'
+        : 'dm-adjudication'
+  }
   if (action.kind === 'multiattack') {
     return action.sequence?.length || action.randomRepeat ? 'headless' : 'invalid'
   }
@@ -2687,6 +2865,23 @@ function validateActionList(
       })
     } else {
       actionSectionById.set(action.id, section)
+    }
+    if (action.sharedUsageActionId != null) {
+      const owner = actions.find((candidate) => candidate.id === action.sharedUsageActionId)
+      if (
+        !owner ||
+        owner.id === action.id ||
+        action.usage == null ||
+        owner.usage == null ||
+        JSON.stringify(owner.usage) !== JSON.stringify(action.usage)
+      ) {
+        issues.push({
+          monsterId: monster.id,
+          actionId: action.id,
+          code: 'invalid-stat-block',
+          message: `${section}动作 ${action.name} 引用了无效的共享使用次数动作：${action.sharedUsageActionId}`,
+        })
+      }
     }
     const automation = dnd5eMonsterActionAutomation(action)
     if (automation === 'invalid') {

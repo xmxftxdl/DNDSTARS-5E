@@ -5,6 +5,7 @@ import { sceneInteractionReceiptId, type SceneInteractionOutcomeEffect } from '.
 import type { DmAdjudicationInterruptResponse } from '../../lib/combatInterruptProtocol'
 import type { BattleMap, Token } from '../../store/maps'
 import { useCharacterStore } from '../../store/characters'
+import { useCampaignTimeStore } from '../../store/campaignTime'
 import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useRoomCommunicationsStore } from '../../store/roomCommunications'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
@@ -97,6 +98,18 @@ export interface Dnd5eMapInteractionActionContext {
   pushCombatLog: (message: string, type: 'turn') => void
 }
 
+/**
+ * Opening a door that the authoritative rules have already validated as an
+ * automatic success is a complete object interaction. It must not pause for a
+ * second DM approval. Checks, forced entry, searches, and other interactions
+ * keep the adjudication boundary.
+ */
+export function dnd5eMapInteractionRequiresDmAdjudication(
+  prepared: Pick<PreparedDnd5eMapInteraction, 'operation' | 'automaticSuccess'>,
+): boolean {
+  return prepared.operation !== 'open' || !prepared.automaticSuccess
+}
+
 export async function processDnd5eMapInteractionAction(
   context: Dnd5eMapInteractionActionContext,
 ): Promise<void> {
@@ -147,6 +160,9 @@ export async function processDnd5eMapInteractionAction(
           interactionPoints,
           hasThievesTools,
           hasMatchingKey,
+          worldMinute: useCampaignTimeStore.getState().state.worldMinute,
+          combatId: combatActiveRef.current ? action.combatId : undefined,
+          round: combatActiveRef.current ? liveRound : undefined,
         })
         if (!prepared.ok) {
           acknowledgePlayerAction(action, 'rejected', prepared.reason)
@@ -227,14 +243,20 @@ export async function processDnd5eMapInteractionAction(
             return
           }
         }
-        const adjudication = await requestSharedMapInteractionAdjudication(
-          action,
-          dnd5eActionActor.name,
-          prepared.prepared,
-        )
-        const interruptId = `dm-adjudication:${action.id}`
+        const requiresDmAdjudication = dnd5eMapInteractionRequiresDmAdjudication(prepared.prepared)
+        const adjudication: DmAdjudicationInterruptResponse = requiresDmAdjudication
+          ? await requestSharedMapInteractionAdjudication(
+              action,
+              dnd5eActionActor.name,
+              prepared.prepared,
+            )
+          : { decision: 'approved', effects: [] }
+        const interruptId = requiresDmAdjudication ? `dm-adjudication:${action.id}` : undefined
+        const finishMapInteractionInterrupt = async () => {
+          if (interruptId) await finishSharedCombatInterrupt(interruptId, adjudication)
+        }
         if (adjudication.decision !== 'approved') {
-          await finishSharedCombatInterrupt(interruptId, adjudication)
+          await finishMapInteractionInterrupt()
           acknowledgePlayerAction(action, 'rejected', 'map-interaction-cancelled')
           completePlayerActionRequest(action)
           return
@@ -300,7 +322,7 @@ export async function processDnd5eMapInteractionAction(
             })
           : undefined
         if (preparedOutcomeTransaction && !preparedOutcomeTransaction.ok) {
-          await finishSharedCombatInterrupt(interruptId, adjudication)
+          await finishMapInteractionInterrupt()
           acknowledgePlayerAction(action, 'rejected', preparedOutcomeTransaction.reason)
           completePlayerActionRequest(action)
           return
@@ -377,7 +399,7 @@ export async function processDnd5eMapInteractionAction(
               authorityMap,
             )
             if (!economyResult.ok) {
-              await finishSharedCombatInterrupt(interruptId, adjudication)
+              await finishMapInteractionInterrupt()
               acknowledgePlayerAction(action, 'rejected', economyResult.reason)
               completePlayerActionRequest(action)
               return
@@ -392,7 +414,7 @@ export async function processDnd5eMapInteractionAction(
               steps: outcomeSteps,
             }, authorityMap)
             if (!outcomeResult.ok) {
-              await finishSharedCombatInterrupt(interruptId, adjudication)
+              await finishMapInteractionInterrupt()
               acknowledgePlayerAction(action, 'rejected', outcomeResult.reason)
               completePlayerActionRequest(action)
               return
@@ -415,7 +437,7 @@ export async function processDnd5eMapInteractionAction(
             receiptId: interactionReceiptId,
           })
           if (!rewardResult.ok) {
-            await finishSharedCombatInterrupt(interruptId, adjudication)
+            await finishMapInteractionInterrupt()
             acknowledgePlayerAction(action, 'rejected', rewardResult.reason ?? 'interaction-reward-failed')
             completePlayerActionRequest(action)
             return
@@ -424,7 +446,7 @@ export async function processDnd5eMapInteractionAction(
             (character) => character.id === dnd5eActionActor.id,
           )
           if (!rewardedCharacter?.dnd5eInventory) {
-            await finishSharedCombatInterrupt(interruptId, adjudication)
+            await finishMapInteractionInterrupt()
             acknowledgePlayerAction(action, 'rejected', 'interaction-reward-failed')
             completePlayerActionRequest(action)
             return
@@ -447,7 +469,7 @@ export async function processDnd5eMapInteractionAction(
         try {
           applyDnd5eCombatApplication(application)
         } catch {
-          await finishSharedCombatInterrupt(interruptId, adjudication)
+          await finishMapInteractionInterrupt()
           acknowledgePlayerAction(action, 'rejected', 'interaction-commit-failed')
           completePlayerActionRequest(action)
           return
@@ -465,6 +487,7 @@ export async function processDnd5eMapInteractionAction(
         const geometryChanged = !!prepared.prepared.door && !!(
           resolved.nextDoorState ||
           resolved.nextDoorPhysicalState ||
+          resolved.nextArcaneLockSuppression ||
           (resolved.revealSecret && dnd5eActionActor.roomMemberId)
         )
         if (resolved.nextDoorState && prepared.prepared.door) {
@@ -474,8 +497,16 @@ export async function processDnd5eMapInteractionAction(
           applyAuthorityGeometryEntityUpdate(authorityMap.id, prepared.prepared.door.id, {
             physicalState: resolved.nextDoorPhysicalState,
             ...(resolved.nextDoorPhysicalState === 'broken'
-              ? { lockState: 'unlocked' }
+              ? { lockState: 'unlocked', dnd5eArcaneLock: undefined }
               : {}),
+          })
+        }
+        if (resolved.nextArcaneLockSuppression && prepared.prepared.door?.dnd5eArcaneLock) {
+          applyAuthorityGeometryEntityUpdate(authorityMap.id, prepared.prepared.door.id, {
+            dnd5eArcaneLock: {
+              ...prepared.prepared.door.dnd5eArcaneLock,
+              suppression: resolved.nextArcaneLockSuppression,
+            },
           })
         }
         if (resolved.revealSecret && prepared.prepared.door && dnd5eActionActor.roomMemberId) {
@@ -514,7 +545,7 @@ export async function processDnd5eMapInteractionAction(
           }`,
           'turn',
         )
-        await finishSharedCombatInterrupt(interruptId, adjudication)
+        await finishMapInteractionInterrupt()
         completePlayerActionRequest(action)
         acknowledgePlayerAction(
           action,

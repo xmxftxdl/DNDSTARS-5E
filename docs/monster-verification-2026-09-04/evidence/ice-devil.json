@@ -1,0 +1,235 @@
+{
+  "id": "srd-5.1:ice-devil",
+  "slug": "ice-devil",
+  "name": "冰魔",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [
+    "保留边界：冰墙包含墙段实体、每段 AC/HP、抗性与火焰易伤、被墙穿过时的推向一侧选择、首次敏捷豁免，以及持续冷气范围和进入触发。当前不能完整表达所有墙段生命周期，因此继续由 DM 裁定。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "claws",
+      "name": "双爪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tail",
+      "name": "尾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "wall-of-ice",
+      "name": "冰墙",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 29,
+      "slug": "ice-devil",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:00:46.532Z",
+      "name": "冰魔",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "14",
+      "total": 334,
+      "mapId": "verify-ui-ice-devil-bite-1788566446588",
+      "combatId": "verify-ui-ice-devil-bite-1788566446588:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "冰魔 使用啃咬攻击 验证目标：啃咬 → 验证目标 10+10=20 命中；共造成 22 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:01 PM\n结算\n\n冰魔 使用啃咬攻击 验证目标：啃咬 → 验证目标 10+10=20 命中；共造成 22 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +10。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜2d6 骰面：3 + 2 = 5｜固定加值 +5｜小计 10\n伤害骰 · 啃咬（基础伤害 2·寒冷）｜3d6 骰面：4 + 3 + 5 = 12｜固定加值 +0｜小计 12\n冰魔｜消耗动作\n验证目标｜受到 22 点伤害｜HP 320 → 298",
+      "playerLog": "冰魔 使用啃咬攻击 验证目标：啃咬 → 验证目标 10+10=20 命中；共造成 22 点伤害。",
+      "afterHp": 298,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:01:14.180Z",
+      "evidenceFile": "ui-cases/monsters/029-ice-devil.json"
+    },
+    {
+      "index": 171,
+      "slug": "ice-devil",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:45:30.507Z",
+      "name": "冰魔",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-ice-devil-bite-1788561930620",
+      "combatId": "verify-ui-ice-devil-bite-1788561930620:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "status": "failed",
+      "error": "TimeoutError: locator.click: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: '展开怪物控制台', exact: true })\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:45:54.970Z",
+      "evidenceFile": "ui-cases/monsters/171-ice-devil.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "魔鬼视界",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法抗性",
+      "automation": "headless",
+      "rule": "magic-resistance",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.savingThrowAdvantageAgainstMagic"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "magical",
+        "physical"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 12,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
 import {
   BookOpenText,
+  Bookmark,
   Bot,
   Boxes,
   CheckCircle2,
   Download,
   FileText,
-  GitBranch,
   Hammer,
   History,
   KeyRound,
@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Mic2,
   PackageCheck,
+  PanelLeftOpen,
   PencilLine,
   RotateCcw,
   Sparkles,
@@ -25,7 +26,7 @@ import {
   WandSparkles,
   XCircle,
 } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
 import AiProviderSelector from '../components/dm/AiProviderSelector'
 import DmMapAnalysisPanel from '../components/dm/DmMapAnalysisPanel'
@@ -34,8 +35,10 @@ import DmSessionPrepDashboard from '../components/dm/DmSessionPrepDashboard'
 import DmSessionLifecyclePanel from '../components/dm/DmSessionLifecyclePanel'
 import DmStoryEventWorkspace from '../components/dm/DmStoryEventWorkspace'
 import { campaignPrepPlanDraft, createDefaultCampaignPrepPlan } from '../components/dm/dmSessionPrepPlanModel'
-import PdfCampaignAnalysisEditor from '../components/dm/PdfCampaignAnalysisEditor'
+import PdfCampaignAnalysisEditor, { type PdfCampaignAnalysisEditorTarget } from '../components/dm/PdfCampaignAnalysisEditor'
 import PdfCampaignKnowledgeBase from '../components/dm/PdfCampaignKnowledgeBase'
+import type { PdfSourceBookmarkTargetV1 } from '../components/dm/PdfSourceBookmarkWorkspace'
+import type { PdfMonsterCodexEntryV1 } from '../components/dm/pdfCampaignKnowledgeBaseModel'
 import PageHeader from '../components/PageHeader'
 import { DEFAULT_AI_PROVIDER_SELECTION } from '../lib/aiProvider'
 import { isAccountCampaignId } from '../lib/campaignNavigation'
@@ -81,6 +84,8 @@ import {
   normalizeDmEditedPdfCampaignAnalysisV2,
   type PdfCampaignAnalysisArtifact,
 } from '../lib/pdfCampaignAnalysisMigration'
+import { stageDmWorkshopMonsterHandoff } from '../lib/dmWorkshopMonsterHandoff'
+import { requestPdfSplitView } from '../lib/pdfSplitViewController'
 
 type StageStatus = 'available' | 'partial' | 'planned'
 type Notice = { kind: 'success' | 'error'; text: string }
@@ -153,6 +158,7 @@ function formatJobTime(value: number): string {
 
 export default function DmPrepAssistantPage() {
   const { campaignId = 'local' } = useParams()
+  const navigate = useNavigate()
   const campaignBasePath = `/campaign/${encodeURIComponent(campaignId)}`
   const roomJournal = useRoomCommunicationsStore((state) => state.journal)
   const loadRoomJournal = useRoomCommunicationsStore((state) => state.loadJournal)
@@ -171,6 +177,7 @@ export default function DmPrepAssistantPage() {
   const [pdfAnalysisProgress, setPdfAnalysisProgress] = useState<PdfAnalysisProgressV1 | null>(null)
   const [pdfAnalysisResult, setPdfAnalysisResult] = useState<PdfCampaignAnalysisV2 | null>(null)
   const [pdfAnalysisEditorOpen, setPdfAnalysisEditorOpen] = useState(false)
+  const [pdfAnalysisEditorTarget, setPdfAnalysisEditorTarget] = useState<PdfCampaignAnalysisEditorTarget | undefined>()
   const [pdfAnalysisDirty, setPdfAnalysisDirty] = useState(false)
   const [pdfAnalysisDepth, setPdfAnalysisDepth] = useState<PdfAnalysisDepthV1>('quick')
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null)
@@ -195,6 +202,7 @@ export default function DmPrepAssistantPage() {
   const [sessionPrepSaveFailed, setSessionPrepSaveFailed] = useState(false)
   const [, setSessionPrepLastSavedAt] = useState<number | null>(null)
   const [workspaceSection, setWorkspaceSection] = useState<DmPrepWorkspaceSection>('session')
+  const [pdfSourceTarget, setPdfSourceTarget] = useState<PdfSourceBookmarkTargetV1 | undefined>()
   const [aiProviderSelection, setAiProviderSelection] = useState(() => ({ ...DEFAULT_AI_PROVIDER_SELECTION }))
   const [exportBusy, setExportBusy] = useState(false)
   const [exportNotice, setExportNotice] = useState<Notice | null>(null)
@@ -303,6 +311,7 @@ export default function DmPrepAssistantPage() {
     setPdfAnalysisResult(null)
     setPdfAnalysisProgress(null)
     setPdfAnalysisEditorOpen(false)
+    setPdfAnalysisEditorTarget(undefined)
     setPdfAnalysisDirty(false)
     setActiveAiJob(null)
     setPdfAnalysisDepth('quick')
@@ -489,6 +498,7 @@ export default function DmPrepAssistantPage() {
         setPdfAnalysisResult(null)
         setPdfAnalysisDirty(false)
         setPdfAnalysisEditorOpen(false)
+        setPdfAnalysisEditorTarget(undefined)
       }
       setAiJobDeleteConfirm(null)
       setPdfNotice('AI 任务记录已永久删除。原始 PDF 与其他任务不受影响。')
@@ -570,6 +580,34 @@ export default function DmPrepAssistantPage() {
     setPdfAnalysisDirty(true)
   }, [])
 
+  const openPdfAnalysisEditor = (target?: PdfCampaignAnalysisEditorTarget) => {
+    setPdfAnalysisEditorTarget(target)
+    setPdfAnalysisEditorOpen(true)
+  }
+
+  const closePdfAnalysisEditor = () => {
+    setPdfAnalysisEditorOpen(false)
+    setPdfAnalysisEditorTarget(undefined)
+  }
+
+  const openPdfMonsterInWorkshop = (entry: PdfMonsterCodexEntryV1) => {
+    const staged = stageDmWorkshopMonsterHandoff(campaignId, {
+      name: entry.name,
+      description: entry.description,
+      monsterStatBlockText: entry.monsterStatBlockText,
+      automation: entry.automation,
+      sourceLabels: [
+        ...entry.encounterNames,
+        ...entry.citations.map((citation) => `${citation.documentName} · 第 ${citation.page} 页`),
+      ],
+    })
+    if (!staged) {
+      setPdfNotice('无法把怪物资料交接给怪物工坊，请刷新页面后重试。')
+      return
+    }
+    navigate(`${campaignBasePath}/dm-tools/workshop`)
+  }
+
   useEffect(() => {
     if (!pdfAnalysisDirty || !pdfAnalysisResult || !activeAiJob || pdfAnalysisBusy || pdfSaveBusy || pdfSaveFailed) return
     const timer = window.setTimeout(() => {
@@ -635,14 +673,19 @@ export default function DmPrepAssistantPage() {
     }
   }, [campaignId, sessionPrepDraft, sessionPrepLoadedCampaignId, sessionPrepPlan])
 
-  const updateSessionPrepDraft = useCallback((draft: AccountCampaignPrepPlanDraftV1) => {
+  const updateSessionPrepDraft = useCallback((update: AccountCampaignPrepPlanDraftV1 | ((current: AccountCampaignPrepPlanDraftV1) => AccountCampaignPrepPlanDraftV1)) => {
     sessionPrepEditRevisionRef.current += 1
     setSessionPrepLoadedCampaignId(campaignId)
     if (sessionPrepLoadedCampaignId !== campaignId) setSessionPrepPlan(null)
-    setSessionPrepDraft(draft)
+    setSessionPrepDraft((current) => {
+      const latest = sessionPrepLoadedCampaignId === campaignId && current
+        ? current
+        : createDefaultCampaignPrepPlan(pdfAnalysisResult)
+      return typeof update === 'function' ? update(latest) : update
+    })
     setSessionPrepDirty(true)
     setSessionPrepSaveFailed(false)
-  }, [campaignId, sessionPrepLoadedCampaignId])
+  }, [campaignId, pdfAnalysisResult, sessionPrepLoadedCampaignId])
 
   useEffect(() => {
     if (sessionPrepLoadedCampaignId !== campaignId || !sessionPrepDirty || !sessionPrepDraft || sessionPrepSaveBusy || sessionPrepSaveFailed || !isAccountCampaignId(campaignId)) return
@@ -650,7 +693,6 @@ export default function DmPrepAssistantPage() {
     return () => window.clearTimeout(timer)
   }, [campaignId, persistSessionPrepPlan, sessionPrepDirty, sessionPrepDraft, sessionPrepLoadedCampaignId, sessionPrepSaveBusy, sessionPrepSaveFailed])
 
-  const campaignAnalysisJobs = aiJobs.filter((job) => job.taskKind === 'campaign-analysis')
   const effectiveSessionPrepDraft = sessionPrepLoadedCampaignId === campaignId && sessionPrepDraft
     ? sessionPrepDraft
     : createDefaultCampaignPrepPlan(pdfAnalysisResult)
@@ -665,12 +707,6 @@ export default function DmPrepAssistantPage() {
       <DmPrepWorkspaceShell
         activeSection={workspaceSection}
         onSectionChange={setWorkspaceSection}
-        sidebarFooter={(
-          <button type="button" onClick={() => setWorkspaceSection('imports')} className="w-full rounded-2xl border border-sky-400/15 bg-sky-500/[0.035] p-3 text-left hover:bg-sky-500/[0.06]">
-            <span className="flex items-center gap-2 text-xs font-semibold text-sky-100"><Bot className="h-4 w-4" />AI 导入与任务</span>
-            <span className="mt-1 block text-[10px] leading-4 text-slate-500">{aiProviderSelection.providerId} · {campaignAnalysisJobs.length} 项任务</span>
-          </button>
-        )}
       >
         {workspaceSection === 'session' && (
           <>
@@ -705,17 +741,26 @@ export default function DmPrepAssistantPage() {
                   <h2 className="text-sm font-semibold text-slate-100">{workspaceSection === 'story' ? '剧情工作区' : workspaceSection === 'world' ? '世界资料库' : '战役资源库'}</h2>
                   <p className="mt-1 text-[10px] text-slate-500">内容修改会自动保存到账号战役；原文证据仍可随时打开核对。</p>
                 </div>
-                <button type="button" onClick={() => setPdfAnalysisEditorOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100"><PencilLine className="h-3.5 w-3.5" />编辑全部字段</button>
+                <button type="button" onClick={() => openPdfAnalysisEditor()} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100"><PencilLine className="h-3.5 w-3.5" />编辑全部字段</button>
               </div>
               {workspaceSection === 'story' ? (
-                <DmStoryEventWorkspace analysis={pdfAnalysisResult} plan={effectiveSessionPrepDraft} onPlanChange={updateSessionPrepDraft} />
+                <DmStoryEventWorkspace
+                  analysis={pdfAnalysisResult}
+                  plan={effectiveSessionPrepDraft}
+                  onPlanChange={updateSessionPrepDraft}
+                  onOpenSourceWorkspace={(citation) => {
+                    setPdfSourceTarget({ documentId: citation.documentId, page: citation.page, quote: citation.quote })
+                    setWorkspaceSection('world')
+                  }}
+                />
               ) : (
                 <PdfCampaignKnowledgeBase
                   analysis={pdfAnalysisResult}
                   section={workspaceSection}
                   compactHeader
                   mapHref={`${campaignBasePath}/maps`}
-                  onEdit={() => setPdfAnalysisEditorOpen(true)}
+                  onEdit={openPdfAnalysisEditor}
+                  onEditMonster={openPdfMonsterInWorkshop}
                   onPortraitChange={updatePdfPersonPortrait}
                   onTimelineEventsChange={(timelineEvents) => {
                     setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
@@ -734,6 +779,14 @@ export default function DmPrepAssistantPage() {
                     markPdfAnalysisDirty()
                     return persistPdfAnalysisDraft(next)
                   }}
+                  onBookmarksChange={(bookmarks) => {
+                    setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                      ...current,
+                      bookmarks,
+                    }) : current)
+                    markPdfAnalysisDirty()
+                  }}
+                  sourceTarget={pdfSourceTarget}
                 />
               )}
               {workspaceSection === 'resources' && <DmMapAnalysisPanel aiProviderSelection={aiProviderSelection} />}
@@ -804,13 +857,22 @@ export default function DmPrepAssistantPage() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => pdfInputRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"
-          >
-            <Upload className="h-4 w-4" />选择 PDF
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => requestPdfSplitView(pdfFiles[0] ? { file: pdfFiles[0] } : {})}
+              className="inline-flex items-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 hover:bg-sky-500/15"
+            >
+              <PanelLeftOpen className="h-4 w-4" />分屏阅读
+            </button>
+            <button
+              type="button"
+              onClick={() => pdfInputRef.current?.click()}
+              className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"
+            >
+              <Upload className="h-4 w-4" />选择 PDF
+            </button>
+          </div>
           <input
             ref={pdfInputRef}
             type="file"
@@ -1060,7 +1122,7 @@ export default function DmPrepAssistantPage() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <ResultCard icon={GitBranch} title="人物关系图" description="人物、阵营、地点和事件之间的有向关系，并可追溯到原文页码。" count={pdfAnalysisResult?.relationships.length} />
+            <ResultCard icon={Bookmark} title="原文阅读与书签" description="在 APP 内逐页阅读原文，选中短引手动建书签，或确认 AI 识别的人物、地点、线索与事件书签。" count={pdfAnalysisResult ? (pdfAnalysisResult.bookmarks?.length ?? 0) : undefined} />
             <ResultCard icon={Users} title="人物形象与档案" description="立绘、外貌、性格、动机、秘密、说话方式与可能的剧情反应。" count={pdfAnalysisResult?.people.length} />
             <ResultCard icon={KeyRound} title="关键线索" description="线索来源、可发现地点、前置条件、失败补救和关联讲义。" count={pdfAnalysisResult?.clues.length} />
             <ResultCard icon={BookOpenText} title="章节与场景" description="按地点和事件拆成可编排场景，标记必要人物、怪物和地图。" count={pdfAnalysisResult?.scenes.length} />
@@ -1086,7 +1148,7 @@ export default function DmPrepAssistantPage() {
                 {pdfAnalysisDirty && <p className="mt-1 text-[10px] text-amber-300">当前草稿包含尚未保存到战役的 DM 修改。</p>}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => setPdfAnalysisEditorOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
+                <button type="button" onClick={() => openPdfAnalysisEditor()} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15">
                   <PencilLine className="h-4 w-4" />审阅与编辑
                 </button>
                 <button
@@ -1107,7 +1169,8 @@ export default function DmPrepAssistantPage() {
             <PdfCampaignKnowledgeBase
               analysis={pdfAnalysisResult}
               mapHref={`${campaignBasePath}/maps`}
-              onEdit={() => setPdfAnalysisEditorOpen(true)}
+              onEdit={openPdfAnalysisEditor}
+              onEditMonster={openPdfMonsterInWorkshop}
               onPortraitChange={updatePdfPersonPortrait}
               onTimelineEventsChange={(timelineEvents) => {
                 setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
@@ -1126,6 +1189,13 @@ export default function DmPrepAssistantPage() {
                 markPdfAnalysisDirty()
                 return persistPdfAnalysisDraft(next)
               }}
+              onBookmarksChange={(bookmarks) => {
+                setPdfAnalysisResult((current) => current ? normalizeDmEditedPdfCampaignAnalysisV2({
+                  ...current,
+                  bookmarks,
+                }) : current)
+                markPdfAnalysisDirty()
+              }}
             />
 
             {pdfAnalysisResult.warnings.length > 0 && (
@@ -1137,12 +1207,14 @@ export default function DmPrepAssistantPage() {
 
             {pdfAnalysisEditorOpen && (
               <PdfCampaignAnalysisEditor
+                key={`${pdfAnalysisEditorTarget?.tab ?? 'overview'}:${pdfAnalysisEditorTarget?.index ?? -1}`}
                 analysis={pdfAnalysisResult}
+                initialTarget={pdfAnalysisEditorTarget}
                 onChange={(next) => {
                   setPdfAnalysisResult(normalizeDmEditedPdfCampaignAnalysisV2(next as unknown as PdfCampaignAnalysisV2))
                   markPdfAnalysisDirty()
                 }}
-                onClose={() => setPdfAnalysisEditorOpen(false)}
+                onClose={closePdfAnalysisEditor}
                 onExport={downloadPdfAnalysis}
               />
             )}
@@ -1260,12 +1332,14 @@ export default function DmPrepAssistantPage() {
       </DmPrepWorkspaceShell>
       {workspaceSection !== 'imports' && pdfAnalysisResult && pdfAnalysisEditorOpen && (
         <PdfCampaignAnalysisEditor
+          key={`${pdfAnalysisEditorTarget?.tab ?? 'overview'}:${pdfAnalysisEditorTarget?.index ?? -1}`}
           analysis={pdfAnalysisResult}
+          initialTarget={pdfAnalysisEditorTarget}
           onChange={(next) => {
             setPdfAnalysisResult(normalizeDmEditedPdfCampaignAnalysisV2(next as unknown as PdfCampaignAnalysisV2))
             markPdfAnalysisDirty()
           }}
-          onClose={() => setPdfAnalysisEditorOpen(false)}
+          onClose={closePdfAnalysisEditor}
           onExport={downloadPdfAnalysis}
         />
       )}

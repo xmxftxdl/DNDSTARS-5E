@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eCombatant,
   dnd5eCombatantPairKey,
@@ -10,7 +10,15 @@ import {
 } from './headlessCombatEngine'
 import { getDnd5eSrdMonsterBySlug } from './monsters'
 
-const KRAKEN = getDnd5eSrdMonsterBySlug('kraken')!
+import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
+
+const mechanicFixtures = new Map([['kraken', monsterMechanicFixture('kraken', ["tentacle","fling","multiattack","multiattack-two-tentacles-and-fling","multiattack-tentacle-and-two-flings","multiattack-flings","legendary-fling","legendary-tentacle-attack"])]])
+beforeEach(() => setDnd5eRoomMonsterCatalog([...mechanicFixtures.values()]))
+afterEach(() => setDnd5eRoomMonsterCatalog([]))
+const getMechanicMonster = (slug: string) => mechanicFixtures.get(slug) ?? getDnd5eSrdMonsterBySlug(slug)
+
+const KRAKEN = getMechanicMonster('kraken')!
 const ABILITIES = {
   str: 10,
   dex: 10,
@@ -93,7 +101,7 @@ function sourceTentacleRelations(state: Dnd5eHeadlessCombatState) {
   )
 }
 
-describe('Kraken Fling Headless transaction', () => {
+describe('Kraken Fling structured sub-rule in an isolated fixture', () => {
   it('publishes reviewed +17 attacks and a strict throw rule', () => {
     expect(KRAKEN.actions.find((action) => action.id === 'bite')?.attack?.toHit)
       .toBe(17)
@@ -257,4 +265,10 @@ describe('Kraken Fling Headless transaction', () => {
     expect(sourceTentacleRelations(result.state)).toHaveLength(1)
     expect(result.state.combatants.hero.position).toEqual({ x: 5, y: 0 })
   })
+})
+
+vi.mock('./monsterMultiattackConstraints', async importOriginal => {
+  const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
+  const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
+  return monsterMechanicConstraints(original)
 })

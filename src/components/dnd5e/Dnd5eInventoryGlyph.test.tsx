@@ -6,7 +6,7 @@ import Dnd5eInventoryGlyph from './Dnd5eInventoryGlyph'
 
 describe('Dnd5eInventoryGlyph', () => {
   it('has original multicolour SVG artwork for every inventory icon id', () => {
-    expect(DND5E_INVENTORY_ICON_IDS).toHaveLength(60)
+    expect(DND5E_INVENTORY_ICON_IDS).toHaveLength(68)
 
     for (const icon of DND5E_INVENTORY_ICON_IDS) {
       const html = renderToStaticMarkup(createElement(Dnd5eInventoryGlyph, { icon }))

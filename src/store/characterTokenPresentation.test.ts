@@ -43,6 +43,56 @@ describe('character token presentation', () => {
     })
   })
 
+  it('projects the source character artwork onto a Mirror Image decoy without linking it as a creature', () => {
+    const source = token({ id: 'wizard-token', characterId: 'character-1' })
+    const decoy = token({
+      id: 'mirror-decoy',
+      type: 'obstacle',
+      characterId: undefined,
+      label: '镜影分身 1',
+      dnd5eSpellEffect: {
+        schemaVersion: 1,
+        spellId: 'mirror-image',
+        sourceCharacterId: 'character-1',
+        sourceTokenId: 'wizard-token',
+        sourceEffectId: 'mirror-effect',
+        projectionKind: 'attack-decoy',
+        projectionIndex: 1,
+        createdRound: 1,
+        expiresAfterRound: 11,
+      },
+    })
+    const projected = projectCharacterTokenPresentations([source, decoy], [{
+      id: 'character-1',
+      name: '法师',
+      avatar: '🧙',
+      portrait: 'data:image/webp;base64,AAAA',
+      tokenPortrait: 'data:image/webp;base64,BBBB',
+    }])
+    expect(projected[1]).toMatchObject({
+      label: '镜影分身 1',
+      characterId: undefined,
+      emoji: '🧙',
+      portrait: 'data:image/webp;base64,AAAA',
+      tokenPortrait: 'data:image/webp;base64,BBBB',
+    })
+  })
+
+  it('does not project mismatched catalogue initiative art over a room Token image', () => {
+    const projected = projectCharacterTokenPresentations([
+      token({
+        type: 'enemy',
+        characterId: undefined,
+        poolId: 'srd-5.1:androsphinx',
+        tokenPortraitImageId: 'room-sphinx-token',
+      }),
+    ], [])
+
+    expect(projected[0]?.portrait).toBeUndefined()
+    expect(projected[0]?.tokenPortrait).toBeUndefined()
+    expect(projected[0]?.tokenPortraitImageId).toBe('room-sphinx-token')
+  })
+
   it('projects temporary Darkvision without overwriting the stored token range', () => {
     const original = token({ darkvisionRangeFeet: 30 })
     const effect = createDnd5eMechanicalEffect({

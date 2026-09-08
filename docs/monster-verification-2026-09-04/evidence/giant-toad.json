@@ -1,0 +1,196 @@
+{
+  "id": "srd-5.1:giant-toad",
+  "slug": "giant-toad",
+  "name": "巨蟾蜍",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "swallow",
+      "name": "吞咽",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.targetMaxSizeRank",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].sourceDeathEscape.movementCostFeet",
+        "attack.onHitEffects[].sourceDeathEscape.applyProne",
+        "attack.onHitEffects[].removeSourceRelationSlotGroupOnApply"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 136,
+      "slug": "giant-toad",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:24:28.143Z",
+      "name": "巨蟾蜍",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-toad-bite-1788560668216",
+      "combatId": "verify-ui-giant-toad-bite-1788560668216:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "status": "failed",
+      "error": "Error: Timeout 5000ms exceeded while waiting on the predicate",
+      "finishedAt": "2026-09-04T22:24:41.697Z",
+      "evidenceFile": "ui-cases/monsters/136-giant-toad.json"
+    },
+    {
+      "index": 201,
+      "slug": "giant-toad",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:51:15.222Z",
+      "name": "巨蟾蜍",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1",
+      "total": 334,
+      "mapId": "verify-ui-giant-toad-bite-1788569475263",
+      "combatId": "verify-ui-giant-toad-bite-1788569475263:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨蟾蜍 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+4=17 命中；共造成 15 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:51 PM\n结算\n\n巨蟾蜍 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+4=17 命中；共造成 15 点伤害。\n\n查看 Headless 结算依据（14）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +4。\n结果 · 17 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害 1·穿刺）｜1d10 骰面：10 = 10｜固定加值 +2｜小计 12\n伤害骰 · 啃咬（基础伤害 2·毒素）｜1d10 骰面：3 = 3｜固定加值 +0｜小计 3\n巨蟾蜍｜消耗动作\n验证目标｜受到 15 点伤害｜HP 320 → 305\n验证目标｜获得状态：擒抱｜来源：巨蟾蜍\n验证目标｜效果生效：擒抱\n巨蟾蜍｜monster:srd-5.1:giant-toad:bite:bite-grapple生效｜目标 验证目标\n验证目标｜获得状态：束缚｜来源：巨蟾蜍\n验证目标｜效果生效：束缚",
+      "playerLog": "巨蟾蜍 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+4=17 命中；共造成 15 点伤害。",
+      "afterHp": 305,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "grappled",
+        "restrained"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:51:43.889Z",
+      "evidenceFile": "ui-cases/monsters/201-giant-toad.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "立定跳跃",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

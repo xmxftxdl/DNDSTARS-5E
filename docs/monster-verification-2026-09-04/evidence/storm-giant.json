@@ -1,0 +1,194 @@
+{
+  "id": "srd-5.1:storm-giant",
+  "slug": "storm-giant",
+  "name": "风暴巨人",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greatsword",
+      "name": "巨剑",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "rock",
+      "name": "投石",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "lightning-strike",
+      "name": "闪电打击",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "usage.kind",
+        "usage.dieSides",
+        "usage.minimum",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.area.placeRangeFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 34,
+      "slug": "storm-giant",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:03:07.105Z",
+      "name": "风暴巨人",
+      "actionId": "greatsword",
+      "actionName": "巨剑",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "13",
+      "total": 334,
+      "mapId": "verify-ui-storm-giant-greatsword-1788566587167",
+      "combatId": "verify-ui-storm-giant-greatsword-1788566587167:combat",
+      "actorPosition": {
+        "x": 245,
+        "y": 315
+      },
+      "targetPosition": {
+        "x": 385,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "风暴巨人 使用巨剑攻击 验证目标：巨剑 → 验证目标 10+14=24 命中；共造成 25 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:03 PM\n结算\n\n风暴巨人 使用巨剑攻击 验证目标：巨剑 → 验证目标 10+14=24 命中；共造成 25 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：巨剑｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 10 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +14。\n结果 · 24 vs AC 10：命中。\n伤害骰 · 巨剑（基础伤害·挥砍）｜6d6 骰面：4 + 2 + 5 + 3 + 1 + 1 = 16｜固定加值 +9｜小计 25\n风暴巨人｜消耗动作\n验证目标｜受到 25 点伤害｜HP 320 → 295",
+      "playerLog": "风暴巨人 使用巨剑攻击 验证目标：巨剑 → 验证目标 10+14=24 命中；共造成 25 点伤害。",
+      "afterHp": 295,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:03:31.749Z",
+      "evidenceFile": "ui-cases/monsters/034-storm-giant.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 11,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

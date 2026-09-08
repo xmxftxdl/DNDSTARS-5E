@@ -23,12 +23,17 @@ import {
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDeclarativeCompanionProfileUpgrade, dnd5eDeclarativeEnvironmentalMovementSpeed, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, reconcileDnd5eSourceLinkedRelations, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eCombatEvent, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDeclarativeCompanionProfileUpgrade, dnd5eDeclarativeEnvironmentalMovementSpeed, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, dnd5eHeadlessTurnKey, hydrateDnd5eWildShapeCombatant, reconcileDnd5eSourceLinkedRelations, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eCombatEvent, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
+import { dnd5eStandardConditionId } from './conditions'
 import { dnd5eChallengeRatingValue } from './wildShape'
-import { DND5E_COMBAT_STATE_SCHEMA_VERSION, dnd5eActiveForcedFleeSourceId } from './activeEffects'
+import {
+  createDnd5eMechanicalEffect,
+  DND5E_COMBAT_STATE_SCHEMA_VERSION,
+  dnd5eActiveForcedFleeSourceId,
+} from './activeEffects'
 import {
   dnd5eEffectiveHitPointMaximum,
   normalizeDnd5eHitPointMaximumReductionLedger,
@@ -43,6 +48,7 @@ import {
 } from './effectiveRulesContext'
 import { dnd5eMonsterHasStructuredShapechange } from './monsterAdvancedAbilities'
 import {
+  dnd5eMonsterHasAntimagicSusceptibility,
   dnd5eMonsterHasImmutableForm,
   dnd5eMonsterHasMagicResistance,
   dnd5eMonsterLimitedMagicImmunityRule,
@@ -57,12 +63,54 @@ import {
   dnd5eCreatureHeightFeetForSizeRank,
   dnd5eMapTokenDistanceFeet,
 } from './verticalCombatGeometry'
+import { dnd5eRestoredSummonedOriginalObject } from './summonedCreatures'
 import { dnd5ePluginFeatureDefinition } from './pluginApi'
-import { dnd5ePersistentAreaOccupantModifiersAt } from './persistentAreaGeometry'
+import {
+  dnd5ePersistentAreaOccupantModifiersAt,
+  dnd5eTokenIntersectsPersistentAreaAt,
+} from './persistentAreaGeometry'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
+}
+
+/**
+ * Per-action snapshots may contain several initiative slots for the same
+ * creature (for example Time Stop's one-shot extra turns). Preserve the
+ * exact UI-authoritative slot whenever it still belongs to the actor instead
+ * of collapsing back to that actor's first/normal slot.
+ */
+export function dnd5eRequestedInitiativeActorIndex(
+  state: Pick<Dnd5eHeadlessCombatState, 'initiativeOrder'>,
+  actorId: string,
+  requestedIndex: number,
+): number {
+  return Number.isInteger(requestedIndex) &&
+    requestedIndex >= 0 &&
+    state.initiativeOrder[requestedIndex] === actorId
+    ? requestedIndex
+    : state.initiativeOrder.indexOf(actorId)
+}
+
+/**
+ * Exploration actions reuse the combat resolver but are not combat turns.
+ * Pin the synthetic actor's turn-start boundary so an ongoing periodic effect
+ * from an ended encounter is not incorrectly demanded as dice for this action.
+ */
+export function prepareDnd5eExplorationActor(
+  state: Dnd5eHeadlessCombatState,
+  actorId: string,
+): Dnd5eCombatant | undefined {
+  state.active = true
+  const actor = state.combatants[actorId]
+  if (!actor) return undefined
+  const actorIndex = state.initiativeOrder.indexOf(actorId)
+  actor.classState.turnStartResolvedTurnKey = dnd5eHeadlessTurnKey(
+    actorIndex >= 0 ? { ...state, initiativeIndex: actorIndex } : state,
+    actorId,
+  )
+  return actor
 }
 
 export interface Dnd5eAttackCoverSnapshot {
@@ -84,18 +132,34 @@ function dnd5eMonsterArmorClassNoteMeansWornArmor(note: string | undefined): boo
     normalized.includes(fragment))
 }
 
-function dnd5eMonsterConditionImmunities(monster: Dnd5eMonsterStatBlock | undefined): readonly string[] | undefined {
-  if (!monster) return undefined
-  const hasMagicalSleepImmunity = monster.traits.some((trait) => {
+function dnd5eMonsterHasFeyAncestry(monster: Dnd5eMonsterStatBlock | undefined): boolean {
+  return monster?.traits.some((trait) => {
     const name = trait.name.trim().toLowerCase()
     const description = trait.description.trim().toLowerCase()
     return name === 'fey ancestry' || name === '妖精血统' || name === '精灵血统' ||
+      description.includes('advantage on saving throws against being charmed') ||
+      description.includes('对抗魅惑') ||
       description.includes("magic can't put") || description.includes('magic cannot put') ||
       description.includes('魔法无法使其入睡') || description.includes('魔法不能使其入睡')
+  }) === true
+}
+
+function dnd5eMonsterConditionImmunities(monster: Dnd5eMonsterStatBlock | undefined): readonly string[] | undefined {
+  if (!monster) return undefined
+  // Reviewed monster translations localize presentation strings in the
+  // catalog. Headless Activity checks, however, consume canonical condition
+  // ids. Preserve the reviewed labels for UI/logging while projecting their
+  // canonical ids so effects such as Compulsion can automatically succeed
+  // for charm-immune monsters.
+  const catalogImmunities = monster.conditionImmunities ?? []
+  const normalizedImmunities = catalogImmunities.flatMap((condition) => {
+    const standard = dnd5eStandardConditionId(condition)
+    return standard ? [condition, standard] : [condition]
   })
+  const hasMagicalSleepImmunity = dnd5eMonsterHasFeyAncestry(monster)
   return hasMagicalSleepImmunity
-    ? [...new Set([...(monster.conditionImmunities ?? []), 'magical-sleep', '魔法睡眠'])]
-    : monster.conditionImmunities
+    ? [...new Set([...normalizedImmunities, 'magical-sleep', '魔法睡眠'])]
+    : [...new Set(normalizedImmunities)]
 }
 
 export function dnd5eAttackCoverForPair(
@@ -383,13 +447,132 @@ function applyPersistentAreaOccupantModifiers(map: BattleMap, combatants: Dnd5eC
     if (modifiers.damageResistances.length > 0) {
       combatant.damageResistances = [...new Set([...combatant.damageResistances, ...modifiers.damageResistances])]
     }
+    if (modifiers.damageVulnerabilities.length > 0) {
+      combatant.damageVulnerabilities = [...new Set([
+        ...(combatant.damageVulnerabilities ?? []),
+        ...modifiers.damageVulnerabilities,
+      ])]
+    }
     if (modifiers.conditionImmunities.length > 0) {
       combatant.conditionImmunities = [...new Set([...combatant.conditionImmunities, ...modifiers.conditionImmunities])]
+    }
+    if (
+      modifiers.conditionImmunitiesBySourceCreatureType.length > 0 ||
+      modifiers.savingThrowAdvantagesBySourceCreatureType.length > 0 ||
+      modifiers.spellTargetingImmunitySchools.length > 0 ||
+      modifiers.magicallyHeldAloft ||
+      modifiers.languageCapabilities != null
+    ) {
+      combatant.classState.activeEffects = [
+        ...(combatant.classState.activeEffects ?? []),
+        createDnd5eMechanicalEffect({
+          id: `persistent-area-occupant:${combatant.id}`,
+          definitionId: 'persistent-area:source-qualified-protection',
+          label: '区域类型防护',
+          source: {
+            kind: 'system',
+            rulesId: `persistent-area-occupant:${combatant.id}`,
+            magical: true,
+          },
+          targetId: combatant.id,
+          duration: { type: 'permanent' },
+          modifiers: {
+            conditionImmunitiesBySourceCreatureType:
+              modifiers.conditionImmunitiesBySourceCreatureType,
+            savingThrowAdvantagesBySourceCreatureType:
+              modifiers.savingThrowAdvantagesBySourceCreatureType,
+            spellTargetingImmunitySchools:
+              modifiers.spellTargetingImmunitySchools,
+            magicallyHeldAloft: modifiers.magicallyHeldAloft || undefined,
+            languageCapabilities: modifiers.languageCapabilities,
+          },
+        }),
+      ]
+    }
+    if (modifiers.attacksAgainstOccupantDisadvantageSources.length > 0) {
+      combatant.classState.activeEffects = [
+        ...(combatant.classState.activeEffects ?? []),
+        ...modifiers.attacksAgainstOccupantDisadvantageSources.map((source) =>
+          createDnd5eMechanicalEffect({
+            id: `persistent-area-occupant:${source.areaId}:${combatant.id}`,
+            definitionId: `persistent-area:${source.areaId}:attack-disadvantage`,
+            label: source.label,
+            source: {
+              kind: 'system',
+              rulesId: `persistent-area-occupant:${source.areaId}:${combatant.id}`,
+              magical: true,
+            },
+            targetId: combatant.id,
+            duration: { type: 'permanent' },
+            modifiers: {
+              attacksAgainstTargetDisadvantageCreatureTypes: source.creatureTypes,
+            },
+          })),
+      ]
     }
     combatant.spellSavingThrowAdvantage ||= modifiers.spellSavingThrowAdvantage
     combatant.successfulSpellSaveNegatesDamage ||= modifiers.successfulSpellSaveNegatesDamage
     combatant.hitPointMaximumReductionImmunity ||= modifiers.hitPointMaximumReductionImmunity
+    combatant.rangedWeaponAttacksPrevented ||= modifiers.preventsRangedWeaponAttacks
+    combatant.concentrationSavingThrowDisadvantage ||= modifiers.concentrationSavingThrowDisadvantage
+    combatant.soundSuppressed ||= modifiers.preventsVerbalComponents
+    combatant.magicSuppressed ||= modifiers.suppressesMagic
+    combatant.incapacitatedByAntimagicSusceptibility ||=
+      modifiers.suppressesMagic &&
+      dnd5eMonsterHasAntimagicSusceptibility(
+        token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined,
+      )
+    combatant.spellSuppressionAreas = modifiers.spellSuppressionAreas.length > 0
+      ? modifiers.spellSuppressionAreas.map((entry) => ({ ...entry }))
+      : undefined
+    if (modifiers.suppressesMagic) {
+      combatant.classState.activeEffects = combatant.classState.activeEffects?.map((effect) =>
+        effect.source.magical !== true
+          ? effect
+          : {
+              ...effect,
+              suspendedBy: [...new Set([
+                ...(effect.suspendedBy ?? []),
+                'persistent-area:antimagic',
+              ])],
+            })
+    }
   }
+}
+
+/**
+ * UI turn scheduling uses persisted tokens rather than a Headless snapshot.
+ * Recompute this transient map rule so an affected monster cannot retain an
+ * interactive turn between snapshot creation and action submission.
+ */
+export function dnd5eTokenIsIncapacitatedByAntimagicArea(
+  map: BattleMap,
+  token: Token,
+): boolean {
+  if (!dnd5eMonsterHasAntimagicSusceptibility(
+    token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined,
+  )) return false
+  return dnd5ePersistentAreaOccupantModifiersAt({ map, token, position: token })
+    .suppressesMagic
+}
+
+function persistentActiveEffectsWithoutTransientAreaSuspension(
+  effects: readonly import('./activeEffects').Dnd5eActiveEffectInstance[] | undefined,
+) {
+  return effects?.filter((effect) =>
+    !effect.source.rulesId?.startsWith('persistent-area-occupant:'),
+  ).map((effect) => {
+    const suspendedBy = effect.suspendedBy?.filter((entry) =>
+      entry !== 'persistent-area:antimagic')
+    return {
+      ...effect,
+      source: { ...effect.source },
+      duration: { ...effect.duration },
+      repeatSave: effect.repeatSave ? { ...effect.repeatSave } : undefined,
+      breakOn: effect.breakOn ? [...effect.breakOn] : undefined,
+      suspendedBy: suspendedBy?.length ? suspendedBy : undefined,
+    }
+  })
 }
 
 function applyBardCountercharm(map: BattleMap, combatants: Dnd5eCombatant[]): void {
@@ -465,6 +648,27 @@ function applyDraconicPresenceSources(map: BattleMap, combatants: Dnd5eCombatant
   }
 }
 
+function reconcileShapechangerReversionAreaLocks(
+  map: BattleMap,
+  combatants: Dnd5eCombatant[],
+): void {
+  const tokenById = new Map(map.tokens.map((token) => [token.id, token]))
+  const areaById = new Map((map.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
+  for (const combatant of combatants) {
+    const lockedAreaIds = combatant.classState.shapechangerReversionAreaIds
+    if (!lockedAreaIds?.length) continue
+    const token = tokenById.get(combatant.id)
+    const retained = token ? lockedAreaIds.filter((areaId) => {
+      const area = areaById.get(areaId)
+      return area?.sourceKind === 'core-spell' && area.coreSpellId === 'moonbeam' &&
+        dnd5eTokenIntersectsPersistentAreaAt(token, map, area, token)
+    }) : []
+    combatant.classState.shapechangerReversionAreaIds = retained.length > 0
+      ? [...new Set(retained)]
+      : undefined
+  }
+}
+
 export function createDnd5eMapCombatSnapshot(input: {
   combatId: string
   round?: number
@@ -486,10 +690,15 @@ export function createDnd5eMapCombatSnapshot(input: {
   const characterIdByCombatantId: Record<string, string> = {}
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const combatants = input.map.tokens.flatMap((token) => {
-    if (token.type !== 'player' && token.type !== 'enemy') return []
+    // NPC tokens are still creatures for spell saves and damage even when the
+    // table does not give them turns. Spell-resolution callers provide a
+    // synthetic initiative entry so they can participate in an ephemeral
+    // Headless snapshot without joining the persisted combat turn order.
+    if (token.type !== 'player' && token.type !== 'enemy' && token.type !== 'npc') return []
     const initiative = initiativeByTokenId.get(token.id)
     if (initiative == null) return []
     const character = token.characterId ? charactersById.get(token.characterId) : undefined
+    const simulacrum = token.dnd5eSimulacrum
     // A player token that names a character must never silently fall through to
     // the generic monster path while the character resource is still syncing.
     // Omitting it makes the action fail closed instead of accepting an attack
@@ -503,17 +712,111 @@ export function createDnd5eMapCombatSnapshot(input: {
         fallbackRangeFeet: geometry?.vision.defaultRangeFeet ??
           DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
       })
-      characterIdByCombatantId[token.id] = character.id
+      if (!simulacrum) characterIdByCombatantId[token.id] = character.id
       const combatant = createCombatantFromDnd5eCharacter({
         character: migrated,
         controller: dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
         initiativeD20: Math.max(1, Math.min(20, initiative - migrated.initiativeBonus)),
         position: { x: token.x, y: token.y },
       })
-      const weaponDamageSources = characterWeaponDamageSources(character)
-      const mainWeaponId = character.equipment?.mainWeapon?.id
+      // Character effects persist between maps, while Headless concentration
+      // ownership uses map-token ids. Rebind self-hosted concentration effects
+      // to the new token before the combat starts; otherwise replacing a
+      // concentration spell on another map cannot find and remove the old
+      // effect (for example Magic Weapon cast on the caster's own weapon).
+      const persistedConcentrationId = combatant.classState.concentrationSpellId
+      if (persistedConcentrationId && combatant.classState.activeEffects?.length) {
+        let hasSelfConcentrationEffect = false
+        const staleSelfSourceIds = new Set<string>()
+        combatant.classState.activeEffects = combatant.classState.activeEffects.flatMap((effect) => {
+          const selfHostedConcentration = effect.duration.type === 'concentration' && (
+            effect.source.characterId === character.id ||
+            effect.source.actorId === character.id ||
+            effect.duration.sourceActorId === character.id ||
+            (effect.source.characterId == null && effect.source.actorName === character.name)
+          )
+          if (effect.duration.type === 'concentration' && selfHostedConcentration) {
+            if (effect.source.actorId) staleSelfSourceIds.add(effect.source.actorId)
+            if (effect.duration.sourceActorId) staleSelfSourceIds.add(effect.duration.sourceActorId)
+          }
+          const effectConcentrationId = effect.duration.type === 'concentration'
+            ? effect.duration.concentrationId ?? effect.source.rulesId
+            : undefined
+          const ownConcentration = effect.duration.type === 'concentration' &&
+            selfHostedConcentration &&
+            effectConcentrationId === persistedConcentrationId
+          if (ownConcentration) hasSelfConcentrationEffect = true
+          // A character can only maintain one concentration spell. Activity
+          // effects created before their outer spell transaction committed do
+          // not always have duration.concentrationId, so use the spell source
+          // id as the fallback and discard any older self-hosted concentration
+          // row left behind on another map token.
+          if (selfHostedConcentration && !ownConcentration) return []
+          return [{
+            ...effect,
+            targetId: token.id,
+            source: ownConcentration
+              ? { ...effect.source, actorId: token.id }
+              : { ...effect.source },
+            duration: ownConcentration
+              ? { ...effect.duration, sourceActorId: token.id }
+              : { ...effect.duration },
+          }]
+        })
+        if (hasSelfConcentrationEffect) {
+          const currentMapTokenIds = new Set(input.map.tokens.map((candidate) => candidate.id))
+          combatant.classState.concentrationTargetIds = [...new Set([
+            ...(combatant.classState.concentrationTargetIds ?? [])
+              .filter((targetId) => currentMapTokenIds.has(targetId)),
+            token.id,
+          ])]
+          const concentrationEffectsBySource = Object.fromEntries(Object.entries(
+            combatant.classState.concentrationEffectsBySource ?? {},
+          ).filter(([sourceId]) => !staleSelfSourceIds.has(sourceId)))
+          combatant.classState.concentrationEffectsBySource = {
+            ...concentrationEffectsBySource,
+            [token.id]: persistedConcentrationId,
+          }
+        }
+      }
+      if (simulacrum) {
+        combatant.level = simulacrum.level
+        combatant.proficiencyBonus = simulacrum.proficiencyBonus
+        combatant.abilities = { ...simulacrum.abilities }
+        combatant.armorClass = simulacrum.armorClass
+        combatant.currentHp = Math.max(0, Math.min(simulacrum.maximumHitPoints, token.hp ?? simulacrum.maximumHitPoints))
+        combatant.maxHp = simulacrum.maximumHitPoints
+        combatant.speed = simulacrum.speed
+        combatant.sizeRank = simulacrum.sizeRank
+        combatant.creatureType = simulacrum.creatureType
+        combatant.saveDc = simulacrum.saveDc
+        combatant.classLevels = simulacrum.classLevels ? { ...simulacrum.classLevels } : undefined
+        combatant.classResources = Object.fromEntries(Object.entries(simulacrum.classResources).map(([id, resource]) => [id, {
+          current: resource.current, max: resource.maximum,
+        }]))
+        combatant.classState = { ...combatant.classState, ...(token.dnd5eCombatState ?? {}) }
+        combatant.summonedSourceCombatantId = simulacrum.sourceTokenId
+        combatant.summonedPersistent = true
+        combatant.simulacrumCannotRegainSpellSlots = true
+        combatant.simulacrumCannotRegainHitPoints = true
+      }
+      if (combatant.classState.spellControlMentalAbilities) {
+        combatant.abilities = {
+          ...combatant.abilities,
+          ...combatant.classState.spellControlMentalAbilities,
+        }
+      }
+      const weaponDamageSources = simulacrum ? {} : characterWeaponDamageSources(character)
+      const mainWeaponId = simulacrum ? undefined : character.equipment?.mainWeapon?.id
       return [{
         ...combatant,
+        campaignWorldMinute: Number.isSafeInteger(character.dnd5eWorldTimeAppliedMinute)
+          ? character.dnd5eWorldTimeAppliedMinute
+          : undefined,
+        languages: [...new Set([
+          'common',
+          ...(character.dnd5eBackgroundLanguages ?? []),
+        ])],
         mainWeaponId,
         mainWeaponMagical: !!mainWeaponId && weaponDamageSources?.[mainWeaponId]?.magical === true,
         weaponDamageSources,
@@ -522,7 +825,14 @@ export function createDnd5eMapCombatSnapshot(input: {
         id: token.id,
         name: token.label,
         initiative,
-        sizeRank: ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? '中型'],
+        // createCombatantFromDnd5eCharacter has already hydrated an active
+        // creature form, including its size. Do not replace that form size
+        // with the map token's original creatureSize during each action
+        // snapshot: the following map projection would otherwise shrink a
+        // Large-or-bigger polymorphed token back to Medium after it moved.
+        sizeRank: combatant.classState.wildShapeFormId
+          ? combatant.sizeRank
+          : ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? '中型'],
         illumination: mapGeometryIlluminationAtPoint({
           geometry,
           map: input.map,
@@ -567,7 +877,13 @@ export function createDnd5eMapCombatSnapshot(input: {
     const combatant = createDnd5eCombatant({
       id: token.id,
       name: token.label,
-      controller: dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
+      // True Polymorph's object-to-creature branch may remain friendly after
+      // becoming permanent, but the caster explicitly loses control. Keep
+      // relationship/targeting on the player side while assigning its turns
+      // to the DM once the authority-owned control-ended flag is present.
+      controller: token.dnd5eSummon?.controlEnded === true
+        ? 'dm'
+        : dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
       initiative,
       abilities: monster ? { ...monster.abilities } : { ...DEFAULT_ABILITIES },
       savingThrowBonuses: monster?.savingThrows
@@ -577,6 +893,7 @@ export function createDnd5eMapCombatSnapshot(input: {
           ]))
         : undefined,
       skillProficiencies: monster?.skills?.map((skill) => skill.key),
+      languages: monster?.languages ? [...monster.languages] : [],
       classSelections: {
         expertise: dnd5eMonsterExpertiseSkills(monster),
       },
@@ -602,9 +919,9 @@ export function createDnd5eMapCombatSnapshot(input: {
       maxHp,
       temporaryHp: Math.max(0, Math.floor(tokenTemporaryHp ?? 0)),
       exhaustionLevel: 0,
-      speed: monster ? dnd5eMonsterMapSpeed(monster) : 30,
+      speed: token.dnd5eSummon?.walkingSpeedFeet ?? (monster ? dnd5eMonsterMapSpeed(monster) : 30),
       movementSpeeds: monster ? {
-        walk: monster.speed.walk ?? 0,
+        walk: token.dnd5eSummon?.walkingSpeedFeet ?? monster.speed.walk ?? 0,
         climb: monster.speed.climb,
         swim: monster.speed.swim,
         fly: monster.speed.fly,
@@ -673,16 +990,51 @@ export function createDnd5eMapCombatSnapshot(input: {
       summonedProficientSkillCheckBonus: token.dnd5eSummon?.proficientSkillCheckBonus,
       summonedAttacksPerAction: token.dnd5eSummon?.attacksPerAction,
       summonedShareSelfSpellsRangeFeet: token.dnd5eSummon?.shareSelfSpellsRangeFeet,
-      summonedSourceCombatantId: token.dnd5eSummon?.sourceTokenId,
+      summonedCannotAttack: token.dnd5eSummon?.cannotAttack === true,
+      summonedSourceCombatantId: token.dnd5eSummon?.controlEnded === true
+        ? undefined
+        : token.dnd5eSummon?.sourceTokenId,
       summonedPersistent: token.dnd5eSummon?.persistent === true,
-      creatureType: monster?.creatureType,
+      // Custom and unlinked combat tokens carry their creature taxonomy on
+      // the map token. Dropping it here bypassed creature-type rules such as
+      // Spare the Dying's construct/undead immunity.
+      creatureType: monster?.creatureType ?? token.creatureTypes?.[0],
       damageVulnerabilities: monster?.damageVulnerabilities,
       damageResistances: monster?.damageResistances,
       damageImmunities: monster?.damageImmunities,
       damageDefenseRules: monster?.damageDefenseRules,
       moralAlignment: normalizeDnd5eMoralAlignment(monster?.alignment),
       conditionImmunities: dnd5eMonsterConditionImmunities(monster),
+      racialSavingThrowAdvantages: dnd5eMonsterHasFeyAncestry(monster)
+        ? { conditions: ['charmed', '魅惑'] }
+        : undefined,
     })
+    if (simulacrum) {
+      combatant.level = simulacrum.level
+      combatant.proficiencyBonus = simulacrum.proficiencyBonus
+      combatant.abilities = { ...simulacrum.abilities }
+      combatant.armorClass = simulacrum.armorClass
+      combatant.currentHp = Math.max(0, Math.min(simulacrum.maximumHitPoints, token.hp ?? simulacrum.maximumHitPoints))
+      combatant.maxHp = simulacrum.maximumHitPoints
+      combatant.speed = simulacrum.speed
+      combatant.sizeRank = simulacrum.sizeRank
+      combatant.creatureType = simulacrum.creatureType
+      combatant.saveDc = simulacrum.saveDc
+      combatant.classLevels = simulacrum.classLevels ? { ...simulacrum.classLevels } : undefined
+      combatant.classResources = Object.fromEntries(Object.entries(simulacrum.classResources).map(([id, resource]) => [id, {
+        current: resource.current, max: resource.maximum,
+      }]))
+      combatant.summonedSourceCombatantId = simulacrum.sourceTokenId
+      combatant.summonedPersistent = true
+      combatant.simulacrumCannotRegainSpellSlots = true
+      combatant.simulacrumCannotRegainHitPoints = true
+    }
+    if (tokenClassState.spellControlMentalAbilities) {
+      combatant.abilities = {
+        ...combatant.abilities,
+        ...tokenClassState.spellControlMentalAbilities,
+      }
+    }
     if (!token.characterId && combatant.currentHp === 0 && tokenStableAtZero === true) {
       combatant.deathSaves = {
         successes: 0,
@@ -691,7 +1043,7 @@ export function createDnd5eMapCombatSnapshot(input: {
         dead: false,
       }
     }
-    return [combatant]
+    return [hydrateDnd5eWildShapeCombatant(combatant)]
   })
   for (const companion of combatants) {
     if (!companion.summonedSourceCombatantId) continue
@@ -721,6 +1073,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       ...(fly ? { fly: Math.max(combatant.movementSpeeds?.fly ?? 0, fly) } : {}),
     }
   }
+  reconcileShapechangerReversionAreaLocks(input.map, combatants)
   applyClassPassiveDefenses(combatants)
   applyPersistentAreaWeaponHitBonusDamage(
     input.map,
@@ -738,6 +1091,11 @@ export function createDnd5eMapCombatSnapshot(input: {
     state.combatants[entry.tokenId] != null,
   )
   if (authoritativeSlots.length > 0) {
+    // The generic engine keeps a sole-combatant constructor useful as an
+    // out-of-combat sandbox. A map snapshot carrying an authoritative
+    // initiative slot is different: the UI has explicitly published a combat,
+    // so every action rebuilt from that one-slot order must remain resolvable.
+    state.active = true
     state.initiativeOrder = authoritativeSlots.map((entry) => entry.tokenId)
     state.initiativeSlotIds = authoritativeSlots.map((entry) => entry.slotId ?? entry.tokenId)
     const firstRoundOnlyInitiativeSlotIds = authoritativeSlots.flatMap((entry) =>
@@ -746,11 +1104,32 @@ export function createDnd5eMapCombatSnapshot(input: {
     state.firstRoundOnlyInitiativeSlotIds = firstRoundOnlyInitiativeSlotIds.length > 0
       ? firstRoundOnlyInitiativeSlotIds
       : undefined
+    // Activity-granted turns span multiple player requests. Their durable
+    // owner/group lives on the character or token state, while the shared
+    // initiative tracker carries the generated slot ids. Reconnect those two
+    // projections whenever a per-action Headless snapshot is rebuilt so an
+    // ended extra turn is removed instead of becoming a permanent duplicate.
+    const activityExtraTurnSlotIds = new Set(combatants.flatMap((combatant) =>
+      combatant.classState.activityExtraTurnGroup?.slotIds ?? [],
+    ))
+    const oneShotInitiativeSlotIds = authoritativeSlots.flatMap((entry) => {
+      const slotId = entry.slotId ?? entry.tokenId
+      return entry.turnKind === 'activity-extra-turn' ||
+        activityExtraTurnSlotIds.has(slotId) ||
+        slotId.startsWith('activity-extra-turns:')
+        ? [slotId]
+        : []
+    })
+    state.oneShotInitiativeSlotIds = oneShotInitiativeSlotIds.length > 0
+      ? oneShotInitiativeSlotIds
+      : undefined
   }
   state.mapId = input.map.id
   state.coordinateUnitsPerFoot = input.map.gridSize /
     Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   state.environment = geometry?.environment
+  state.weather = geometry?.weather
+  state.overheadSpace = geometry?.overheadSpace
   const roomRules = getRoomRulesSnapshot()
   state.effectiveRules = input.effectiveRules
     ? restoreDnd5eEffectiveRulesContextForCombat(input.combatId, input.effectiveRules) ?? undefined
@@ -774,6 +1153,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
   state.physicalLineOfSightBlockedByCombatantPair = {}
+  state.ordinaryDarknessByCombatantPair = {}
   state.magicalDarknessByCombatantPair = {}
   const snapshotRound = Math.max(1, Math.floor(input.round ?? 1))
   for (const area of input.map.dnd5ePluginAreas ?? []) {
@@ -858,13 +1238,18 @@ export function createDnd5eMapCombatSnapshot(input: {
           toEyeHeightFeet: targetHeightFeet / 2,
         })
         if (physicalLineOfSightBlocked) state.physicalLineOfSightBlockedByCombatantPair[directedKey] = true
-        if (mapGeometryIlluminationAtPoint({
+        const targetIllumination = mapGeometryIlluminationAtPoint({
           geometry,
           map: input.map,
           tokens: input.map.tokens,
           point: target,
           elevationFeet: target.elevationFeet ?? 0,
-        }) === 'magical-darkness') state.magicalDarknessByCombatantPair[directedKey] = true
+        })
+        if (targetIllumination === 'magical-darkness') {
+          state.magicalDarknessByCombatantPair[directedKey] = true
+        } else if (targetIllumination === 'darkness') {
+          state.ordinaryDarknessByCombatantPair[directedKey] = true
+        }
         const lineOfSightBlocked = physicalLineOfSightBlocked ||
           !mapGeometryCanSeeToken({
             geometry,
@@ -983,6 +1368,13 @@ export function planDnd5eMapResultApplication(input: {
   state: Dnd5eHeadlessCombatState
   map: BattleMap
   characters: readonly Character[]
+  /**
+   * Optional pre-transaction character snapshots. Some authoritative costs
+   * (consumed spell materials and item charges) settle outside the combatant
+   * state; comparing only against `characters` would make a cost-only ritual
+   * look unchanged and omit its inventory patch from the live commit.
+   */
+  baselineCharacters?: readonly Character[]
   characterIdByCombatantId: Readonly<Record<string, string>>
   openedDoorIds?: readonly string[]
   events?: Dnd5eCombatEvent[]
@@ -995,12 +1387,19 @@ export function planDnd5eMapResultApplication(input: {
   const tokenPatches: Record<string, Partial<Token>> = {}
   const characterPatches: Record<string, Partial<Character>> = {}
   const tokenById = new Map(input.map.tokens.map((token) => [token.id, token]))
-  const map: BattleMap = {
+  let map: BattleMap = {
     ...input.map,
     tokens: input.map.tokens.map((token) => {
       const combatant = input.state.combatants[token.id]
       if (!combatant) return token
-      const nextTokenClassState = !token.characterId
+      const independentlyPersistedToken = !token.characterId || token.dnd5eSimulacrum != null
+      // Character-bound tokens may still carry a mirrored combat-state copy
+      // written by the DM status editor. The authoritative Headless result is
+      // persisted on the character below; retaining the old token copy makes
+      // the map details panel resurrect effects that the transaction removed.
+      const clearsMirroredCharacterTokenClassState =
+        !independentlyPersistedToken && token.dnd5eCombatState != null
+      const nextTokenClassState = independentlyPersistedToken
           ? compactOptionalRecord({
             schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
             stableAtZero: combatant.currentHp === 0 &&
@@ -1035,17 +1434,32 @@ export function planDnd5eMapResultApplication(input: {
             activeEffectDamageSavePendingIds: combatant.classState.activeEffectDamageSavePendingIds
               ? [...combatant.classState.activeEffectDamageSavePendingIds]
               : undefined,
-            activeEffects: combatant.classState.activeEffects?.map((effect) => ({
-              ...effect,
-              source: { ...effect.source },
-              duration: { ...effect.duration },
-              repeatSave: effect.repeatSave ? { ...effect.repeatSave } : undefined,
-              breakOn: effect.breakOn ? [...effect.breakOn] : undefined,
-            })),
+            activeEffectDamageSavePendingModes: combatant.classState.activeEffectDamageSavePendingModes
+              ? { ...combatant.classState.activeEffectDamageSavePendingModes }
+              : undefined,
+            deathRound: combatant.classState.deathRound,
+            deathInitiativeIndex: combatant.classState.deathInitiativeIndex,
+            deathCause: combatant.classState.deathCause,
+            soulReturnStatus: combatant.classState.soulReturnStatus,
+            bodyPresent: combatant.classState.bodyPresent,
+            missingBodyParts: combatant.classState.missingBodyParts
+              ? [...combatant.classState.missingBodyParts]
+              : undefined,
+            vitalBodyPartsMissing: combatant.classState.vitalBodyPartsMissing,
+            activeEffects: persistentActiveEffectsWithoutTransientAreaSuspension(
+              combatant.classState.activeEffects,
+            ),
+            spellAuthorityRecords: combatant.classState.spellAuthorityRecords,
+            spellControlledByActorId: combatant.classState.spellControlledByActorId,
+            spellControlMentalAbilities: combatant.classState.spellControlMentalAbilities,
+            spellControlledBodyMentalAbilities: combatant.classState.spellControlledBodyMentalAbilities,
             caltropsSpeedPenaltyFeet: combatant.classState.caltropsSpeedPenaltyFeet,
             attacksMadeTurnKey: combatant.classState.attacksMadeTurnKey,
             attacksMadeThisTurn: combatant.classState.attacksMadeThisTurn,
             turnStartResolvedTurnKey: combatant.classState.turnStartResolvedTurnKey,
+            slowDelayedSpell: combatant.classState.slowDelayedSpell
+              ? structuredClone(combatant.classState.slowDelayedSpell)
+              : undefined,
             recklessAttackTurnKey: combatant.classState.recklessAttackTurnKey,
             monsterReactiveAvailableTurnKey: combatant.classState.monsterReactiveAvailableTurnKey,
             monsterReactiveUsedTurnKey: combatant.classState.monsterReactiveUsedTurnKey,
@@ -1088,6 +1502,8 @@ export function planDnd5eMapResultApplication(input: {
                     combatant.classState.declarativeReactionWeaponAttackOpportunities,
                   ).map(([featureId, opportunity]) => [featureId, { ...opportunity }]))
                 : undefined,
+            abilityScoreReductionLedger: combatant.classState.abilityScoreReductionLedger
+              ?.map((entry) => ({ ...entry })),
             droppedEquipmentIds: combatant.classState.droppedEquipmentIds,
             spellSavePressureBySource: combatant.classState.spellSavePressureBySource,
             bonusProneEligibleTargetIds:
@@ -1106,13 +1522,51 @@ export function planDnd5eMapResultApplication(input: {
             concentrationSpellLevel: combatant.classState.concentrationSpellLevel,
             concentrationTargetIds: combatant.classState.concentrationTargetIds,
             concentrationRoundsRemaining: combatant.classState.concentrationRoundsRemaining,
+            concentrationStartedTurnKey: combatant.classState.concentrationStartedTurnKey,
+            lastCompletedConcentration: combatant.classState.lastCompletedConcentration
+              ? { ...combatant.classState.lastCompletedConcentration }
+              : undefined,
             concentrationEffectsBySource: combatant.classState.concentrationEffectsBySource,
+            wildShapeFormId: combatant.classState.wildShapeFormId,
+            wildShapeMode: combatant.classState.wildShapeMode,
+            wildShapeSourceActorId: combatant.classState.wildShapeSourceActorId,
+            wildShapeSourceActivityId: combatant.classState.wildShapeSourceActivityId,
+            wildShapeMaximumChallengeRating: combatant.classState.wildShapeMaximumChallengeRating,
+            wildShapeMaximumSizeRank: combatant.classState.wildShapeMaximumSizeRank,
+            wildShapeCurrentHp: combatant.classState.wildShapeCurrentHp,
+            wildShapeRoundsRemaining: combatant.classState.wildShapeRoundsRemaining,
+            wildShapePermanent: combatant.classState.wildShapePermanent,
+            wildShapePermanentAfterConcentrationCompletes:
+              combatant.classState.wildShapePermanentAfterConcentrationCompletes,
+            shapechangeEquipmentDisposition: combatant.classState.shapechangeEquipmentDisposition,
+            wildShapeOriginalCurrentHp: combatant.classState.wildShapeOriginalCurrentHp,
+            wildShapeOriginalMaxHp: combatant.classState.wildShapeOriginalMaxHp,
+            wildShapeOriginalArmorClass: combatant.classState.wildShapeOriginalArmorClass,
+            wildShapeOriginalSpeed: combatant.classState.wildShapeOriginalSpeed,
+            wildShapeOriginalMovementSpeeds: combatant.classState.wildShapeOriginalMovementSpeeds,
+            wildShapeOriginalSizeRank: combatant.classState.wildShapeOriginalSizeRank,
+            wildShapeOriginalAbilities: combatant.classState.wildShapeOriginalAbilities,
+            wildShapeOriginalSavingThrowBonuses: combatant.classState.wildShapeOriginalSavingThrowBonuses,
+            wildShapeOriginalSavingThrowProficiencies: combatant.classState.wildShapeOriginalSavingThrowProficiencies,
+            wildShapeOriginalSkillProficiencies: combatant.classState.wildShapeOriginalSkillProficiencies,
+            wildShapeOriginalPassivePerception: combatant.classState.wildShapeOriginalPassivePerception,
+            wildShapeOriginalStatBlockId: combatant.classState.wildShapeOriginalStatBlockId,
+            wildShapeOriginalCreatureType: combatant.classState.wildShapeOriginalCreatureType,
+            wildShapeOriginalDamageVulnerabilities: combatant.classState.wildShapeOriginalDamageVulnerabilities,
+            wildShapeOriginalDamageResistances: combatant.classState.wildShapeOriginalDamageResistances,
+            wildShapeOriginalDamageImmunities: combatant.classState.wildShapeOriginalDamageImmunities,
+            wildShapeOriginalDamageDefenseRules: combatant.classState.wildShapeOriginalDamageDefenseRules,
+            wildShapeOriginalMagicResistance: combatant.classState.wildShapeOriginalMagicResistance,
+            wildShapeOriginalLimitedMagicImmunity: combatant.classState.wildShapeOriginalLimitedMagicImmunity,
+            wildShapeOriginalWeaponAttacksMagical: combatant.classState.wildShapeOriginalWeaponAttacksMagical,
+            wildShapeOriginalConditionImmunities: combatant.classState.wildShapeOriginalConditionImmunities,
             viciousMockeryAttackDisadvantage: combatant.classState.viciousMockeryAttackDisadvantage,
             helpedAttackSourceId: combatant.classState.helpedAttackSourceId,
             helpedAttackSourceTurnKey: combatant.classState.helpedAttackSourceTurnKey,
             shieldSpellActive: combatant.classState.shieldSpellActive,
             legendaryResistanceUses: combatant.classState.legendaryResistanceUses,
             monsterLegendaryActionPoints: combatant.classState.monsterLegendaryActionPoints,
+            monsterLegendaryMovement: combatant.classState.monsterLegendaryMovement,
             monsterLairActionRoundUsed: combatant.classState.monsterLairActionRoundUsed,
             monsterLairActionLastId: combatant.classState.monsterLairActionLastId,
             monsterRechargeReadyByActionId: combatant.classState.monsterRechargeReadyByActionId,
@@ -1122,6 +1576,7 @@ export function planDnd5eMapResultApplication(input: {
             monsterMultiattackContinuation: combatant.classState.monsterMultiattackContinuation,
             monsterShapechangeOriginalStatBlockId: combatant.classState.monsterShapechangeOriginalStatBlockId,
             monsterShapechangeFormId: combatant.classState.monsterShapechangeFormId,
+            shapechangerReversionAreaIds: combatant.classState.shapechangerReversionAreaIds,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
             monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
             monsterBerserk: combatant.classState.monsterBerserk,
@@ -1143,6 +1598,14 @@ export function planDnd5eMapResultApplication(input: {
             hurlThroughHellAppliedTurnKey: combatant.classState.hurlThroughHellAppliedTurnKey,
           })
         : undefined
+      const changedMonsterStatBlock = !token.characterId && combatant.statBlockId &&
+        combatant.statBlockId !== token.poolId
+      const previousMonster = changedMonsterStatBlock && token.poolId
+        ? getDnd5eSrdMonster(token.poolId)
+        : undefined
+      const nextMonster = changedMonsterStatBlock
+        ? getDnd5eSrdMonster(combatant.statBlockId!)
+        : undefined
       const patch: Partial<Token> = {
         x: combatant.position.x,
         y: combatant.position.y,
@@ -1152,25 +1615,90 @@ export function planDnd5eMapResultApplication(input: {
           : combatant.elevationFeet,
         hp: combatant.currentHp,
         maxHp: combatant.maxHp,
-        ...(!token.characterId && combatant.statBlockId && combatant.statBlockId !== token.poolId
-          ? { poolId: combatant.statBlockId }
+        ...(changedMonsterStatBlock
+          ? {
+              poolId: combatant.statBlockId,
+              ...(previousMonster && nextMonster && token.label === previousMonster.name
+                ? { label: nextMonster.name }
+                : {}),
+            }
           : {}),
-        ...(!token.characterId ? { dnd5eCombatState: nextTokenClassState } : {}),
+        ...(independentlyPersistedToken ? {
+          dnd5eCombatState: nextTokenClassState,
+          ...(token.dnd5eSimulacrum ? {
+            dnd5eSimulacrum: {
+              ...token.dnd5eSimulacrum,
+              classResources: Object.fromEntries(Object.entries(combatant.classResources).map(([id, resource]) => [id, {
+                current: resource.current, maximum: resource.max,
+              }])),
+            },
+          } : {}),
+        } : clearsMirroredCharacterTokenClassState
+          ? { dnd5eCombatState: undefined }
+          : {}),
       }
-      const tokenClassStateUnchanged = token.characterId ||
-        JSON.stringify(token.dnd5eCombatState ?? {}) === JSON.stringify(nextTokenClassState ?? {})
+      const tokenClassStateUnchanged = independentlyPersistedToken
+        ? JSON.stringify(token.dnd5eCombatState ?? {}) === JSON.stringify(nextTokenClassState ?? {})
+        : !clearsMirroredCharacterTokenClassState
+      const simulacrumStateUnchanged = !token.dnd5eSimulacrum ||
+        JSON.stringify(token.dnd5eSimulacrum) === JSON.stringify(patch.dnd5eSimulacrum)
       if (
         token.x === patch.x && token.y === patch.y && token.size === patch.size &&
         token.elevationFeet === patch.elevationFeet && token.hp === patch.hp && token.maxHp === patch.maxHp &&
+        token.label === (patch.label ?? token.label) &&
         token.poolId === (patch.poolId ?? token.poolId) &&
-        tokenClassStateUnchanged
+        tokenClassStateUnchanged && simulacrumStateUnchanged
       ) return token
       changedTokenIds.push(token.id)
       tokenPatches[token.id] = patch
       return { ...token, ...patch }
     }),
   }
+  // Animate Objects ends for an individual target as soon as that creature
+  // reaches 0 HP. Resolve that replacement in the same Headless transaction
+  // so the damage event still carries the exact overkill amount; a later map
+  // reconciliation only sees a clamped 0 HP token and cannot reconstruct it.
+  map = {
+    ...map,
+    tokens: map.tokens.flatMap((token) => {
+      if (
+        token.dnd5eSummon?.featureId !== 'spell:animate-objects' ||
+        !token.dnd5eSummon.truePolymorphOriginalObject ||
+        (token.hp ?? token.maxHp ?? 1) > 0
+      ) return [token]
+      const defeatEvent = input.events?.find((event) =>
+        event.type === 'damage-applied' &&
+        event.targetId === token.id &&
+        event.hpBefore > 0 &&
+        event.hpAfter === 0)
+      const temporaryHitPointsAbsorbed = defeatEvent?.type === 'damage-applied'
+        ? Math.max(0, defeatEvent.temporaryHpBefore - defeatEvent.temporaryHpAfter)
+        : 0
+      const overflowDamage = defeatEvent?.type === 'damage-applied'
+        ? Math.max(0, defeatEvent.amount - temporaryHitPointsAbsorbed - defeatEvent.hpBefore)
+        : 0
+      const restored = dnd5eRestoredSummonedOriginalObject(token, overflowDamage)
+      if (!restored) return [token]
+      if (!changedTokenIds.includes(token.id)) changedTokenIds.push(token.id)
+      if (!changedTokenIds.includes(restored.id)) changedTokenIds.push(restored.id)
+      delete tokenPatches[token.id]
+      return [restored]
+    }),
+  }
+  const meltedSimulacrumIds = map.tokens
+    .filter((token) => token.dnd5eSimulacrum && (token.hp ?? token.maxHp ?? 0) <= 0)
+    .map((token) => token.id)
+  if (meltedSimulacrumIds.length > 0) {
+    const melted = new Set(meltedSimulacrumIds)
+    map = { ...map, tokens: map.tokens.filter((token) => !melted.has(token.id)) }
+    for (const tokenId of meltedSimulacrumIds) {
+      if (!changedTokenIds.includes(tokenId)) changedTokenIds.push(tokenId)
+      delete tokenPatches[tokenId]
+    }
+  }
+
   const characters = input.characters.map((character) => {
+    const baselineCharacter = input.baselineCharacters?.find((candidate) => candidate.id === character.id) ?? character
     const combatantId = Object.keys(input.characterIdByCombatantId).find((id) => input.characterIdByCombatantId[id] === character.id)
     const combatant = combatantId ? input.state.combatants[combatantId] : undefined
     if (!combatant) return character
@@ -1179,6 +1707,9 @@ export function planDnd5eMapResultApplication(input: {
       : undefined
     const nextClassState = compactOptionalRecord({
       ...combatant.classState,
+      activeEffects: persistentActiveEffectsWithoutTransientAreaSuspension(
+        combatant.classState.activeEffects,
+      ),
       hitPointMaximumReductionLedger:
         combatant.classState.hitPointMaximumReductionLedger
           ? {
@@ -1188,10 +1719,15 @@ export function planDnd5eMapResultApplication(input: {
                   .map((entry) => ({ ...entry })),
             }
           : undefined,
+      abilityScoreReductionLedger: combatant.classState.abilityScoreReductionLedger
+        ?.map((entry) => ({ ...entry })),
     })
     const nextCharacterCurrentHp = combatant.classState.wildShapeFormId
       ? combatant.classState.wildShapeOriginalCurrentHp ?? character.currentHp
       : combatant.currentHp
+    const nextCharacterMaxHp = combatant.classState.wildShapeFormId
+      ? combatant.classState.wildShapeOriginalMaxHp ?? character.maxHp
+      : combatant.maxHp
     let inventoryCharacter = applyDnd5eInventoryHeadlessSnapshotToCharacter({
       character,
       snapshots: combatant.inventoryHeadlessEffects,
@@ -1237,27 +1773,29 @@ export function planDnd5eMapResultApplication(input: {
           : inventoryCharacter.equipment,
       }
     }
-    const resourcesUnchanged = JSON.stringify(character.classResources ?? {}) === JSON.stringify(nextClassResources ?? {})
-    const inventoryUnchanged = JSON.stringify(character.dnd5eInventory ?? {}) === JSON.stringify(inventoryCharacter.dnd5eInventory ?? {})
-    const classStateUnchanged = JSON.stringify(character.dnd5eCombatState ?? {}) === JSON.stringify(nextClassState ?? {})
-    const conditionsUnchanged = JSON.stringify(character.conditions) === JSON.stringify(combatant.conditions)
+    const resourcesUnchanged = JSON.stringify(baselineCharacter.classResources ?? {}) === JSON.stringify(nextClassResources ?? {})
+    const inventoryUnchanged = JSON.stringify(baselineCharacter.dnd5eInventory ?? {}) === JSON.stringify(inventoryCharacter.dnd5eInventory ?? {})
+    const equipmentUnchanged = JSON.stringify(baselineCharacter.equipment ?? {}) === JSON.stringify(inventoryCharacter.equipment ?? {})
+    const classStateUnchanged = JSON.stringify(baselineCharacter.dnd5eCombatState ?? {}) === JSON.stringify(nextClassState ?? {})
+    const conditionsUnchanged = JSON.stringify(baselineCharacter.conditions) === JSON.stringify(combatant.conditions)
     if (
-      character.currentHp === nextCharacterCurrentHp &&
-      character.maxHp === combatant.maxHp &&
-      character.tempHp === combatant.temporaryHp &&
-      (character.exhaustionLevel ?? 0) === combatant.exhaustionLevel &&
-      (character.deathSaveSuccesses ?? 0) === combatant.deathSaves.successes &&
-      (character.deathSaveFailures ?? 0) === combatant.deathSaves.failures &&
-      (character.deathSaveStable ?? false) === combatant.deathSaves.stable &&
-      (character.concentrating ?? false) === combatant.concentrating &&
+      baselineCharacter.currentHp === nextCharacterCurrentHp &&
+      baselineCharacter.maxHp === combatant.maxHp &&
+      baselineCharacter.tempHp === combatant.temporaryHp &&
+      (baselineCharacter.exhaustionLevel ?? 0) === combatant.exhaustionLevel &&
+      (baselineCharacter.deathSaveSuccesses ?? 0) === combatant.deathSaves.successes &&
+      (baselineCharacter.deathSaveFailures ?? 0) === combatant.deathSaves.failures &&
+      (baselineCharacter.deathSaveStable ?? false) === combatant.deathSaves.stable &&
+      (baselineCharacter.concentrating ?? false) === combatant.concentrating &&
       resourcesUnchanged &&
       inventoryUnchanged &&
+      equipmentUnchanged &&
       classStateUnchanged &&
       conditionsUnchanged
     ) return character
     const patch: Partial<Character> = {
       currentHp: nextCharacterCurrentHp,
-      maxHp: combatant.maxHp,
+      maxHp: nextCharacterMaxHp,
       tempHp: combatant.temporaryHp,
       exhaustionLevel: combatant.exhaustionLevel,
       deathSaveSuccesses: combatant.deathSaves.successes,
@@ -1267,6 +1805,7 @@ export function planDnd5eMapResultApplication(input: {
       conditions: [...combatant.conditions],
       classResources: nextClassResources,
       dnd5eInventory: inventoryCharacter.dnd5eInventory,
+      ...(!equipmentUnchanged ? { equipment: inventoryCharacter.equipment } : {}),
       dnd5eCombatState: nextClassState,
     }
     changedCharacterIds.push(character.id)

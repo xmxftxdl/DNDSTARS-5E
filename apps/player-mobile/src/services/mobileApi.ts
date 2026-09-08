@@ -127,9 +127,10 @@ export async function logoutMobileAccount(serverUrl: string, account: MobileAcco
 }
 
 export async function fetchMobileAccount(serverUrl: string, account: MobileAccountSession) {
-  return jsonRequest<MobileAccountSession>(`${apiBase(serverUrl)}/accounts/me`, {
+  const profile = await jsonRequest<Omit<MobileAccountSession, 'sessionToken'>>(`${apiBase(serverUrl)}/accounts/me`, {
     headers: accountHeaders(account),
   })
+  return { ...account, ...profile, sessionToken: account.sessionToken }
 }
 
 export async function updateMobileAccountProfile(
@@ -137,7 +138,7 @@ export async function updateMobileAccountProfile(
   account: MobileAccountSession,
   input: { displayName: string; avatar?: string },
 ) {
-  return jsonRequest<MobileAccountSession>(`${apiBase(serverUrl)}/accounts/me`, {
+  return jsonRequest<Omit<MobileAccountSession, 'sessionToken'>>(`${apiBase(serverUrl)}/accounts/me`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', ...accountHeaders(account) },
     body: JSON.stringify(input),

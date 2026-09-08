@@ -17,6 +17,13 @@ export function isDnd5eMonsterInstanceOverride(monsterId: string | undefined): b
     monsterId?.startsWith(LEGACY_OVERRIDE_PREFIX) === true
 }
 
+export function dnd5eMonsterOverrideSaveMatchesEditRequest(input: {
+  requestedMonsterId: string
+  savedMonsterId: string
+}): boolean {
+  return input.requestedMonsterId === input.savedMonsterId
+}
+
 export function createDnd5eMonsterInstanceOverride(input: {
   monster: Dnd5eMonsterStatBlock
   tokenId: string

@@ -1,0 +1,110 @@
+{
+  "id": "srd-5.1:ogre",
+  "slug": "ogre",
+  "name": "食人魔",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "greatclub",
+      "name": "巨棒",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "javelin",
+      "name": "标枪",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 185,
+      "slug": "ogre",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:45:55.599Z",
+      "name": "食人魔",
+      "actionId": "greatclub",
+      "actionName": "巨棒",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "2",
+      "total": 334,
+      "mapId": "verify-ui-ogre-greatclub-1788569155670",
+      "combatId": "verify-ui-ogre-greatclub-1788569155670:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "食人魔 使用巨棒攻击 验证目标：巨棒 → 验证目标 19+6=25 命中；共造成 13 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:46 PM\n结算\n\n食人魔 使用巨棒攻击 验证目标：巨棒 → 验证目标 19+6=25 命中；共造成 13 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：巨棒｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 19；最终采用 19；调整值 +6。\n结果 · 25 vs AC 10：命中。\n伤害骰 · 巨棒（基础伤害·钝击）｜2d8 骰面：4 + 5 = 9｜固定加值 +4｜小计 13\n食人魔｜消耗动作\n验证目标｜受到 13 点伤害｜HP 320 → 307",
+      "playerLog": "食人魔 使用巨棒攻击 验证目标：巨棒 → 验证目标 19+6=25 命中；共造成 13 点伤害。",
+      "afterHp": 307,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:46:20.175Z",
+      "evidenceFile": "ui-cases/monsters/185-ogre.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

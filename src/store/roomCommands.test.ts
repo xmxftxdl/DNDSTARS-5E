@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoomCommandEnvelope } from '../lib/roomCommandBus'
 import { saveSharedResourcesAtomically } from '../lib/sharedApi'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from '../rulesets/dnd5e'
 import {
   appRoomCommandBus,
   moveRoomToken,
   mutateRoomCharacterInventory,
+  planRoomConcentrationEnd,
   planRoomSpellEffectRemoval,
   removeRoomSpellEffectToken,
   replaceRoomCombatantActiveEffects,
@@ -341,6 +343,223 @@ describe('class resource spend room command authority', () => {
   })
 })
 
+describe('DM inventory grant room command authority', () => {
+  const character = () => normalizeCharacter({
+    id: 'cleric-materials',
+    name: 'Cleric',
+    charClass: '牧师',
+    level: 20,
+    dnd5eClassLevels: { cleric: 20 },
+  })
+
+  beforeEach(() => {
+    useCharacterStore.setState({ characters: [character()], selectedId: 'cleric-materials' })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('does not report a successful DM grant until the authoritative character snapshot is persisted', async () => {
+    let finishSave!: (updatedAt: number) => void
+    const saving = new Promise<number>((resolve) => { finishSave = resolve })
+    const saveSharedNow = vi.spyOn(useCharacterStore.getState(), 'saveSharedNow')
+      .mockReturnValue(saving)
+
+    let settled = false
+    const grant = mutateRoomCharacterInventory({
+      type: 'grant',
+      characterId: 'cleric-materials',
+      templateId: 'srd-5.1:item:diamond-1000gp',
+      quantity: 3,
+    }).then((result) => {
+      settled = true
+      return result
+    })
+
+    await vi.waitFor(() => {
+      expect(useCharacterStore.getState().characters[0]?.dnd5eInventory?.entries)
+        .toEqual(expect.arrayContaining([expect.objectContaining({
+          templateId: 'srd-5.1:item:diamond-1000gp',
+          quantity: 3,
+        })]))
+    })
+    expect(saveSharedNow).toHaveBeenCalled()
+    expect(settled).toBe(false)
+
+    finishSave(Date.now())
+    await expect(grant).resolves.toMatchObject({ status: 'applied', inventory: { ok: true } })
+  })
+
+  it('rolls the local grant back when authoritative persistence fails', async () => {
+    vi.spyOn(useCharacterStore.getState(), 'saveSharedNow')
+      .mockRejectedValue(new Error('characters-save-rejected:conflict'))
+
+    await expect(mutateRoomCharacterInventory({
+      type: 'grant',
+      characterId: 'cleric-materials',
+      templateId: 'srd-5.1:item:diamond-1000gp',
+      quantity: 1,
+    })).rejects.toThrow('characters-save-rejected:conflict')
+
+    expect((useCharacterStore.getState().characters[0]?.dnd5eInventory?.entries ?? [])
+      .some((entry) => entry.templateId === 'srd-5.1:item:diamond-1000gp')).toBe(false)
+  })
+})
+
+describe('concentration ending planning', () => {
+  it('clears the exact spell, its target effects, persistent entity, and summon in one snapshot', () => {
+    const invisibility = createDnd5eConditionEffect({
+      definitionId: 'srd-5.1:spell:invisibility',
+      condition: 'invisible',
+      targetId: 'target-token',
+      source: { kind: 'spell', actorId: 'caster-token', rulesId: 'invisibility', spellLevel: 2 },
+      duration: {
+        type: 'concentration',
+        sourceActorId: 'caster-token',
+        concentrationId: 'invisibility',
+      },
+    })
+    const unrelated = createDnd5eConditionEffect({
+      definitionId: 'condition:prone',
+      condition: 'prone',
+      targetId: 'target-token',
+      source: { kind: 'feature', actorId: 'other-token', rulesId: 'trip-attack' },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+    })
+    const caster = {
+      ...normalizeCharacter({ id: 'caster', name: 'Wizard', level: 5 }),
+      concentrating: true,
+      dnd5eCombatState: {
+        concentrationSpellId: 'invisibility',
+        concentrationSpellLevel: 2,
+        concentrationTargetIds: ['target-token'],
+      },
+    }
+    const target = {
+      ...normalizeCharacter({ id: 'target', name: 'Rogue', level: 5 }),
+      conditions: ['invisible'],
+      dnd5eCombatState: { activeEffects: [invisibility, unrelated] },
+    }
+    const map = {
+      id: 'map-concentration', name: 'Map', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [
+        { id: 'caster-token', characterId: 'caster', label: 'Wizard', type: 'player', x: 0, y: 0, size: 1, color: '#fff', emoji: 'W' },
+        {
+          id: 'target-token', characterId: 'target', label: 'Rogue', type: 'player', x: 50, y: 0,
+          size: 1, color: '#fff', emoji: 'R',
+          dnd5eCombatState: { activeEffects: [invisibility, unrelated], conditions: ['invisible'] },
+        },
+        {
+          id: 'effect-token', label: '幻象', type: 'obstacle', x: 100, y: 0, size: 1, color: '#fff', emoji: 'I',
+          dnd5eSpellEffect: {
+            schemaVersion: 1, spellId: 'invisibility', sourceCharacterId: 'caster',
+            sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+            concentrationId: 'invisibility',
+          },
+        },
+        {
+          id: 'summon-token', label: 'Summon', type: 'npc', x: 150, y: 0, size: 1, color: '#fff', emoji: 'S',
+          dnd5eSummon: {
+            schemaVersion: 1, pluginId: 'srd-5.1', featureId: 'test-summon', sourceCharacterId: 'caster',
+            sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+            concentrationId: 'invisibility', side: 'player',
+          },
+        },
+      ],
+      dnd5ePluginAreas: [{
+        id: 'area', pluginId: 'srd-5.1', featureId: 'test-area', sourceKind: 'core-spell',
+        coreSpellId: 'invisibility', label: 'Area', color: '#fff', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', slotLevel: 2, createdRound: 1, expiresAfterRound: 11,
+        concentrationId: 'invisibility', cells: [{ col: 2, row: 0 }], anchorMode: 'effect-token',
+        anchorTokenId: 'effect-token', relation: 'any', includeSelf: true, triggers: [],
+      }],
+    } as unknown as BattleMap
+
+    const plan = planRoomConcentrationEnd({
+      maps: [map],
+      characters: [caster, target],
+      mapId: map.id,
+      tokenId: 'caster-token',
+      characterId: caster.id,
+      expectedConcentrationId: 'invisibility',
+    })
+
+    expect(plan.status).toBe('ended')
+    expect(plan.characters[0]).toMatchObject({ concentrating: false })
+    expect(plan.characters[0]?.dnd5eCombatState?.concentrationSpellId).toBeUndefined()
+    expect(plan.characters[1]?.dnd5eCombatState?.activeEffects).toEqual([unrelated])
+    expect(plan.characters[1]?.conditions).not.toContain('invisible')
+    expect(plan.maps[0]?.tokens.map((token) => token.id)).toEqual(['caster-token', 'target-token'])
+    expect(plan.maps[0]?.tokens[1]?.dnd5eCombatState?.activeEffects).toEqual([unrelated])
+    expect(plan.maps[0]?.dnd5ePluginAreas).toBeUndefined()
+    expect(plan.removedEffectIds).toContain(invisibility.id)
+  })
+
+  it('does not let a stale dialog end a newer concentration spell', () => {
+    const caster = {
+      ...normalizeCharacter({ id: 'caster', name: 'Wizard', level: 5 }),
+      concentrating: true,
+      dnd5eCombatState: { concentrationSpellId: 'fly' },
+    }
+    const map = {
+      id: 'map', tokens: [{ id: 'caster-token', characterId: 'caster' }],
+    } as unknown as BattleMap
+    const plan = planRoomConcentrationEnd({
+      maps: [map], characters: [caster], mapId: map.id, tokenId: 'caster-token',
+      characterId: caster.id, expectedConcentrationId: 'invisibility',
+    })
+
+    expect(plan.status).toBe('stale')
+    expect(plan.characters[0]?.dnd5eCombatState?.concentrationSpellId).toBe('fly')
+  })
+
+  it('ending Polymorph concentration restores the target character and token footprint', () => {
+    const caster = {
+      ...normalizeCharacter({ id: 'caster', name: 'Wizard', level: 8 }),
+      concentrating: true,
+      dnd5eCombatState: {
+        concentrationSpellId: 'polymorph',
+        concentrationTargetIds: ['target-token'],
+      },
+    }
+    const target = {
+      ...normalizeCharacter({ id: 'target', name: 'Target', level: 8 }),
+      currentHp: 31,
+      maxHp: 40,
+      dnd5eCombatState: {
+        wildShapeFormId: 'srd-5.1:brown-bear',
+        wildShapeMode: 'polymorph' as const,
+        wildShapeSourceActorId: 'caster-token',
+        wildShapeSourceActivityId: 'spell:polymorph',
+        wildShapeCurrentHp: 22,
+        wildShapeOriginalCurrentHp: 31,
+        wildShapeOriginalMaxHp: 40,
+        wildShapeOriginalSizeRank: 2,
+      },
+    }
+    const map = {
+      id: 'polymorph-map', name: 'Polymorph', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [
+        { id: 'caster-token', characterId: caster.id, label: caster.name, type: 'player', x: 0, y: 0, size: 1, color: '#fff', emoji: 'W' },
+        { id: 'target-token', characterId: target.id, label: target.name, type: 'player', x: 50, y: 0, size: 2, hp: 22, maxHp: 34, color: '#fff', emoji: 'T' },
+      ],
+    } as BattleMap
+
+    const plan = planRoomConcentrationEnd({
+      maps: [map], characters: [caster, target], mapId: map.id,
+      tokenId: 'caster-token', characterId: caster.id, expectedConcentrationId: 'polymorph',
+    })
+
+    expect(plan.status).toBe('ended')
+    expect(plan.characters[1]).toMatchObject({ currentHp: 31, maxHp: 40 })
+    expect(plan.characters[1]?.dnd5eCombatState).not.toHaveProperty('wildShapeFormId')
+    expect(plan.maps[0]?.tokens[1]).toMatchObject({ hp: 31, maxHp: 40, size: 1 })
+  })
+})
+
 describe('spell effect removal planning', () => {
   const sphereMap = (): BattleMap => ({
     id: 'map-sphere',
@@ -555,6 +774,96 @@ describe('spell effect removal planning', () => {
   })
 })
 
+describe('DM active-effect replacement', () => {
+  beforeEach(() => {
+    const banished = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:banishment',
+      label: '放逐',
+      legacyCondition: 'banished',
+      targetId: 'wizard-token',
+      source: { kind: 'spell', actorId: 'archmage-token', rulesId: 'banishment', spellLevel: 4 },
+      duration: {
+        type: 'concentration',
+        sourceActorId: 'archmage-token',
+        concentrationId: 'banishment',
+        remainingRounds: 10,
+      },
+    })
+    const wizard = {
+      ...normalizeCharacter({
+        id: 'wizard-character',
+        name: 'Wizard',
+        dnd5eClassLevels: { wizard: 9 },
+        level: 9,
+      }),
+      dnd5eCombatState: {
+        activeEffects: [banished],
+      },
+    }
+    const map = {
+      id: 'map-linked-active-effects',
+      tokens: [
+        {
+          id: 'wizard-token',
+          characterId: wizard.id,
+          label: wizard.name,
+          x: 0,
+          y: 0,
+          color: '#14b8a6',
+          emoji: 'W',
+          type: 'player',
+          hp: 48,
+          maxHp: 48,
+          dnd5eCombatState: {
+            activeEffects: [banished],
+            conditions: ['banished' as const],
+          },
+        },
+        {
+          id: 'archmage-token',
+          label: 'Archmage',
+          x: 50,
+          y: 0,
+          color: '#ef4444',
+          emoji: 'A',
+          type: 'enemy',
+        },
+      ],
+    } as unknown as BattleMap
+    useCharacterStore.setState({ characters: [wizard], selectedId: wizard.id })
+    useMapStore.setState({ maps: [map], selectedId: map.id })
+    vi.mocked(saveSharedResourcesAtomically).mockReset().mockResolvedValue({
+      status: 'committed',
+      transactionId: 'linked-active-effects',
+      revisions: { characters: 2, maps: 2 },
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('clears a linked token mirror so Headless targeting cannot retain a ghost banishment', async () => {
+    await expect(replaceRoomCombatantActiveEffects({
+      characterId: 'wizard-character',
+      mapId: 'map-linked-active-effects',
+      tokenId: 'wizard-token',
+      activeEffects: [],
+    })).resolves.toEqual({ status: 'applied' })
+
+    expect(useCharacterStore.getState().characters[0]?.dnd5eCombatState).toMatchObject({
+      activeEffects: undefined,
+    })
+    expect(useCharacterStore.getState().characters[0]?.conditions).not.toContain('banished')
+    expect(useMapStore.getState().maps[0]?.tokens[0]?.dnd5eCombatState).toMatchObject({
+      activeEffects: undefined,
+      conditions: undefined,
+    })
+    const [resources] = vi.mocked(saveSharedResourcesAtomically).mock.calls[0]
+    expect(resources.map((resource) => resource.name)).toEqual(['characters', 'maps'])
+  })
+})
+
 describe('room command HP conflict recovery', () => {
   beforeEach(() => {
     clearPendingLocalCharacterHitPointEditsForTest()
@@ -655,6 +964,78 @@ describe('room command HP conflict recovery', () => {
     settle({ status: 'submitted' })
     await expect(result).resolves.toEqual({ status: 'submitted' })
   })
+
+  it('treats a direct DM HP decrease as damage for break-on-damage effects', async () => {
+    const sleep = createDnd5eConditionEffect({
+      condition: 'unconscious',
+      targetId: 'sleeping-bandit',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'sleep' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      breakOn: ['takes-damage'],
+    })
+    const prone = createDnd5eConditionEffect({
+      condition: 'prone',
+      targetId: 'sleeping-bandit',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'sleep-fall-prone' },
+    })
+    const map = {
+      id: 'map-manual-damage-break',
+      tokens: [{
+        id: 'sleeping-bandit', label: 'Bandit', type: 'enemy', x: 0, y: 0,
+        hp: 11, maxHp: 11,
+        dnd5eCombatState: { activeEffects: [sleep, prone], conditions: ['unconscious', 'prone'] },
+      }],
+    } as unknown as BattleMap
+    useMapStore.setState({ maps: [map], selectedId: map.id })
+    vi.spyOn(useMapStore.getState(), 'saveSharedNow').mockResolvedValue()
+
+    await expect(setRoomCharacterHitPoints({
+      mapId: map.id,
+      tokenId: 'sleeping-bandit',
+      currentHp: 10,
+      maxHp: 11,
+    })).resolves.toEqual({ status: 'applied' })
+
+    expect(useMapStore.getState().maps[0]?.tokens[0]).toMatchObject({
+      hp: 10,
+      dnd5eCombatState: {
+        activeEffects: [expect.objectContaining({ standardCondition: 'prone' })],
+        conditions: ['prone'],
+      },
+    })
+  })
+
+  it('locks a simulacrum maximum and melts its token at 0 HP', async () => {
+    const map = {
+      id: 'map-simulacrum-hp',
+      tokens: [{
+        id: 'simulacrum-hp', label: 'Wizard·拟像', type: 'player', x: 0, y: 0,
+        hp: 12, maxHp: 12,
+        dnd5eSimulacrum: {
+          schemaVersion: 1, sourceTokenId: 'wizard', subjectTokenId: 'wizard',
+          sourceCharacterId: 'wizard-character', sourceActivityId: 'simulacrum', createdRound: 1,
+          level: 15, proficiencyBonus: 5,
+          abilities: { str: 8, dex: 14, con: 12, int: 20, wis: 10, cha: 10 },
+          armorClass: 12, maximumHitPoints: 12, speed: 30, sizeRank: 2,
+          classResources: {}, cannotIncreaseLevel: true,
+          cannotRegainSpellSlots: true, cannotRegainHitPoints: true,
+        },
+      }],
+    } as unknown as BattleMap
+    useCharacterStore.setState({ characters: [], selectedId: null })
+    useMapStore.setState({ maps: [map], selectedId: map.id })
+    vi.spyOn(useMapStore.getState(), 'saveSharedNow').mockResolvedValue()
+
+    await expect(setRoomCharacterHitPoints({
+      mapId: map.id,
+      tokenId: 'simulacrum-hp',
+      currentHp: 0,
+      maxHp: 999,
+      manuallySetMaximum: true,
+    })).resolves.toEqual({ status: 'applied' })
+
+    expect(useMapStore.getState().maps[0]?.tokens).toEqual([])
+  })
 })
 
 describe('DM monster runtime status commands', () => {
@@ -701,6 +1082,36 @@ describe('DM monster runtime status commands', () => {
     })).resolves.toEqual({ status: 'applied' })
     expect(useMapStore.getState().maps[0]?.tokens[0]?.dnd5eCombatState?.monsterBerserk)
       .toBeUndefined()
+  })
+
+  it('projects temporary HP onto an unlinked monster token before persistence settles', async () => {
+    useMapStore.setState({
+      maps: [{
+        id: 'map-temp-hp',
+        tokens: [{
+          id: 'monster-temp-hp',
+          type: 'enemy',
+          hp: 12,
+          maxHp: 12,
+          dnd5eCombatState: { temporaryHp: 2 },
+        }],
+      } as unknown as BattleMap],
+      selectedId: 'map-temp-hp',
+    })
+
+    await setRoomCharacterHitPoints({
+      mapId: 'map-temp-hp',
+      tokenId: 'monster-temp-hp',
+      currentHp: 12,
+      maxHp: 12,
+      temporaryHp: 7,
+    })
+
+    expect(useMapStore.getState().maps[0]?.tokens[0]).toMatchObject({
+      hp: 12,
+      maxHp: 12,
+      dnd5eCombatState: { temporaryHp: 7 },
+    })
   })
 
   it('adds and removes declared damage aversion but rejects it on an unrelated monster', async () => {

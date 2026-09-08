@@ -576,7 +576,7 @@ export function dnd5eActivityFromPluginItem(
     consumption,
     outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations }],
     automation: capability(manual ? 'manual' : 'full', limitations),
-    legacySource: { kind: 'item', id: item.id },
+    legacySource: { kind: 'item', id: item.id, magical: item.magicItem != null },
   }
 }
 

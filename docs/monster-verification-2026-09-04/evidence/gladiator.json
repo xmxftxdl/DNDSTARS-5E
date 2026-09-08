@@ -1,0 +1,305 @@
+{
+  "id": "srd-5.1:gladiator",
+  "slug": "gladiator",
+  "name": "角斗士",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "spear",
+      "name": "长矛",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.rangeFeet.normal",
+        "attack.rangeFeet.long",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.rangedDamage[].average",
+        "attack.rangedDamage[].count",
+        "attack.rangedDamage[].sides",
+        "attack.rangedDamage[].bonus",
+        "attack.rangedDamage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "shield-bash",
+      "name": "盾击",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.targetMaxSizeRank",
+        "attack.onHit",
+        "attack.onHitRule.kind",
+        "attack.onHitRule.ability",
+        "attack.onHitRule.dc",
+        "attack.onHitRule.condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "spear-two-handed",
+      "name": "长矛（双手近战）",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-shield-bash-and-two-spears",
+      "name": "多重攻击：盾击 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-two-shield-bashes-and-spear",
+      "name": "多重攻击：盾击 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-shield-bashes",
+      "name": "多重攻击：盾击 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-spears-ranged",
+      "name": "多重攻击：长矛 ×2",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "reactions",
+      "sectionLabel": "反应",
+      "id": "parry",
+      "name": "招架",
+      "automation": "headless",
+      "rule": "parry",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.armorClassBonus",
+        "rule.requiresSight",
+        "rule.requiresWieldedMeleeWeapon"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "SRD monster Parry in Headless combat applies the exact +3 AC reaction for 'gladiator'"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 143,
+      "slug": "gladiator",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:28:42.653Z",
+      "name": "角斗士",
+      "actionId": "spear",
+      "actionName": "长矛",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-gladiator-spear-1788560922730",
+      "combatId": "verify-ui-gladiator-spear-1788560922730:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "角斗士 使用长矛攻击 验证目标：长矛 → 验证目标 1+7=8 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:28 PM\n攻击\n\n角斗士 使用长矛攻击 验证目标：长矛 → 验证目标 1+7=8 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：长矛｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 1；最终采用 1；调整值 +7。\n结果 · 8 vs AC 10：未命中。\n角斗士｜消耗动作",
+      "playerLog": "角斗士 使用长矛攻击 验证目标：长矛 → 验证目标 1+7=8 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T22:29:02.164Z",
+      "evidenceFile": "ui-cases/monsters/143-gladiator.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "勇敢",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "蛮力",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 15,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

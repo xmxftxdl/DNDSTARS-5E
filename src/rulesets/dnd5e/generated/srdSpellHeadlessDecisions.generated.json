@@ -1,0 +1,1183 @@
+{
+  "schemaVersion": 1,
+  "decisions": {
+    "aid": [
+      "full",
+      "max-hit-points",
+      "slot-scaling"
+    ],
+    "alarm": [
+      "full",
+      "persistent-area",
+      "event-trigger",
+      "notification"
+    ],
+    "alter-self": [
+      "partial",
+      "mode-choice",
+      "stat-transform",
+      "illusory-content"
+    ],
+    "animal-friendship": [
+      "full",
+      "saving-throw",
+      "typed-target",
+      "condition-lifecycle"
+    ],
+    "animal-messenger": [
+      "partial",
+      "timed-delivery",
+      "semantic-destination",
+      "npc-response"
+    ],
+    "animal-shapes": [
+      "full",
+      "stat-transform",
+      "form-catalog",
+      "hit-point-handoff"
+    ],
+    "animate-dead": [
+      "partial",
+      "summon-companion",
+      "material-targeting",
+      "dm-creature-choice"
+    ],
+    "animate-objects": [
+      "partial",
+      "summon-companion",
+      "world-object",
+      "dm-damage-type"
+    ],
+    "antilife-shell": [
+      "full",
+      "persistent-area",
+      "typed-target",
+      "movement-blocking"
+    ],
+    "antimagic-field": [
+      "partial",
+      "persistent-area",
+      "magic-suppression",
+      "source-anchoring",
+      "movement-gap"
+    ],
+    "antipathy-sympathy": [
+      "partial",
+      "persistent-area",
+      "typed-target",
+      "semantic-creature-category"
+    ],
+    "arcane-eye": [
+      "full",
+      "sensor-vision",
+      "entity-movement",
+      "darkvision"
+    ],
+    "arcane-hand": [
+      "full",
+      "summon-companion",
+      "granted-activity",
+      "contested-check"
+    ],
+    "arcane-lock": [
+      "full",
+      "door-state",
+      "password-state",
+      "dispel-state"
+    ],
+    "arcane-sword": [
+      "full",
+      "summon-companion",
+      "granted-activity",
+      "spell-attack"
+    ],
+    "arcanists-magic-aura": [
+      "partial",
+      "metadata-override",
+      "semantic-detection",
+      "long-term-state"
+    ],
+    "astral-projection": [
+      "partial",
+      "planar-state",
+      "cross-scene",
+      "death-handoff"
+    ],
+    "augury": [
+      "manual",
+      "dm-response",
+      "future-information"
+    ],
+    "awaken": [
+      "partial",
+      "ability-override",
+      "condition-lifecycle",
+      "npc-personality"
+    ],
+    "beacon-of-hope": [
+      "full",
+      "saving-throw-modifier",
+      "maximum-healing",
+      "condition-immunity"
+    ],
+    "bestow-curse": [
+      "partial",
+      "mode-choice",
+      "effect-modifier",
+      "open-ended-option"
+    ],
+    "blink": [
+      "full",
+      "random-table",
+      "planar-state",
+      "turn-trigger"
+    ],
+    "branding-smite": [
+      "full",
+      "on-hit-rider",
+      "damage-scaling",
+      "visibility-effect"
+    ],
+    "clairvoyance": [
+      "partial",
+      "sensor-vision",
+      "cross-scene",
+      "semantic-location"
+    ],
+    "clone": [
+      "full",
+      "long-term-state",
+      "death-handoff",
+      "body-snapshot"
+    ],
+    "command": [
+      "full",
+      "saving-throw",
+      "mode-choice",
+      "turn-trigger",
+      "slot-scaling",
+      "language-immunity"
+    ],
+    "commune": [
+      "manual",
+      "dm-response",
+      "future-information"
+    ],
+    "commune-with-nature": [
+      "manual",
+      "dm-response",
+      "world-information"
+    ],
+    "comprehend-languages": [
+      "full",
+      "language-capability",
+      "duration"
+    ],
+    "compulsion": [
+      "full",
+      "saving-throw",
+      "forced-movement",
+      "turn-trigger"
+    ],
+    "confusion": [
+      "full",
+      "saving-throw",
+      "random-table",
+      "save-ends",
+      "area-slot-scaling"
+    ],
+    "conjure-animals": [
+      "partial",
+      "summon-companion",
+      "count-choice",
+      "dm-creature-choice"
+    ],
+    "conjure-celestial": [
+      "partial",
+      "summon-companion",
+      "slot-scaling",
+      "dm-creature-choice"
+    ],
+    "conjure-elemental": [
+      "partial",
+      "summon-companion",
+      "material-targeting",
+      "dm-creature-choice"
+    ],
+    "conjure-fey": [
+      "partial",
+      "summon-companion",
+      "slot-scaling",
+      "dm-creature-choice"
+    ],
+    "conjure-minor-elementals": [
+      "partial",
+      "summon-companion",
+      "count-choice",
+      "dm-creature-choice"
+    ],
+    "conjure-woodland-beings": [
+      "partial",
+      "summon-companion",
+      "count-choice",
+      "dm-creature-choice"
+    ],
+    "contact-other-plane": [
+      "partial",
+      "voice-response",
+      "saving-throw",
+      "random-damage"
+    ],
+    "contagion": [
+      "full",
+      "spell-attack",
+      "multi-save-counter",
+      "mode-choice"
+    ],
+    "contingency": [
+      "partial",
+      "invoke-activity",
+      "open-text-trigger",
+      "spell-storage"
+    ],
+    "continual-flame": [
+      "partial",
+      "light-source",
+      "object-enchantment",
+      "dm-object-narration",
+      "dispel-state"
+    ],
+    "control-water": [
+      "partial",
+      "mode-choice",
+      "terrain-geometry",
+      "environment-state"
+    ],
+    "control-weather": [
+      "partial",
+      "mode-choice",
+      "environment-state",
+      "dm-initial-state"
+    ],
+    "create-food-and-water": [
+      "full",
+      "item-generation",
+      "inventory-effect"
+    ],
+    "create-or-destroy-water": [
+      "partial",
+      "mode-choice",
+      "world-object",
+      "terrain-geometry"
+    ],
+    "create-undead": [
+      "partial",
+      "summon-companion",
+      "material-targeting",
+      "dm-creature-choice"
+    ],
+    "creation": [
+      "partial",
+      "object-creation",
+      "open-ended-object",
+      "duration-by-material"
+    ],
+    "delayed-blast-fireball": [
+      "full",
+      "persistent-area",
+      "damage-accumulator",
+      "event-trigger",
+      "slot-scaling"
+    ],
+    "demiplane": [
+      "partial",
+      "cross-scene",
+      "door-state",
+      "semantic-destination"
+    ],
+    "detect-evil-and-good": [
+      "partial",
+      "persistent-sense",
+      "typed-target",
+      "effect-detection",
+      "consecrated-object-gap",
+      "barrier-material-thickness-gap"
+    ],
+    "detect-magic": [
+      "partial",
+      "persistent-sense",
+      "effect-detection",
+      "magic-item-detection",
+      "metadata-visibility",
+      "world-object-gap",
+      "barrier-material-thickness-gap"
+    ],
+    "detect-poison-and-disease": [
+      "partial",
+      "persistent-sense",
+      "effect-detection",
+      "typed-target",
+      "world-object-gap",
+      "poison-kind-gap",
+      "barrier-material-thickness-gap"
+    ],
+    "detect-thoughts": [
+      "partial",
+      "saving-throw",
+      "sensor-information",
+      "dm-response"
+    ],
+    "dimension-door": [
+      "partial",
+      "teleport",
+      "passenger-movement",
+      "off-map-destination"
+    ],
+    "disguise-self": [
+      "partial",
+      "illusory-content",
+      "ability-check",
+      "dm-interpretation"
+    ],
+    "dispel-evil-and-good": [
+      "full",
+      "mode-choice",
+      "effect-removal",
+      "planar-state"
+    ],
+    "divination": [
+      "manual",
+      "dm-response",
+      "future-information"
+    ],
+    "divine-word": [
+      "full",
+      "hit-point-threshold",
+      "condition-lifecycle",
+      "planar-state"
+    ],
+    "dominate-beast": [
+      "partial",
+      "saving-throw",
+      "actor-control",
+      "semantic-command"
+    ],
+    "dominate-monster": [
+      "partial",
+      "saving-throw",
+      "actor-control",
+      "semantic-command"
+    ],
+    "dominate-person": [
+      "partial",
+      "saving-throw",
+      "actor-control",
+      "semantic-command"
+    ],
+    "dream": [
+      "partial",
+      "communication",
+      "saving-throw",
+      "dm-narrative"
+    ],
+    "druidcraft": [
+      "partial",
+      "mode-choice",
+      "minor-world-effect",
+      "dm-weather"
+    ],
+    "earthquake": [
+      "partial",
+      "persistent-area",
+      "terrain-geometry",
+      "structure-damage"
+    ],
+    "enthrall": [
+      "full",
+      "saving-throw",
+      "skill-check-modifier",
+      "source-link"
+    ],
+    "etherealness": [
+      "partial",
+      "planar-state",
+      "movement-mode",
+      "effect-suppression",
+      "slot-scaling-gap"
+    ],
+    "eyebite": [
+      "full",
+      "mode-choice",
+      "saving-throw",
+      "save-ends"
+    ],
+    "fabricate": [
+      "partial",
+      "object-creation",
+      "world-material",
+      "crafting-judgment"
+    ],
+    "faithful-hound": [
+      "full",
+      "persistent-area",
+      "granted-activity",
+      "visibility-rule"
+    ],
+    "fear": [
+      "full",
+      "saving-throw",
+      "forced-movement",
+      "condition-lifecycle"
+    ],
+    "feather-fall": [
+      "full",
+      "reaction-trigger",
+      "falling-state",
+      "movement-rate"
+    ],
+    "feeblemind": [
+      "full",
+      "saving-throw",
+      "ability-override",
+      "long-term-save"
+    ],
+    "find-familiar": [
+      "full",
+      "summon-companion",
+      "form-catalog",
+      "shared-senses"
+    ],
+    "find-steed": [
+      "partial",
+      "summon-companion",
+      "shared-spells",
+      "dm-creature-choice"
+    ],
+    "find-the-path": [
+      "partial",
+      "world-navigation",
+      "semantic-destination",
+      "dm-information"
+    ],
+    "find-traps": [
+      "partial",
+      "world-information",
+      "hidden-object-tags",
+      "dm-information"
+    ],
+    "fire-shield": [
+      "full",
+      "mode-choice",
+      "damage-resistance",
+      "damage-reflection"
+    ],
+    "fire-storm": [
+      "full",
+      "multi-cell-template",
+      "saving-throw",
+      "damage"
+    ],
+    "flesh-to-stone": [
+      "full",
+      "saving-throw",
+      "multi-save-counter",
+      "condition-lifecycle"
+    ],
+    "floating-disk": [
+      "full",
+      "summon-companion",
+      "source-following",
+      "carry-capacity"
+    ],
+    "forbiddance": [
+      "partial",
+      "persistent-area",
+      "typed-target",
+      "teleport-blocking",
+      "turn-trigger-gap"
+    ],
+    "forcecage": [
+      "full",
+      "persistent-area",
+      "movement-blocking",
+      "teleport-save"
+    ],
+    "foresight": [
+      "full",
+      "roll-mode-modifier",
+      "condition-immunity",
+      "duration"
+    ],
+    "freedom-of-movement": [
+      "full",
+      "condition-immunity",
+      "movement-modifier",
+      "automatic-escape"
+    ],
+    "gaseous-form": [
+      "full",
+      "stat-transform",
+      "movement-mode",
+      "action-restriction"
+    ],
+    "gate": [
+      "partial",
+      "cross-scene",
+      "summon-companion",
+      "deity-veto"
+    ],
+    "geas": [
+      "partial",
+      "saving-throw",
+      "semantic-command",
+      "semantic-compliance"
+    ],
+    "gentle-repose": [
+      "full",
+      "corpse-state",
+      "duration",
+      "resurrection-timer"
+    ],
+    "giant-insect": [
+      "partial",
+      "stat-transform",
+      "form-catalog",
+      "dm-actor-control"
+    ],
+    "glibness": [
+      "partial",
+      "minimum-roll",
+      "truth-detection-gap"
+    ],
+    "globe-of-invulnerability": [
+      "partial",
+      "persistent-area",
+      "spell-level-suppression"
+    ],
+    "glyph-of-warding": [
+      "partial",
+      "persistent-area",
+      "open-text-trigger",
+      "spell-storage"
+    ],
+    "goodberry": [
+      "full",
+      "item-generation",
+      "healing",
+      "inventory-effect"
+    ],
+    "greater-restoration": [
+      "full",
+      "mode-choice",
+      "effect-removal",
+      "ability-restoration"
+    ],
+    "guardian-of-faith": [
+      "full",
+      "persistent-area",
+      "saving-throw",
+      "damage-pool"
+    ],
+    "guards-and-wards": [
+      "partial",
+      "multi-area",
+      "door-state",
+      "illusory-content"
+    ],
+    "gust-of-wind": [
+      "full",
+      "persistent-area",
+      "forced-movement",
+      "area-movement"
+    ],
+    "hallow": [
+      "partial",
+      "persistent-area",
+      "mode-choice",
+      "open-ended-exclusions"
+    ],
+    "hallucinatory-terrain": [
+      "partial",
+      "terrain-geometry",
+      "illusory-content",
+      "dm-interpretation"
+    ],
+    "haste": [
+      "full",
+      "effect-modifier",
+      "restricted-extra-action",
+      "expiry-penalty"
+    ],
+    "heroes-feast": [
+      "full",
+      "max-hit-points",
+      "condition-immunity",
+      "saving-throw-modifier"
+    ],
+    "holy-aura": [
+      "full",
+      "roll-mode-modifier",
+      "typed-target",
+      "reaction-trigger"
+    ],
+    "identify": [
+      "full",
+      "metadata-visibility",
+      "effect-detection",
+      "inventory-effect"
+    ],
+    "illusory-script": [
+      "partial",
+      "illusory-content",
+      "reader-identity",
+      "dm-interpretation"
+    ],
+    "imprisonment": [
+      "partial",
+      "mode-choice",
+      "planar-state",
+      "open-text-release"
+    ],
+    "incendiary-cloud": [
+      "full",
+      "persistent-area",
+      "saving-throw",
+      "area-lifecycle"
+    ],
+    "instant-summons": [
+      "full",
+      "item-link",
+      "planar-state",
+      "inventory-effect"
+    ],
+    "irresistible-dance": [
+      "full",
+      "effect-modifier",
+      "saving-throw",
+      "action-escape"
+    ],
+    "knock": [
+      "full",
+      "door-state",
+      "object-unlock",
+      "sound-event"
+    ],
+    "legend-lore": [
+      "full",
+      "resolve-only"
+    ],
+    "levitate": [
+      "full",
+      "saving-throw",
+      "vertical-movement",
+      "source-control"
+    ],
+    "light": [
+      "full",
+      "light-source",
+      "object-enchantment",
+      "saving-throw"
+    ],
+    "locate-animals-or-plants": [
+      "partial",
+      "world-information",
+      "semantic-target",
+      "off-map-search"
+    ],
+    "locate-creature": [
+      "partial",
+      "world-information",
+      "semantic-target",
+      "off-map-search"
+    ],
+    "locate-object": [
+      "partial",
+      "world-information",
+      "semantic-target",
+      "off-map-search"
+    ],
+    "magic-circle": [
+      "full",
+      "persistent-area",
+      "typed-target",
+      "movement-blocking"
+    ],
+    "magic-jar": [
+      "full",
+      "planar-state",
+      "actor-control",
+      "body-snapshot"
+    ],
+    "magic-mouth": [
+      "full",
+      "object-enchantment",
+      "open-text-trigger",
+      "communication"
+    ],
+    "magnificent-mansion": [
+      "partial",
+      "cross-scene",
+      "object-creation",
+      "dm-layout"
+    ],
+    "major-image": [
+      "partial",
+      "illusory-content",
+      "sensor-vision",
+      "dm-interpretation"
+    ],
+    "mass-suggestion": [
+      "partial",
+      "saving-throw",
+      "semantic-command",
+      "semantic-compliance"
+    ],
+    "maze": [
+      "full",
+      "planar-state",
+      "ability-check",
+      "turn-trigger"
+    ],
+    "meld-into-stone": [
+      "full",
+      "terrain-geometry",
+      "planar-state",
+      "ejection-damage"
+    ],
+    "mending": [
+      "partial",
+      "world-object",
+      "repair-state",
+      "dm-object-fit"
+    ],
+    "message": [
+      "full",
+      "action-economy"
+    ],
+    "mind-blank": [
+      "full",
+      "damage-immunity",
+      "condition-immunity",
+      "effect-suppression"
+    ],
+    "mirage-arcane": [
+      "partial",
+      "terrain-geometry",
+      "illusory-content",
+      "world-state"
+    ],
+    "mirror-image": [
+      "full",
+      "attack-redirection",
+      "duplicate-counter",
+      "attack-resolution"
+    ],
+    "mislead": [
+      "full",
+      "sensor-vision",
+      "invisibility",
+      "entity-movement"
+    ],
+    "modify-memory": [
+      "partial",
+      "saving-throw",
+      "semantic-memory",
+      "dm-interpretation"
+    ],
+    "move-earth": [
+      "partial",
+      "terrain-geometry",
+      "world-state",
+      "dm-interpretation"
+    ],
+    "nondetection": [
+      "full",
+      "effect-suppression",
+      "duration",
+      "targeting-immunity"
+    ],
+    "pass-without-trace": [
+      "full",
+      "skill-check-modifier",
+      "source-aura",
+      "tracking-suppression"
+    ],
+    "passwall": [
+      "full",
+      "terrain-geometry",
+      "movement-blocking",
+      "duration"
+    ],
+    "phantom-steed": [
+      "full",
+      "summon-companion",
+      "movement-mode",
+      "duration"
+    ],
+    "planar-ally": [
+      "partial",
+      "summon-companion",
+      "dm-creature-choice",
+      "semantic-bargain"
+    ],
+    "planar-binding": [
+      "partial",
+      "saving-throw",
+      "actor-control",
+      "semantic-command"
+    ],
+    "plane-shift": [
+      "partial",
+      "spell-attack",
+      "saving-throw",
+      "cross-scene"
+    ],
+    "plant-growth": [
+      "partial",
+      "persistent-area",
+      "terrain-geometry",
+      "long-term-world-state"
+    ],
+    "polymorph": [
+      "full",
+      "stat-transform",
+      "form-catalog",
+      "hit-point-handoff"
+    ],
+    "prestidigitation": [
+      "partial",
+      "mode-choice",
+      "minor-world-effect",
+      "open-ended-content"
+    ],
+    "prismatic-spray": [
+      "partial",
+      "saving-throw",
+      "random-table",
+      "dm-planar-destination"
+    ],
+    "prismatic-wall": [
+      "partial",
+      "persistent-area",
+      "layered-effects",
+      "dm-planar-destination"
+    ],
+    "private-sanctum": [
+      "partial",
+      "persistent-area",
+      "sensor-blocking",
+      "teleport-blocking",
+      "slot-scaling-gap"
+    ],
+    "programmed-illusion": [
+      "partial",
+      "persistent-area",
+      "illusory-content",
+      "open-text-trigger",
+      "dm-interpretation"
+    ],
+    "project-image": [
+      "full",
+      "sensor-vision",
+      "entity-movement"
+    ],
+    "protection-from-evil-and-good": [
+      "full",
+      "typed-target",
+      "roll-mode-modifier",
+      "condition-immunity"
+    ],
+    "purify-food-and-drink": [
+      "full",
+      "world-object",
+      "effect-removal",
+      "inventory-effect"
+    ],
+    "raise-dead": [
+      "full",
+      "death-handoff",
+      "condition-restoration",
+      "long-term-penalty"
+    ],
+    "ray-of-enfeeblement": [
+      "full",
+      "spell-attack",
+      "damage-multiplier",
+      "save-ends"
+    ],
+    "regenerate": [
+      "full",
+      "healing",
+      "periodic-healing",
+      "body-restoration"
+    ],
+    "reincarnate": [
+      "partial",
+      "death-handoff",
+      "random-table",
+      "dm-form-choice"
+    ],
+    "remove-curse": [
+      "full",
+      "effect-removal",
+      "item-link",
+      "duration"
+    ],
+    "resilient-sphere": [
+      "full",
+      "saving-throw",
+      "persistent-area",
+      "movement-blocking"
+    ],
+    "resurrection": [
+      "full",
+      "death-handoff",
+      "condition-restoration",
+      "long-term-penalty"
+    ],
+    "reverse-gravity": [
+      "full",
+      "persistent-area",
+      "vertical-movement",
+      "falling-state"
+    ],
+    "revivify": [
+      "full",
+      "death-handoff",
+      "resurrection-timer",
+      "healing"
+    ],
+    "rope-trick": [
+      "partial",
+      "cross-scene",
+      "persistent-area",
+      "semantic-entry"
+    ],
+    "scrying": [
+      "partial",
+      "saving-throw",
+      "sensor-vision",
+      "cross-scene"
+    ],
+    "secret-chest": [
+      "full",
+      "item-link",
+      "planar-state",
+      "inventory-effect"
+    ],
+    "seeming": [
+      "partial",
+      "saving-throw",
+      "illusory-content",
+      "dm-interpretation"
+    ],
+    "sending": [
+      "partial",
+      "communication",
+      "cross-scene",
+      "npc-response"
+    ],
+    "sequester": [
+      "partial",
+      "invisibility",
+      "open-text-trigger",
+      "long-term-state"
+    ],
+    "shapechange": [
+      "partial",
+      "stat-transform",
+      "form-catalog",
+      "dm-equipment-fit"
+    ],
+    "silent-image": [
+      "partial",
+      "illusory-content",
+      "entity-movement",
+      "dm-interpretation"
+    ],
+    "simulacrum": [
+      "full",
+      "body-snapshot",
+      "summon-companion",
+      "resource-restriction"
+    ],
+    "speak-with-animals": [
+      "manual",
+      "communication",
+      "npc-response"
+    ],
+    "speak-with-dead": [
+      "manual",
+      "communication",
+      "npc-response"
+    ],
+    "speak-with-plants": [
+      "partial",
+      "communication",
+      "terrain-state",
+      "dm-response"
+    ],
+    "spider-climb": [
+      "full",
+      "movement-mode",
+      "duration",
+      "concentration"
+    ],
+    "stone-shape": [
+      "partial",
+      "terrain-geometry",
+      "world-object",
+      "dm-interpretation"
+    ],
+    "stoneskin": [
+      "full",
+      "damage-resistance",
+      "damage-qualification",
+      "concentration"
+    ],
+    "storm-of-vengeance": [
+      "full",
+      "persistent-area",
+      "round-timeline",
+      "multi-effect"
+    ],
+    "suggestion": [
+      "partial",
+      "saving-throw",
+      "semantic-command",
+      "semantic-compliance"
+    ],
+    "symbol": [
+      "partial",
+      "persistent-area",
+      "open-text-trigger",
+      "mode-choice"
+    ],
+    "telekinesis": [
+      "partial",
+      "contested-check",
+      "forced-movement",
+      "world-object"
+    ],
+    "telepathic-bond": [
+      "full",
+      "communication",
+      "language-capability",
+      "duration"
+    ],
+    "teleport": [
+      "partial",
+      "random-table",
+      "cross-scene",
+      "semantic-familiarity"
+    ],
+    "teleportation-circle": [
+      "partial",
+      "persistent-area",
+      "cross-scene",
+      "world-registry"
+    ],
+    "time-stop": [
+      "full",
+      "extra-turns",
+      "random-table",
+      "effect-break"
+    ],
+    "tiny-hut": [
+      "full",
+      "persistent-area",
+      "movement-blocking",
+      "occupant-permissions"
+    ],
+    "tongues": [
+      "full",
+      "language-capability",
+      "communication",
+      "duration"
+    ],
+    "transport-via-plants": [
+      "partial",
+      "world-object",
+      "cross-scene",
+      "semantic-destination"
+    ],
+    "tree-stride": [
+      "partial",
+      "world-object",
+      "teleport",
+      "off-map-destination"
+    ],
+    "true-polymorph": [
+      "partial",
+      "stat-transform",
+      "object-transform",
+      "open-ended-form"
+    ],
+    "true-resurrection": [
+      "full",
+      "death-handoff",
+      "body-restoration",
+      "condition-restoration"
+    ],
+    "true-seeing": [
+      "full",
+      "sensor-vision",
+      "effect-detection",
+      "planar-sight"
+    ],
+    "true-strike": [
+      "full",
+      "target-linked-effect",
+      "roll-mode-modifier",
+      "concentration"
+    ],
+    "unseen-servant": [
+      "full",
+      "summon-companion",
+      "granted-activity",
+      "semantic-task"
+    ],
+    "water-breathing": [
+      "full",
+      "movement-capability",
+      "duration",
+      "multi-target"
+    ],
+    "water-walk": [
+      "full",
+      "movement-mode",
+      "multi-target",
+      "duration"
+    ],
+    "weird": [
+      "full",
+      "saving-throw",
+      "condition-lifecycle",
+      "periodic-damage"
+    ],
+    "wind-walk": [
+      "full",
+      "stat-transform",
+      "movement-mode",
+      "transition-timer"
+    ],
+    "wish": [
+      "partial",
+      "invoke-activity",
+      "bounded-safe-options",
+      "open-ended-effect"
+    ],
+    "word-of-recall": [
+      "partial",
+      "teleport",
+      "cross-scene",
+      "configured-sanctuary"
+    ],
+    "zone-of-truth": [
+      "partial",
+      "persistent-area",
+      "saving-throw",
+      "semantic-compliance"
+    ]
+  }
+}

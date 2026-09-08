@@ -8,6 +8,7 @@ import { FLAMING_SPHERE_VISUAL_DIAMETER_GRID_FACTOR } from './flamingSphereHando
 import { usePrefersReducedMotion, useTokenBadgeImage } from './mapEffectHooks'
 import type { MapProjectile } from './mapCanvasContracts'
 import { DirectionalSpriteAtlasEffect, DirectionalTextureEffect, MovingFireTextureEffect, TargetSpriteAtlasEffect } from './MapEffectPrimitives'
+import { createWebAreaStrands } from './webAreaPresentation'
 interface BurningHandsSparkSpec {
   start: number
   speed: number
@@ -1156,13 +1157,6 @@ export function BurningHandsSpriteEffect({
   )
 }
 
-interface WebStrandSpec {
-  points: number[]
-  opacity: number
-  width: number
-  closed?: boolean
-}
-
 export function SequenceFireProjectileEffect({
   projectile,
   assetUrl,
@@ -1307,47 +1301,7 @@ function WebAreaEntranceEffect({ projectile }: { projectile: MapProjectile }) {
   const height = Math.max(48, projectile.areaHeightPx ?? (projectile.radiusPx ?? 70) * 2)
   const halfWidth = width / 2
   const halfHeight = height / 2
-  const strands = useMemo<WebStrandSpec[]>(() => {
-    const spokes = Array.from({ length: 14 }, (_, index) => {
-      const angle = index / 14 * Math.PI * 2
-      const cosine = Math.cos(angle)
-      const sine = Math.sin(angle)
-      const extent = 1 / Math.max(
-        Math.abs(cosine) / Math.max(1, halfWidth),
-        Math.abs(sine) / Math.max(1, halfHeight),
-      )
-      const endX = cosine * extent
-      const endY = sine * extent
-      const bend = Math.sin(index * 2.17) * Math.min(width, height) * 0.035
-      return {
-        points: [
-          0, 0,
-          endX * 0.34 - sine * bend, endY * 0.34 + cosine * bend,
-          endX * 0.68 + sine * bend * 0.7, endY * 0.68 - cosine * bend * 0.7,
-          endX, endY,
-        ],
-        opacity: 0.52 + index % 3 * 0.13,
-        width: Math.max(1.2, Math.min(width, height) * (index % 4 === 0 ? 0.013 : 0.008)),
-      }
-    })
-    const rings = [0.2, 0.36, 0.54, 0.73, 0.91].map((radiusScale, ringIndex) => {
-      const points = Array.from({ length: 18 }, (_, pointIndex) => {
-        const angle = pointIndex / 18 * Math.PI * 2
-        const wobble = 1 + Math.sin(pointIndex * 2.63 + ringIndex * 1.71) * 0.045
-        return [
-          Math.cos(angle) * halfWidth * radiusScale * wobble,
-          Math.sin(angle) * halfHeight * radiusScale * wobble,
-        ]
-      }).flat()
-      return {
-        points,
-        closed: true,
-        opacity: 0.44 + ringIndex * 0.08,
-        width: Math.max(1.1, Math.min(width, height) * 0.009),
-      }
-    })
-    return [...spokes, ...rings]
-  }, [halfHeight, halfWidth, height, width])
+  const strands = useMemo(() => createWebAreaStrands(width, height), [height, width])
 
   useEffect(() => {
     const effect = effectRef.current
@@ -1537,6 +1491,7 @@ export function MaterialAreaSpellEffect({
   const isIceStorm = projectile.kind === 'ice-storm'
   const isFreezingSphere = projectile.kind === 'freezing-sphere'
   const isColorSpray = projectile.kind === 'color-spray'
+  const isPrismaticSpray = projectile.kind === 'prismatic-spray'
   const isFaerieFire = projectile.kind === 'faerie-fire'
   const isSleep = projectile.kind === 'sleep'
   const isEntangle = projectile.kind === 'entangle'
@@ -1566,10 +1521,11 @@ export function MaterialAreaSpellEffect({
   const isWallOfThorns = projectile.kind === 'wall-of-thorns'
   const isWallOfFire = projectile.kind === 'wall-of-fire'
   const isBladeBarrier = projectile.kind === 'blade-barrier'
-  const asset = isWeb ? undefined : assetUrl
+  const asset = isWeb || isGrease ? undefined : assetUrl
   const loadedImage = useTokenBadgeImage(asset)
   const image = loadedImage
   const reducedMotion = usePrefersReducedMotion()
+  if (isGrease) return null
   if (isWeb) return <WebAreaEntranceEffect projectile={projectile} />
   if (isSilence) return <SilenceAreaEntranceEffect projectile={projectile} />
   if (!image) return null
@@ -1627,16 +1583,16 @@ export function MaterialAreaSpellEffect({
       />
     )
   }
-  if (isFaerieFire || isSleep || isEntangle || isGrease) {
+  if (isFaerieFire || isSleep || isEntangle) {
     const radius = Math.max(30, projectile.radiusPx ?? 70)
     return (
       <TargetSpriteAtlasEffect
         projectile={projectile}
         image={image}
         diameter={radius * (isFaerieFire ? 2.05 : isSleep ? 2.18 : 2.06)}
-        shadowColor={isFaerieFire ? '#d946ef' : isSleep ? '#6366f1' : isEntangle ? '#65a30d' : '#d97706'}
-        particleColor={isFaerieFire ? '#67e8f9' : isSleep ? '#c4b5fd' : isEntangle ? '#84cc16' : '#f59e0b'}
-        particleHighlight={isFaerieFire ? '#fde68a' : isSleep ? '#fef3c7' : isEntangle ? '#d9f99d' : '#fef3c7'}
+        shadowColor={isFaerieFire ? '#d946ef' : isSleep ? '#6366f1' : '#65a30d'}
+        particleColor={isFaerieFire ? '#67e8f9' : isSleep ? '#c4b5fd' : '#84cc16'}
+        particleHighlight={isFaerieFire ? '#fde68a' : isSleep ? '#fef3c7' : '#d9f99d'}
       />
     )
   }
@@ -1765,7 +1721,7 @@ export function MaterialAreaSpellEffect({
       />
     )
   }
-  if (isColorSpray) {
+  if (isColorSpray || isPrismaticSpray) {
     return (
       <DirectionalSpriteAtlasEffect
         projectile={projectile}
@@ -1773,9 +1729,9 @@ export function MaterialAreaSpellEffect({
         heightRatio={areaWidth / distance}
         minHeight={areaWidth * 0.98}
         maxHeight={areaWidth * 1.02}
-        shadowColor="#f472b6"
-        particleColor="#67e8f9"
-        particleHighlight="#fef08a"
+        shadowColor={isPrismaticSpray ? '#a855f7' : '#f472b6'}
+        particleColor={isPrismaticSpray ? '#22d3ee' : '#67e8f9'}
+        particleHighlight={isPrismaticSpray ? '#ffffff' : '#fef08a'}
       />
     )
   }

@@ -1,0 +1,77 @@
+{
+  "id": "srd-5.1:commoner",
+  "slug": "commoner",
+  "name": "平民",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "club",
+      "name": "木棒",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 67,
+      "slug": "commoner",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:41:28.412Z",
+      "name": "平民",
+      "actionId": "club",
+      "actionName": "木棒",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-commoner-club-1788558088483",
+      "combatId": "verify-ui-commoner-club-1788558088483:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "平民 使用木棒攻击 验证目标：木棒 → 验证目标 18+2=20 命中；共造成 1 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:41 PM\n结算\n\n平民 使用木棒攻击 验证目标：木棒 → 验证目标 18+2=20 命中；共造成 1 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：木棒｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +2。\n结果 · 20 vs AC 10：命中。\n伤害骰 · 木棒（基础伤害·钝击）｜1d4 骰面：1 = 1｜固定加值 +0｜小计 1\n平民｜消耗动作\n验证目标｜受到 1 点伤害｜HP 320 → 319",
+      "playerLog": "平民 使用木棒攻击 验证目标：木棒 → 验证目标 18+2=20 命中；共造成 1 点伤害。",
+      "afterHp": 319,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-04T21:41:53.006Z",
+      "evidenceFile": "ui-cases/monsters/067-commoner.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -60,4 +60,16 @@ describe('inventory drag destinations', () => {
     expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'offHand' })).toMatchObject({ accepted: true })
     expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'armor' })).toMatchObject({ accepted: false })
   })
+
+  it('does not present the current equipment slot as a valid drop target', () => {
+    const focus = equipmentEntry('mainWeapon')
+    focus.equippedSlot = 'mainWeapon'
+    focus.item.equipment!.allowedSlots = ['mainWeapon', 'offHand']
+
+    expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'mainWeapon' })).toEqual({
+      accepted: false,
+      reason: '该物品已经位于这个穿戴槽。',
+    })
+    expect(dnd5eInventoryDropDecision(focus, { kind: 'equipment', slot: 'offHand' })).toMatchObject({ accepted: true })
+  })
 })

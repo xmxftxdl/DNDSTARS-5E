@@ -9,10 +9,12 @@ import {
   createStoryWorkspace,
   evaluateStoryLinkCondition,
   orderedStoryEvents,
+  removeStoryGraphLink,
   resolveStoryBranch,
   startCampaignSession,
   storyEventAvailability,
   storyEventSourceCitations,
+  synchronizeStoryBranchEventStatuses,
   synchronizeStoryWorkspace,
 } from './dmCampaignStoryModel'
 
@@ -271,6 +273,41 @@ describe('dmCampaignStoryModel', () => {
     expect(recovered.graphEditedByDm).toBe(false)
   })
 
+  it('载入时自动把已移除的单线投影迁回 SOL 原始分支', () => {
+    const causalAnalysis: PdfCampaignAnalysisV2 = {
+      ...analysis,
+      scenes: [],
+      timelineEvents: [
+        { ...analysis.timelineEvents![0]!, id: 'event-choice', name: '决定是否同行', causedBy: [] },
+        { ...analysis.timelineEvents![0]!, id: 'event-go', name: '同行护送', causedBy: ['决定是否同行'], causalExplanation: '玩家选择同行。' },
+        { ...analysis.timelineEvents![0]!, id: 'event-stay', name: '留在驿馆', causedBy: ['决定是否同行'], causalExplanation: '玩家选择留守。' },
+      ],
+    }
+    const original = createStoryWorkspace(causalAnalysis)
+    const byTitle = new Map(original.events.map((event) => [event.title, event.id]))
+    const dmEvent = { ...createDmStoryEventForTest(), id: 'dm-follow-up', title: 'DM 后续事件' }
+    const migrated = synchronizeStoryWorkspace({
+      ...original,
+      events: [...original.events, dmEvent],
+      graphLinks: [
+        { id: 'story-link-m123abc-0', fromEventId: byTitle.get('决定是否同行')!, toEventId: byTitle.get('同行护送')!, label: '', condition: { kind: 'always' as const } },
+        { id: 'story-link-m123abc-1', fromEventId: byTitle.get('同行护送')!, toEventId: byTitle.get('留在驿馆')!, label: '', condition: { kind: 'always' as const } },
+        { id: 'story-link-m123abc-2', fromEventId: byTitle.get('留在驿馆')!, toEventId: dmEvent.id, label: '', condition: { kind: 'always' as const } },
+      ],
+      graphEditedByDm: true,
+      graphLayoutVersion: 4,
+    }, causalAnalysis)
+    const titleById = new Map(migrated.events.map((event) => [event.id, event.title]))
+
+    expect(migrated.graphLinks?.map((link) => [titleById.get(link.fromEventId), titleById.get(link.toEventId), link.label])).toEqual([
+      ['决定是否同行', '同行护送', '玩家选择同行。'],
+      ['决定是否同行', '留在驿馆', '玩家选择留守。'],
+    ])
+    expect(migrated.events.some((event) => event.id === dmEvent.id)).toBe(true)
+    expect(migrated.graphEditedByDm).toBe(false)
+    expect(migrated.graphLayoutVersion).toBe(2)
+  })
+
   it('使用 DM 剧情连线决定团务事件顺序，而不是沿用 AI 数组顺序', () => {
     const first = { ...createDmStoryEventForTest(), id: 'first', title: '开场', graphPosition: { x: 20, y: 120 } }
     const yes = { ...createDmStoryEventForTest(), id: 'yes', title: '接受委托', graphPosition: { x: 320, y: 40 } }
@@ -291,7 +328,7 @@ describe('dmCampaignStoryModel', () => {
     expect(orderedStoryEvents(workspace).map((event) => event.id)).toEqual(['first', 'yes', 'no'])
   })
 
-  it('根据人物生死状态判断互斥分支，并在前置事件完成后开放正确节点', () => {
+  it('旧人物条件只保留说明文字，分支改由 DM 三态决定', () => {
     const first = { ...createDmStoryEventForTest(), id: 'first', status: 'completed' as const }
     const dead = { ...createDmStoryEventForTest(), id: 'dead-route' }
     const alive = { ...createDmStoryEventForTest(), id: 'alive-route' }
@@ -310,13 +347,23 @@ describe('dmCampaignStoryModel', () => {
       activeSession: { id: 'session', title: '测试团务', startedAt: 1, baselineJournalEntryIds: [], journalEntryIds: [] },
       recaps: [],
     }
-    expect(evaluateStoryLinkCondition(workspace.graphLinks[0]!, workspace)).toBe('matched')
-    expect(evaluateStoryLinkCondition(workspace.graphLinks[1]!, workspace)).toBe('blocked')
-    expect(storyEventAvailability(workspace, 'dead-route')).toBe('available')
-    expect(storyEventAvailability(workspace, 'alive-route')).toBe('blocked')
+    expect(evaluateStoryLinkCondition(workspace.graphLinks[0]!, workspace)).toBe('manual')
+    expect(evaluateStoryLinkCondition(workspace.graphLinks[1]!, workspace)).toBe('manual')
+    expect(storyEventAvailability(workspace, 'dead-route')).toBe('waiting')
+    expect(storyEventAvailability(workspace, 'alive-route')).toBe('waiting')
+
+    const ruled = {
+      ...workspace,
+      graphLinks: workspace.graphLinks.map((link) => ({
+        ...link,
+        resolution: link.id === 'dead-link' ? 'triggered' as const : 'not-triggered' as const,
+      })),
+    }
+    expect(storyEventAvailability(ruled, 'dead-route')).toBe('available')
+    expect(storyEventAvailability(ruled, 'alive-route')).toBe('blocked')
   })
 
-  it('根据普通剧情事件是否发生判断分支，不依赖人物生死状态', () => {
+  it('旧事件条件不再自动裁定，仍可由 DM 三态覆盖', () => {
     const gate = { ...createDmStoryEventForTest(), id: 'gate', status: 'completed' as const }
     const alarm = { ...createDmStoryEventForTest(), id: 'alarm', title: '警报被触发', status: 'completed' as const }
     const alarmRoute = { ...createDmStoryEventForTest(), id: 'alarm-route' }
@@ -335,14 +382,18 @@ describe('dmCampaignStoryModel', () => {
       recaps: [],
     }
 
-    expect(evaluateStoryLinkCondition(workspace.graphLinks[0]!, workspace)).toBe('matched')
-    expect(evaluateStoryLinkCondition(workspace.graphLinks[1]!, workspace)).toBe('blocked')
-    expect(storyEventAvailability(workspace, 'alarm-route')).toBe('available')
-    expect(storyEventAvailability(workspace, 'quiet-route')).toBe('blocked')
+    expect(evaluateStoryLinkCondition(workspace.graphLinks[0]!, workspace)).toBe('manual')
+    expect(evaluateStoryLinkCondition(workspace.graphLinks[1]!, workspace)).toBe('manual')
 
-    const skippedAlarm = { ...workspace, events: workspace.events.map((event) => event.id === 'alarm' ? { ...event, status: 'skipped' as const } : event) }
-    expect(evaluateStoryLinkCondition(skippedAlarm.graphLinks[0]!, skippedAlarm)).toBe('blocked')
-    expect(evaluateStoryLinkCondition(skippedAlarm.graphLinks[1]!, skippedAlarm)).toBe('matched')
+    const ruled = {
+      ...workspace,
+      graphLinks: workspace.graphLinks.map((link) => ({
+        ...link,
+        resolution: link.id === 'alarm-link' ? 'triggered' as const : 'not-triggered' as const,
+      })),
+    }
+    expect(evaluateStoryLinkCondition(ruled.graphLinks[0]!, ruled)).toBe('matched')
+    expect(evaluateStoryLinkCondition(ruled.graphLinks[1]!, ruled)).toBe('blocked')
   })
 
   it('让 DM 的分支裁定覆盖条件，并把未触发支线的全部后继标记为不可达', () => {
@@ -371,14 +422,64 @@ describe('dmCampaignStoryModel', () => {
     expect(storyEventAvailability(workspace, 'abandoned')).toBe('blocked')
     expect(storyEventAvailability(workspace, 'abandoned-ending')).toBe('blocked')
 
-    const reset = resolveStoryBranch(workspace, 'chosen-link', 'pending')
+    const synchronized = synchronizeStoryBranchEventStatuses(workspace)
+    expect(synchronized.events.find((event) => event.id === 'chosen')?.status).toBe('planned')
+    expect(synchronized.events.find((event) => event.id === 'abandoned')).toMatchObject({ status: 'not-triggered', statusAutomation: 'branch' })
+    expect(synchronized.events.find((event) => event.id === 'abandoned-ending')).toMatchObject({ status: 'not-triggered', statusAutomation: 'branch' })
+
+    const reset = resolveStoryBranch(synchronized, 'chosen-link', 'pending')
     expect(reset.events.find((event) => event.id === 'choice')?.status).toBe('planned')
+    expect(reset.events.find((event) => event.id === 'abandoned')?.status).toBe('planned')
+    expect(reset.events.find((event) => event.id === 'abandoned-ending')?.status).toBe('planned')
     expect(reset.graphLinks?.map((link) => link.resolution)).toEqual(['pending', 'pending', undefined])
     const switched = resolveStoryBranch(reset, 'abandoned-link', 'triggered')
     expect(switched.events.find((event) => event.id === 'choice')?.status).toBe('completed')
     expect(switched.graphLinks?.map((link) => link.resolution)).toEqual(['not-triggered', 'triggered', undefined])
     expect(storyEventAvailability(switched, 'chosen')).toBe('blocked')
     expect(storyEventAvailability(switched, 'abandoned')).toBe('available')
+
+    const removed = removeStoryGraphLink(switched, 'abandoned-link')
+    expect(removed.events.map((event) => event.id)).toEqual(['choice', 'chosen', 'abandoned', 'abandoned-ending'])
+    expect(removed.graphLinks?.map((link) => link.id)).toEqual(['chosen-link', 'abandoned-ending-link'])
+    expect(removed.events.find((event) => event.id === 'choice')?.status).toBe('planned')
+    expect(removed.graphLinks?.find((link) => link.id === 'chosen-link')?.resolution).toBe('pending')
+  })
+
+  it('只在所有入边条件都未触发时自动设为未触发，待决定或任一触发会恢复', () => {
+    const left = { ...createDmStoryEventForTest(), id: 'left', status: 'completed' as const }
+    const right = { ...createDmStoryEventForTest(), id: 'right', status: 'completed' as const }
+    const target = { ...createDmStoryEventForTest(), id: 'target' }
+    const workspace = {
+      schemaVersion: 1 as const,
+      mode: 'running' as const,
+      events: [left, right, target],
+      graphLinks: [
+        { id: 'left-target', fromEventId: 'left', toEventId: 'target', label: '左路', condition: { kind: 'manual' as const, expression: '左路成功' }, resolution: 'not-triggered' as const },
+        { id: 'right-target', fromEventId: 'right', toEventId: 'target', label: '右路', condition: { kind: 'manual' as const, expression: '右路成功' }, resolution: 'not-triggered' as const },
+      ],
+      personStates: [],
+      clueStates: [],
+      activeSession: { id: 'session', title: '测试', startedAt: 1, baselineJournalEntryIds: [], journalEntryIds: [] },
+      recaps: [],
+    }
+
+    const blocked = synchronizeStoryBranchEventStatuses(workspace)
+    expect(blocked.events.find((event) => event.id === 'target')).toMatchObject({ status: 'not-triggered', statusAutomation: 'branch' })
+
+    const waiting = synchronizeStoryBranchEventStatuses({
+      ...blocked,
+      graphLinks: blocked.graphLinks?.map((link) => link.id === 'right-target' ? { ...link, resolution: 'pending' as const } : link),
+    })
+    expect(storyEventAvailability(waiting, 'target')).toBe('waiting')
+    expect(waiting.events.find((event) => event.id === 'target')?.status).toBe('planned')
+    expect(waiting.events.find((event) => event.id === 'target')?.statusAutomation).toBeUndefined()
+
+    const triggered = synchronizeStoryBranchEventStatuses({
+      ...blocked,
+      graphLinks: blocked.graphLinks?.map((link) => link.id === 'right-target' ? { ...link, resolution: 'triggered' as const } : link),
+    })
+    expect(storyEventAvailability(triggered, 'target')).toBe('available')
+    expect(triggered.events.find((event) => event.id === 'target')?.status).toBe('planned')
   })
 
   it('把 AI 直接推理的因果前提与人物生死分支转换为剧情图，而不是按数组顺序串联', () => {

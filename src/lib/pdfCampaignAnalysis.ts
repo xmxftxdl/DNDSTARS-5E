@@ -118,6 +118,12 @@ export type PdfImportCandidateKindV1 = 'monster' | 'npc' | 'item' | 'spell' | 'm
 export interface PdfImportCandidateV1 extends PdfNamedRecordV1 {
   kind: PdfImportCandidateKindV1
   automation: 'full' | 'partial' | 'manual'
+  /**
+   * Verbatim, self-contained monster stat block captured from the source PDF.
+   * Kept as source text so the shared D&D 5e parser—not the model—owns the
+   * authoritative conversion into workshop traits, actions and spellcasting.
+   */
+  monsterStatBlockText?: string
 }
 
 export interface PdfPrepTipV1 {
@@ -536,7 +542,11 @@ export function validatePdfCampaignChunkAnalysis(value: unknown): value is PdfCa
   if (!listIsValid(value.importCandidates, (entry) => (
     namedRecordIsValid(entry) &&
     ['monster', 'npc', 'item', 'spell', 'map', 'handout', 'rule'].includes(String(field(entry, 'kind'))) &&
-    ['full', 'partial', 'manual'].includes(String(field(entry, 'automation')))
+    ['full', 'partial', 'manual'].includes(String(field(entry, 'automation'))) &&
+    typeof field(entry, 'monsterStatBlockText') === 'string' &&
+    String(field(entry, 'monsterStatBlockText')).length <= 24_000 &&
+    (field(entry, 'kind') === 'monster' || String(field(entry, 'monsterStatBlockText')).length === 0) &&
+    (field(entry, 'kind') !== 'monster' || field(entry, 'automation') !== 'full' || String(field(entry, 'monsterStatBlockText')).trim().length > 0)
   ))) return false
   if (!listIsValid(value.prepTips, (entry) => (
     isPlainObject(entry) &&
@@ -717,11 +727,12 @@ export const PDF_CAMPAIGN_CHUNK_SCHEMA: JsonSchemaV1 = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['kind', 'name', 'description', 'aliases', 'automation', 'citations'],
+        required: ['kind', 'name', 'description', 'aliases', 'automation', 'monsterStatBlockText', 'citations'],
         properties: {
           ...NAMED_RECORD_PROPERTIES,
           kind: { type: 'string', enum: ['monster', 'npc', 'item', 'spell', 'map', 'handout', 'rule'] },
           automation: { type: 'string', enum: ['full', 'partial', 'manual'] },
+          monsterStatBlockText: { type: 'string', maxLength: 24_000 },
         },
       },
     },
@@ -797,10 +808,10 @@ const PDF_PASS_ARRAY_LIMITS: Record<PdfAnalysisSchemaModeV1, Record<string, numb
 }
 
 const PDF_PASS_OUTPUT_TOKENS: Record<PdfAnalysisSchemaModeV1, number> = {
-  quick: 2_200,
+  quick: 5_000,
   entities: 1_400,
   relationships: 1_200,
-  adventure: 1_600,
+  adventure: 5_000,
   synthesis: 12_000,
 }
 
@@ -852,12 +863,14 @@ function compactPdfAnalysisRetrySchema(source: JsonSchemaV1): JsonSchemaV1 {
         : Math.max(1, Math.ceil(value.maxItems * 0.55))
     }
     if (value.type === 'string' && typeof value.maxLength === 'number') {
-      const compactMaximum = propertyName === 'quote'
-        ? 180
-        : propertyName === 'overview'
-          ? 480
-          : 240
-      value.maxLength = Math.min(value.maxLength, compactMaximum)
+      if (propertyName !== 'monsterStatBlockText') {
+        const compactMaximum = propertyName === 'quote'
+          ? 180
+          : propertyName === 'overview'
+            ? 480
+            : 240
+        value.maxLength = Math.min(value.maxLength, compactMaximum)
+      }
     }
     const properties = isPlainObject(value.properties)
       ? value.properties as Record<string, unknown>
@@ -1268,6 +1281,7 @@ const PDF_ANALYSIS_SYSTEM_PROMPT = [
   '所有会改变后续事件、人物状态、证据链或结局的选择与成功/失败结果都必须成为可见分支；不得仅为了减少节点而把这些分支折叠进 description。',
   '原文没有时间依据时 time 填“时间未注明”，不得自行发明日期；条件分支必须标记 conditional，不能当作已经发生的事实。',
   '严格区分 NPC 与怪物导入候选：社交、剧情或服务型非玩家角色归为 npc；出现体型＋生物类型＋阵营式数据、属性块、战斗动作、法术战斗能力或召唤战斗单位的生物归为 monster，即使它拥有专名。',
+  '每个 importCandidates 项都必须填写 monsterStatBlockText。kind 不是 monster 时填写空字符串。kind 是 monster 时，若当前页段出现属性块，必须把从怪物名称、体型/类型/阵营开始，到特质、施法、动作、附赠动作、反应、传奇动作和巢穴动作结束的完整原文保存在 monsterStatBlockText；不得改写、摘要或只保留 AC/HP 等基础数据。当前页段没有完整属性块时填写空字符串，并将 automation 标为 partial 或 manual。',
   '只有原文提供的结构化数据足以直接完成 Host 校验与权威结算时，automation 才能标记 full；缺少属性块、动作数值或规则细节时必须标记 partial 或 manual。',
   '使用自然、准确、适合中文跑团语境的表述，优先保留动机、因果、冲突和可运行信息，而不是泛泛复述。',
   '每个字段必须简洁；同一实体只能出现一次。只保留本页段有明确依据且对备团有价值的内容，不得为了填满数组而重复、拆分或扩写。',
@@ -1309,6 +1323,7 @@ function deepFocusPrompt(focus: DeepAnalysisFocus): string {
     '附录标题、朗读文本、时间表、家族立场、写作提示和剧情概念本身不是法术、怪物、NPC 或可导入资源。',
     '只有原文提供了可结构化数据、明确规则正文、具体地图/讲义或独立实体资料时，才能加入 importCandidates。',
     '“中型/大型等体型＋类人生物等类型＋阵营”、战斗单位、守卫、军兵、召唤生物及带动作/法术战斗能力的条目应作为 monster 候选；不要因为它有名字就标记为 npc。',
+    '对每个 monster 候选，monsterStatBlockText 必须逐行保留当前页段中的完整怪物属性块：名称、体型/类型/阵营、AC、HP、速度、六项属性、豁免、技能、抗性/免疫/易伤、感官、语言、CR、特质、施法、动作、附赠动作、反应、传奇动作和巢穴动作。不要把能力正文压缩进 description。只有零散提及而没有属性块时 monsterStatBlockText 填空字符串。非 monster 候选始终填空字符串。',
     '每个页段最多输出 10 条线索、8 个场景、6 个遭遇、8 个资源候选和 6 条备团提示；这些数字是严格上限而不是填充目标，原文没有的项目不得生成；合并同义或重复项目。',
     'people、relationships、locations、factions、timelineEvents 必须返回空数组；clues、scenes、encounters、importCandidates、prepTips 可以填写。',
     'overview 只总结本页段的因果链、玩家选择和后果；warnings 记录资料缺口，不得把普通剧情建议写成高危警告。',
@@ -1316,7 +1331,7 @@ function deepFocusPrompt(focus: DeepAnalysisFocus): string {
 }
 
 function quickAnalysisPrompt(): string {
-  return '分析附带页段，提取人物、关系、地点、势力、关键线索、场景、遭遇、可导入资源与备团风险。关系应覆盖人物之间以及人物、势力、地点之间有直接文本依据的联系；不能仅凭同场推测。timelineEvents 必须返回空数组；快速分析不生成全书时间线。空缺字段使用空字符串或空数组。'
+  return '分析附带页段，提取人物、关系、地点、势力、关键线索、场景、遭遇、可导入资源与备团风险。关系应覆盖人物之间以及人物、势力、地点之间有直接文本依据的联系；不能仅凭同场推测。怪物候选的 monsterStatBlockText 必须保留当前页段所含完整属性块及全部特质、施法、动作、附赠动作、反应、传奇动作和巢穴动作原文，不能只摘要基础数据；非怪物或没有属性块时填空字符串。timelineEvents 必须返回空数组；快速分析不生成全书时间线。空缺字段使用空字符串或空数组。'
 }
 
 function compactCampaignDraft(value: PdfCampaignAnalysisV1): string {
@@ -1454,7 +1469,7 @@ async function executePdfAnalysisPass(input: {
                 ? `上一轮 JSON 未通过 Host Schema 校验。失败项：${retryState.validationDetail || '未知字段约束'}。请重新生成完整对象，严格修复这些字段；不要省略必填数组或字符串，不要改写 documentId、documentName、chunkId 与页码范围。`
                 : retryReason === 'non-json'
                   ? '上一轮没有返回可解析的 JSON。请重新执行同一提取任务，只输出一个以 { 开始、以 } 结束的完整 JSON 对象；不要输出 Markdown 代码块、解释、思考过程、前言或结语。'
-                  : '上一次输出达到长度上限。必须进一步精简内容，优先返回完整、可解析且符合 Schema 的 JSON；不得扩写描述或为了填满数组增加项目。',
+                  : '上一次输出达到长度上限。必须进一步精简内容：减少项目数量与普通描述，优先返回完整、可解析且符合 Schema 的 JSON；不得扩写或为了填满数组增加项目。monsterStatBlockText 是怪物能力的唯一无损来源，不得裁切或摘要；如需缩减，减少候选数量并优先保留属性块完整的怪物。',
             ].join('\n'),
         outputSchema,
         maxOutputTokens,

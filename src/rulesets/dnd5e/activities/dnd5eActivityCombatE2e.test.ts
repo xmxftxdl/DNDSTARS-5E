@@ -183,6 +183,37 @@ const activities: readonly Dnd5eActivityDefinitionV1[] = [{
   }] }],
   automation,
   legacySource: { kind: 'feature', id: 'fire-fist-hit' },
+}, {
+  schemaVersion: 1,
+  id: 'suspended-cloud-stance',
+  name: 'Suspended cloud stance',
+  activation: { kind: 'free', cost: 0 },
+  invocation: { kind: 'active', confirmation: 'actor-choice' },
+  target: { kind: 'self' },
+  effects: [{
+    schemaVersion: 1,
+    id: 'cloud-transition',
+    name: 'Cloud transition',
+    duration: { kind: 'rounds', rounds: 1, expiresAt: 'target-turn-end' },
+    conditions: ['incapacitated'],
+    modifiers: [{ kind: 'speed', mode: 'override', value: { kind: 'constant', value: 0 } }],
+    stacking: 'refresh-duration',
+  }, {
+    schemaVersion: 1,
+    id: 'cloud-mode',
+    name: 'Cloud mode',
+    duration: { kind: 'rounds', rounds: 10, expiresAt: 'target-turn-end' },
+    modifiers: [{ kind: 'flight-speed', speedFeet: 300 }],
+    suspendWhileEffectId: 'cloud-transition',
+    stacking: 'replace',
+  }],
+  outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [{
+    id: 'start-transition', kind: 'apply-effect', target: 'actor', effectId: 'cloud-transition',
+  }, {
+    id: 'apply-cloud', kind: 'apply-effect', target: 'actor', effectId: 'cloud-mode',
+  }] }],
+  automation,
+  legacySource: { kind: 'feature', id: 'suspended-cloud-stance' },
 }]
 
 function combatant(id: string, controller: 'player' | 'dm', initiative: number) {
@@ -202,7 +233,10 @@ function combatant(id: string, controller: 'player' | 'dm', initiative: number) 
     concentrating: false,
     classResources: id === 'actor' ? { focus: { current: 2, max: 2 }, ki: { current: 2, max: 2 } } : undefined,
     pluginFeatureIds: id === 'actor'
-      ? ['active-pulse', 'light-follow-up', 'feature-chain', 'fire-fist-stance', 'fire-fist-hit']
+      ? [
+          'active-pulse', 'light-follow-up', 'feature-chain', 'fire-fist-stance', 'fire-fist-hit',
+          'suspended-cloud-stance',
+        ]
       : ['retaliation', 'after-hurt-guard', 'condition-reflection'],
     conditionImmunities: id === 'target' ? ['charmed'] : undefined,
   })
@@ -225,6 +259,42 @@ beforeEach(() => registerDnd5eActivityPackage({
 afterEach(clearDnd5eActivityRegistryForTests)
 
 describe('unified Activity Host combat E2E', () => {
+  it('suspends a later effect by the real transition instance and resumes it when that instance expires', () => {
+    const resolved = resolveRegisteredDnd5eActivityInCombatV1({
+      state: combat(),
+      combatRevision: 1,
+      command: {
+        schemaVersion: 1,
+        commandId: 'suspended-cloud-stance-1',
+        actorId: 'actor',
+        packageId: PACKAGE_ID,
+        packageVersion: PACKAGE_VERSION,
+        activityId: 'suspended-cloud-stance',
+        targetIds: ['actor'],
+        expectedRevision: 1,
+      },
+      authoritativeRolls: {},
+      confirmedBy: 'actor',
+    })
+    expect(resolved.phase).toBe('commit')
+    if (resolved.phase !== 'commit' || !resolved.result.ok) return
+    const appliedEffects = resolved.result.state.combatants.actor.classState.activeEffects ?? []
+    const transition = appliedEffects.find((effect) => effect.stackingKey.includes(':cloud-transition:'))
+    const cloud = appliedEffects.find((effect) => effect.definitionId.includes(':cloud-mode:'))
+    expect(transition).toBeDefined()
+    expect(cloud).toMatchObject({
+      modifiers: { flySpeedFeet: 300 },
+      suspendedBy: [transition?.id],
+    })
+
+    const ended = resolveDnd5eHeadlessAction(resolved.result.state, { type: 'end-turn', actorId: 'actor' })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    const remaining = ended.state.combatants.actor.classState.activeEffects ?? []
+    expect(remaining.some((effect) => effect.id === transition?.id)).toBe(false)
+    expect(remaining.find((effect) => effect.id === cloud?.id)?.suspendedBy).toBeUndefined()
+  })
+
   it('rebuilds an automatic event-target splash from Host distance pairs', async () => {
     const state = combat()
     state.combatants.actor.pluginFeatureIds = [...state.combatants.actor.pluginFeatureIds, 'event-target-splash']

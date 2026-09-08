@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Crown, Download, FileSpreadsheet, LoaderCircle, Upload, User, UserPlus, Users } from 'lucide-react'
+import { Crown, Download, FileSpreadsheet, LoaderCircle, Trash2, Upload, User, UserPlus, Users } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import CharacterSheet from '../components/character/CharacterSheet'
@@ -9,12 +9,14 @@ import CharacterExcelImportDialog from '../components/character/CharacterExcelIm
 import DMRoster from '../components/character/DMRoster'
 import AccountCharacterVaultPanel from '../components/character/AccountCharacterVaultPanel'
 import { useCharacterStore } from '../store/characters'
+import { useMapStore } from '../store/maps'
 import { modeFromPort, playerSlotLabel } from '../lib/appMode'
 import {
   currentPlayerSlot,
   getAssignedPlayerCharacterId,
   getRoomCharacterAssignment,
   playerViewCharacters,
+  playerCharacterPageActiveId,
   PLAYER_ASSIGNMENT_EVENT,
   setAssignedPlayerCharacterId,
 } from '../lib/playerView'
@@ -24,7 +26,7 @@ import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { declarativeClassContentBindingV1 } from '../rulesets/dnd5e/declarativeClass'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
 import { dnd5eStartingEquipmentPlan, resolveDnd5eStartingEquipment } from '../rulesets/dnd5e/startingEquipment'
-import { showAppAlert } from '../lib/appDialog'
+import { showAppAlert, showAppConfirm } from '../lib/appDialog'
 import { createCharacterPortraitDataUrl } from '../lib/characterPortrait'
 import {
   buildCharacterExcelImportDraft,
@@ -151,8 +153,11 @@ export default function CharactersPage() {
   })
   const visibleList = playerVisibleList
   const assignableList = playerVisibleList
-  const activeId =
-    selectedId && visibleList.some((c) => c.id === selectedId) ? selectedId : visibleList[0]?.id ?? null
+  const activeId = playerCharacterPageActiveId(visibleList, {
+    isDM,
+    assignedCharacterId,
+    selectedCharacterId: selectedId,
+  })
   const activeCharacter = activeId ? visibleList.find((c) => c.id === activeId) ?? null : null
   const unfinishedCreation = !isDM && !showCreate
     ? visibleList.find((character) =>
@@ -209,6 +214,45 @@ export default function CharactersPage() {
       console.error('[character-import-failed]', error)
       await showAppAlert('无法载入角色 JSON。请确认文件是从本项目导出的角色文件。')
     }
+  }
+
+  const deleteActiveCharacter = async () => {
+    if (!activeCharacter) return
+    if (
+      roomCharacterAssignment?.enforced === true &&
+      roomCharacterAssignment.characterId === activeCharacter.id
+    ) {
+      await showAppAlert({
+        title: '角色由 DM 锁定',
+        message: '这个角色当前由 DM 指定给你。请先让 DM 解除分配或由 DM 删除。',
+        tone: 'danger',
+      })
+      return
+    }
+    const linkedTokens = useMapStore.getState().maps.flatMap((map) =>
+      map.tokens.filter((token) => token.characterId === activeCharacter.id).map((token) => ({
+        mapName: map.name,
+        tokenName: token.label,
+      })))
+    if (linkedTokens.length > 0) {
+      await showAppAlert({
+        title: '角色仍在地图上',
+        message: `该角色仍关联 ${linkedTokens.length} 个地图 Token。请让 DM 从角色名册删除，系统会同时清理这些 Token。`,
+        tone: 'danger',
+      })
+      return
+    }
+    const confirmed = await showAppConfirm({
+      title: '删除角色',
+      message: `确定从当前房间删除“${activeCharacter.name}”吗？角色的账号角色库备份仍会保留，可稍后重新带入房间。`,
+      confirmLabel: '确认删除',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    if (assignedCharacterId === activeCharacter.id) {
+      setAssignedPlayerCharacterId(null, playerSlot)
+    }
+    remove(activeCharacter.id)
   }
 
   const importCharacterExcelFile = async (file: File) => {
@@ -358,6 +402,15 @@ export default function CharactersPage() {
                 >
                   <Download className="h-4 w-4" />
                   导出角色
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteActiveCharacter()}
+                  disabled={!activeCharacter}
+                  className="glass flex items-center gap-2 rounded-xl border-red-400/20 px-4 py-2.5 text-sm font-semibold text-red-200 transition-colors hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除角色
                 </button>
                 <button
                   onClick={openCreateDialog}

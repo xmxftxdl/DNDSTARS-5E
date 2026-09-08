@@ -3,6 +3,7 @@ import {
   mapCanvasAoeGridCell,
   mapCanvasEffectTokenAreaRenderOffset,
   mapCanvasGeometryDrawShouldStart,
+  mapCanvasGeometryOverlayVisible,
   mapCanvasGeometryRightButtonPanShouldStart,
   mapCanvasGridHotkeyUsesEditableTarget,
   mapCanvasGridSizeAfterWheel,
@@ -62,6 +63,19 @@ describe('map canvas viewport panning', () => {
     expect(mapCanvasGeometryDrawShouldStart('window', true)).toBe(true)
     expect(mapCanvasGeometryDrawShouldStart('wall', false)).toBe(true)
     expect(mapCanvasGeometryDrawShouldStart('difficult-terrain', false)).toBe(true)
+  })
+
+  it('renders projected geometry for players without requiring a door interaction handler', () => {
+    expect(mapCanvasGeometryOverlayVisible({
+      isDM: false,
+      hasGeometry: true,
+      hasDraft: false,
+    })).toBe(true)
+    expect(mapCanvasGeometryOverlayVisible({
+      isDM: false,
+      hasGeometry: false,
+      hasDraft: false,
+    })).toBe(false)
   })
 
   it('temporarily pans with the right button in every geometry tool', () => {
@@ -128,6 +142,11 @@ describe('map canvas area targeting', () => {
   it('consumes token clicks as area confirmation instead of opening token details', () => {
     expect(mapCanvasTokenClickAction(true)).toBe('consume-area-click')
     expect(mapCanvasTokenClickAction(false)).toBe('select-token')
+  })
+
+  it('routes token clicks to movement before area or token inspection', () => {
+    expect(mapCanvasTokenClickAction(false, true)).toBe('select-movement-destination')
+    expect(mapCanvasTokenClickAction(true, true)).toBe('select-movement-destination')
   })
 
   it('converts a continuous pointer position into an integer authoritative grid cell', () => {

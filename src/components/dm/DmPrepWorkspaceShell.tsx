@@ -18,7 +18,7 @@ const WORKSPACE_SECTIONS: Array<{
 }> = [
   { id: 'session', label: '本次备团', description: '下一场需要准备什么', icon: Clock3 },
   { id: 'story', label: '剧情', description: '时间线、事件与线索', icon: BookOpenText },
-  { id: 'world', label: '世界', description: '人物、关系、势力与地点', icon: Users },
+  { id: 'world', label: '世界与原文', description: '人物、势力、地点与原文书签', icon: Users },
   { id: 'resources', label: '资源', description: '地图、怪物与待导入内容', icon: MapPinned },
   { id: 'recap', label: '团务复盘', description: '日志、状态与下一场', icon: History },
   { id: 'imports', label: '导入与复核', description: 'AI 任务、校验与归档', icon: CheckCircle2 },

@@ -19,17 +19,26 @@ export const DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS = [
   'protected',
   'exposed',
   'hidden',
+  'disguised',
   'fire-averse',
   'attached',
   'suffocating',
+  'truth-bound',
+  'imprisoned',
+  'frozen-statue',
+  'nondetection',
+  'plane-shifted',
 ] as const
 
 export type Dnd5eTacticalTokenStatusMarkerId =
   typeof DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS[number]
 
+export type Dnd5eCustomTokenStatusMarkerId = `custom:${string}`
+
 export type Dnd5eTokenStatusMarkerId =
   | Dnd5eStandardConditionId
   | Dnd5eTacticalTokenStatusMarkerId
+  | Dnd5eCustomTokenStatusMarkerId
 
 export type Dnd5eTokenStatusMarkerSource = 'dm' | 'headless' | 'workshop'
 export type Dnd5eTokenStatusMarkerGrantTarget = 'self' | 'other'
@@ -196,9 +205,33 @@ const TACTICAL_DEFINITIONS: Readonly<Record<
   protected: { label: '防护', description: '地图标注：目标当前受到额外防护。' },
   exposed: { label: '破绽', description: '地图标注：目标已暴露破绽。' },
   hidden: { label: '隐藏', description: '地图标注：目标正在隐藏。' },
+  disguised: {
+    label: '易容',
+    description: '权威效果：目标的外貌正受到易容术或同类伪装效果改变；这不等同于隐形。',
+  },
   'fire-averse': { label: '畏火', description: '地图标注：目标对火焰表现出畏惧或退避反应。' },
   attached: { label: '附着', description: '地图标注：另一生物或效果正附着在目标身上。' },
   suffocating: { label: '窒息', description: '地图标注：目标当前无法呼吸。' },
+  'truth-bound': {
+    label: '诚实约束',
+    description: '权威效果：目标已在诚实之域中豁免失败；当它位于该法术区域内时，无法故意说谎。目标知晓自己受到此法术影响，但仍可回避回答或在真话范围内含糊其辞。',
+  },
+  imprisoned: {
+    label: '禁锢术',
+    description: '权威效果：目标正受到禁锢术影响。',
+  },
+  'frozen-statue': {
+    label: '冰冻塑像',
+    description: '权威效果：该生物被寒冰锥杀死并化为冰冻塑像，持续至解冻。',
+  },
+  nondetection: {
+    label: '回避侦测',
+    description: '权威效果：目标受到回避侦测保护，无法成为预言系法术的目标，也无法被魔法探知传感器察觉。',
+  },
+  'plane-shifted': {
+    label: '已被异界传送',
+    description: '权威效果：该生物因异界传送豁免失败，已被送往施法者指定的存在位面。',
+  },
 }
 
 const TOKEN_STATUS_MARKER_IDS = new Set<string>([
@@ -247,12 +280,26 @@ const LEGACY_EFFECT_TOKEN_STATUS_MARKERS: Readonly<Record<string, Dnd5eTacticalT
   'fire-averse': 'fire-averse',
   attached: 'attached',
   hidden: 'hidden',
+  disguise: 'disguised',
+  disguised: 'disguised',
+  'disguise-self': 'disguised',
   marked: 'marked',
   protected: 'protected',
   silenced: 'silenced',
   slowed: 'slowed',
   weakened: 'weakened',
   'unable-to-breathe': 'suffocating',
+  'truth-bound': 'truth-bound',
+  'imprisonment-burial': 'imprisoned',
+  'imprisonment-chaining': 'imprisoned',
+  'imprisonment-hedged-prison': 'imprisoned',
+  'imprisonment-minimus-containment': 'imprisoned',
+  'imprisonment-slumber': 'imprisoned',
+  'frozen-statue': 'frozen-statue',
+  'cone-of-cold:frozen-statue': 'frozen-statue',
+  nondetection: 'nondetection',
+  'plane-shifted': 'plane-shifted',
+  'plane-shift-transferred': 'plane-shifted',
   '流血': 'bleeding',
   '燃烧': 'burning',
   '着火': 'burning',
@@ -262,6 +309,9 @@ const LEGACY_EFFECT_TOKEN_STATUS_MARKERS: Readonly<Record<string, Dnd5eTacticalT
   '畏火': 'fire-averse',
   '附着': 'attached',
   '隐藏': 'hidden',
+  '易容': 'disguised',
+  '易容术': 'disguised',
+  '伪装': 'disguised',
   '标记': 'marked',
   '防护': 'protected',
   '沉默': 'silenced',
@@ -269,18 +319,41 @@ const LEGACY_EFFECT_TOKEN_STATUS_MARKERS: Readonly<Record<string, Dnd5eTacticalT
   '虚弱': 'weakened',
   '无法呼吸': 'suffocating',
   '窒息': 'suffocating',
+  '诚实约束': 'truth-bound',
+  '无法故意说谎': 'truth-bound',
+  '寒冰锥：冰冻塑像（直至解冻）': 'frozen-statue',
+  '冰冻塑像': 'frozen-statue',
+  '回避侦测': 'nondetection',
+  '已被异界传送': 'plane-shifted',
+  '异界传送：已被传送': 'plane-shifted',
 }
 
 interface Dnd5eTokenStatusMarkerActiveEffectProjection {
   id: string
+  definitionId?: string
   label?: string
   legacyCondition?: string
+  standardCondition?: Dnd5eStandardConditionId
   suspendedBy?: readonly string[]
   source?: { actorId?: string; actorName?: string; label?: string; rulesId?: string }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function dnd5eCustomTokenStatusMarkerId(label: string): Dnd5eCustomTokenStatusMarkerId {
+  const normalized = label.trim().normalize('NFKC').toLocaleLowerCase('zh-CN') || 'status'
+  let hash = 0x811c9dc5
+  for (const character of normalized) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return `custom:${(hash >>> 0).toString(36)}`
+}
+
+function isDnd5eTokenStatusMarkerId(value: string): value is Dnd5eTokenStatusMarkerId {
+  return TOKEN_STATUS_MARKER_IDS.has(value) || /^custom:[a-z0-9][a-z0-9_-]{0,63}$/.test(value)
 }
 
 export function dnd5eTokenStatusMarkerDefinition(
@@ -321,9 +394,12 @@ export function dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(
   if (/weaken|衰弱|虚弱/.test(normalized)) return 'weakened'
   if (/protect|ward|防护/.test(normalized)) return 'protected'
   if (/expos|破绽/.test(normalized)) return 'exposed'
+  if (/disguise|易容|伪装/.test(normalized)) return 'disguised'
   if (/invisib|hidden|隐藏|隐形/.test(normalized)) return 'hidden'
   if (/attach|附着/.test(normalized)) return 'attached'
   if (/unable-to-breathe|suffocat|无法呼吸|窒息/.test(normalized)) return 'suffocating'
+  if (/frozen[- ]?statue|冰冻塑像/.test(normalized)) return 'frozen-statue'
+  if (/plane[- ]?shift(?:ed|[- ]transferred)?|异界传送.*已被传送|已被异界传送/.test(normalized)) return 'plane-shifted'
   if (/mark|标记/.test(normalized)) return 'marked'
   return undefined
 }
@@ -538,8 +614,21 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
   const result: Dnd5eTokenStatusMarker[] = []
   for (const effect of effects ?? []) {
     if ((effect.suspendedBy?.length ?? 0) > 0) continue
-    const statusId = dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.legacyCondition) ??
-      dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label)
+    // Standard conditions already render through Dnd5eStandardConditionBadge.
+    // Do not infer a second tactical marker from the same effect's label or
+    // legacy alias (for example invisible -> hidden).
+    if (effect.standardCondition) continue
+    const statusId = effect.definitionId === 'srd-5.1:spell:cone-of-cold:frozen-statue'
+      ? 'frozen-statue'
+      : effect.definitionId === 'srd-5.1:spell:nondetection'
+        ? 'nondetection'
+      : effect.definitionId === 'srd-5.1:spell:plane-shift-transferred'
+        ? 'plane-shifted'
+      : dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.legacyCondition) ??
+      dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label) ??
+      (effect.definitionId?.startsWith('dm:custom-status:') && effect.label?.trim()
+        ? dnd5eCustomTokenStatusMarkerId(effect.label)
+        : undefined)
     if (!statusId) continue
     const safeEffectId = effect.id
       .trim()
@@ -571,7 +660,7 @@ export function normalizeDnd5eTokenStatusMarkers(value: unknown): Dnd5eTokenStat
   for (const raw of value.slice(0, 64)) {
     if (!isRecord(raw) || raw.schemaVersion !== DND5E_TOKEN_STATUS_MARKER_SCHEMA_VERSION) continue
     if (typeof raw.id !== 'string' || !/^[a-z0-9][a-z0-9:_-]{0,159}$/i.test(raw.id)) continue
-    if (typeof raw.statusId !== 'string' || !TOKEN_STATUS_MARKER_IDS.has(raw.statusId)) continue
+    if (typeof raw.statusId !== 'string' || !isDnd5eTokenStatusMarkerId(raw.statusId)) continue
     if (!TOKEN_STATUS_MARKER_SOURCES.has(raw.source as Dnd5eTokenStatusMarkerSource)) continue
     if (seenIds.has(raw.id) || seenStatuses.has(raw.statusId)) continue
     const label = typeof raw.label === 'string' && raw.label.trim()

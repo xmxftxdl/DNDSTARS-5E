@@ -51,7 +51,9 @@ import {
 } from './airborneFallActionResolution'
 import {
   createDnd5eMapCombatSnapshot,
+  dnd5eRequestedInitiativeActorIndex,
   planDnd5eMapResultApplication,
+  prepareDnd5eExplorationActor,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
@@ -286,7 +288,7 @@ function featureClassRequirement(payload: Dnd5eClassFeaturePayload): {
   classId: 'barbarian' | 'bard' | 'paladin' | 'monk' | 'cleric' | 'rogue' | 'ranger' | 'sorcerer' | 'druid' | 'warlock' | 'fighter'
   minimumLevel: number
   subclassId?: string
-} {
+} | undefined {
   switch (payload.feature) {
     case 'barbarian-rage': return { classId: 'barbarian', minimumLevel: 1 }
     case 'feature-rage-bonus-dash': return { classId: 'barbarian', minimumLevel: 1 }
@@ -332,8 +334,9 @@ function featureClassRequirement(payload: Dnd5eClassFeaturePayload): {
       return { classId: 'monk', minimumLevel: 18 }
     case 'druid-wild-shape':
     case 'druid-creature-form-heal':
-    case 'druid-end-wild-shape':
       return { classId: 'druid', minimumLevel: 2 }
+    case 'druid-end-wild-shape':
+      return undefined
     case 'warlock-hurl-through-hell-ready':
       return { classId: 'warlock', minimumLevel: 14, subclassId: 'fiend' }
     case 'linked-equipment-recall':
@@ -528,6 +531,9 @@ export function prepareDnd5eClassFeature(input: {
   const { action } = input
   const payload = action.dnd5eClassFeature
   if (action.type !== 'dnd5e-class-feature' || !payload) return { ok: false, reason: 'invalid-action' }
+  if (!action.combatId && payload.feature !== 'druid-end-wild-shape') {
+    return { ok: false, reason: 'invalid-action' }
+  }
 
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
@@ -541,17 +547,24 @@ export function prepareDnd5eClassFeature(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  if (!action.combatId) prepareDnd5eExplorationActor(snapshot.state, actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    action.initiativeIndex,
+  )
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
 
   const requirement = featureClassRequirement(payload)
-  if (actorCombatant.classId !== requirement.classId) return { ok: false, reason: 'wrong-class' }
-  if (
-    dnd5eCombatantClassLevel(actorCombatant, requirement.classId) < requirement.minimumLevel ||
-    (requirement.subclassId && !dnd5eCombatantHasSubclass(actorCombatant, requirement.classId, requirement.subclassId))
-  ) {
-    return { ok: false, reason: 'feature-locked' }
+  if (requirement) {
+    if (actorCombatant.classId !== requirement.classId) return { ok: false, reason: 'wrong-class' }
+    if (
+      dnd5eCombatantClassLevel(actorCombatant, requirement.classId) < requirement.minimumLevel ||
+      (requirement.subclassId && !dnd5eCombatantHasSubclass(actorCombatant, requirement.classId, requirement.subclassId))
+    ) {
+      return { ok: false, reason: 'feature-locked' }
+    }
   }
   if (
     payload.feature === 'feature-rage-bonus-dash' &&
@@ -976,6 +989,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
   hideAllowed?: boolean
   divineInterventionD100?: number
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+  attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): {
   result: Dnd5eActionResult
   application?: Dnd5eMapResultPlan
@@ -1072,7 +1086,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
       : prepared.headlessAction
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(
     prepared.state,
-    headlessAction,
+    { ...headlessAction, attackDecoyRolls: input.attackDecoyRolls },
     input.airborneFallDamageRollsByCombatantId,
   )
   if (!result.ok) return { result, airborneFalls }
@@ -1084,6 +1098,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

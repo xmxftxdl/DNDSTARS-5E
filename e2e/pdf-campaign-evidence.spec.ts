@@ -305,6 +305,18 @@ test('V2 PDF 证据可核验、高亮并在刷新后恢复，同时继续读取 
   await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^剧情/ }).click()
   const storyGraph = page.getByTestId('dm-story-flow-graph')
   await expect(storyGraph).toBeVisible()
+  await page.getByRole('button', { name: '添加事件' }).click()
+  await expect(page.getByTestId('dm-story-event-workspace')).toContainText('1 个统一事件')
+  await expect(page.getByRole('dialog', { name: '编辑剧情事件' })).toBeVisible()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
+  await expect(storyGraph.getByText('新剧情节点', { exact: true })).toBeVisible()
+  // Covers both the former passive synchronization race and the 1.2 s account
+  // autosave boundary that could restore the previous server snapshot.
+  await page.waitForTimeout(1_800)
+  await expect(storyGraph.getByText('新剧情节点', { exact: true })).toBeVisible()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByRole('navigation', { name: '备团工作台' }).getByRole('button', { name: /^剧情/ }).click()
+  await expect(page.getByTestId('dm-story-flow-graph').getByText('新剧情节点', { exact: true })).toBeVisible()
   await expect(storyGraph.getByTestId('dm-story-edit-tools')).toHaveCount(0)
   await storyGraph.getByRole('button', { name: '全屏' }).click()
 

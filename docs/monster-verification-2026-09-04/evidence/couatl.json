@@ -1,0 +1,225 @@
+{
+  "id": "srd-5.1:couatl",
+  "slug": "couatl",
+  "name": "羽蛇",
+  "verdict": "Headless 已验证，仍有 DM 裁定边界",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].ability",
+        "attack.onHitEffects[].dc",
+        "attack.onHitEffects[].conditionOnFailedSave.condition",
+        "attack.onHitEffects[].conditionOnFailedSave.durationRounds",
+        "attack.onHitEffects[].conditionOnFailedSave.repeatSaveAtEndOfTargetTurn",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].condition",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].durationRounds",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].repeatSaveAtEndOfTargetTurn",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].dependsOnCondition",
+        "attack.onHitEffects[].additionalConditionsOnFailedSave[].canBeAwakenedByAction",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "bite-poisoned-unconscious:apply",
+        "bite-poisoned-unconscious:save",
+        "bite-poisoned-unconscious:condition-immune"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "constrict",
+      "name": "缠勒",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "change-shape",
+      "name": "改变形态",
+      "automation": "dm-adjudication",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 非战斗",
+      "scenarios": []
+    }
+  ],
+  "ui": [
+    {
+      "index": 70,
+      "slug": "couatl",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:43:27.621Z",
+      "name": "羽蛇",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-couatl-bite-1788558207733",
+      "combatId": "verify-ui-couatl-bite-1788558207733:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "羽蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+8=21 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:43 PM\n结算\n\n羽蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+8=21 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 13；最终采用 13；调整值 +8。\n结果 · 21 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：1 = 1｜固定加值 +5｜小计 6\n羽蛇｜消耗动作\n验证目标｜体质豁免 d20 20 +10 = 30 vs DC 13｜成功\n验证目标｜受到 6 点伤害｜HP 320 → 314",
+      "playerLog": "羽蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 13+8=21 命中；共造成 6 点伤害。",
+      "status": "failed",
+      "error": "TimeoutError: apiRequestContext.get: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - → GET http://127.0.0.1:6973/api/state/characters\u001b[22m\n\u001b[2m    - user-agent: Playwright/1.61.1 (x64; windows 10.0) node/24.16\u001b[22m\n\u001b[2m    - accept: */*\u001b[22m\n\u001b[2m    - accept-encoding: gzip,deflate,br\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:44:21.688Z",
+      "evidenceFile": "ui-cases/monsters/070-couatl.json"
+    },
+    {
+      "index": 130,
+      "slug": "couatl",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:36:02.422Z",
+      "name": "羽蛇",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "4",
+      "total": 334,
+      "mapId": "verify-ui-couatl-bite-1788568562463",
+      "combatId": "verify-ui-couatl-bite-1788568562463:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "羽蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+8=25 命中；共造成 11 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:36 PM\n结算\n\n羽蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+8=25 命中；共造成 11 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 17；最终采用 17；调整值 +8。\n结果 · 25 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：6 = 6｜固定加值 +5｜小计 11\n羽蛇｜消耗动作\n验证目标｜体质豁免 d20 18 +10 = 28 vs DC 13｜成功\n验证目标｜受到 11 点伤害｜HP 320 → 309",
+      "playerLog": "羽蛇 使用啃咬攻击 验证目标：啃咬 → 验证目标 17+8=25 命中；共造成 11 点伤害。",
+      "afterHp": 309,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:36:31.096Z",
+      "evidenceFile": "ui-cases/monsters/130-couatl.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "天生施法",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "魔法武器",
+      "automation": "headless",
+      "rule": "magic-weapons",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.weaponAttacksMagical"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "ordinary-defenses",
+        "nonmagical-immunity"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "心灵屏障",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 11,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

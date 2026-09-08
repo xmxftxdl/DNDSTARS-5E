@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>星痕 · 启动器</title>
+    <link rel="stylesheet" href="/launcher/launcher.css" />
+  </head>
+  <body>
+    <main class="launcher-shell">
+      <section class="launcher-card" aria-labelledby="launcher-title">
+        <div class="star-mark" aria-hidden="true">✦</div>
+        <p class="eyebrow">ASTRAL TRACE DESKTOP</p>
+        <h1 id="launcher-title">星痕</h1>
+        <p id="launcher-message" class="message" role="status">正在连接星痕服务器…</p>
+        <div class="progress-track" aria-hidden="true">
+          <div id="launcher-progress" class="progress-bar"></div>
+        </div>
+        <p id="launcher-detail" class="detail">DM 与玩家通用 · 在线客户端</p>
+        <button id="launcher-retry" type="button" hidden>重新连接</button>
+      </section>
+    </main>
+    <script src="/launcher/launcher.js"></script>
+  </body>
+</html>

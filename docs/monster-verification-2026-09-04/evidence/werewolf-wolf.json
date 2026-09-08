@@ -1,0 +1,117 @@
+{
+  "id": "srd-5.1:werewolf-wolf",
+  "slug": "werewolf-wolf",
+  "name": "狼人（狼形态）",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].magical",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].targetCreatureTypeRequirements[]",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "bite-lycanthropy:apply",
+        "bite-lycanthropy:save",
+        "bite-lycanthropy:excluded-type"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 139,
+      "slug": "werewolf-wolf",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:38:07.875Z",
+      "name": "狼人（狼形态）",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "3",
+      "total": 334,
+      "mapId": "verify-ui-werewolf-wolf-bite-1788568687950",
+      "combatId": "verify-ui-werewolf-wolf-bite-1788568687950:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "狼人（狼形态） 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+4=19 命中；共造成 10 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:38 PM\n结算\n\n狼人（狼形态） 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+4=19 命中；共造成 10 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 15；最终采用 15；调整值 +4。\n结果 · 19 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d8 骰面：8 = 8｜固定加值 +2｜小计 10\n狼人（狼形态）｜消耗动作\n验证目标｜体质豁免 d20 9 +10 = 19 vs DC 12｜成功\n验证目标｜受到 10 点伤害｜HP 320 → 310",
+      "playerLog": "狼人（狼形态） 使用啃咬攻击 验证目标：啃咬 → 验证目标 15+4=19 命中；共造成 10 点伤害。",
+      "afterHp": 310,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:38:37.549Z",
+      "evidenceFile": "ui-cases/monsters/139-werewolf-wolf.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "敏锐听觉与嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

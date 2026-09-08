@@ -19,9 +19,26 @@ import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
   validateDnd5eMulticlassLevelGain,
   normalizeDnd5eClassLevels,
+  dnd5eWeaponAttackProfile,
+  dnd5eShillelaghAttackChoice,
+  dnd5eRageFeatureForCharacter,
+  dnd5eActiveSustainedSpellControl,
+  dnd5eAlternateResourceSpellsForCharacter,
+  dnd5eAvailableSpellModifierIntents,
+  dnd5eSpellOriginProjectionsForCharacter,
+  dnd5eSpellcastingClassIdForSpell,
+  dnd5eSrdSpellHasFullHeadlessAutomation,
+  dnd5eActivityWeaponAttackGrantMatchesV1,
+  dnd5eMartialSpellBonusAttackAvailable,
+  dnd5eMartialSpellSynergyForCharacter,
+  dnd5ePluginBonusWeaponAttackForCharacter,
+  dnd5eWeaponPropertyIds,
+  getDnd5eSrdMonster,
   type Dnd5eClassId,
 } from '../../../../src/rulesets/dnd5e'
+import type { BattleMap } from '../../../../src/store/maps'
 import { dnd5eAdvancementFeatOptions } from '../../../../src/components/character/featAdvancementOptions'
+import { dnd5eInventoryLoad } from '../../../../src/rulesets/dnd5e/items'
 import type { Character } from '../../../../src/types/character'
 import type {
   MobileCharacterView,
@@ -84,12 +101,52 @@ function publicImageUrl(credentials: MobileCredentials, value: string): string |
 
 function activeEffectConditions(state: unknown): string[] {
   const combat = object(state)
-  const active = list(combat.activeEffects).map(object)
+  const active = list(combat.activeEffects).map(object).filter((effect) => effect.visibility !== 'dm-only')
   const effectConditions = active.flatMap((effect) => {
-    const id = text(effect.conditionId) || text(effect.rulesId)
+    const id = text(effect.standardCondition) || text(effect.legacyCondition) || text(effect.definitionId)
     return id ? [id] : []
   })
   return [...new Set([...list(combat.conditions).map(String), ...effectConditions])]
+}
+
+function activeEffectViews(state: unknown): NonNullable<MobileCharacterView['activeEffects']> {
+  const combat = object(state)
+  return list(combat.activeEffects).map(object).filter((effect) => effect.visibility !== 'dm-only').flatMap((effect) => {
+    const id = text(effect.id)
+    const definitionId = text(effect.definitionId)
+    const label = text(effect.label)
+    if (!id || !definitionId || !label) return []
+    const source = object(effect.source)
+    const duration = object(effect.duration)
+    const repeatSave = object(effect.repeatSave)
+    const durationType = ['permanent', 'rounds', 'until-turn-boundary', 'concentration'].includes(text(duration.type))
+      ? text(duration.type) as 'permanent' | 'rounds' | 'until-turn-boundary' | 'concentration'
+      : 'permanent'
+    return [{
+      id,
+      definitionId,
+      label,
+      conditionId: text(effect.standardCondition) || text(effect.legacyCondition) || undefined,
+      source: Object.keys(source).length ? {
+        actorId: text(source.actorId) || undefined,
+        actorName: text(source.actorName) || undefined,
+        rulesId: text(source.rulesId) || undefined,
+        label: text(source.label) || undefined,
+        spellLevel: Number.isFinite(Number(source.spellLevel)) ? num(source.spellLevel) : undefined,
+      } : undefined,
+      duration: {
+        type: durationType,
+        remainingRounds: Number.isFinite(Number(duration.remainingRounds)) ? Math.max(0, num(duration.remainingRounds)) : undefined,
+        boundary: text(duration.boundary) || text(duration.tickOn) || undefined,
+      },
+      repeatSave: text(repeatSave.ability) && Number.isFinite(Number(repeatSave.dc)) ? {
+        ability: text(repeatSave.ability),
+        dc: num(repeatSave.dc),
+        timing: text(repeatSave.timing),
+      } : undefined,
+      suspended: list(effect.suspendedBy).length > 0 || undefined,
+    }]
+  })
 }
 
 function selectedSubclassId(character: Character, classId: string): string | undefined {
@@ -346,7 +403,132 @@ function adaptCharacter(raw: unknown): MobileCharacterView {
     dnd5ePluginFeatureIds: list(value.dnd5ePluginFeatureIds).map(String),
   } as unknown as Character
   const inventory = object(value.dnd5eInventory)
+  const combatState = object(value.dnd5eCombatState)
+  const inventoryLoad = dnd5eInventoryLoad(character)
+  const movementSpeeds = object(value.dnd5eMovementSpeeds)
+  const mainWeaponProfile = dnd5eWeaponAttackProfile(character)
+  const offHandWeaponProfile = dnd5eWeaponAttackProfile(character, { weaponSlot: 'offHand' })
+  const weaponProfiles = [
+    ...(mainWeaponProfile ? [{ slot: 'main-hand' as const, profile: mainWeaponProfile }] : []),
+    ...(offHandWeaponProfile ? [{ slot: 'off-hand' as const, profile: offHandWeaponProfile }] : []),
+  ]
+  const activityWeaponAttackGrants = Object.values(
+    character.dnd5eCombatState?.activityWeaponAttackGrants ?? {},
+  ).flatMap((grant) => weaponProfiles.flatMap(({ slot, profile }) =>
+    dnd5eActivityWeaponAttackGrantMatchesV1(grant, grant.appliedTurnKey, {
+      weaponId: profile.weaponId,
+      baseWeaponId: profile.baseWeaponId,
+      mode: profile.mode,
+      weaponProperties: dnd5eWeaponPropertyIds(profile.properties),
+      proficient: profile.proficient,
+    }, slot) ? [{
+      id: `activity:${grant.grantId}:${slot}`,
+      label: `${grant.label} · ${profile.weaponName}`,
+      turnKey: grant.appliedTurnKey,
+      economy: grant.economy === 'none' ? 'none' as const : 'bonusAction' as const,
+      options: {
+        activityWeaponAttackGrantId: grant.grantId,
+        activityWeaponAttackWeaponSlot: slot,
+      },
+    }] : []))
+  const weaponAttackActionTurnKey = text(combatState.weaponAttackActionTurnKey)
+  const genericBonusWeaponAttack = weaponAttackActionTurnKey
+    ? dnd5ePluginBonusWeaponAttackForCharacter(character, weaponAttackActionTurnKey)
+    : undefined
+  const martialSpellBonusTurnKey = text(combatState.spellBonusWeaponAttackTurnKey) ||
+    text(combatState.cantripBonusWeaponAttackTurnKey)
+  const martialSpellBonusAvailable = !!mainWeaponProfile && !!martialSpellBonusTurnKey &&
+    dnd5eMartialSpellBonusAttackAvailable(character, martialSpellBonusTurnKey)
+  const linkedEquipment = dnd5eMartialSpellSynergyForCharacter(character, 'linked-equipment')
+  const mainWeaponId = character.equipment?.mainWeapon?.id
+  const extraActionTeleport = dnd5eMartialSpellSynergyForCharacter(character, 'extra-action-teleport')
+  const weaponProfile = dnd5eWeaponAttackProfile(character)
+  const shillelaghAttackChoice = dnd5eShillelaghAttackChoice(character)
+  const wildShape = text(combatState.wildShapeFormId)
+    ? getDnd5eSrdMonster(text(combatState.wildShapeFormId))
+    : undefined
   const racialRules = dnd5eRacialRulesForCharacter(value as never)
+  // Older room snapshots may contain pre-ActiveEffect records without a
+  // source object.  They can still be shown through the compatibility
+  // projection, but must never be interpreted as an authoritative sustained
+  // spell credential.
+  const sustainedCharacter = {
+    ...character,
+    dnd5eCombatState: {
+      ...character.dnd5eCombatState,
+      activeEffects: character.dnd5eCombatState?.activeEffects?.filter((effect) =>
+        !!effect.source && typeof effect.source.kind === 'string',
+      ),
+    },
+  } satisfies Character
+  const sustainedSpellControls = DND5E_SRD_COMBAT_SPELLS.flatMap((spell) => {
+    if (!dnd5eSrdSpellHasFullHeadlessAutomation(spell.id)) return []
+    const control = dnd5eActiveSustainedSpellControl(sustainedCharacter, spell)
+    if (!control) return []
+    const castingClassId = dnd5eSpellcastingClassIdForSpell(character, spell.id, undefined, spell.classes)
+    return [{
+      ...control,
+      economy: control.economy === 'bonus-action' ? 'bonusAction' as const : 'action' as const,
+      targeting: control.targeting === 'creature'
+        ? 'single-creature' as const
+        : control.targeting === 'area'
+          ? 'area' as const
+          : 'self' as const,
+      castingClassId,
+    }]
+  })
+  const alternateResourceSpells = dnd5eAlternateResourceSpellsForCharacter(character).flatMap((grant) => {
+    const spell = DND5E_SRD_COMBAT_SPELLS.find((candidate) => candidate.id === grant.spellId)
+    const pluginSpell = dnd5ePluginSpellDefinition(grant.spellId)
+    if (!spell && !pluginSpell) return []
+    const pluginArea = pluginSpell?.range?.shape != null
+    const targeting = spell?.area || pluginArea
+      ? 'area' as const
+      : spell?.target === 'ally' && spell.rangeFeet === 0 || pluginSpell?.range?.type === 'self'
+        ? 'self' as const
+        : 'single-creature' as const
+    return [{
+      featureId: grant.featureId,
+      featureName: grant.featureName,
+      grantId: grant.grantId,
+      spellId: grant.spellId,
+      spellName: spell?.name ?? pluginSpell?.name ?? grant.spellId,
+      classId: grant.classId,
+      resourceId: grant.resourceId,
+      castLevelOptions: grant.castLevelOptions.map((option) => ({ ...option })),
+      ignoreMaterialComponents: grant.ignoreMaterialComponents,
+      headless: (spell != null && dnd5eSrdSpellHasFullHeadlessAutomation(spell.id)) ||
+        pluginSpell?.automation.mode === 'headless-action',
+      economy: spell?.castingTime === 'bonus-action' || pluginSpell?.castingTime.unit === 'bonus-action'
+        ? 'bonusAction' as const
+        : spell?.castingTime === 'reaction' || pluginSpell?.castingTime.unit === 'reaction'
+          ? 'reaction' as const
+          : 'action' as const,
+      targeting,
+      rangeFeet: spell?.rangeFeet ?? pluginSpell?.range.feet,
+    }]
+  })
+  const spellModifierIntents = dnd5eAvailableSpellModifierIntents(character).map((entry) => {
+    const featureId = entry.definition.operation.kind === 'declarative-damage-maximization'
+      ? entry.definition.operation.featureId
+      : undefined
+    const featureMechanic = featureId
+      ? dnd5ePluginFeatureDefinition(featureId)?.declarativeAbility?.mechanic
+      : undefined
+    return {
+      id: entry.definition.id,
+      label: entry.definition.label,
+      description: entry.definition.description,
+      operation: entry.definition.operation.kind,
+      featureId,
+      compatibleDamageTypes: featureMechanic?.kind === 'damage-roll-maximization'
+        ? [...featureMechanic.damageTypes]
+        : undefined,
+      available: entry.available,
+      unavailableReason: entry.unavailableReason,
+      resource: entry.resource ? { ...entry.resource } : undefined,
+    }
+  })
   return {
     id: text(value.id),
     name: text(value.name, '未命名角色'),
@@ -382,13 +564,94 @@ function adaptCharacter(raw: unknown): MobileCharacterView {
     maxHp: Math.max(0, num(value.maxHp)),
     currentHp: Math.max(0, num(value.currentHp)),
     tempHp: Math.max(0, num(value.tempHp)),
+    deathSaveSuccesses: Math.max(0, Math.min(3, Math.floor(num(value.deathSaveSuccesses)))),
+    deathSaveFailures: Math.max(0, Math.min(3, Math.floor(num(value.deathSaveFailures)))),
+    deathSaveStable: value.deathSaveStable === true,
+    exhaustionLevel: Math.max(0, Math.min(6, Math.floor(num(value.exhaustionLevel)))),
+    inspiration: Math.max(0, Math.floor(num(value.inspiration))),
     ac: num(value.ac, 10),
     speed: num(value.speed, 30),
+    movementSpeeds: {
+      walk: num(value.speed, 30),
+      climb: Number.isFinite(Number(movementSpeeds.climb)) ? Math.max(0, num(movementSpeeds.climb)) : undefined,
+      swim: Number.isFinite(Number(movementSpeeds.swim)) ? Math.max(0, num(movementSpeeds.swim)) : undefined,
+      fly: Number.isFinite(Number(movementSpeeds.fly)) ? Math.max(0, num(movementSpeeds.fly)) : undefined,
+      hover: movementSpeeds.hover === true || undefined,
+    },
+    inventoryLoad: { ...inventoryLoad },
     initiativeBonus: num(value.initiativeBonus),
     saveDC: num(value.saveDC, 10),
     passivePerception: num(value.passivePerception, 10),
     conditions: [...new Set([...list(value.conditions).map(String), ...activeEffectConditions(value.dnd5eCombatState)])],
+    activeEffects: activeEffectViews(value.dnd5eCombatState),
     concentrating: value.concentrating === true || !!text(object(value.dnd5eCombatState).concentrationSpellId),
+    combatState: {
+      raging: combatState.raging === true || undefined,
+      frenzying: combatState.frenzying === true || undefined,
+      frenzyStartedTurnKey: text(combatState.frenzyStartedTurnKey) || undefined,
+      recklessAttackTurnKey: text(combatState.recklessAttackTurnKey) || undefined,
+      foeSlayerTurnKey: text(combatState.foeSlayerTurnKey) || undefined,
+      hordeBreakerOpportunityTurnKey: text(combatState.hordeBreakerOpportunityTurnKey) || undefined,
+      hordeBreakerUsedTurnKey: text(combatState.hordeBreakerUsedTurnKey) || undefined,
+      wildShapeFormId: text(combatState.wildShapeFormId) || undefined,
+      wildShapeCurrentHp: Number.isFinite(Number(combatState.wildShapeCurrentHp)) ? num(combatState.wildShapeCurrentHp) : undefined,
+      quiveringPalmTargetId: text(combatState.quiveringPalmTargetId) || undefined,
+      bonusProneEligibleTargetIds: list(combatState.bonusProneEligibleTargetIds).map(String),
+      rageFeatureOperations: (['rage-mobile-defense', 'bonus-prone-on-hit'] as const)
+        .filter((operation) => !!dnd5eRageFeatureForCharacter(character, operation)),
+      bonusWeaponAttackGrants: [
+        ...activityWeaponAttackGrants,
+        ...(genericBonusWeaponAttack && mainWeaponProfile ? [{
+          id: `generic:${genericBonusWeaponAttack.id}`,
+          label: genericBonusWeaponAttack.name,
+          turnKey: weaponAttackActionTurnKey,
+          economy: 'bonusAction' as const,
+          options: { featureBonusWeaponAttackId: genericBonusWeaponAttack.id },
+        }] : []),
+        ...(martialSpellBonusAvailable ? [{
+          id: 'martial-spell-synergy',
+          label: '特性附赠武器攻击',
+          turnKey: martialSpellBonusTurnKey,
+          economy: 'bonusAction' as const,
+          options: { featureBonusWeaponAttack: true },
+        }] : []),
+      ],
+      basicActionGrants: Object.values(character.dnd5eCombatState?.activityBasicActionGrants ?? {})
+        .filter((grant) => grant.schemaVersion === 1 && grant.economy === 'bonus-action')
+        .map((grant) => ({
+          grantId: grant.grantId,
+          label: grant.label,
+          turnKey: grant.appliedTurnKey,
+          actions: [...grant.actions],
+          shovePushDistanceBonusFeet: grant.shovePushDistanceBonusFeet,
+        })),
+      linkedEquipmentRecall: linkedEquipment && mainWeaponId &&
+        character.dnd5eCombatState?.linkedEquipmentIds?.includes(mainWeaponId)
+        ? { weaponId: mainWeaponId, weaponName: character.equipment?.mainWeapon?.name ?? '联结武器' }
+        : undefined,
+      extraActionTeleport: extraActionTeleport && text(combatState.extraActionTeleportTurnKey)
+        ? {
+            turnKey: text(combatState.extraActionTeleportTurnKey),
+            usedTurnKey: text(combatState.extraActionTeleportUsedTurnKey) || undefined,
+            rangeFeet: extraActionTeleport.mechanic.teleportRangeFeet ?? 30,
+          }
+        : undefined,
+    },
+    weaponProfile: weaponProfile ? {
+      weaponName: weaponProfile.weaponName,
+      mode: weaponProfile.mode,
+      attackAbility: weaponProfile.attackAbility,
+    } : undefined,
+    shillelaghAttackChoice: shillelaghAttackChoice ? {
+      spellcastingAbility: shillelaghAttackChoice.spellcastingAbility,
+      spellcastingModifier: shillelaghAttackChoice.spellcastingModifier,
+      strengthModifier: shillelaghAttackChoice.strengthModifier,
+    } : undefined,
+    wildShapeActions: wildShape?.actions.flatMap((action, index) =>
+      action.kind === 'weapon-attack' || action.kind === 'multiattack'
+        ? [{ index, id: action.id, name: action.name, kind: action.kind }]
+        : [],
+    ),
     classResources: object(value.classResources) as MobileCharacterView['classResources'],
     hitPointDice: list(value.hitPointDice).map((pool) => ({
       sides: Math.max(2, num(object(pool).sides, 6)),
@@ -405,6 +668,9 @@ function adaptCharacter(raw: unknown): MobileCharacterView {
     dnd5ePluginFeatureIds: list(value.dnd5ePluginFeatureIds).map(String),
     dnd5eFeatIds: list(value.dnd5eFeatIds).map(String),
     features: adaptCharacterFeatures(character),
+    sustainedSpellControls,
+    alternateResourceSpells,
+    spellModifierIntents,
     levelUpPlans: adaptLevelUpPlans(character),
     levelAdvancements: list(value.dnd5eLevelAdvancements).map((rawRecord) => {
       const record = object(rawRecord) as unknown as NonNullable<Character['dnd5eLevelAdvancements']>[number]
@@ -472,9 +738,13 @@ function adaptToken(raw: unknown, characterById: Map<string, MobileCharacterView
     hp: Math.max(0, character?.currentHp ?? num(value.hp, maxHp)),
     maxHp,
     elevation: num(value.elevationFeet),
+    airborne: num(value.elevationFeet) > 0 || combatState.flying === true || combatState.airborne === true,
+    concentrating: character?.concentrating === true || !!text(combatState.concentrationSpellId),
     controlled: value.viewerControlled === true,
     friendly: side === 'player' || value.type === 'player' || value.type === 'npc',
     conditions: [...new Set([...character?.conditions ?? [], ...activeEffectConditions(combatState)])],
+    activeEffects: [...(character?.activeEffects ?? []), ...activeEffectViews(combatState)]
+      .filter((effect, index, all) => all.findIndex((candidate) => candidate.id === effect.id) === index),
   }
 }
 
@@ -562,6 +832,9 @@ function persistentAreasForMap(raw: unknown, activeCharacterId?: string): Mobile
       sourceCharacterId: text(area.sourceCharacterId) || undefined,
       sourceTokenId: text(area.sourceTokenId) || undefined,
       coreSpellId: text(area.coreSpellId) || undefined,
+      sourceKind: text(area.sourceKind) || undefined,
+      slotLevel: Number.isInteger(Number(area.slotLevel)) ? Math.max(0, num(area.slotLevel)) : undefined,
+      castingClassId: text(area.castingClassId) || undefined,
       cells,
       anchorCell: Object.keys(anchorCell).length ? { col: Math.floor(num(anchorCell.col)), row: Math.floor(num(anchorCell.row)) } : undefined,
       movement: Object.keys(movement).length && (movement.economy === 'action' || movement.economy === 'bonus-action')
@@ -756,7 +1029,8 @@ function adaptSpells(character: MobileCharacterView | null, importedRaw: unknown
     const custom = imported.get(id)
     const automation = plugin?.automation.mode ?? text(object(custom?.automation).mode)
     const combat = DND5E_SRD_COMBAT_SPELLS.find((spell) => spell.id === id)
-    const headless = combatIds.has(id) || automation === 'headless-action'
+    const headless = (combatIds.has(id) && dnd5eSrdSpellHasFullHeadlessAutomation(id)) ||
+      automation === 'headless-action'
     const school = plugin?.school ?? (text(custom?.school) || combat?.school)
     const components = plugin?.components ?? object(custom?.components)
     const duration = plugin?.duration ?? object(custom?.duration)
@@ -829,6 +1103,7 @@ function adaptSpells(character: MobileCharacterView | null, importedRaw: unknown
         concentration: combat.concentration === true,
       } : undefined,
       rangeFeet: combat?.rangeFeet ?? range?.feet ?? (range?.type === 'touch' ? 5 : range?.type === 'self' ? 0 : undefined),
+      damageType: combat?.damageType ?? plugin?.mechanics?.damage?.type,
       target: combat?.target ?? pluginTarget,
       requiresVisibleTarget: combat?.requiresVisibleTarget,
       area: combat?.area ? {
@@ -883,6 +1158,7 @@ export function buildMobileWorkspace(input: {
   const characters = ownedRaw.map(adaptCharacter)
   const ownedCharacterIds = new Set(characters.map((character) => character.id))
   const activeCharacter = characters.find((character) => character.id === input.activeCharacterId) ?? characters[0] ?? null
+  const activeRawCharacter = ownedRaw.find((candidate) => text(object(candidate).id) === activeCharacter?.id) as Character | undefined
   const characterById = new Map(characters.map((character) => [character.id, character]))
   const visibleTokens = list(selectedMap?.tokens).map((token) => adaptToken(token, characterById, input.credentials)).filter((token) => token.id)
   const controlledTokens = visibleTokens.filter((token) => token.controlled || characterById.has(text(object(list(selectedMap?.tokens).find((raw) => object(raw).id === token.id)).characterId)))
@@ -906,6 +1182,10 @@ export function buildMobileWorkspace(input: {
     controlledTokens, visibleTokens,
     opaqueSegments: segmentsForGeometry(input.resources['map-geometry'], selectedMapId),
     persistentAreas: persistentAreasForMap(selectedMap, activeCharacter?.id),
+    spellOriginAreas: activeRawCharacter
+      ? dnd5eSpellOriginProjectionsForCharacter(activeRawCharacter, selectedMap as unknown as BattleMap)
+          .map((projection) => ({ id: projection.areaId, label: `${projection.label}（投影起点）` }))
+      : [],
     terrainElevations: terrainElevationsForGeometry(input.resources['map-geometry'], selectedMapId),
     lights: lightsForGeometry(input.resources['map-geometry'], selectedMapId),
     fogChunks: [],

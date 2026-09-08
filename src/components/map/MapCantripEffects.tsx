@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { Circle, Group, Image as KonvaImage, Line, Rect } from 'react-konva'
 import Konva from 'konva'
 import { MAP_SPELL_STATUS_ICONS } from './mapSpellStatusIcons'
@@ -6,6 +6,15 @@ import { useTokenBadgeImage } from './mapEffectHooks'
 import type { MapSpellStatusId } from './tokenStatusTooltip'
 import type { MapProjectile } from './mapCanvasContracts'
 import { DirectionalSpriteAtlasEffect, MovingFireTextureEffect, TargetSpriteAtlasEffect, TargetTextureManifestation } from './MapEffectPrimitives'
+import type { TokenMovementAnimation } from '../../lib/tokenMovementAnimation'
+import type { RegisterTokenPositionNode } from './MapTokenNode'
+import {
+  CHILL_TOUCH_PERSISTENT_FRAMES,
+  CHILL_TOUCH_PERSISTENT_DIAMETER_FACTOR,
+  CHILL_TOUCH_PERSISTENT_INITIAL_FRAME,
+  CHILL_TOUCH_SEQUENCE_ASSET_URL,
+  chillTouchPersistentPosition,
+} from './chillTouchPersistentPresentation'
 export { NewSpellManifestation } from './MapUtilitySpellEffects'
 export function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
@@ -1282,36 +1291,141 @@ export function SpectralSkeletalHand({ radius }: { radius: number }) {
   )
 }
 
-export function ChillTouchPersistentMark(input: { x: number; y: number; radius: number }) {
-  const handImage = useTokenBadgeImage('/assets/vfx/chill-touch-hand.png')
+export function ChillTouchPersistentMark(input: {
+  tokenId: string
+  x: number
+  y: number
+  radius: number
+  movementAnimation?: TokenMovementAnimation
+  registerPositionNode?: RegisterTokenPositionNode
+}) {
+  const { tokenId, x, y, radius, movementAnimation, registerPositionNode } = input
+  const rootRef = useRef<Konva.Group>(null)
+  const handRef = useRef<Konva.Image>(null)
+  const movementFrameRef = useRef(0)
+  const positionLockedRef = useRef(false)
+  // Reuse the exact atlas used by the one-second manifestation. Frame 10 is
+  // the mature closed hand that visually reads as gripping the target.
+  const handImage = useTokenBadgeImage(CHILL_TOUCH_SEQUENCE_ASSET_URL)
+  const frameWidth = handImage ? (handImage.naturalWidth || handImage.width) / 4 : 1
+  const frameHeight = handImage ? (handImage.naturalHeight || handImage.height) / 4 : 1
+  const persistentFrame = CHILL_TOUCH_PERSISTENT_INITIAL_FRAME
+  const diameter = Math.max(24, radius) * CHILL_TOUCH_PERSISTENT_DIAMETER_FACTOR
+
+  const cancelPositionAnimation = useCallback(() => {
+    if (!movementFrameRef.current) return
+    window.cancelAnimationFrame(movementFrameRef.current)
+    movementFrameRef.current = 0
+  }, [])
+  const setPositionLocked = useCallback((locked: boolean) => {
+    positionLockedRef.current = locked
+  }, [])
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root || !registerPositionNode) return
+    return registerPositionNode(
+      tokenId,
+      root,
+      cancelPositionAnimation,
+      setPositionLocked,
+    )
+  }, [cancelPositionAnimation, registerPositionNode, setPositionLocked, tokenId])
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root || positionLockedRef.current) return
+    root.position(chillTouchPersistentPosition({ x, y, movementAnimation, now: Date.now() }))
+  }, [movementAnimation, x, y])
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root || !movementAnimation || positionLockedRef.current) return
+    cancelPositionAnimation()
+    let disposed = false
+    const tick = () => {
+      if (disposed || positionLockedRef.current) {
+        movementFrameRef.current = 0
+        return
+      }
+      const now = Date.now()
+      const position = chillTouchPersistentPosition({ x, y, movementAnimation, now })
+      const inFlight = now < movementAnimation.issuedAt + movementAnimation.durationMs
+      root.position(position)
+      root.getLayer()?.batchDraw()
+      if (inFlight) movementFrameRef.current = window.requestAnimationFrame(tick)
+      else movementFrameRef.current = 0
+    }
+    tick()
+    return () => {
+      disposed = true
+      cancelPositionAnimation()
+    }
+  }, [cancelPositionAnimation, movementAnimation, x, y])
+
+  useEffect(() => {
+    const hand = handRef.current
+    const layer = hand?.getLayer()
+    if (!hand || !handImage || !layer) return
+    let frame = 0
+    const drawMatureFrame = () => {
+      const frameIndex = CHILL_TOUCH_PERSISTENT_FRAMES[
+        frame % CHILL_TOUCH_PERSISTENT_FRAMES.length
+      ]
+      hand.crop({
+        x: (frameIndex % 4) * frameWidth,
+        y: Math.floor(frameIndex / 4) * frameHeight,
+        width: frameWidth,
+        height: frameHeight,
+      })
+      hand.scale({
+        x: 0.985 + (frame % 2) * 0.015,
+        y: 1 - (frame % 2) * 0.012,
+      })
+      frame += 1
+      layer.batchDraw()
+    }
+    drawMatureFrame()
+    const interval = window.setInterval(drawMatureFrame, 220)
+    return () => window.clearInterval(interval)
+  }, [frameHeight, frameWidth, handImage])
+
   return (
     <Group
-      x={input.x + input.radius * 0.18}
-      y={input.y + input.radius * 0.12}
-      opacity={0.88}
+      ref={rootRef}
+      x={x}
+      y={y}
+      opacity={0.92}
       listening={false}
     >
       <Circle
-        radius={input.radius * 0.94}
-        stroke="rgba(103,232,249,0.36)"
+        radius={radius * 1.02}
+        stroke="rgba(167,139,250,0.42)"
         strokeWidth={2}
         dash={[4, 8]}
-        shadowColor="#0891b2"
-        shadowBlur={10}
+        shadowColor="#7c3aed"
+        shadowBlur={14}
         perfectDrawEnabled={false}
       />
       {handImage ? (
         <KonvaImage
+          ref={handRef}
           image={handImage}
-          x={-input.radius}
-          y={-input.radius * 1.12}
-          width={input.radius * 2}
-          height={input.radius * 2}
-          shadowColor="#22d3ee"
-          shadowBlur={12}
+          crop={{
+            x: (persistentFrame % 4) * frameWidth,
+            y: Math.floor(persistentFrame / 4) * frameHeight,
+            width: frameWidth,
+            height: frameHeight,
+          }}
+          x={-diameter / 2}
+          y={-diameter / 2}
+          width={diameter}
+          height={diameter}
+          shadowColor="#7c3aed"
+          shadowBlur={20}
           perfectDrawEnabled={false}
         />
-      ) : <SpectralSkeletalHand radius={input.radius} />}
+      ) : <SpectralSkeletalHand radius={radius} />}
     </Group>
   )
 }

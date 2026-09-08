@@ -61,6 +61,7 @@ import {
 import {
   applyDnd5eMonsterAbilityTemplate,
   DND5E_MONSTER_ABILITY_TEMPLATES,
+  dnd5eMonsterWorkshopDefaultSaveDc,
   type Dnd5eMonsterAbilityTemplate,
   type Dnd5eMonsterAbilityTemplateSection,
 } from '../../rulesets/dnd5e/monsterWorkshopAbilityTemplates'
@@ -542,7 +543,7 @@ export default function Dnd5eMonsterWorkshopDialog({
       const dependencyNotice = applied.addedActionIds.length + applied.addedMultiattackIds.length > 1
         ? `，并带入 ${applied.addedActionIds.length + applied.addedMultiattackIds.length - 1} 个依赖动作`
         : ''
-      setMessage(`已从“${template.sourceMonsterName}”复制“${template.name}”${dependencyNotice}；所有规则均为当前怪物的独立副本。`)
+      setMessage(`已加入${template.sourceCount > 1 ? `由 ${template.sourceCount} 个图鉴来源归并的通用` : `来自“${template.sourceMonsterName}”的`}“${template.name}”模板${dependencyNotice}；【名称】已替换为当前怪物，所有规则均为独立副本。`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     }
@@ -1540,7 +1541,7 @@ export default function Dnd5eMonsterWorkshopDialog({
               <div className="space-y-2">
                 {draft.traits.map((trait, index) => {
                   const update = (patch: Partial<typeof trait>) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
-                  const headlessPreset = trait.preservedTrait?.automation === 'headless' || ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus', 'charge-damage'].includes(trait.ruleKind)
+                  const headlessPreset = trait.preservedTrait?.automation === 'headless' || ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus', 'charge-damage', 'relentless', 'sneak-attack', 'surprise-attack', 'stench'].includes(trait.ruleKind)
                   const coveredByFullMechanic = dnd5eMonsterTraitCoveredByFullMechanic(draft, trait)
                   const collapsed = collapsedTraitIndexes.has(index)
                   return <div id={dnd5eMonsterTraitReviewTarget(index)} key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -1555,11 +1556,11 @@ export default function Dnd5eMonsterWorkshopDialog({
                         ruleKind,
                         preservedTrait: undefined,
                         templateSource: undefined,
-                        automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus', 'charge-damage'].includes(ruleKind)
+                        automation: ['regeneration', 'undead-fortitude', 'nimble-escape', 'swarm', 'magic-resistance', 'limited-magic-immunity', 'magic-weapons', 'conditional-target-bonus', 'charge-damage', 'relentless', 'sneak-attack', 'surprise-attack', 'stench'].includes(ruleKind)
                           ? 'headless'
                           : 'dm-adjudication',
                       })
-                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset || coveredByFullMechanic ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">{coveredByFullMechanic ? '同名机制接管' : 'Headless'}</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => removeTrait(index)} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    }} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option><option value="magic-resistance">魔法抗性</option><option value="limited-magic-immunity">有限魔法免疫</option><option value="magic-weapons">魔法武器</option><option value="relentless">坚韧不屈</option><option value="sneak-attack">偷袭</option><option value="surprise-attack">突袭攻击</option><option value="stench">恶臭</option><option value="conditional-target-bonus">按目标状态获得攻击/伤害加值</option><option value="keen-sense">灵敏感官＋盲视</option><option value="ambusher">伏击手（突袭先攻优势）</option><option value="charge-damage">冲锋/袭掠追加伤害</option></select><select value={headlessPreset || coveredByFullMechanic ? 'headless' : 'dm-adjudication'} disabled className={inputClass()}><option value="headless">{coveredByFullMechanic ? '同名机制接管' : 'Headless'}</option><option value="dm-adjudication">结构化／DM 裁定</option></select><button type="button" onClick={() => removeTrait(index)} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
                     {(trait.ruleKind === 'regeneration' || trait.ruleKind === 'undead-fortitude') && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       {trait.ruleKind === 'regeneration' ? <label className="text-xs text-slate-400">每回合恢复<input type="number" min={1} value={trait.amount} onChange={(event) => update({ amount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <label className="text-xs text-slate-400">DC 基数<input type="number" min={1} value={trait.dcBase} onChange={(event) => update({ dcBase: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
                       <label className="col-span-2 text-xs text-slate-400">{trait.ruleKind === 'regeneration' ? '压制再生的伤害类型' : '不能触发的伤害类型'}<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ damageTypes: trait.damageTypes.includes(type) ? trait.damageTypes.filter((entry) => entry !== type) : [...trait.damageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.damageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{DND5E_DAMAGE_TYPE_LABELS[type]}</button>)}</div></label>
@@ -1572,6 +1573,23 @@ export default function Dnd5eMonsterWorkshopDialog({
                       <label className="text-xs text-slate-400">附带盲视（尺）<input type="number" min={0} value={trait.keenSenseBlindsightFeet} onChange={(event) => update({ keenSenseBlindsightFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                     </div>}
                     {trait.ruleKind === 'ambusher' && <p className="mt-2 rounded-lg border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-100">仅在该怪物实际发动突袭时获得先攻优势；当前由 DM 确认突袭成立，结构会完整写入 Stat Block。</p>}
+                    {trait.ruleKind === 'relentless' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">单次伤害上限<input type="number" min={1} value={trait.relentlessMaximumDamage} onChange={(event) => update({ relentlessMaximumDamage: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-3">不超过该数值的一次伤害原本会使怪物降至 0 HP 时，Headless 改为保留 1 HP。</p>
+                    </div>}
+                    {trait.ruleKind === 'sneak-attack' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">偷袭额外伤害<input value={trait.sneakAttackDamageDice} onChange={(event) => update({ sneakAttackDamageDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-3">每回合一次；攻击具有优势，或目标 5 尺内存在未失能盟友且攻击不具有劣势时触发。</p>
+                    </div>}
+                    {trait.ruleKind === 'surprise-attack' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">突袭额外伤害<input value={trait.surpriseAttackDamageDice} onChange={(event) => update({ surpriseAttackDamageDice: event.target.value })} placeholder="2d6" className={`mt-1 ${inputClass()}`} /></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200 lg:col-span-3">仅在战斗第一轮命中仍处于受惊状态的目标时触发。</p>
+                    </div>}
+                    {trait.ruleKind === 'stench' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      <label className="text-xs text-slate-400">灵光半径（尺）<input type="number" min={5} step={5} value={trait.stenchRangeFeet} onChange={(event) => update({ stenchRangeFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="text-xs text-slate-400">体质豁免 DC<input type="number" min={1} max={100} value={trait.stenchSaveDc} onChange={(event) => update({ stenchSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /><button type="button" onClick={() => update({ stenchSaveDc: dnd5eMonsterWorkshopDefaultSaveDc(draft, 'con') })} className="mt-1 text-[10px] text-violet-300 hover:text-violet-200">按体质自动计算：{dnd5eMonsterWorkshopDefaultSaveDc(draft, 'con')}</button></label>
+                      <p className="col-span-2 self-end pb-2 text-[11px] leading-relaxed text-emerald-200">范围内开始回合时进行体质豁免；失败中毒至下回合开始，成功后对该来源免疫 24 小时。</p>
+                    </div>}
                     {trait.ruleKind === 'charge-damage' && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
                       <label className="text-xs text-slate-400">至少直线移动（尺）<input type="number" min={5} value={trait.chargeMinimumFeet} onChange={(event) => update({ chargeMinimumFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>
                       <label className="text-xs text-slate-400">随后命中的攻击<select value={trait.chargeActionId} onChange={(event) => update({ chargeActionId: event.target.value })} className={`mt-1 ${inputClass()}`}><option value="">请选择攻击</option>{draft.actions.filter((action) => action.category === 'action' && action.kind === 'weapon-attack').map((action) => <option key={action.id} value={action.id}>{action.name || action.id}</option>)}</select></label>

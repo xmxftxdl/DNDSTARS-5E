@@ -25,6 +25,10 @@ import {
   verifyMarketplaceProductSignature,
   type MarketplaceSigningKey,
 } from './marketplaceSignature'
+import {
+  DND5E_PLUGIN_CONTENT_CATEGORY_IDS,
+  type Dnd5ePluginContentCategory,
+} from '../../shared/plugin-content-category.mjs'
 
 export type PluginPublicationVisibility = 'public' | 'unlisted' | 'private'
 export type PluginPublicationStatus = 'pending' | 'published' | 'rejected' | 'suspended' | 'withdrawn'
@@ -77,6 +81,36 @@ export interface PluginCatalogEntry {
   versions: PluginCatalogVersion[]
   createdAt: number
   updatedAt: number
+  popularity?: PluginCatalogPopularity
+}
+
+export interface PluginCatalogPopularity {
+  periodDays: number
+  views: number
+  downloads: number
+  installs: number
+  activeInstallations: number
+}
+
+export interface PluginCatalogFacets {
+  total: number
+  categories: Record<Dnd5ePluginContentCategory, number>
+}
+
+export interface PluginCatalogSnapshot {
+  plugins: PluginCatalogEntry[]
+  facets: PluginCatalogFacets
+  pagination: {
+    offset: number
+    limit: number
+    returned: number
+    total: number
+    hasMore: boolean
+  }
+  discovery?: {
+    newest: PluginCatalogEntry[]
+    hot: PluginCatalogEntry[]
+  }
 }
 
 export interface MarketplaceCapabilities {
@@ -164,17 +198,87 @@ export function loadMarketplaceSigningKey(): Promise<MarketplaceSigningKey> {
 
 export async function loadPluginCatalog(input: {
   query?: string
-  category?: string
+  category?: Dnd5ePluginContentCategory
   publisher?: string
+  offset?: number
+  limit?: number
 } = {}): Promise<PluginCatalogEntry[]> {
+  return (await loadPluginCatalogSnapshot(input)).plugins
+}
+
+export async function loadPluginCatalogSnapshot(input: {
+  query?: string
+  category?: Dnd5ePluginContentCategory
+  publisher?: string
+  offset?: number
+  limit?: number
+} = {}): Promise<PluginCatalogSnapshot> {
   const params = new URLSearchParams()
   if (input.query?.trim()) params.set('q', input.query.trim())
   if (input.category?.trim()) params.set('category', input.category.trim())
   if (input.publisher?.trim()) params.set('publisher', input.publisher.trim())
-  const response = await catalogRequest<{ plugins: PluginCatalogEntry[] }>(
+  if (Number.isSafeInteger(input.offset) && Number(input.offset) > 0) params.set('offset', String(input.offset))
+  if (Number.isSafeInteger(input.limit) && Number(input.limit) > 0) params.set('limit', String(input.limit))
+  const response = await catalogRequest<{
+    plugins: PluginCatalogEntry[]
+    pagination?: {
+      offset?: number
+      limit?: number
+      returned?: number
+      total?: number
+      hasMore?: boolean
+    }
+    discovery?: {
+      newest?: PluginCatalogEntry[]
+      hot?: PluginCatalogEntry[]
+    }
+    facets?: {
+      total?: number
+      categories?: Partial<Record<Dnd5ePluginContentCategory, number>>
+    }
+  }>(
     `/plugins/catalog${params.size ? `?${params.toString()}` : ''}`,
   )
-  return Array.isArray(response.plugins) ? response.plugins : []
+  const plugins = Array.isArray(response.plugins) ? response.plugins : []
+  const categories = Object.fromEntries(DND5E_PLUGIN_CONTENT_CATEGORY_IDS.map((category) => {
+    const count = response.facets?.categories?.[category]
+    return [category, Number.isFinite(count) && Number(count) >= 0 ? Number(count) : 0]
+  })) as Record<Dnd5ePluginContentCategory, number>
+  const filteredTotal = input.category ? categories[input.category] : (
+    Number.isFinite(response.facets?.total) ? Number(response.facets?.total) : plugins.length
+  )
+  const offset = Number.isSafeInteger(response.pagination?.offset) && Number(response.pagination?.offset) >= 0
+    ? Number(response.pagination?.offset)
+    : Math.max(0, Number(input.offset) || 0)
+  const limit = Number.isSafeInteger(response.pagination?.limit) && Number(response.pagination?.limit) > 0
+    ? Number(response.pagination?.limit)
+    : Math.max(plugins.length, Number(input.limit) || 0)
+  return {
+    plugins,
+    facets: {
+      total: Number.isFinite(response.facets?.total) && Number(response.facets?.total) >= 0
+        ? Number(response.facets?.total)
+        : plugins.length,
+      categories,
+    },
+    pagination: {
+      offset,
+      limit,
+      returned: Number.isSafeInteger(response.pagination?.returned) && Number(response.pagination?.returned) >= 0
+        ? Number(response.pagination?.returned)
+        : plugins.length,
+      total: Number.isSafeInteger(response.pagination?.total) && Number(response.pagination?.total) >= 0
+        ? Number(response.pagination?.total)
+        : filteredTotal,
+      hasMore: response.pagination?.hasMore === true,
+    },
+    ...(response.discovery ? {
+      discovery: {
+        newest: Array.isArray(response.discovery.newest) ? response.discovery.newest : [],
+        hot: Array.isArray(response.discovery.hot) ? response.discovery.hot : [],
+      },
+    } : {}),
+  }
 }
 
 export async function loadMarketplaceCapabilities(): Promise<MarketplaceCapabilities> {

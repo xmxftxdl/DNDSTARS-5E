@@ -1,0 +1,794 @@
+{
+  "id": "srd-5.1:kraken",
+  "slug": "kraken",
+  "name": "海妖克拉肯",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [
+    "已修复：闪电风暴现在要求恰好分配三束闪电，同一生物可重复选择；每束独立进行 DC 23 敏捷豁免和 4d10 雷电伤害结算。普通动作只消耗一次动作，传奇版只消耗 2 点；缺束、多束或骰值不完整会原子回滚。",
+    "保留边界：当前地图战斗目标模型只把生物交给豁免处理器；原文允许闪电命中物体，物体作为目标时仍需 DM 裁定。",
+    "已修复：安全名单曾把已经完整结构化的触手、抓取关系、甩掷移动、碰撞伤害、倒地及其多重攻击和传奇引用全部降级。现已恢复 Headless；关系容量、目标体型、距离、移动、伤害骰、一次动作消耗和失败时原子回滚均由权威引擎验证。",
+    "已修复：啃咬现在只接受已被触手抓住的大型或更小目标；命中后结束触手抓取并建立吞咽关系，自动处理目盲、束缚、12d6 胃酸、50 点体内伤害触发的 DC 25 反刍、体内外全掩护，以及死亡后花费 15 尺移动离开尸体并倒地。"
+  ],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.targetMaxSizeRank",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].relation.movement",
+        "attack.onHitEffects[].relation.endsOnSourceIncapacitated",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].regurgitation.damageThreshold",
+        "attack.onHitEffects[].regurgitation.ability",
+        "attack.onHitEffects[].regurgitation.dc",
+        "attack.onHitEffects[].regurgitation.ejects",
+        "attack.onHitEffects[].regurgitation.applyProne",
+        "attack.onHitEffects[].regurgitation.placementWithinFeet",
+        "attack.onHitEffects[].sourceDeathEscape.movementCostFeet",
+        "attack.onHitEffects[].sourceDeathEscape.applyProne",
+        "attack.onHitEffects[].removeSourceRelationSlotGroupOnApply",
+        "automation",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "swallow relation, total cover, internal attack, source death, movement-cost corpse exit, prone"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tentacle",
+      "name": "触手",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].relation.kind",
+        "attack.onHitEffects[].relation.slotGroup",
+        "attack.onHitEffects[].relation.capacity",
+        "attack.onHitEffects[].relation.maxDistanceFeet",
+        "attack.onHitEffects[].relation.targetMaxSizeRank",
+        "attack.onHitEffects[].relation.whenCapacityFull",
+        "attack.onHitEffects[].escapeDc",
+        "attack.onHitEffects[].conditions[].condition",
+        "attack.onHitEffects[].conditions[].dependsOnCondition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "fling",
+      "name": "甩掷",
+      "automation": "headless",
+      "rule": "throw-linked-target",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.slotGroup",
+        "rule.maximumDistanceFeet",
+        "rule.targetMaxSizeRank",
+        "rule.collisionDamage.distanceFeetPerDie",
+        "rule.collisionDamage.sides",
+        "rule.collisionDamage.type",
+        "rule.conditionAfterThrow",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "relation, size, forced movement, collision damage, prone, release, rollback"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "lightning-storm",
+      "name": "闪电风暴",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.minimumTargets",
+        "rule.maximumTargets",
+        "rule.allowRepeatedTargetSelections",
+        "rule.damageRollsPerTargetSelection",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "three independent bolts, repeated targets, per-bolt saves, legendary cost, atomic rollback"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-two-tentacles-and-fling",
+      "name": "多重攻击：触手 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-tentacle-and-two-flings",
+      "name": "多重攻击：触手 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack-flings",
+      "name": "多重攻击：甩掷 ×3",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "sequence[]"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "legendary-tentacle-attack",
+      "name": "触手攻击或甩掷",
+      "automation": "headless",
+      "rule": "other",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "legendary-fling",
+      "name": "触手攻击或甩掷",
+      "automation": "headless",
+      "rule": "throw-linked-target",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "referencedActionId",
+        "relationRequirement.kind",
+        "relationRequirement.slotGroup",
+        "rule.kind",
+        "rule.slotGroup",
+        "rule.maximumDistanceFeet",
+        "rule.targetMaxSizeRank",
+        "rule.collisionDamage.distanceFeetPerDie",
+        "rule.collisionDamage.sides",
+        "rule.collisionDamage.type",
+        "rule.conditionAfterThrow"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "relation, size, forced movement, collision damage, prone, release, rollback"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "lightning-storm-costs-2-actions",
+      "name": "闪电风暴（消耗 2 动作）",
+      "automation": "headless",
+      "rule": "area-saving-throw",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.minimumTargets",
+        "rule.maximumTargets",
+        "rule.allowRepeatedTargetSelections",
+        "rule.damageRollsPerTargetSelection",
+        "rule.ability",
+        "rule.dc",
+        "rule.magical",
+        "rule.requiresSourceCanSeeTarget",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "duplicate-target",
+        "exhausted-resource",
+        "three independent bolts, repeated targets, per-bolt saves, legendary cost, atomic rollback"
+      ]
+    },
+    {
+      "section": "legendaryActions",
+      "sectionLabel": "传奇动作",
+      "id": "ink-cloud-costs-3-actions",
+      "name": "墨汁云（消耗 3 动作）",
+      "automation": "headless",
+      "rule": "persistent-area",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "automation",
+        "legendaryCost",
+        "rule.kind",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.durationRounds",
+        "rule.expiresAtSourceNextTurnEnd",
+        "rule.concentration",
+        "rule.anchorMode",
+        "rule.vertical.mode",
+        "rule.vertical.heightFeet",
+        "rule.vertical.anchorOffsetFeet",
+        "rule.relation",
+        "rule.includeSelf",
+        "rule.requiredEnvironment",
+        "rule.obscuration.kind",
+        "rule.obscuration.sourceCanSeeThrough",
+        "rule.color",
+        "rule.visual.preset",
+        "rule.visual.intensity",
+        "rule.triggers[].id",
+        "rule.triggers[].label",
+        "rule.triggers[].timing",
+        "rule.triggers[].oncePerTurn",
+        "rule.triggers[].savingThrow.ability",
+        "rule.triggers[].savingThrow.dc",
+        "rule.triggers[].savingThrow.onSuccess",
+        "rule.triggers[].damage.count",
+        "rule.triggers[].damage.sides",
+        "rule.triggers[].damage.modifier",
+        "rule.triggers[].damage.type"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "minimum",
+        "maximum",
+        "no-resource",
+        "wrong-environment"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 3,
+      "slug": "kraken",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T23:49:27.800Z",
+      "name": "海妖克拉肯",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "challengeRating": "23",
+      "total": 334,
+      "mapId": "verify-ui-kraken-inspect-1788565767846",
+      "combatId": "verify-ui-kraken-inspect-1788565767846:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-04T23:49:32.376Z",
+      "evidenceFile": "ui-cases/monsters/003-kraken.json"
+    },
+    {
+      "index": 180,
+      "slug": "kraken",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:49:29.846Z",
+      "name": "海妖克拉肯",
+      "actionId": null,
+      "actionName": null,
+      "kind": "inspect-only",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-kraken-inspect-1788562169918",
+      "combatId": "verify-ui-kraken-inspect-1788562169918:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "status": "inspect-only",
+      "limitation": "No direct Headless weapon action; this case checks the actual dock only.",
+      "finishedAt": "2026-09-04T22:49:36.338Z",
+      "evidenceFile": "ui-cases/monsters/180-kraken.json"
+    },
+    {
+      "index": 6,
+      "mode": "specials",
+      "startedAt": "2026-09-04T23:12:51.221Z",
+      "slug": "kraken",
+      "name": "海妖克拉肯",
+      "actionId": "lightning-storm",
+      "actionName": "闪电风暴",
+      "legendary": false,
+      "movement": "none",
+      "fixtureActionId": null,
+      "section": "actions",
+      "total": 7,
+      "mapId": "verify-ui-kraken-lightning-storm-1788563572123",
+      "combatId": "verify-ui-kraken-lightning-storm-1788563572123:combat",
+      "actorPosition": {
+        "x": 280,
+        "y": 350
+      },
+      "targetPosition": {
+        "x": 455,
+        "y": 245
+      },
+      "before": {
+        "maps": [
+          {
+            "id": "verify-ui-kraken-lightning-storm-1788563572123",
+            "name": "怪物验证 · 海妖克拉肯",
+            "width": 1120,
+            "height": 700,
+            "gridSize": 70,
+            "feetPerCell": 5,
+            "gridOffsetX": 0,
+            "gridOffsetY": 0,
+            "showGrid": true,
+            "tokens": [
+              {
+                "id": "actor",
+                "label": "海妖克拉肯",
+                "x": 280,
+                "y": 350,
+                "color": "#ef4444",
+                "emoji": "M",
+                "size": 4,
+                "creatureSize": "巨型",
+                "type": "enemy",
+                "poolId": "srd-5.1:kraken",
+                "hp": 472,
+                "maxHp": 472,
+                "dnd5eCombatState": {
+                  "schemaVersion": 2
+                },
+                "dnd5eWorldTimeAppliedMinute": 480
+              },
+              {
+                "id": "target",
+                "label": "验证目标",
+                "x": 455,
+                "y": 245,
+                "color": "#3b82f6",
+                "emoji": "H",
+                "size": 1,
+                "creatureSize": "中型",
+                "type": "player",
+                "characterId": "hero",
+                "hp": 100000,
+                "maxHp": 100000
+              }
+            ]
+          }
+        ],
+        "selectedId": "verify-ui-kraken-lightning-storm-1788563572123",
+        "updatedAt": 1788563574918,
+        "_sync": {
+          "schemaVersion": 1,
+          "revision": 710,
+          "writerId": "client:9a9bfa9f-55ac-46df-bd91-a9bc76d6b061",
+          "writtenAt": 1788563575051
+        }
+      },
+      "status": "passed",
+      "scope": "真实控制台显示 DM 裁定入口；不再把未完成的三束闪电当作普通范围动作。",
+      "finishedAt": "2026-09-04T23:12:58.876Z",
+      "evidenceFile": "ui-cases/specials/06.json"
+    },
+    {
+      "mapId": "kraken-lightning-ui-1788599112248",
+      "combatId": "kraken-lightning-ui-1788599112248:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "startedAt": "2026-09-05T09:05:12.942Z",
+      "selection": {
+        "targetIds": [
+          "target",
+          "target",
+          "target"
+        ],
+        "progress": [
+          "0/3",
+          "1/3",
+          "2/3"
+        ]
+      },
+      "settlement": {
+        "hpBefore": 200,
+        "hpAfter": 176
+      },
+      "dmLog": "克拉肯使用闪电风暴，共造成 24 点伤害。",
+      "playerLog": "克拉肯使用闪电风暴，共造成 24 点伤害。",
+      "status": "passed",
+      "finishedAt": "2026-09-05T09:05:49.463Z",
+      "mode": "area-action-special",
+      "actionId": "lightning-storm"
+    },
+    {
+      "mapId": "kraken-bite-ui-1788601608029",
+      "combatId": "kraken-bite-ui-1788601608029:combat",
+      "dmBase": "http://127.0.0.1:7073",
+      "playerBase": "http://127.0.0.1:7074",
+      "startedAt": "2026-09-05T09:46:48.512Z",
+      "beforeHp": 200,
+      "afterTentacle": {
+        "currentHp": 175,
+        "conditions": [
+          "grappled",
+          "restrained"
+        ],
+        "activeEffects": [
+          {
+            "schemaVersion": 1,
+            "id": "relation:grapple:actor:tentacle:target",
+            "definitionId": "condition:grappled",
+            "label": "擒抱",
+            "kind": "condition",
+            "standardCondition": "grappled",
+            "source": {
+              "kind": "monster",
+              "actorId": "actor",
+              "actorName": "克拉肯",
+              "rulesId": "monster:srd-5.1:kraken:tentacle:tentacle-grapple",
+              "magical": false
+            },
+            "appliedAt": 1788601622930,
+            "duration": {
+              "type": "permanent"
+            },
+            "escapeCheck": {
+              "ability": "str",
+              "skill": "athletics",
+              "alternativeAbility": "dex",
+              "alternativeSkill": "acrobatics",
+              "dc": 18,
+              "economy": "action"
+            },
+            "relation": {
+              "schemaVersion": 1,
+              "kind": "grapple",
+              "sourceActorId": "actor",
+              "sourceActionId": "tentacle",
+              "slotGroup": "tentacle",
+              "maxDistanceFeet": 30,
+              "movement": "drag-target",
+              "endsOnSourceIncapacitated": true
+            },
+            "stackingKey": "relation:grapple:actor:tentacle:target",
+            "stackingPolicy": "refresh-duration",
+            "visibility": "public"
+          },
+          {
+            "schemaVersion": 1,
+            "id": "relation-dependent:grapple:actor:tentacle:target:restrained",
+            "definitionId": "condition:restrained",
+            "label": "束缚",
+            "kind": "condition",
+            "standardCondition": "restrained",
+            "source": {
+              "kind": "monster",
+              "actorId": "actor",
+              "actorName": "克拉肯",
+              "rulesId": "monster:srd-5.1:kraken:tentacle:tentacle-grapple",
+              "magical": false
+            },
+            "appliedAt": 1788601622931,
+            "duration": {
+              "type": "permanent"
+            },
+            "dependsOnEffectId": "relation:grapple:actor:tentacle:target",
+            "stackingKey": "relation-dependent:grapple:actor:tentacle:target:restrained",
+            "stackingPolicy": "refresh-duration",
+            "visibility": "public"
+          }
+        ]
+      },
+      "afterBite": {
+        "currentHp": 144,
+        "conditions": [
+          "restrained",
+          "blinded"
+        ],
+        "activeEffects": [
+          {
+            "schemaVersion": 1,
+            "id": "relation:swallowed:actor:swallow:target",
+            "definitionId": "condition:restrained",
+            "label": "束缚",
+            "kind": "condition",
+            "standardCondition": "restrained",
+            "source": {
+              "kind": "monster",
+              "actorId": "actor",
+              "actorName": "克拉肯",
+              "rulesId": "monster:srd-5.1:kraken:bite:bite-swallow",
+              "magical": false
+            },
+            "appliedAt": 1788601640284,
+            "duration": {
+              "type": "permanent"
+            },
+            "periodicDamage": {
+              "timing": "source-turn-start",
+              "count": 12,
+              "sides": 6,
+              "modifier": 0,
+              "type": "acid"
+            },
+            "relation": {
+              "schemaVersion": 1,
+              "kind": "swallowed",
+              "sourceActorId": "actor",
+              "sourceActionId": "bite",
+              "slotGroup": "swallow",
+              "maxDistanceFeet": 5,
+              "movement": "carry-target",
+              "endsOnSourceIncapacitated": false
+            },
+            "stackingKey": "relation:swallowed:actor:swallow:target",
+            "stackingPolicy": "refresh-duration",
+            "visibility": "public"
+          },
+          {
+            "schemaVersion": 1,
+            "id": "relation-dependent:swallowed:actor:swallow:target:blinded",
+            "definitionId": "condition:blinded",
+            "label": "目盲",
+            "kind": "condition",
+            "standardCondition": "blinded",
+            "source": {
+              "kind": "monster",
+              "actorId": "actor",
+              "actorName": "克拉肯",
+              "rulesId": "monster:srd-5.1:kraken:bite:bite-swallow",
+              "magical": false
+            },
+            "appliedAt": 1788601640286,
+            "duration": {
+              "type": "permanent"
+            },
+            "dependsOnEffectId": "relation:swallowed:actor:swallow:target",
+            "stackingKey": "relation-dependent:swallowed:actor:swallow:target:blinded",
+            "stackingPolicy": "refresh-duration",
+            "visibility": "public"
+          }
+        ],
+        "actionAvailable": 0
+      },
+      "dmLogs": [
+        "海妖克拉肯 使用触手攻击 吞咽验证目标：触手 → 吞咽验证目标 16+17=33 命中；共造成 25 点伤害。",
+        "海妖克拉肯 使用啃咬攻击 吞咽验证目标：啃咬 → 吞咽验证目标 16+17=33 命中；共造成 31 点伤害。"
+      ],
+      "playerLogs": [
+        "海妖克拉肯 使用触手攻击 吞咽验证目标：触手 → 吞咽验证目标 16+17=33 命中；共造成 25 点伤害。",
+        "海妖克拉肯 使用啃咬攻击 吞咽验证目标：啃咬 → 吞咽验证目标 16+17=33 命中；共造成 31 点伤害。"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T09:47:23.429Z",
+      "mode": "swallow-lifecycle-special",
+      "actionId": "bite"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "两栖",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "行动自如",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "攻城怪物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 29,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

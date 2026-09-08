@@ -1,0 +1,136 @@
+{
+  "id": "srd-5.1:wereboar-boar",
+  "slug": "wereboar-boar",
+  "name": "野猪人（野猪形态）",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "tusks",
+      "name": "双獠牙",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].magical",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].targetCreatureTypeRequirements[]",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "tusks-lycanthropy:apply",
+        "tusks-lycanthropy:save",
+        "tusks-lycanthropy:excluded-type"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 128,
+      "slug": "wereboar-boar",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:35:16.280Z",
+      "name": "野猪人（野猪形态）",
+      "actionId": "tusks",
+      "actionName": "双獠牙",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "4",
+      "total": 334,
+      "mapId": "verify-ui-wereboar-boar-tusks-1788568516329",
+      "combatId": "verify-ui-wereboar-boar-tusks-1788568516329:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "野猪人（野猪形态） 使用双獠牙攻击 验证目标：双獠牙 → 验证目标 1+5=6 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:35 PM\n攻击\n\n野猪人（野猪形态） 使用双獠牙攻击 验证目标：双獠牙 → 验证目标 1+5=6 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：双獠牙｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 1；最终采用 1；调整值 +5。\n结果 · 6 vs AC 10：未命中。\n野猪人（野猪形态）｜消耗动作",
+      "playerLog": "野猪人（野猪形态） 使用双獠牙攻击 验证目标：双獠牙 → 验证目标 1+5=6 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:35:36.707Z",
+      "evidenceFile": "ui-cases/monsters/128-wereboar-boar.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "变形生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "冲锋（仅野猪或混合形态）",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    },
+    {
+      "name": "坚韧不屈",
+      "automation": "headless",
+      "rule": "relentless",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.maximumDamage"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "at-threshold",
+        "above-threshold",
+        "already-zero"
+      ],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 9,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

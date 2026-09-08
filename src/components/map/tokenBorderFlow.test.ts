@@ -33,6 +33,20 @@ describe('map Token spell-portrait flow frame', () => {
     expect(source).toContain("from './tokenBorderFlow'")
   })
 
+  it('moves the portrait, class ring and status overlays from one map-level clock', () => {
+    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8')
+    const borderAnimation = canvasSource.slice(
+      canvasSource.indexOf('useStatusAnimation('),
+      canvasSource.indexOf('const effectTokenAreaOverlayNodesRef'),
+    )
+
+    expect(canvasSource).toContain('syncTokenVisualPositionFrame(entries)')
+    expect(canvasSource).toContain('const movementFrameTokens = renderedTokens.map(displayToken)')
+    expect(borderAnimation).not.toContain('tokenMovementAnimationPosition(')
+    expect(tokenNodeSource).toContain('externalPositionLockedRef.current ||\n      registerPositionNode')
+  })
+
   it('reuses the spell portrait stops, opacity and slow shared period', () => {
     expect(TOKEN_BORDER_FLOW_FPS).toBe(60)
     expect(TOKEN_BORDER_FLOW_PERIOD_MS).toBe(DND5E_CLASS_BORDER_FLOW_PERIOD_MS)

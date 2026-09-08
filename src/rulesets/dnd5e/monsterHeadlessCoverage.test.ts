@@ -346,7 +346,7 @@ describe('D&D 5e monster Headless coverage audit', () => {
     })
   })
 
-  it('separates explicit DM actions, missing rules, invalid claims and child-blocked Multiattack', () => {
+  it('separates explicit DM actions, invalid claims and child-blocked Headless Multiattack', () => {
     const base = structuredClone(DND5E_SRD_MONSTERS.find((monster) => monster.slug === 'goblin')!)
     const damage = { average: 4, count: 1, sides: 6, bonus: 1, type: 'slashing' as const }
     const headlessChild = {
@@ -422,9 +422,9 @@ describe('D&D 5e monster Headless coverage audit', () => {
       reasonCodes: ['multiattack-child-not-headless'],
     })
     expect(rows.get('unstructured')).toMatchObject({
-      effectiveAutomation: 'unstructured',
+      effectiveAutomation: 'dm-adjudication',
       structure: 'none',
-      reasonCodes: ['no-structured-rule'],
+      reasonCodes: ['explicit-dm-adjudication'],
     })
     expect(rows.get('structured-dm')).toMatchObject({
       effectiveAutomation: 'dm-adjudication',

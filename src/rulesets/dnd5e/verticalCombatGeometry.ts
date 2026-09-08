@@ -26,6 +26,27 @@ const COLUMN_HEIGHT_BY_SPELL: Readonly<Record<string, number>> = {
   thunderwave: 15,
 }
 
+const DND5E_CREATURE_SIZE_BY_RANK = [
+  '微型',
+  '小型',
+  '中型',
+  '大型',
+  '超大型',
+  '巨型',
+] as const
+
+function dnd5eTokenAtEffectiveSize(
+  token: Token,
+  sizeRank: number | undefined,
+): Token {
+  if (sizeRank == null) return token
+  const normalized = Math.max(0, Math.min(5, Math.floor(sizeRank)))
+  const creatureSize = DND5E_CREATURE_SIZE_BY_RANK[normalized]
+  return creatureSize === token.creatureSize
+    ? token
+    : { ...token, creatureSize }
+}
+
 /** D&D space height used by the grid rules, rather than portrait pixel size. */
 export function dnd5eCreatureHeightFeetForSizeRank(sizeRank: number): number {
   const normalized = Math.max(0, Math.min(5, Math.floor(sizeRank)))
@@ -80,6 +101,8 @@ export function dnd5eMapTokenDistanceFeet(input: {
   rightSizeRank?: number
 }): number {
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
+  const horizontalLeft = dnd5eTokenAtEffectiveSize(input.left, input.leftSizeRank)
+  const horizontalRight = dnd5eTokenAtEffectiveSize(input.right, input.rightSizeRank)
   const leftBottom = mapGeometryTokenElevation(input.geometry, input.left)
   const rightBottom = mapGeometryTokenElevation(input.geometry, input.right)
   const vertical = dnd5eVerticalIntervalDistanceFeet(
@@ -93,7 +116,7 @@ export function dnd5eMapTokenDistanceFeet(input: {
       : dnd5eCreatureHeightFeetForSizeRank(input.rightSizeRank),
   )
   return Math.max(
-    tokenFootprintDistanceCells(input.left, input.right, input.map) * feetPerCell,
+    tokenFootprintDistanceCells(horizontalLeft, horizontalRight, input.map) * feetPerCell,
     vertical,
   )
 }

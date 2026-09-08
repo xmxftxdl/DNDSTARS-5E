@@ -3,6 +3,11 @@ export interface Dnd5eRepeatedProjectileTargeting {
   targetTokenIds: readonly string[]
 }
 
+export interface Dnd5eVisibleGuessedProjectileTargeting extends Dnd5eRepeatedProjectileTargeting {
+  guessedTargeting?: boolean
+  allowDuplicateTargets?: boolean
+}
+
 export function appendDnd5eRepeatedProjectileTarget(
   targeting: Dnd5eRepeatedProjectileTargeting,
   targetTokenId: string,
@@ -12,6 +17,18 @@ export function appendDnd5eRepeatedProjectileTarget(
     return [...targeting.targetTokenIds]
   }
   return [...targeting.targetTokenIds, targetTokenId]
+}
+
+export function appendDnd5eVisibleGuessedProjectileTarget(
+  targeting: Dnd5eVisibleGuessedProjectileTargeting,
+  visibleTargetTokenId?: string,
+): string[] | undefined {
+  if (
+    !targeting.guessedTargeting ||
+    !targeting.allowDuplicateTargets ||
+    !visibleTargetTokenId
+  ) return undefined
+  return appendDnd5eRepeatedProjectileTarget(targeting, visibleTargetTokenId)
 }
 
 export function dnd5eRepeatedProjectileTargetsRemaining(

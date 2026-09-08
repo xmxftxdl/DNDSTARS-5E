@@ -7,7 +7,7 @@ import {
   fighterResourceState,
 } from './fighter'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { createDnd5eMapCombatSnapshot, dnd5eRequestedInitiativeActorIndex, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eFighterFeatureId = 'second-wind' | 'action-surge'
@@ -68,7 +68,11 @@ export function prepareDnd5eFighterFeature(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorIndex = dnd5eRequestedInitiativeActorIndex(
+    snapshot.state,
+    actorToken.id,
+    input.action.initiativeIndex,
+  )
   if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id]) return { ok: false, reason: 'combatant-missing' }
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (input.turnEconomy) {
@@ -123,6 +127,7 @@ export function resolvePreparedDnd5eFighterFeature(input: {
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
+      events: [...result.events],
     }),
   }
 }

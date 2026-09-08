@@ -14,7 +14,7 @@ const analysis: PdfCampaignAnalysisV1 = {
 }
 
 describe('PdfCampaignKnowledgeBase', () => {
-  it('把分析结果组织为独立页签、搜索模式、地图、怪物图鉴和关系图入口', () => {
+  it('把分析结果组织为独立页签、搜索模式、地图、怪物图鉴和原文书签入口', () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <PdfCampaignKnowledgeBase
@@ -29,7 +29,8 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('战役知识库')
     expect(html).toContain('全库搜索模式')
     expect(html).toContain('怪物图鉴')
-    expect(html).toContain('人物关系图')
+    expect(html).toContain('原文与书签')
+    expect(html).not.toContain('人物关系图')
     expect(html).toContain('地图')
     expect(html).toContain('编辑知识库')
   })
@@ -51,7 +52,24 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('事件与场景')
     expect(html).toContain('线索')
     expect(html).not.toContain('怪物图鉴')
-    expect(html).not.toContain('人物关系图')
+    expect(html).not.toContain('原文与书签')
+  })
+
+  it('旧版分析进入原文页时给出安全的重新附加提示', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={analysis}
+          mapHref="/campaign/test/maps"
+          initialTab="bookmarks"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('没有可安全打开的本机原文索引')
+    expect(html).toContain('重新附加同一份 PDF')
   })
 
   it('把 NPC 待导入草稿渲染为可打开详情的按钮，并提示战斗单位可能误分类', () => {
@@ -79,6 +97,54 @@ describe('PdfCampaignKnowledgeBase', () => {
     expect(html).toContain('查看详情')
     expect(html).toContain('可能应归类为怪物')
     expect(html).toContain('<button')
+  })
+
+  it('怪物图鉴卡片可直接定位到导入条目或来源遭遇进行编辑', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            importCandidates: [{ name: '伊利法军兵', description: '已结构化。', kind: 'monster', automation: 'full', citations: [] }],
+            encounters: [{ name: '冒险者综合体废墟', description: '', creatures: ['两个作儒'], notes: '', citations: [] }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="monsters"
+          onEdit={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('data-edit-tab="imports"')
+    expect(html).toContain('data-edit-tab="encounters"')
+    expect(html.match(/>编辑<\/button>/g)).toHaveLength(2)
+  })
+
+  it('资源页提供怪物工坊入口，并把导入候选与遭遇引用使用同一交接动作', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <PdfCampaignKnowledgeBase
+          analysis={{
+            ...analysis,
+            importCandidates: [{ name: '潮汐祭司', description: '施法怪物。', kind: 'monster', automation: 'partial', monsterStatBlockText: '潮汐祭司\nAC 14\n动作\n潮汐打击。近战武器攻击。', citations: [] }],
+            encounters: [{ name: '灯塔决战', description: '', creatures: ['潮汐祭司', '潮汐魔像'], notes: '', citations: [] }],
+          }}
+          mapHref="/campaign/test/maps"
+          initialTab="monsters"
+          onEdit={vi.fn()}
+          onEditMonster={vi.fn()}
+          onPortraitChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(html).toContain('data-monster-workshop-entry="潮汐祭司"')
+    expect(html).toContain('data-monster-workshop-entry="潮汐魔像"')
+    expect(html).toContain('含完整能力属性块')
+    expect(html).toContain('仅基础资料')
+    expect(html.match(/>怪物工坊<\/button>/g)).toHaveLength(2)
+    expect(html).not.toContain('data-edit-tab=')
   })
 
   it('把简称与完整姓名安全归并为一行，并在详情面板展示完整人物档案', () => {

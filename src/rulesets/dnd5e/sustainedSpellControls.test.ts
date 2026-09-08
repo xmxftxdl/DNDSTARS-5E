@@ -4,8 +4,16 @@ import {
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
 } from './headlessCombatEngine'
+import { dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell } from './spells'
 
 const abilities = { str: 10, dex: 14, con: 14, int: 18, wis: 18, cha: 18 } as const
+
+it('scales the Produce Flame follow-up attack at every cantrip tier', () => {
+  const spell = getDnd5eSrdCombatSpell('produce-flame')!
+  expect([1, 4, 5, 10, 11, 16, 17, 20].map((level) =>
+    dnd5eSustainedSpellAttackDiceCount(spell, 0, level),
+  )).toEqual([1, 1, 2, 2, 3, 3, 4, 4])
+})
 
 function caster(
   id: string,
@@ -60,6 +68,16 @@ function enemy(id: string, hp = 60) {
 }
 
 describe('shared sustained spell controls', () => {
+  it('does not invent higher-slot damage for Sunbeam when its sustained dice declare no scaling', () => {
+    const sunbeam = getDnd5eSrdCombatSpell('sunbeam')!
+    const heatMetal = getDnd5eSrdCombatSpell('heat-metal')!
+
+    expect(dnd5eSustainedSpellAttackDiceCount(sunbeam, 6, 20)).toBe(6)
+    expect(dnd5eSustainedSpellAttackDiceCount(sunbeam, 7, 20)).toBe(6)
+    expect(dnd5eSustainedSpellAttackDiceCount(sunbeam, 9, 20)).toBe(6)
+    expect(dnd5eSustainedSpellAttackDiceCount(heatMetal, 3, 20)).toBe(3)
+  })
+
   it('uses Expeditious Retreat as a bonus-action Dash only while its concentration effect exists', () => {
     const actor = caster('wizard', 'wizard', 'expeditious-retreat', 5, 1)
     const cast = resolveDnd5eHeadlessAction(
@@ -72,6 +90,15 @@ describe('shared sustained spell controls', () => {
     expect(cast.ok).toBe(true)
     if (!cast.ok) return
     expect(cast.state.combatants[actor.id].classState.concentrationSpellId).toBe('expeditious-retreat')
+    expect(cast.state.combatants[actor.id].turn).toMatchObject({
+      actionAvailable: true,
+      bonusActionAvailable: false,
+      movementRemaining: 60,
+    })
+    expect(cast.events).toContainEqual({
+      type: 'movement-granted', actorId: actor.id, amount: 30,
+    })
+    cast.state.combatants[actor.id].turn.movementRemaining = 30
     cast.state.combatants[actor.id].turn.bonusActionAvailable = true
     const dash = resolveDnd5eHeadlessAction(cast.state, {
       type: 'dash', actorId: actor.id, sourceSpellId: 'expeditious-retreat',
@@ -172,6 +199,16 @@ describe('shared sustained spell controls', () => {
     expect(cast.state.combatants[first.id].classState.activeEffects).toContainEqual(
       expect.objectContaining({ standardCondition: 'blinded' }),
     )
+    expect(cast.state.combatants[actor.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:sunbeam',
+        modifiers: expect.objectContaining({
+          emittedLight: {
+            brightRadiusFeet: 30, dimRadiusFeet: 30, color: '#fef3c7', sunlight: true,
+          },
+        }),
+      }),
+    )
     cast.state.combatants[actor.id].turn.actionAvailable = true
     const repeated = resolveDnd5eHeadlessAction(cast.state, {
       type: 'cast-spell', actorId: actor.id, targetId: second.id, targetIds: [second.id],
@@ -182,6 +219,67 @@ describe('shared sustained spell controls', () => {
     if (!repeated.ok) return
     expect(repeated.state.combatants[second.id].currentHp).toBe(70)
     expect(repeated.state.combatants[actor.id].turn.actionAvailable).toBe(false)
+  })
+
+  it('resolves a seventh-level Sunbeam with the same 6d8 initial and repeated beams', () => {
+    const actor = caster('wizard', 'wizard', 'sunbeam', 13, 7)
+    const target = enemy('target', 100)
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('sunbeam-upcast', [actor, target]),
+      {
+        type: 'cast-spell', actorId: actor.id, targetId: target.id,
+        targetIds: [target.id], spellId: 'sunbeam', slotLevel: 7,
+        savingThrowD20: 1, effectRolls: [1, 1, 1, 1, 1, 1],
+      },
+    )
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants[target.id].currentHp).toBe(94)
+    cast.state.combatants[actor.id].turn.actionAvailable = true
+    const repeated = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'cast-spell', actorId: actor.id, targetId: target.id, targetIds: [target.id],
+      spellId: 'sunbeam', slotLevel: 7, sustainedEffectAttack: 'sunbeam',
+      savingThrowD20: 1, effectRolls: [1, 1, 1, 1, 1, 1],
+    })
+    expect(repeated.ok).toBe(true)
+    if (!repeated.ok) return
+    expect(repeated.state.combatants[target.id].currentHp).toBe(88)
+  })
+
+  it('restarts the full Sunbeam concentration when the same spell is recast through an empty line', () => {
+    const actor = caster('wizard', 'wizard', 'sunbeam', 13, 6)
+    const cast = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('sunbeam-empty-recast', [actor, enemy('outside-line')]),
+      {
+        type: 'cast-spell', actorId: actor.id, targetId: actor.id,
+        targetIds: [], spellId: 'sunbeam', slotLevel: 6, effectRolls: [],
+      },
+    )
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    const casterAfterFirst = cast.state.combatants[actor.id]
+    casterAfterFirst.classState.concentrationRoundsRemaining = 3
+    casterAfterFirst.turn.actionAvailable = true
+    casterAfterFirst.classResources['dnd5e-spell-slot-6'] = { current: 1, max: 1 }
+
+    const recast = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'cast-spell', actorId: actor.id, targetId: actor.id,
+      targetIds: [], spellId: 'sunbeam', slotLevel: 6, effectRolls: [],
+    })
+    expect(recast.ok).toBe(true)
+    if (!recast.ok) return
+    expect(recast.state.combatants[actor.id].classState).toMatchObject({
+      concentrationSpellId: 'sunbeam',
+      concentrationRoundsRemaining: 10,
+    })
+    expect(recast.events).toContainEqual({
+      type: 'class-state-changed', actorId: actor.id,
+      stateKey: 'concentration', active: false,
+    })
+    expect(recast.events).toContainEqual({
+      type: 'class-state-changed', actorId: actor.id,
+      stateKey: 'concentration', active: true,
+    })
   })
 
   it('holds Produce Flame as an effect, then consumes it when the flame is thrown', () => {

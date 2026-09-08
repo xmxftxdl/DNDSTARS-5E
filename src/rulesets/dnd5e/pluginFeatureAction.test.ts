@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { createDnd5eMechanicalEffect } from './activeEffects'
+import { ensureDnd5eCoreSpellActivitiesRegisteredV1 } from './activities/dnd5eCoreSpellActivities'
+import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eHeadlessActionFromDeclarativeDraft } from './declarativePluginPackage'
@@ -93,6 +96,642 @@ function action(featureId: string): SharedPlayerActionState {
 }
 
 describe('D&D 5e plugin feature authority action', () => {
+  it('authorizes a DM-controlled monster action granted by its live Detect Thoughts effect', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:detect-thoughts:contest'
+    const wizardToken = token('wizard-token', 'wizard', 75)
+    const wizard = character('wizard', {
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eMechanicalEffect({
+          id: 'detect-thoughts-controller-instance',
+          definitionId: 'activity:detect-thoughts:detect-thoughts-controller:modifiers:0',
+          label: '侦测思想·持续读心',
+          source: {
+            kind: 'spell', actorId: wizardToken.id, characterId: 'wizard',
+            rulesId: 'detect-thoughts', pluginId: 'srd-5.1', spellLevel: 2, magical: true,
+          },
+          targetId: wizardToken.id,
+          duration: { type: 'concentration', sourceActorId: wizardToken.id, remainingRounds: 10 },
+          grantedActivities: [
+            'spell:detect-thoughts:surface',
+            'spell:detect-thoughts:probe',
+            'spell:detect-thoughts:search',
+          ],
+        })],
+      },
+    })
+    const probed = createDnd5eMechanicalEffect({
+      id: 'detect-thoughts-probed-instance',
+      definitionId: 'activity:srd-5.1:spell:detect-thoughts:probe:detect-thoughts-probed:modifiers:0',
+      label: '侦测思想·察觉深入探查',
+      source: {
+        kind: 'plugin', actorId: wizardToken.id, characterId: wizard.id,
+        rulesId: 'srd-5.1:spell:detect-thoughts:probe', pluginId: 'srd-5.1', magical: false,
+      },
+      targetId: 'bandit-token',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'source-turn-end' },
+      grantedActivities: ['spell:detect-thoughts:contest'],
+    })
+    const bandit = {
+      ...token('bandit-token', '', 25, 'enemy'),
+      characterId: undefined,
+      hp: 11,
+      maxHp: 11,
+      poolId: 'srd-5.1:bandit',
+      dnd5eCombatState: { activeEffects: [probed] },
+    } as Token
+    const map: BattleMap = {
+      id: 'map-1', name: 'Detect Thoughts contest', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [bandit, wizardToken],
+    }
+    const requested: SharedPlayerActionState = {
+      ...action(featureId),
+      sourceMode: 'dm',
+      actorTokenId: bandit.id,
+      characterId: `dm-token:${bandit.id}`,
+      targetTokenId: wizardToken.id,
+      dnd5ePluginAction: { featureId, payload: { activeEffectId: probed.id } },
+    }
+
+    const prepared = prepareDnd5ePluginFeatureAction({
+      action: requested,
+      map,
+      characters: [wizard],
+      initiativeOrder: [
+        { slotId: 'bandit-token:normal', tokenId: bandit.id, label: bandit.label, emoji: 'B', color: '#fff', roll: 20 },
+        { slotId: 'wizard-token:normal', tokenId: wizardToken.id, label: wizard.name, emoji: 'W', color: '#fff', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('combat-1:1:bandit-token:normal'),
+      roomRequiredPlugins: [],
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.actor.name).toBe('bandit-token')
+    expect(prepared.prepared.actorToken.id).toBe(bandit.id)
+    expect(prepared.prepared.targetToken.id).toBe(wizardToken.id)
+    expect(prepared.prepared.headlessAction.hostEntitlement).toEqual({
+      kind: 'active-effect', effectId: probed.id,
+    })
+  })
+
+  it('preflights root Active Effect requirements before a monster grant opens its DM interrupt', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:geas:violate-command'
+    const wizardToken = token('wizard-token', 'wizard', 75)
+    const wizard = character('wizard')
+    const geas = createDnd5eMechanicalEffect({
+      id: 'geas-instance',
+      definitionId: 'activity:srd-5.1:spell:geas:geas-charmed:modifiers:0',
+      label: '指使术',
+      source: {
+        kind: 'spell', actorId: wizardToken.id, characterId: wizard.id,
+        rulesId: 'geas', pluginId: 'srd-5.1', spellLevel: 5, magical: true,
+      },
+      targetId: 'bandit-token',
+      duration: { type: 'rounds', remainingRounds: 432_000, tickOn: 'target-turn-end' },
+      grantedActivities: ['spell:geas:violate-command'],
+    })
+    const cooldown = createDnd5eMechanicalEffect({
+      id: 'geas-daily-lock-instance',
+      definitionId: 'activity:srd-5.1:spell:geas:violate-command:geas-daily-damage-lock:modifiers:1',
+      label: '指使术·每日伤害已触发',
+      source: {
+        kind: 'spell', actorId: 'bandit-token', rulesId: 'geas',
+        pluginId: 'srd-5.1', spellLevel: 5, magical: true,
+      },
+      targetId: 'bandit-token',
+      duration: { type: 'rounds', remainingRounds: 14_400, tickOn: 'target-turn-end' },
+    })
+    const makeBandit = (activeEffects: NonNullable<Token['dnd5eCombatState']>['activeEffects']) => ({
+      ...token('bandit-token', '', 25, 'enemy'),
+      characterId: undefined,
+      hp: 65,
+      maxHp: 65,
+      poolId: 'srd-5.1:bandit-captain',
+      dnd5eCombatState: { activeEffects },
+    } as Token)
+    const request: SharedPlayerActionState = {
+      ...action(featureId),
+      sourceMode: 'dm',
+      actorTokenId: 'bandit-token',
+      characterId: 'dm-token:bandit-token',
+      targetTokenId: 'bandit-token',
+      dnd5ePluginAction: { featureId, payload: { activeEffectId: geas.id } },
+    }
+    const prepare = (bandit: Token) => prepareDnd5ePluginFeatureAction({
+      action: request,
+      map: {
+        id: 'map-1', name: 'Geas cooldown', width: 500, height: 500,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [bandit, wizardToken],
+      },
+      characters: [wizard],
+      initiativeOrder: [
+        { slotId: 'bandit-token:normal', tokenId: 'bandit-token', label: 'Bandit Captain', emoji: 'B', color: '#fff', roll: 20 },
+        { slotId: 'wizard-token:normal', tokenId: wizardToken.id, label: wizard.name, emoji: 'W', color: '#fff', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('combat-1:1:bandit-token:normal'),
+      roomRequiredPlugins: [],
+    })
+
+    const firstUse = prepare(makeBandit([geas]))
+    expect(firstUse.ok, firstUse.ok ? undefined : firstUse.reason).toBe(true)
+    const repeatedUse = prepare(makeBandit([geas, cooldown]))
+    expect(repeatedUse).toEqual({ ok: false, reason: 'feature-unavailable' })
+  })
+
+  it('removes the caster Geas controller after dismissing the last affected target', async () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:geas:dismiss'
+    const heroToken = token('hero-token', 'hero', 25)
+    const allyToken = token('ally-token', 'ally', 75)
+    const controller = createDnd5eMechanicalEffect({
+      id: 'geas-controller-instance',
+      definitionId: 'activity:srd-5.1:spell:geas:geas-caster-controller:marker',
+      label: '指使术·施法者控制',
+      source: {
+        kind: 'spell', actorId: heroToken.id, characterId: 'hero',
+        rulesId: 'geas', pluginId: 'srd-5.1', spellLevel: 5, magical: true,
+      },
+      targetId: heroToken.id,
+      duration: { type: 'rounds', remainingRounds: 432_000, tickOn: 'target-turn-end' },
+      grantedActivities: ['spell:geas:dismiss'],
+      stackingPolicy: 'stack',
+    })
+    const geas = createDnd5eMechanicalEffect({
+      id: 'geas-target-instance',
+      definitionId: 'activity:srd-5.1:spell:geas:geas-charmed',
+      label: '指使术',
+      source: {
+        kind: 'spell', actorId: heroToken.id, characterId: 'hero',
+        rulesId: 'geas', pluginId: 'srd-5.1', spellLevel: 5, magical: true,
+      },
+      targetId: allyToken.id,
+      duration: { type: 'rounds', remainingRounds: 432_000, tickOn: 'target-turn-end' },
+      grantedActivities: ['spell:geas:violate-command'],
+    })
+    const hero = character('hero', { dnd5eCombatState: { activeEffects: [controller] } })
+    const ally = character('ally', { dnd5eCombatState: { activeEffects: [geas] } })
+    const map: BattleMap = {
+      id: 'map-1', name: 'Geas dismissal', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [heroToken, allyToken],
+    }
+    const prepared = prepareDnd5ePluginFeatureAction({
+      action: {
+        ...action(featureId), targetTokenId: allyToken.id,
+        dnd5ePluginAction: { featureId, payload: { activeEffectId: controller.id } },
+      },
+      map,
+      characters: [hero, ally],
+      initiativeOrder: [
+        { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+        { slotId: 'ally-token:normal', tokenId: allyToken.id, label: ally.name, emoji: 'A', color: '#fff', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('combat-1:1:hero-token:normal'),
+      roomRequiredPlugins: [],
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters.find((candidate) => candidate.id === ally.id)
+      ?.dnd5eCombatState?.activeEffects ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: geas.id }),
+    ]))
+    expect(resolved.application?.characters.find((candidate) => candidate.id === hero.id)
+      ?.dnd5eCombatState?.activeEffects ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: controller.id }),
+    ]))
+  })
+
+  it('authorizes a monster to investigate an externally usable Disguise Self effect', async () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:disguise-self:inspect'
+    const wizardToken = token('wizard-token', 'wizard', 75)
+    const disguise = createDnd5eMechanicalEffect({
+      id: 'disguise-self-instance',
+      definitionId: 'activity:spell:disguise-self:disguise-self-appearance:modifiers:0',
+      label: '易容术',
+      source: {
+        kind: 'spell', actorId: wizardToken.id, characterId: 'wizard',
+        rulesId: 'disguise-self', pluginId: 'srd-5.1', spellLevel: 1,
+        spellSaveDc: 19, magical: true,
+      },
+      targetId: wizardToken.id,
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      tags: ['illusion', 'disguise', 'appearance', 'externally-usable-activity'],
+      grantedActivities: ['spell:disguise-self:dismiss', 'spell:disguise-self:inspect'],
+    })
+    const wizard = character('wizard', { saveDC: 19, dnd5eCombatState: { activeEffects: [disguise] } })
+    const bandit = {
+      ...token('bandit-token', '', 25, 'enemy'), characterId: undefined,
+      hp: 11, maxHp: 11, poolId: 'srd-5.1:bandit',
+    } as Token
+    const map: BattleMap = {
+      id: 'map-1', name: 'Disguise inspection', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [bandit, wizardToken],
+    }
+    const prepared = prepareDnd5ePluginFeatureAction({
+      action: {
+        ...action(featureId), sourceMode: 'dm', actorTokenId: bandit.id,
+        characterId: `dm-token:${bandit.id}`, targetTokenId: wizardToken.id,
+        dnd5ePluginAction: { featureId, payload: { activeEffectId: disguise.id } },
+      },
+      map, characters: [wizard],
+      initiativeOrder: [
+        { slotId: 'bandit-token:normal', tokenId: bandit.id, label: bandit.label, emoji: 'B', color: '#fff', roll: 20 },
+        { slotId: 'wizard-token:normal', tokenId: wizardToken.id, label: wizard.name, emoji: 'W', color: '#fff', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('combat-1:1:bandit-token:normal'),
+      roomRequiredPlugins: [],
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.headlessAction.hostEntitlement).toEqual({
+      kind: 'active-effect', effectId: disguise.id,
+    })
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({
+      prepared: prepared.prepared,
+      rolls: {
+        [`disguise-self-investigation-d20:${wizardToken.id}`]: {
+          values: [20, 1], modifier: 0, total: 21,
+        },
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved', actorId: bandit.id, perceivedTargetId: wizardToken.id,
+      total: 20, dc: 19, success: true,
+    }))
+  })
+
+  it('accepts and resolves a legacy core-spell Effect grant and its empty Blink return cell', async () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:blink:return'
+    const heroToken = token('hero-token', 'hero', 25)
+    const controller = createDnd5eMechanicalEffect({
+      id: 'blink-return-pending-instance',
+      definitionId: 'blink-return-pending',
+      label: '闪现术·返回落点',
+      source: { kind: 'spell', actorId: heroToken.id, rulesId: 'blink', magical: true },
+      targetId: heroToken.id,
+      grantedActivities: ['spell:blink:return'],
+      modifiers: { speedOverrideFeet: 0 },
+      duration: { type: 'until-turn-boundary', boundary: 'target-turn-end' },
+    })
+    const hero = character('hero', { dnd5eCombatState: { activeEffects: [controller] } })
+    const map: BattleMap = {
+      id: 'map-1', name: 'Blink return', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [heroToken],
+    }
+
+    const prepared = prepareDnd5ePluginFeatureAction({
+      action: {
+        ...action(featureId),
+        targetTokenId: undefined,
+        targetCell: { col: 1, row: 0 },
+        dnd5ePluginAction: { featureId, payload: { activeEffectId: controller.id } },
+      },
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+      ],
+      turnEconomy: {
+        ...createDnd5eTurnEconomyCounts('combat-1:1:hero-token:normal'),
+        movement: { current: 0, max: 0 },
+      },
+      roomRequiredPlugins: [],
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetCell).toEqual({ col: 1, row: 0 })
+    expect(prepared.prepared.headlessAction.hostEntitlement).toEqual({
+      kind: 'active-effect', effectId: controller.id,
+    })
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({
+      prepared: prepared.prepared,
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.activityHandoffs?.movements).toContainEqual(expect.objectContaining({
+      operationId: 'blink-return-teleport', targetId: heroToken.id,
+      mode: 'teleport', distanceFeet: 10,
+    }))
+    expect(resolved.result.state.combatants[heroToken.id]?.turn.movementRemaining).toBe(30)
+  })
+
+  it('rejects an Activity control whose granting Effect is suspended', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:tree-stride:teleport'
+    const heroToken = token('hero-token', 'hero', 25)
+    const controller = createDnd5eMechanicalEffect({
+      id: 'suspended-tree-stride-controller',
+      definitionId: 'activity:tree-stride:tree-stride-teleport:modifiers:0',
+      label: '树跃术·暂停控制',
+      source: {
+        kind: 'spell', actorId: heroToken.id, pluginId: 'srd-5.1',
+        rulesId: 'tree-stride', spellLevel: 5, magical: true,
+      },
+      targetId: heroToken.id,
+      grantedActivities: ['spell:tree-stride:teleport'],
+      suspendedBy: ['transition-instance'],
+      duration: { type: 'concentration', sourceActorId: heroToken.id, remainingRounds: 10 },
+    })
+    const hero = character('hero', { dnd5eCombatState: { activeEffects: [controller] } })
+    const map: BattleMap = {
+      id: 'map-1', name: 'Suspended grant', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [heroToken],
+    }
+
+    expect(prepareDnd5ePluginFeatureAction({
+      action: {
+        ...action(featureId),
+        targetTokenId: heroToken.id,
+        dnd5ePluginAction: { featureId, payload: { activeEffectId: controller.id } },
+      },
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('combat-1:1:hero-token:normal'),
+    })).toEqual({ ok: false, reason: 'feature-not-selected' })
+  })
+
+  it('rejects a used once-per-turn granted Activity before opening its DM interrupt', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:tree-stride:teleport'
+    const heroToken = token('hero-token', 'hero', 25)
+    const controller = createDnd5eMechanicalEffect({
+      definitionId: 'activity:tree-stride:tree-stride-teleport:modifiers:0',
+      label: '树跃术·树跃能力',
+      source: {
+        kind: 'spell', actorId: heroToken.id, pluginId: 'srd-5.1',
+        rulesId: 'tree-stride', spellLevel: 5, magical: true,
+      },
+      targetId: heroToken.id,
+      grantedActivities: ['spell:tree-stride:teleport'],
+      duration: { type: 'concentration', sourceActorId: heroToken.id, remainingRounds: 10 },
+    })
+    const hero = character('hero', {
+      dnd5eCombatState: {
+        activeEffects: [controller],
+      },
+    })
+    const map: BattleMap = {
+      id: 'map-1', name: 'Tree Stride once per turn', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [heroToken],
+    }
+    const initiativeOrder: InitiativeEntry[] = [
+      { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+    ]
+
+    expect(prepareDnd5ePluginFeatureAction({
+      action: {
+        ...action(featureId),
+        targetTokenId: heroToken.id,
+        dnd5ePluginAction: {
+          featureId,
+          payload: { activeEffectId: controller.id },
+        },
+      },
+      map,
+      characters: [hero],
+      initiativeOrder,
+      turnEconomy: {
+        ...createDnd5eTurnEconomyCounts('combat-1:1:hero-token:normal'),
+        usedOncePerTurnKeys: ['tree-stride-teleport'],
+      },
+      roomRequiredPlugins: [],
+    })).toEqual({ ok: false, reason: 'feature-already-used' })
+  })
+
+  it('keeps the captured spell DC for a spell-granted follow-up Activity', () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:magic-jar:possess'
+    const heroToken = token('hero-token', 'hero', 25)
+    const targetToken = token('ally-token', 'target', 75, 'enemy')
+    const controller = createDnd5eMechanicalEffect({
+      definitionId: 'activity:magic-jar:magic-jar-controller:modifiers:0',
+      label: '魔魂壶·灵魂容器',
+      source: {
+        kind: 'spell', actorId: heroToken.id, pluginId: 'srd-5.1',
+        rulesId: 'magic-jar', spellLevel: 6, spellSaveDc: 19, magical: true,
+      },
+      targetId: heroToken.id,
+      grantedActivities: ['spell:magic-jar:possess', 'spell:magic-jar:return', 'spell:magic-jar:return-body'],
+      duration: { type: 'permanent' },
+    })
+    const hero = character('hero', {
+      charClass: '法师',
+      level: 20,
+      abilities: { ...ABILITIES, int: 20 },
+      saveDC: 12,
+      dnd5eCombatState: { activeEffects: [controller] },
+    })
+    const target = character('target')
+    const map: BattleMap = {
+      id: 'map-1', name: 'Magic Jar save DC', width: 500, height: 500,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [heroToken, targetToken],
+    }
+    const initiativeOrder: InitiativeEntry[] = [
+      { slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name, emoji: 'H', color: '#fff', roll: 20 },
+      { slotId: 'ally-token:normal', tokenId: targetToken.id, label: target.name, emoji: 'T', color: '#f00', roll: 10 },
+    ]
+    const prepared = prepareDnd5ePluginFeatureAction({
+      action: {
+        ...action(featureId),
+        targetTokenId: targetToken.id,
+        dnd5ePluginAction: {
+          featureId,
+          payload: { activeEffectId: controller.id },
+        },
+      },
+      map,
+      characters: [hero, target],
+      initiativeOrder,
+      roomRequiredPlugins: [],
+    })
+
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.state.combatants[heroToken.id].saveDc).toBe(19)
+  })
+
+  it('resolves the Instant Summons recall granted by its live controller effect with an airborne witness', async () => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const featureId = 'srd-5.1:effect-control.spell:instant-summons:recall'
+    const heroToken = token('hero-token', 'hero', 25)
+    const controller = createDnd5eMechanicalEffect({
+      definitionId: 'activity:instant-summons:instant-summons-controller:modifiers:0',
+      label: '瞬间召唤·物品连结',
+      source: {
+        kind: 'spell', actorId: heroToken.id, pluginId: 'srd-5.1',
+        rulesId: 'instant-summons', spellLevel: 6, magical: true,
+      },
+      targetId: heroToken.id,
+      grantedActivities: ['spell:instant-summons:recall'],
+      duration: { type: 'permanent' },
+    })
+    const recordId = `linked-planar-object:instant-summons:${heroToken.id}:knife-1`
+    const secondRecordId = `linked-planar-object:instant-summons:${heroToken.id}:parchment-1`
+    const hero = character('hero', {
+      dnd5eCombatState: {
+        activeEffects: [controller],
+        spellAuthorityRecords: {
+          [recordId]: {
+            schemaVersion: 1,
+            id: recordId,
+            sourceActorId: heroToken.id,
+            subjectActorId: heroToken.id,
+            sourceActivityId: 'spell:instant-summons',
+            createdWorldMinute: 1,
+            kind: 'linked-planar-object',
+            profile: 'instant-summons',
+            inventoryInstanceId: 'knife-1',
+            planarState: 'material',
+          },
+          [secondRecordId]: {
+            schemaVersion: 1,
+            id: secondRecordId,
+            sourceActorId: heroToken.id,
+            subjectActorId: heroToken.id,
+            sourceActivityId: 'spell:instant-summons',
+            createdWorldMinute: 2,
+            kind: 'linked-planar-object',
+            profile: 'instant-summons',
+            inventoryInstanceId: 'parchment-1',
+            spellLevel: 8,
+            planarState: 'material',
+          },
+        },
+      },
+    })
+    const airborneWitness: Token = {
+      ...token('airborne-witness', '', 125, 'enemy'),
+      characterId: undefined,
+      hp: 10,
+      maxHp: 10,
+      elevationFeet: 10,
+    }
+    const map: BattleMap = {
+      id: 'map-1', name: 'Instant Summons exploration', width: 600, height: 400,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [heroToken, airborneWitness],
+    }
+    const initiativeOrder: InitiativeEntry[] = [
+      {
+        slotId: `exploration:${heroToken.id}`, tokenId: heroToken.id,
+        label: hero.name, emoji: 'H', color: '#fff', roll: 20,
+      },
+      {
+        slotId: `exploration:${airborneWitness.id}`, tokenId: airborneWitness.id,
+        label: airborneWitness.label, emoji: 'W', color: '#f00', roll: 10,
+      },
+    ]
+    const requested: SharedPlayerActionState = {
+      ...action(featureId),
+      combatId: undefined,
+      targetTokenId: heroToken.id,
+      dnd5ePluginAction: {
+        featureId,
+        payload: {
+          activeEffectId: controller.id,
+          activitySpellAuthorityRecordId: secondRecordId,
+        },
+      },
+    }
+    const prepared = prepareDnd5ePluginFeatureAction({
+      action: requested, map, characters: [hero], initiativeOrder,
+      roomRequiredPlugins: [],
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({
+      prepared: prepared.prepared,
+      authoritativePayload: { activitySpellAuthorityRecordId: secondRecordId },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants[heroToken.id].classState.spellAuthorityRecords?.[recordId])
+      .toBeDefined()
+    expect(resolved.result.state.combatants[heroToken.id].classState.spellAuthorityRecords?.[secondRecordId])
+      .toBeUndefined()
+    expect(resolved.result.state.combatants[heroToken.id].classState.activeEffects?.map((effect) => effect.id))
+      .toContain(controller.id)
+  })
+
+  it('authorizes an unowned Activity only while its authoritative effect grant is live', () => {
+    const pluginId = 'local.effect-grant-test'
+    const featureId = `${pluginId}:effect-control.levitate-control`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Effect grant', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerFeature({
+          id: 'effect-control.levitate-control', name: 'Levitate control',
+          summary: 'Move a levitated target.', description: 'Effect-owned action.',
+          automation: 'full',
+          action: {
+            id: 'levitate-control', label: 'Levitate control', economy: 'none',
+            targeting: { kind: 'self' },
+          },
+        })
+        api.registerHeadlessAction({ id: 'levitate-control', resolve: ({ succeed }) => succeed() })
+      },
+    })
+    try {
+      const activeEffect = createDnd5eMechanicalEffect({
+        definitionId: 'activity:levitate-control', label: 'Levitate control',
+        source: { kind: 'spell', actorId: 'hero-token', pluginId }, targetId: 'hero-token',
+        grantedActivities: ['levitate-control'],
+      })
+      const hero = character('hero', { dnd5eCombatState: { activeEffects: [activeEffect] } })
+      const heroToken = token('hero-token', hero.id, 25)
+      const map: BattleMap = {
+        id: 'map-1', name: 'Effect grant map', width: 600, height: 400,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [heroToken],
+      }
+      const initiativeOrder: InitiativeEntry[] = [{
+        slotId: 'hero-token:normal', tokenId: heroToken.id, label: hero.name,
+        emoji: 'H', color: '#fff', roll: 20,
+      }]
+      const requested = {
+        ...action(featureId),
+        targetTokenId: heroToken.id,
+        dnd5ePluginAction: { featureId, payload: { activeEffectId: activeEffect.id } },
+      }
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: requested, map, characters: [hero], initiativeOrder,
+      })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (prepared.ok) expect(prepared.prepared.headlessAction.hostEntitlement).toEqual({
+        kind: 'active-effect', effectId: activeEffect.id,
+      })
+      expect(prepareDnd5ePluginFeatureAction({
+        action: requested, map,
+        characters: [{ ...hero, dnd5eCombatState: { activeEffects: [] } }], initiativeOrder,
+      })).toEqual({ ok: false, reason: 'feature-not-selected' })
+    } finally {
+      dispose()
+    }
+  })
+
   it('authorizes an unowned Activity only through its live persistent area and derives range from the area', () => {
     const pluginId = 'local.area-grant-test'
     const featureId = `${pluginId}:area-control.vine-control`
@@ -345,7 +984,11 @@ describe('D&D 5e plugin feature authority action', () => {
         dnd5eSummon: { side: 'player', concentrationId: 'plugin-summon:plugin-action-1' },
       })
       expect(resolved.summonedInitiativeEntries).toEqual([
-        expect.objectContaining({ tokenId: 'plugin-summon:plugin-action-1', roll: 14 }),
+        expect.objectContaining({
+          tokenId: 'plugin-summon:plugin-action-1',
+          roll: 14,
+          initiativeCalculation: { rolls: [12], d20: 12, modifier: 2, mode: 'normal' },
+        }),
       ])
       expect(resolved.application?.characters[0]).toMatchObject({
         concentrating: true,

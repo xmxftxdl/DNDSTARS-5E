@@ -26,6 +26,10 @@ export interface Dnd5eExecuteActivityCommandV1 {
   projectileTargetIds?: readonly string[]
   /** Client-selected placement only; geometry is rebuilt by the authority. */
   areaPlacement?: Dnd5eActivityAreaPlacementV1
+  /** Optional creature allow-list for Activities that explicitly expose trigger exemptions. */
+  areaExemptTargetIds?: readonly string[]
+  /** Optional cast-time rules phrase; the resolver emits only a digest. */
+  secretPhrase?: string
   castLevel?: number
   choices?: Readonly<Record<string, string>>
   expectedRevision: number
@@ -49,6 +53,10 @@ export interface Dnd5eActivityAuthorityInput {
   areaPlacementDistanceFeet?: number
   /** Target ids recomputed by the Host from the authoritative area geometry. */
   areaTargetIds?: readonly string[]
+  /** Creature ids independently reloaded and approved by the Host. */
+  areaExemptTargetIds?: readonly string[]
+  /** Host forwards the bounded phrase only to the trusted Activity resolver. */
+  secretPhrase?: string
   parentDamageType?: Dnd5eDamageType
   usedTurnKeys?: ReadonlySet<string>
   dmApproved?: boolean
@@ -97,6 +105,15 @@ export function validateDnd5eExecuteActivityCommandV1(command: Dnd5eExecuteActiv
     errors.push('invalid targetIds')
   }
   if (new Set(command.targetIds).size !== command.targetIds.length) errors.push('duplicate targetIds')
+  if (command.areaExemptTargetIds != null && (
+    !Array.isArray(command.areaExemptTargetIds) || command.areaExemptTargetIds.length > 256 ||
+    command.areaExemptTargetIds.some((id) => !ID_PATTERN.test(id)) ||
+    new Set(command.areaExemptTargetIds).size !== command.areaExemptTargetIds.length
+  )) errors.push('invalid areaExemptTargetIds')
+  if (command.secretPhrase != null && (
+    typeof command.secretPhrase !== 'string' || !command.secretPhrase.trim() ||
+    command.secretPhrase.normalize('NFKC').trim().length > 120
+  )) errors.push('invalid secretPhrase')
   if (
     command.projectileTargetIds != null &&
     (!Array.isArray(command.projectileTargetIds) || command.projectileTargetIds.length > 256 ||
@@ -109,7 +126,12 @@ export function validateDnd5eExecuteActivityCommandV1(command: Dnd5eExecuteActiv
     (command.areaPlacement.radiusFeet != null && !Number.isFinite(command.areaPlacement.radiusFeet)) ||
     (command.areaPlacement.lengthFeet != null && !Number.isFinite(command.areaPlacement.lengthFeet)) ||
     (command.areaPlacement.widthFeet != null && !Number.isFinite(command.areaPlacement.widthFeet)) ||
-    (command.areaPlacement.heightFeet != null && !Number.isFinite(command.areaPlacement.heightFeet))
+    (command.areaPlacement.heightFeet != null && !Number.isFinite(command.areaPlacement.heightFeet)) ||
+    (command.areaPlacement.instances != null && (
+      !Array.isArray(command.areaPlacement.instances) || command.areaPlacement.instances.length < 1 ||
+      command.areaPlacement.instances.length > 64 || command.areaPlacement.instances.some((instance) =>
+        !Number.isFinite(instance.x) || !Number.isFinite(instance.y) ||
+        (instance.elevationFeet != null && !Number.isFinite(instance.elevationFeet)))))
   )) errors.push('invalid areaPlacement')
   if (Object.entries(command.choices ?? {}).some(([key, value]) => !ID_PATTERN.test(key) || !ID_PATTERN.test(value))) {
     errors.push('invalid choices')
@@ -138,6 +160,11 @@ export function resolveDnd5eActivityCommand(
   }
   const activity = getRegisteredDnd5eActivity(input.command.packageId, input.command.activityId)
   if (!activity) return { ok: false, reason: 'unknown-activity', details: ['Activity is not registered'] }
+  const acceptsSecretPhrase = activity.outcomes.flatMap((outcome) => outcome.operations).some((operation) =>
+    operation.kind === 'modify-map-object-lock' && operation.accessPolicy === 'selected-creatures-and-password')
+  if (input.command.secretPhrase != null && !acceptsSecretPhrase) {
+    return { ok: false, reason: 'invalid-command', details: ['Activity does not accept a secret phrase'] }
+  }
   if (input.command.triggerEventId != null && input.triggerContext?.eventId !== input.command.triggerEventId) {
     return { ok: false, reason: 'invalid-command', details: ['trigger event reference does not match Host context'] }
   }
@@ -161,6 +188,12 @@ export function resolveDnd5eActivityCommand(
       authoritativeAreaTargets.length !== submittedTargetIds.length ||
       authoritativeAreaTargets.some((id, index) => id !== submittedTargetIds[index])
     ) return { ok: false, reason: 'target-snapshot-mismatch', details: ['submitted targets do not match authoritative area geometry'] }
+    const submittedExemptions = [...(input.command.areaExemptTargetIds ?? [])].sort()
+    const authoritativeExemptions = [...(input.areaExemptTargetIds ?? [])].sort()
+    if (
+      submittedExemptions.length !== authoritativeExemptions.length ||
+      submittedExemptions.some((id, index) => id !== authoritativeExemptions[index])
+    ) return { ok: false, reason: 'target-snapshot-mismatch', details: ['area trigger exemptions do not match Host creature snapshots'] }
   } else if (input.command.areaPlacement != null) {
     return { ok: false, reason: 'invalid-command', details: ['non-area Activity cannot include area placement'] }
   }
@@ -174,6 +207,8 @@ export function resolveDnd5eActivityCommand(
     distanceFeetByTargetId: input.distanceFeetByTargetId,
     areaPlacement: input.command.areaPlacement,
     areaPlacementDistanceFeet: input.areaPlacementDistanceFeet,
+    areaExemptTargetIds: input.areaExemptTargetIds,
+    secretPhrase: input.secretPhrase ?? input.command.secretPhrase,
     projectileTargetIds: input.command.projectileTargetIds,
     parentDamageType: input.parentDamageType,
     choices: input.command.choices,
@@ -181,5 +216,6 @@ export function resolveDnd5eActivityCommand(
     dmApproved: input.dmApproved,
     triggerContext: input.triggerContext,
     confirmedBy: input.confirmedBy,
+    inventoryInstanceId: input.command.inventoryInstanceId,
   })
 }

@@ -3,6 +3,7 @@ import type { Token } from '../store/maps'
 import {
   buildDnd5eManualMonsterSpellPlan,
   dnd5eManualMonsterSpellOptions,
+  dnd5eMonsterAdjudicationSpellOptions,
 } from './monsterManualSpell'
 
 function mageToken(): Token {
@@ -75,5 +76,41 @@ describe('manual monster spells', () => {
       targetTokenIds: ['hero-token'],
       areaTargetCell: { col: 5, row: 0 },
     })).toBeUndefined()
+  })
+
+  it('offers prepared Sphinx spells and their live slots to legendary DM adjudication', () => {
+    const sphinx: Token = {
+      ...mageToken(),
+      id: 'sphinx',
+      label: '雌性斯芬克斯',
+      poolId: 'srd-5.1:gynosphinx',
+      dnd5eCombatState: {
+        monsterLegendaryActionPoints: 3,
+        monsterSpellSlots: {
+          1: { current: 3, max: 4 },
+          2: { current: 2, max: 3 },
+          3: { current: 3, max: 3 },
+          4: { current: 3, max: 3 },
+          5: { current: 1, max: 1 },
+        },
+      },
+    }
+    const options = dnd5eMonsterAdjudicationSpellOptions(sphinx)
+    expect(options.find((spell) => spell.spellId === 'shield')).toMatchObject({
+      level: 1,
+      availableSlotLevels: [1, 2, 3, 4, 5],
+      resourceLabels: { '1': '1 环 3/4' },
+    })
+    expect(options.find((spell) => spell.spellId === 'legend-lore')).toMatchObject({
+      level: 5,
+      availableSlotLevels: [5],
+    })
+    expect(dnd5eManualMonsterSpellOptions(sphinx)
+      .find((spell) => spell.spellId === 'legend-lore')).toMatchObject({
+        level: 5,
+        castingTime: 'action',
+        automation: 'manual',
+        availableSlotLevels: [5],
+      })
   })
 })

@@ -1,4 +1,5 @@
 import type { AccountStoryEventLinkV1, AccountStoryEventV1 } from '../../lib/accountApi'
+import { storyTimeClueForEvent } from './dmStoryTimelineMarkers'
 
 export const STORY_GRAPH_NODE_WIDTH = 304
 export const STORY_GRAPH_NODE_HEIGHT = 154
@@ -176,6 +177,35 @@ function layoutStoryGraphPositions(
   }
   let fallbackLevel = Math.max(0, ...levels.values())
   for (const event of events) if (!levels.has(event.id)) levels.set(event.id, ++fallbackLevel)
+
+  // Causal depth is the primary layout constraint. Distinct, explicitly ordered
+  // analysis time buckets add a second floor so two different hours cannot share
+  // one row and produce overlapping separators.
+  const chronology = [...events]
+    .filter((event) => event.source === 'analysis-timeline' && storyTimeClueForEvent(event))
+    .sort((left, right) => (
+      (left.timelineOrder ?? Number.MAX_SAFE_INTEGER) - (right.timelineOrder ?? Number.MAX_SAFE_INTEGER)
+      || events.indexOf(left) - events.indexOf(right)
+    ))
+  const groups: Array<{ key: string; events: AccountStoryEventV1[] }> = []
+  const byTimeKey = new Map<string, { key: string; events: AccountStoryEventV1[] }>()
+  for (const event of chronology) {
+    const key = storyTimeClueForEvent(event)!.key
+    const existing = byTimeKey.get(key)
+    if (existing) existing.events.push(event)
+    else {
+      const group = { key, events: [event] }
+      groups.push(group)
+      byTimeKey.set(key, group)
+    }
+  }
+  let previousTimeLevel = -1
+  for (const group of groups) {
+    const baseLevels = group.events.map((event) => levels.get(event.id) ?? 0)
+    const shift = Math.max(0, previousTimeLevel + 1 - Math.min(...baseLevels))
+    for (const event of group.events) levels.set(event.id, (levels.get(event.id) ?? 0) + shift)
+    previousTimeLevel = Math.max(previousTimeLevel, ...group.events.map((event) => levels.get(event.id) ?? 0))
+  }
 
   const byLevel = new Map<number, AccountStoryEventV1[]>()
   for (const event of events) {

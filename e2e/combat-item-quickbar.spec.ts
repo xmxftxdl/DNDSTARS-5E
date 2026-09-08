@@ -158,7 +158,12 @@ test('player backpack exposes every item, edits seven quick slots, and uses an i
   await backpack.getByTestId('inventory-quickbar-slot-1').click()
   await backpack.getByRole('button', { name: /治疗药水/ }).click()
   await backpack.getByTestId('inventory-quickbar-slot-7').click()
-  await backpack.getByTestId('inventory-item-actions').getByRole('button', { name: '使用', exact: true }).click()
+  await backpack.getByRole('button', { name: '关闭战斗背包' }).click()
+
+  const potionSlot = hotbar.getByTestId('combat-item-quick-slot-7')
+  await expect(potionSlot).toHaveAttribute('data-command-kind', 'use-item')
+  await expect(potionSlot).toContainText('使用')
+  await potionSlot.click()
 
   await expect(backpack).toHaveCount(0)
   await expect.poll(async () => {

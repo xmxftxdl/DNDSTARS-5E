@@ -1,0 +1,107 @@
+{
+  "id": "srd-5.1:giant-lizard",
+  "slug": "giant-lizard",
+  "name": "巨蜥",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 126,
+      "slug": "giant-lizard",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:18:09.790Z",
+      "name": "巨蜥",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-giant-lizard-bite-1788560289853",
+      "combatId": "verify-ui-giant-lizard-bite-1788560289853:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨蜥 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+4=22 命中；共造成 3 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:18 PM\n结算\n\n巨蜥 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+4=22 命中；共造成 3 点伤害。\n\n查看 Headless 结算依据（8）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +4。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d8 骰面：1 = 1｜固定加值 +2｜小计 3\n巨蜥｜消耗动作\n验证目标｜受到 3 点伤害｜HP 320 → 317",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/巨蜥 使用啃咬攻击 验证目标：/)\nExpected: \u001b[32m\"巨蜥 使用啃咬攻击 验证目标：啃咬 → 验证目标 18+4=22 命中；共造成 3 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/巨蜥 使用啃咬攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:18:41.425Z",
+      "evidenceFile": "ui-cases/monsters/126-giant-lizard.json"
+    },
+    {
+      "index": 264,
+      "slug": "giant-lizard",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:05:30.611Z",
+      "name": "巨蜥",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/4",
+      "total": 334,
+      "mapId": "verify-ui-giant-lizard-bite-1788570330680",
+      "combatId": "verify-ui-giant-lizard-bite-1788570330680:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "巨蜥 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+4=5 未命中；共造成 0 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:05 PM\n攻击\n\n巨蜥 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+4=5 未命中；共造成 0 点伤害。\n\n查看 Headless 结算依据（6）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 1；最终采用 1；调整值 +4。\n结果 · 5 vs AC 10：未命中。\n巨蜥｜消耗动作",
+      "playerLog": "巨蜥 使用啃咬攻击 验证目标：啃咬 → 验证目标 1+4=5 未命中；共造成 0 点伤害。",
+      "afterHp": 320,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:05:51.222Z",
+      "evidenceFile": "ui-cases/monsters/264-giant-lizard.json"
+    }
+  ],
+  "traitFields": [],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

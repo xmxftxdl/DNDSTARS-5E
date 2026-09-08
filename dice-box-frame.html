@@ -229,9 +229,9 @@
           // Pin each physical die before and after gathering so the visible D4
           // face cannot drift away from the authoritative result.
           box.correctVisibleFaces(presentedValues)
-          // Keep the physical roll, then present multi-die results as a readable
-          // non-overlapping grid. D6 dice retain their rolled top face while
-          // being straightened, so stacked dice cannot remain leaning.
+          // Keep the physical roll, then gather every result (including a lone
+          // d20) into a readable central grid. Every non-d4 die retains its
+          // rolled top face while being leveled so no result remains leaning.
           await box.arrangeSettledDice(presentedValues)
           const correctedAfterArrange = box.correctVisibleFaces(presentedValues)
           const visibleValues = box.visibleValues()

@@ -6,7 +6,11 @@ import {
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  dnd5eActivePlanarPhase,
+} from './activeEffects'
+import {
   createDnd5eCombatant,
+  dnd5eCombatantPairKey,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
 } from './headlessCombatEngine'
@@ -114,12 +118,21 @@ describe('structured monster Teleport and Invisibility', () => {
       })
       expect(validateDnd5eMonsterSchema(monster)).toEqual([])
     }
-    for (const slug of ['blink-dog', 'unicorn']) {
+    for (const slug of ['blink-dog', 'nightmare', 'unicorn']) {
       const action = getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
-        .find((candidate) => candidate.id === 'teleport')
+        .find((candidate) => candidate.id === (slug === 'nightmare' ? 'ethereal-stride' : 'teleport'))
       expect(action).toMatchObject({ automation: 'dm-adjudication' })
       expect(action?.rule).toBeUndefined()
     }
+    expect(getDnd5eSrdMonster('srd-5.1:blink-dog')?.actions
+      .find((candidate) => candidate.id === 'teleport-only')).toMatchObject({
+      automation: 'headless',
+      rule: {
+        kind: 'teleport', target: 'self', rangeFeet: 40,
+        requiresVisibleDestination: true,
+        requiresUnoccupiedDestination: true,
+      },
+    })
   })
 
   it('publishes five stable invisibility declarations without parsing descriptions', () => {
@@ -141,6 +154,207 @@ describe('structured monster Teleport and Invisibility', () => {
         maximumDurationRounds: 600,
         breakOnMonsterAbilityIds: ['enlarge'],
       })
+  })
+
+  it('publishes Ghost and Succubus/Incubus Etherealness as validated self toggles', () => {
+    for (const slug of ['ghost', 'succubus-incubus']) {
+      const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+      expect(monster.actions.find((action) => action.id === 'etherealness')).toMatchObject({
+        automation: 'headless',
+        kind: 'other',
+        rule: { kind: 'toggle-planar-phase', target: 'self', plane: 'ethereal' },
+      })
+      expect(validateDnd5eMonsterSchema(monster)).toEqual([])
+    }
+  })
+
+  it('toggles Etherealness atomically and blocks cross-plane attacks', () => {
+    const ghost = combatant('ghost', 20, {
+      statBlockId: 'srd-5.1:ghost', creatureType: 'undead',
+    })
+    const hero = combatant('hero', 10, { position: { x: 10, y: 5 } })
+    const state = startDnd5eHeadlessCombat('ghost-etherealness', [ghost, hero])
+    const forged = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action', actorId: 'ghost', actionId: 'etherealness',
+      targetId: 'hero',
+    })
+    expect(forged).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    expect(state.combatants.ghost.turn.actionAvailable).toBe(true)
+
+    const entered = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action', actorId: 'ghost', actionId: 'etherealness',
+    })
+    expect(entered.ok).toBe(true)
+    if (!entered.ok) return
+    expect(dnd5eActivePlanarPhase(
+      entered.state.combatants.ghost.classState.activeEffects,
+    ).plane).toBe('ethereal')
+    expect(entered.state.combatants.ghost.turn.actionAvailable).toBe(false)
+    expect(state.combatants.ghost.turn.actionAvailable).toBe(true)
+
+    entered.state.initiativeIndex = 1
+    const blocked = resolveDnd5eHeadlessAction(entered.state, {
+      type: 'attack', actorId: 'hero', targetId: 'ghost', attackModifier: 20,
+      d20: 20, damage: { count: 1, sides: 4, bonus: 0, rolls: [4] },
+    })
+    expect(blocked).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    entered.state.initiativeIndex = 0
+    entered.state.combatants.ghost.turn.actionAvailable = true
+    const returned = resolveDnd5eHeadlessAction(entered.state, {
+      type: 'monster-special-action', actorId: 'ghost', actionId: 'etherealness',
+    })
+    expect(returned.ok).toBe(true)
+    if (!returned.ok) return
+    expect(dnd5eActivePlanarPhase(
+      returned.state.combatants.ghost.classState.activeEffects,
+    ).plane).toBe('material')
+    expect(returned.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', stateKey: 'monster:srd-5.1:ghost:etherealness',
+      active: false,
+    }))
+  })
+
+  it('settles the Nightmare zero-passenger Ethereal Stride choice as a self-only toggle', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:nightmare')!
+    expect(monster.actions.find((action) => action.id === 'ethereal-stride-self-only'))
+      .toMatchObject({
+        automation: 'headless',
+        rule: {
+          kind: 'toggle-planar-phase', target: 'self', plane: 'ethereal', magical: true,
+        },
+      })
+    expect(validateDnd5eMonsterSchema(monster)).toEqual([])
+    const nightmare = combatant('nightmare', 20, {
+      statBlockId: monster.id, creatureType: monster.creatureType,
+    })
+    const hero = combatant('hero', 10, { position: { x: 10, y: 5 } })
+    const state = startDnd5eHeadlessCombat('nightmare-self-only-ethereal-stride', [nightmare, hero])
+    const entered = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action', actorId: nightmare.id,
+      actionId: 'ethereal-stride-self-only',
+    })
+    expect(entered.ok, entered.ok ? undefined : entered.reason).toBe(true)
+    if (!entered.ok) return
+    expect(dnd5eActivePlanarPhase(
+      entered.state.combatants.nightmare.classState.activeEffects,
+    )).toMatchObject({ plane: 'ethereal', suppressCrossPlaneEffects: true })
+    expect(entered.state.combatants.nightmare.turn.actionAvailable).toBe(false)
+    expect(state.combatants.nightmare.classState.activeEffects).toBeUndefined()
+  })
+
+  it('prepares a no-target Etherealness map transaction for the manual UI route', () => {
+    const ghostToken = token({ id: 'ghost', label: 'Ghost', poolId: 'srd-5.1:ghost' })
+    const heroToken = token({
+      id: 'hero', label: 'Hero', type: 'player', characterId: 'hero-character', x: 55,
+    })
+    const map = battleMap([ghostToken, heroToken], 'ghost-ethereal-map')
+    const prepared = prepareDnd5eMonsterSpecialAction({
+      combatId: 'combat', map, characters: [character()],
+      initiativeOrder: initiative(map.tokens), actorTokenId: ghostToken.id,
+      actionId: 'etherealness',
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const settled = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared })
+    expect(settled.result.ok).toBe(true)
+    expect(settled.application?.map.tokens.find((entry) => entry.id === ghostToken.id)
+      ?.dnd5eCombatState?.activeEffects).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          definitionId: 'monster:srd-5.1:ghost:etherealness:planar-phase',
+          modifiers: { planarPhase: expect.objectContaining({ plane: 'ethereal' }) },
+        }),
+      ]))
+  })
+
+  it('settles Draining Kiss damage, half damage, maximum-HP loss, and target eligibility', () => {
+    const fiend = combatant('fiend', 20, {
+      statBlockId: 'srd-5.1:succubus-incubus', creatureType: 'fiend',
+    })
+    const hero = combatant('hero', 10, {
+      position: { x: 10, y: 5 }, creatureType: 'humanoid',
+    })
+    const state = startDnd5eHeadlessCombat('draining-kiss', [fiend, hero])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(fiend.id, hero.id)]: 5,
+    }
+
+    const unwilling = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action', actorId: 'fiend', actionId: 'draining-kiss',
+      targetId: 'hero', d20: 1, damageRolls: [1, 1, 1, 1, 1],
+    })
+    expect(unwilling).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(state.combatants.fiend.turn.actionAvailable).toBe(true)
+
+    const willing = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action', actorId: 'fiend', actionId: 'draining-kiss',
+      targetId: 'hero', targetWilling: true, d20: 20,
+      damageRolls: [1, 1, 1, 1, 1],
+    })
+    expect(willing.ok, willing.ok ? undefined : willing.reason).toBe(true)
+    if (!willing.ok) return
+    expect(willing.state.combatants.hero).toMatchObject({ currentHp: 95, maxHp: 95 })
+    expect(willing.state.combatants.hero.classState.hitPointMaximumReductionLedger)
+      .toMatchObject({ entries: [expect.objectContaining({ amount: 5, recovery: 'long-rest' })] })
+
+    const charmFiend = combatant('fiend', 20, {
+      statBlockId: 'srd-5.1:succubus-incubus', creatureType: 'fiend',
+    })
+    const charmHero = combatant('hero', 10, {
+      position: { x: 10, y: 5 }, creatureType: 'humanoid',
+    })
+    const charmState = startDnd5eHeadlessCombat(
+      'draining-kiss-charmed',
+      [charmFiend, charmHero],
+    )
+    charmState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(charmFiend.id, charmHero.id)]: 5,
+    }
+    const charmed = resolveDnd5eHeadlessAction(charmState, {
+      type: 'monster-special-action', actorId: 'fiend', actionId: 'charm',
+      targetId: 'hero', d20: 1,
+    })
+    expect(charmed.ok, charmed.ok ? undefined : charmed.reason).toBe(true)
+    if (!charmed.ok) return
+    charmed.state.combatants.fiend.turn.actionAvailable = true
+    const kissed = resolveDnd5eHeadlessAction(charmed.state, {
+      type: 'monster-special-action', actorId: 'fiend', actionId: 'draining-kiss',
+      targetId: 'hero', d20: 1, damageRolls: [1, 1, 1, 1, 1],
+    })
+    expect(kissed.ok).toBe(true)
+    if (!kissed.ok) return
+    expect(kissed.state.combatants.hero).toMatchObject({ currentHp: 90, maxHp: 90 })
+    expect(kissed.events).toContainEqual(expect.objectContaining({
+      type: 'hit-point-maximum-reduced', amount: 10, recovery: 'long-rest',
+    }))
+  })
+
+  it('kills when Draining Kiss reduces maximum HP to zero', () => {
+    const fiend = combatant('fiend', 20, {
+      statBlockId: 'srd-5.1:succubus-incubus', creatureType: 'fiend',
+    })
+    const hero = combatant('hero', 10, {
+      position: { x: 10, y: 5 }, creatureType: 'humanoid', currentHp: 5, maxHp: 5,
+    })
+    const state = startDnd5eHeadlessCombat('fatal-draining-kiss', [fiend, hero])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(fiend.id, hero.id)]: 5,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action', actorId: 'fiend', actionId: 'draining-kiss',
+      targetId: 'hero', targetWilling: true, d20: 1,
+      damageRolls: [1, 1, 1, 1, 1],
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.hero).toMatchObject({
+      currentHp: 0,
+      maxHp: 0,
+      deathSaves: { dead: true, failures: 3 },
+    })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'instant-death', sourceId: 'fiend', targetId: 'hero',
+    }))
   })
 
   it('rechecks bounds, occupancy and sight before creating a teleport transaction', () => {
@@ -210,6 +424,37 @@ describe('structured monster Teleport and Invisibility', () => {
     expect(forged).toMatchObject({ ok: false, reason: 'invalid-target' })
     expect(state.combatants.balor.position).toEqual({ x: 5, y: 5 })
     expect(state.combatants.balor.turn.actionAvailable).toBe(true)
+  })
+
+  it('settles the Blink Dog teleport-only choice without fabricating its optional Bite', () => {
+    const blinkDogToken = token({
+      id: 'blink-dog', label: 'Blink Dog', poolId: 'srd-5.1:blink-dog',
+    })
+    const heroToken = token({
+      id: 'hero', label: 'Hero', type: 'player', characterId: 'hero-character', x: 155,
+    })
+    const map = battleMap([blinkDogToken, heroToken], 'blink-dog-teleport-only')
+    const prepared = prepareDnd5eMonsterSpecialAction({
+      combatId: 'combat', map, characters: [character()],
+      initiativeOrder: initiative(map.tokens), actorTokenId: blinkDogToken.id,
+      actionId: 'teleport-only', destinationCell: { col: 6, row: 0 },
+    })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === blinkDogToken.id))
+      .toMatchObject({ x: 65, y: 5, hp: 100 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'teleported', actorId: blinkDogToken.id, distanceFeet: 30,
+    }))
+    expect(resolved.result.events.some((event) => event.type === 'attack-resolved')).toBe(false)
+    if (resolved.result.ok) {
+      expect(resolved.result.state.combatants[blinkDogToken.id].classState
+        .monsterRechargeReadyByActionId).toMatchObject({ teleport: false })
+      expect(resolved.result.state.combatants[blinkDogToken.id].classState
+        .monsterRechargeReadyByActionId?.['teleport-only']).toBeUndefined()
+    }
   })
 
   it('keeps flyers airborne and routes an unsupported aerial arrival through deterministic fall dice', () => {

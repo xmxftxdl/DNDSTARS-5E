@@ -1,0 +1,163 @@
+{
+  "id": "srd-5.1:death-dog",
+  "slug": "death-dog",
+  "name": "死亡犬",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "multiattack",
+      "name": "多重攻击",
+      "automation": "headless",
+      "rule": "multiattack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "sequence[]",
+        "automation",
+        "sequenceAttackMode"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "complete-sequence"
+      ]
+    },
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].savingThrow.ability",
+        "attack.onHitEffects[].savingThrow.dc",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].ailment",
+        "attack.onHitEffects[].standardCondition",
+        "attack.onHitEffects[].calendarRepeatSave.intervalMinutes",
+        "attack.onHitEffects[].calendarRepeatSave.ability",
+        "attack.onHitEffects[].calendarRepeatSave.dc",
+        "attack.onHitEffects[].calendarRepeatSave.onSuccess",
+        "attack.onHitEffects[].calendarRepeatSave.maximumHitPointReductionOnFailure.average",
+        "attack.onHitEffects[].calendarRepeatSave.maximumHitPointReductionOnFailure.count",
+        "attack.onHitEffects[].calendarRepeatSave.maximumHitPointReductionOnFailure.sides",
+        "attack.onHitEffects[].calendarRepeatSave.maximumHitPointReductionOnFailure.bonus",
+        "attack.onHitEffects[].calendarRepeatSave.maximumHitPointReductionOnFailure.recovery",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "bite-disease:apply",
+        "bite-disease:save"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 76,
+      "slug": "death-dog",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T21:49:48.900Z",
+      "name": "死亡犬",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-death-dog-bite-1788558588999",
+      "combatId": "verify-ui-death-dog-bite-1788558588999:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "死亡犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 12+4=16 命中；共造成 3 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n04:50 PM\n结算\n\n死亡犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 12+4=16 命中；共造成 3 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 12；最终采用 12；调整值 +4。\n结果 · 16 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：1 = 1｜固定加值 +2｜小计 3\n死亡犬｜消耗动作\n验证目标｜体质豁免 d20 13 +10 = 23 vs DC 12｜成功\n验证目标｜受到 3 点伤害｜HP 320 → 317",
+      "playerLog": "死亡犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 12+4=16 命中；共造成 3 点伤害。",
+      "status": "failed",
+      "error": "TimeoutError: apiRequestContext.get: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - → GET http://127.0.0.1:6973/api/state/characters\u001b[22m\n\u001b[2m    - user-agent: Playwright/1.61.1 (x64; windows 10.0) node/24.16\u001b[22m\n\u001b[2m    - accept: */*\u001b[22m\n\u001b[2m    - accept-encoding: gzip,deflate,br\u001b[22m\n",
+      "finishedAt": "2026-09-04T21:50:56.032Z",
+      "evidenceFile": "ui-cases/monsters/076-death-dog.json"
+    },
+    {
+      "index": 215,
+      "slug": "death-dog",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T00:53:11.175Z",
+      "name": "死亡犬",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1",
+      "total": 334,
+      "mapId": "verify-ui-death-dog-bite-1788569591227",
+      "combatId": "verify-ui-death-dog-bite-1788569591227:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "死亡犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 9+4=13 命中；共造成 4 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n07:53 PM\n结算\n\n死亡犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 9+4=13 命中；共造成 4 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 9；最终采用 9；调整值 +4。\n结果 · 13 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜1d6 骰面：2 = 2｜固定加值 +2｜小计 4\n死亡犬｜消耗动作\n验证目标｜体质豁免 d20 11 +10 = 21 vs DC 12｜成功\n验证目标｜受到 4 点伤害｜HP 320 → 316",
+      "playerLog": "死亡犬 使用啃咬攻击 验证目标：啃咬 → 验证目标 9+4=13 命中；共造成 4 点伤害。",
+      "afterHp": 316,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T00:53:39.736Z",
+      "evidenceFile": "ui-cases/monsters/215-death-dog.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "双头生物",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 6,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

@@ -24,6 +24,14 @@ export interface Dnd5eManualMonsterSpellOption {
   resourceLabels: Readonly<Record<string, string>>
 }
 
+export interface Dnd5eMonsterAdjudicationSpellOption {
+  spellId: string
+  spellName: string
+  level: number
+  availableSlotLevels: readonly number[]
+  resourceLabels: Readonly<Record<string, string>>
+}
+
 function slotResourceLabel(
   token: Token,
   monsterSlots: Readonly<Record<string, number>> | undefined,
@@ -35,6 +43,47 @@ function slotResourceLabel(
   return `${level} 环 ${current}/${maximum}`
 }
 
+/** Includes narrative/manual spells that have no audited combat-spell definition. */
+export function dnd5eMonsterAdjudicationSpellOptions(
+  token: Token,
+): readonly Dnd5eMonsterAdjudicationSpellOption[] {
+  const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
+  if (!monster?.spellcasting?.spells) return []
+  return monster.spellcasting.spells.flatMap((spell) => {
+    const availableSlotLevels = dnd5eAvailableMonsterSpellSlotLevels({
+      monster,
+      token,
+      spell,
+    })
+    if (availableSlotLevels.length === 0) return []
+    const resourceLabels: Record<string, string> = {}
+    for (const slotLevel of availableSlotLevels) {
+      if (spell.level === 0 || spell.usage?.kind === 'at-will') {
+        resourceLabels[String(slotLevel)] = '随意施法'
+      } else if (spell.usage?.kind === 'per-day') {
+        const resource = token.dnd5eCombatState?.monsterSpellUsesBySpellId?.[spell.id]
+        const current = resource?.current ?? spell.usage.max
+        const maximum = resource?.max ?? spell.usage.max
+        resourceLabels[String(slotLevel)] = `每日 ${current}/${maximum}`
+      } else {
+        resourceLabels[String(slotLevel)] = slotResourceLabel(
+          token,
+          monster.spellcasting?.slots,
+          slotLevel,
+        )
+      }
+    }
+    return [{
+      spellId: spell.id,
+      spellName: spell.name,
+      level: spell.level,
+      availableSlotLevels,
+      resourceLabels,
+    }]
+  }).sort((left, right) =>
+    left.level - right.level || left.spellName.localeCompare(right.spellName, 'zh-CN'))
+}
+
 export function dnd5eManualMonsterSpellOptions(
   token: Token,
 ): readonly Dnd5eManualMonsterSpellOption[] {
@@ -42,8 +91,13 @@ export function dnd5eManualMonsterSpellOptions(
   if (!monster?.spellcasting?.spells) return []
   return monster.spellcasting.spells.flatMap((listedSpell) => {
     const spell = getDnd5eSrdCombatSpell(listedSpell.id)
-    if (!spell || spell.level !== listedSpell.level) return []
-    const compatibility = dnd5eMonsterCoreSpellCompatibility(spell)
+    const definitionMatches = !!spell && spell.level === listedSpell.level
+    const compatibility = definitionMatches
+      ? dnd5eMonsterCoreSpellCompatibility(spell)
+      : {
+          automation: 'manual' as const,
+          reason: '该法术没有通过完整 Headless 语义审查；批准后仅消费怪物施法资源。',
+        }
     const availableSlotLevels = dnd5eAvailableMonsterSpellSlotLevels({
       monster,
       token,
@@ -67,13 +121,13 @@ export function dnd5eManualMonsterSpellOptions(
       }
     }
     return [{
-      spellId: spell.id,
-      spellName: listedSpell.name || spell.name,
-      level: spell.level,
-      castingTime: spell.castingTime,
-      target: spell.target,
-      rangeFeet: spell.rangeFeet,
-      area: spell.area,
+      spellId: listedSpell.id,
+      spellName: listedSpell.name || spell?.name || listedSpell.id,
+      level: listedSpell.level,
+      castingTime: spell?.castingTime ?? 'action',
+      target: spell?.target ?? 'creature',
+      rangeFeet: spell?.rangeFeet ?? 0,
+      area: spell?.area,
       automation: compatibility.automation,
       compatibilityReason: compatibility.reason,
       availableSlotLevels,
@@ -92,6 +146,7 @@ export function buildDnd5eManualMonsterSpellPlan(input: {
   areaTargetCell?: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaTargetElevationFeet?: number
+  legendaryActionId?: string
 }): Dnd5eMonsterTurnPlan | undefined {
   const monster = input.actor.poolId ? getDnd5eSrdMonster(input.actor.poolId) : undefined
   const listedSpell = monster?.spellcasting?.spells?.find((spell) => spell.id === input.spellId)
@@ -131,6 +186,7 @@ export function buildDnd5eManualMonsterSpellPlan(input: {
       areaTargetCell: input.areaTargetCell,
       areaTargetOrientation: input.areaTargetOrientation,
       areaTargetElevationFeet: input.areaTargetElevationFeet,
+      legendaryActionId: input.legendaryActionId,
     },
     message: `${input.actor.label}施放${spell.name}${input.slotLevel > 0 ? `（${input.slotLevel} 环）` : '（戏法）'}。`,
   }

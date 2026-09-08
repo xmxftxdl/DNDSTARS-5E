@@ -1,0 +1,99 @@
+{
+  "id": "srd-5.1:worg",
+  "slug": "worg",
+  "name": "座狼",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "bite",
+      "name": "啃咬",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.reachFeet",
+        "attack.onHit",
+        "attack.onHitRule.kind",
+        "attack.onHitRule.ability",
+        "attack.onHitRule.dc",
+        "attack.onHitRule.condition",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 253,
+      "slug": "worg",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:02:56.408Z",
+      "name": "座狼",
+      "actionId": "bite",
+      "actionName": "啃咬",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/2",
+      "total": 334,
+      "mapId": "verify-ui-worg-bite-1788570176467",
+      "combatId": "verify-ui-worg-bite-1788570176467:combat",
+      "actorPosition": {
+        "x": 210,
+        "y": 280
+      },
+      "targetPosition": {
+        "x": 315,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "座狼 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+5=19 命中；共造成 13 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:03 PM\n结算\n\n座狼 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+5=19 命中；共造成 13 点伤害。\n\n查看 Headless 结算依据（12）\n怪物动作：啃咬｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 14；最终采用 14；调整值 +5。\n结果 · 19 vs AC 10：命中。\n伤害骰 · 啃咬（基础伤害·穿刺）｜2d6 骰面：6 + 4 = 10｜固定加值 +3｜小计 13\n座狼｜消耗动作\n验证目标｜受到 13 点伤害｜HP 320 → 307\n验证目标｜力量豁免 d20 10 +0 = 10 vs DC 13｜失败\n验证目标｜获得状态：倒地｜来源：座狼\n验证目标｜效果生效：倒地\n座狼｜monster:srd-5.1:worg:bite生效｜目标 验证目标",
+      "playerLog": "座狼 使用啃咬攻击 验证目标：啃咬 → 验证目标 14+5=19 命中；共造成 13 点伤害。",
+      "afterHp": 307,
+      "afterMaximumHp": 320,
+      "conditions": [
+        "prone"
+      ],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:03:25.024Z",
+      "evidenceFile": "ui-cases/monsters/253-worg.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "敏锐听觉与嗅觉",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "automationReason"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 3,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

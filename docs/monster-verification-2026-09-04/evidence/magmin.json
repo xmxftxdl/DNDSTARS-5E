@@ -1,0 +1,166 @@
+{
+  "id": "srd-5.1:magmin",
+  "slug": "magmin",
+  "name": "岩浆怪",
+  "verdict": "本次已覆盖范围通过",
+  "bugs": [],
+  "rows": [
+    {
+      "section": "actions",
+      "sectionLabel": "动作",
+      "id": "touch",
+      "name": "触碰",
+      "automation": "headless",
+      "rule": "weapon-attack",
+      "fieldPaths": [
+        "id",
+        "name",
+        "description",
+        "kind",
+        "attack.mode",
+        "attack.toHit",
+        "attack.reachFeet",
+        "attack.target",
+        "attack.damage[].average",
+        "attack.damage[].count",
+        "attack.damage[].sides",
+        "attack.damage[].bonus",
+        "attack.damage[].type",
+        "attack.onHitEffects[].id",
+        "attack.onHitEffects[].kind",
+        "attack.onHitEffects[].definitionId",
+        "attack.onHitEffects[].label",
+        "attack.onHitEffects[].periodicDamage.timing",
+        "attack.onHitEffects[].periodicDamage.count",
+        "attack.onHitEffects[].periodicDamage.sides",
+        "attack.onHitEffects[].periodicDamage.modifier",
+        "attack.onHitEffects[].periodicDamage.type",
+        "attack.onHitEffects[].removal.action.label",
+        "attack.onHitEffects[].removal.action.economy",
+        "attack.onHitEffects[].removal.action.maxDistanceFeet",
+        "attack.onHitEffects[].stacking",
+        "automation"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "miss",
+        "hit",
+        "critical",
+        "ignited:apply"
+      ]
+    }
+  ],
+  "ui": [
+    {
+      "index": 189,
+      "slug": "magmin",
+      "mode": "monsters",
+      "startedAt": "2026-09-04T22:54:05.776Z",
+      "name": "岩浆怪",
+      "actionId": "touch",
+      "actionName": "触碰",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "total": 334,
+      "mapId": "verify-ui-magmin-touch-1788562445830",
+      "combatId": "verify-ui-magmin-touch-1788562445830:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "岩浆怪 使用触碰攻击 验证目标：触碰 → 验证目标 10+4=14 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n05:54 PM\n结算\n\n岩浆怪 使用触碰攻击 验证目标：触碰 → 验证目标 10+4=14 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：触碰｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 10；最终采用 10；调整值 +4。\n结果 · 14 vs AC 10：命中。\n伤害骰 · 触碰（基础伤害·火焰）｜2d6 骰面：1 + 5 = 6｜固定加值 +0｜小计 6\n岩浆怪｜消耗动作\n验证目标｜受到 6 点伤害｜HP 320 → 314\n验证目标｜效果生效：srd-5.1:monster:magmin:ignited",
+      "status": "failed",
+      "error": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('combat-log-dock').getByText(/岩浆怪 使用触碰攻击 验证目标：/)\nExpected: \u001b[32m\"岩浆怪 使用触碰攻击 验证目标：触碰 → 验证目标 10+4=14 命中；共造成 6 点伤害。\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('combat-log-dock').getByText(/岩浆怪 使用触碰攻击 验证目标：/)\u001b[22m\n",
+      "finishedAt": "2026-09-04T22:54:38.457Z",
+      "evidenceFile": "ui-cases/monsters/189-magmin.json"
+    },
+    {
+      "index": 246,
+      "slug": "magmin",
+      "mode": "monsters",
+      "startedAt": "2026-09-05T01:00:52.241Z",
+      "name": "岩浆怪",
+      "actionId": "touch",
+      "actionName": "触碰",
+      "kind": "weapon-attack",
+      "section": "actions",
+      "challengeRating": "1/2",
+      "total": 334,
+      "mapId": "verify-ui-magmin-touch-1788570052306",
+      "combatId": "verify-ui-magmin-touch-1788570052306:combat",
+      "actorPosition": {
+        "x": 175,
+        "y": 245
+      },
+      "targetPosition": {
+        "x": 245,
+        "y": 245
+      },
+      "beforeHp": 320,
+      "dmLog": "岩浆怪 使用触碰攻击 验证目标：触碰 → 验证目标 18+4=22 命中；共造成 6 点伤害。",
+      "dmDetails": "战斗记录\n1\n清空\nR1\n08:01 PM\n结算\n\n岩浆怪 使用触碰攻击 验证目标：触碰 → 验证目标 18+4=22 命中；共造成 6 点伤害。\n\n查看 Headless 结算依据（9）\n怪物动作：触碰｜攻击次数 1\n攻击资格 · Headless 已验证目标与距离；效果线和视线状态已纳入本次结算；距离 5 尺（触及 5 尺）。\n空间判定 · 双方海拔均为 0 尺；掩护：已由 Headless 计入目标 AC。\n攻击骰 · 普通（1d20）；各骰面 18；最终采用 18；调整值 +4。\n结果 · 22 vs AC 10：命中。\n伤害骰 · 触碰（基础伤害·火焰）｜2d6 骰面：1 + 5 = 6｜固定加值 +0｜小计 6\n岩浆怪｜消耗动作\n验证目标｜受到 6 点伤害｜HP 320 → 314\n验证目标｜效果生效：srd-5.1:monster:magmin:ignited",
+      "playerLog": "岩浆怪 使用触碰攻击 验证目标：触碰 → 验证目标 18+4=22 命中；共造成 6 点伤害。",
+      "afterHp": 314,
+      "afterMaximumHp": 320,
+      "conditions": [],
+      "status": "passed",
+      "finishedAt": "2026-09-05T01:01:15.741Z",
+      "evidenceFile": "ui-cases/monsters/246-magmin.json"
+    }
+  ],
+  "traitFields": [
+    {
+      "name": "死亡爆裂",
+      "automation": "headless",
+      "rule": "death-area-saving-throw",
+      "fields": [
+        "name",
+        "description",
+        "automation",
+        "rule.kind",
+        "rule.ruleId",
+        "rule.area.shape",
+        "rule.area.origin",
+        "rule.area.radiusFeet",
+        "rule.target",
+        "rule.ability",
+        "rule.dc",
+        "rule.damage.average",
+        "rule.damage.count",
+        "rule.damage.sides",
+        "rule.damage.bonus",
+        "rule.damage.type",
+        "rule.damageOnSuccessfulSave"
+      ],
+      "runtime": "通过",
+      "scenarios": [
+        "failed-save",
+        "successful-save",
+        "outside-radius",
+        "replay-rejected"
+      ],
+      "boundaries": []
+    },
+    {
+      "name": "燃火照明",
+      "automation": "dm-adjudication",
+      "fields": [
+        "name",
+        "description",
+        "automation"
+      ],
+      "runtime": "DM 裁定 / 情境判断",
+      "scenarios": [],
+      "boundaries": []
+    }
+  ],
+  "runtimeInvocationCount": 8,
+  "uncoveredActionCount": 0,
+  "uncoveredTraitCount": 0
+}

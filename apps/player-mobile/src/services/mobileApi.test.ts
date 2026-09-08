@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MobileAccountSession } from '../../../../packages/mobile-protocol/src'
-import { joinMobileRoom } from './mobileApi'
+import { fetchMobileAccount, fetchMobileCampaigns, joinMobileRoom, updateMobileAccountProfile } from './mobileApi'
 
 const account: MobileAccountSession = {
   accountId: 'account-1', displayName: '玩家', sessionToken: 'account-token', createdAt: 1,
@@ -9,6 +9,26 @@ const account: MobileAccountSession = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('mobile room join readiness', () => {
+  it('preserves the credential when /accounts/me returns only a public profile', async () => {
+    const requests: RequestInit[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(init)
+      return new Response(JSON.stringify(requests.length === 1
+        ? { accountId: account.accountId, displayName: '改名后', createdAt: 1 }
+        : { campaigns: [] }), { status: 200 })
+    }))
+    const restored = await fetchMobileAccount('https://example.test', account)
+    expect(restored).toEqual({ ...account, displayName: '改名后' })
+    await fetchMobileCampaigns('https://example.test', restored)
+    expect(new Headers(requests[1].headers).get('X-Stars-Account-Token')).toBe(account.sessionToken)
+  })
+
+  it('does not invent a session credential in a profile update response', async () => {
+    const profile = { accountId: account.accountId, displayName: '改名后', createdAt: 1 }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(profile))))
+    expect(await updateMobileAccountProfile('https://example.test', account, { displayName: '改名后' })).toEqual(profile)
+  })
+
   it('does not claim previewed packages are active before downloading them', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

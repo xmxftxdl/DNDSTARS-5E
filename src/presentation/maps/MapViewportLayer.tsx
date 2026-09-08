@@ -3,14 +3,16 @@ import type { SpellStatusTokenMark, StandardConditionTokenMark } from '../../com
 import { spellStatusTokenTooltip, standardConditionTokenTooltip } from '../../components/map/tokenStatusTooltip'
 import { useBrowserSceneWorldMinute } from '../../composition/browserSceneClock'
 import { realignTokensToGrid } from '../../lib/gridCombat'
+import { isDnd5eTokenBanished, tokenPresentationHitPoints } from '../../lib/combatTokens'
 import { dnd5eCharacterPresentationColors } from '../dnd5e/characterPresentation'
 import {
   dnd5eActiveStandardConditions,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
 } from '../../application/combat/dnd5eCombatRules'
-import { dnd5eConditionLabel } from '../../rulesets/dnd5e/conditions'
 import { dnd5eTokenStatusMarkersFromActiveEffects } from '../../rulesets/dnd5e/tokenStatusMarkers'
+import { dnd5eActiveEmittedLight } from '../../rulesets/dnd5e/activeEffects'
+import { dnd5eTokenIntersectsPersistentAreaAt } from '../../rulesets/dnd5e/persistentAreaGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import { projectCharacterTokenPresentations } from '../../store/maps'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
@@ -36,13 +38,11 @@ import {
   hasEnlargeReducePresentationEffect,
   hasFlameBladePresentationEffect,
   hasFlyPresentationEffect,
-  hasGreaterInvisibilityPresentationEffect,
   hasGuidancePresentationEffect,
   hasHeroismPresentationEffect,
   hasHideousLaughterPresentationEffect,
   hasHoldPersonPresentationEffect,
   hasHuntersMarkPresentationEffect,
-  hasInvisibilityPresentationEffect,
   hasJumpPresentationEffect,
   hasLongstriderPresentationEffect,
   hasMageArmorPresentationEffect,
@@ -76,6 +76,7 @@ type ViewportOwnedSceneCanvasProps =
   | 'concentrationTokenMarks'
   | 'tokenHoverLabels'
   | 'defeatedTokenIds'
+  | 'etherealTokenIds'
 
 export interface MapViewportGridCalibrationDraft {
   mapId: string
@@ -104,8 +105,8 @@ export interface MapViewportPresentation {
   sanctuaryTokenIds: string[]
   spellStatusTokenMarks: SpellStatusTokenMark[]
   concentrationTokenMarks: NonNullable<SceneCanvasProps['concentrationTokenMarks']>
-  tokenHoverLabels: Record<string, string>
   defeatedTokenIds: string[]
+  etherealTokenIds: string[]
 }
 
 function linkedCharacter(
@@ -136,14 +137,12 @@ function statusIdsForCombatState(combatState: Token['dnd5eCombatState'] | undefi
     hasHuntersMarkPresentationEffect(combatState) ? 'hunters-mark' : undefined,
     hasMagicWeaponPresentationEffect(combatState) ? 'magic-weapon' : undefined,
     hasFlameBladePresentationEffect(combatState) ? 'flame-blade' : undefined,
-    hasInvisibilityPresentationEffect(combatState) ? 'invisibility' : undefined,
     hasBlurPresentationEffect(combatState) ? 'blur' : undefined,
     hasBarkskinPresentationEffect(combatState) ? 'barkskin' : undefined,
     hasProtectionFromPoisonPresentationEffect(combatState) ? 'protection-from-poison' : undefined,
     hasLongstriderPresentationEffect(combatState) ? 'longstrider' : undefined,
     hasProtectionFromEnergyPresentationEffect(combatState) ? 'protection-from-energy' : undefined,
     hasDeathWardPresentationEffect(combatState) ? 'death-ward' : undefined,
-    hasGreaterInvisibilityPresentationEffect(combatState) ? 'greater-invisibility' : undefined,
     hasCharmPersonPresentationEffect(combatState) ? 'charm-person' : undefined,
     hasHideousLaughterPresentationEffect(combatState) ? 'hideous-laughter' : undefined,
     hasHoldPersonPresentationEffect(combatState) ? 'hold-person' : undefined,
@@ -180,24 +179,54 @@ export function buildMapViewportPresentation(
   const chillTouchTokenIds: string[] = []
   const standardConditionTokenMarks: StandardConditionTokenMark[] = []
   const spellEffectStatusTokenMarks: SpellStatusTokenMark[] = []
+  const emittedLightByTokenId: Record<string, NonNullable<Token['lightSource']>> = {}
+  const etherealTokenIds: string[] = []
 
   for (const token of map.tokens) {
     const character = linkedCharacter(token, charactersById)
-    const hitPoints = character
-      ? { hp: character.currentHp, max: character.maxHp, temp: character.tempHp ?? 0 }
-      : token.maxHp != null
-        ? { hp: token.hp ?? token.maxHp, max: token.maxHp }
-        : undefined
+    if (isDnd5eTokenBanished(token, characters)) etherealTokenIds.push(token.id)
+    const hitPoints = tokenPresentationHitPoints(token, character)
     if (hitPoints) hpByToken[token.id] = hitPoints
 
-    const effects = normalizeDnd5eActiveEffects(
-      character?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects,
-    )
+    const effects = normalizeDnd5eActiveEffects([
+      ...(character?.dnd5eCombatState?.activeEffects ?? []),
+      ...(token.dnd5eCombatState?.activeEffects ?? []),
+    ])
     const conditions = dnd5eActiveStandardConditions({
       conditions: dnd5eConditionsFromActiveEffects(effects),
     })
     if (conditions.length > 0) dnd5eConditionsByToken[token.id] = conditions
-    const statusMarkers = dnd5eTokenStatusMarkersFromActiveEffects(effects).map((marker) => {
+    const emittedLight = dnd5eActiveEmittedLight(effects)
+    if (emittedLight) {
+      const existing = token.lightSource
+      const existingOuter = existing?.enabled
+        ? existing.brightRadiusFeet + existing.dimRadiusFeet
+        : 0
+      const emittedOuter = emittedLight.brightRadiusFeet + emittedLight.dimRadiusFeet
+      const brightRadiusFeet = Math.max(existing?.enabled ? existing.brightRadiusFeet : 0, emittedLight.brightRadiusFeet)
+      emittedLightByTokenId[token.id] = {
+        enabled: true,
+        brightRadiusFeet,
+        dimRadiusFeet: Math.max(existingOuter, emittedOuter) - brightRadiusFeet,
+        color: existingOuter >= emittedOuter && existing?.enabled ? existing.color : emittedLight.color,
+        sourceKind: 'spell',
+        ...(emittedLight.sunlight === true || existing?.sunlight === true ? { sunlight: true as const } : {}),
+      }
+    }
+    const visibleStatusEffects = effects.filter((effect) => {
+      if (
+        effect.definitionId !== 'srd-5.1:spell:zone-of-truth:failed-save' ||
+        effect.source.rulesId !== 'zone-of-truth'
+      ) return true
+      const areaTag = effect.tags?.find((tag) => tag.startsWith('persistent-area:'))
+      const areaId = areaTag?.slice('persistent-area:'.length)
+      const area = areaId
+        ? map.dnd5ePluginAreas?.find((candidate) =>
+            candidate.id === areaId && candidate.coreSpellId === 'zone-of-truth')
+        : undefined
+      return !!area && dnd5eTokenIntersectsPersistentAreaAt(token, map, area, token)
+    })
+    const statusMarkers = dnd5eTokenStatusMarkersFromActiveEffects(visibleStatusEffects).map((marker) => {
       const sourceToken = marker.sourceActorId
         ? map.tokens.find((candidate) => candidate.id === marker.sourceActorId)
         : undefined
@@ -210,7 +239,11 @@ export function buildMapViewportPresentation(
         ...marker,
         sourceLabel: marker.sourceLabel ?? sourceCharacter.name ?? sourceToken?.label,
         backgroundColor: colors.statusBackgroundColor,
-        borderColor: colors.statusBorderColor,
+        // Tactical spell badges are small enough that the palette's very pale
+        // status-frame color reads as white (wizard: #DBEAFE). Use the source
+        // class primary accent for the visible perimeter so the caster remains
+        // identifiable at map scale; keep the deep background and glow slots.
+        borderColor: colors.accentColor,
         glowColor: colors.glowColor,
       }
     })
@@ -229,7 +262,8 @@ export function buildMapViewportPresentation(
     for (const statusId of statusIdsForCombatState(combatState)) {
       const activeEffect = effects.find((effect) =>
         effect.source.rulesId === statusId || effect.definitionId === `srd-5.1:spell:${statusId}`)
-      const sourceActorId = spellPresentationEffectSourceActorId(combatState, statusId)
+      const sourceActorId = activeEffect?.source.actorId ??
+        spellPresentationEffectSourceActorId(combatState, statusId)
       const sourceToken = map.tokens.find((candidate) => candidate.id === sourceActorId)
       const sourceCharacter = sourceToken?.characterId
         ? charactersById.get(sourceToken.characterId)
@@ -254,7 +288,9 @@ export function buildMapViewportPresentation(
         statusId,
         backgroundHighlightColor: colors.statusBackgroundHighlightColor,
         backgroundColor: colors.statusBackgroundColor,
-        borderColor: colors.statusBorderColor,
+        // Every source-attributed Token marker uses the granting class's
+        // primary banner color for its visible perimeter.
+        borderColor: colors.accentColor,
         glowColor: colors.glowColor,
         classId: colors.classId,
       })
@@ -287,7 +323,7 @@ export function buildMapViewportPresentation(
         tokenId: token.id,
         condition,
         backgroundColor: colors.statusBackgroundColor,
-        borderColor: colors.statusBorderColor,
+        borderColor: colors.accentColor,
         glowColor: colors.glowColor,
       })
     }
@@ -304,12 +340,15 @@ export function buildMapViewportPresentation(
     ...spellEffectStatusTokenMarks,
     ...buildDnd5eMonsterStatusTokenMarks(map.tokens, [...characters]),
   ]
-  const tokenHoverLabels = Object.fromEntries(Object.entries(dnd5eConditionsByToken).map(
-    ([tokenId, conditions]) => [tokenId, `状态：${conditions.map(dnd5eConditionLabel).join('、')}`],
-  ))
-
   return {
-    map: canvasMap,
+    map: Object.keys(emittedLightByTokenId).length > 0
+      ? {
+          ...canvasMap,
+          tokens: canvasMap.tokens.map((token) => emittedLightByTokenId[token.id]
+            ? { ...token, lightSource: emittedLightByTokenId[token.id] }
+            : token),
+        }
+      : canvasMap,
     tokenBorderPresentations: buildDnd5eTokenBorderPresentations(displayMap.tokens, [...characters]),
     hpByToken,
     dnd5eConditionsByToken,
@@ -323,11 +362,11 @@ export function buildMapViewportPresentation(
       .map((mark) => mark.tokenId),
     spellStatusTokenMarks,
     concentrationTokenMarks: buildDnd5eConcentrationTokenMarks(map.tokens, [...characters]),
-    tokenHoverLabels,
     defeatedTokenIds: map.tokens.flatMap((token) => {
       const hitPoints = hpByToken[token.id]
       return hitPoints && hitPoints.hp <= 0 ? [token.id] : []
     }),
+    etherealTokenIds,
   }
 }
 
@@ -367,8 +406,8 @@ function MapViewportLayerComponent({
         sanctuaryTokenIds={presentation.sanctuaryTokenIds}
         spellStatusTokenMarks={presentation.spellStatusTokenMarks}
         concentrationTokenMarks={presentation.concentrationTokenMarks}
-        tokenHoverLabels={presentation.tokenHoverLabels}
         defeatedTokenIds={presentation.defeatedTokenIds}
+        etherealTokenIds={presentation.etherealTokenIds}
       />
       {orchestratedScene ? (
         <SceneWeatherLayer

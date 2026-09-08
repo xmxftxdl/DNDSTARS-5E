@@ -7,6 +7,7 @@ import {
 import {
   applyDnd5eMonsterAbilityTemplate,
   DND5E_MONSTER_ABILITY_TEMPLATES,
+  dnd5eMonsterWorkshopDefaultSaveDc,
 } from './monsterWorkshopAbilityTemplates'
 import { DND5E_SRD_MONSTERS } from './monsters'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
@@ -18,6 +19,150 @@ describe('D&D 5e monster workshop ability templates', () => {
     expect(DND5E_MONSTER_ABILITY_TEMPLATES.some((template) => template.ruleKind === 'multiattack')).toBe(true)
     expect(DND5E_MONSTER_ABILITY_TEMPLATES.some((template) => template.ruleKind === 'area-saving-throw')).toBe(true)
     expect(DND5E_MONSTER_ABILITY_TEMPLATES.every((template) => template.searchText.length > 0)).toBe(true)
+  })
+
+  it('collapses identical monster-specific traits into one generic placeholder template', () => {
+    const templates = DND5E_MONSTER_ABILITY_TEMPLATES.filter((template) =>
+      template.section === 'trait' && template.ruleKind === 'magic-resistance')
+    expect(templates).toHaveLength(1)
+    expect(templates[0]?.sourceCount).toBeGreaterThan(5)
+    expect(templates[0]?.description).toBe('【名称】对抗法术和其他魔法效应时进行的豁免检定具有优势。')
+    expect(templates[0]?.searchText).toContain('独角兽')
+
+    const initial = createDnd5eCustomMonsterDraft()
+    initial.name = '星痕守卫'
+    const applied = applyDnd5eMonsterAbilityTemplate(initial, templates[0]!.id)
+    const imported = applied.draft.traits.at(-1)
+    expect(imported?.description).toBe('星痕守卫对抗法术和其他魔法效应时进行的豁免检定具有优势。')
+    expect(imported?.description).not.toContain('【名称】')
+    expect(imported?.preservedTrait?.description).toBe(imported?.description)
+    expect(imported?.templateSource?.monsterName).toContain('通用模板')
+  })
+
+  it('keeps complex parameterized actions distinct while common traits use editors', () => {
+    const regeneration = DND5E_MONSTER_ABILITY_TEMPLATES.filter((template) =>
+      template.section === 'trait' && template.ruleKind === 'regeneration')
+    const areaSaves = DND5E_MONSTER_ABILITY_TEMPLATES.filter((template) =>
+      template.section === 'action' && template.ruleKind === 'area-saving-throw')
+    expect(regeneration).toHaveLength(1)
+    expect(regeneration[0]?.parameterEditor).toBe('regeneration')
+    expect(areaSaves.length).toBeGreaterThan(5)
+  })
+
+  it('collapses Charge into one editable template with an automatically calculated default DC', () => {
+    const templates = DND5E_MONSTER_ABILITY_TEMPLATES.filter((template) =>
+      template.parameterEditor === 'charge')
+    expect(templates).toHaveLength(1)
+    expect(templates[0]).toMatchObject({
+      name: '冲锋',
+      dependencyCount: 0,
+    })
+    expect(templates[0]?.sourceCount).toBeGreaterThan(5)
+    expect(templates[0]?.description).toContain('DM 填写的额外伤害')
+    expect(DND5E_MONSTER_ABILITY_TEMPLATES.some((template) =>
+      template.ruleKind === 'charge-damage' && template.name === '猛扑')).toBe(true)
+    expect(DND5E_MONSTER_ABILITY_TEMPLATES.some((template) =>
+      template.ruleKind === 'charge-damage' && template.name === '践踏冲锋')).toBe(true)
+
+    const initial = createDnd5eCustomMonsterDraft()
+    initial.name = '铁角兽'
+    initial.challengeRating = '5'
+    initial.abilities.str = 18
+    const applied = applyDnd5eMonsterAbilityTemplate(initial, templates[0]!.id)
+    const imported = applied.draft.traits.at(-1)
+
+    expect(applied.addedActionIds).toEqual([])
+    expect(imported).toMatchObject({
+      name: '冲锋',
+      ruleKind: 'charge-damage',
+      chargeMinimumFeet: 20,
+      chargeActionId: initial.actions[0].id,
+      chargeDamageDice: '2d6',
+      chargeSaveEnabled: true,
+      chargeSaveAbility: 'str',
+      chargeSaveDc: 15,
+      chargeSaveCondition: 'prone',
+    })
+    expect(imported?.preservedTrait).toBeUndefined()
+    expect(dnd5eMonsterWorkshopDefaultSaveDc(initial, 'str')).toBe(15)
+
+    imported!.chargeDamageDice = '4d8+3'
+    const built = buildDnd5eCustomMonster(applied.draft)
+    const charge = built.traits.find((trait) => trait.rule?.kind === 'charge-damage')
+    expect(charge?.rule).toMatchObject({
+      kind: 'charge-damage',
+      minimumStraightMovementFeet: 20,
+      extraDamage: { count: 4, sides: 8, bonus: 3 },
+      savingThrowOnHit: { ability: 'str', dc: 15, conditionOnFailedSave: 'prone' },
+    })
+  })
+
+  it('collapses common traits into editable templates and round-trips their Headless rules', () => {
+    const expectedSourceCounts = new Map([
+      ['regeneration', 7],
+      ['magic-weapons', 16],
+      ['relentless', 5],
+      ['sneak-attack', 2],
+      ['surprise-attack', 2],
+      ['stench', 2],
+    ] as const)
+    for (const [editor, sourceCount] of expectedSourceCounts) {
+      const matches = DND5E_MONSTER_ABILITY_TEMPLATES.filter((template) =>
+        template.parameterEditor === editor)
+      expect(matches).toHaveLength(1)
+      expect(matches[0]?.sourceCount).toBe(sourceCount)
+      expect(matches[0]?.dependencyCount).toBe(0)
+    }
+
+    let draft = createDnd5eCustomMonsterDraft()
+    draft.name = '常见特性测试怪物'
+    draft.challengeRating = '5'
+    draft.abilities.con = 16
+    for (const editor of expectedSourceCounts.keys()) {
+      const template = DND5E_MONSTER_ABILITY_TEMPLATES.find((candidate) =>
+        candidate.parameterEditor === editor)!
+      draft = applyDnd5eMonsterAbilityTemplate(draft, template.id).draft
+    }
+
+    const regeneration = draft.traits.find((trait) => trait.ruleKind === 'regeneration')!
+    regeneration.amount = 12
+    regeneration.damageTypes = ['fire']
+    regeneration.requiresPositiveHp = false
+    regeneration.diesAtZeroWhenSuppressed = true
+    draft.traits.find((trait) => trait.ruleKind === 'relentless')!.relentlessMaximumDamage = 17
+    draft.traits.find((trait) => trait.ruleKind === 'sneak-attack')!.sneakAttackDamageDice = '3d6+1'
+    draft.traits.find((trait) => trait.ruleKind === 'surprise-attack')!.surpriseAttackDamageDice = '4d6'
+    const stench = draft.traits.find((trait) => trait.ruleKind === 'stench')!
+    stench.stenchRangeFeet = 15
+    expect(stench.stenchSaveDc).toBe(14)
+
+    const built = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(built).ok).toBe(true)
+    expect(built.traits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rule: expect.objectContaining({
+        kind: 'regeneration', amount: 12, requiresPositiveHp: false,
+        suppressedByDamageTypes: ['fire'], diesAtZeroWhenSuppressed: true,
+      }) }),
+      expect.objectContaining({ rule: { kind: 'magic-weapons', weaponAttacksMagical: true } }),
+      expect.objectContaining({ rule: { kind: 'relentless', maximumDamage: 17 } }),
+      expect.objectContaining({ rule: expect.objectContaining({
+        kind: 'sneak-attack', extraDamage: expect.objectContaining({ count: 3, sides: 6, bonus: 1 }),
+      }) }),
+      expect.objectContaining({ rule: expect.objectContaining({
+        kind: 'surprise-attack', extraDamage: expect.objectContaining({ count: 4, sides: 6, bonus: 0 }),
+      }) }),
+      expect.objectContaining({ rule: expect.objectContaining({
+        kind: 'turn-start-saving-throw-aura', ruleId: 'stench', rangeFeet: 15, dc: 14,
+      }) }),
+    ]))
+
+    const restored = dnd5eCustomMonsterDraftFromStatBlock(built)
+    expect(restored.traits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleKind: 'relentless', relentlessMaximumDamage: 17 }),
+      expect.objectContaining({ ruleKind: 'sneak-attack', sneakAttackDamageDice: '3d6+1' }),
+      expect.objectContaining({ ruleKind: 'surprise-attack', surpriseAttackDamageDice: '4d6' }),
+      expect.objectContaining({ ruleKind: 'stench', stenchRangeFeet: 15, stenchSaveDc: 14 }),
+    ]))
   })
 
   it('keeps a complex trait rule that the basic editor cannot represent', () => {

@@ -1,0 +1,42 @@
+{
+  "mapId": "aboleth-multiattack-ui-1788592442638",
+  "combatId": "aboleth-multiattack-ui-1788592442638:combat",
+  "dmBase": "http://127.0.0.1:7073",
+  "playerBase": "http://127.0.0.1:7074",
+  "startedAt": "2026-09-05T07:14:03.209Z",
+  "beforeHp": 120,
+  "afterHp": 87,
+  "conditions": [
+    "disease"
+  ],
+  "activeEffects": [
+    {
+      "schemaVersion": 1,
+      "id": "monster-persistent:actor:tentacle:tentacle-disease:target",
+      "definitionId": "srd-5.1:monster:aboleth:tentacle-disease",
+      "label": "Aboleth Tentacle Disease",
+      "tags": [
+        "disease"
+      ],
+      "kind": "debuff",
+      "source": {
+        "kind": "monster",
+        "actorId": "actor",
+        "actorName": "底栖魔鱼",
+        "rulesId": "monster:srd-5.1:aboleth:tentacle:tentacle-disease"
+      },
+      "appliedAt": 0,
+      "duration": {
+        "type": "permanent"
+      },
+      "stackingKey": "monster-persistent:actor:tentacle:tentacle-disease:target",
+      "stackingPolicy": "refresh-duration",
+      "visibility": "public",
+      "legacyCondition": "disease"
+    }
+  ],
+  "dmLog": "底栖魔鱼 使用多重攻击攻击 验证目标：触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；共造成 33 点伤害。",
+  "playerLog": "底栖魔鱼 使用多重攻击攻击 验证目标：触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；触手 → 验证目标 10+9=19 命中；共造成 33 点伤害。",
+  "status": "passed",
+  "finishedAt": "2026-09-05T07:14:46.848Z"
+}

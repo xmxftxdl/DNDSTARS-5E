@@ -1,5 +1,10 @@
 export type CombatSettlementMode = 'automatic' | 'manual'
-export type ManualSettlementOperation = 'damage' | 'healing' | 'temporary-hit-points'
+export type ManualSettlementOperation =
+  | 'damage'
+  | 'healing'
+  | 'temporary-hit-points'
+  | 'increase-temporary-hit-points'
+  | 'decrease-temporary-hit-points'
 
 export interface ManualHitPointState {
   currentHp: number
@@ -7,22 +12,17 @@ export interface ManualHitPointState {
   temporaryHp: number
 }
 
-export const COMBAT_SETTLEMENT_MODE_OPTIONS: ReadonlyArray<{
-  id: CombatSettlementMode
-  label: string
-  summary: string
-}> = [
-  { id: 'automatic', label: '自动结算', summary: '玩家与怪物都由 D&D 5e Headless 结算。' },
-  { id: 'manual', label: '手动结算', summary: '双方只使用公共骰盘，DM 手工应用伤害和治疗。' },
-]
-
 export function normalizeCombatSettlementMode(value: unknown): CombatSettlementMode {
-  // 旧房间的半自动模式迁移为手动，避免重新载入后意外启动怪物 AI。
-  return value === 'manual' || value === 'semi-automatic' ? 'manual' : 'automatic'
+  // Global settlement selection was removed. Keep the legacy wire union so old
+  // snapshots still decode, but every room now routes each individual action
+  // by its audited Headless capability instead of a room-wide switch.
+  void value
+  return 'automatic'
 }
 
-export function usesAutomatedPlayerSettlement(mode: CombatSettlementMode): boolean {
-  return mode !== 'manual'
+export function usesAutomatedPlayerSettlement(_mode: CombatSettlementMode): boolean {
+  void _mode
+  return true
 }
 
 export function allowsPlayerActionInSettlementMode(
@@ -30,18 +30,17 @@ export function allowsPlayerActionInSettlementMode(
   actionType: string,
   combatActive = true,
 ): boolean {
-  return usesAutomatedPlayerSettlement(mode) ||
-    actionType === 'end-turn' ||
-    actionType === 'dnd5e-map-interaction' ||
-    (!combatActive && actionType === 'move-token')
+  // Kept in the public signature for callers that distinguish exploration
+  // from combat; movement is intentionally authorized in both states.
+  void combatActive
+  void mode
+  void actionType
+  return true
 }
 
-export function usesAutomatedMonsterSettlement(mode: CombatSettlementMode): boolean {
-  return mode === 'automatic'
-}
-
-export function supportsManualDice(mode: CombatSettlementMode, role: 'dm' | 'player'): boolean {
-  return role === 'dm' || mode === 'manual'
+export function supportsManualDice(_mode: CombatSettlementMode, role: 'dm' | 'player'): boolean {
+  void _mode
+  return role === 'dm'
 }
 
 /**
@@ -64,6 +63,14 @@ export function applyManualHitPointOperation(
   const amount = Math.max(0, Math.floor(rawAmount))
   const currentHp = Math.min(maxHp, Math.max(0, Math.floor(state.currentHp)))
   const temporaryHp = Math.max(0, Math.floor(state.temporaryHp))
+  // DM 管理入口需要精确修正临时生命；法术/能力继续使用下面的
+  // temporary-hit-points 分支，遵守 5e “不叠加、取较高值”的规则。
+  if (operation === 'increase-temporary-hit-points') {
+    return { currentHp, maxHp, temporaryHp: temporaryHp + amount }
+  }
+  if (operation === 'decrease-temporary-hit-points') {
+    return { currentHp, maxHp, temporaryHp: Math.max(0, temporaryHp - amount) }
+  }
   if (operation === 'temporary-hit-points') {
     return { currentHp, maxHp, temporaryHp: Math.max(temporaryHp, amount) }
   }

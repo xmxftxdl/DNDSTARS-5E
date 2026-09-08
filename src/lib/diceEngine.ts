@@ -89,7 +89,7 @@ interface RuntimeQuaternion {
 }
 
 interface RuntimeGeometry {
-  groups?: Array<{ materialIndex?: number }>
+  groups?: Array<{ start?: number; count?: number; materialIndex?: number }>
   getAttribute?: (name: string) => { array?: ArrayLike<number> } | undefined
 }
 
@@ -132,6 +132,39 @@ interface VectorValue {
   z: number
 }
 
+function groupLocalNormal(
+  normals: ArrayLike<number>,
+  group: { start?: number; count?: number },
+  groupIndex: number,
+): VectorValue | undefined {
+  const firstVertex = Number.isFinite(group.start)
+    ? Math.max(0, Math.round(group.start!))
+    : groupIndex * 3
+  const vertexCount = Number.isFinite(group.count)
+    ? Math.max(1, Math.round(group.count!))
+    : 3
+  let x = 0
+  let y = 0
+  let z = 0
+  let samples = 0
+  for (let vertex = firstVertex; vertex < firstVertex + vertexCount; vertex += 1) {
+    const offset = vertex * 3
+    if (offset + 2 >= normals.length) break
+    const nextX = Number(normals[offset])
+    const nextY = Number(normals[offset + 1])
+    const nextZ = Number(normals[offset + 2])
+    if (![nextX, nextY, nextZ].every(Number.isFinite)) continue
+    x += nextX
+    y += nextY
+    z += nextZ
+    samples += 1
+  }
+  if (samples < 1) return undefined
+  const length = Math.hypot(x, y, z)
+  if (length < 0.000001) return undefined
+  return { x: x / length, y: y / length, z: z / length }
+}
+
 function normalizedQuaternion(value: QuaternionValue): QuaternionValue {
   const length = Math.hypot(value.x, value.y, value.z, value.w) || 1
   return {
@@ -162,14 +195,13 @@ function multiplyQuaternion(left: QuaternionValue, right: QuaternionValue): Quat
   })
 }
 
-function straightenedD6Quaternion(die: RuntimeDie): QuaternionValue {
+function uprightTopFaceQuaternion(die: RuntimeDie): QuaternionValue {
   const current = normalizedQuaternion({
     x: die.quaternion?.x ?? 0,
     y: die.quaternion?.y ?? 0,
     z: die.quaternion?.z ?? 0,
     w: die.quaternion?.w ?? 1,
   })
-  if (die.shape !== 'd6') return current
   const normals = die.geometry?.getAttribute?.('normal')?.array
   const groups = die.geometry?.groups
   if (!normals || !groups?.length) return current
@@ -178,13 +210,8 @@ function straightenedD6Quaternion(die: RuntimeDie): QuaternionValue {
   let upperLocalNormal: VectorValue | undefined
   for (let index = 0; index < groups.length; index += 1) {
     if (groups[index].materialIndex === 0) continue
-    const offset = index * 9
-    if (offset + 2 >= normals.length) continue
-    const localNormal = {
-      x: Number(normals[offset]),
-      y: Number(normals[offset + 1]),
-      z: Number(normals[offset + 2]),
-    }
+    const localNormal = groupLocalNormal(normals, groups[index], index)
+    if (!localNormal) continue
     const worldNormal = rotateVector(localNormal, current)
     if (!upperNormal || worldNormal.z > upperNormal.z) {
       upperNormal = worldNormal
@@ -264,13 +291,9 @@ function d4SettledFaceValue(die: RuntimeDie): number | undefined {
   for (let index = 0; index < groups.length; index += 1) {
     const materialIndex = groups[index].materialIndex
     if (!materialIndex) continue
-    const offset = index * 9
-    if (offset + 2 >= normals.length) continue
-    const worldNormal = rotateVector({
-      x: Number(normals[offset]),
-      y: Number(normals[offset + 1]),
-      z: Number(normals[offset + 2]),
-    }, quaternion)
+    const localNormal = groupLocalNormal(normals, groups[index], index)
+    if (!localNormal) continue
+    const worldNormal = rotateVector(localNormal, quaternion)
     if (worldNormal.z < lowestZ) {
       lowestZ = worldNormal.z
       value = materialIndex - 1
@@ -291,13 +314,10 @@ function d4ResultQuaternion(die: RuntimeDie, targetValue: number | undefined): Q
   const groups = die.geometry?.groups
   if (!normals || !groups?.length) return current
   const groupIndex = groups.findIndex((group) => group.materialIndex === targetValue + 1)
-  const offset = groupIndex * 9
-  if (groupIndex < 0 || offset + 2 >= normals.length) return current
-  const worldNormal = rotateVector({
-    x: Number(normals[offset]),
-    y: Number(normals[offset + 1]),
-    z: Number(normals[offset + 2]),
-  }, current)
+  if (groupIndex < 0) return current
+  const localNormal = groupLocalNormal(normals, groups[groupIndex], groupIndex)
+  if (!localNormal) return current
+  const worldNormal = rotateVector(localNormal, current)
   const length = Math.hypot(worldNormal.x, worldNormal.y, worldNormal.z) || 1
   const from = {
     x: worldNormal.x / length,
@@ -322,7 +342,7 @@ function d4ResultQuaternion(die: RuntimeDie, targetValue: number | undefined): Q
 
 function settledQuaternion(die: RuntimeDie, targetValue: number | undefined): QuaternionValue {
   if (die.shape === 'd4') return d4ResultQuaternion(die, targetValue)
-  return straightenedD6Quaternion(die)
+  return uprightTopFaceQuaternion(die)
 }
 
 function geometryBounds(
@@ -511,7 +531,10 @@ export async function createDiceBox(
       const dice = runtimeBox.diceList?.filter((die) =>
         die.position && die.quaternion && die.geometry,
       ) ?? []
-      if (dice.length < 2) return Promise.resolve()
+      // A single die still needs the same gather/straighten pass. Skipping it
+      // used to leave secret d20s at their random flight endpoint and could
+      // open the confirmation drawer while the die was visibly leaning.
+      if (dice.length < 1) return Promise.resolve()
 
       const tableWidth = Math.max(320, runtimeBox.display?.containerWidth ?? 680)
       const tableHeight = Math.max(260, runtimeBox.display?.containerHeight ?? 420)

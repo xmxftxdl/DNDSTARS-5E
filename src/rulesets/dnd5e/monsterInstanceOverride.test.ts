@@ -5,11 +5,23 @@ import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import {
   createDnd5eMonsterInstanceOverride,
   dnd5eMonsterOverrideTokenPatch,
+  dnd5eMonsterOverrideSaveMatchesEditRequest,
   dnd5eMonsterOverrideTargets,
   isDnd5eMonsterInstanceOverride,
 } from './monsterInstanceOverride'
 
 describe('DM monster instance overrides', () => {
+  it('only applies the stat block that the token editor originally opened', () => {
+    expect(dnd5eMonsterOverrideSaveMatchesEditRequest({
+      requestedMonsterId: 'room-monster:dm-override-token-dragon',
+      savedMonsterId: 'room-monster:dm-override-token-dragon',
+    })).toBe(true)
+    expect(dnd5eMonsterOverrideSaveMatchesEditRequest({
+      requestedMonsterId: 'room-monster:dm-override-token-dragon',
+      savedMonsterId: 'srd-5.1:purple-worm',
+    })).toBe(false)
+  })
+
   it('clones an SRD stat block into a stable room-owned override without losing mechanics', () => {
     const goblin = getDnd5eSrdMonster('srd-5.1:goblin')!
     const override = createDnd5eMonsterInstanceOverride({

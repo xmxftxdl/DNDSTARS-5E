@@ -90,6 +90,7 @@ export type CombatPresentationAreaSpellId =
   | 'freezing-sphere'
   | 'meteor-swarm'
   | 'color-spray'
+  | 'prismatic-spray'
   | 'faerie-fire'
   | 'sleep'
   | 'entangle'

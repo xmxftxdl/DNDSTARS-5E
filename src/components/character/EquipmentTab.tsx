@@ -29,6 +29,7 @@ import {
 import { mutateRoomCharacterInventory } from '../../store/roomCommands'
 import {
   dnd5eAttunementRequirementDecision,
+  dnd5eInventoryEntryIsNonmagicalFoodOrDrink,
   dnd5eInventoryEntryIsActive,
   dnd5eInventoryLoad,
   normalizeDnd5eInventory,
@@ -207,6 +208,7 @@ export default function EquipmentTab({
   const [quantity, setQuantity] = useState(1)
   const [notice, setNotice] = useState('')
   const [draggedInstanceId, setDraggedInstanceId] = useState<string | null>(null)
+  const [dragHoverTarget, setDragHoverTarget] = useState<string | null>(null)
   const roomRules = useSyncExternalStore(
     subscribeRoomRules,
     getRoomRulesSnapshot,
@@ -313,6 +315,7 @@ export default function EquipmentTab({
     event.dataTransfer.effectAllowed = 'copyMove'
     event.dataTransfer.setData(DND5E_INVENTORY_DRAG_MIME, entry.instanceId)
     event.dataTransfer.setData('text/plain', entry.instanceId)
+    setDragHoverTarget(null)
     setDraggedInstanceId(entry.instanceId)
     setSelectedId(entry.instanceId)
     setQuantity(1)
@@ -325,6 +328,7 @@ export default function EquipmentTab({
 
   const dropOnEquipmentSlot = (event: DragEvent<HTMLElement>, slot: EquipmentSlot) => {
     event.preventDefault()
+    setDragHoverTarget(null)
     const instanceId = droppedInstanceId(event)
     const entry = inventory.entries.find((candidate) => candidate.instanceId === instanceId)
     const combatSlotLocked = combatManagementLocked && !isHandEquipmentSlot(slot)
@@ -346,6 +350,7 @@ export default function EquipmentTab({
 
   const dropOnQuickbarSlot = (event: DragEvent<HTMLElement>, slotIndex: number) => {
     event.preventDefault()
+    setDragHoverTarget(null)
     const instanceId = droppedInstanceId(event)
     const entry = inventory.entries.find((candidate) => candidate.instanceId === instanceId)
     const decision = dnd5eInventoryDropDecision(entry, { kind: 'quickbar', slotIndex })
@@ -372,6 +377,8 @@ export default function EquipmentTab({
       : undefined
     const combatSlotLocked = combatManagementLocked && !isHandEquipmentSlot(slot)
     const canDrop = decision?.accepted === true && editable && !pending && !combatSlotLocked
+    const dragTargetKey = `equipment:${slot}`
+    const isDragHoverTarget = dragHoverTarget === dragTargetKey
     return (
       <div
         key={slot}
@@ -379,13 +386,20 @@ export default function EquipmentTab({
         onDragOver={(event) => {
           if (draggedInstanceId && editable) {
             event.preventDefault()
+            setDragHoverTarget(dragTargetKey)
             event.dataTransfer.dropEffect = canDrop ? 'move' : 'none'
           }
         }}
+        onDragLeave={(event) => {
+          const nextTarget = event.relatedTarget
+          if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+            setDragHoverTarget((current) => current === dragTargetKey ? null : current)
+          }
+        }}
         onDrop={(event) => dropOnEquipmentSlot(event, slot)}
-        className={`group/slot relative flex min-h-[72px] flex-1 items-center justify-center rounded-xl border p-1.5 transition sm:min-h-0 ${canDrop
+        className={`group/slot relative flex min-h-[72px] flex-1 items-center justify-center rounded-xl border p-1.5 transition sm:min-h-0 ${isDragHoverTarget && canDrop
           ? 'border-emerald-300/65 bg-emerald-400/12 ring-2 ring-emerald-300/15'
-          : draggedInstanceId && decision && !decision.accepted
+          : isDragHoverTarget && draggedInstanceId && decision && !decision.accepted
             ? 'border-rose-400/20 bg-rose-500/[0.035]'
             : 'border-white/8 bg-void-950/55 shadow-[inset_0_0_18px_rgba(0,0,0,0.3)]'}`}
       >
@@ -407,7 +421,11 @@ export default function EquipmentTab({
             </span>
           )}
           <span className="mt-1 block max-w-full truncate text-[8px] font-semibold uppercase tracking-wide text-amber-100/65 sm:text-[9px]">{EQUIPMENT_SLOT_LABELS[slot]}</span>
-          <span className="mt-0.5 block max-w-full truncate text-[9px] text-slate-300 sm:text-[10px]">{item?.name ?? '拖入装备'}</span>
+          <span className={`mt-0.5 block max-w-full truncate text-[9px] sm:text-[10px] ${isDragHoverTarget && canDrop
+            ? 'font-bold text-emerald-200'
+            : 'text-slate-300'}`}>
+            {isDragHoverTarget && canDrop ? '松开放入' : item?.name ?? '拖入装备'}
+          </span>
         </button>
         {editable && entry && (
           <button
@@ -418,7 +436,6 @@ export default function EquipmentTab({
             className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-void-950 text-slate-500 hover:text-rose-200 disabled:opacity-40 group-hover/slot:flex"
           ><X className="h-3 w-3" /></button>
         )}
-        {canDrop && <span className="pointer-events-none absolute inset-x-1 bottom-1 rounded bg-emerald-500/20 py-0.5 text-center text-[8px] font-bold text-emerald-100">松开放入</span>}
       </div>
     )
   }
@@ -504,6 +521,8 @@ export default function EquipmentTab({
                   ? inventory.entries.find((candidate) => candidate.instanceId === instanceId)
                   : undefined
                 const primaryResource = entry ? Object.values(entry.resources ?? {})[0] : undefined
+                const dragTargetKey = `quickbar:${slotIndex}`
+                const isDragHoverTarget = dragHoverTarget === dragTargetKey
                 return (
                   <div key={`quickbar-slot-${slotIndex}`} className="relative">
                     <button
@@ -523,13 +542,20 @@ export default function EquipmentTab({
                       onDragOver={(event) => {
                         if (onAssignQuickbarSlot && draggedInstanceId) {
                           event.preventDefault()
+                          setDragHoverTarget(dragTargetKey)
                           event.dataTransfer.dropEffect = 'copy'
+                        }
+                      }}
+                      onDragLeave={(event) => {
+                        const nextTarget = event.relatedTarget
+                        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                          setDragHoverTarget((current) => current === dragTargetKey ? null : current)
                         }
                       }}
                       onDrop={(event) => dropOnQuickbarSlot(event, slotIndex)}
                       className={[
                         'relative flex aspect-square w-full items-center justify-center rounded-xl border p-1 transition',
-                        draggedInstanceId && onAssignQuickbarSlot
+                        isDragHoverTarget && draggedInstanceId && onAssignQuickbarSlot
                           ? 'border-amber-200/60 bg-amber-400/15 ring-1 ring-amber-200/20'
                           : selected
                           ? 'border-amber-300/35 bg-amber-400/10 hover:border-amber-200/70 hover:bg-amber-400/20'
@@ -650,7 +676,10 @@ export default function EquipmentTab({
                   draggable={editable && !pending}
                   dragging={entry.instanceId === draggedInstanceId}
                   onDragStart={(event) => beginInventoryDrag(event, entry)}
-                  onDragEnd={() => setDraggedInstanceId(null)}
+                  onDragEnd={() => {
+                    setDraggedInstanceId(null)
+                    setDragHoverTarget(null)
+                  }}
                   onSelect={() => {
                     setSelectedId(entry.instanceId === selectedId ? null : entry.instanceId)
                     setQuantity(1)
@@ -679,7 +708,7 @@ export default function EquipmentTab({
                 持有 {selected.quantity}{inventoryResourceSummary(selected) ? ` · ${inventoryResourceSummary(selected)}` : ''} · {selected.identified === false ? '未鉴定魔法物品' : selected.item.englishName ?? CATEGORY_LABELS[selected.item.category]}
               </p>
             </div>
-            {editable && <div className="flex flex-wrap gap-2">
+            {editable && <div className="mr-16 flex flex-wrap gap-2">
               {selected.item.equipment && !selected.equippedSlot && selected.identified !== false && (
                 <ActionButton
                   icon={Shield}
@@ -749,6 +778,50 @@ export default function EquipmentTab({
             <p className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
               当前角色不满足同调条件：{selected.item.magicItem.attunementRequirement}。
             </p>
+          )}
+          {selected.linkedSpellAuthorityRecordId && (
+            <p className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-500/[0.07] px-3 py-2 text-xs text-cyan-100">
+              长期法术连结已生效；该物品当前位于{selected.planarState === 'ethereal' ? '以太位面' : '物质位面'}。转交物品时，连结会随同一物品实例保留。
+            </p>
+          )}
+          {selected.linkedSpellFocusAuthorityRecordId && (
+            <p className="rounded-xl border border-sky-300/40 bg-sky-500/10 px-3 py-2 text-xs leading-5 text-sky-100">
+              该物品是长期法术锚点；对它施放解除魔法会结束对应的瞬间召唤连结，但不会消耗该物品。
+            </p>
+          )}
+          {isDm && dnd5eInventoryEntryIsNonmagicalFoodOrDrink(selected) && (
+            <div className="mt-3 rounded-xl border border-lime-300/20 bg-lime-500/[0.06] p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-200/75">DM 场景污染</p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-400">为非魔法食物或饮品添加权威污染，供侦测、食用与净化法术实际结算。</p>
+              <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-200">
+                {(['poison', 'disease'] as const).map((contaminant) => {
+                  const checked = selected.contaminants?.includes(contaminant) === true
+                  const label = contaminant === 'poison' ? '毒素污染' : '疾病污染'
+                  return <label key={contaminant} className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={label}
+                      checked={checked}
+                      disabled={pending}
+                      onChange={() => run({
+                        type: 'set-consumable-contaminants',
+                        characterId: character.id,
+                        instanceId: selected.instanceId,
+                        contaminants: checked
+                          ? (selected.contaminants ?? []).filter((entry) => entry !== contaminant)
+                          : [...(selected.contaminants ?? []), contaminant],
+                      })}
+                    />
+                    {label}
+                  </label>
+                })}
+              </div>
+              <p className="mt-2 text-[11px] text-lime-100/80">
+                当前：{selected.contaminants?.length
+                  ? selected.contaminants.map((entry) => entry === 'poison' ? '毒素' : '疾病').join('、')
+                  : '无污染'}
+              </p>
+            </div>
           )}
           {selected.item.magicItem?.attunement === 'required' && attunementDecision === 'dm-confirmation-required' && !isDm && (
             <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
