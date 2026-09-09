@@ -60,6 +60,8 @@ interface CharacterDetailPanelProps {
   onRepairSimulacrum?: (hitPoints: number) => void | Promise<unknown>
   onRemoveFromMap?: () => void | Promise<void>
   onClose: () => void
+  embedded?: boolean
+  view?: 'all' | 'data' | 'status'
 }
 
 export default function CharacterDetailPanel({
@@ -77,6 +79,8 @@ export default function CharacterDetailPanel({
   onRepairSimulacrum,
   onRemoveFromMap,
   onClose,
+  embedded = false,
+  view = 'all',
 }: CharacterDetailPanelProps) {
   const portrait = resolveMapTokenPortrait(character, token)
   const tempHp = character.tempHp ?? 0
@@ -390,7 +394,9 @@ export default function CharacterDetailPanel({
     <div
       data-testid="character-detail-panel"
       data-defeated={defeated || undefined}
-      className="glass absolute bottom-3 left-3 z-[120] flex max-h-[min(820px,calc(100%-3rem))] w-[min(520px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl"
+      className={embedded
+        ? 'flex h-full w-full flex-col overflow-hidden bg-void-950/70'
+        : 'glass absolute bottom-3 left-3 z-[120] flex max-h-[min(820px,calc(100%-3rem))] w-[min(520px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl'}
     >
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
@@ -434,7 +440,7 @@ export default function CharacterDetailPanel({
             </div>
           ) : null}
         </div>
-        <button
+        {!embedded && <button
           type="button"
           data-testid="close-character-detail"
           aria-label="关闭角色详情"
@@ -453,10 +459,11 @@ export default function CharacterDetailPanel({
           title="关闭"
         >
           <X className="h-4 w-4" />
-        </button>
+        </button>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {view !== 'data' && <>
         <section className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-rose-200">
             <HeartPulse className="h-3.5 w-3.5" />
@@ -580,6 +587,8 @@ export default function CharacterDetailPanel({
           </section>
         ) : null}
 
+        </>}
+        {view !== 'status' && <>
         <div data-testid="character-detail-combat-summary" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
             <Shield className="h-4 w-4 text-sky-400" />
@@ -705,6 +714,8 @@ export default function CharacterDetailPanel({
           </div>
         </section>}
 
+        </>}
+        {view !== 'data' && <>
         {canManageConditions && onConditionsChange ? (
           <div className="mt-4">
             <Dnd5eConditionEditor
@@ -834,6 +845,7 @@ export default function CharacterDetailPanel({
             </button>
           </section>
         ) : null}
+        </>}
       </div>
     </div>
   )

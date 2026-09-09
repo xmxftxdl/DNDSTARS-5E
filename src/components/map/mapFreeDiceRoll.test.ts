@@ -5,10 +5,25 @@ import {
   mapFreeDiceKeepSuffix,
   mapFreeDiceSelectionFormula,
   removeMapFreeDie,
+  replaceMapFreeDie,
   resolveMapFreeDiceRoll,
 } from './mapFreeDiceRoll'
 
 describe('map free dice roll resolution', () => {
+  it('replaces only the selected position, retains duplicate dice and applies the bonus once', () => {
+    const original = [4, 4, 6]
+    const values = replaceMapFreeDie(original, 1, 2)
+    expect(values).toEqual([4, 2, 6])
+    expect(original).toEqual([4, 4, 6])
+    expect(resolveMapFreeDiceRoll(values, 3).total).toBe(15)
+    expect(resolveMapFreeDiceRoll(values, 3, { keep: 'lowest' }).total).toBe(5)
+  })
+
+  it('rejects invalid single-die selections', () => {
+    for (const index of [-1, 2, 0.5, NaN]) {
+      expect(() => replaceMapFreeDie([3, 3], index, 6)).toThrow('Invalid die index')
+    }
+  })
   it('adds repeated die clicks to the tray and allows right-click removal', () => {
     const first = addMapFreeDie({ count: 0, sides: 20 }, 10)
     const second = addMapFreeDie(first, 10)

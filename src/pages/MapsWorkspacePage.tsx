@@ -1,4 +1,7 @@
+import { publicActivityRollDetails } from './maps/combatRollVisibility'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
+import { createDmDiceConfirmationQueue } from '../presentation/maps/dmDiceConfirmationQueue'
+import MapVoicePanel from '../components/map/MapVoicePanel'
 import {
   Upload,
   FileUp,
@@ -55,7 +58,7 @@ import ClassResourceIndicators from '../components/map/ClassResourceIndicators'
 import CombatActionBanner from '../components/map/CombatActionBanner'
 import KillStreakPresentation from '../components/map/KillStreakPresentation'
 import type { MapFreeDiceRollRequest } from '../components/map/MapDiceRoller'
-import { buildMapFreeDiceRollPresentation } from '../components/map/mapFreeDiceRoll'
+import { buildMapFreeDiceRollPresentation, replaceMapFreeDie } from '../components/map/mapFreeDiceRoll'
 import { canShowEnemyDetail } from '../components/map/enemyDetailPanelUtils'
 import { dnd5eCreatureFormEndControl } from '../components/map/dnd5eCreatureFormEndControl'
 import { shouldClearSelectedMapToken } from '../components/map/mapTokenSelection'
@@ -123,6 +126,9 @@ import {
 } from './maps/combatRollVisibility'
 import {
   forgetPendingPlayerDiceRollRequest,
+  rememberPendingPlayerDiceRollRequest,
+  savedPlayerDiceRollValue,
+  savePlayerDiceRollValue,
   isPlayerDiceRollRequestForClient,
   pendingPlayerDiceRollRequests,
   PLAYER_D20_REQUEST_TIMEOUT_MS,
@@ -132,6 +138,10 @@ import {
 } from './maps/playerDiceRoll'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import DicePresentationOverlays from '../presentation/maps/DicePresentationOverlays'
+import MapCombatUnitDrawer, {
+  MapCombatUnitStatusPanel,
+  type MapCombatUnitDrawerTab,
+} from '../presentation/maps/MapCombatUnitDrawer'
 import { useMapsPageStoreProjection } from '../presentation/maps/useMapsPageStoreProjection'
 import { useLatestCallback } from '../presentation/hooks/useLatestCallback'
 import { reconcileMirrorImageDecoyProjections } from './maps/mirrorImageDecoyProjection'
@@ -1253,7 +1263,8 @@ import {
   dnd5eActivityChoicesFromPayload,
   dnd5eActivityExtraTurnRollResult,
   dnd5eActivityHandoffLogDetails,
-  dnd5eActivityRollLogDetails,
+  dnd5eActivityRollLogEvidence,
+  type ActivityRollLogEvidence,
 } from './maps/dnd5eActivityHandoffLogDetails'
 import Dnd5eActivityMapTargetingOverlay from '../presentation/maps/Dnd5eActivityMapTargetingOverlay'
 import { useDnd5eActivityMapTargeting } from '../presentation/maps/useDnd5eActivityMapTargeting'
@@ -1313,6 +1324,9 @@ const loadEnemyPoolPicker = () => import('../components/map/EnemyPoolPicker')
 const EnemyPoolPicker = lazy(loadEnemyPoolPicker)
 const MapViewportLayer = lazy(() => import('../presentation/maps/MapViewportLayer'))
 const MapWorkspacePanelsLayer = lazy(() => import('../presentation/maps/MapWorkspacePanelsLayer'))
+const MapWorkspaceCombatLogPanel = lazy(() => import('../presentation/maps/MapWorkspacePanelsLayer').then(
+  (module) => ({ default: module.MapWorkspaceCombatLogPanel }),
+))
 const MapWorkspaceInitiativePanel = lazy(() => import('../presentation/maps/MapWorkspacePanelsLayer').then(
   (module) => ({ default: module.MapWorkspaceInitiativePanel }),
 ))
@@ -1622,7 +1636,9 @@ export default function MapsWorkspacePage() {
   const [dnd5eTurnEconomyByToken, setDnd5eTurnEconomyByToken] = useState<Dnd5eTurnEconomyByToken>({})
   const dnd5eTurnEconomyByTokenRef = useRef<Dnd5eTurnEconomyByToken>({})
   const [combatLog, setCombatLog] = useState<CombatLogEntry[]>([])
-  const [combatLogOpen, setCombatLogOpen] = useState(false)
+  const [rightCombatDockTab, setRightCombatDockTab] = useState<'log' | 'dice' | null>(null)
+  const combatLogOpen = rightCombatDockTab === 'log'
+  const setCombatLogOpen = (open: boolean) => setRightCombatDockTab(open ? 'log' : null)
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
   const [dmGrantedActivityPendingId, setDmGrantedActivityPendingId] = useState<string>()
   const [selectedCharacterTokenId, setSelectedCharacterTokenId] = useState<string | null>(null)
@@ -1664,6 +1680,13 @@ export default function MapsWorkspacePage() {
   const [measureMode, setMeasureMode] = useState(false)
   const [deleteSelectMode, setDeleteSelectMode] = useState(false)
   const [showBar, setShowBar] = useState(true) // 顶部控件浮层是否显示
+  const [mapToolsOpen, setMapToolsOpen] = useState(false)
+  const [combatUnitPanelTab, setCombatUnitPanelTab] = useState<MapCombatUnitDrawerTab>('stats')
+  useEffect(() => {
+    if (!combatActive) return
+    const timer = window.setTimeout(() => setMapToolsOpen(false), 0)
+    return () => window.clearTimeout(timer)
+  }, [combatActive])
   const [gridDetecting, setGridDetecting] = useState(false)
   const [gridAdjustMode, setGridAdjustMode] = useState(false)
   const [gridSizePreview, setGridSizePreview] = useState(false)
@@ -2124,9 +2147,31 @@ export default function MapsWorkspacePage() {
     label: string
     targetName: string
     sides: number
+    visibility?: 'public' | 'dm-only'
     values: number[]
     resolve: (values: number[]) => void
   } | null>(null)
+  const dmDiceConfirmationQueueRef = useRef<ReturnType<typeof createDmDiceConfirmationQueue> | null>(null)
+  if (!dmDiceConfirmationQueueRef.current) {
+    dmDiceConfirmationQueueRef.current = createDmDiceConfirmationQueue(request =>
+      new Promise<number[]>(resolve => setSecretDiceOverride({ ...request, resolve })))
+  }
+  const confirmDmDice = async (
+    id: string, label: string, targetName: string, sides: number, values: number[], isPublic: boolean,
+  ): Promise<number[]> => {
+    if (!isDM) return values
+    const confirmed = await dmDiceConfirmationQueueRef.current!({
+      id, label, targetName, sides, values, visibility: isPublic ? 'public' : 'dm-only',
+    })
+    if (isPublic && confirmed.some((value, index) => value !== values[index])) {
+      await publishRollRequest({
+        requestId: `${id}:dm-confirmed`, kind: sides === 20 && confirmed.length === 1 ? 'd20' : 'dice',
+        count: confirmed.length, sides, values: confirmed, label: `${label}（DM 修正）`,
+        targetName, delivery: 'broadcast-result',
+      })
+    }
+    return confirmed
+  }
   const [dnd5eCoreAreaMoveTargeting, setDnd5eCoreAreaMoveTargeting] = useState<{
     characterId: string
     areaId: string
@@ -2341,7 +2386,9 @@ export default function MapsWorkspacePage() {
       const sharedEntry: CombatLogEntry = shouldRedactForPlayers
         ? {
             ...entry,
-            text: redactSecretMonsterCombatLog(entry.text),
+            text: (activeMap.tokens.some(token => token.id === actorTokenId && dnd5eCombatTokenSide(token) === 'player'))
+              ? redactSecretMonsterCombatLog(entry.text).replace('怪物暗骰：', '施法结算：')
+              : redactSecretMonsterCombatLog(entry.text),
             details: options.secretPlayerDetails && options.secretPlayerDetails.length > 0
               ? [...options.secretPlayerDetails]
               : undefined,
@@ -2393,7 +2440,11 @@ export default function MapsWorkspacePage() {
   })
   const secretHeadlessCombatOutcomeDetails = (
     events: Parameters<typeof formatDnd5eCombatLogDetails>[0],
+    extra: readonly (string | ActivityRollLogEvidence)[] = [],
+    casterTokenId?: string,
   ) => formatDnd5eSecretCombatOutcomeDetails(events, {
+    publicRollerIds: new Set((activeMap?.tokens ?? []).filter(token => dnd5eCombatTokenSide(token) === 'player').flatMap(token => [token.id, ...(token.characterId ? [token.characterId] : [])])),
+    publicExtra: publicActivityRollDetails(extra, new Set((activeMap?.tokens ?? []).filter(token => dnd5eCombatTokenSide(token) === 'player').flatMap(token => [token.id, ...(token.characterId ? [token.characterId] : [])])), (activeMap?.tokens ?? []).some(token => token.id === casterTokenId && dnd5eCombatTokenSide(token) === 'player')),
     resolveName: (entityId) => {
       const directCharacter = characters.find((character) => character.id === entityId)
       if (directCharacter) return directCharacter.name
@@ -2410,7 +2461,7 @@ export default function MapsWorkspacePage() {
     text: string,
     kind: CombatLogEntry['kind'],
     events: Parameters<typeof formatDnd5eCombatLogDetails>[0],
-    extra: readonly string[] = [],
+    extra: readonly (string | ActivityRollLogEvidence)[] = [],
     actorTokenId?: string,
     redactForPlayers?: boolean,
   ) => {
@@ -2425,7 +2476,7 @@ export default function MapsWorkspacePage() {
       text,
       kind,
       roundRef.current,
-      headlessCombatLogDetails(events, extra),
+      headlessCombatLogDetails(events, extra.map(entry => typeof entry === 'string' ? entry : entry.text)),
       {
         actorTokenId: actorTokenId ?? resolveHeadlessCombatLogActorTokenId(
           events,
@@ -2433,7 +2484,7 @@ export default function MapsWorkspacePage() {
         ),
         redactForPlayers,
         forceRedactForPlayers,
-        secretPlayerDetails: secretHeadlessCombatOutcomeDetails(events),
+        secretPlayerDetails: secretHeadlessCombatOutcomeDetails(events, extra, actorTokenId ?? resolveHeadlessCombatLogActorTokenId(events, activeMap?.tokens ?? [])),
       },
     )
   }
@@ -2963,7 +3014,7 @@ export default function MapsWorkspacePage() {
       rollerSide: effectiveRollerSide,
       targetCharacterId: rollOwnerCharacterId,
     })) {
-      const delegatedValue = await requestPlayerD20Roll({
+      let delegatedValue = await requestPlayerD20Roll({
         requestId: rollRequestId,
         label,
         targetName,
@@ -2974,6 +3025,7 @@ export default function MapsWorkspacePage() {
           : undefined,
       })
       if (delegatedValue != null) {
+        delegatedValue = (await confirmDmDice(rollRequestId, label, targetName, 20, [delegatedValue], true))[0]!
         if (context.skipChoiceReroll || !combatActiveRef.current || !activeMap) return delegatedValue
         return confirmPlayerD20ChoiceReroll({
           rollId: rollRequestId,
@@ -3003,7 +3055,7 @@ export default function MapsWorkspacePage() {
         delivery: 'broadcast-result',
       }).catch(() => undefined)
     }
-    const animatedValue = await new Promise<number>((resolve) => {
+    let animatedValue = await new Promise<number>((resolve) => {
       setDiceBoxD20({
         id,
         label,
@@ -3015,9 +3067,8 @@ export default function MapsWorkspacePage() {
         resolve,
       })
     })
-    if (secretMonsterRoll) {
-      return confirmCombatD20(rollRequestId, label, targetName, animatedValue, { visibility: 'dm-only' })
-    }
+    animatedValue = (await confirmDmDice(rollRequestId, label, targetName, 20, [animatedValue], !secretMonsterRoll))[0]!
+    if (secretMonsterRoll) return animatedValue
     if (context.skipChoiceReroll || !combatActiveRef.current || !activeMap) return animatedValue
     if (!inferredRollKind) return animatedValue
     return confirmPlayerD20ChoiceReroll({
@@ -3039,6 +3090,7 @@ export default function MapsWorkspacePage() {
     options: {
       broadcast?: boolean
       forcePublic?: boolean
+      skipDmConfirmation?: boolean
       rollerTokenId?: string
       rollerCharacterId?: string
       d20RollKind?: 'attack' | 'ability-check' | 'saving-throw'
@@ -3096,7 +3148,7 @@ export default function MapsWorkspacePage() {
         resolve,
       })
     })
-    const resolvedValues = await settleAuthoritativeDicePresentation({
+    let resolvedValues = await settleAuthoritativeDicePresentation({
       authoritativeValues: values,
       presentation,
       // Large pools such as 10d6 need more than the old 3.5-second gate to
@@ -3108,6 +3160,7 @@ export default function MapsWorkspacePage() {
           : 0) +
         1000,
     })
+    if (!options.skipDmConfirmation) resolvedValues = await confirmDmDice(rollRequestId, label, targetName, safeSides, resolvedValues, shouldBroadcast)
     if (!combatActiveRef.current) return resolvedValues
     if (shouldBroadcast) {
       if (!options.skipChoiceReroll && options.d20RollKind != null && shouldOfferDnd5ePlayerD20ChoiceReroll({
@@ -3133,30 +3186,7 @@ export default function MapsWorkspacePage() {
       }
       return resolvedValues
     }
-    if (secretMonsterRoll && safeSides !== 20) {
-      return new Promise<number[]>((resolve) => {
-        setSecretDiceOverride({
-          id: rollRequestId,
-          label,
-          targetName,
-          sides: safeSides,
-          values: resolvedValues,
-          resolve,
-        })
-      })
-    }
-    if (safeSides !== 20) return resolvedValues
-    const confirmedValues: number[] = []
-    for (const [index, originalValue] of resolvedValues.entries()) {
-      confirmedValues.push(await confirmCombatD20(
-        `${rollRequestId}:${index}`,
-        safeCount > 1 ? `${label}（第 ${index + 1} 枚 d20）` : label,
-        targetName,
-        originalValue,
-        { visibility: 'dm-only' },
-      ))
-    }
-    return confirmedValues
+    return resolvedValues
   }
   useEffect(() => {
     // React StrictMode intentionally runs one setup/cleanup cycle before the
@@ -5162,9 +5192,9 @@ export default function MapsWorkspacePage() {
           spectator: isSpectator,
           controlledCharacterIds,
         }) || seenRollRequestIdsRef.current.has(event.requestId)) return
-        seenRollRequestIdsRef.current.add(event.requestId)
-        forgetPendingPlayerDiceRollRequest(event.requestId)
-        setPendingPlayerDiceRoll({ ...event, busy: false })
+        rememberPendingPlayerDiceRollRequest(event)
+        setPendingPlayerDiceRoll((current) => current?.requestId === event.requestId
+          ? current : { ...event, busy: false })
         return
       }
       if (seenRollRequestIdsRef.current.has(event.requestId)) return
@@ -5178,6 +5208,7 @@ export default function MapsWorkspacePage() {
       seenRollRequestIdsRef.current.add(event.requestId)
       setRollRequestPreview({
         id: event.requestId,
+        settled: event.requestId.endsWith(':dm-confirmed'),
         kind: event.kind,
         count: Math.max(1, Math.round(event.count)),
         sides: Math.max(2, Math.round(event.sides)),
@@ -5193,12 +5224,15 @@ export default function MapsWorkspacePage() {
     )
     return unsubscribe
   }, [activeMapId, assignedCharacterId, characters, isSpectator, mode, playerSlot])
+  const resumedPlayerDiceRollIdsRef = useRef(new Set<string>())
+  const playerDiceRollInFlightRef = useRef(new Set<string>())
   const handlePlayerDiceRoll = async (requestId: string) => {
     const request = pendingPlayerDiceRoll
     if (
-      !request || request.requestId !== requestId || request.busy ||
+      !request || request.requestId !== requestId || request.busy || playerDiceRollInFlightRef.current.has(requestId) ||
       request.delivery !== 'player-roll-request' || !request.targetCharacterId
     ) return
+    playerDiceRollInFlightRef.current.add(requestId)
     setPendingPlayerDiceRoll((current) => current?.requestId === requestId
       ? { ...current, busy: true }
       : current)
@@ -5206,8 +5240,10 @@ export default function MapsWorkspacePage() {
       const id = d20RequestCounterRef.current + 1
       d20RequestCounterRef.current = id
       const requestKey = `${request.requestId}:player-authority`
-      const value = randomDieValue(20)
-      const animatedValue = await new Promise<number>((resolve) => {
+      const savedValue = savedPlayerDiceRollValue(request.requestId)
+      const value = savedValue ?? randomDieValue(20)
+      savePlayerDiceRollValue(request, value)
+      const animatedValue = savedValue ?? await new Promise<number>((resolve) => {
         setDiceBoxD20({
           id,
           label: request.label,
@@ -5232,6 +5268,8 @@ export default function MapsWorkspacePage() {
         rollKind: request.rollKind,
         savingThrowAbility: request.savingThrowAbility,
       })
+      seenRollRequestIdsRef.current.add(request.requestId)
+      forgetPendingPlayerDiceRollRequest(request.requestId)
       setPendingPlayerDiceRoll((current) => current?.requestId === requestId ? null : current)
     } catch (error) {
       console.error('[player-dice-roll] result publish failed', error)
@@ -5239,8 +5277,17 @@ export default function MapsWorkspacePage() {
         ? { ...current, busy: false }
         : current)
       void showCombatNotice('投骰结果发送失败', '请确认房间连接后再次点击“确认并投掷”。', 'amber')
+    } finally {
+      playerDiceRollInFlightRef.current.delete(requestId)
     }
   }
+  useEffect(() => {
+    const requestId = pendingPlayerDiceRoll?.requestId
+    if (!requestId || pendingPlayerDiceRoll.busy || resumedPlayerDiceRollIdsRef.current.has(requestId)
+      || savedPlayerDiceRollValue(requestId) == null) return
+    resumedPlayerDiceRollIdsRef.current.add(requestId)
+    void handlePlayerDiceRoll(requestId)
+  })
   useEffect(() => {
     if (!activeMapId || !mode) return
     let cancelled = false
@@ -5381,6 +5428,16 @@ export default function MapsWorkspacePage() {
     combatActive && dnd5eMonsterManualControlEnabled(monsterControl) && isEnemyTurn && currentInitiativeToken
       ? `${combatId}:${round}:${initiativeIndex}:${currentInitiativeToken.id}`
       : undefined
+  const currentInitiativeTokenId = currentInitiativeToken?.id
+  useEffect(() => {
+    if (!isDM || !manualMonsterTurnKey || !currentInitiativeTokenId) return
+    const timer = window.setTimeout(() => {
+      setSelectedCharacterTokenId(null)
+      setSelectedTokenId(currentInitiativeTokenId)
+      setCombatUnitPanelTab('actions')
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [currentInitiativeTokenId, isDM, manualMonsterTurnKey])
   const manualMonsterTurnEconomy =
     manualMonsterTurnKey && currentInitiativeToken
       ? dnd5eTurnEconomyByToken[currentInitiativeToken.id] ??
@@ -6379,36 +6436,57 @@ export default function MapsWorkspacePage() {
         dnd5eEffectiveWalkingSpeed(mapDiceCharacter),
       )
     : activeCharDnd5eTurnEconomy
-  const handleMapFreeDiceRoll = async (input: MapFreeDiceRollRequest) => {
-    const isPrivate = isDM && input.visibility === 'dm'
-    const values = await rollDiceBoxValues(
-      input.count,
-      input.sides,
-      input.label,
-      manualDiceRollerName,
-      { broadcast: !isPrivate },
-    )
-    const presentation = buildMapFreeDiceRollPresentation({
-      ...input, rollerName: manualDiceRollerName, values, privateRoll: isPrivate,
-    })
-    const manualRoll: DiceRoll = {
-      values,
-      sides: input.sides,
-      bonus: input.bonus,
-      total: presentation.total,
-      label: `${manualDiceRollerName} · ${input.label}`,
-      formula: presentation.formula,
-      targetName: presentation.targetName,
+  const [lastFreeDiceRoll, setLastFreeDiceRoll] = useState<{ input: MapFreeDiceRollRequest; roll: DiceRoll } | null>(null)
+  const freeDiceRollingRef = useRef(false)
+  const handleMapFreeDiceRoll = async (input: MapFreeDiceRollRequest, reroll?: { values: number[]; index: number }) => {
+    if (freeDiceRollingRef.current) return
+    freeDiceRollingRef.current = true
+    try {
+      const isPrivate = isDM && input.visibility === 'dm'
+      const rolledValues = reroll ? await new Promise<number[]>((resolve) => {
+        const id = ++diceBoxRollRequestCounterRef.current
+        setDiceBoxRoll({
+          id, count: 1, sides: input.sides, values: [],
+          label: input.label, targetName: manualDiceRollerName,
+          retainedValues: reroll.values, rerollIndex: reroll.index,
+          requestKey: `free-reroll:${id}:${runtimeNow()}`, resolve,
+        })
+      }) : await rollDiceBoxValues(
+        input.count,
+        input.sides,
+        input.label,
+        manualDiceRollerName,
+        { broadcast: !isPrivate, forcePublic: !isPrivate, skipDmConfirmation: true },
+      )
+      if (reroll && (rolledValues.length !== 1 || !Number.isInteger(rolledValues[0]) || rolledValues[0] < 1 || rolledValues[0] > input.sides)) {
+        throw new Error('未能读取骰子落稳点数，请重新投掷')
+      }
+      const values = reroll ? replaceMapFreeDie(reroll.values, reroll.index, rolledValues[0]!) : rolledValues
+      const presentation = buildMapFreeDiceRollPresentation({
+        ...input, rollerName: manualDiceRollerName, values, privateRoll: isPrivate,
+      })
+      const manualRoll: DiceRoll = {
+        values,
+        sides: input.sides,
+        bonus: input.bonus,
+        total: presentation.total,
+        label: `${manualDiceRollerName} · ${input.label}`,
+        formula: presentation.formula,
+        targetName: presentation.targetName,
+      }
+      setRoll(manualRoll)
+      setLastFreeDiceRoll({ input, roll: manualRoll })
+      if (isPrivate) return
+      publishSharedDiceRoll(manualRoll, { visibility: 'public', rollerName: manualDiceRollerName })
+      pushCombatLog(
+        presentation.logMessage,
+        'attack',
+        roundRef.current,
+        presentation.logDetails,
+      )
+    } finally {
+      freeDiceRollingRef.current = false
     }
-    setRoll(manualRoll)
-    if (isPrivate) return
-    publishSharedDiceRoll(manualRoll, { visibility: 'public', rollerName: manualDiceRollerName })
-    pushCombatLog(
-      presentation.logMessage,
-      'attack',
-      roundRef.current,
-      presentation.logDetails,
-    )
   }
   const handleManualSettlement = async (
     targetId: string,
@@ -7018,10 +7096,13 @@ export default function MapsWorkspacePage() {
   }
   useEffect(() => {
     if (combatActive) return
-    liveInitiativeConfirmationDraftRef.current = null
-    setLiveInitiativeConfirmationDraft(null)
-    liveInitiativeConfirmationSubmittingRef.current = false
-    setLiveInitiativeConfirmationSubmitting(false)
+    const timer = window.setTimeout(() => {
+      liveInitiativeConfirmationDraftRef.current = null
+      setLiveInitiativeConfirmationDraft(null)
+      liveInitiativeConfirmationSubmittingRef.current = false
+      setLiveInitiativeConfirmationSubmitting(false)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [combatActive])
   useEffect(() => {
     if (!isDM || !combatActive || !activeMap) return
@@ -8683,7 +8764,7 @@ export default function MapsWorkspacePage() {
           const movedToken = useMapStore.getState().maps
             .find((map) => map.id === latestMap.id)?.tokens
             .find((token) => token.id === enemy.id)
-          if (!movedToken) throw new Error('monster-movement-token-missing-after-rebase')
+          if (!movedToken) throw new Error('monster-movement-token-missing-after-rebase', { cause: retryError })
           await useMapStore.getState().saveAuthorityTokenPatch(latestMap.id, enemy.id, {
             x: movedToken.x,
             y: movedToken.y,
@@ -8771,7 +8852,7 @@ export default function MapsWorkspacePage() {
     const attackerCombatant = attack.state.combatants[attackerToken.id]
     if (!attackerCombatant) return false
     if (attackerCharacter) {
-      let acceptedWeaponAttack = false
+      let acceptedWeaponAttack: boolean
       if ((opts?.trigger == null || opts.trigger === 'movement') &&
         attackerCombatant.opportunityAttackSpellReplacement === true) {
         const actionIdPrefix = `war-caster:${activeInterruptTransactionIdRef.current ?? runtimeId()}:${runtimeId()}`
@@ -10892,7 +10973,9 @@ export default function MapsWorkspacePage() {
   const openTokenDetails = (tokenId: string) => {
     const token = activeMap?.tokens.find((candidate) => candidate.id === tokenId)
     if (!token) return
+    setMapToolsOpen(false)
     if (token.characterId) {
+      setCombatUnitPanelTab('stats')
       setSelectedTokenId(null)
       if (isDM) {
         setActiveCharId(null)
@@ -10906,6 +10989,7 @@ export default function MapsWorkspacePage() {
     }
     setSelectedCharacterTokenId(null)
     setSelectedTokenId(token.id)
+    setCombatUnitPanelTab(isDM ? 'management' : 'stats')
     if (token.type === 'enemy') setEnemyDetailOpen(true)
   }
   const handleSelectToken = async (tokenId: string | null) => {
@@ -10942,8 +11026,7 @@ export default function MapsWorkspacePage() {
       return
     }
     if (!tokenId) {
-      setSelectedTokenId(null)
-      setSelectedCharacterTokenId(null)
+      // Map deselection must not dismiss the independently opened unit drawer.
       return
     }
     if (tokenId && dnd5ePersistentAreaActivityTargeting && activeMap) {
@@ -25391,6 +25474,25 @@ export default function MapsWorkspacePage() {
               if (!combatant) throw new Error('activity-target-missing')
               return dnd5eActivityActorSnapshotFromCombatantV1(combatant, activityActor)
             })
+            // Play the validated cone before requesting any Activity dice. Awaiting
+            // its completion keeps saving throws, colors and damage after the VFX.
+            if (spellAnimationsEnabled && pluginCast.spell.id === 'prismatic-spray') {
+              const presentation = areaSpellPresentationForSettlement({
+                spellId: pluginCast.spell.id,
+                transactionId: action.id,
+                mapId: pluginCast.map.id,
+                actorTokenId: pluginCast.actorToken.id,
+                areaAnchorCell: pluginCast.payload.areaTargetCell,
+                areaTargetOrientation: pluginCast.payload.areaTargetOrientation,
+              })
+              if (presentation) {
+                const schedule = await publishAreaSpellPresentation(presentation)
+                await new Promise<void>((resolve) => window.setTimeout(
+                  resolve,
+                  Math.max(0, schedule.completesAt - combatPresentationServerNow()),
+                ))
+              }
+            }
             const rollTargets = pluginCast.targets.map((target, index) => ({
               id: target.token.id,
               statBlockId: activityTargetSnapshots[index]?.statBlockId,
@@ -25457,7 +25559,7 @@ export default function MapsWorkspacePage() {
               pluginCast.map.tokens.find((token) => token.id === declaration.rollerTokenId)?.label ?? pluginCast.targetToken.label,
               {
                 broadcast: declaration.visibility !== 'dm',
-                rollerTokenId: declaration.rollerTokenId,
+                rollerTokenId: declaration.rollerTokenId ?? pluginCast.actorToken.id,
                 d20RollKind: declaration.d20RollKind,
                 d20RollMode: declaration.d20RollMode,
               },
@@ -26472,7 +26574,7 @@ export default function MapsWorkspacePage() {
             ? [`复活结算：死亡年龄 ${event.deathAgeRounds} 轮（${(event.deathAgeRounds / (10 * 60 * 24)).toFixed(2)} 天）｜身体 ${event.newBodyCreated ? '已新建' : event.bodyRestored ? '已复原' : '保留'}｜移除状态 ${event.removedConditionCount ?? 0}、疾病 ${event.removedDiseaseCount ?? 0}、诅咒 ${event.removedCurseCount ?? 0}｜施法者负担 ${event.casterStrained ? '已施加' : '未施加'}`]
             : []),
           ...(activityInventoryMutationMessage ? [activityInventoryMutationMessage] : []),
-          ...dnd5eActivityRollLogDetails(activityDefinition, activityRolls, settledPluginSpellEvents),
+          ...dnd5eActivityRollLogEvidence(activityDefinition, activityRolls, settledPluginSpellEvents, pluginCast.actorToken.id),
           ...(pluginCast.spell.id === 'time-stop'
             ? [
                 `额外回合先攻槽：${settledPluginSpell.result.state.oneShotInitiativeSlotIds?.length ?? 0} 个｜共享先攻总槽位 ${activityCombatInitiativeProjection?.initiativeOrder.length ?? initiativeOrderRef.current.length}`,
@@ -29772,7 +29874,7 @@ export default function MapsWorkspacePage() {
                 prepared.prepared.map.tokens.find((token) => token.id === declaration.rollerTokenId)?.label ?? prepared.prepared.targetToken.label,
                 {
                   broadcast: declaration.visibility !== 'dm',
-                  rollerTokenId: declaration.rollerTokenId,
+                  rollerTokenId: declaration.rollerTokenId ?? prepared.prepared.actorToken.id,
                   d20RollKind: declaration.d20RollKind,
                   d20RollMode: declaration.d20RollMode,
                 },
@@ -30520,7 +30622,7 @@ export default function MapsWorkspacePage() {
           [
             `扩展特性：${prepared.prepared.feature.name}`,
             ...(activityInventoryMutationMessage ? [activityInventoryMutationMessage] : []),
-            ...dnd5eActivityRollLogDetails(activityDefinition, pluginRolls, settledPluginFeatureEvents),
+            ...dnd5eActivityRollLogEvidence(activityDefinition, pluginRolls, settledPluginFeatureEvents, prepared.prepared.actorToken.id),
             ...dnd5eActivityChoiceLogDetails(
               activityDefinition,
               dnd5eActivityChoicesFromPayload(action.dnd5ePluginAction?.payload),
@@ -32873,8 +32975,6 @@ export default function MapsWorkspacePage() {
         completePlayerActionRequest(action)
         return
       }
-      let attackRetargetInterrupt: Dnd5eAttackRetargetInterruptUse | undefined
-      let mountedAttackRedirect: Dnd5eMountedAttackRedirectUse | undefined
       const retarget = await prepareDnd5eAttackRetargetInterrupt({
         map: authorityMap,
         state: prepared.prepared.state,
@@ -32886,8 +32986,8 @@ export default function MapsWorkspacePage() {
           prepared.prepared.declarativeIntentFeatureIds.some((featureId) =>
             dnd5eDeclarativeCombatManeuverDefinition(featureId)?.mechanic.operation === 'extended-reach') ? 5 : 0),
       })
-      attackRetargetInterrupt = retarget.use
-      mountedAttackRedirect = retarget.mountedAttackRedirect
+      const attackRetargetInterrupt: Dnd5eAttackRetargetInterruptUse | undefined = retarget.use
+      const mountedAttackRedirect: Dnd5eMountedAttackRedirectUse | undefined = retarget.mountedAttackRedirect
       if (retarget.targetToken.id !== prepared.prepared.targetToken.id) {
         prepared = prepareDnd5eEquipmentAttack({
           action: { ...action, targetTokenId: retarget.targetToken.id },
@@ -33241,7 +33341,7 @@ export default function MapsWorkspacePage() {
         dnd5eGrantedDieCombatOptionAvailable(attack.state, shieldTargetCombatant, 'armor-class')
         ? dnd5eHeldBardicInspirationDie(shieldTargetCombatant)
         : undefined
-      const grantedDieArmorClassRoll = !!(
+      const grantedDieArmorClassRoll = (
         tranquility.passed && attackHit && !preview.roll.naturalTwenty && !strokeOfLuck &&
         shieldTargetCombatant?.turn.reactionAvailable && armorClassInspirationDie != null &&
         effectiveAttackTotalAfterAdjustment < attack.targetArmorClass + armorClassInspirationDie
@@ -38382,6 +38482,222 @@ export default function MapsWorkspacePage() {
     teleport: dnd5eExtraActionTeleportTargeting,
     persistentArea: dnd5eCoreAreaMoveTargeting,
   })
+  const sculptConfirmationAtInitiative = dnd5eSpellTargeting?.autoSculpt === true && dnd5eSpellTargeting.areaTargetSelected
+  const spellTargetingControls = (dnd5eSpellTargeting && (
+            !dnd5eSpellTargeting.area ||
+            dnd5eSpellTargeting.areaTargetSelected ||
+            (dnd5eSpellTargeting.areaTargetCount ?? 1) > 1 ||
+            dnd5eSpellTargeting.spellId === 'dancing-lights'
+          ) && (
+            <div
+              data-testid="dnd5e-spell-targeting-overlay"
+              aria-live="polite"
+              className={`map-combat-action-bar border-violet-400/40 ${sculptConfirmationAtInitiative ? 'map-sculpt-confirmation-compact' : ''} ${sculptConfirmationAtInitiative && showBar ? 'map-sculpt-confirmation-inline' : ''}`}
+            >
+              {dnd5eSpellTargeting.allowDuplicateTargets ? (
+                <span className="text-violet-100">
+                  {dnd5eSpellTargeting.targetTokenIds.length < dnd5eSpellTargeting.maximumTargets
+                    ? `已分配 ${dnd5eSpellTargeting.targetTokenIds.length}/${dnd5eSpellTargeting.maximumTargets} 枚飞弹；请选择第 ${dnd5eSpellTargeting.targetTokenIds.length + 1} 枚的目标，同一目标可以重复点击。`
+                    : `已分配 ${dnd5eSpellTargeting.maximumTargets}/${dnd5eSpellTargeting.maximumTargets} 枚飞弹，可以确认释放。`}
+                </span>
+              ) : null}
+              {!dnd5eSpellTargeting.area &&
+                !dnd5eSpellTargeting.allowDuplicateTargets &&
+                dnd5eSpellTargeting.maximumTargets > 1 ? <>
+                  <span
+                    data-testid="dnd5e-spell-selected-target-summary"
+                    className="max-w-[min(72vw,560px)] truncate text-violet-100"
+                    title={dnd5eSpellTargeting.targetTokenIds
+                      .map((targetId) => activeMap?.tokens.find((token) => token.id === targetId)?.label ?? targetId)
+                      .join('、')}
+                  >
+                    已选择 {dnd5eSpellTargeting.targetTokenIds.length}/{dnd5eSpellTargeting.maximumTargets}
+                    {dnd5eSpellTargeting.targetTokenIds.length > 0
+                      ? `：${dnd5eSpellTargeting.targetTokenIds
+                          .map((targetId) => activeMap?.tokens.find((token) => token.id === targetId)?.label ?? targetId)
+                          .join('、')}`
+                      : '：尚未选择目标'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={dnd5eSpellTargeting.targetTokenIds.length < 1}
+                    onClick={undoLastDnd5eSpellTarget}
+                    className="shrink-0 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    撤销上一个目标
+                  </button>
+                </> : null}
+              {dnd5eSpellTargeting.spellId === 'dancing-lights' ? <>
+                <button
+                  type="button"
+                  aria-pressed={(dnd5eSpellTargeting.dancingLightsForm ?? 'lights') === 'lights'}
+                  onClick={() => {
+                    setDnd5eSpellTargeting((current) => current?.spellId === 'dancing-lights'
+                      ? {
+                          ...current,
+                          dancingLightsForm: 'lights',
+                          areaTargetCount: 4,
+                          minimumAreaTargetCount: 1,
+                          areaTargetCell: undefined,
+                          areaTargetCells: [],
+                          areaTargetSelected: false,
+                          targetTokenIds: [],
+                        }
+                      : current)
+                    setAoePreviewCell(null)
+                    setSelectedTokenId(null)
+                  }}
+                  className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${(dnd5eSpellTargeting.dancingLightsForm ?? 'lights') === 'lights' ? 'border-cyan-300/60 bg-cyan-400/20 text-cyan-50' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                >
+                  分散光团（1–4）
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={dnd5eSpellTargeting.dancingLightsForm === 'humanoid'}
+                  onClick={() => {
+                    setDnd5eSpellTargeting((current) => current?.spellId === 'dancing-lights'
+                      ? {
+                          ...current,
+                          dancingLightsForm: 'humanoid',
+                          areaTargetCount: 1,
+                          minimumAreaTargetCount: 1,
+                          areaTargetCell: undefined,
+                          areaTargetCells: undefined,
+                          areaTargetSelected: false,
+                          targetTokenIds: [],
+                        }
+                      : current)
+                    setAoePreviewCell(null)
+                    setSelectedTokenId(null)
+                  }}
+                  className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.dancingLightsForm === 'humanoid' ? 'border-fuchsia-300/60 bg-fuchsia-400/20 text-fuchsia-50' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                >
+                  合并类人形态（4 光合一）
+                </button>
+              </> : null}
+              {(dnd5eSpellTargeting.areaTargetCount ?? 1) > 1 ? (
+                <span className="text-violet-100">
+                  已选择 {dnd5eSpellTargeting.areaTargetCells?.length ?? 0}/{dnd5eSpellTargeting.areaTargetCount} 个{dnd5eSpellTargeting.spellId === 'dancing-lights' ? '光团位置' : '法术落点'}；{dnd5eSpellTargeting.minimumAreaTargetCount && dnd5eSpellTargeting.minimumAreaTargetCount < (dnd5eSpellTargeting.areaTargetCount ?? 1) ? `至少选择 ${dnd5eSpellTargeting.minimumAreaTargetCount} 个，` : ''}落点必须互不相同。
+                </span>
+              ) : null}
+              {dnd5eSpellTargeting.spellId === 'dancing-lights' && dnd5eSpellTargeting.dancingLightsForm === 'humanoid' ? (
+                <span className="text-violet-100">
+                  {dnd5eSpellTargeting.areaTargetSelected ? '已选择类人形态位置，可以确认施放。' : '点击 120 尺内的地图格放置一个朦胧的中型类人光形。'}
+                </span>
+              ) : null}
+              {dnd5eSpellTargeting.guessedTargeting && !dnd5eSpellTargeting.allowDuplicateTargets ? (
+                <span className="text-violet-100">点击地图格猜测目标位置；Host 会按怪物的实时位置判定。</span>
+              ) : null}
+              {committedSpellAreaLocked ? (
+                <span className="shrink-0 rounded-lg border border-emerald-300/35 bg-emerald-400/10 px-2 py-1 text-xs text-emerald-100">
+                  范围已锁定
+                </span>
+              ) : null}
+              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.autoSculpt === true ? <button
+                type="button"
+                onClick={toggleDnd5eSculptSpellTargets}
+                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.sculpting ? 'border-sky-300/50 bg-sky-400/20 text-sky-100' : 'border-sky-400/20 bg-sky-500/10 text-sky-200'}`}
+              >
+                {dnd5eSpellTargeting.sculpting
+                  ? `完成保护选择（${dnd5eSpellTargeting.sculptedTargetIds.length}/${dnd5eSpellTargeting.maximumSculptedTargets}）`
+                  : `${dnd5eSpellTargeting.sculptedTargetIds.length > 0 ? '修改' : '选择'}保护目标 ${dnd5eSpellTargeting.sculptedTargetIds.length}/${dnd5eSpellTargeting.maximumSculptedTargets}`}
+              </button> : null}
+              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.autoSculpt === true && dnd5eSpellTargeting.sculpting ? (
+                <span className="text-sky-100">
+                  {sculptSelectableTokenIds.length > 0
+                    ? <>点击蓝框角色，金边表示已保护。</>
+                    : '当前范围内没有可见的其他生物。'}
+                </span>
+              ) : null}
+              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.areaExemptionMode ? <button
+                type="button"
+                onClick={toggleExcludedAreaTargets}
+                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.excludingAreaTargets ? 'border-amber-300/60 bg-amber-400/20 text-amber-50' : 'border-amber-400/25 bg-amber-500/10 text-amber-100'}`}
+              >
+                {dnd5eSpellTargeting.excludingAreaTargets
+                  ? dnd5eSpellTargeting.areaExemptionMode === 'trigger' ? '完成不触发目标选择' : '完成豁免目标选择'
+                  : `${dnd5eSpellTargeting.areaExemptionMode === 'trigger' ? '不触发警报目标' : '不受影响目标'} ${dnd5eSpellTargeting.excludedAreaTargetIds?.length ?? 0}`}
+              </button> : null}
+              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.metamagic?.kind === 'careful' ? <button
+                type="button"
+                onClick={toggleDnd5eCarefulSpellTargets}
+                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.carefulSelecting ? 'border-rose-300/50 bg-rose-400/20 text-rose-100' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}
+              >
+                {dnd5eSpellTargeting.carefulSelecting ? '完成谨慎目标选择' : `谨慎目标 ${dnd5eSpellTargeting.carefulTargetIds.length}/${dnd5eSpellTargeting.maximumCarefulTargets}`}
+              </button> : null}
+              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.metamagic?.kind === 'heightened' ? <button
+                type="button"
+                onClick={toggleDnd5eHeightenedSpellTarget}
+                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.heightenedSelecting ? 'border-fuchsia-300/50 bg-fuchsia-400/20 text-fuchsia-100' : 'border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-200'}`}
+              >
+                {dnd5eSpellTargeting.heightenedSelecting ? '完成劣势目标选择' : dnd5eSpellTargeting.heightenedTargetId ? '已指定劣势目标' : '选择劣势目标'}
+              </button> : null}
+              {!dnd5eSpellTargeting.area && activeMap ? (
+                <label className="flex shrink-0 items-center gap-2 text-xs text-violet-100">
+                  <span>目标</span>
+                  <select
+                    aria-label="选择法术目标"
+                    value=""
+                    onChange={(event) => {
+                      const tokenId = event.target.value
+                      if (tokenId) void handleSelectToken(tokenId)
+                    }}
+                    className="max-w-64 rounded-lg border border-violet-300/25 bg-void-900 px-2 py-1 text-xs text-white"
+                  >
+                    <option value="">选择地图生物…</option>
+                    {selectedSpellTargetOptions
+                      .map((token) => (
+                        <option key={token.id} value={token.id}>
+                          {token.label}
+                          {token.dnd5eTruesightPerception
+                            ? `（真视察觉：${[
+                                token.dnd5eTruesightPerception.ethereal ? '以太位面' : null,
+                                token.dnd5eTruesightPerception.originalForm ? '原本形态' : null,
+                                token.dnd5eTruesightPerception.visualIllusion ? '视觉幻象' : null,
+                              ].filter(Boolean).join(' · ')}）`
+                            : ''}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
+              {(!dnd5eSpellTargeting.guessedTargeting || dnd5eSpellTargeting.allowDuplicateTargets) &&
+                (dnd5eSpellTargeting.areaTargetSelected || dnd5eSpellTargeting.maximumTargets > 1) ? <button
+                type="button"
+                disabled={
+                  (selectedSpellTargetKind !== 'area' &&
+                    dnd5eSpellTargeting.targetTokenIds.length < (dnd5eSpellTargeting.minimumTargets ?? 1)) ||
+                  (dnd5eSpellTargeting.allowDuplicateTargets &&
+                    dnd5eSpellTargeting.targetTokenIds.length !== dnd5eSpellTargeting.maximumTargets) ||
+                  ((dnd5eSpellTargeting.areaTargetCount ?? 1) > 1 && (
+                    (dnd5eSpellTargeting.areaTargetCells?.length ?? 0) < (dnd5eSpellTargeting.minimumAreaTargetCount ?? dnd5eSpellTargeting.areaTargetCount ?? 1) ||
+                    (dnd5eSpellTargeting.areaTargetCells?.length ?? 0) > (dnd5eSpellTargeting.areaTargetCount ?? 1)
+                  )) ||
+                  (dnd5eSpellTargeting.metamagic?.kind === 'twinned' &&
+                    dnd5eSpellTargeting.targetTokenIds.length !== 2) ||
+                  (dnd5eSpellTargeting.metamagic?.kind === 'careful' &&
+                    dnd5eSpellTargeting.carefulTargetIds.length < 1) ||
+                  (dnd5eSpellTargeting.metamagic?.kind === 'heightened' &&
+                    !dnd5eSpellTargeting.heightenedTargetId)
+                }
+                onClick={submitSelectedDnd5eSpellTargets}
+                className="shrink-0 rounded-lg bg-emerald-500/25 px-3 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/35 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {dnd5eSpellTargeting.allowDuplicateTargets
+                  ? `确认释放（${dnd5eSpellTargeting.targetTokenIds.length}/${dnd5eSpellTargeting.maximumTargets}）`
+                  : '确认施放'}
+              </button> : null}
+              <button
+                onClick={() => {
+                  setDnd5eSpellTargeting(null)
+                  setAoePreviewCell(null)
+                }}
+                className="shrink-0 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+              >
+                取消
+              </button>
+            </div>
+          ))
   const modeToggle = forcedMode || !mode ? null : <MapsModeToggle mode={mode} onChooseMode={chooseMode} />
   const playerWaitingForDm =
     mode === 'player' &&
@@ -38396,7 +38712,7 @@ export default function MapsWorkspacePage() {
   }
 
   return (
-    <div className="h-full w-full">
+    <div className="map-workspace-container h-full w-full">
       <EnemyTokenPortraitSyncBoundary
         enabled={isDM}
         requireSharedImages={!!roomSession}
@@ -38425,9 +38741,16 @@ export default function MapsWorkspacePage() {
         />
       ) : (
         /* 全屏地图框，所有控件作为浮层 */
-        <div ref={frameRef} className="relative h-full w-full overflow-hidden rounded-2xl">
+        <div
+          ref={frameRef}
+          className={[
+            'map-workspace-frame relative h-full w-full overflow-hidden rounded-2xl',
+            rightCombatDockTab === 'dice' ? 'map-workspace-frame--right-dock-open' : '',
+          ].join(' ')}
+        >
+          <MapVoicePanel belowInitiative={showBar && combatActive && initiativeOrder.length > 0} />
           {/* 地图本体铺满 */}
-          <div className="absolute inset-0">
+          <div className="map-workspace-viewport absolute inset-y-0 left-0 right-0">
             <Suspense
               fallback={(
                 <div
@@ -38707,11 +39030,6 @@ export default function MapsWorkspacePage() {
                 setDnd5ePluginAreaTargeting(null)
                 setDnd5eManualMonsterAttackTargeting(null)
                 setDnd5eManualMonsterSpellTargeting(null)
-                setSelectedTokenId(null)
-                setSelectedCharacterTokenId(null)
-                setEnemyDetailOpen(false)
-                setActiveCharId(null)
-                setCharPanel(null)
               }}
               lockDragTokenIds={lockDragTokenIds}
               gridAdjustMode={isDM && gridAdjustMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
@@ -38814,7 +39132,7 @@ export default function MapsWorkspacePage() {
               正在等待 DM 同步战斗状态
             </div>
           )}
-          {isDM && (activeMap.dnd5eItemAreas?.length ?? 0) > 0 && (
+          {isDM && mapToolsOpen && (activeMap.dnd5eItemAreas?.length ?? 0) > 0 && (
             <div className="absolute right-4 top-16 z-30 w-52 rounded-xl border border-white/10 bg-void-950/88 p-2 text-xs shadow-xl backdrop-blur-sm">
               <p className="px-1 pb-1.5 font-semibold text-slate-300">地图物品区域</p>
               <div className="max-h-40 space-y-1 overflow-y-auto">
@@ -38855,7 +39173,7 @@ export default function MapsWorkspacePage() {
           )}
 
           {dnd5eItemAreaTargeting && (
-            <div className="absolute left-1/2 top-14 z-[110] flex max-w-[min(92vw,760px)] -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-400/40 bg-void-950/90 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm">
+            <div className="map-combat-action-bar border-amber-400/40">
               <span className="text-xl">△</span>
               <span className="text-slate-200">
                 放置 <span className="font-semibold text-amber-200">{dnd5eItemAreaTargeting.itemName}</span>
@@ -38875,7 +39193,7 @@ export default function MapsWorkspacePage() {
           {activeManualMonsterSpellTargeting ? (
             <div
               data-testid="manual-monster-spell-targeting"
-              className="absolute left-1/2 top-14 z-[140] flex max-w-[min(94vw,920px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-sky-400/40 bg-void-950/95 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm"
+              className="map-combat-action-bar border-sky-400/40"
             >
               <Sparkles className="h-4 w-4 shrink-0 text-sky-300" />
               <span className="text-slate-200">
@@ -38945,7 +39263,7 @@ export default function MapsWorkspacePage() {
           {manualMonsterMoveSelectMode && moveCircle && manualMonsterMoveToken ? (
             <div
               data-testid="manual-monster-move-targeting"
-              className="absolute left-1/2 top-14 z-[110] flex max-w-[min(94vw,920px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-cyan-400/40 bg-void-950/95 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm"
+              className="map-combat-action-bar border-cyan-400/40"
             >
               <Move className="h-4 w-4 shrink-0 text-cyan-300" />
               <span className="text-slate-200">
@@ -39011,7 +39329,7 @@ export default function MapsWorkspacePage() {
               </button>
             </div>
           ) : showMoveRange && moveCircle ? (
-            <div className="absolute left-1/2 top-14 z-[110] flex -translate-x-1/2 items-center gap-3 rounded-xl border border-sky-400/40 bg-void-950/90 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm">
+            <div className="map-combat-action-bar border-sky-400/40">
               <span className="text-slate-200">
                 选择移动落点 · 可达 {moveCircle.feet} 尺
               </span>
@@ -39129,7 +39447,7 @@ export default function MapsWorkspacePage() {
             <div
               data-testid="dnd5e-persistent-area-move-overlay"
               aria-live="polite"
-              className="absolute left-1/2 top-14 z-[112] flex max-w-[min(94vw,920px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-sky-400/40 bg-void-950/95 px-3 py-2 text-sm shadow-2xl backdrop-blur-sm"
+              className="map-combat-action-bar border-sky-400/40"
             >
               {dnd5eCoreAreaMoveTargeting.coreSpellId === 'dancing-lights' ? (
                 <span className="text-sky-100">
@@ -39181,7 +39499,7 @@ export default function MapsWorkspacePage() {
           )}
 
           {dnd5eItemCreatureTargeting && (
-            <div className="absolute left-1/2 top-14 z-[110] flex max-w-[min(92vw,760px)] -translate-x-1/2 items-center gap-3 rounded-xl border border-cyan-400/40 bg-void-950/90 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm">
+            <div className="map-combat-action-bar border-cyan-400/40">
               <span className="text-xl">◎</span>
               <span className="text-slate-200">
                 使用 <span className="font-semibold text-cyan-200">{dnd5eItemCreatureTargeting.itemName}</span>
@@ -39196,221 +39514,7 @@ export default function MapsWorkspacePage() {
             </div>
           )}
           <WallOfFireTargetingControls targeting={dnd5eSpellTargeting} setTargeting={setDnd5eSpellTargeting} />
-          {dnd5eSpellTargeting && (
-            !dnd5eSpellTargeting.area ||
-            dnd5eSpellTargeting.areaTargetSelected ||
-            (dnd5eSpellTargeting.areaTargetCount ?? 1) > 1 ||
-            dnd5eSpellTargeting.spellId === 'dancing-lights'
-          ) && (
-            <div
-              data-testid="dnd5e-spell-targeting-overlay"
-              aria-live="polite"
-              className="absolute left-1/2 top-14 z-[110] flex max-w-[min(94vw,920px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-violet-400/40 bg-void-950/95 px-3 py-2 text-sm shadow-2xl backdrop-blur-sm"
-            >
-              {dnd5eSpellTargeting.allowDuplicateTargets ? (
-                <span className="text-violet-100">
-                  {dnd5eSpellTargeting.targetTokenIds.length < dnd5eSpellTargeting.maximumTargets
-                    ? `已分配 ${dnd5eSpellTargeting.targetTokenIds.length}/${dnd5eSpellTargeting.maximumTargets} 枚飞弹；请选择第 ${dnd5eSpellTargeting.targetTokenIds.length + 1} 枚的目标，同一目标可以重复点击。`
-                    : `已分配 ${dnd5eSpellTargeting.maximumTargets}/${dnd5eSpellTargeting.maximumTargets} 枚飞弹，可以确认释放。`}
-                </span>
-              ) : null}
-              {!dnd5eSpellTargeting.area &&
-                !dnd5eSpellTargeting.allowDuplicateTargets &&
-                dnd5eSpellTargeting.maximumTargets > 1 ? <>
-                  <span
-                    data-testid="dnd5e-spell-selected-target-summary"
-                    className="max-w-[min(72vw,560px)] truncate text-violet-100"
-                    title={dnd5eSpellTargeting.targetTokenIds
-                      .map((targetId) => activeMap?.tokens.find((token) => token.id === targetId)?.label ?? targetId)
-                      .join('、')}
-                  >
-                    已选择 {dnd5eSpellTargeting.targetTokenIds.length}/{dnd5eSpellTargeting.maximumTargets}
-                    {dnd5eSpellTargeting.targetTokenIds.length > 0
-                      ? `：${dnd5eSpellTargeting.targetTokenIds
-                          .map((targetId) => activeMap?.tokens.find((token) => token.id === targetId)?.label ?? targetId)
-                          .join('、')}`
-                      : '：尚未选择目标'}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={dnd5eSpellTargeting.targetTokenIds.length < 1}
-                    onClick={undoLastDnd5eSpellTarget}
-                    className="shrink-0 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    撤销上一个目标
-                  </button>
-                </> : null}
-              {dnd5eSpellTargeting.spellId === 'dancing-lights' ? <>
-                <button
-                  type="button"
-                  aria-pressed={(dnd5eSpellTargeting.dancingLightsForm ?? 'lights') === 'lights'}
-                  onClick={() => {
-                    setDnd5eSpellTargeting((current) => current?.spellId === 'dancing-lights'
-                      ? {
-                          ...current,
-                          dancingLightsForm: 'lights',
-                          areaTargetCount: 4,
-                          minimumAreaTargetCount: 1,
-                          areaTargetCell: undefined,
-                          areaTargetCells: [],
-                          areaTargetSelected: false,
-                          targetTokenIds: [],
-                        }
-                      : current)
-                    setAoePreviewCell(null)
-                    setSelectedTokenId(null)
-                  }}
-                  className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${(dnd5eSpellTargeting.dancingLightsForm ?? 'lights') === 'lights' ? 'border-cyan-300/60 bg-cyan-400/20 text-cyan-50' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}
-                >
-                  分散光团（1–4）
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={dnd5eSpellTargeting.dancingLightsForm === 'humanoid'}
-                  onClick={() => {
-                    setDnd5eSpellTargeting((current) => current?.spellId === 'dancing-lights'
-                      ? {
-                          ...current,
-                          dancingLightsForm: 'humanoid',
-                          areaTargetCount: 1,
-                          minimumAreaTargetCount: 1,
-                          areaTargetCell: undefined,
-                          areaTargetCells: undefined,
-                          areaTargetSelected: false,
-                          targetTokenIds: [],
-                        }
-                      : current)
-                    setAoePreviewCell(null)
-                    setSelectedTokenId(null)
-                  }}
-                  className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.dancingLightsForm === 'humanoid' ? 'border-fuchsia-300/60 bg-fuchsia-400/20 text-fuchsia-50' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}`}
-                >
-                  合并类人形态（4 光合一）
-                </button>
-              </> : null}
-              {(dnd5eSpellTargeting.areaTargetCount ?? 1) > 1 ? (
-                <span className="text-violet-100">
-                  已选择 {dnd5eSpellTargeting.areaTargetCells?.length ?? 0}/{dnd5eSpellTargeting.areaTargetCount} 个{dnd5eSpellTargeting.spellId === 'dancing-lights' ? '光团位置' : '法术落点'}；{dnd5eSpellTargeting.minimumAreaTargetCount && dnd5eSpellTargeting.minimumAreaTargetCount < (dnd5eSpellTargeting.areaTargetCount ?? 1) ? `至少选择 ${dnd5eSpellTargeting.minimumAreaTargetCount} 个，` : ''}落点必须互不相同。
-                </span>
-              ) : null}
-              {dnd5eSpellTargeting.spellId === 'dancing-lights' && dnd5eSpellTargeting.dancingLightsForm === 'humanoid' ? (
-                <span className="text-violet-100">
-                  {dnd5eSpellTargeting.areaTargetSelected ? '已选择类人形态位置，可以确认施放。' : '点击 120 尺内的地图格放置一个朦胧的中型类人光形。'}
-                </span>
-              ) : null}
-              {dnd5eSpellTargeting.guessedTargeting && !dnd5eSpellTargeting.allowDuplicateTargets ? (
-                <span className="text-violet-100">点击地图格猜测目标位置；Host 会按怪物的实时位置判定。</span>
-              ) : null}
-              {committedSpellAreaLocked ? (
-                <span className="shrink-0 rounded-lg border border-emerald-300/35 bg-emerald-400/10 px-2 py-1 text-xs text-emerald-100">
-                  范围已锁定
-                </span>
-              ) : null}
-              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.autoSculpt === true ? <button
-                type="button"
-                onClick={toggleDnd5eSculptSpellTargets}
-                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.sculpting ? 'border-sky-300/50 bg-sky-400/20 text-sky-100' : 'border-sky-400/20 bg-sky-500/10 text-sky-200'}`}
-              >
-                {dnd5eSpellTargeting.sculpting
-                  ? `完成保护选择（${dnd5eSpellTargeting.sculptedTargetIds.length}/${dnd5eSpellTargeting.maximumSculptedTargets}）`
-                  : `${dnd5eSpellTargeting.sculptedTargetIds.length > 0 ? '修改' : '选择'}保护目标 ${dnd5eSpellTargeting.sculptedTargetIds.length}/${dnd5eSpellTargeting.maximumSculptedTargets}`}
-              </button> : null}
-              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.autoSculpt === true && dnd5eSpellTargeting.sculpting ? (
-                <span className="text-sky-100">
-                  {sculptSelectableTokenIds.length > 0
-                    ? <>点击地图上的蓝框角色；金边表示已保护，最多 {dnd5eSpellTargeting.maximumSculptedTargets} 个。</>
-                    : '当前范围内没有可见的其他生物。'}
-                </span>
-              ) : null}
-              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.areaExemptionMode ? <button
-                type="button"
-                onClick={toggleExcludedAreaTargets}
-                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.excludingAreaTargets ? 'border-amber-300/60 bg-amber-400/20 text-amber-50' : 'border-amber-400/25 bg-amber-500/10 text-amber-100'}`}
-              >
-                {dnd5eSpellTargeting.excludingAreaTargets
-                  ? dnd5eSpellTargeting.areaExemptionMode === 'trigger' ? '完成不触发目标选择' : '完成豁免目标选择'
-                  : `${dnd5eSpellTargeting.areaExemptionMode === 'trigger' ? '不触发警报目标' : '不受影响目标'} ${dnd5eSpellTargeting.excludedAreaTargetIds?.length ?? 0}`}
-              </button> : null}
-              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.metamagic?.kind === 'careful' ? <button
-                type="button"
-                onClick={toggleDnd5eCarefulSpellTargets}
-                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.carefulSelecting ? 'border-rose-300/50 bg-rose-400/20 text-rose-100' : 'border-rose-400/20 bg-rose-500/10 text-rose-200'}`}
-              >
-                {dnd5eSpellTargeting.carefulSelecting ? '完成谨慎目标选择' : `谨慎目标 ${dnd5eSpellTargeting.carefulTargetIds.length}/${dnd5eSpellTargeting.maximumCarefulTargets}`}
-              </button> : null}
-              {dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.metamagic?.kind === 'heightened' ? <button
-                type="button"
-                onClick={toggleDnd5eHeightenedSpellTarget}
-                className={`shrink-0 rounded-lg border px-2 py-1 text-xs ${dnd5eSpellTargeting.heightenedSelecting ? 'border-fuchsia-300/50 bg-fuchsia-400/20 text-fuchsia-100' : 'border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-200'}`}
-              >
-                {dnd5eSpellTargeting.heightenedSelecting ? '完成劣势目标选择' : dnd5eSpellTargeting.heightenedTargetId ? '已指定劣势目标' : '选择劣势目标'}
-              </button> : null}
-              {!dnd5eSpellTargeting.area && activeMap ? (
-                <label className="flex shrink-0 items-center gap-2 text-xs text-violet-100">
-                  <span>目标</span>
-                  <select
-                    aria-label="选择法术目标"
-                    value=""
-                    onChange={(event) => {
-                      const tokenId = event.target.value
-                      if (tokenId) void handleSelectToken(tokenId)
-                    }}
-                    className="max-w-64 rounded-lg border border-violet-300/25 bg-void-900 px-2 py-1 text-xs text-white"
-                  >
-                    <option value="">选择地图生物…</option>
-                    {selectedSpellTargetOptions
-                      .map((token) => (
-                        <option key={token.id} value={token.id}>
-                          {token.label}
-                          {token.dnd5eTruesightPerception
-                            ? `（真视察觉：${[
-                                token.dnd5eTruesightPerception.ethereal ? '以太位面' : null,
-                                token.dnd5eTruesightPerception.originalForm ? '原本形态' : null,
-                                token.dnd5eTruesightPerception.visualIllusion ? '视觉幻象' : null,
-                              ].filter(Boolean).join(' · ')}）`
-                            : ''}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              ) : null}
-              {(!dnd5eSpellTargeting.guessedTargeting || dnd5eSpellTargeting.allowDuplicateTargets) &&
-                (dnd5eSpellTargeting.areaTargetSelected || dnd5eSpellTargeting.maximumTargets > 1) ? <button
-                type="button"
-                disabled={
-                  (selectedSpellTargetKind !== 'area' &&
-                    dnd5eSpellTargeting.targetTokenIds.length < (dnd5eSpellTargeting.minimumTargets ?? 1)) ||
-                  (dnd5eSpellTargeting.allowDuplicateTargets &&
-                    dnd5eSpellTargeting.targetTokenIds.length !== dnd5eSpellTargeting.maximumTargets) ||
-                  ((dnd5eSpellTargeting.areaTargetCount ?? 1) > 1 && (
-                    (dnd5eSpellTargeting.areaTargetCells?.length ?? 0) < (dnd5eSpellTargeting.minimumAreaTargetCount ?? dnd5eSpellTargeting.areaTargetCount ?? 1) ||
-                    (dnd5eSpellTargeting.areaTargetCells?.length ?? 0) > (dnd5eSpellTargeting.areaTargetCount ?? 1)
-                  )) ||
-                  (dnd5eSpellTargeting.metamagic?.kind === 'twinned' &&
-                    dnd5eSpellTargeting.targetTokenIds.length !== 2) ||
-                  (dnd5eSpellTargeting.metamagic?.kind === 'careful' &&
-                    dnd5eSpellTargeting.carefulTargetIds.length < 1) ||
-                  (dnd5eSpellTargeting.metamagic?.kind === 'heightened' &&
-                    !dnd5eSpellTargeting.heightenedTargetId)
-                }
-                onClick={submitSelectedDnd5eSpellTargets}
-                className="shrink-0 rounded-lg bg-emerald-500/25 px-3 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/35 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {dnd5eSpellTargeting.allowDuplicateTargets
-                  ? `确认释放（${dnd5eSpellTargeting.targetTokenIds.length}/${dnd5eSpellTargeting.maximumTargets}）`
-                  : '确认施放'}
-              </button> : null}
-              <button
-                onClick={() => {
-                  setDnd5eSpellTargeting(null)
-                  setAoePreviewCell(null)
-                }}
-                className="shrink-0 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
-              >
-                取消
-              </button>
-            </div>
-          )}
+          {(!sculptConfirmationAtInitiative || !showBar) && spellTargetingControls}
 
           <CombatDialogOverlay dialog={combatDialog} onClose={closeCombatDialog} />
 
@@ -39581,6 +39685,7 @@ export default function MapsWorkspacePage() {
               onClearCombatLog={() => setCombatLog([])}
               onOpenCombatLog={() => setCombatLogOpen(true)}
               onCloseCombatLog={() => setCombatLogOpen(false)}
+              showCombatLogDock={false}
             />
           </Suspense>
 
@@ -39602,6 +39707,8 @@ export default function MapsWorkspacePage() {
             </MapLazyOverlayBoundary>
           )}
           <DicePresentationOverlays
+            key={`${combatPlaybackLedgerScope}:${activeMapId}`}
+            historyScope={`${combatPlaybackLedgerScope}:${activeMapId}`}
             roll={roll}
             diceBoxD20={diceBoxD20}
             diceBoxRoll={diceBoxRoll}
@@ -39624,6 +39731,7 @@ export default function MapsWorkspacePage() {
                   targetName: secretDiceOverride.targetName,
                   sides: secretDiceOverride.sides,
                   values: secretDiceOverride.values,
+                  visibility: secretDiceOverride.visibility,
                 }
               : isDM &&
                   sharedRollConfirmationPrompt?.payload.visibility === 'dm-only' &&
@@ -39638,6 +39746,21 @@ export default function MapsWorkspacePage() {
                   }
                 : null}
             isDM={isDM}
+            freeReroll={!isSpectator && lastFreeDiceRoll ? {
+              roll: lastFreeDiceRoll.roll,
+              onReroll: (index) => handleMapFreeDiceRoll(lastFreeDiceRoll.input,
+                index == null ? undefined : { values: lastFreeDiceRoll.roll.values, index }),
+            } : undefined}
+            dockTab={rightCombatDockTab}
+            combatLogCount={combatLog.length}
+            combatLogPanel={<Suspense fallback={<div className="rounded-2xl bg-void-950 p-4 text-slate-400">正在载入战斗记录…</div>}>
+              <MapWorkspaceCombatLogPanel
+                combatLog={combatLog} tokens={displayActiveMap?.tokens ?? []} characters={characters}
+                currentTurnTokenId={currentInitiativeToken?.id}
+                onClearCombatLog={() => setCombatLog([])} onCloseCombatLog={() => setRightCombatDockTab(null)}
+              />
+            </Suspense>}
+            onDockTabChange={setRightCombatDockTab}
             renderFreeRollControls={!isSpectator ? (close) => (
               <Suspense fallback={<div className="p-4 text-xs text-slate-400">正在打开掷骰设置…</div>}>
                 <MapDiceRoller
@@ -39742,8 +39865,8 @@ export default function MapsWorkspacePage() {
           {/* 顶部控件浮层（可隐藏）；临时移动/施法配置固定叠在本层之上。 */}
           {showBar ? (
             <div className="pointer-events-none absolute inset-x-2 top-2 z-[80] flex flex-col items-center gap-2">
-            <div className="glass pointer-events-auto flex w-full flex-wrap items-center gap-2 rounded-xl px-2 py-1.5 shadow-xl">
-              {modeToggle}
+            <div className="glass pointer-events-auto relative flex w-full flex-wrap items-center gap-2 rounded-xl px-2 py-1.5 shadow-xl">
+              {!combatActive ? modeToggle : null}
               {isDM && (
                 <button
                   type="button"
@@ -39763,7 +39886,7 @@ export default function MapsWorkspacePage() {
                   战斗恢复
                 </button>
               )}
-              {isDM && (
+              {isDM && (!combatActive || mapToolsOpen) && (
                 <button
                   type="button"
                   data-testid="scene-orchestration-toolbar-button"
@@ -39800,7 +39923,9 @@ export default function MapsWorkspacePage() {
                 ].join(' ')}
               >
                 <Swords className="h-3.5 w-3.5" />
-                {combatActive ? `第 ${round} 回合` : '未开始'}
+                {combatActive
+                  ? `第 ${round} 回合 · ${currentInitiativeToken?.label ?? '等待行动者'}`
+                  : '未开始'}
               </div>
               {combatActive && (isDM ? (
                 <button
@@ -39919,6 +40044,33 @@ export default function MapsWorkspacePage() {
               {isDM && (
                 <>
                   <div className="mx-0.5 h-5 w-px bg-white/10" />
+                  <button
+                    type="button"
+                    data-testid="map-tools-toggle"
+                    aria-expanded={mapToolsOpen}
+                    onClick={() => setMapToolsOpen((open) => {
+                      const next = !open
+                      if (next) {
+                        setSelectedTokenId(null)
+                        setSelectedCharacterTokenId(null)
+                        setEnemyDetailOpen(false)
+                      }
+                      return next
+                    })}
+                    className={[
+                      'flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors',
+                      mapToolsOpen
+                        ? 'border-cyan-300/30 bg-cyan-500/20 text-cyan-100'
+                        : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10',
+                    ].join(' ')}
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    地图工具
+                  </button>
+                  {mapToolsOpen ? <div
+                    data-testid="map-tools-drawer"
+                    className="map-tools-drawer flex max-h-[min(50vh,36rem)] flex-wrap items-center gap-2 overflow-y-auto rounded-xl border border-white/10 bg-void-950/96 p-2 shadow-2xl backdrop-blur-xl"
+                  >
                   {/* 地图切换 */}
                   <MapWorkspaceMapSelect
                     activeMapId={activeMap.id}
@@ -40376,6 +40528,7 @@ export default function MapsWorkspacePage() {
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
+                  </div> : null}
                 </>
               )}
 
@@ -40388,6 +40541,7 @@ export default function MapsWorkspacePage() {
               </button>
             </div>
             {combatActive && initiativeOrder.length > 0 && (
+              <div className="map-workspace-initiative">
               <Suspense fallback={null}>
                 <MapWorkspaceInitiativePanel
                   entries={displayInitiativeOrder}
@@ -40400,7 +40554,9 @@ export default function MapsWorkspacePage() {
                   onSelect={openTokenDetails}
                 />
               </Suspense>
+              </div>
             )}
+            {sculptConfirmationAtInitiative && spellTargetingControls}
             </div>
           ) : (
             <button
@@ -40432,7 +40588,7 @@ export default function MapsWorkspacePage() {
           )}
           {isDM && <MapDetailPanelBoundary><MapWorkspacePersistentAreaDetailPanel area={effectDetailArea} sourceName={characters.find((character) => character.id === effectDetailArea?.sourceCharacterId)?.name} excludedTargetNames={[...new Set(effectDetailArea?.triggers?.flatMap((trigger) => trigger.excludedTokenIds ?? []) ?? [])].map((targetId) => { const token = activeMap.tokens.find((candidate) => candidate.id === targetId); const character = token?.characterId ? characters.find((candidate) => candidate.id === token.characterId) : undefined; return character?.name ?? token?.label ?? targetId })} feetPerCell={activeMap.feetPerCell} currentRound={round} onClose={() => setEffectDetailAreaId(null)} onResolveEntityAttack={async ({ areaId, attackTotal, damage }) => { const latest = useMapStore.getState().maps.find((map) => map.id === activeMap.id); const resolved = latest && resolvePersistentAreaEntityAttackByDm({ map: latest, characters: useCharacterStore.getState().characters, areaId, attackTotal, damage }); if (!resolved) return undefined; if (resolved.outcome !== 'miss') { applyAuthorityMapUpdate(resolved.map.id, { dnd5ePluginAreas: resolved.map.dnd5ePluginAreas, tokens: resolved.map.tokens }); if (resolved.character) applyAuthorityCharacterUpdate(resolved.character.id, resolved.character); await Promise.all([useMapStore.getState().saveSharedNow(), saveCharactersSharedNow()]); } pushCombatLog(resolved.outcome === 'miss' ? `对 ${resolved.label} 的攻击总值 ${resolved.attackTotal} 未达到 AC ${resolved.armorClass}，未命中。` : `对 ${resolved.label} 的攻击总值 ${resolved.attackTotal} 命中 AC ${resolved.armorClass}，造成 ${resolved.damage} 点伤害；HP ${resolved.hitPointsBefore}→${resolved.hitPointsAfter}${resolved.outcome === 'destroyed' ? '，法术结束' : ''}。`, resolved.outcome === 'miss' ? 'system' : 'damage'); return resolved }} onSetWebUnsupported={setWebAreaUnsupported} onIgniteWebCell={igniteWebAreaCell} onDelete={removeDnd5ePersistentAreaWithEnvironmentalFalls} /></MapDetailPanelBoundary>}
 
-          {isDM && (activeMap.dnd5ePluginAreas?.length ?? 0) > 0 && !effectDetailArea && (
+          {isDM && mapToolsOpen && (activeMap.dnd5ePluginAreas?.length ?? 0) > 0 && !effectDetailArea && (
             <div
               data-testid="dnd5e-persistent-area-list"
               className="glass absolute bottom-20 left-3 z-30 flex max-w-[min(32rem,calc(100%-1.5rem))] flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs shadow-xl"
@@ -40480,13 +40636,36 @@ export default function MapsWorkspacePage() {
               </MapDetailPanelBoundary>
           )}
 
-          {selectedToken &&
+          <MapCombatUnitDrawer
+            statusAvailable={!!selectedCharacterToken}
+            managementAvailable={isDM && !!selectedToken}
+            unitKey={selectedCharacterToken?.id ?? selectedToken?.id}
+            open={!!selectedCharacterToken || !!(selectedToken && canShowEnemyDetail(selectedToken))}
+            activeTab={combatUnitPanelTab}
+            actionsAvailable={!!(
+              isDM &&
+              combatActive &&
+              selectedToken?.type === 'enemy' &&
+              selectedToken.id === currentInitiativeToken?.id &&
+              dnd5eMonsterManualControlEnabled(monsterControl)
+            )}
+            onTabChange={setCombatUnitPanelTab}
+            onClose={() => {
+              setSelectedTokenId(null)
+              setSelectedCharacterTokenId(null)
+              setEnemyDetailOpen(false)
+            }}
+          >
+          {(combatUnitPanelTab === 'stats' || combatUnitPanelTab === 'management') && selectedToken &&
             !activeAoeTargeting &&
             !dnd5eItemAreaTargeting &&
             canShowEnemyDetail(selectedToken) &&
             (isDM || (selectedToken.showDetailOnToken !== false && enemyDetailOpen)) && (
               <MapDetailPanelBoundary>
                 <MapWorkspaceEnemyDetailPanel
+              statusSummary={<MapCombatUnitStatusPanel token={selectedToken} compact />}
+              view={isDM && combatUnitPanelTab === 'management' ? 'management' : 'statblock'}
+              embedded
               token={selectedToken}
               closable={!isDM}
               isDM={isDM}
@@ -40617,10 +40796,12 @@ export default function MapsWorkspacePage() {
               </MapDetailPanelBoundary>
           )}
 
-          {selectedCharacterToken && selectedCharacter && (
+          {(combatUnitPanelTab === 'stats' || combatUnitPanelTab === 'status') && selectedCharacterToken && selectedCharacter && (
             isDM ? (
               <MapDetailPanelBoundary>
                 <MapWorkspaceCharacterDetailPanel
+                  view={combatUnitPanelTab === 'status' ? 'status' : 'data'}
+                  embedded
                   token={selectedCharacterToken}
                   character={selectedCharacter}
                   onSetHitPoints={({ currentHp, maxHp, temporaryHp, manuallySetMaximum }) => {
@@ -40730,6 +40911,8 @@ export default function MapsWorkspacePage() {
             ) : (
               <MapDetailPanelBoundary>
                 <PlayerQuickCharacterSheet
+                  view={combatUnitPanelTab === 'status' ? 'status' : 'data'}
+                  embedded
                   character={selectedCharacter}
                   onClose={() => setSelectedCharacterTokenId(null)}
                 />
@@ -40752,9 +40935,15 @@ export default function MapsWorkspacePage() {
           ) : null}
 
           {/* 左侧只保留角色选择；所有战斗操作统一进入底部快捷栏。 */}
-          {isDM && combatActive && (
+          {combatUnitPanelTab === 'actions' && isDM && combatActive && selectedToken?.type === 'enemy' && (
             <MapLazyOverlayBoundary label="正在打开怪物控制栏…">
               <DmMonsterControlDock
+              embedded
+              focusedTokenId={selectedToken.id}
+              onFocusedTokenChange={(tokenId) => {
+                setSelectedCharacterTokenId(null)
+                setSelectedTokenId(tokenId)
+              }}
               monsters={combatMonsterTokens}
               currentTokenId={currentInitiativeToken?.type === 'enemy' ? currentInitiativeToken.id : undefined}
               actionUsed={manualMonsterActionUsed || dnd5eTurnStartSettlementPending}
@@ -40812,46 +41001,41 @@ export default function MapsWorkspacePage() {
               />
             </MapLazyOverlayBoundary>
           )}
+          </MapCombatUnitDrawer>
+
+          {activeManualMonsterAttackTargeting && !activeManualMonsterMapAreaEffect ? (
+            <div
+              data-testid="manual-monster-attack-targeting-bar"
+              className="map-combat-action-bar border-rose-300/30"
+            >
+              <span className="font-semibold text-rose-100">
+                {activeManualMonsterAttackTargeting.actionName} · 点击地图上的目标
+              </span>
+              <button
+                type="button"
+                onClick={() => setDnd5eManualMonsterAttackTargeting(null)}
+                className="rounded-lg border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-white/20 hover:text-white"
+              >
+                取消
+              </button>
+            </div>
+          ) : null}
 
           {dnd5ePersistentAreaActivityTargeting && activeMap ? (
             <div
               data-testid="persistent-area-activity-target-picker"
-              className="absolute right-3 top-36 z-[125] w-64 rounded-2xl border border-emerald-300/30 bg-void-950/95 p-3 shadow-2xl backdrop-blur-xl"
+              className="map-combat-action-bar border-emerald-300/30"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200">
-                    选择生物目标
-                  </p>
-                  <p className="mt-1 text-xs font-semibold text-white">
-                    {dnd5ePersistentAreaActivityTargeting.label}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDnd5ePersistentAreaActivityTargeting(null)}
-                  className="rounded-lg border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-white/20 hover:text-white"
-                >
-                  取消
-                </button>
-              </div>
-              <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
-                也可以直接点击地图 Token；距离、目标合法性、行动资源与授予来源仍由 Host 权威校验。
-              </p>
-              <div className="mt-2 grid max-h-64 gap-1.5 overflow-y-auto">
-                {activeMap.tokens.filter((target) => target.type !== 'obstacle').map((target) => (
-                  <button
-                    key={target.id}
-                    type="button"
-                    data-testid={`persistent-area-activity-target-${target.id}`}
-                    onClick={() => void handleSelectToken(target.id)}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-xs font-semibold text-slate-100 hover:border-emerald-300/35 hover:bg-emerald-500/15"
-                  >
-                    <span className="truncate">{target.label}</span>
-                    <span className="ml-2 shrink-0 text-[10px] text-emerald-200">选择</span>
-                  </button>
-                ))}
-              </div>
+              <span className="font-semibold text-emerald-100">
+                {dnd5ePersistentAreaActivityTargeting.label} · 点击地图上的生物目标
+              </span>
+              <button
+                type="button"
+                onClick={() => setDnd5ePersistentAreaActivityTargeting(null)}
+                className="rounded-lg border border-white/10 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-white/20 hover:text-white"
+              >
+                取消
+              </button>
             </div>
           ) : null}
 
@@ -40872,7 +41056,7 @@ export default function MapsWorkspacePage() {
             </Suspense>
           ) : null}
 
-          {railChars.length > 0 && !selectedCharacterToken && (
+          {railChars.length > 0 && !selectedCharacterToken && !selectedToken && (
             <div className="absolute bottom-3 left-3 z-30 flex flex-col-reverse gap-3">
               {railChars.map((c) => (
                 <CharacterRailEntry

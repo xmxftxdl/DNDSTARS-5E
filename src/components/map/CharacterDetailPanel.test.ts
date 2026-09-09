@@ -42,6 +42,16 @@ const character = {
 } as unknown as Character
 
 describe('CharacterDetailPanel', () => {
+  it('separates the DM character data card from editable status', () => {
+    const props = { token, character, isDM: true, onClose: () => {}, onSetHitPoints: () => {} }
+    const data = renderToStaticMarkup(createElement(CharacterDetailPanel, { ...props, view: 'data' }))
+    const status = renderToStaticMarkup(createElement(CharacterDetailPanel, { ...props, view: 'status' }))
+    expect(data).toContain('character-detail-abilities')
+    expect(data).not.toContain('aria-label="当前生命值"')
+    expect(status).toContain('aria-label="当前生命值"')
+    expect(status).not.toContain('character-detail-abilities')
+    expect(status).not.toContain('character-detail-equipment')
+  })
   it('生命值输入与权威确认之间始终使用同一份乐观快照绘制血条', () => {
     expect(resolveHitPointDisplay({
       currentHp: 40,

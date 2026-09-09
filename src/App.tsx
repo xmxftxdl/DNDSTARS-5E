@@ -20,6 +20,7 @@ import {
   type PdfSplitViewRequest,
 } from './lib/pdfSplitViewController'
 import { VoiceRoomProvider } from './voice/VoiceRoomContext'
+import MapReferencePanel, { MapReferenceProvider } from './presentation/maps/MapReferencePanel'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
 const Sidebar = lazy(() => import('./components/Sidebar'))
@@ -49,7 +50,6 @@ const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotif
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
 const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
 const VoiceRoomSystem = lazy(() => import('./components/VoiceRoomSystem'))
-const CampaignCombatBackgroundSystem = lazy(() => import('./components/CampaignCombatBackgroundSystem'))
 
 function PageLoadingFallback() {
   return (
@@ -416,6 +416,7 @@ export default function App() {
 
   return (
     <VoiceRoomProvider session={roomSession}>
+      <MapReferenceProvider enabled={!!pdfSplitRequest && mapWorkspaceActive}>
       <div className="flex h-screen w-screen overflow-hidden">
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
@@ -427,14 +428,7 @@ export default function App() {
           isDm={endpointMode !== 'player'}
         />
         <SceneAudioPlaybackSystem active={mapWorkspaceActive} />
-        {roomSession && (
-          <CampaignCombatBackgroundSystem
-            key={`${roomSession.roomId}:${roomSession.memberId}:combat-background`}
-            session={roomSession}
-            active={!mapWorkspaceActive}
-          />
-        )}
-        {roomSession && (
+        {roomSession && !mapWorkspaceActive && (
           <VoiceRoomSystem
             key={`voice-room:${roomSession.roomId}:${roomSession.memberId}`}
           />
@@ -460,11 +454,13 @@ export default function App() {
         </Suspense>
       )}
       {pdfSplitRequest && (
+        <MapReferencePanel>
         <PageErrorBoundary scope="PDF 分屏阅读器">
           <Suspense fallback={<div className="grid h-screen w-[clamp(24rem,42vw,48rem)] shrink-0 place-items-center border-r border-white/10 bg-slate-950 text-xs text-slate-500">正在打开 PDF…</div>}>
-            <PdfSplitViewPanel request={pdfSplitRequest} onClose={closePdfSplitView} />
+            <PdfSplitViewPanel request={pdfSplitRequest} onClose={closePdfSplitView} embedded />
           </Suspense>
         </PageErrorBoundary>
+        </MapReferencePanel>
       )}
       <main className={`relative min-w-0 flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
         {collapsed && (
@@ -476,6 +472,11 @@ export default function App() {
             <PanelLeftOpen className="h-5 w-5" />
           </button>
         )}
+        {/* Keep the room's single combat processor alive across campaign pages.
+            Dice portals remain visible outside this hidden map container. */}
+        <div className="h-full" hidden={!mapWorkspaceActive} key={`combat-workspace:${campaignId}:${roomSession?.memberId ?? endpointMode}`}>
+          {lazyPage('地图与战斗', <MapsPage />)}
+        </div>
         <Routes>
           <Route
             path="/campaign/:campaignId/overview"
@@ -510,7 +511,7 @@ export default function App() {
               element={<Navigate to={`${campaignBasePath}/dm-tools/simulation`} replace />}
             />
           </>}
-          <Route path="/campaign/:campaignId/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
+          <Route path="/campaign/:campaignId/maps" element={null} />
           {!isSpectator && <Route path="/campaign/:campaignId/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
           {dmToolsAvailable && <Route path="/campaign/:campaignId/shops" element={lazyPage('冒险者商店', <ShopsPage />)} />}
@@ -530,6 +531,7 @@ export default function App() {
         </Routes>
       </main>
       </div>
+      </MapReferenceProvider>
     </VoiceRoomProvider>
   )
 }

@@ -910,7 +910,7 @@ export default function MapCanvas({
   }, [movementFrameTokens])
 
   const canDragToken = (token: Token): boolean =>
-    canDragMapToken({
+    targetSelectableTokenIds.length === 0 && canDragMapToken({
       isDm: isDM,
       combatActive,
       token,
@@ -2163,7 +2163,7 @@ export default function MapCanvas({
     geometrySearchMode,
     sceneEditMode: sceneEditMode || scenePointPlacementMode,
   })
-  const stageCanPan = !geometryDragActive && !geometryViewportPanActive && stagePanAllowedByTools
+  const stageCanPan = targetSelectableTokenIds.length === 0 && !geometryDragActive && !geometryViewportPanActive && stagePanAllowedByTools
   const aoeHighlightVisible = aoeSelectMode || aoeHighlight != null
   const savingThrowToken = savingThrowTokenId
     ? map.tokens.find((candidate) => candidate.id === savingThrowTokenId)
@@ -2498,6 +2498,12 @@ export default function MapCanvas({
         }}
         onMouseDown={(e) => {
           const stage = e.target.getStage()
+          if (!aoeSelectMode && targetSelectableTokenIds.length > 0 && e.evt.button === 0) {
+            // A fresh click belongs to the committed template's protection
+            // picker, not the preceding placement click or a movement tool.
+            suppressTokenSelectUntilRef.current = 0
+            return
+          }
           if (scenePointPlacementMode && e.evt.button === 0) {
             e.cancelBubble = true
             const point = relativePoint(stage)
@@ -2965,6 +2971,7 @@ export default function MapCanvas({
                 const clickAction = mapCanvasTokenClickAction(
                   aoeSelectMode || Date.now() < suppressTokenSelectUntilRef.current,
                   moveSelectMode && !!moveCircle,
+                  !aoeSelectMode && Date.now() >= suppressTokenSelectUntilRef.current && targetSelectableTokenIds.includes(t.id),
                 )
                 if (clickAction === 'consume-area-click') return
                 if (clickAction === 'select-movement-destination') {

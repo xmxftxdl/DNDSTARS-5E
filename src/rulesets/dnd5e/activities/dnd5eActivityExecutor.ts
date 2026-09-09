@@ -1,3 +1,4 @@
+import { activityLogPredicate } from './dnd5eActivityLogPredicates'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eStandardConditionId } from '../conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../damageTypes'
@@ -213,7 +214,7 @@ export type Dnd5eResolvedEffectDuration =
           }
     }
 
-export type Dnd5eActivityCapabilityProposal =
+export type Dnd5eActivityCapabilityProposal = (
   | { kind: 'deal-damage'; operationId: string; targetId: string; amount: number; damageType: Dnd5eDamageType; magical: boolean }
   | {
       kind: 'heal'
@@ -578,6 +579,8 @@ export type Dnd5eActivityCapabilityProposal =
     }
   | { kind: 'invoke-activity'; operationId: string; activityId: string; actorId: string; targetId?: string; repeat: number }
   | { kind: 'request-dm-adjudication'; operationId: string; prompt: string; reason: string }
+
+) & { logTrigger?: { activityName: string; outcomeId: string; operationId: string; conditions: readonly string[] } }
 
 export type Dnd5eActivityExecutionResult =
   | {
@@ -2784,7 +2787,22 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
             : 1 + Math.max(0, scaled.additionalProjectilesByOperationId.get(operation.id) ?? 0)
           for (let repeat = 0; repeat < repeats; repeat += 1) {
             operationProposals(operation, operationExecutionInput, target, criticalSuccess)
-              .forEach((proposal) => proposals.push(proposal))
+              .forEach((proposal) => proposals.push({ ...proposal, logTrigger: {
+                activityName: activity.name, outcomeId: outcome.id, operationId: operation.id,
+                conditions: (when.kind === 'always' ? [] : when.kind === 'all' ? when.conditions : [when]).map(condition => {
+                  if (condition.kind === 'choice') {
+                    const choice = activity.choices?.find(item => item.id === condition.choiceId)
+                    return `选择${choice?.label ?? '规则选项'}：${choice?.options.find(item => item.id === condition.optionId)?.label ?? '指定选项'}`
+                  }
+                  if (condition.kind === 'check') {
+                    const check = activity.checks?.find(item => item.id === condition.checkId)
+                    const label = check?.kind === 'saving-throw' ? '目标豁免' : check?.kind === 'attack-roll' ? '攻击检定' : '规则检定'
+                    return `${label}${{'success':'成功','failure':'失败','critical-success':'重击成功','critical-failure':'大失败'}[condition.result]}`
+                  }
+                  if (condition.kind === 'check-total') return '效果判定落入本分支的结果范围'
+                  return activityLogPredicate(condition.predicate)
+                }),
+              } }))
           }
           if (once) appliedOnce.add(onceKey)
         }

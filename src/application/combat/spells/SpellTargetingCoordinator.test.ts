@@ -216,9 +216,17 @@ describe('SpellTargetingCoordinator', () => {
     expect(result).toMatchObject({ sculpting: true, carefulSelecting: false, heightenedSelecting: false })
   })
 
-  it('does not expose Sculpt Spells merely because the caster is eligible for it', () => {
+  it('only pauses for protection when Sculpt Spells was armed', () => {
     const eligibleButInactive = { ...targeting, autoSculpt: false }
+    expect(shouldAutoSubmitSpellAreaSelection({
+      ...eligibleButInactive, autoSubmitOnAreaSelection: true,
+    }, 1)).toBe(true)
     expect(selectSpellModifierMode(eligibleButInactive, 'sculpt')).toBe(eligibleButInactive)
+    const armed = { ...eligibleButInactive, autoSculpt: true, autoSubmitOnAreaSelection: true }
+    expect(shouldAutoSubmitSpellAreaSelection(armed, 1)).toBe(false)
+    expect(selectSpellModifierMode(armed, 'sculpt')).toMatchObject({ sculpting: true })
+    const ineligible = { ...eligibleButInactive, canSculpt: false }
+    expect(selectSpellModifierMode(ineligible, 'sculpt')).toBe(ineligible)
   })
 
   it('leaves Sculpt Spells protection empty until the player chooses creatures', () => {

@@ -1,3 +1,5 @@
+import { presentCombatLogEvent } from './combatLogEventPresentation'
+import { additionalCombatLogDetails } from './combatLogAdditionalEvents'
 import type { AbilityKey } from './dnd'
 import { dnd5eConditionLabel } from '../rulesets/dnd5e/conditions'
 import { DND5E_DAMAGE_TYPE_LABELS } from '../rulesets/dnd5e/damageTypes'
@@ -406,7 +408,11 @@ function persistentAreaDamageDetails(
   ]
 }
 
-function eventDetails(
+function eventDetails(...args: Parameters<typeof rawEventDetails>): string[] {
+  return presentCombatLogEvent(args[0], rawEventDetails(...args), args[1])
+}
+
+function rawEventDetails(
   event: Dnd5eCombatEvent,
   resolveName: (id: string) => string,
   formatPosition: (position: { x: number; y: number }) => string,
@@ -484,7 +490,7 @@ function eventDetails(
     case 'hit-point-maximum-restored':
       return [`${resolveName(event.targetId)}｜最大 HP ${event.maximumBefore} → ${event.maximumAfter}（恢复 ${event.amount}）`]
     case 'damage-reduced':
-      return [`${resolveName(event.targetId)}｜伤害减免 ${event.amount}（${event.damageBefore} → ${event.damageAfter}）${event.caught ? '｜接住投射物' : ''}`]
+      return [`${resolveName(event.targetId)}｜拨挡飞弹：受到远程武器攻击时反应减伤｜d10 ${event.d10} ${signed(event.modifier)}｜伤害减免 ${event.amount}（${event.damageBefore} → ${event.damageAfter}）${event.caught ? '｜接住投射物' : ''}`]
     case 'inventory-headless-effect-applied': {
       if (event.effectKind !== 'damage-reduction') return []
       const roll = event.dice
@@ -744,13 +750,13 @@ function eventDetails(
     case 'contest-resolved':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${event.contest === 'grapple' ? '擒抱' : event.contest === 'shove' ? '推撞' : '挣脱擒抱'} ${event.actorTotal} vs ${event.targetTotal}｜${event.success ? '成功' : '失败'}${event.outcome ? `｜${event.outcome === 'prone' ? '击倒' : '推开'}` : ''}`]
     case 'active-effect-applied':
-      return [`${resolveName(event.targetId)}｜效果生效：${effectDefinitionLabel(event.definitionId)}`]
+      return [`${resolveName(event.targetId)}｜效果生效：${event.logContext?.effect?.label ?? effectDefinitionLabel(event.definitionId)}`]
     case 'active-effect-refreshed':
-      return [`${resolveName(event.targetId)}｜效果刷新：${effectDefinitionLabel(event.definitionId)}`]
+      return [`${resolveName(event.targetId)}｜效果刷新：${event.logContext?.effect?.label ?? effectDefinitionLabel(event.definitionId)}`]
     case 'optional-bonus-die-used':
       return [`${resolveName(event.targetId)}｜${event.rollKind === 'saving-throw' ? '豁免' : '属性检定'}奖励骰：${event.label} d${event.dieSides}=${event.roll}｜已消耗`]
     case 'active-effect-removed':
-      return [`${resolveName(event.targetId)}｜效果结束：${effectDefinitionLabel(event.definitionId)}｜${REMOVAL_REASON_LABELS[event.reason] ?? event.reason}`]
+      return [`${resolveName(event.targetId)}｜效果结束：${event.logContext?.effect?.label ?? effectDefinitionLabel(event.definitionId)}｜${REMOVAL_REASON_LABELS[event.reason] ?? event.reason}`]
     case 'active-effect-save-required':
       return [`${resolveName(event.targetId)}｜需进行${ABILITY_LABELS[event.ability]}豁免 DC ${event.dc}（${event.timing === 'target-turn-start' ? '回合开始' : event.timing === 'target-turn-end' ? '回合结束' : '受到伤害'}${event.mode === 'advantage' ? '，优势' : event.mode === 'disadvantage' ? '，劣势' : ''}）`]
     case 'active-effect-save-resolved':
@@ -788,7 +794,7 @@ function eventDetails(
     case 'controlled-descent-resolved':
       return [`${resolveName(event.actorId)}｜受控下降 ${event.distanceFeet} 尺｜${event.landed ? '安全落地' : `仍在空中（高度 ${event.toElevationFeet} 尺）`}`]
     case 'legendary-resistance-used':
-      return [`${resolveName(event.targetId)}｜使用传奇抗性｜剩余 ${event.remainingUses} 次`]
+      return [`${resolveName(event.targetId)}｜豁免失败后使用传奇抗性，将失败改为成功｜剩余 ${event.remainingUses} 次`]
     case 'counterspell-resolved':
       return [`${resolveName(event.actorId)}反制 ${resolveName(event.casterId)} 的 ${event.spellId}｜${event.success ? '反制成功' : '反制失败'}${event.dc === undefined ? '' : `｜检定 ${event.abilityCheckTotal ?? '—'} vs DC ${event.dc}`}`]
     case 'spell-interception-resolved':
@@ -806,7 +812,7 @@ function eventDetails(
     case 'combat-ended':
       return ['战斗状态已结束，回合资源与中断窗口已关闭']
     default:
-      return []
+      return additionalCombatLogDetails(event, resolveName)
   }
 }
 
@@ -825,12 +831,20 @@ export interface CombatLogDetailOptions {
  */
 export function formatDnd5eSecretCombatOutcomeDetails(
   events: readonly Dnd5eCombatEvent[],
-  options: Omit<CombatLogDetailOptions, 'extra'> = {},
+  options: Omit<CombatLogDetailOptions, 'extra'> & { publicRollerIds?: ReadonlySet<string>; publicExtra?: readonly string[] } = {},
 ): string[] {
   const resolveName = options.resolveName ?? ((id: string) => id)
   const formatPosition = options.formatPosition ?? ((position) => `(${position.x}, ${position.y})`)
   const lines = events.flatMap((event): string[] => {
+    const rollerId = event.type === 'saving-throw-resolved' || event.type === 'active-effect-save-resolved' || event.type === 'optional-bonus-die-used' || event.type === 'undead-fortitude-resolved' || event.type === 'damage-reduced' || event.type === 'active-effect-random-condition-resolved' || event.type === 'monster-turn-start-gaze-save-resolved' || event.type === 'monster-on-hit-save-required' || event.type === 'undead-fortitude-save-required' || event.type === 'draconic-presence-save-required' || event.type === 'relentless-rage-save-required' ? event.targetId
+      : event.type === 'spell-interception-resolved' ? event.casterId
+      : 'actorId' in event ? event.actorId : undefined
+    if (rollerId && options.publicRollerIds?.has(rollerId) && event.type !== 'opposed-ability-check-resolved' && event.type !== 'contest-resolved' && event.type !== 'monster-on-hit-contest-resolved' && event.type !== 'hellish-rebuke-resolved' && event.type !== 'combat-maneuver-resolved') {
+      return formatDnd5eCombatLogDetails([event], options)
+    }
     switch (event.type) {
+      case 'damage-reduced':
+        return [`${resolveName(event.targetId)}｜伤害减免 ${event.amount}（${event.damageBefore} → ${event.damageAfter}）${event.caught ? '｜接住投射物' : ''}`]
       case 'attack-resolved':
         return [
           `${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜攻击结果：${event.critical ? '重击' : event.hit ? '命中' : '未命中'}`,
@@ -934,6 +948,8 @@ export function formatDnd5eSecretCombatOutcomeDetails(
       case 'relentless-rage-resolved':
         return [`${resolveName(event.actorId)}｜不屈狂怒：${event.success ? '成功，保留 1 HP' : '失败'}`]
       default: {
+        const additional = additionalCombatLogDetails(event, resolveName, true, options.publicRollerIds)
+        if (additional.length > 0) return presentCombatLogEvent(event, additional, resolveName)
         const creatureFormRevertedByDamage = event.type === 'damage-applied' &&
           event.creatureFormHpBefore != null
         return eventDetails(
@@ -947,8 +963,9 @@ export function formatDnd5eSecretCombatOutcomeDetails(
       }
     }
   })
-  const unique = lines.filter((line, index) => line.trim().length > 0 && lines.indexOf(line) === index)
-  const limit = Math.max(1, options.limit ?? 32)
+  const combined = [...(options.publicExtra ?? []), ...lines]
+  const unique = combined.filter((line, index) => line.trim().length > 0 && combined.indexOf(line) === index)
+  const limit = Math.max(1, options.limit ?? Number.POSITIVE_INFINITY)
   if (unique.length <= limit) return unique
   return [...unique.slice(0, limit), `另有 ${unique.length - limit} 项结算结果未展开`]
 }
@@ -998,7 +1015,7 @@ export function formatDnd5eCombatLogDetails(
     ...regularEventLines,
   ]
   const unique = all.filter((line, index) => all.indexOf(line) === index)
-  const limit = Math.max(1, options.limit ?? 32)
+  const limit = Math.max(1, options.limit ?? Number.POSITIVE_INFINITY)
   if (unique.length <= limit) return unique
   return [...unique.slice(0, limit), `另有 ${unique.length - limit} 项结算事件未展开`]
 }

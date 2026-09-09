@@ -1,3 +1,4 @@
+import { snapshotCombatLogContext, effectCombatLogContext, type Dnd5eCombatLogContext } from './combatLogContext'
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import { isMovementLocked } from '../../lib/combatStatus'
 import { dnd5eLegendaryMovementBoundaryKey, type Dnd5eMonsterLegendaryMovementGrant } from './monsterLegendaryMovement'
@@ -3585,7 +3586,7 @@ export interface Dnd5eMonsterOnHitEffectRoll {
   durationRolls?: readonly number[]
 }
 
-export type Dnd5eCombatEvent =
+export type Dnd5eCombatEvent = (
   | { type: 'turn-started'; actorId: string; round: number }
   | {
       type: 'spell-authority-record-established'
@@ -4043,6 +4044,7 @@ export type Dnd5eCombatEvent =
   | { type: 'delayed-spell-damage-triggered'; sourceId?: string; targetId: string; spellId: string; amount: number }
   | { type: 'concentration-resolved'; actorId: string; d20: number; total: number; dc: number; success: boolean }
   | { type: 'combat-ended' }
+) & { logContext?: Dnd5eCombatLogContext }
 
 export type Dnd5eActionFailure =
   | 'combat-ended'
@@ -5041,7 +5043,7 @@ export function applyDnd5eStandardConditionEffect(
     type: mutation.status === 'refreshed' ? 'active-effect-refreshed' : 'active-effect-applied',
     targetId: target.id,
     effectId: persistedEffect?.id ?? incoming.id,
-    definitionId: persistedEffect?.definitionId ?? incoming.definitionId,
+    definitionId: persistedEffect?.definitionId ?? incoming.definitionId, logContext: effectCombatLogContext(persistedEffect ?? incoming),
   })
   events.push({
     type: 'class-state-changed', actorId: conditionActorId, targetId: target.id,
@@ -5320,7 +5322,7 @@ function applyDnd5eMechanicalStatusEffect(
   if (input.preventReactions) target.turn = { ...target.turn, reactionAvailable: false }
   events.push({
     type: 'active-effect-applied', targetId: target.id,
-    effectId: incoming.id, definitionId: incoming.definitionId,
+    effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
   })
 }
 
@@ -5524,7 +5526,7 @@ function applyDnd5eRulesCondition(
   commitDnd5eActiveEffects(target, mutation.effects)
   events.push({
     type: 'active-effect-applied', targetId: target.id,
-    effectId: incoming.id, definitionId: incoming.definitionId,
+    effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
   })
   return true
 }
@@ -7042,7 +7044,7 @@ function resolveDnd5ePostSpellRandomTableManualAdjudication(
             type: mutation.status === 'refreshed' ? 'active-effect-refreshed' : 'active-effect-applied',
             targetId: target.id,
             effectId: incoming.id,
-            definitionId: incoming.definitionId,
+            definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
           })
           events.push({
             type: 'condition-applied',
@@ -20467,7 +20469,7 @@ function resolveSpellCast(
     commitDnd5eActiveEffects(affectedTarget, mutation.effects)
     events.push({
       type: 'active-effect-applied', targetId: affectedTarget.id,
-      effectId: incoming.id, definitionId: incoming.definitionId,
+      effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
     })
   }
   const applyFailedSaveSpellEffect = (affectedTarget: Dnd5eCombatant, dc: number) => {
@@ -22220,7 +22222,7 @@ function resolveDnd5eMonsterMechanics(input: {
         commitDnd5eActiveEffects(target, mutation.effects)
         input.events.push({
           type: 'active-effect-applied', targetId: target.id,
-          effectId: incoming.id, definitionId: incoming.definitionId,
+          effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
         })
         outcomes.push({
           effectId: effect.id, kind: effect.kind, targetId: target.id,
@@ -22416,7 +22418,7 @@ function resolveDnd5ePendingMonsterMechanicTrigger(
       commitDnd5eActiveEffects(target, mutation.effects)
       events.push({
         type: 'active-effect-applied', targetId: target.id,
-        effectId: incoming.id, definitionId: incoming.definitionId,
+        effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
       })
       outcomes.push({
         effectId: effect.id, kind: effect.kind, targetId: target.id,
@@ -23239,7 +23241,7 @@ function applyDnd5eMonsterSourceLinkedCondition(
           : 'active-effect-applied',
         targetId: target.id,
         effectId: rootEffectId,
-        definitionId: incoming.definitionId,
+        definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
       })
     }
   }
@@ -23347,7 +23349,7 @@ function applyDnd5eMonsterSourceLinkedCondition(
         : 'active-effect-applied',
       targetId: target.id,
       effectId: childEffectId,
-      definitionId: incoming.definitionId,
+      definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
     })
   }
   if (attackHadAdvantage) {
@@ -23395,7 +23397,7 @@ function applyDnd5eMonsterSourceLinkedCondition(
           : 'active-effect-applied',
         targetId: target.id,
         effectId: childEffectId,
-        definitionId: incoming.definitionId,
+        definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
       })
     }
   }
@@ -24231,7 +24233,7 @@ function applyResolvedDnd5eMonsterPersistentEffects(
         type: 'active-effect-refreshed',
         targetId: target.id,
         effectId: existing.id,
-        definitionId: existing.definitionId,
+        definitionId: existing.definitionId, logContext: effectCombatLogContext(existing),
       })
       continue
     }
@@ -24279,7 +24281,7 @@ function applyResolvedDnd5eMonsterPersistentEffects(
             : 'active-effect-applied',
         targetId: target.id,
         effectId: persisted.id,
-        definitionId: persisted.definitionId,
+        definitionId: persisted.definitionId, logContext: effectCombatLogContext(persisted),
       })
       if (effect.standardCondition) {
         applyDnd5eStandardConditionEffect(target, actor, {
@@ -24359,7 +24361,7 @@ function applyResolvedDnd5eMonsterPersistentEffects(
           : 'active-effect-applied',
       targetId: target.id,
       effectId: persisted.id,
-      definitionId: persisted.definitionId,
+      definitionId: persisted.definitionId, logContext: effectCombatLogContext(persisted),
     })
   }
 }
@@ -31776,7 +31778,7 @@ function resolveAdjudicatedSpell(
       type: controllerMutation.status === 'refreshed' ? 'active-effect-refreshed' : 'active-effect-applied',
       targetId: actor.id,
       effectId: controller.id,
-      definitionId: controller.definitionId,
+      definitionId: controller.definitionId, logContext: effectCombatLogContext(controller),
     })
   }
   const concentrationLinkedTargetIds = applicableEffects
@@ -31966,7 +31968,7 @@ function resolveAdjudicatedSpell(
       })
       if (mutation.status !== 'rejected-immune') {
         commitDnd5eActiveEffects(target, mutation.effects)
-        events.push({ type: mutation.status === 'refreshed' ? 'active-effect-refreshed' : 'active-effect-applied', targetId: target.id, effectId: incoming.id, definitionId: incoming.definitionId })
+        events.push({ type: mutation.status === 'refreshed' ? 'active-effect-refreshed' : 'active-effect-applied', targetId: target.id, effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming) })
         events.push({ type: 'condition-applied', actorId: actor.id, targetId: target.id, condition: addCondition })
       }
     }
@@ -33081,6 +33083,8 @@ export function commitDnd5eActivityExecution(
   }
 
   for (const proposal of input.resolution.proposals) {
+    const firstEventIndex = events.length
+    try {
     if (proposal.kind === 'grant-weapon-attack') {
       actor.classState.activityWeaponAttackGrants = {
         ...(actor.classState.activityWeaponAttackGrants ?? {}),
@@ -33565,6 +33569,11 @@ export function commitDnd5eActivityExecution(
         input.source?.kind === 'spell' ? input.castLevel : undefined,
         input.source?.packageId,
       )) return fail(state, events, 'invalid-plugin-action')
+    }
+    } finally {
+      if (proposal.logTrigger) for (let i = firstEventIndex; i < events.length; i += 1) {
+        events[i] = { ...events[i], logContext: { ...events[i].logContext, activityTrigger: structuredClone(proposal.logTrigger) } }
+      }
     }
   }
 
@@ -38122,7 +38131,7 @@ function resolveDnd5eHeadlessActionInternal(
           events.push({ type: 'condition-applied', actorId: source.id, targetId: actor.id, condition })
           events.push({
             type: 'active-effect-applied', targetId: actor.id,
-            effectId: incoming.id, definitionId: incoming.definitionId,
+            effectId: incoming.id, definitionId: incoming.definitionId, logContext: effectCombatLogContext(incoming),
           })
         }
       }
@@ -41347,6 +41356,7 @@ export function resolveDnd5eHeadlessAction(
   } finally {
     headlessResolutionDepth -= 1
   }
+  finalResult = { ...finalResult!, events: snapshotCombatLogContext(finalResult!.events, source, finalResult!.state, action) }
   if (transaction) {
     finalResult = {
       ...finalResult!,

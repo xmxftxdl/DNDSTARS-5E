@@ -139,6 +139,11 @@ describe('map canvas viewport panning', () => {
 })
 
 describe('map canvas area targeting', () => {
+  it('lets protection selection take priority over movement and area click suppression', () => {
+    expect(mapCanvasTokenClickAction(false, true, true)).toBe('select-token')
+    expect(mapCanvasTokenClickAction(true, false, true)).toBe('select-token')
+    expect(mapCanvasTokenClickAction(true, true, false)).toBe('select-movement-destination')
+  })
   it('consumes token clicks as area confirmation instead of opening token details', () => {
     expect(mapCanvasTokenClickAction(true)).toBe('consume-area-click')
     expect(mapCanvasTokenClickAction(false)).toBe('select-token')

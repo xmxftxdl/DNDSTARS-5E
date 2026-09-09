@@ -1,0 +1,14 @@
+{
+  "spell-save-d20": "怪影杀手·豁免",
+  "spell-attack-d20": "衰弱射线·攻击命中",
+  "bestow-curse-save": "降咒·豁免",
+  "command-save-d20": "命令术·豁免",
+  "contact-other-plane-save-d20": "异界探知·豁免",
+  "geas-save-d20": "指使术·豁免",
+  "prismatic-ray-d8": "虹光喷射·效果判定",
+  "prismatic-primary-damage-d6": "虹光喷射·效果判定",
+  "prismatic-extra-ray-a-d8": "虹光喷射·效果判定",
+  "prismatic-extra-damage-a-d6": "虹光喷射·效果判定",
+  "prismatic-extra-ray-b-d8": "虹光喷射·效果判定",
+  "prismatic-extra-damage-b-d6": "虹光喷射·效果判定"
+}

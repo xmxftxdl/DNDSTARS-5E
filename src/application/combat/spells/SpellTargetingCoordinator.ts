@@ -53,7 +53,7 @@ export function shouldAutoSubmitSpellAreaSelection(
   targeting: Pick<
     Dnd5eSpellTargetingSession,
     'autoSubmitOnAreaSelection' | 'areaTargetCount' | 'minimumAreaTargetCount' | 'areaExemptionMode'
-  >,
+  > & { autoSculpt?: boolean },
   selectedAreaCount: number,
 ): boolean {
   const maximum = Math.max(1, Math.floor(targeting.areaTargetCount ?? 1))
@@ -62,6 +62,7 @@ export function shouldAutoSubmitSpellAreaSelection(
     Math.min(maximum, Math.floor(targeting.minimumAreaTargetCount ?? maximum)),
   )
   return targeting.autoSubmitOnAreaSelection === true &&
+    targeting.autoSculpt !== true &&
     targeting.areaExemptionMode == null &&
     maximum === 1 &&
     selectedAreaCount >= minimum

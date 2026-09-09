@@ -1,11 +1,78 @@
 import type { Token } from '../../store/maps'
 import { creatureSizeToTokenSize } from '../../lib/monsterTypes'
-import type { Dnd5eMonsterStatBlock } from './monsters'
+import { DND5E_SRD_MONSTERS, dnd5eMonsterWeaponAttackAbility, type Dnd5eMonsterAction, type Dnd5eMonsterDamage, type Dnd5eMonsterStatBlock } from './monsters'
+
+function updateAttackDescription(description: string, oldAction: Dnd5eMonsterAction, action: Dnd5eMonsterAction): string {
+  if (!oldAction.attack || !action.attack) return description
+  const hit = action.attack.toHit
+  return description
+    .replace(/(命中\s*)[+-]?\d+/, `$1${hit >= 0 ? '+' : ''}${hit}`)
+    .replace(/[+-]?\d+(\s+to hit)/i, `${hit >= 0 ? '+' : ''}${hit}$1`)
+    .replace(/\d+\s*[（(]\s*(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?\s*[）)]/g,
+      (text, count, sides, sign, bonus) => {
+        const oldDamage = [...oldAction.attack!.damage, ...(oldAction.attack!.rangedDamage ?? []), ...(oldAction.attack!.damageAtHalfHp ?? [])]
+        const newDamage = [...action.attack!.damage, ...(action.attack!.rangedDamage ?? []), ...(action.attack!.damageAtHalfHp ?? [])]
+        const index = oldDamage.findIndex(damage => damage.count === Number(count) && damage.sides === Number(sides) &&
+          damage.bonus === (bonus ? Number(bonus) * (sign === '-' ? -1 : 1) : 0))
+        const damage = newDamage[index]
+        return damage ? `${damage.average} (${damage.count}d${damage.sides}${damage.bonus ? ` ${damage.bonus > 0 ? '+' : '-'} ${Math.abs(damage.bonus)}` : ''})` : text
+      })
+}
 
 export type Dnd5eMonsterOverrideScope = 'instance' | 'same-template'
 
 const OVERRIDE_PREFIX = 'room-monster:dm-override-'
 const LEGACY_OVERRIDE_PREFIX = 'room-monster:dm-override:'
+
+/** Inline edits always fork by token, including formerly shared overrides. */
+export function updateDnd5eMonsterInstanceAbility(
+  monster: Dnd5eMonsterStatBlock,
+  tokenId: string,
+  ability: keyof Dnd5eMonsterStatBlock['abilities'],
+  score: number,
+): Dnd5eMonsterStatBlock {
+  if (!Number.isInteger(score) || score < 1 || score > 30) throw new Error('属性值须为 1–30 的整数。')
+  const key = safeOverrideKey(`token-${tokenId}`)
+  const original = isDnd5eMonsterInstanceOverride(monster.id)
+    ? DND5E_SRD_MONSTERS.find(candidate => candidate.englishName === monster.englishName)
+    : undefined
+  const updateActions = (actions: readonly Dnd5eMonsterAction[] | undefined, originals?: readonly Dnd5eMonsterAction[]) => actions?.map(action => {
+    if (!action.attack) return action
+    // Recover untouched attacks from overrides saved before derived numbers
+    // were updated; their stored ability score already differs from the SRD.
+    const originalAction = originals?.find(candidate => candidate.id === action.id)
+    const basis = original && originalAction && JSON.stringify(originalAction.attack) === JSON.stringify(action.attack) ? original : monster
+    const attackAbility = dnd5eMonsterWeaponAttackAbility(basis, action.attack)
+    const delta = Math.floor((score - 10) / 2) - Math.floor((basis.abilities[ability] - 10) / 2)
+    const updateDamage = (damage: readonly Dnd5eMonsterDamage[] | undefined) => damage?.map((part, index) => {
+      const change = part.modifierFormula
+        ? part.modifierFormula.terms.reduce((sum, term) => sum + (term.kind === 'ability-modifier' && term.ability === ability ? delta * (term.multiplier ?? 1) : 0), 0)
+        : index === 0 && attackAbility === ability ? delta : 0
+      return change ? { ...part, bonus: part.bonus + change, average: Math.max(0, Math.floor(part.count * (part.sides + 1) / 2 + part.bonus + change)) } : part
+    })
+    const next = { ...action, attack: {
+      ...action.attack,
+      attackAbility,
+      toHit: action.attack.toHit + (attackAbility === ability ? delta : 0),
+      damage: updateDamage(action.attack.damage)!,
+      rangedDamage: updateDamage(action.attack.rangedDamage),
+      damageAtHalfHp: updateDamage(action.attack.damageAtHalfHp),
+    } }
+    return { ...next, description: updateAttackDescription(action.description, action, next) }
+  })
+  return {
+    ...structuredClone(monster),
+    id: `${OVERRIDE_PREFIX}${key}`,
+    slug: `dm-override-${key}`,
+    source: 'DM 自定义',
+    abilities: { ...monster.abilities, [ability]: score },
+    actions: updateActions(monster.actions, original?.actions)!,
+    bonusActions: updateActions(monster.bonusActions, original?.bonusActions),
+    reactions: updateActions(monster.reactions, original?.reactions),
+    legendaryActions: updateActions(monster.legendaryActions, original?.legendaryActions),
+    lairActions: updateActions(monster.lairActions, original?.lairActions),
+  }
+}
 
 function safeOverrideKey(value: string): string {
   const normalized = value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')

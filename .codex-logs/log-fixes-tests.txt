@@ -1,0 +1,87 @@
+
+ RUN  v4.1.10 C:/Users/Doco/Desktop/DND/DNDSTARS-5E
+
+ ❯ src/lib/combatLogDetails.test.ts (37 tests | 5 failed) 221ms
+     × projects movement positions into the current map grid when supplied 5ms
+     × records Host random-table checks and distinguishes a no-slot core spell 2ms
+     × labels a cantrip as slot-free instead of inventing a 0-level spell slot 1ms
+     × explains when antimagic consumes a cast but suppresses its effect 3ms
+     × shows persistent spell-detection targets, distances, schools, and sources 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/combatLogDetails.test.ts > formatDnd5eCombatLogDetails > projects movement positions into the current map grid when supplied
+AssertionError: expected [ …(2) ] to include '艾莉雅｜misty-step传送 30 尺｜格（X=6, Y=6） → 格…'
+ ❯ src/lib/combatLogDetails.test.ts:683:21
+    681|
+    682|     expect(details).toContain('艾莉雅｜移动 10 尺｜格（X=7, Y=7） → 格（X=6, Y=6）')
+    683|     expect(details).toContain('艾莉雅｜misty-step传送 30 尺｜格（X=6, Y=6） → 格（X…
+       |                     ^
+    684|   })
+    685|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/lib/combatLogDetails.test.ts > formatDnd5eCombatLogDetails > records Host random-table checks and distinguishes a no-slot core spell
+AssertionError: expected [ '艾莉雅｜施法后随机表待判定｜掷 d20，1 时触发', …(5) ] to include '艾莉雅 → 艾莉雅｜施放 fireball｜按 3 环结算，不消耗法术位'
+ ❯ src/lib/combatLogDetails.test.ts:797:21
+    795|     expect(details).toContain('艾莉雅｜施法后随机表待判定｜掷 d20，1 时触发')
+    796|     expect(details).toContain('艾莉雅｜施法后随机表已触发｜触发骰 1')
+    797|     expect(details).toContain('艾莉雅 → 艾莉雅｜施放 fireball｜按 3 环结算，不消耗法术位')
+       |                     ^
+    798|     expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜…
+    799|     expect(details).toContain('艾莉雅｜随机表结果 50 未接入自动结算｜战斗结算已暂停，等待 DM 裁定')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/lib/combatLogDetails.test.ts > formatDnd5eCombatLogDetails > labels a cantrip as slot-free instead of inventing a 0-level spell slot
+AssertionError: expected [ '艾莉雅 → 恐狼｜施放 燃火术｜使用戏法（不消耗法术位）' ] to include '艾莉雅 → 恐狼｜施放 produce-flame｜使用戏法（不消耗法术位）'
+ ❯ src/lib/combatLogDetails.test.ts:850:21
+    848|     }], { resolveName })
+    849|
+    850|     expect(details).toContain('艾莉雅 → 恐狼｜施放 produce-flame｜使用戏法（不消耗法术位）')
+       |                     ^
+    851|     expect(details.some((line) => line.includes('0 环法术位'))).toBe(false)
+    852|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/lib/combatLogDetails.test.ts > formatDnd5eCombatLogDetails > explains when antimagic consumes a cast but suppresses its effect
+AssertionError: expected [ '艾莉雅 → 恐狼｜火焰箭效果被反魔法力场压制｜未产生法术效果' ] to deeply equal [ Array(1) ]
+
+- Expected
++ Received
+
+  [
+-   "艾莉雅 → 恐狼｜fire-bolt效果被反魔法力场压制｜未产生法术效果",
++   "艾莉雅 → 恐狼｜火焰箭效果被反魔法力场压制｜未产生法术效果",
+  ]
+
+ ❯ src/lib/combatLogDetails.test.ts:884:21
+    882|     }], { resolveName })
+    883|
+    884|     expect(details).toEqual([
+       |                     ^
+    885|       '艾莉雅 → 恐狼｜fire-bolt效果被反魔法力场压制｜未产生法术效果',
+    886|     ])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/lib/combatLogDetails.test.ts > formatDnd5eCombatLogDetails > shows persistent spell-detection targets, distances, schools, and sources
+AssertionError: expected [ Array(1) ] to include '艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 …'
+ ❯ src/lib/combatLogDetails.test.ts:917:21
+    915|     }], { resolveName })
+    916|
+    917|     expect(details).toContain('艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 de…
+       |                     ^
+    918|     expect(formatDnd5eCombatLogDetails([{
+    919|       type: 'spell-detection-updated',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  5 failed | 55 passed (60)
+   Start at  18:13:18
+   Duration  4.45s (transform 10.18s, setup 0ms, import 14.12s, tests 745ms, environment 1ms)
+

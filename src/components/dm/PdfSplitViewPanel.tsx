@@ -62,9 +62,10 @@ async function saveReaderPdf(file: File): Promise<PdfDocumentRecordV2> {
   return document
 }
 
-export default function PdfSplitViewPanel({ request, onClose }: {
+export default function PdfSplitViewPanel({ request, onClose, embedded = false }: {
   request: PdfSplitViewRequest
   onClose: () => void
+  embedded?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const readerRef = useRef<PdfContinuousDocumentRendererHandle>(null)
@@ -166,7 +167,7 @@ export default function PdfSplitViewPanel({ request, onClose }: {
 
   return (
     <aside
-      className="relative z-[80] flex h-screen w-[clamp(24rem,42vw,48rem)] shrink-0 flex-col border-r border-sky-300/15 bg-slate-950 shadow-[14px_0_36px_rgba(0,0,0,0.36)]"
+      className={`relative z-[80] flex shrink-0 flex-col border-r border-sky-300/15 bg-slate-950 shadow-[14px_0_36px_rgba(0,0,0,0.36)] ${embedded ? 'h-full w-full' : 'h-screen w-[clamp(24rem,42vw,48rem)]'}`}
       aria-label="PDF 分屏阅读器"
       data-testid="pdf-split-view-panel"
     >

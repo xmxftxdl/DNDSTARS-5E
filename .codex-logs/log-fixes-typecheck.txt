@@ -1,0 +1,6 @@
+
+> dndstars-5e@0.1.0-beta.1 typecheck
+> tsc -b --pretty false
+
+src/lib/combatLogAdditionalEvents.ts(47,74): error TS2339: Property 'other' does not exist on type '{ approach: string; drop: string; flee: string; grovel: string; halt: string; }'.
+src/rulesets/dnd5e/combatLogContext.ts(19,103): error TS2339: Property 'name' does not exist on type 'RegisteredDnd5ePluginResource'.

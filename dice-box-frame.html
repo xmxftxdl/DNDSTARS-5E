@@ -24,6 +24,7 @@
 
       #dice {
         position: relative;
+        outline: none;
       }
 
       canvas {
@@ -72,6 +73,50 @@
       const frameQty = Math.max(1, Math.min(12, Math.round(Number(params.get('qty')) || 1)))
 
       let boxPromise = null
+      let interactive = false
+      let latestRequestId = null
+      let drag = null
+      let staged = false
+      const surface = document.getElementById('dice')
+      const pointerPosition = (event) => {
+        const bounds = surface.getBoundingClientRect()
+        return [(event.clientX - bounds.left) / bounds.width * 2 - 1, 1 - (event.clientY - bounds.top) / bounds.height * 2]
+      }
+      surface.style.touchAction = 'none' 
+      surface.addEventListener('pointerdown', async (event) => {
+        if (!interactive || drag || event.button !== 0) return
+        const box = await getBox()
+        if (!interactive || drag) return
+        const index = box.grabDie(...pointerPosition(event))
+        if (index == null) return
+        event.preventDefault()
+        drag = { index, pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
+        surface.setPointerCapture(event.pointerId)
+        surface.style.cursor = 'grabbing'
+      })
+      surface.addEventListener('pointermove', async (event) => {
+        if (!drag || drag.pointerId !== event.pointerId) return
+        if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 6) drag.moved = true
+        const box = await getBox()
+        if (drag?.pointerId === event.pointerId) box.moveGrabbedDie(...pointerPosition(event))
+      })
+      const release = async (event) => {
+        if (!drag || drag.pointerId !== event.pointerId) return
+        const selected = drag
+        drag = null
+        const box = await getBox()
+        const throwDie = event.type === 'pointerup' && selected.moved && interactive && !staged
+        box.releaseDie(throwDie)
+        if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId)
+        surface.style.cursor = interactive ? 'grab' : 'default'
+        if (throwDie) {
+          interactive = false
+          window.parent.postMessage({ type: 'dice-box-reroll-die', requestId: latestRequestId, index: selected.index }, ORIGIN)
+        }
+      }
+      surface.addEventListener('pointerup', release)
+      surface.addEventListener('pointercancel', release)
+      surface.addEventListener('lostpointercapture', release)
       // requestId-level exactly-once: even if a request is posted twice (promise +
       // event double-fire upstream), only one *-result leaves this frame (AC6).
       const completedRequestIds = new Set()
@@ -176,14 +221,17 @@
         window.parent.postMessage(payload, ORIGIN)
       }
 
-      async function handleRoll(kind, requestId, qty, sides, values) {
+      async function handleRoll(kind, requestId, qty, sides, values, rerollIndex) {
         if (requestId == null) return
         if (completedRequestIds.has(requestId)) return // dedup repeat requests
         if (inFlightRequestIds.has(requestId)) return // dedup repeat requests while physics is still rolling
         inFlightRequestIds.add(requestId)
+        interactive = false
+        latestRequestId = requestId
 
         let settled = false
         const forced = forcedValues(qty, sides, values)
+        const physicalReroll = Number.isInteger(rerollIndex) && rerollIndex >= 0 && rerollIndex < qty
         const deliver = (vals, fallback) => {
           if (settled) return
           settled = true
@@ -193,16 +241,28 @@
 
         // Single-end timeout fallback (kept for AC4): always hand back a value.
         const timer = window.setTimeout(
-          () => deliver(fallbackValues(qty, sides), true),
+          () => deliver(physicalReroll ? [] : fallbackValues(qty, sides), true),
           kind === 'd20' ? 45000 : 18000,
         )
 
         try {
           const box = await getBox()
           const notation = buildNotation(qty, sides, values)
-          box.clear()
-          await new Promise((resolve) => requestAnimationFrame(resolve))
-          let outcome = await box.roll(notation)
+          box.releaseDie()
+          const canReroll = Number.isInteger(rerollIndex) && rerollIndex >= 0 && rerollIndex < qty && box.visibleValues().length === qty
+          if (physicalReroll && !canReroll) throw new Error('The retained dice pool is unavailable')
+          let outcome
+          if (canReroll) {
+            outcome = { values: await box.reroll(rerollIndex) }
+            // A manual rethrow settles to the physical upper face. Never relabel
+            // it to a separately generated number after the user has seen it.
+            deliver(outcome.values, false)
+            return
+          } else {
+            box.clear()
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+            outcome = await box.roll(notation)
+          }
           let vals =
             Array.isArray(outcome.values) && outcome.values.length > 0
               ? outcome.values
@@ -232,7 +292,7 @@
           // Keep the physical roll, then gather every result (including a lone
           // d20) into a readable central grid. Every non-d4 die retains its
           // rolled top face while being leveled so no result remains leaning.
-          await box.arrangeSettledDice(presentedValues)
+          if (!canReroll) await box.arrangeSettledDice(presentedValues)
           const correctedAfterArrange = box.correctVisibleFaces(presentedValues)
           const visibleValues = box.visibleValues()
           if (!sameOrderedDiceValues(visibleValues, presentedValues)) {
@@ -247,20 +307,38 @@
           deliver(presentedValues, false)
         } catch (error) {
           console.error('[dice-box-frame] roll failed', error)
-          deliver(fallbackValues(qty, sides), true)
+          deliver(physicalReroll ? [] : fallbackValues(qty, sides), true)
         }
       }
 
       window.addEventListener('message', (event) => {
-        if (event.origin !== ORIGIN) return
+        if (event.origin !== ORIGIN || event.source !== window.parent) return
         const data = event.data
+        if (data?.type === 'dice-box-interactive' && data.requestId === latestRequestId) {
+          interactive = data.enabled === true
+          surface.style.cursor = interactive ? 'grab' : 'default'
+          return
+        }
         if (data?.type === 'roll-d20') {
           // value present → forced (1d20@v); absent → random 1d20.
           void handleRoll('d20', data.requestId, 1, 20, data.value == null ? [] : [data.value])
           return
         }
+        if (data?.type === 'stage-dice') {
+          if (completedRequestIds.has(data.requestId) || inFlightRequestIds.has(data.requestId)) return
+          inFlightRequestIds.add(data.requestId)
+          latestRequestId = data.requestId
+          staged = true
+          interactive = false
+          void getBox().then(async (box) => {
+            await box.stage(data.sides, forcedValues(data.qty, data.sides, data.values))
+            postResult('dice', data.requestId, data.values, false)
+          })
+          return
+        }
         if (data?.type === 'roll-dice') {
-          void handleRoll('dice', data.requestId, data.qty, data.sides, data.values)
+          staged = false
+          void handleRoll('dice', data.requestId, data.qty, data.sides, data.values, data.rerollIndex)
           return
         }
       })

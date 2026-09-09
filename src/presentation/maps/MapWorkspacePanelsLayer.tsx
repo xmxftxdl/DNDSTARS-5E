@@ -45,7 +45,56 @@ export function MapWorkspaceInitiativePanel(
 
 const MemoizedCombatLogEntryCard = memo(CombatLogEntryCard)
 
+/** Existing Log presentation shared by both panel hosts. */
+export function MapWorkspaceCombatLogPanel({ combatLog, tokens, characters, currentTurnTokenId, onClearCombatLog, onCloseCombatLog }: Pick<MapWorkspacePanelsLayerProps,
+  'combatLog' | 'tokens' | 'characters' | 'currentTurnTokenId' | 'onClearCombatLog' | 'onCloseCombatLog'>) {
+  return (
+    <div className="w-[min(36rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-void-950/90 shadow-2xl backdrop-blur-md">
+              <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+                <Swords className="h-4 w-4 text-amber-200" />
+                <span className="text-sm font-bold text-slate-100">战斗记录</span>
+                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-300">
+                  {combatLog.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={onClearCombatLog}
+                  className="ml-auto rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-200"
+                >
+                  清空
+                </button>
+                <button
+                  type="button"
+                  onClick={onCloseCombatLog}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                  title="隐藏战斗记录"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="max-h-[28rem] overflow-y-auto px-2 py-2">
+                {combatLog.length === 0 ? (
+                  <p className="px-2 py-5 text-center text-xs text-slate-500">暂无战斗记录</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {combatLog.map((entry) => (
+                      <MemoizedCombatLogEntryCard
+                        key={entry.id}
+                        entry={entry}
+                        tokens={tokens}
+                        characters={characters}
+                        currentTurnTokenId={currentTurnTokenId}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+  )
+}
+
 export interface MapWorkspacePanelsLayerProps {
+  showCombatLogDock?: boolean
   combatActive: boolean
   combatLog: readonly CombatLogEntry[]
   combatLogOpen: boolean
@@ -72,6 +121,7 @@ export interface MapWorkspacePanelsLayerProps {
  * log or initiative portraits when their actual inputs are unchanged.
  */
 const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
+  showCombatLogDock = true,
   combatActive,
   combatLog,
   combatLogOpen,
@@ -93,53 +143,17 @@ const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
 }: MapWorkspacePanelsLayerProps) {
   return (
     <>
-      {(combatActive || combatLog.length > 0) && (
+      {showCombatLogDock && (combatActive || combatLog.length > 0) && (
         <div
           data-testid="combat-log-dock"
           className="absolute bottom-3 right-3 z-[120] flex max-w-[calc(100%-1.5rem)] flex-col items-end"
         >
           {combatLogOpen ? (
-            <div className="w-[min(36rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-void-950/90 shadow-2xl backdrop-blur-md">
-              <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2">
-                <Swords className="h-4 w-4 text-amber-200" />
-                <span className="text-sm font-bold text-slate-100">战斗记录</span>
-                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-slate-300">
-                  {combatLog.length}
-                </span>
-                <button
-                  type="button"
-                  onClick={onClearCombatLog}
-                  className="ml-auto rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-200"
-                >
-                  清空
-                </button>
-                <button
-                  type="button"
-                  onClick={onCloseCombatLog}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
-                  title="隐藏战斗 Log"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="max-h-[28rem] overflow-y-auto px-2 py-2">
-                {combatLog.length === 0 ? (
-                  <p className="px-2 py-5 text-center text-xs text-slate-500">暂无战斗记录</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {combatLog.map((entry) => (
-                      <MemoizedCombatLogEntryCard
-                        key={entry.id}
-                        entry={entry}
-                        tokens={tokens}
-                        characters={characters}
-                        currentTurnTokenId={currentTurnTokenId}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            <MapWorkspaceCombatLogPanel
+              combatLog={combatLog} tokens={tokens} characters={characters}
+              currentTurnTokenId={currentTurnTokenId}
+              onClearCombatLog={onClearCombatLog} onCloseCombatLog={onCloseCombatLog}
+            />
           ) : (
             <button
               type="button"
@@ -148,7 +162,7 @@ const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-void-950/88 px-3 py-2 text-xs font-bold text-slate-200 shadow-xl backdrop-blur-md hover:bg-white/10"
             >
               <Swords className="h-3.5 w-3.5 text-amber-200" />
-              Log
+              记录
               {combatLog.length > 0 && (
                 <span className="rounded-full bg-amber-500/25 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100">
                   {combatLog.length}

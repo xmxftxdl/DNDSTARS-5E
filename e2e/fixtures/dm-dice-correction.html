@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React from 'react';import{createRoot}from'react-dom/client';
+import Overlays from '/src/presentation/maps/DicePresentationOverlays.tsx';
+import {useDicePresentation} from '/src/presentation/maps/useDicePresentation.ts';import '/src/index.css';
+window.results=[];
+window.addEventListener('message',e=>{if(e.data?.type==='dice-box-roll-result')window.results.push({id:e.data.requestId,values:e.data.values})});
+function App(){
+ const dice=useDicePresentation(()=>1);
+ const send=(id,value)=>dice.setRollRequestPreview({id,kind:'dice',count:1,sides:8,values:[value],label:'颜色',targetName:'卓尔',settled:id.endsWith(':dm-confirmed')});
+ return React.createElement(React.Fragment,null,
+ React.createElement('button',{onClick:()=>{send('color',3);send('color:dm-confirmed',6);send('next',4)}},'模拟连续广播'),
+ React.createElement(Overlays,{...dice,activeRollStatus:null,secretConfirmation:null,isDM:false,dockTab:'dice',onRollDone:()=>{},onD20Complete:dice.completeDiceBoxD20,onDiceComplete:dice.completeDiceBoxRoll,onPreviewComplete:dice.completeRollRequestPreview,onSecretConfirm:()=>{}}));
+}createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

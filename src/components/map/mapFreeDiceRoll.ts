@@ -3,6 +3,14 @@ export interface MapFreeDiceResolution {
   dc?: number
 }
 
+/** Replace by position so equal-valued dice remain independently selectable. */
+export function replaceMapFreeDie(values: readonly number[], index: number, value: number): number[] {
+  if (!Number.isInteger(index) || index < 0 || index >= values.length) {
+    throw new Error('Invalid die index')
+  }
+  return values.map((previous, position) => position === index ? value : previous)
+}
+
 export interface MapFreeDiceSelection {
   count: number
   sides: number

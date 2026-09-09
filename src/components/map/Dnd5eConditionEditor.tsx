@@ -367,8 +367,8 @@ export default function Dnd5eConditionEditor({
         })}
       </div>
 
-      <div className="mt-3 rounded-lg border border-violet-300/15 bg-violet-500/[0.04] p-2">
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-violet-200/80">自定义状态</p>
+      <details className="mt-3 rounded-lg border border-violet-300/15 bg-violet-500/[0.04] p-2">
+        <summary className="mb-1 cursor-pointer text-[11px] font-semibold text-violet-200/80">自定义状态</summary>
         <div className="flex gap-1.5">
           <input
             data-testid="dnd5e-custom-status-name"
@@ -423,7 +423,7 @@ export default function Dnd5eConditionEditor({
           </label>
         </div>
         {customStatusError ? <p role="alert" className="mt-1 text-[10px] text-rose-300">{customStatusError}</p> : null}
-      </div>
+      </details>
 
       {availableTacticalStatuses.length > 0 ? (
         <div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-500/[0.04] p-2">
@@ -494,7 +494,7 @@ export default function Dnd5eConditionEditor({
         </div>
       ) : null}
 
-      <details className="mt-3 rounded-lg border border-white/8 bg-void-950/30 p-2" open>
+      <details className="mt-3 rounded-lg border border-white/8 bg-void-950/30 p-2">
         <summary className="cursor-pointer text-[11px] font-semibold text-slate-300">新状态生命周期配置</summary>
         <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-400">
           <label>来源角色

@@ -680,7 +680,7 @@ describe('formatDnd5eCombatLogDetails', () => {
     })
 
     expect(details).toContain('艾莉雅｜移动 10 尺｜格（X=7, Y=7） → 格（X=6, Y=6）')
-    expect(details).toContain('艾莉雅｜misty-step传送 30 尺｜格（X=6, Y=6） → 格（X=3, Y=4）')
+    expect(details).toContain('艾莉雅｜迷踪步传送 30 尺｜格（X=6, Y=6） → 格（X=3, Y=4）')
   })
 
   it('records condition, resource, contest, and falling outcomes in one audit trail', () => {
@@ -794,8 +794,8 @@ describe('formatDnd5eCombatLogDetails', () => {
 
     expect(details).toContain('艾莉雅｜施法后随机表待判定｜掷 d20，1 时触发')
     expect(details).toContain('艾莉雅｜施法后随机表已触发｜触发骰 1')
-    expect(details).toContain('艾莉雅 → 艾莉雅｜施放 fireball｜按 3 环结算，不消耗法术位')
-    expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜自动结算 fireball')
+    expect(details).toContain('艾莉雅 → 艾莉雅｜施放 火球术｜按 3 环结算，不消耗法术位')
+    expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜自动结算 火球术')
     expect(details).toContain('艾莉雅｜随机表结果 50 未接入自动结算｜战斗结算已暂停，等待 DM 裁定')
     expect(details).toContain('艾莉雅｜随机表结果 50 的 DM 裁定已完成｜已跳过该结果｜备注：无需额外效果')
   })
@@ -847,7 +847,7 @@ describe('formatDnd5eCombatLogDetails', () => {
       spellId: 'produce-flame', slotLevel: 0,
     }], { resolveName })
 
-    expect(details).toContain('艾莉雅 → 恐狼｜施放 produce-flame｜使用戏法（不消耗法术位）')
+    expect(details).toContain('艾莉雅 → 恐狼｜施放 燃火术｜使用戏法（不消耗法术位）')
     expect(details.some((line) => line.includes('0 环法术位'))).toBe(false)
   })
 
@@ -882,7 +882,7 @@ describe('formatDnd5eCombatLogDetails', () => {
     }], { resolveName })
 
     expect(details).toEqual([
-      '艾莉雅 → 恐狼｜fire-bolt效果被反魔法力场压制｜未产生法术效果',
+      '艾莉雅 → 恐狼｜火焰箭效果被反魔法力场压制｜未产生法术效果',
     ])
   })
 
@@ -914,7 +914,7 @@ describe('formatDnd5eCombatLogDetails', () => {
       }],
     }], { resolveName })
 
-    expect(details).toContain('艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 detect-magic、longstrider）')
+    expect(details).toContain('艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 侦测魔法、longstrider）')
     expect(formatDnd5eCombatLogDetails([{
       type: 'spell-detection-updated',
       actorId: 'hero',

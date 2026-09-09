@@ -1,0 +1,1192 @@
+{
+  "spellNameCount": 319,
+  "auditedSpellCount": 197,
+  "effectCount": 137,
+  "eventCount": 184,
+  "centralHandledEventCount": 184,
+  "missingFromCentralFormatter": [],
+  "spells": [
+    {
+      "id": "aid",
+      "name": "援助术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "alarm",
+      "name": "警报术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "alter-self",
+      "name": "变身术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "animal-friendship",
+      "name": "化兽为友",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "animal-messenger",
+      "name": "动物信使",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "animal-shapes",
+      "name": "动物形态",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "animate-dead",
+      "name": "操纵死尸",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "animate-objects",
+      "name": "活化物件",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "antilife-shell",
+      "name": "防活物护罩",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "antimagic-field",
+      "name": "反魔法力场",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "antipathy-sympathy",
+      "name": "嫌恶/关怀术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "arcane-eye",
+      "name": "秘法眼",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "arcane-hand",
+      "name": "奥术之手",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "arcane-lock",
+      "name": "秘法锁",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "arcane-sword",
+      "name": "奥术之剑",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "arcanists-magic-aura",
+      "name": "奥法师魔法灵光",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "astral-projection",
+      "name": "星界投影",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "augury",
+      "name": "卜筮术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "awaken",
+      "name": "启蒙术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "beacon-of-hope",
+      "name": "希望信标",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "bestow-curse",
+      "name": "降咒",
+      "effects": 9,
+      "checks": 1
+    },
+    {
+      "id": "blink",
+      "name": "闪现术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "branding-smite",
+      "name": "印记斩",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "clairvoyance",
+      "name": "鹰眼术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "clone",
+      "name": "克隆术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "command",
+      "name": "命令术",
+      "effects": 6,
+      "checks": 1
+    },
+    {
+      "id": "commune",
+      "name": "通神术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "commune-with-nature",
+      "name": "问道自然",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "comprehend-languages",
+      "name": "通晓语言",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "compulsion",
+      "name": "强迫术",
+      "effects": 2,
+      "checks": 1
+    },
+    {
+      "id": "confusion",
+      "name": "困惑术",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "conjure-animals",
+      "name": "召唤动物",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "conjure-celestial",
+      "name": "召唤天界生物",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "conjure-elemental",
+      "name": "召唤元素生物",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "conjure-fey",
+      "name": "召唤精类生物",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "conjure-minor-elementals",
+      "name": "召唤次级元素生物",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "conjure-woodland-beings",
+      "name": "召唤林地之精",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "contact-other-plane",
+      "name": "异界探知",
+      "effects": 2,
+      "checks": 1
+    },
+    {
+      "id": "contagion",
+      "name": "疫病术",
+      "effects": 6,
+      "checks": 1
+    },
+    {
+      "id": "contingency",
+      "name": "触发术",
+      "effects": 24,
+      "checks": 0
+    },
+    {
+      "id": "continual-flame",
+      "name": "不灭明焰",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "control-water",
+      "name": "操控水体",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "control-weather",
+      "name": "操控天气",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "create-food-and-water",
+      "name": "造粮术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "create-undead",
+      "name": "唤起死灵",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "create-or-destroy-water",
+      "name": "造水/枯水术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "creation",
+      "name": "造物术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "delayed-blast-fireball",
+      "name": "延迟爆裂火球",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "demiplane",
+      "name": "创造半位面",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "detect-evil-and-good",
+      "name": "侦测善恶",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "detect-magic",
+      "name": "侦测魔法",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "detect-poison-and-disease",
+      "name": "侦测毒性和疾病",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "detect-thoughts",
+      "name": "侦测思想",
+      "effects": 2,
+      "checks": 0
+    },
+    {
+      "id": "dimension-door",
+      "name": "任意门",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "disguise-self",
+      "name": "易容术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "dispel-evil-and-good",
+      "name": "反制善恶",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "divination",
+      "name": "预言术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "divine-word",
+      "name": "圣言术",
+      "effects": 4,
+      "checks": 1
+    },
+    {
+      "id": "dominate-beast",
+      "name": "支配野兽",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "dominate-monster",
+      "name": "支配怪物",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "dominate-person",
+      "name": "支配人类",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "dream",
+      "name": "托梦术",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "druidcraft",
+      "name": "德鲁伊伎俩",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "earthquake",
+      "name": "地震术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "enthrall",
+      "name": "注目术",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "etherealness",
+      "name": "以太化",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "eyebite",
+      "name": "摄心目光",
+      "effects": 5,
+      "checks": 1
+    },
+    {
+      "id": "fabricate",
+      "name": "鬼斧神工",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "faithful-hound",
+      "name": "忠犬术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "fear",
+      "name": "恐惧术",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "feather-fall",
+      "name": "羽落术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "feeblemind",
+      "name": "弱智术",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "find-familiar",
+      "name": "获得魔宠",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "find-steed",
+      "name": "召唤坐骑",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "find-traps",
+      "name": "寻找陷阱",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "find-the-path",
+      "name": "寻路术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "fire-shield",
+      "name": "火焰护盾",
+      "effects": 2,
+      "checks": 0
+    },
+    {
+      "id": "fire-storm",
+      "name": "火焰风暴",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "flesh-to-stone",
+      "name": "石化术",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "floating-disk",
+      "name": "浮碟术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "forbiddance",
+      "name": "禁制术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "forcecage",
+      "name": "魔力监牢",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "foresight",
+      "name": "预警术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "freedom-of-movement",
+      "name": "行动自如",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "gaseous-form",
+      "name": "气化形体",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "gate",
+      "name": "异界之门",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "geas",
+      "name": "指使术",
+      "effects": 2,
+      "checks": 1
+    },
+    {
+      "id": "gentle-repose",
+      "name": "遗体防腐",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "giant-insect",
+      "name": "巨虫术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "glibness",
+      "name": "花言巧语",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "globe-of-invulnerability",
+      "name": "法术无效结界",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "glyph-of-warding",
+      "name": "守卫刻文",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "goodberry",
+      "name": "神莓术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "greater-restoration",
+      "name": "高等复原术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "guardian-of-faith",
+      "name": "信仰守卫",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "guards-and-wards",
+      "name": "铜墙铁壁",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "gust-of-wind",
+      "name": "造风术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "hallow",
+      "name": "圣居",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "hallucinatory-terrain",
+      "name": "幻景",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "haste",
+      "name": "加速术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "heroes-feast",
+      "name": "英雄宴",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "holy-aura",
+      "name": "圣洁灵光",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "identify",
+      "name": "鉴定术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "illusory-script",
+      "name": "迷幻手稿",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "imprisonment",
+      "name": "禁锢术",
+      "effects": 6,
+      "checks": 1
+    },
+    {
+      "id": "incendiary-cloud",
+      "name": "焚云术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "instant-summons",
+      "name": "瞬间召唤",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "irresistible-dance",
+      "name": "迷舞术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "knock",
+      "name": "敲击术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "legend-lore",
+      "name": "通晓传奇",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "levitate",
+      "name": "浮空术",
+      "effects": 3,
+      "checks": 1
+    },
+    {
+      "id": "light",
+      "name": "光亮术",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "locate-animals-or-plants",
+      "name": "动植物定位术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "locate-creature",
+      "name": "生物定位术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "locate-object",
+      "name": "物件定位术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "magic-circle",
+      "name": "防护法阵",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "magic-jar",
+      "name": "魔魂壶",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "magic-mouth",
+      "name": "魔嘴术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "magnificent-mansion",
+      "name": "豪宅术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "major-image",
+      "name": "高等幻影",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "mass-suggestion",
+      "name": "群体暗示术",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "maze",
+      "name": "迷宫术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "meld-into-stone",
+      "name": "融身入石",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "mending",
+      "name": "修复术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "message",
+      "name": "传讯术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "mind-blank",
+      "name": "心灵屏障",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "minor-illusion",
+      "name": "次级幻影",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "mirage-arcane",
+      "name": "海市蜃楼",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "mirror-image",
+      "name": "镜影术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "mislead",
+      "name": "假象术",
+      "effects": 3,
+      "checks": 0
+    },
+    {
+      "id": "modify-memory",
+      "name": "篡改记忆",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "move-earth",
+      "name": "地动术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "nondetection",
+      "name": "回避侦测",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "pass-without-trace",
+      "name": "行动无踪",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "passwall",
+      "name": "穿墙术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "phantom-steed",
+      "name": "魅影驹",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "planar-ally",
+      "name": "异界盟誓",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "planar-binding",
+      "name": "异界誓缚",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "plane-shift",
+      "name": "异界传送",
+      "effects": 1,
+      "checks": 2
+    },
+    {
+      "id": "plant-growth",
+      "name": "植物滋长",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "polymorph",
+      "name": "变形术",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "prestidigitation",
+      "name": "魔法伎俩",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "prismatic-spray",
+      "name": "虹光喷射",
+      "effects": 0,
+      "checks": 7
+    },
+    {
+      "id": "prismatic-wall",
+      "name": "虹光法墙",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "private-sanctum",
+      "name": "私人密室",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "programmed-illusion",
+      "name": "预置幻影",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "project-image",
+      "name": "投影术",
+      "effects": 2,
+      "checks": 0
+    },
+    {
+      "id": "protection-from-evil-and-good",
+      "name": "防护善恶",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "purify-food-and-drink",
+      "name": "净化食粮",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "raise-dead",
+      "name": "死者复活",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "ray-of-enfeeblement",
+      "name": "衰弱射线",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "regenerate",
+      "name": "再生术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "reincarnate",
+      "name": "转生术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "remove-curse",
+      "name": "移除诅咒",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "resilient-sphere",
+      "name": "弹力法球",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "resurrection",
+      "name": "复生术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "reverse-gravity",
+      "name": "反重力",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "revivify",
+      "name": "回生术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "rope-trick",
+      "name": "魔绳术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "scrying",
+      "name": "探知",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "secret-chest",
+      "name": "秘藏箱",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "seeming",
+      "name": "伪装术",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "sending",
+      "name": "短讯术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "sequester",
+      "name": "隔离术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "shapechange",
+      "name": "形体变化",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "silent-image",
+      "name": "无声幻影",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "simulacrum",
+      "name": "拟像术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "speak-with-animals",
+      "name": "动物交谈术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "speak-with-dead",
+      "name": "死者交谈",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "speak-with-plants",
+      "name": "植物交谈",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "spider-climb",
+      "name": "蛛行术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "stone-shape",
+      "name": "塑石术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "stoneskin",
+      "name": "石肤术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "storm-of-vengeance",
+      "name": "复仇风暴",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "suggestion",
+      "name": "暗示术",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "symbol",
+      "name": "魔法徽记",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "telekinesis",
+      "name": "心灵遥控",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "telepathic-bond",
+      "name": "心灵联结",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "teleport",
+      "name": "传送术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "teleportation-circle",
+      "name": "传送法阵",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "time-stop",
+      "name": "时间停止",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "tiny-hut",
+      "name": "小屋术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "tongues",
+      "name": "巧言术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "transport-via-plants",
+      "name": "木遁术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "tree-stride",
+      "name": "树跃术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "true-polymorph",
+      "name": "完全变形术",
+      "effects": 0,
+      "checks": 1
+    },
+    {
+      "id": "true-resurrection",
+      "name": "完全复生术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "true-seeing",
+      "name": "真知术",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "true-strike",
+      "name": "克敌机先",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "unseen-servant",
+      "name": "隐形仆役",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "water-breathing",
+      "name": "水下呼吸",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "water-walk",
+      "name": "水上行走",
+      "effects": 1,
+      "checks": 0
+    },
+    {
+      "id": "weird",
+      "name": "怪影杀手",
+      "effects": 1,
+      "checks": 1
+    },
+    {
+      "id": "wind-walk",
+      "name": "御风而行",
+      "effects": 4,
+      "checks": 0
+    },
+    {
+      "id": "wish",
+      "name": "祈愿术",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "word-of-recall",
+      "name": "回返真言",
+      "effects": 0,
+      "checks": 0
+    },
+    {
+      "id": "zone-of-truth",
+      "name": "诚实之域",
+      "effects": 0,
+      "checks": 0
+    }
+  ]
+}

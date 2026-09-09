@@ -23,6 +23,32 @@ function monsterToken(patch: Partial<Token> = {}): Token {
 }
 
 describe('EnemyDetailPanel monster thumbnail', () => {
+  it('separates DM management from the stat block', () => {
+    const props = { token: monsterToken(), onClose: () => {}, isDM: true, mapId: 'map-1', updateToken: () => {}, canManageConditions: true, onConditionsChange: () => {} }
+    const management = renderToStaticMarkup(<EnemyDetailPanel {...props} view="management" />)
+    const statblock = renderToStaticMarkup(<EnemyDetailPanel {...props} view="statblock" />)
+    expect(management).toContain('怪物当前生命值')
+    expect(management).toContain('状态效果')
+    expect(management).not.toContain('灵活逃脱')
+    expect(statblock).toContain('灵活逃脱')
+    expect(statblock).not.toContain('怪物当前生命值')
+    expect(statblock).not.toContain('DM 自由编辑属性块')
+  })
+  it('keeps automation settings out of details and folds optional state editors', () => {
+    const markup = renderToStaticMarkup(<EnemyDetailPanel token={monsterToken()} onClose={() => {}} isDM mapId="map-1" updateToken={() => {}} canManageConditions onConditionsChange={() => {}} />)
+    expect(markup).not.toContain('自动攻击偏好')
+    expect(markup).not.toContain('自动行为风格')
+    expect(markup).toContain('仅地图图标')
+    expect(markup).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/)
+    expect(markup.indexOf('D&D 5e 状态效果')).toBeLessThan(markup.indexOf('仅地图图标'))
+  })
+  it('leaves closing to the unit drawer only when embedded', () => {
+    const standalone = renderToStaticMarkup(<EnemyDetailPanel token={monsterToken()} onClose={() => {}} />)
+    const embedded = renderToStaticMarkup(<EnemyDetailPanel token={monsterToken()} onClose={() => {}} embedded />)
+    expect(standalone).toContain('title="关闭"')
+    expect(embedded).not.toContain('title="关闭"')
+    expect(embedded).toContain('哥布林')
+  })
   it('shows a monster speed after active spell effects, not only the stat-block base speed', () => {
     const markup = renderToStaticMarkup(
       <EnemyDetailPanel
@@ -66,9 +92,10 @@ describe('EnemyDetailPanel monster thumbnail', () => {
     )
 
     expect(playerMarkup).not.toContain('DM 自由编辑属性块')
-    expect(dmMarkup).toContain('DM 自由编辑属性块')
-    expect(dmMarkup).toContain('仅当前怪物实例')
-    expect(dmMarkup).toContain('当前地图全部同类')
+    expect(dmMarkup).not.toContain('打开编辑器')
+    expect(dmMarkup).toContain('编辑怪物属性')
+    expect(dmMarkup).not.toContain('怪物力量属性值')
+    expect(playerMarkup).not.toContain('怪物力量属性值')
   })
 
   it('lets a DM add and remove campaign-specific creature types', () => {

@@ -1187,6 +1187,10 @@ export function TokenNode({
   ) : null
 
   const handleStatusTokenClick = (instance: MapTokenStatusInstance) => {
+    if (targetSelectable) {
+      onSelect()
+      return
+    }
     if (onStatusTokenClick) {
       onStatusTokenClick(instance)
       return

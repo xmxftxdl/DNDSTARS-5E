@@ -374,6 +374,9 @@ export default function DmMonsterControlDock({
   endTurnPending = false,
   onEndTurn,
   initialExpanded = false,
+  embedded = false,
+  focusedTokenId,
+  onFocusedTokenChange,
 }: {
   monsters: readonly Token[]
   currentTokenId?: string
@@ -428,14 +431,17 @@ export default function DmMonsterControlDock({
   endTurnPending?: boolean
   onEndTurn: () => void
   initialExpanded?: boolean
+  embedded?: boolean
+  focusedTokenId?: string
+  onFocusedTokenChange?: (tokenId: string) => void
 }) {
   const [expanded, setExpanded] = useState(initialExpanded)
-  const [selectedTokenId, setSelectedTokenId] = useState<string>()
+  const [internalSelectedTokenId, setInternalSelectedTokenId] = useState<string>()
   const selectedToken = useMemo(
-    () => monsters.find((token) => token.id === selectedTokenId) ??
+    () => monsters.find((token) => token.id === (focusedTokenId ?? internalSelectedTokenId)) ??
       monsters.find((token) => token.id === currentTokenId) ??
       monsters[0],
-    [currentTokenId, monsters, selectedTokenId],
+    [currentTokenId, focusedTokenId, internalSelectedTokenId, monsters],
   )
   const stats = selectedToken?.poolId ? getEnemyStatBlock(selectedToken.poolId) : undefined
   const structuredMonster = selectedToken?.poolId ? getDnd5eSrdMonster(selectedToken.poolId) : undefined
@@ -522,9 +528,11 @@ export default function DmMonsterControlDock({
   return (
     <div
       data-testid="dm-monster-control-dock"
-      className="pointer-events-auto absolute bottom-3 left-3 z-[110] flex max-w-[min(620px,calc(100%-1.5rem))] flex-col-reverse gap-2"
+      className={embedded
+        ? 'flex h-full w-full flex-col overflow-hidden'
+        : 'pointer-events-auto absolute bottom-3 left-3 z-[110] flex max-w-[min(620px,calc(100%-1.5rem))] flex-col-reverse gap-2'}
     >
-      <div className="glass flex items-center gap-2 rounded-2xl border border-rose-300/15 bg-void-950/90 p-2 shadow-2xl backdrop-blur-xl">
+      {!embedded ? <div className="glass flex items-center gap-2 rounded-2xl border border-rose-300/15 bg-void-950/90 p-2 shadow-2xl backdrop-blur-xl">
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
@@ -546,7 +554,8 @@ export default function DmMonsterControlDock({
                 data-current={current || undefined}
                 data-selected={selected || undefined}
                 onClick={() => {
-                  setSelectedTokenId(token.id)
+                  setInternalSelectedTokenId(token.id)
+                  onFocusedTokenChange?.(token.id)
                   setExpanded(true)
                 }}
                 className={[
@@ -565,10 +574,12 @@ export default function DmMonsterControlDock({
             )
           })}
         </div>
-      </div>
+      </div> : null}
 
-      {expanded && selectedToken ? (
-        <div className="glass max-h-[min(620px,calc(100vh-10rem))] w-[min(520px,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-rose-300/15 bg-void-950/95 shadow-2xl backdrop-blur-xl">
+      {(embedded || expanded) && selectedToken ? (
+        <div className={embedded
+          ? 'h-full w-full overflow-y-auto bg-void-950/70'
+          : 'glass max-h-[min(620px,calc(100vh-10rem))] w-[min(520px,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-rose-300/15 bg-void-950/95 shadow-2xl backdrop-blur-xl'}>
           <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-white/10 bg-void-950/95 px-4 py-3 backdrop-blur-xl">
             <span
               className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-void-900"

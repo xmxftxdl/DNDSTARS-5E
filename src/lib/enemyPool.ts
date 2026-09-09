@@ -5923,6 +5923,17 @@ const SRD_MONSTER_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = 
   goblin: ['哥布林'],
 }
 
+// Attribute overrides retain the original SRD identity in englishName even
+// though their room-owned slug changes. Resolve art independently of rules ID.
+function monsterPresentation(monster: Dnd5eMonsterStatBlock): SrdMonsterPresentation | undefined {
+  const direct = SRD_MONSTER_PRESENTATION[monster.slug]
+  if (direct) return direct
+  if (!monster.id.startsWith('room-monster:dm-override')) return undefined
+  const original = DND5E_SRD_MONSTERS.find(candidate =>
+    !!monster.englishName && candidate.englishName === monster.englishName)
+  return original ? SRD_MONSTER_PRESENTATION[original.slug] : undefined
+}
+
 export function getEnemyVisualVariants(id: string): readonly EnemyVisualVariant[] {
   const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
   if (!monster) return []
@@ -5938,7 +5949,7 @@ function dnd5eMonsterVisualVariants(monster: Dnd5eMonsterStatBlock): readonly En
     tokenPortrait: customTokenPortrait,
     initiativePortrait: customInitiativePortrait,
   }]
-  const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
+  const presentation = monsterPresentation(monster)
   if (presentation?.visualVariants?.length) return presentation.visualVariants
   if (!presentation?.tokenPortrait || !presentation.initiativePortrait) return []
   return [{
@@ -5971,7 +5982,7 @@ export function getEnemyVisualPresentation(
       initiativePortrait: monster.initiativePortrait ?? monster.portrait ?? monster.tokenPortrait!,
     }
   }
-  const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
+  const presentation = monsterPresentation(monster)
   if (!presentation?.tokenPortrait || !presentation.initiativePortrait) return undefined
   return {
     tokenPortrait: presentation.tokenPortrait,
@@ -5998,7 +6009,7 @@ function srdCreatureTypes(type: string): CreatureType[] {
 }
 
 export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): EnemyTemplate {
-  const presentation = SRD_MONSTER_PRESENTATION[monster.slug] ?? { emoji: '👾', color: '#f87171' }
+  const presentation = monsterPresentation(monster) ?? { emoji: '👾', color: '#f87171' }
   const visualVariants = dnd5eMonsterVisualVariants(monster)
   const selectedVisual = visualVariants[0]
   const capabilityTags = [

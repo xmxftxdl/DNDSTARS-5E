@@ -34,6 +34,18 @@ function character(): Character {
 }
 
 describe('PlayerQuickCharacterSheet', () => {
+  it('separates status and concentration from the data sheet', () => {
+    const hero = { ...character(), concentrating: true }
+    const status = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { character: hero, onClose: () => {}, view: 'status' }))
+    const data = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { character: hero, onClose: () => {}, view: 'data' }))
+    expect(status).toContain('25/32')
+    expect(status).toContain('临时生命值 4')
+    expect(status).toContain('专注中')
+    expect(status).not.toContain('属性与豁免')
+    expect(data).toContain('属性与豁免')
+    expect(data).not.toContain('当前状态')
+    expect(data).not.toContain('专注中')
+  })
   it('displays Aid current HP against the effective maximum instead of the base maximum', () => {
     const aid = createDnd5eMechanicalEffect({
       definitionId: 'activity:aid:aid:modifiers:0', label: '援助术', targetId: 'quick-hero',

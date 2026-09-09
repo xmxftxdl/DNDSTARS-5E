@@ -4,6 +4,7 @@ import { settleAuthoritativeDicePresentation } from './dicePresentationGate'
 describe('settleAuthoritativeDicePresentation', () => {
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('始终保留 Host 生成的权威骰值', async () => {
@@ -39,5 +40,27 @@ describe('settleAuthoritativeDicePresentation', () => {
       presentation: Promise.reject(new Error('WebGL unavailable')),
       maximumWaitMs: 100,
     })).resolves.toEqual([4, 2])
+  })
+
+  it('switching to a hidden tab releases a stalled animation without waiting for timers', async () => {
+    vi.useFakeTimers()
+    const doc = Object.assign(new EventTarget(), { hidden: false })
+    vi.stubGlobal('document', doc)
+    const remove = vi.spyOn(doc, 'removeEventListener')
+    const result = settleAuthoritativeDicePresentation({
+      authoritativeValues: [8, 3], presentation: new Promise(() => undefined), maximumWaitMs: 60_000,
+    })
+    doc.hidden = true
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await expect(result).resolves.toEqual([8, 3])
+    expect(remove).toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a roll received while already hidden does not await animation', async () => {
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { hidden: true }))
+    await expect(settleAuthoritativeDicePresentation({
+      authoritativeValues: [20], presentation: new Promise(() => undefined), maximumWaitMs: 60_000,
+    })).resolves.toEqual([20])
   })
 })

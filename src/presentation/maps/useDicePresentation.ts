@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { enqueueDicePreview, finishDicePreview } from './dicePreviewQueue'
 import type { DiceRoll } from '../../components/DiceRollOverlay'
 import { DICE_TIMING } from '../../lib/diceOverlayShared'
 
@@ -14,6 +15,8 @@ export interface DiceBoxD20Request {
 }
 
 export interface DiceBoxRollRequest {
+  retainedValues?: number[]
+  rerollIndex?: number
   id: number
   /** Full authoritative pool; `count` may be capped for 3D rendering. */
   totalCount?: number
@@ -31,6 +34,7 @@ export interface DiceBoxRollRequest {
 export interface SharedRollRequestPreview {
   id: string
   kind: 'd20' | 'dice'
+  settled?: boolean
   count: number
   sides: number
   values: number[]
@@ -48,7 +52,11 @@ export function useDicePresentation(
   const diceBoxRollRequestCounterRef = useRef(0)
   const [diceBoxD20, setDiceBoxD20] = useState<DiceBoxD20Request | null>(null)
   const [diceBoxRoll, setDiceBoxRoll] = useState<DiceBoxRollRequest | null>(null)
-  const [rollRequestPreview, setRollRequestPreview] = useState<SharedRollRequestPreview | null>(null)
+  const [previewQueue, setPreviewQueue] = useState<SharedRollRequestPreview[]>([])
+  const rollRequestPreview = previewQueue[0] ?? null
+  const setRollRequestPreview = useCallback((incoming: SharedRollRequestPreview | null) => {
+    setPreviewQueue(queue => enqueueDicePreview(queue, incoming))
+  }, [])
 
   useEffect(() => {
     if (!diceBoxD20) return
@@ -65,7 +73,7 @@ export function useDicePresentation(
     const request = diceBoxRoll
     const timer = window.setTimeout(() => {
       setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
-      request.resolve(request.values)
+      request.resolve(request.rerollIndex != null ? [] : request.values)
     }, DICE_TIMING.ROLL_FAILSAFE_MS + (request.settledHoldMs ?? 0) + 1000)
     return () => window.clearTimeout(timer)
   }, [diceBoxRoll])
@@ -73,30 +81,26 @@ export function useDicePresentation(
   useEffect(() => {
     if (!rollRequestPreview) return
     const id = rollRequestPreview.id
-    const duration = rollRequestPreview.kind === 'd20' ? 4500 : 16000
+    const duration = DICE_TIMING.ROLL_FAILSAFE_MS + 1000
     const timer = window.setTimeout(() => {
-      setRollRequestPreview((current) => (current?.id === id ? null : current))
+      setPreviewQueue(queue => finishDicePreview(queue, id))
     }, duration)
     return () => window.clearTimeout(timer)
   }, [rollRequestPreview])
 
   const completeDiceBoxD20 = useCallback((request: DiceBoxD20Request, value: number) => {
     request.resolve(value)
-    window.setTimeout(() => {
-      setDiceBoxD20((current) => (current?.id === request.id ? null : current))
-    }, 900)
+    setDiceBoxD20((current) => (current?.id === request.id ? null : current))
   }, [])
 
   const completeDiceBoxRoll = useCallback((request: DiceBoxRollRequest, values: number[]) => {
-    request.resolve(request.values.length > 0 ? request.values : values)
-    window.setTimeout(() => {
-      setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
-    }, 1200)
+    request.resolve(request.rerollIndex != null ? values : request.values.length > 0 ? request.values : values)
+    setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
   }, [])
 
   const completeRollRequestPreview = useCallback((id: string, delayMs: number) => {
     window.setTimeout(() => {
-      setRollRequestPreview((current) => (current?.id === id ? null : current))
+      setPreviewQueue(queue => finishDicePreview(queue, id))
     }, delayMs)
   }, [])
 

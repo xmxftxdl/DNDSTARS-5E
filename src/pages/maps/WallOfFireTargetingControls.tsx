@@ -58,7 +58,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     const bladeAngle = targeting?.bladeBarrierAngleDegrees ?? 0
     const bladeLength = targeting?.bladeBarrierLengthFeet ?? 100
     const bladeDiameter = targeting?.bladeBarrierDiameterFeet ?? 60
-    return <div data-testid="blade-barrier-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,980px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-sky-300/50 bg-void-950/95 px-3 py-2 text-xs text-sky-50 shadow-2xl backdrop-blur-sm">
+    return <div data-testid="blade-barrier-targeting-controls" className="map-combat-action-bar border-sky-300/50 text-xs text-sky-50">
       <strong className="text-sky-200">剑刃障壁</strong>
       <button type="button" onClick={() => patch({ bladeBarrierShape: 'line' })} className={`rounded px-2 py-1 ${bladeShape === 'line' ? 'bg-sky-500/35' : 'bg-white/5'}`}>直线</button>
       <button type="button" onClick={() => patch({ bladeBarrierShape: 'ring' })} className={`rounded px-2 py-1 ${bladeShape === 'ring' ? 'bg-sky-500/35' : 'bg-white/5'}`}>环形</button>
@@ -74,7 +74,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
       targeting.areaTargetWidthFeet ?? targeting.areaTargetHeightFeet ?? 40,
     ).areaTargetWidthFeet
     return (
-      <div data-testid="move-earth-area-size-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,760px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-amber-300/55 bg-void-950/95 px-3 py-2 text-xs text-amber-50 shadow-2xl backdrop-blur-sm">
+      <div data-testid="move-earth-area-size-controls" className="map-combat-action-bar border-amber-300/55 text-xs text-amber-50">
         <strong className="text-amber-200">地动术区域</strong>
         <label className="flex items-center gap-2">正方形边长
           <button
@@ -124,7 +124,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
       value: targeting.areaTargetLengthFeet ?? targeting.area.lengthFeet,
     })
     return (
-      <div data-testid="adjustable-area-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,900px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-void-950/95 px-3 py-2 text-xs text-cyan-50 shadow-2xl backdrop-blur-sm">
+      <div data-testid="adjustable-area-targeting-controls" className="map-combat-action-bar border-cyan-300/50 text-xs text-cyan-50">
         <strong className="text-cyan-200">调整法术范围</strong>
         {controls.map((control) => {
           const stepFeet = control.min % 5 !== 0 ? 2.5 : 5
@@ -154,7 +154,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     )
   }
   if (genericRectActive) return (
-    <div data-testid="rotatable-rect-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,820px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-cyan-300/50 bg-void-950/95 px-3 py-2 text-xs text-cyan-50 shadow-2xl backdrop-blur-sm">
+    <div data-testid="rotatable-rect-targeting-controls" className="map-combat-action-bar border-cyan-300/50 text-xs text-cyan-50">
       <strong className="text-cyan-200">长方形范围</strong>
       <label className="flex items-center gap-2">角度
         <input aria-label="长方形范围角度" type="range" min="0" max="359" step="1" value={angle} onChange={(event) => patch({ areaTargetAngleDegrees: Number(event.target.value) })} className="w-48 accent-cyan-400" />
@@ -164,7 +164,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     </div>
   )
   return (
-    <div data-testid="wall-of-fire-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,980px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-orange-300/50 bg-void-950/95 px-3 py-2 text-xs text-orange-50 shadow-2xl backdrop-blur-sm">
+    <div data-testid="wall-of-fire-targeting-controls" className="map-combat-action-bar border-orange-300/50 text-xs text-orange-50">
       <strong className="text-orange-200">火墙术</strong>
       <button type="button" onClick={() => patch({ wallOfFireShape: 'line', wallOfFireDamagingSide: side === 'left' ? 'left' : 'right' })} className={`rounded px-2 py-1 ${shape === 'line' ? 'bg-orange-500/35' : 'bg-white/5'}`}>直线</button>
       <button type="button" onClick={() => patch({ wallOfFireShape: 'ring', wallOfFireDamagingSide: side === 'inside' ? 'inside' : 'outside' })} className={`rounded px-2 py-1 ${shape === 'ring' ? 'bg-orange-500/35' : 'bg-white/5'}`}>环形</button>

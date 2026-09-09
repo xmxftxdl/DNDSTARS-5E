@@ -143,7 +143,7 @@ describe('Activity Headless authority commit bridge', () => {
 
     expect(committed.ok).toBe(true)
     if (!committed.ok) return
-    expect(committed.events).toContainEqual({
+    expect(committed.events).toContainEqual(expect.objectContaining({
       type: 'opposed-ability-check-resolved',
       actorId: caster.id,
       targetId: target.id,
@@ -159,7 +159,7 @@ describe('Activity Headless authority commit bridge', () => {
       targetModifier: 7,
       targetTotal: 25,
       success: false,
-    })
+    }))
   })
 
   it('distinguishes foreign-planar dismissal from a local native banishment', () => {
@@ -415,13 +415,13 @@ describe('Activity Headless authority commit bridge', () => {
     })
     expect(committed.state.combatants.target.statBlockId).toBeUndefined()
     expect(committed.state.combatants.target.classState.wildShapeFormId).toBeUndefined()
-    expect(committed.events).toContainEqual({
+    expect(committed.events).toContainEqual(expect.objectContaining({
       type: 'creature-transformation-unaffected',
       actorId: caster.id,
       targetId: target.id,
       sourceActivityId: activity.id,
       reason,
-    })
+    }))
   })
 
   it('rejects True Resurrection after the 200-year boundary', () => {
@@ -1125,9 +1125,9 @@ describe('Activity Headless authority commit bridge', () => {
     ]))
     expect(committed.state.combatants.actor.classResources['dnd5e-spell-slot-7']?.current).toBe(0)
     expect(committed.state.combatants.actor.turn.bonusActionAvailable).toBe(false)
-    expect(committed.events).toContainEqual({
+    expect(committed.events).toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: actor.id, targetId: 'hp15', hpBefore: 15,
-    })
+    }))
   })
 
   it('revives only an eligible authoritative corpse and records body/penalty state', () => {
@@ -1476,10 +1476,10 @@ describe('Activity Headless authority commit bridge', () => {
     if (!removed.ok) return
     expect(removed.state.combatants.actor.concentrating).toBe(false)
     expect(removed.state.combatants.actor.classState.concentrationSpellId).toBeUndefined()
-    expect(removed.events).toContainEqual({
+    expect(removed.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: actor.id,
       stateKey: 'concentration', active: false,
-    })
+    }))
   })
 
   it('stores extension behaviour and modifiers as one save-ends effect', () => {
@@ -1670,9 +1670,9 @@ describe('Activity Headless authority commit bridge', () => {
     expect(cured.state.combatants.target.currentHp).toBe(20)
     expect(cured.state.combatants.target.classState.abilityScoreReductionLedger).toBeUndefined()
     expect(cured.state.combatants.target.classState.hitPointMaximumReductionLedger).toBeUndefined()
-    expect(cured.events).toContainEqual({
+    expect(cured.events).toContainEqual(expect.objectContaining({
       type: 'exhaustion-adjusted', actorId: 'target', before: 2, after: 1, amount: -1,
-    })
+    }))
   })
 
   it('does not partially mutate the source when a cost is unavailable', () => {

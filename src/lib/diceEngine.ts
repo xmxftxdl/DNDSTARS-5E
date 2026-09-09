@@ -17,6 +17,7 @@
 // ============================================================================
 import DiceBox, { type DiceRollResults, type DiceColorset } from '@3d-dice/dice-box-threejs'
 import { settledDiceGrid } from './diceFrameLayout'
+import { diceThrowMotion, type DiceDragSample } from './diceThrowMotion'
 
 // AC3 — single source of truth. Accent parity with the legacy Babylon
 // themeColor in public/dice-box-frame.html ('#7c3aed').
@@ -66,6 +67,11 @@ export interface CreateDiceBoxOptions {
 export interface DiceEngineBox {
   // Resolves with the same DiceOutcome that onComplete receives — exactly once.
   roll(notation: string): Promise<DiceOutcome>
+  stage(sides: number, values: number[]): Promise<void>
+  reroll(index: number): Promise<number[]>
+  grabDie(x: number, y: number): number | null
+  moveGrabbedDie(x: number, y: number): void
+  releaseDie(throwDie?: boolean): void
   correctVisibleFaces(values: number[]): boolean
   visibleValues(): number[]
   arrangeSettledDice(values?: number[]): Promise<void>
@@ -78,6 +84,13 @@ interface RuntimeVector {
   y: number
   z: number
   set?: (x: number, y: number, z: number) => void
+  clone?: () => ProjectableVector
+}
+
+interface ProjectableVector extends RuntimeVector {
+  set: (x: number, y: number, z: number) => ProjectableVector
+  project: (camera: unknown) => ProjectableVector
+  unproject: (camera: unknown) => ProjectableVector
 }
 
 interface RuntimeQuaternion {
@@ -101,6 +114,7 @@ interface RuntimeBody {
 }
 
 interface RuntimeDie {
+  notation?: { type?: string }
   shape?: string
   geometry?: RuntimeGeometry
   position?: RuntimeVector
@@ -108,9 +122,13 @@ interface RuntimeDie {
   body?: RuntimeBody
   getLastValue?: () => { value?: number; label?: string; reason?: string }
   setLastValue?: (value: { value: number; label: string; reason: string }) => void
+  storeRolledValue?: (reason: string) => void
 }
 
 interface RuntimeDiceBox {
+  startClickThrow?: (notation: string) => { vectors: unknown[] }
+  spawnDice?: (vector: unknown) => void
+  last_time?: number
   diceList?: RuntimeDie[]
   swapDiceFace?: (die: RuntimeDie, value: number) => void
   renderer?: { render: (scene: unknown, camera: unknown) => void }
@@ -302,6 +320,28 @@ function d4SettledFaceValue(die: RuntimeDie): number | undefined {
   return value != null && value >= 1 && value <= 4 ? value : undefined
 }
 
+function physicalDieValue(die: RuntimeDie): number | undefined {
+  if (die.shape === 'd4') return d4SettledFaceValue(die)
+  const normals = die.geometry?.getAttribute?.('normal')?.array
+  const groups = die.geometry?.groups
+  if (!normals || !groups || !die.quaternion) return undefined
+  let highest = -Infinity
+  let materialIndex: number | undefined
+  for (let index = 0; index < groups.length; index += 1) {
+    if (!groups[index].materialIndex) continue
+    const normal = groupLocalNormal(normals, groups[index], index)
+    if (!normal) continue
+    const world = rotateVector(normal, normalizedQuaternion(die.quaternion))
+    if (world.z > highest) {
+      highest = world.z
+      materialIndex = groups[index].materialIndex
+    }
+  }
+  if (materialIndex == null) return undefined
+  const value = die.shape === 'd10' || die.shape === 'd2' ? materialIndex : materialIndex - 1
+  return die.notation?.type === 'd100' ? value * 10 : value
+}
+
 function d4ResultQuaternion(die: RuntimeDie, targetValue: number | undefined): QuaternionValue {
   const current = normalizedQuaternion({
     x: die.quaternion?.x ?? 0,
@@ -456,10 +496,122 @@ export async function createDiceBox(
   await box.initialize?.()
 
   const runtimeBox = box as unknown as RuntimeDiceBox
+  let grabbed: { index: number; position: ProjectableVector; quaternion: QuaternionValue; heldSince: number; depth: number; offsetX: number; offsetY: number; radius: number; samples: DiceDragSample[] } | null = null
+  let rerolling = false
+  let released: { index: number; motion: ReturnType<typeof diceThrowMotion> } | null = null
+  const renderScene = () => {
+    if (runtimeBox.scene && runtimeBox.camera) runtimeBox.renderer?.render(runtimeBox.scene, runtimeBox.camera)
+  }
 
   return {
+    async stage(this: DiceEngineBox, sides, values) {
+      if (pending || rerolling) throw new Error('Dice are busy')
+      box.clearDice()
+      const vectors = runtimeBox.startClickThrow?.(`${values.length}d${sides}`)?.vectors ?? []
+      for (const vector of vectors) runtimeBox.spawnDice?.(vector)
+      for (const die of runtimeBox.diceList ?? []) {
+        die.position?.set?.(0, 0, 0)
+        die.quaternion?.set?.(0, 0, 0, 1)
+        die.body?.position?.set?.(0, 0, 0)
+        die.body?.quaternion?.set?.(0, 0, 0, 1)
+        die.body?.velocity?.set?.(0, 0, 0)
+        die.body?.angularVelocity?.set?.(0, 0, 0)
+        die.storeRolledValue?.('staged')
+      }
+      this.correctVisibleFaces(values)
+      await this.arrangeSettledDice(values)
+    },
+    grabDie(x, y) {
+      if (pending || rerolling || grabbed || !runtimeBox.camera) return null
+      const dice = runtimeBox.diceList ?? []
+      let hit: { index: number; distance: number; center: ProjectableVector } | null = null
+      dice.forEach((die, index) => {
+        const center = die.position?.clone?.().project(runtimeBox.camera)
+        if (!center || !die.position) return
+        const bounds = geometryBounds(die, normalizedQuaternion(die.quaternion ?? { x: 0, y: 0, z: 0, w: 1 }))
+        const edge = die.position.clone?.().set(die.position.x + bounds.width / 2, die.position.y + bounds.height / 2, die.position.z).project(runtimeBox.camera)
+        if (!edge) return
+        const dx = (x - center.x) / Math.max(0.025, Math.abs(edge.x - center.x))
+        const dy = (y - center.y) / Math.max(0.025, Math.abs(edge.y - center.y))
+        const distance = dx * dx + dy * dy
+        if (distance <= 1.4 && (!hit || distance < hit.distance)) hit = { index, distance, center }
+      })
+      const selected = hit as { index: number; distance: number; center: ProjectableVector } | null
+      if (!selected) return null
+      const position = dice[selected.index].position!.clone!()
+      const bounds = geometryBounds(dice[selected.index], normalizedQuaternion(dice[selected.index].quaternion ?? { x: 0, y: 0, z: 0, w: 1 }))
+      const radius = Math.max(bounds.width, bounds.height) / 2
+      const lifted = position.clone!().set(position.x, position.y, position.z + Math.max(90, radius * 1.5)).project(runtimeBox.camera)
+      released = null
+      grabbed = { index: selected.index, position, quaternion: normalizedQuaternion(dice[selected.index].quaternion ?? { x: 0, y: 0, z: 0, w: 1 }), heldSince: performance.now(), depth: lifted.z, offsetX: selected.center.x - x, offsetY: selected.center.y - y, radius, samples: [] }
+      return selected.index
+    },
+    moveGrabbedDie(x, y) {
+      if (!grabbed) return
+      const position = grabbed.position.clone!().set(Math.max(-0.9, Math.min(0.9, x + grabbed.offsetX)), Math.max(-0.9, Math.min(0.9, y + grabbed.offsetY)), grabbed.depth).unproject(runtimeBox.camera)
+      runtimeBox.diceList?.[grabbed.index].position?.set?.(position.x, position.y, position.z)
+      const time = performance.now()
+      // A lifted die rests at a slight angle in the hand. On release this same
+      // pose hits the felt and tumbles, instead of spinning around its center.
+      const heldQuaternion = multiplyQuaternion(normalizedQuaternion({ x: 0.2, y: -0.16, z: 0.04, w: 1 }), grabbed.quaternion)
+      const quaternion = slerpQuaternion(grabbed.quaternion, heldQuaternion, Math.min(1, (time - grabbed.heldSince) / 90))
+      runtimeBox.diceList?.[grabbed.index].quaternion?.set?.(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
+      grabbed.samples = [...grabbed.samples.filter((sample) => time - sample.time <= 120), { x: position.x, y: position.y, time }]
+      renderScene()
+    },
+    releaseDie(throwDie = false) {
+      if (!grabbed) return
+      const { index, position } = grabbed
+      if (throwDie) {
+        released = { index, motion: diceThrowMotion(grabbed.samples, performance.now(), grabbed.radius) }
+      } else {
+        runtimeBox.diceList?.[index].position?.set?.(position.x, position.y, position.z)
+        const quaternion = grabbed.quaternion
+        runtimeBox.diceList?.[index].quaternion?.set?.(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
+        released = null
+      }
+      grabbed = null
+      renderScene()
+    },
+    async reroll(index) {
+      if (pending || rerolling || !Number.isInteger(index) || !runtimeBox.diceList?.[index]) throw new Error('Invalid or busy dice reroll')
+      rerolling = true
+      const die = runtimeBox.diceList[index]
+      const position = die.position?.clone?.()
+      const quaternion = normalizedQuaternion(die.quaternion ?? { x: 0, y: 0, z: 0, w: 1 })
+      const launch = released?.index === index ? released.motion : {
+        velocity: { x: 150, y: 80, z: 450 }, angularVelocity: { x: -3, y: 5, z: 1 },
+      }
+      if (position && released?.index !== index) position.z += 90
+      released = null
+      try {
+        // Native reroll retains the previous animation timestamp. Reset it so
+        // an idle tray does not simulate every second since the last throw.
+        runtimeBox.last_time = 0
+        const result = box.reroll([index])
+        // Native reroll starts with a fixed vertical kick. Replace that first
+        // step before the browser paints, using the actual release pose/motion.
+        if (position) {
+          die.body?.position?.set?.(position.x, position.y, position.z)
+          die.position?.set?.(position.x, position.y, position.z)
+        }
+        die.body?.quaternion?.set?.(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
+        die.quaternion?.set?.(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
+        die.body?.velocity?.set?.(launch.velocity.x, launch.velocity.y, launch.velocity.z)
+        die.body?.angularVelocity?.set?.(launch.angularVelocity.x, launch.angularVelocity.y, launch.angularVelocity.z)
+        renderScene()
+        await result
+        return (runtimeBox.diceList ?? []).map((item) => {
+          const value = physicalDieValue(item) ?? Number(item.getLastValue?.().value)
+          item.setLastValue?.({ value, label: String(value), reason: 'reroll' })
+          return value
+        })
+      } finally {
+        rerolling = false
+      }
+    },
     roll(notation: string): Promise<DiceOutcome> {
-      if (pending) {
+      if (pending || rerolling) {
         return Promise.reject(new Error('diceEngine: a roll is already in flight'))
       }
       const token = ++seq
@@ -514,6 +666,9 @@ export async function createDiceBox(
           })
         }
         runtimeBox.swapDiceFace(die, target)
+        // Material swaps clear the native result history; seed it before
+        // replacing the last entry so subsequent grabs still see every die.
+        if (die.getLastValue?.().value == null) die.storeRolledValue?.('forced')
         die.setLastValue?.({ value: target, label: String(target), reason: 'forced' })
         changed = true
       }
@@ -524,7 +679,7 @@ export async function createDiceBox(
     },
     visibleValues(): number[] {
       return (runtimeBox.diceList ?? []).map((die) =>
-        d4SettledFaceValue(die) ?? Number(die.getLastValue?.().value),
+        physicalDieValue(die) ?? Number(die.getLastValue?.().value),
       ).filter((value) => Number.isFinite(value))
     },
     arrangeSettledDice(values: number[] = []): Promise<void> {

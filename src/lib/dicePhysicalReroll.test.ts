@@ -1,0 +1,51 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const runtime = vi.hoisted(() => ({ dice: [] as unknown[], swap: vi.fn() }))
+vi.mock('@3d-dice/dice-box-threejs', () => ({ default: class {
+  diceList = runtime.dice
+  swapDiceFace = runtime.swap
+  async initialize() {}
+  async reroll() { return [] }
+} }))
+
+import { createDiceBox } from './diceEngine'
+import { buildMapFreeDiceRollPresentation } from '../components/map/mapFreeDiceRoll'
+
+function vector(x = 0, y = 0, z = 0) {
+  return { x, y, z, set(a: number, b: number, c: number) { this.x = a; this.y = b; this.z = c }, clone() { return vector(this.x, this.y, this.z) } }
+}
+
+function die(physicalValue: number, recordedValue: number) {
+  let value = recordedValue
+  return {
+    shape: 'd6', position: vector(0, 0, 60),
+    quaternion: { x: 0, y: 0, z: 0, w: 1 },
+    body: { position: vector(), velocity: vector(), angularVelocity: vector() },
+    geometry: {
+      groups: [{ start: 0, count: 3, materialIndex: physicalValue + 1 }],
+      getAttribute: () => ({ array: [0, 0, 1, 0, 0, 1, 0, 0, 1] }),
+    },
+    getLastValue: () => ({ value }),
+    setLastValue: (result: { value: number }) => { value = result.value },
+  }
+}
+
+describe('physical reroll outcome', () => {
+  beforeEach(() => { runtime.swap.mockClear() })
+
+  it('settles a visible 3 as 3 even if the recorded value was 1, without relabeling the die', async () => {
+    const selected = die(3, 1)
+    runtime.dice = [selected, die(4, 4), die(6, 6)]
+    const box = await createDiceBox('#dice')
+    const values = await box.reroll(0)
+    expect(values).toEqual([3, 4, 6])
+    expect(box.visibleValues()).toEqual([3, 4, 6])
+    expect(selected.getLastValue().value).toBe(3)
+    expect(runtime.swap).not.toHaveBeenCalled()
+    expect(selected.geometry.groups[0].materialIndex).toBe(4)
+    const presentation = buildMapFreeDiceRollPresentation({ values, count: 3, sides: 6, bonus: 2, rollerName: 'DM', privateRoll: false })
+    expect(presentation.total).toBe(15)
+    expect(presentation.logMessage).toContain('3、4、6')
+    expect(presentation.logMessage).toContain('= 15')
+  })
+})

@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React,{useState} from 'react';import{createRoot}from'react-dom/client';
+import Tray from '/src/presentation/maps/PersistentDiceTray.tsx';import '/src/index.css';
+window.completed=[];window.grabs=[];
+function App(){
+ const [request,setRequest]=useState(()=>({id:'first',count:3,sides:6,values:[2,4,6],label:'test',targetName:'test',onComplete:(values)=>{window.completed.push(values);setRequest(null)}}));
+ const [visible,setVisible]=useState(true);window.toggle=()=>setVisible(v=>!v);
+ return React.createElement(React.Fragment,null,React.createElement('aside',{className:'dice-tray-drawer'},React.createElement('div',{className:'dice-tray-drawer__surface'})),React.createElement(Tray,{request,visible,onGrabReroll:async(index)=>{window.grabs.push(index);setRequest({id:'reroll-'+window.grabs.length,count:1,sides:6,values:[5],retainedValues:[2,4,6],rerollIndex:index,label:'test',targetName:'test',onComplete:(values)=>{window.completed.push(values);setRequest(null)}})}}));
+}createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

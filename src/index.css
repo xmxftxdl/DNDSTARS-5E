@@ -966,13 +966,18 @@ html[data-theme="light"] .public-landing-title-accent {
  * the rim and result rail are rendered above it, so dice can never cover the
  * authoritative numeric result. Free-roll settings occupy this same tray when
  * no roll presentation is active. */
+:root {
+  --map-pdf-panel-width: clamp(24rem, 42vw, 48rem);
+  --map-unit-panel-width: clamp(20rem, 28vw, 24rem);
+}
+
 .dice-tray-drawer {
   position: fixed;
-  right: 4.75rem;
-  top: 50%;
-  width: min(25rem, calc(100vw - 5.5rem));
-  height: min(34rem, 82vh);
-  transform: translateY(-50%);
+  right: 0.75rem;
+  top: 4.25rem;
+  width: min(23rem, calc(100vw - 1.5rem));
+  height: calc(100vh - 5rem);
+  transform: none;
   pointer-events: none;
   animation: dice-tray-open 360ms cubic-bezier(0.2, 0.78, 0.18, 1) both;
 }
@@ -996,7 +1001,7 @@ html[data-theme="light"] .public-landing-title-accent {
   position: absolute;
   left: 1rem;
   right: 1rem;
-  top: 5.85rem;
+  top: 8.75rem;
   bottom: 5.65rem;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 1.05rem;
@@ -1015,7 +1020,7 @@ html[data-theme="light"] .public-landing-title-accent {
   position: absolute;
   left: 1.45rem;
   right: 1.45rem;
-  top: 6.3rem;
+  top: 9.2rem;
   bottom: 6.1rem;
   border-radius: 0.8rem;
   box-shadow: inset 0 0 44px rgba(0, 0, 0, 0.34);
@@ -1024,7 +1029,7 @@ html[data-theme="light"] .public-landing-title-accent {
 .dice-tray-drawer__rim {
   position: absolute;
   z-index: 4;
-  inset: 0;
+  inset: 2.8rem 0 0;
   border: 0.9rem solid rgba(45, 27, 26, 0.95);
   border-radius: 1.7rem;
   box-shadow:
@@ -1038,7 +1043,7 @@ html[data-theme="light"] .public-landing-title-accent {
   z-index: 6;
   left: 1rem;
   right: 1rem;
-  top: 0.7rem;
+  top: 3.45rem;
   display: flex;
   min-height: 4.85rem;
   align-items: center;
@@ -1157,7 +1162,7 @@ html[data-theme="light"] .public-landing-title-accent {
   z-index: 7;
   left: 1rem;
   right: 1rem;
-  top: 5.8rem;
+  top: 8.6rem;
   bottom: 0.8rem;
   overflow: hidden;
   pointer-events: auto;
@@ -1562,29 +1567,29 @@ html[data-theme="light"] .public-landing-title-accent {
 
 .dice-box-d20-frame.dice-box-frame--left-drawer,
 .dice-box-damage-frame.dice-box-frame--left-drawer {
-  right: 5.75rem;
+  right: 1.75rem;
   left: auto;
-  top: calc(50% + 0.45rem);
-  width: min(23rem, calc(100vw - 7.5rem));
-  height: min(21rem, calc(82vh - 12rem));
-  transform: translateY(-50%);
+  top: 12.7rem;
+  width: min(21rem, calc(100vw - 3.5rem));
+  height: calc(100vh - 23rem);
+  transform: none;
   animation: dice-box-left-drawer-enter 520ms cubic-bezier(0.2, 0.78, 0.18, 1) both;
 }
 
 @keyframes dice-box-left-drawer-enter {
   from {
     opacity: 0;
-    transform: translate(calc(100% + 1.5rem), -50%) scale(0.97);
+    transform: translateX(calc(100% + 1.5rem)) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) scale(1);
+    transform: none;
   }
 }
 
 @keyframes dice-tray-open {
-  from { opacity: 0; transform: translate(calc(100% + 1rem), -50%) scale(0.98); }
-  to { opacity: 1; transform: translateY(-50%) scale(1); }
+  from { opacity: 0; transform: translateX(calc(100% + 1rem)) scale(0.98); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes dice-tray-waiting {
@@ -1596,18 +1601,361 @@ html[data-theme="light"] .public-landing-title-accent {
   .dice-tray-drawer,
   .dice-box-d20-frame.dice-box-frame--left-drawer,
   .dice-box-damage-frame.dice-box-frame--left-drawer {
-    right: 3.6rem;
+    right: 0.35rem;
     left: auto;
-    width: calc(100vw - 4rem);
+    width: calc(100vw - 0.7rem);
   }
 
   .dice-box-d20-frame.dice-box-frame--left-drawer,
   .dice-box-damage-frame.dice-box-frame--left-drawer {
-    right: 4.6rem;
+    right: 1.35rem;
     left: auto;
-    width: calc(100vw - 6rem);
+    width: calc(100vw - 2.7rem);
   }
 }
+
+.map-combat-right-dock__recall button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 0.55rem;
+  padding: 0.4rem 0.7rem;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.combat-tray-tabs { position: absolute; z-index: 14; top: 0.45rem; left: 1rem; right: 1rem; display: flex; gap: 0.4rem; padding: 0.3rem; border: 0; background: transparent; pointer-events: auto; }
+.combat-tray-tabs button { padding: 0.35rem 0.85rem; border-radius: 0.5rem; color: #94a3b8; font-size: 0.75rem; font-weight: 700; }
+.combat-tray-tabs button[aria-pressed='true'] { background: #312e53; color: #f8fafc; }
+.dice-tray-drawer[data-tab='log'] { top: auto; bottom: 0.75rem; width: min(36rem, calc(100vw - 1.5rem)); height: auto; max-height: calc(100vh - 1.5rem); overflow-y: auto; pointer-events: auto; }
+.dice-tray-drawer[data-tab='log'] .combat-tray-tabs { position: static; margin-bottom: 0.4rem; }
+
+.map-combat-right-dock__recall button span {
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.22);
+  padding: 0.05rem 0.35rem;
+  color: #fde68a;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-combat-right-dock__recall {
+  position: fixed;
+  z-index: 20;
+  right: 0;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  transform: translateY(-50%);
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  border-right: 0;
+  border-radius: 0.8rem 0 0 0.8rem;
+  background: rgba(7, 10, 18, 0.94);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
+
+.map-combat-right-dock__recall button + button { border-top: 1px solid rgba(148, 163, 184, 0.12); }
+.map-combat-right-dock__recall button:hover { background: rgba(139, 92, 246, 0.16); color: #ede9fe; }
+
+.map-workspace-container {
+  container: map-workspace / inline-size;
+}
+
+.map-reference-panel {
+  position: relative;
+  z-index: 80;
+  display: flex;
+  flex: 0 0 var(--map-pdf-panel-width);
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: #020617;
+}
+
+.map-reference-panel[data-tab='unit'] { flex-basis: var(--map-unit-panel-width); }
+/* Preserve the hidden reader's line wrapping and scroll geometry while the unit tab is narrower. */
+.map-reference-panel__pdf { width: var(--map-pdf-panel-width); }
+
+.map-reference-panel__tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.map-reference-panel__tabs button {
+  padding: 0.4rem 1rem;
+  border-radius: 0.5rem;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.map-reference-panel__tabs button[aria-pressed='true'] { background: #1e293b; color: #f8fafc; }
+.map-reference-panel__tabs button:disabled { opacity: 0.35; }
+.map-reference-panel__content { position: relative; flex: 1; min-height: 0; }
+.map-reference-panel__surface { position: absolute; inset: 0; }
+.map-reference-panel__unit > .map-combat-unit-drawer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.map-workspace-frame {
+  --map-right-dock-width: 0px;
+}
+
+.map-workspace-frame--right-dock-open { --map-right-dock-width: 23.75rem; }
+
+.map-voice-panel {
+  position: absolute;
+  top: 4rem;
+  right: calc(var(--map-right-dock-width, 0px) + 0.75rem);
+  z-index: 116;
+  width: min(15rem, calc(100% - 1.5rem));
+  max-height: calc(100% - 5rem);
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  background: linear-gradient(145deg, rgba(43, 58, 64, 0.92), rgba(30, 43, 49, 0.88));
+  backdrop-filter: blur(14px) saturate(0.75);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+}
+.map-voice-panel__body { overflow-y: auto; min-height: 0; }
+html .map-voice-panel :is(p, span, button, a),
+html[data-theme] .map-voice-panel :is(p, span, button, a) { color: #e2e8f0 !important; }
+.map-voice-panel[data-below-initiative] { top: 15rem; max-height: calc(100% - 16rem); }
+@media (max-width: 640px) {
+  .map-workspace-frame--right-dock-open .map-voice-panel { right: 0.75rem; }
+}
+
+.map-workspace-viewport {
+  left: 0;
+  right: var(--map-right-dock-width);
+  transition: left 180ms ease, right 180ms ease;
+}
+
+.map-tools-drawer {
+  order: 1;
+  flex: 0 0 calc(100% - var(--map-right-dock-width));
+  min-width: 0;
+  width: calc(100% - var(--map-right-dock-width));
+  margin-right: var(--map-right-dock-width);
+}
+
+.map-workspace-initiative {
+  align-self: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.75rem;
+  pointer-events: auto;
+}
+
+.map-workspace-initiative > * {
+  width: max-content;
+  margin-inline: auto;
+}
+
+.map-combat-unit-drawer {
+  position: absolute;
+  z-index: 115;
+  left: 0.75rem;
+  top: 4.25rem;
+  bottom: 0.75rem;
+  display: flex;
+  width: 22.25rem;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 1rem;
+  background: rgba(5, 8, 15, 0.95);
+  box-shadow: 0 22px 56px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.map-combat-unit-drawer__tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(8, 12, 22, 0.98);
+}
+
+.map-combat-unit-drawer__tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border-radius: 0.55rem;
+  padding: 0.42rem 0.65rem;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.map-combat-unit-drawer__tabs button[data-active='true'] {
+  background: rgba(244, 63, 94, 0.16);
+  color: #ffe4e6;
+}
+
+.map-combat-unit-drawer__tabs button:disabled { cursor: not-allowed; opacity: 0.3; }
+.map-combat-unit-drawer__tabs button:not(:disabled):hover { background: rgba(255, 255, 255, 0.06); color: #f8fafc; }
+
+.map-combat-unit-drawer__tabs .map-combat-unit-drawer__close {
+  width: 1.85rem;
+  margin-left: auto;
+  padding-inline: 0;
+}
+
+.map-combat-unit-drawer__body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.map-combat-unit-drawer__body > [data-testid='map-lazy-overlay-loading'] {
+  position: static;
+  margin: 1rem;
+  transform: none;
+}
+
+.map-combat-unit-status {
+  height: 100%;
+  overflow-y: auto;
+  background: rgba(5, 8, 15, 0.72);
+}
+
+.map-combat-unit-status > header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.map-combat-unit-status__avatar {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 0.8rem;
+  background: rgba(30, 41, 59, 0.72);
+  font-size: 1.45rem;
+  overflow: hidden;
+}
+
+.map-combat-unit-status__avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.map-combat-unit-status h3 { color: #f8fafc; font-size: 0.9rem; font-weight: 850; }
+.map-combat-unit-status header p { margin-top: 0.18rem; color: #94a3b8; font-size: 0.72rem; }
+.map-combat-unit-status__content { display: grid; gap: 0.65rem; padding: 0.85rem; }
+.map-combat-unit-status__content h4 { color: #94a3b8; font-size: 0.65rem; font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
+.map-combat-unit-status__content > p { border-radius: 0.65rem; background: rgba(255, 255, 255, 0.035); padding: 0.75rem; color: #64748b; font-size: 0.72rem; }
+.map-combat-unit-status__chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.map-combat-unit-status__chips span { border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 999px; background: rgba(245, 158, 11, 0.1); padding: 0.28rem 0.55rem; color: #fde68a; font-size: 0.68rem; }
+.map-combat-unit-status__effects { display: grid; gap: 0.4rem; }
+.map-combat-unit-status__effects article { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border: 1px solid rgba(139, 92, 246, 0.16); border-radius: 0.65rem; background: rgba(139, 92, 246, 0.08); padding: 0.6rem 0.7rem; }
+.map-combat-unit-status__effects strong { color: #ddd6fe; font-size: 0.72rem; }
+.map-combat-unit-status__effects span { color: #c4b5fd; font-size: 0.65rem; }
+
+.map-combat-action-bar {
+  position: absolute;
+  z-index: 110;
+  left: calc((100% - var(--map-right-dock-width)) / 2);
+  bottom: 0.85rem;
+  top: auto;
+  display: flex;
+  width: max-content;
+  max-width: min(58rem, calc(100% - var(--map-right-dock-width) - 1.5rem));
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 0.65rem;
+  overflow-x: auto;
+  border: 1px solid rgba(103, 232, 249, 0.22);
+  border-radius: 0.8rem;
+  background: rgba(5, 8, 15, 0.93);
+  padding: 0.5rem 0.75rem;
+  color: #e2e8f0;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.map-combat-action-bar.map-sculpt-confirmation-inline {
+  position: relative;
+  inset: auto;
+  transform: none;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  max-width: calc(100% - 1rem);
+}
+
+.map-combat-action-bar.map-sculpt-confirmation-compact {
+  gap: 0.375rem;
+  max-width: min(42rem, calc(100% - 1rem));
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.65rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.map-sculpt-confirmation-compact > button,
+.map-sculpt-confirmation-compact > span.shrink-0 {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+@container map-workspace (max-width: 900px) {
+  .map-workspace-frame--right-dock-open {
+    --map-right-dock-width: 0px;
+  }
+
+  .map-combat-unit-drawer {
+    inset: 3.75rem 0.35rem 0.35rem;
+    width: auto;
+  }
+
+  .map-tools-drawer {
+    width: 100%;
+  }
+}
+
+/* The dice surface is portaled outside the map query container. */
+@media (max-width: 900px) {
+  .dice-tray-drawer {
+    inset: 3.75rem 0.35rem 0.35rem auto;
+    width: calc(100vw - 0.7rem);
+    height: auto;
+  }
+}
+
+.dice-tray-drawer__result:has(.dice-tray-reroll) { height: auto; min-height: 6rem; pointer-events: auto; }
+.dice-tray-reroll { min-width: 0; flex: 1; }
+.dice-tray-reroll .dice-tray-drawer__die { cursor: grab; touch-action: manipulation; }
+.dice-tray-reroll .dice-tray-drawer__die[aria-pressed='true'] { background: #164e63; outline: 2px solid #67e8f9; }
+.dice-tray-reroll__actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.dice-tray-reroll__actions button { display: flex; align-items: center; justify-content: center; gap: 0.3rem; border: 1px solid #475569; border-radius: 0.5rem; background: #1e293b; color: #e2e8f0; padding: 0.45rem 0.6rem; font-size: 0.7rem; }
+.dice-tray-reroll__actions button:hover { background: #334155; }
+.dice-tray-reroll__actions .dice-tray-reroll__drop { border-style: dashed; }
+.dice-tray-reroll button:disabled { opacity: 0.5; cursor: wait; }
+.dice-tray-reroll p { margin-top: 0.4rem; color: #fda4af; font-size: 0.7rem; }
 
 @keyframes dice-box-roll-flight {
   0% {
@@ -3627,3 +3975,6 @@ html[data-theme="light"] :is([class~="fixed"][class~="inset-0"], [class~="fixed"
     animation: none;
   }
 }
+
+/* The Log tab shares the tray's opaque felt, including its tab strip. */
+.dice-tray-drawer--foreground[data-tab='log'] { background: linear-gradient(145deg, #583622, #23141c 52%, #120d1b); border-radius: 1.7rem; padding: 0.6rem; }
