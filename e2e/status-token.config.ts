@@ -1,0 +1,2 @@
+import { defineConfig, devices } from '@playwright/test'
+export default defineConfig({ testDir: '.', testMatch: 'status-token.spec.ts', timeout: 30000, use: { ...devices['Desktop Chrome'] }, webServer: { cwd: process.cwd(), command: 'npx vite build --config e2e/status-token.vite.ts && npx vite preview --config e2e/status-token.vite.ts --host 127.0.0.1 --port 6385 --strictPort', url: 'http://127.0.0.1:6385/e2e/fixtures/status-token.html', timeout: 60000 } })

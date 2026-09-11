@@ -723,6 +723,7 @@ export async function submitSharedPlayerCharacterCommand(
 }
 
 export interface DmUndoTransactionSummary {
+  details?: string[]
   transactionId: string
   label: string
   status: 'applied' | 'undone'
@@ -732,6 +733,14 @@ export interface DmUndoTransactionSummary {
   undoneAt?: number
   combatRecoverable?: boolean
   combat?: {
+    beforeActorId?: string
+    beforeActorLabel?: string
+    beforeSlotId?: string
+    afterActorId?: string
+    afterActorLabel?: string
+    afterSlotId?: string
+    beforeActive?: boolean
+    afterActive?: boolean
     mapId?: string
     combatId?: string
     beforeRound?: number
@@ -825,7 +834,7 @@ export async function publishSharedEvent<T>(channel: string, data: T): Promise<v
   let lastError: unknown = new Error(`shared-event-unavailable:${channel}`)
   for (const api of candidates) {
     try {
-      const response = await fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
+      const response = await fetchSharedCandidate(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(data),
@@ -1188,6 +1197,9 @@ export async function mutateSharedRoomResource<T>(
   throw new Error(lastError)
 }
 
+export class SharedStorageQuotaError extends Error {
+  constructor() { super('账号素材空间不足。请在个人资料查看用量，清理不需要的素材或联系管理员升级。已有素材不会删除。') }
+}
 export async function putSharedImage(
   id: string,
   blob: Blob,
@@ -1206,7 +1218,12 @@ export async function putSharedImage(
         body: blob,
       })
       if (res.ok) return true
-    } catch {
+      if (res.status === 413) {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        if (body.error === 'account-storage-quota-exceeded') throw new SharedStorageQuotaError()
+      }
+    } catch (error) {
+      if (error instanceof SharedStorageQuotaError) throw error
       // Try the next endpoint.
     }
   }

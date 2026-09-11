@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import Overlays from '/src/presentation/maps/DicePresentationOverlays.tsx';import '/src/index.css';
+function App(){const [prompt,setPrompt]=React.useState({id:'fire-bolt',label:'火焰箭·法术攻击',targetName:'牛头人',count:1,sides:20,busy:false});const [clicked,setClicked]=React.useState(false); const [dice,setDice]=React.useState(null);return React.createElement(React.Fragment,null,React.createElement('p',null,clicked?'已点击投掷':'等待玩家操作'),React.createElement(Overlays,{isDM:false,playerRollPrompt:prompt,roll:null,diceBoxD20:dice,diceBoxRoll:null,rollRequestPreview:null,activeRollStatus:null,dockTab:'dice',renderFreeRollControls:()=>React.createElement('div',null,'骰子选择'),roomRolls:Array.from({length:7},(_,i)=>({id:'req-'+i,rollerName:'牛头人',label:'火焰箭·法术攻击',targetName:'牛头人',sides:20,values:[],formula:'1d20',status:'waiting',updatedAt:i})),onPlayerRoll:()=>{setPrompt(p=>({...p,busy:true}));setDice({id:1,requestKey:'fire-bolt-player',label:'火焰箭',targetName:'牛头人',value:18,resolve:()=>{}})},onD20Complete:(_,value)=>{setClicked(value===18);setDice(null);setPrompt(null)},onDiceComplete:()=>{},onPreviewComplete:()=>{},onRollDone:()=>{}}))}function DmApp(){
+ const [dock,setDock]=React.useState(null);const [confirmation,setConfirmation]=React.useState(null);const [done,setDone]=React.useState(false);const [damage,setDamage]=React.useState(null);
+ const [entries,setEntries]=React.useState([{id:'attack',rollerName:'新冒险者',label:'火焰箭·法术攻击',targetName:'牛头人',sides:20,values:[],formula:'1d20',status:'waiting',updatedAt:1}]);
+ return React.createElement(React.Fragment,null,
+ React.createElement('button',{onClick:()=>setDock('dice')},'打开骰盘'),
+ React.createElement('button',{onClick:()=>{setEntries(rows=>rows.map(r=>({...r,status:'review',values:[18],total:18,updatedAt:2})));setConfirmation({id:'attack',label:'火焰箭·法术攻击',targetName:'牛头人',sides:20,values:[18],visibility:'public'})}},'收到攻击骰结果'),
+ React.createElement('p',null,done?'伤害骰完成：22':'等待攻击确认'),
+ React.createElement(Overlays,{isDM:true,diceBoxRoll:damage,roomRolls:entries,secretConfirmation:confirmation,dockTab:dock,onDockTabChange:setDock,renderFreeRollControls:()=>React.createElement('div',null,'骰子选择'),onSecretConfirm:()=>{setConfirmation(null);setDamage({id:2,requestKey:'damage',count:4,sides:10,values:[8,6,5,3],label:'火焰箭·伤害',targetName:'牛头人',resolve:()=>{}})},onD20Complete:()=>{},onDiceComplete:(_,values)=>{setDone(values.join(',')==='8,6,5,3');setDamage(null)},onPreviewComplete:()=>{},onRollDone:()=>{}}));
+}
+createRoot(document.getElementById('root')).render(React.createElement(location.search?DmApp:App));
+</script></body></html>

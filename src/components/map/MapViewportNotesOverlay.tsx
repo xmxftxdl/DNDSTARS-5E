@@ -1,3 +1,4 @@
+import PdfLinkedText from '../PdfLinkedText'
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { GripHorizontal, Image as ImageIcon, Loader2, Trash2, X } from 'lucide-react'
 import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
@@ -391,7 +392,7 @@ export default function MapViewportNotesOverlay({
                   className="h-full w-full resize-none bg-transparent p-3 text-sm leading-6 text-amber-50 outline-none placeholder:text-amber-100/35"
                 />
               ) : (
-                <div className="h-full overflow-auto whitespace-pre-wrap p-3 text-sm leading-6">{note.text}</div>
+                <div className="h-full overflow-auto whitespace-pre-wrap p-3 text-sm leading-6"><PdfLinkedText text={note.text ?? ""} /></div>
               )
             ) : note.imageId ? (
               <SharedViewportImage imageId={note.imageId} imageName={note.imageName} />

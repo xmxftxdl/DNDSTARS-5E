@@ -1,3 +1,4 @@
+import PdfLinkedText from '../components/PdfLinkedText'
 import { useMemo, useState, useSyncExternalStore } from 'react'
 import {
   BookOpen, Bot, ChevronRight, FileJson, Filter, Hammer, Search, ShieldCheck, Trash2,
@@ -346,5 +347,5 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 function RuleBlock({ title, text }: { title: string; text: string }) {
-  return <div className="mt-5"><h3 className="text-sm font-semibold text-slate-200">{title}</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-400">{text}</p></div>
+  return <div className="mt-5"><h3 className="text-sm font-semibold text-slate-200">{title}</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-400"><PdfLinkedText text={text} /></p></div>
 }

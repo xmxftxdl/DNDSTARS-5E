@@ -4990,7 +4990,7 @@ describe('enforceImageQuota — AC4 配额', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  it('超过 IMAGE_COUNT_LIMIT 时按最旧优先 GC', async () => {
+  it('超过旧图片数量限制时仍保留全部素材', async () => {
     const total = IMAGE_COUNT_LIMIT + 5
     for (let i = 0; i < total; i += 1) {
       const name = `img${String(i).padStart(3, '0')}`
@@ -5002,11 +5002,11 @@ describe('enforceImageQuota — AC4 配额', () => {
       await utimes(path.join(dir, name), t, t)
     }
     const removed = await enforceImageQuota(dir)
-    expect(removed.length).toBe(5)
+    expect(removed).toEqual([])
     const remaining = (await readdir(dir)).filter((n) => !n.endsWith('.json'))
-    expect(remaining.length).toBe(IMAGE_COUNT_LIMIT)
-    // 最旧的 5 张（img000..img004）被删。
-    expect(removed.sort()).toEqual(['img000', 'img001', 'img002', 'img003', 'img004'])
+    expect(remaining.length).toBe(total)
+    // 最旧的素材也必须保留。
+    expect(await readFile(path.join(dir, 'img000'), 'utf8')).toBe('data0')
   }, 20_000)
 
   it('未超配额不删任何图片', async () => {

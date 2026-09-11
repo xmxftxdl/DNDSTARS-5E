@@ -1,3 +1,4 @@
+import { ReverseGravityEffect } from './ReverseGravityEffect'
 import { Group } from 'react-konva'
 import { memo, useEffect, useMemo, type ComponentType } from 'react'
 import {
@@ -103,6 +104,7 @@ const VFX_RENDERERS: Readonly<Record<VfxRendererKey, ComponentType<SequenceRende
   guidance: simpleRenderer(GuidanceManifestation),
   resistance: simpleRenderer(ResistanceManifestation),
   sanctuary: simpleRenderer(SanctuaryManifestation),
+  'reverse-gravity': simpleRenderer(ReverseGravityEffect),
   'new-spell': assetRenderer(NewSpellManifestation),
   'status-spell': simpleRenderer(StatusSpellManifestation),
   'sacred-flame': assetRenderer(SacredFlameEffect),

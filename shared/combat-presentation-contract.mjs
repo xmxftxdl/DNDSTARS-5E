@@ -115,6 +115,7 @@ export const COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS = Object.freeze({
   'call-lightning-strike': Object.freeze({ shape: 'circle', radiusFeet: 5 }),
   'insect-plague': Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   'stinking-cloud': Object.freeze({ shape: 'circle', radiusFeet: 20 }),
+  'reverse-gravity': Object.freeze({ shape: 'circle', radiusFeet: 50 }),
   cloudkill: Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   'fog-cloud': Object.freeze({ shape: 'circle', radiusFeet: 20 }),
   silence: Object.freeze({ shape: 'circle', radiusFeet: 20 }),

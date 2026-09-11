@@ -1,0 +1,2 @@
+import { defineConfig, devices } from '@playwright/test'
+export default defineConfig({ testDir: '.', testMatch: 'pdf-reader.spec.ts', timeout: 60_000, use: { actionTimeout: 15000, ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } }, webServer: { cwd: process.cwd(), command: 'npx vite build --config e2e/pdf-reader.vite.ts && npx vite preview --config e2e/pdf-reader.vite.ts --host 127.0.0.1 --port 6383 --strictPort', url: 'http://127.0.0.1:6383/e2e/fixtures/pdf-reader.html', timeout: 60_000 } })

@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { MAX_DICE_POOL_COUNT } from '../../lib/dicePoolLimits'
+import { adoptedD20Index, diceCheckModeLabel, diceCheckResultLabel } from './diceCheckPresentation'
+import type { DiceCheckPresentation } from './diceCheckPresentation'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Dice5, ScrollText } from 'lucide-react'
 import DiceRollOverlay, { type DiceRoll } from '../../components/DiceRollOverlay'
 import DiceTrayRerollControls from './DiceTrayRerollControls'
+import DiceResultValues from './DiceResultValues'
 import PersistentDiceTray, { type PersistentDiceRequest } from './PersistentDiceTray'
 import DiceOverlayPortal from '../../components/DiceOverlayPortal'
 import type {
@@ -10,8 +16,13 @@ import type {
 } from './useDicePresentation'
 import type { ActiveDiceRollStatusView } from './diceRollStatusModel'
 import { readDiceTrayHistory, writeDiceTrayHistory } from './diceTrayHistory'
+import RoomDicePanel from './RoomDicePanel'
+import { diceResultFormula } from './diceResultFormula'
+import { diceCheckOutcomeLabel, type DiceCheckOutcome } from './diceCheckOutcome'
+import type { RoomDiceEntry } from './roomDiceFeed'
 
 export interface DiceTraySecretConfirmation {
+  check?: DiceCheckPresentation
   visibility?: 'public' | 'dm-only'
   id: string
   label: string
@@ -22,6 +33,7 @@ export interface DiceTraySecretConfirmation {
 }
 
 export interface DiceTrayPlayerRollPrompt {
+  check?: DiceCheckPresentation
   id: string
   label: string
   targetName: string
@@ -31,6 +43,11 @@ export interface DiceTrayPlayerRollPrompt {
 }
 
 export interface DicePresentationOverlaysProps {
+  checkResult?: DiceCheckOutcome | null
+  checkOutcome?: DiceCheckOutcome | null
+  controlsHost?: HTMLElement | null
+  roomRolls?: readonly RoomDiceEntry[]
+  onClearRoomRolls?: () => void
   historyScope?: string
   roll: DiceRoll | null
   diceBoxD20: DiceBoxD20Request | null
@@ -40,7 +57,7 @@ export interface DicePresentationOverlaysProps {
   secretConfirmation: DiceTraySecretConfirmation | null
   playerRollPrompt?: DiceTrayPlayerRollPrompt | null
   isDM: boolean
-  renderFreeRollControls?: (close: () => void) => ReactNode
+  renderFreeRollControls?: (close: () => void, visibility: 'public' | 'dm', onVisibilityChange: (visibility: 'public' | 'dm') => void) => ReactNode
   freeReroll?: { roll: DiceRoll; onReroll: (index?: number) => Promise<void> }
   onRollDone: () => void
   onD20Complete: (request: DiceBoxD20Request, value: number) => void
@@ -55,6 +72,9 @@ export interface DicePresentationOverlaysProps {
 }
 
 interface DiceTrayRecord {
+  check?: DiceCheckPresentation
+  settlement?: DiceRoll['settlement']
+  dieSides?: number[]
   sourceRoll?: DiceRoll
   id: string
   label: string
@@ -65,7 +85,7 @@ interface DiceTrayRecord {
   formula?: string
 }
 
-function SecretDiceTrayControls({
+export function SecretDiceTrayControls({
   confirmation,
   onConfirm,
 }: {
@@ -78,7 +98,8 @@ function SecretDiceTrayControls({
   const valid = parsed.length === confirmation.values.length && parsed.every(
     (value) => Number.isInteger(value) && value >= 1 && value <= confirmation.sides,
   )
-  const total = valid ? parsed.reduce((sum, value) => sum + value, 0) : '—'
+  const adoptedIndex = valid ? adoptedD20Index(parsed, confirmation.check) : undefined
+  const total = valid ? adoptedIndex != null ? parsed[adoptedIndex] : parsed.reduce((sum, value) => sum + value, 0) : '—'
 
   const submit = async () => {
     if (!valid || submitting || confirmation.busy) return
@@ -92,13 +113,13 @@ function SecretDiceTrayControls({
 
   return (
     <div
-      className={`dice-tray-drawer__secret${confirmation.values.length > 3 ? ' dice-tray-drawer__secret--many' : ''}`}
+      className={`dice-tray-drawer__secret${confirmation.values.length > 3 ? ' dice-tray-drawer__secret--many' : ''}${confirmation.check ? ' dice-tray-drawer__secret--check' : ''}`}
       data-testid="secret-dice-override"
     >
-      <div className="dice-tray-drawer__total dice-tray-drawer__total--secret">
-        <span>{confirmation.visibility === 'public' ? '明骰总值 · 等待 DM 确认' : '暗骰总值 · 等待 DM 确认'}</span>
+      {!confirmation.check && <div className="dice-tray-drawer__total dice-tray-drawer__total--secret">
+        <span>合计</span>
         <strong>{total}</strong>
-      </div>
+      </div>}
       <div
         className="dice-tray-drawer__dice dice-tray-drawer__dice--editable"
         aria-label={`DM ${confirmation.visibility === 'public' ? '明骰' : '暗骰'}确认：${confirmation.values.length}d${confirmation.sides}`}
@@ -117,7 +138,8 @@ function SecretDiceTrayControls({
             onChange={(event) => setDraft((current) => current.map(
               (item, itemIndex) => itemIndex === index ? event.target.value : item,
             ))}
-            className="dice-tray-drawer__secret-input"
+            className={`dice-tray-drawer__secret-input${index === adoptedIndex ? ' dice-tray-drawer__die--adopted' : ''}`}
+            data-adopted={index === adoptedIndex || undefined}
           />
         ))}
       </div>
@@ -142,10 +164,12 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
     diceBoxRoll,
     rollRequestPreview,
     activeRollStatus,
-    secretConfirmation,
-    playerRollPrompt,
+    secretConfirmation: pendingConfirmation,
+    playerRollPrompt: pendingPlayerRollPrompt,
     onDockTabChange,
   } = props
+  const secretConfirmation = pendingConfirmation
+  const playerRollPrompt = diceBoxD20 || diceBoxRoll ? null : pendingPlayerRollPrompt
   const [restoredHistory] = useState(() => readDiceTrayHistory(props.historyScope))
   const [lastRecord, setLastRecord] = useState<DiceTrayRecord | null>(() => restoredHistory?.record ?? null)
   const [trayOpen, setTrayOpen] = useState(() => restoredHistory?.open ?? props.renderFreeRollControls != null)
@@ -156,6 +180,17 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
     if (restoredHistory?.open) onDockTabChange?.('dice')
   }, [restoredHistory, onDockTabChange])
   const [freeRollControlsOpen, setFreeRollControlsOpen] = useState(false)
+  const [freeRollVisibility, setFreeRollVisibility] = useState<'public' | 'dm'>('public')
+  const [roomLogHost, setRoomLogHost] = useState<HTMLDivElement | null>(null)
+  const [roomResultsHeight, setRoomResultsHeight] = useState(0)
+  useEffect(() => {
+    if (!roomLogHost) return
+    const observer = new ResizeObserver(() => setRoomResultsHeight(roomLogHost.getBoundingClientRect().height))
+    observer.observe(roomLogHost)
+    return () => observer.disconnect()
+  }, [roomLogHost])
+  const trayLayoutStyle = { '--room-results-height': `${roomResultsHeight}px` } as CSSProperties
+  const [roomOpenRequest, setRoomOpenRequest] = useState(0)
   const drawerRef = useRef<HTMLElement>(null)
   const [frameBounds, setFrameBounds] = useState<{ top: number; height: number }>()
   const setDockTab = (tab: 'log' | 'dice' | null) => {
@@ -180,6 +215,7 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
   const animatedRecord: DiceTrayRecord | null = diceBoxD20 && activePresentationId
     ? {
         id: activePresentationId,
+        check: diceBoxD20.check,
         label: activeRollStatus?.label || diceBoxD20.label || 'D20 检定',
         targetName: activeRollStatus?.targetName || diceBoxD20.targetName,
         sides: 20,
@@ -189,26 +225,33 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
     : diceBoxRoll && activePresentationId
       ? {
           id: activePresentationId,
+          check: diceBoxRoll.check,
           label: activeRollStatus?.label || diceBoxRoll.label || '效果骰',
           targetName: activeRollStatus?.targetName || diceBoxRoll.targetName,
           sides: diceBoxRoll.sides,
+          dieSides: diceBoxRoll.dieSides,
           values: [...diceBoxRoll.values],
-          formula: activeRollStatus?.formula || `${diceBoxRoll.totalCount ?? diceBoxRoll.count}d${diceBoxRoll.sides}`,
+          formula: diceBoxRoll.formula || activeRollStatus?.formula || `${diceBoxRoll.totalCount ?? diceBoxRoll.count}d${diceBoxRoll.sides}`,
         }
       : rollRequestPreview && activePresentationId
         ? {
             id: activePresentationId,
+            check: rollRequestPreview.check,
             label: activeRollStatus?.label || rollRequestPreview.label ||
               (rollRequestPreview.kind === 'd20' ? 'D20 检定' : '效果骰'),
             targetName: activeRollStatus?.targetName || rollRequestPreview.targetName,
             sides: rollRequestPreview.sides,
+            dieSides: rollRequestPreview.dieSides,
+            total: rollRequestPreview.total,
+            settlement: rollRequestPreview.settlement,
             values: [...rollRequestPreview.values],
-            formula: activeRollStatus?.formula || `${rollRequestPreview.count}d${rollRequestPreview.sides}`,
+            formula: rollRequestPreview.formula || activeRollStatus?.formula || `${rollRequestPreview.count}d${rollRequestPreview.sides}`,
           }
         : null
   const secretRecord: DiceTrayRecord | null = secretConfirmation
     ? {
         id: `secret:${secretConfirmation.id}`,
+        check: secretConfirmation.check,
         label: secretConfirmation.label || 'DM 暗骰',
         targetName: secretConfirmation.targetName,
         sides: secretConfirmation.sides,
@@ -219,6 +262,7 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
   const playerPromptRecord: DiceTrayRecord | null = playerRollPrompt
     ? {
         id: `player-prompt:${playerRollPrompt.id}`,
+        check: playerRollPrompt.check,
         label: playerRollPrompt.label,
         targetName: playerRollPrompt.targetName,
         sides: playerRollPrompt.sides,
@@ -233,27 +277,34 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
       label: roll.label,
       targetName: roll.targetName,
       sides: roll.sides,
+      dieSides: roll.dieSides,
       values: [...roll.values],
       total: roll.total,
-      formula: roll.formula,
+      settlement: roll.settlement,
+      formula: diceResultFormula(roll),
     }
     : null
   const activeSettledRecord = animatedRecord && lastRecord?.id === animatedRecord.id
     ? lastRecord
     : null
-  const displayedRecord = secretRecord ?? activeSettledRecord ?? animatedRecord ?? playerPromptRecord ?? rollRecord ?? lastRecord
-  const hasActivePresentation = secretConfirmation != null || playerRollPrompt != null || hasDicePresentation
+  const baseRecord = secretRecord ?? activeSettledRecord ?? animatedRecord ?? playerPromptRecord ?? rollRecord ?? lastRecord
+  const checkResult = props.checkResult
+  const displayedRecord = baseRecord && checkResult?.rollId && baseRecord.id.includes(checkResult.rollId)
+    ? { ...baseRecord, check: { mode: checkResult.mode ?? 'normal', kind: checkResult.kind, success: checkResult.success } }
+    : baseRecord
+  const adoptedIndex = adoptedD20Index(displayedRecord?.values ?? [], displayedRecord?.check)
+  const hasActivePresentation = pendingConfirmation != null || playerRollPrompt != null || hasDicePresentation
   const activePresentationSettled = secretConfirmation != null || activeSettledRecord != null
   const showFreeRollControls = freeRollControlsOpen && !hasActivePresentation &&
     props.renderFreeRollControls != null
   // Keep the dice types visible throughout rolling and DM confirmation.
   const showFreeRollQuickbar = !showFreeRollControls && props.renderFreeRollControls != null
   const requestedDockTab = props.dockTab === undefined ? (trayOpen ? 'dice' : null) : props.dockTab
-  const visibleDockTab = hasActivePresentation ? 'dice' : requestedDockTab
+  const visibleDockTab = hasActivePresentation || props.checkOutcome ? 'dice' : requestedDockTab
   const drawerOpen = visibleDockTab != null
   // Persist predetermined values while rolling, not just after the completion
   // callback. Refresh can happen before the iframe reports that dice settled.
-  const historyRecord = secretRecord ?? animatedRecord ?? rollRecord ?? lastRecord
+  const historyRecord = displayedRecord
   const historyJson = JSON.stringify(historyRecord)
   useEffect(() => {
     if (historyRecord) writeDiceTrayHistory(props.historyScope, historyRecord, visibleDockTab === 'dice')
@@ -266,7 +317,9 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
     const measure = () => {
       const rect = drawer.getBoundingClientRect()
       const header = drawer.querySelector('.dice-tray-drawer__header')?.getBoundingClientRect()
-      const quickbar = drawer.querySelector('.dice-tray-drawer__controls--quick')?.getBoundingClientRect()
+      const quickControls = drawer.querySelector<HTMLElement>('.dice-tray-drawer__controls--quick')
+      if (quickControls && header) quickControls.style.top = `${Math.ceil(header.bottom - rect.top + 6)}px`
+      const quickbar = quickControls?.getBoundingClientRect()
       const result = drawer.querySelector('.dice-tray-drawer__result')?.getBoundingClientRect()
       const top = Math.ceil(Math.max(header?.bottom ?? rect.top, quickbar?.bottom ?? 0) + 10)
       // Reserve the result rail even before the dice finish, keeping the
@@ -284,20 +337,33 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
   }, [drawerOpen, visibleDockTab, showFreeRollControls, showFreeRollQuickbar, displayedRecord, secretConfirmation, playerRollPrompt])
   useEffect(() => {
     if (hasActivePresentation) onDockTabChange?.('dice')
-  }, [activePresentationId, hasActivePresentation, onDockTabChange, playerRollPrompt?.id, secretConfirmation?.id])
+  }, [activePresentationId, hasActivePresentation, onDockTabChange, playerRollPrompt?.id, pendingConfirmation?.id])
   const showIdleFreeRollHeader = !hasActivePresentation && displayedRecord == null &&
     props.renderFreeRollControls != null
   const hasManyDisplayedDice = (displayedRecord?.values.length ?? 0) >
     (secretConfirmation ? 3 : 6)
   const displayedTotal = displayedRecord
-    ? displayedRecord.total ?? displayedRecord.values.reduce((sum, value) => sum + value, 0)
+    ? adoptedIndex != null ? displayedRecord.values[adoptedIndex]! : displayedRecord.total ?? displayedRecord.values.reduce((sum, value) => sum + value, 0)
     : 0
 
-  const physicalRequest: PersistentDiceRequest | null = animatedRecord ? {
+  const confirmationFaces = secretRecord ?? (!animatedRecord && lastRecord?.id.startsWith('secret:') ? lastRecord : null)
+  const physicalRequest: PersistentDiceRequest | null = confirmationFaces ? {
+    id: `confirmed-faces:${confirmationFaces.id}:${confirmationFaces.values.join(',')}`,
+    staging: true,
+    check: confirmationFaces.check,
+    count: Math.min(MAX_DICE_POOL_COUNT, confirmationFaces.values.length),
+    sides: confirmationFaces.sides,
+    values: confirmationFaces.values.slice(0, MAX_DICE_POOL_COUNT),
+    label: confirmationFaces.label,
+    targetName: confirmationFaces.targetName,
+    onComplete: () => undefined,
+  } : animatedRecord ? {
     id: animatedRecord.id,
-    staging: rollRequestPreview?.settled,
-    count: diceBoxD20 ? 1 : diceBoxRoll?.count ?? Math.min(12, rollRequestPreview?.count ?? 1),
+    check: animatedRecord.check,
+    staging: !diceBoxD20 && !diceBoxRoll && rollRequestPreview?.settled,
+    count: diceBoxD20 ? 1 : diceBoxRoll?.count ?? Math.min(MAX_DICE_POOL_COUNT, rollRequestPreview?.count ?? 1),
     sides: animatedRecord.sides,
+    dieSides: animatedRecord.dieSides,
     values: animatedRecord.values,
     label: animatedRecord.label,
     targetName: animatedRecord.targetName,
@@ -312,7 +378,9 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
       const fullValues = diceBoxRoll?.retainedValues && diceBoxRoll.rerollIndex != null
         ? diceBoxRoll.retainedValues.map((value, index) => index === diceBoxRoll.rerollIndex ? values[0] : value)
         : animatedRecord.values.length > 0 ? animatedRecord.values : values
-      rememberRecord({ ...animatedRecord, values: fullValues, total: fullValues.reduce((sum, value) => sum + value, 0) })
+      rememberRecord({ ...animatedRecord, values: fullValues,
+        total: diceBoxRoll?.rerollIndex != null ? fullValues.reduce((sum, value) => sum + value, 0)
+          : animatedRecord.total ?? fullValues.reduce((sum, value) => sum + value, 0) })
       if (diceBoxD20) props.onD20Complete(diceBoxD20, values[0])
       else if (diceBoxRoll) props.onDiceComplete(diceBoxRoll, values)
       else if (rollRequestPreview) props.onPreviewComplete(rollRequestPreview.id, 0)
@@ -321,6 +389,17 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
 
   return (
     <>
+      {props.checkOutcome && <DiceOverlayPortal layer="foreground">
+        <div key={props.checkOutcome.id} role="status" data-testid="dice-check-outcome"
+          className={`dice-check-outcome ${props.checkOutcome.success ? 'dice-check-outcome--success' : 'dice-check-outcome--failure'}`}>
+          <span>{props.checkOutcome.actorName}{props.checkOutcome.targetName ? ` → ${props.checkOutcome.targetName}` : ''}</span>
+          <strong>{diceCheckOutcomeLabel(props.checkOutcome)}</strong>
+        </div>
+      </DiceOverlayPortal>}
+      <RoomDicePanel entries={props.roomRolls ?? []} besideTray={visibleDockTab === 'dice'}
+        visible={visibleDockTab === 'dice'}
+        historyScope={props.historyScope} logActive={drawerOpen} logHost={roomLogHost} openRequest={roomOpenRequest}
+        onClear={props.onClearRoomRolls} />
       {roll && <DiceRollOverlay showCard={false} roll={roll} onDone={() => {
         if (rollRecord) setLastRecord(rollRecord)
         props.onRollDone()
@@ -330,6 +409,8 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
           <aside
             className="dice-tray-drawer dice-tray-drawer--backdrop"
             data-tab={visibleDockTab ?? undefined}
+            data-room-rolls={Boolean(props.roomRolls?.length)}
+            style={trayLayoutStyle}
             aria-hidden="true"
           >
             <div className="dice-tray-drawer__surface" />
@@ -352,19 +433,18 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
               ref={drawerRef}
               data-state="open"
               data-tab={visibleDockTab ?? undefined}
+              data-room-rolls={Boolean(props.roomRolls?.length)}
+              style={trayLayoutStyle}
               className="dice-tray-drawer dice-tray-drawer--foreground"
               aria-label="战斗记录与骰盘"
             >
-              {props.combatLogPanel && <nav className="combat-tray-tabs" aria-label="切换战斗记录与骰盘">
-                <button type="button" aria-pressed={visibleDockTab === 'log'} onClick={() => setDockTab('log')}>记录 {props.combatLogCount ?? 0}</button>
-                <button type="button" aria-pressed={visibleDockTab === 'dice'} onClick={() => setDockTab('dice')}>骰盘</button>
-              </nav>}
               {visibleDockTab === 'log' ? props.combatLogPanel : <>
               <div className="dice-tray-drawer__rim" aria-hidden="true" />
               <div className="dice-tray-drawer__header">
+                {displayedRecord?.check && <div className="dice-check-mode" data-testid="dice-check-mode">{diceCheckModeLabel(displayedRecord.check)}</div>}
                 <div className="dice-tray-drawer__context">
                   <div className="dice-tray-drawer__context-meta">
-                    <span>{showFreeRollControls ? '骰盘设置' : secretConfirmation ? (secretConfirmation.visibility === 'public' ? 'DM 明骰确认' : 'DM 暗骰确认') : playerRollPrompt ? '需要你投掷' : hasDicePresentation ? '正在投掷' : showIdleFreeRollHeader ? '骰盘' : '投掷结果'}</span>
+                    <span>{showFreeRollControls ? '骰盘设置' : secretConfirmation ? (secretConfirmation.visibility === 'public' ? '明骰' : '暗骰') : playerRollPrompt ? '需要你投掷' : hasDicePresentation ? '正在投掷' : showIdleFreeRollHeader ? '骰盘' : '投掷结果'}</span>
                     <strong>{showFreeRollControls
                       ? '自由掷骰'
                       : showIdleFreeRollHeader
@@ -378,7 +458,11 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
                         ? '点击骰子添加，然后投掷'
                         : displayedRecord?.label}
                   </div>
-                  {!showFreeRollControls && displayedRecord?.targetName && (
+                  {!hasActivePresentation && props.renderFreeRollControls && !displayedRecord ? (
+                    <div className="dice-tray-drawer__target" aria-live="polite">
+                      <span>下次投掷</span>{freeRollVisibility === 'dm' ? '暗骰 · 仅 DM 可见' : '明骰 · 全房间可见'}
+                    </div>
+                  ) : !showFreeRollControls && displayedRecord?.targetName && (
                     <div className="dice-tray-drawer__target" title={`目标：${displayedRecord.targetName}`}>
                       <span>目标</span>{displayedRecord.targetName}
                     </div>
@@ -444,11 +528,11 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
                 <div inert={hasActivePresentation} className={`dice-tray-drawer__controls ${showFreeRollControls
                   ? 'dice-tray-drawer__controls--expanded'
                   : 'dice-tray-drawer__controls--quick'}`}>
-                  {props.renderFreeRollControls?.(() => setFreeRollControlsOpen(false))}
+                  {props.renderFreeRollControls?.(() => setFreeRollControlsOpen(false), freeRollVisibility, setFreeRollVisibility)}
                 </div>
               ) : null}
               {!showFreeRollControls && displayedRecord ? <div
-                className={`dice-tray-drawer__result${secretConfirmation ? ' dice-tray-drawer__result--secret' : ''}${playerRollPrompt ? ' dice-tray-drawer__result--player-request' : ''}${hasManyDisplayedDice ? ' dice-tray-drawer__result--many' : ''}`}
+                className={`dice-tray-drawer__result${secretConfirmation ? ' dice-tray-drawer__result--secret' : ''}${playerRollPrompt ? ' dice-tray-drawer__result--player-request' : ''}${hasManyDisplayedDice ? ' dice-tray-drawer__result--many' : ''}${displayedRecord.settlement ? ' dice-tray-drawer__result--settlement' : ''}`}
                 aria-live="polite"
               >
                 {secretConfirmation ? (
@@ -483,22 +567,20 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
                   </div>
                 ) : !hasActivePresentation || activePresentationSettled ? (
                   <>
-                    <div className="dice-tray-drawer__total">
-                      <span>{displayedRecord.formula ?? `${displayedRecord.values.length}d${displayedRecord.sides}`}</span>
+                    {(!displayedRecord.check || displayedRecord.settlement) && <div className="dice-tray-drawer__total">
+                      <span>{displayedRecord.settlement?.label ?? displayedRecord.formula ?? `${displayedRecord.values.length}d${displayedRecord.sides}`}</span>
                       <strong>{displayedTotal}</strong>
-                    </div>
+                      {displayedRecord.settlement && <span className="text-[10px] text-slate-400">{displayedRecord.formula}</span>}
+                    </div>}
                     {!hasActivePresentation && props.freeReroll && displayedRecord.sourceRoll === props.freeReroll.roll ? (
                       <DiceTrayRerollControls
                         key={displayedRecord.id}
                         values={displayedRecord.values}
                         sides={displayedRecord.sides}
+                        dieSides={displayedRecord.dieSides}
                         onReroll={props.freeReroll.onReroll}
                       />
-                    ) : <div className="dice-tray-drawer__dice" aria-label={`各骰点数：${displayedRecord.values.join('、')}`}>
-                      {displayedRecord.values.map((value, index) => (
-                        <span key={`${displayedRecord.id}:${index}`} className="dice-tray-drawer__die">{value}</span>
-                      ))}
-                    </div>}
+                    ) : <DiceResultValues values={displayedRecord.values} sides={displayedRecord.sides} dieSides={displayedRecord.dieSides} adoptedIndex={adoptedIndex} />}
                   </>
                 ) : (
                   <div className="dice-tray-drawer__waiting">
@@ -506,27 +588,45 @@ export default function DicePresentationOverlays(props: DicePresentationOverlays
                     骰子落稳后显示点数
                   </div>
                 )}
+                {displayedRecord.check && <div className="dice-check-inline" data-testid="dice-check-inline">
+                  <strong>{diceCheckResultLabel(displayedRecord.check)}</strong>
+                </div>}
+                {displayedRecord.settlement && <div className="basis-full text-[11px] text-slate-300" data-testid="dice-damage-breakdown">
+                  {displayedRecord.settlement.details.map((detail, index) => <div key={index}>{detail}</div>)}
+                </div>}
               </div> : null}
+              <div className="dice-tray-drawer__room-results" ref={setRoomLogHost} />
               </>}
             </aside>
           )}
-          {!drawerOpen && (props.combatLogPanel || props.renderFreeRollControls || displayedRecord) && (
-            <div className="map-combat-right-dock__recall" data-testid="right-combat-dock-recall">
-              {props.combatLogPanel && <button type="button" data-testid="combat-log-toggle" onClick={() => setDockTab('log')}>记录 <span>{props.combatLogCount ?? 0}</span></button>}
+          {(props.controlsHost || !drawerOpen) && (props.combatLogPanel || props.renderFreeRollControls || displayedRecord) && (
+            <CombatDiceControlsPortal host={props.controlsHost}>
+            <div className={props.controlsHost ? 'combat-bar-dice-controls' : 'map-combat-right-dock__recall combat-bar-dice-controls'} data-testid="right-combat-dock-recall">
+              {props.combatLogPanel && <button type="button" data-testid="combat-log-toggle" title="战斗记录" aria-label="战斗记录" aria-pressed={visibleDockTab === 'log'} onClick={() => setDockTab(visibleDockTab === 'log' ? null : 'log')}><ScrollText size={16} /><span>{props.combatLogCount ?? 0}</span></button>}
               <button
                 type="button"
                 data-testid="dice-tray-recall"
-                onClick={() => setDockTab('dice')}
+                title="骰盘"
+                aria-pressed={visibleDockTab === 'dice'}
+                onClick={() => {
+                  if (visibleDockTab !== 'dice') setRoomOpenRequest(value => value + 1)
+                  setDockTab(visibleDockTab === 'dice' ? null : 'dice')
+                }}
                 aria-label={displayedRecord
                   ? `展开上次掷骰结果，总值 ${displayedTotal}`
                   : '展开自由掷骰盘'}
               >
-                骰盘{displayedRecord ? <span>{displayedTotal}</span> : null}
+                <Dice5 size={16} />{displayedRecord ? <span>{displayedTotal}</span> : null}
               </button>
             </div>
+            </CombatDiceControlsPortal>
           )}
         </DiceOverlayPortal>
       )}
     </>
   )
+}
+
+function CombatDiceControlsPortal({ host, children }: { host?: HTMLElement | null; children: ReactNode }) {
+  return host ? createPortal(children, host) : children
 }

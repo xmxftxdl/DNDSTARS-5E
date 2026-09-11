@@ -1,0 +1,34 @@
+[WebServer] (node:31840) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:31016) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 18 tests using 1 worker
+
+(node:32064) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+[dice-box-roll-overlay] {requestId: d20:fire-bolt-player, stage: iframe-ready, elapsedMs: 105, sides: 20, count: 1}
+[dice-box-roll-overlay] {requestId: d20:fire-bolt-player, stage: send-roll, elapsedMs: 105, sides: 20, count: 1}
+[dice-box-roll-overlay] {requestId: d20:fire-bolt-player, stage: result-message, elapsedMs: 3300, sides: 20, count: 1}
+[dice-box-roll-overlay] {requestId: d20:fire-bolt-player, stage: finish, elapsedMs: 3300, sides: 20, count: 1}
+  ok  1 e2e\player-roll-prompt.spec.ts:5:1 › player can confirm fire bolt with seven room dice entries (5.4s)
+  ok  2 e2e\player-roll-prompt.spec.ts:14:39 › DM can confirm attack after closing dice dock (5.8s)
+  ok  3 e2e\player-roll-prompt.spec.ts:14:39 › DM can confirm attack after dismissing room panel (5.6s)
+  ok  4 e2e\player-roll-prompt.spec.ts:26:28 › player throws fire bolt 4d10 and returns all damage values (5.5s)
+  ok  5 e2e\player-roll-prompt.spec.ts:26:28 › player throws fire bolt 8d10 and returns all damage values (6.1s)
+  ok  6 e2e\player-roll-prompt.spec.ts:35:28 › player throws acid arrow 4d4 including delayed damage (4.0s)
+  ok  7 e2e\player-roll-prompt.spec.ts:35:28 › player throws acid arrow 2d4 including delayed damage (4.5s)
+  ok  8 e2e\player-roll-prompt.spec.ts:42:1 › DM plays queued free rolls in order after a long pause, including mixed dice (21.4s)
+  ok  9 e2e\player-roll-prompt.spec.ts:54:58 › DM animates player 1d20 with identical faces (5.3s)
+  ok 10 e2e\player-roll-prompt.spec.ts:54:58 › DM animates player 4d10 with identical faces (6.9s)
+  ok 11 e2e\player-roll-prompt.spec.ts:54:58 › DM animates player 2d4 with identical faces (5.7s)
+  ok 12 e2e\player-roll-prompt.spec.ts:65:1 › damage receipt separates visible dice from reduced damage after animation (5.8s)
+  ok 13 e2e\player-roll-prompt.spec.ts:76:1 › check outcomes show gold hit and shadow save failure (3.1s)
+  ok 14 e2e\player-roll-prompt.spec.ts:86:1 › confirmation preserves the existing dice iframe (4.7s)
+  ok 15 e2e\player-roll-prompt.spec.ts:98:1 › hit is visible while DM confirmation is still waiting (869ms)
+  ok 16 e2e\player-roll-prompt.spec.ts:105:1 › native staged d20 upper faces follow authoritative values through corrections (6.7s)
+  ok 17 e2e\player-roll-prompt.spec.ts:117:1 › overlapping rolls and DM corrections keep real dice visible and ordered (7.4s)
+  ok 18 e2e\player-roll-prompt.spec.ts:145:1 › background completion can enter DM confirmation before physics finishes (8.1s)
+
+  18 passed (2.7m)

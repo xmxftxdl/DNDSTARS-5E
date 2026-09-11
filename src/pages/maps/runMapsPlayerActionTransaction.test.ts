@@ -16,6 +16,10 @@ const action = {
 } as SharedPlayerActionState
 
 describe('runMapsPlayerActionTransaction', () => {
+  it('distinguishes deliberate combat cancellation from a failed authority save', () => {
+    expect(mapsPlayerActionAuthorityFailureReason(new Error('combat-dice-cancelled')))
+      .toBe('combat-action-cancelled')
+  })
   it('keeps the server transaction failure code in the bounded ACK reason', () => {
     expect(mapsPlayerActionAuthorityFailureReason(
       new Error('combat-command-settlement-precondition-conflict'),

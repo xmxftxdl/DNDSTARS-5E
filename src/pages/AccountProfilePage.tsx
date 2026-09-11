@@ -1,3 +1,4 @@
+import AccountStoragePanel from '../components/AccountStoragePanel'
 import { Camera, KeyRound, LoaderCircle, Save, ShieldCheck, UserRound } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -110,6 +111,7 @@ export default function AccountProfilePage() {
       {notice && <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">{notice}</div>}
       {error && <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>}
 
+      <AccountStoragePanel administrator={profile?.storageAdmin} />
       <section className="grid gap-6 rounded-3xl border border-white/10 bg-black/20 p-6 md:grid-cols-[180px_1fr]">
         <div>
           <button

@@ -49,8 +49,8 @@ export async function settleDnd5eConcentrationChecks(input: {
     targetName: string,
     context?: Dnd5eD20RollInterruptContext,
   ) => Promise<number>
-  rollD4: (label: string, targetName: string) => Promise<number>
-  rollDice: (count: number, sides: number, label: string, targetName: string) => Promise<number[]>
+  rollD4: (label: string, targetName: string, context?: { rollerTokenId?: string; rollerCharacterId?: string }) => Promise<number>
+  rollDice: (count: number, sides: number, label: string, targetName: string, context?: { rollerTokenId?: string; rollerCharacterId?: string }) => Promise<number[]>
   requestSavingThrowReroll?: (input: {
     target: Character
     targetName: string
@@ -139,7 +139,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           fall.fallingDamageDice,
           6,
           '失去飞行支撑·坠落伤害',
-          targetName,
+          targetName, { rollerTokenId: fall.combatantId },
         )
       }
       const fallen = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
@@ -169,7 +169,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         fall.fallingDamageDice,
         6,
         '失去飞行支撑·坠落伤害',
-        targetName,
+        targetName, { rollerTokenId: fall.combatantId },
       )
     }
     return resolveDnd5eHeadlessAction(source, {
@@ -218,12 +218,12 @@ export async function settleDnd5eConcentrationChecks(input: {
     const triggerRoll = check.forceTable
       ? undefined
       : check.triggerDieSides === 20
-        ? await input.rollD20('施法后随机表·触发检定', actorName)
+        ? await input.rollD20('施法后随机表·触发检定', actorName, { rollerTokenId: actor.id, rollKind: 'ability-check' })
         : (await input.rollDice(
             1,
             check.triggerDieSides,
             '施法后随机表·触发检定',
-            actorName,
+            actorName, { rollerTokenId: actor.id },
           ))[0]
     const triggered = check.forceTable || check.triggerValues.includes(triggerRoll!)
     const tableRollCount = check.tableRollChoiceFeatureId &&
@@ -235,7 +235,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           tableRollCount,
           check.tableDieSides,
           tableRollCount > 1 ? '施法后随机表·候选结果' : '施法后随机表·结果',
-          actorName,
+          actorName, { rollerTokenId: actor.id },
         )
       : undefined
     const requestedTableRollIndex = triggered && tableRollCandidates && tableRollCount > 1 &&
@@ -330,7 +330,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           plan.effect.damageDice.count,
           plan.effect.damageDice.sides,
           '随机表核心法术·伤害',
-          actorName,
+          actorName, { rollerTokenId: actor.id },
         ),
       }
     }
@@ -676,7 +676,7 @@ export async function settleDnd5eConcentrationChecks(input: {
             rule.damage.count,
             rule.damage.sides,
             `${monster.name}·${rule.ruleId} 伤害`,
-            source.name,
+            source.name, { rollerTokenId: source.id },
           )
         : []
       const resolved = await resolveWithUnsupportedAirborneFalls(state, {
@@ -753,7 +753,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         rebukeOption.slotLevel + 1,
         10,
         '炼狱叱喝·火焰伤害',
-        sourceName,
+        sourceName, { rollerTokenId: reactor.id },
       )
       const reaction = await resolveWithUnsupportedAirborneFalls(state, {
         type: 'hellish-rebuke', actorId: reactor.id, targetId: damageSource.id,
@@ -796,7 +796,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           requirement.count,
           requirement.sides,
           `${pending.mechanicName}·${requirement.effectName}`,
-          pending.ownerName,
+          pending.ownerName, { rollerTokenId: pending.snapshot.mechanicOwnerId },
         ),
       })
     }

@@ -6,25 +6,16 @@ function initiativeEntryKey(entry: InitiativeEntry): string {
 
 function entryWithInitiativeRank(
   entry: InitiativeEntry,
-  rank: Pick<InitiativeEntry, 'roll' | 'initiativeCalculation'>,
+  rank: Pick<InitiativeEntry, 'roll'>,
 ): InitiativeEntry {
   return {
     ...entry,
     roll: rank.roll,
-    initiativeCalculation: rank.initiativeCalculation
-      ? {
-          ...rank.initiativeCalculation,
-          rolls: [...rank.initiativeCalculation.rolls],
-        }
-      : undefined,
+
   }
 }
 
-/**
- * Initiative totals belong to the confirmed rank, not to a stale row. Moving
- * one combatant therefore exchanges both combatants and their authoritative
- * dice breakdowns, keeping the visible order and saved totals consistent.
- */
+/** DM rank overrides change scheduling totals, never the creature's original dice evidence. */
 export function swapInitiativeConfirmationEntries(
   entries: readonly InitiativeEntry[],
   firstSlotId: string,
@@ -58,4 +49,10 @@ export function moveInitiativeConfirmationEntry(
 
 export function combatInitiativeEntryKey(entry: InitiativeEntry): string {
   return initiativeEntryKey(entry)
+}
+
+export function originalInitiativeTotal(entry: InitiativeEntry): number {
+  if (!entry.initiativeCalculation) return entry.roll
+  return entry.initiativeCalculation.d20 + entry.initiativeCalculation.modifier -
+    (entry.turnKind === 'thief-reflexes' ? 10 : 0)
 }

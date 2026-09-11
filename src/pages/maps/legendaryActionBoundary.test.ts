@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 const workspaceSource = readFileSync(
   new URL('../MapsWorkspacePage.tsx', import.meta.url),
   'utf8',
-)
+).replace(/\r\n/g, '\n')
 
 describe('legendary action end-turn authority boundary', () => {
   it('keeps every DM-adjudicated transaction behind the explicit combat resume gate', () => {

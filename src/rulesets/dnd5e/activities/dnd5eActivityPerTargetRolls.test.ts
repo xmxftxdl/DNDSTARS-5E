@@ -23,6 +23,25 @@ const imprisonment = {
 } as Dnd5eActivityDefinitionV1
 
 describe('Activity per-target authoritative roll recipes', () => {
+  it('keeps damage with its caster while player and monster targets own their saves', () => {
+    for (const mode of ['normal', 'advantage', 'disadvantage'] as const) {
+      const declarations = dnd5eActivityPerTargetRollDeclarationsV1({
+        activity: imprisonment,
+        declarations: [
+          { id: 'spell-save-d20', label: '豁免', count: 1, sides: 20 },
+          { id: 'spell-damage', label: '伤害', count: 8, sides: 6 },
+        ],
+        actor: { id: 'caster', controller: 'players' },
+        targets: [{ id: 'player', controller: 'players' }, { id: 'monster', controller: 'dm' }],
+        hostSavingThrowMode: () => mode,
+        hostAttackRollMode: () => mode,
+      })
+      expect(declarations.filter(d => d.id.startsWith('spell-damage:')).map(d => d.rollerTokenId)).toEqual(['caster', 'caster'])
+      expect(declarations.find(d => d.id === 'spell-save-d20:player')?.rollerTokenId).toBe('player')
+      expect(declarations.find(d => d.id === 'spell-save-d20:monster')?.rollerTokenId).toBe('monster')
+    }
+  })
+
   it('rolls one d20 for a Minotaur ordinary Imprisonment save', () => {
     const hostSavingThrowMode = vi.fn(() => 'normal' as const)
     const declarations = dnd5eActivityPerTargetRollDeclarationsV1({

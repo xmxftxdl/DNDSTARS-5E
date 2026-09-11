@@ -139,6 +139,7 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'room-rules-unavailable': { title: '房间规则未就绪', message: '尚未获得可验证的房规快照，为避免错误结算，已拒绝本次行动。' },
   'plugin-not-allowed': { title: '插件未授权', message: '当前房间规则未授权该插件能力，本次行动未结算。' },
   'authority-commit-failed': { title: '结算同步失败', message: '权威战斗结果未能安全保存，本次行动已结束且不会重复扣除资源。请稍后重试。' },
+  'combat-action-cancelled': { title: '行动已取消', message: 'DM 已取消这次未完成行动；待确认骰值与后续效果已作废。此前完成的其他行动保留。' },
 }
 
 export function playerActionRejectionNotice(reason?: string): PlayerActionRejectionNotice {

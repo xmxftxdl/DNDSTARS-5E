@@ -31,7 +31,7 @@ describe('right dice presentation drawer', () => {
       onDiceComplete: () => undefined, onPreviewComplete: () => undefined,
       onSecretConfirm: () => undefined,
     }))
-    expect(html).toContain('切换战斗记录与骰盘')
+    expect(html).not.toContain('combat-tray-tabs')
     expect(html).toContain('bg-void-950/90')
     expect(html).toContain('max-h-[28rem]')
     expect(html).toContain('暂无战斗记录')
@@ -52,8 +52,9 @@ describe('right dice presentation drawer', () => {
       freeReroll: { roll, onReroll: async () => undefined },
     }
     const local = renderToStaticMarkup(createElement(DicePresentationOverlays, props))
-    expect(local).toContain('全部重投')
-    expect(local).toContain('选择第 2 颗 d6，点数 4')
+    expect(local).not.toContain('全部重投')
+    expect(local).not.toContain('拖一颗到这里重投')
+    expect(local).toContain('D6 · 4')
     const other = renderToStaticMarkup(createElement(DicePresentationOverlays, {
       ...props, roll: { ...roll },
     }))
@@ -232,7 +233,7 @@ describe('right dice presentation drawer', () => {
   })
 
   it('hosts the free-roll settings inside the same physical tray', () => {
-    expect(overlaysSource).toContain('renderFreeRollControls?: (close: () => void) => ReactNode')
+    expect(overlaysSource).toContain("visibility: 'public' | 'dm', onVisibilityChange:")
     expect(overlaysSource).toContain('dice-tray-drawer__controls')
     expect(overlaysSource).toContain('showFreeRollQuickbar')
     expect(overlaysSource).toContain('dice-tray-drawer__controls--quick')
@@ -240,7 +241,7 @@ describe('right dice presentation drawer', () => {
     expect(overlaysSource).toContain('inert={hasActivePresentation}')
     expect(css).toMatch(/\.dice-tray-drawer__result--secret\s*{[^}]*z-index:\s*10;/s)
     expect(overlaysSource).toContain("setFreeRollControlsOpen(true)")
-    expect(workspaceSource).toContain('renderFreeRollControls={!isSpectator ? (close) => (')
+    expect(workspaceSource).toContain('renderFreeRollControls={!isSpectator ? (close, visibility, onVisibilityChange) => (')
     expect(workspaceSource).toContain('<MapDiceRoller')
     expect(workspaceSource).toContain('embedded')
     expect(css).toContain('.map-dice-roller__topbar')

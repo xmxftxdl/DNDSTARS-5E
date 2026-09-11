@@ -406,6 +406,19 @@ function compatibleMetamagic(
     : undefined
 }
 
+export function mergeDnd5eArmedSpellModifierIntents(input: {
+  character: Character
+  castingClassId: Dnd5eClassId
+  spellId: string
+  slotLevel: number
+  explicitIds: readonly Dnd5eSpellModifierIntentId[]
+  armedIds: readonly Dnd5eSpellModifierIntentId[]
+  pluginSpell?: Dnd5ePluginSpellModifierCompatibilityV1
+}): Dnd5eSpellModifierIntentId[] {
+  return [...new Set([...input.explicitIds, ...input.armedIds.filter(id =>
+    resolveDnd5eSpellModifierIntents({ ...input, modifierIds: [id] }).ok)])]
+}
+
 export function resolveDnd5eSpellModifierIntents(input: {
   character: Character
   castingClassId: Dnd5eClassId

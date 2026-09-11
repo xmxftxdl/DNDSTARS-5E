@@ -2059,3 +2059,14 @@ describe('combat presentation events', () => {
     vi.useRealTimers()
   })
 })
+
+
+it('does not republish the same resumed Fire Bolt banner with a fresh timestamp', async () => {
+  vi.mocked(publishSharedEvent).mockClear()
+  const banner = { id: 'resume-fire-bolt:banner', mapId: 'replay-map', transactionId: 'resume-fire-bolt', sourceTokenId: 'wizard', spellId: 'fire-bolt', casterName: '法师', spellName: '火焰箭', castingClassId: 'wizard' }
+  await publishSpellBannerPresentation(banner)
+  await publishSpellBannerPresentation(banner)
+  expect(vi.mocked(publishSharedEvent).mock.calls.filter(([channel]) => channel === COMBAT_PRESENTATION_CHANNEL)).toHaveLength(1)
+  await publishSpellBannerPresentation({ ...banner, id: 'next-fire-bolt:banner', transactionId: 'next-fire-bolt' })
+  expect(vi.mocked(publishSharedEvent).mock.calls.filter(([channel]) => channel === COMBAT_PRESENTATION_CHANNEL)).toHaveLength(2)
+})

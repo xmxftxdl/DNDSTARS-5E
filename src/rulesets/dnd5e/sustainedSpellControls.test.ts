@@ -272,14 +272,14 @@ describe('shared sustained spell controls', () => {
       concentrationSpellId: 'sunbeam',
       concentrationRoundsRemaining: 10,
     })
-    expect(recast.events).toContainEqual({
+    expect(recast.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: actor.id,
       stateKey: 'concentration', active: false,
-    })
-    expect(recast.events).toContainEqual({
+    }))
+    expect(recast.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: actor.id,
       stateKey: 'concentration', active: true,
-    })
+    }))
   })
 
   it('holds Produce Flame as an effect, then consumes it when the flame is thrown', () => {

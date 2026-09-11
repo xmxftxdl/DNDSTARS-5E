@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Backpack, Footprints, PackageOpen, Shield, X } from 'lucide-react'
+import { Dices, Backpack, Footprints, PackageOpen, Shield, X } from 'lucide-react'
+import type { Dnd5eAbilityCheckPayload } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import type { Dnd5eInventoryEntry } from '../../types/inventory'
 import { getEffectiveAc } from '../../lib/combatStats'
@@ -34,12 +35,14 @@ import { dnd5eTruePolymorphObjectFormFromEffects } from '../../rulesets/dnd5e/tr
 
 export interface PlayerQuickCharacterSheetProps {
   character: Character
+  onQuickCheck?: (check: Pick<Dnd5eAbilityCheckPayload, 'ability' | 'skill'>) => void
+  quickCheckDisabled?: boolean
   onClose: () => void
   embedded?: boolean
   view?: 'all' | 'data' | 'status'
 }
 
-export default function PlayerQuickCharacterSheet({ character, onClose, embedded = false, view = 'all' }: PlayerQuickCharacterSheetProps) {
+export default function PlayerQuickCharacterSheet({ character, onClose, onQuickCheck, quickCheckDisabled = false, embedded = false, view = 'all' }: PlayerQuickCharacterSheetProps) {
   const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null)
   const portrait = resolveMapTokenPortrait(character)
   const inventory = useMemo(() => normalizeDnd5eInventory(character), [character])
@@ -184,7 +187,7 @@ export default function PlayerQuickCharacterSheet({ character, onClose, embedded
         <div className="quick-character-sheet__body min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {view === 'status' ? <div className="space-y-4" data-testid="quick-character-status"><Summary label="生命值" value={`${currentHp}/${maximumHp}`} detail={`临时生命值 ${character.tempHp}`} />{statusContent}</div> : <>
           <div data-testid="quick-character-overview" className="space-y-4">
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+              <div className={embedded ? "grid grid-cols-3 gap-2" : "grid grid-cols-3 gap-2 sm:grid-cols-6"}>
                 <Summary label={activeObjectForm ? '物体生命值' : activeCreatureForm ? '形态生命值' : '生命值'} value={`${currentHp}/${maximumHp}`} detail={activeCreatureForm ? `本体 ${character.currentHp}/${character.maxHp}` : character.tempHp > 0 ? `临时 ${character.tempHp}` : undefined} />
                 <Summary icon={<Shield className="h-3.5 w-3.5" />} label="护甲等级" value={`${armorClass}`} />
                 <Summary
@@ -200,10 +203,10 @@ export default function PlayerQuickCharacterSheet({ character, onClose, embedded
 
               <section>
                 <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-violet-200">属性与豁免</h3>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                <div className={embedded ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"}>
                   {activeObjectForm ? <p className="col-span-full rounded-xl border border-amber-300/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">物体没有生物属性或豁免；本体数据在法术结束前封存。</p> : abilities.map((entry) => (
                     <div key={entry.key} className="quick-character-sheet__ability rounded-xl border border-violet-300/15 bg-violet-400/[0.06] p-3 text-center">
-                      <div className="text-xs font-bold text-slate-300">{entry.label}</div>
+                      <div className="flex items-center justify-center gap-1 text-xs font-bold text-slate-300">{entry.label}{onQuickCheck && <QuickCheckButton label={entry.label} disabled={quickCheckDisabled} onClick={() => onQuickCheck({ ability: entry.key })} />}</div>
                       <div className="mt-1 text-xl font-black text-white">{entry.score}</div>
                       <div className="text-sm font-bold text-violet-200">{quickFormatModifier(entry.modifier)}</div>
                       <div className={`mt-1 text-[9px] ${entry.saveProficient ? 'text-emerald-300' : 'text-slate-600'}`}>豁免 {quickFormatModifier(entry.savingThrowModifier)}{entry.saveProficient ? ' · 熟练' : ''}</div>
@@ -214,12 +217,13 @@ export default function PlayerQuickCharacterSheet({ character, onClose, embedded
 
               <section>
                 <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-sky-200">技能</h3>
-                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
+                <div className={embedded ? "grid grid-cols-2 gap-1.5" : "grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6"}>
                   {activeObjectForm ? <p className="col-span-full rounded-xl border border-amber-300/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">物体不能进行生物技能检定，也不能行动、说话或施法。</p> : skills.map((entry) => (
                     <div key={entry.key} className="quick-character-sheet__skill flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-2">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${entry.expertise ? 'bg-amber-300' : entry.proficient ? 'bg-sky-300' : 'border border-slate-700'}`} />
                       <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{entry.label}</span>
                       <strong className="text-xs tabular-nums text-white">{quickFormatModifier(entry.modifier)}</strong>
+                      {onQuickCheck && <QuickCheckButton label={entry.label} disabled={quickCheckDisabled} onClick={() => onQuickCheck({ ability: entry.ability, skill: entry.key })} />}
                     </div>
                   ))}
                 </div>
@@ -290,7 +294,7 @@ export default function PlayerQuickCharacterSheet({ character, onClose, embedded
                     </div>
                   ) : <div className="rounded-xl border border-dashed border-white/10 py-5 text-center text-xs text-slate-600">背包为空</div>}
                 </div>
-                <p className="mt-3 border-t border-white/[0.06] pt-3 text-[10px] leading-4 text-slate-600">快捷人物卡为只读视图；装备、使用或转交物品请前往完整角色卡。</p>
+                <p className="mt-3 border-t border-white/[0.06] pt-3 text-[10px] leading-4 text-slate-600">装备、使用或转交物品请前往完整角色卡。</p>
               </section>}
           </div>
           </>}
@@ -328,4 +332,8 @@ function QuickEquipmentSlot({
 
 function Summary({ icon, label, value, detail }: { icon?: ReactNode; label: string; value: string; detail?: string }) {
   return <div className="quick-character-sheet__summary rounded-xl border border-white/[0.08] bg-white/[0.035] p-2.5"><div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">{icon}{label}</div><strong className="mt-1 block text-sm text-white">{value}</strong>{detail ? <span className="text-[9px] text-cyan-300">{detail}</span> : null}</div>
+}
+
+function QuickCheckButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return <button type="button" aria-label={`投掷${label}鉴定`} title={`${label}鉴定`} disabled={disabled} onClick={onClick} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-violet-300 transition-colors hover:bg-violet-400/20 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-300 disabled:cursor-not-allowed disabled:opacity-35"><Dices className="h-3.5 w-3.5" aria-hidden="true" /></button>
 }

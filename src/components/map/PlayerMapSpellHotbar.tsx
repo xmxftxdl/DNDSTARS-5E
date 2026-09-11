@@ -109,7 +109,7 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
     (!hunterMarkTarget || (hunterMarkTarget.hp != null && hunterMarkTarget.hp <= 0))
 
   return (
-    <div className="pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex flex-col items-center gap-2">
+    <div className="map-player-combat-hotbar pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex flex-col items-center gap-2">
       <PlayerCombatHotbar
         key={`${props.combatActive ? 'combat' : 'exploration'}:${character.id}`}
         mode={props.combatActive ? 'combat' : 'exploration'}

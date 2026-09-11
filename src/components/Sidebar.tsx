@@ -10,6 +10,7 @@ import {
   LogOut,
   PackageOpen,
   PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   WandSparkles,
 } from 'lucide-react'
@@ -23,6 +24,8 @@ import { requestPdfSplitView } from '../lib/pdfSplitViewController'
 
 export default function Sidebar({
   onCollapse,
+  compact = false,
+  onExpand,
   mode,
   roomSession,
   campaignBasePath = '',
@@ -30,6 +33,8 @@ export default function Sidebar({
   onLeaveRoom,
 }: {
   onCollapse?: () => void
+  compact?: boolean
+  onExpand?: () => void
   mode?: AppMode
   roomSession?: RoomSession
   campaignBasePath?: string
@@ -49,6 +54,38 @@ export default function Sidebar({
     await navigator.clipboard?.writeText(roomSession.roomId)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
+  }
+  if (compact) {
+    const shortcuts = [
+      ...items,
+      ...(canUseDmAssistant ? dmTools.map(item => ({ ...item, end: false })) : []),
+    ]
+    return (
+      <aside aria-label="快捷导航" className="glass flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto border-r border-white/10 py-3">
+        <button type="button" onClick={onExpand} title="展开侧边栏" aria-label="展开侧边栏"
+          className="mb-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-white/5 hover:text-arcane-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-arcane-400">
+          <PanelLeftOpen className="h-5 w-5" />
+        </button>
+        <nav aria-label="战役快捷入口" className="flex w-full flex-1 flex-col items-center gap-1">
+          {shortcuts.map(({to, label, icon: Icon, ...item}) => (
+            <NavLink key={to} to={to} end={item.end} title={label} aria-label={label}
+              className={({isActive}) => `relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-arcane-400 ${isActive ? 'bg-arcane-500/20 text-arcane-200 ring-1 ring-inset ring-arcane-400/30' : 'text-slate-500 hover:bg-white/5 hover:text-slate-100'}`}>
+              <Icon className="h-5 w-5" />
+              {to.endsWith('/communications') && unreadHandouts > 0 && <span aria-label={`${unreadHandouts} 条未读`} className="absolute right-0 top-0 min-w-3 rounded-full bg-amber-400 px-1 text-[9px] font-bold text-slate-950">{unreadHandouts > 99 ? '99+' : unreadHandouts}</span>}
+            </NavLink>
+          ))}
+          {canUseDmAssistant && <button type="button" onClick={() => requestPdfSplitView()} title="PDF 分屏" aria-label="PDF 分屏" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-slate-100"><BookOpenText className="h-5 w-5" /></button>}
+        </nav>
+        <div className="mt-3 flex w-full flex-col items-center gap-1 border-t border-white/10 pt-2">
+          <NavLink to="/app" title="战役列表" aria-label="战役列表" className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-slate-100"><LibraryBig className="h-5 w-5" /></NavLink>
+          {roomSession?.role !== 'spectator' && <>
+            <NavLink to={`${campaignBasePath}/extensions`} title="规则与扩展" aria-label="规则与扩展" className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-slate-100"><PackageOpen className="h-5 w-5" /></NavLink>
+            <NavLink to={`${campaignBasePath}/settings`} title="设置" aria-label="设置" className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-slate-100"><Settings className="h-5 w-5" /></NavLink>
+          </>}
+          {onLeaveRoom && <button type="button" onClick={onLeaveRoom} title="离开房间" aria-label="离开房间" className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-red-500/10 hover:text-red-200"><LogOut className="h-5 w-5" /></button>}
+        </div>
+      </aside>
+    )
   }
   return (
     <aside className="glass flex w-64 shrink-0 flex-col border-r border-white/10">

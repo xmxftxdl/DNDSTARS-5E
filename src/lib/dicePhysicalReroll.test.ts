@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runtime = vi.hoisted(() => ({ dice: [] as unknown[], swap: vi.fn() }))
 vi.mock('@3d-dice/dice-box-threejs', () => ({ default: class {
@@ -31,7 +31,28 @@ function die(physicalValue: number, recordedValue: number) {
 }
 
 describe('physical reroll outcome', () => {
-  beforeEach(() => { runtime.swap.mockClear() })
+  beforeEach(() => {
+    runtime.swap.mockClear()
+    const element = () => ({ dataset: {}, style: {}, setAttribute() {}, appendChild() {}, remove() {}, getBoundingClientRect: () => ({ width: 100, height: 100, left: 0, top: 0 }) })
+    vi.stubGlobal('document', { createElement: element, head: element(), body: element(), querySelector: () => element() })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('corrects a d20 showing 5 even when cached history already says 15', async () => {
+    const selected = { ...die(5, 15), shape: 'd20' }
+    runtime.dice = [selected]
+    runtime.swap.mockImplementation((target, value: number) => {
+      // Native swap uses recorded history to choose which labels to exchange.
+      expect(target.getLastValue().value).toBe(5)
+      target.geometry.groups[0].materialIndex = value + 1
+    })
+    const box = await createDiceBox('#dice')
+    expect(box.correctVisibleFaces([15])).toBe(true)
+    expect(runtime.swap).toHaveBeenCalledWith(selected, 15)
+    expect(box.visibleValues()).toEqual([15])
+    expect(selected.getLastValue().value).toBe(15)
+    runtime.swap.mockReset()
+  })
 
   it('settles a visible 3 as 3 even if the recorded value was 1, without relabeling the die', async () => {
     const selected = die(3, 1)

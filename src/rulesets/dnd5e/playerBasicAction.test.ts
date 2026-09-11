@@ -608,9 +608,9 @@ describe('D&D 5e player basic action bridge', () => {
       .not.toContain('unconscious')
     expect(resolved.application?.map.tokens.find((entry) => entry.id === 'enemy')?.dnd5eCombatState?.conditions)
       .toContain('prone')
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'sleeping-creature-awakened', actorId: 'hero-token', targetId: 'enemy', spellId: 'sleep',
-    })
+    }))
   })
 
   it('routes shaking a Hypnotic Pattern target through the same authoritative wake action', () => {

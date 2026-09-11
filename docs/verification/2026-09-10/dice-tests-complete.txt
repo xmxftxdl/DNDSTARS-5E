@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 C:/Users/Doco/Desktop/DND/DNDSTARS-5E
+
+
+ Test Files  8 passed (8)
+      Tests  58 passed (58)
+   Start at  20:51:56
+   Duration  6.85s (transform 5.64s, setup 0ms, import 7.00s, tests 374ms, environment 1ms)
+

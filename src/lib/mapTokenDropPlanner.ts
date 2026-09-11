@@ -10,6 +10,7 @@ import {
   type MapGeometryState,
 } from './mapGeometry'
 import type { BattleMap, Token } from '../store/maps'
+import { createMapTokenOccupancy } from './mapTokenOccupancy'
 
 export type MapTokenDropPlan =
   | {
@@ -37,8 +38,11 @@ export function planMapTokenDrop(input: {
 }): MapTokenDropPlan {
   const { token, map, geometry } = input
   const snapped = resolveTokenDropPosition(input.x, input.y, token, map)
+  const occupancy = createMapTokenOccupancy(map, geometry, token)
+  const airborneHeight = Math.max(0, mapGeometryTokenElevation(geometry, token) - mapGeometryTerrainElevationAtPoint(geometry, token))
   const position = shouldSnapTokenOnDrop(token, map)
-    ? resolveFreeDropCell(snapped.x, snapped.y, token.id, map)
+    ? resolveFreeDropCell(snapped.x, snapped.y, token.id, map,
+        at => occupancy(mapGeometryTerrainElevationAtPoint(geometry, at) + airborneHeight))
     : snapped
   const fromTerrainElevation = mapGeometryTerrainElevationAtPoint(geometry, token)
   const toTerrainElevation = mapGeometryTerrainElevationAtPoint(geometry, position)

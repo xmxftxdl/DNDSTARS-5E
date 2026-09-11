@@ -1,0 +1,53 @@
+
+Running 1 test using 1 worker
+
+(node:23548) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 (1.6m)
+
+
+  1) e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 ─────────
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator:  getByTestId('player-combat-hotbar')
+    Expected: "0"
+    Received: "1"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 5000ms
+      - waiting for getByTestId('player-combat-hotbar')
+        12 × locator resolved to <section data-mode="combat" data-action-remaining="1" data-movement-remaining="30" data-bonus-action-remaining="1" data-testid="player-combat-hotbar" class="pointer-events-auto w-full max-w-[1320px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl">…</section>
+           - unexpected value "1"
+
+
+      281 |     const playerHotbar = player.getByTestId('player-combat-hotbar')
+      282 |     await expect(playerHotbar).toBeVisible({ timeout: 20_000 })
+    > 283 |     await expect(playerHotbar).toHaveAttribute('data-action-remaining', '0')
+          |                                ^
+      284 |     await expect(playerHotbar).toHaveAttribute('data-bonus-action-remaining', '0')
+      285 |     await expect(playerHotbar).toHaveAttribute('data-movement-remaining', '10')
+      286 |     await expect(playerHotbar.locator('[data-spell-slot-summary-level="2"]')).toHaveAttribute(
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\combat-authoritative-recovery.spec.ts:283:32
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 ──────────

@@ -1,5 +1,9 @@
+import type { DiceCheckPresentation } from './diceCheckPresentation'
 /** Display history only: never restores callbacks, reroll permissions or commits. */
 export interface DiceTrayHistoryRecord {
+  check?: DiceCheckPresentation
+  settlement?: { label: string; details: string[] }
+  dieSides?: number[]
   id: string
   label: string
   targetName: string
@@ -24,6 +28,13 @@ function sanitize(value: unknown): DiceTrayHistoryRecord | null {
     || !Array.isArray(record.values) || record.values.length === 0 || record.values.length > 100
     || !record.values.every(v => Number.isInteger(v) && v >= 1 && v <= record.sides)) return null
   return {
+    check: record.check && ['normal', 'advantage', 'disadvantage'].includes(record.check.mode)
+      ? { mode: record.check.mode, kind: record.check.kind, success: typeof record.check.success === 'boolean' ? record.check.success : undefined } : undefined,
+    settlement: record.settlement && typeof record.settlement.label === 'string' &&
+      Array.isArray(record.settlement.details) && record.settlement.details.every(detail => typeof detail === 'string')
+      ? { label: record.settlement.label, details: [...record.settlement.details] } : undefined,
+    dieSides: Array.isArray(record.dieSides) && record.dieSides.length === record.values.length
+      && record.dieSides.every((sides, index) => [4, 6, 8, 10, 12, 20, 100].includes(sides) && record.values[index]! <= sides) ? [...record.dieSides] : undefined,
     id: record.id, label: record.label, targetName: record.targetName,
     sides: record.sides, values: [...record.values],
     total: Number.isFinite(record.total) ? record.total : undefined,
@@ -45,4 +56,8 @@ export function writeDiceTrayHistory(scope: string | undefined, record: DiceTray
   const safe = sanitize(record)
   if (!safe) return
   try { window.sessionStorage.setItem(prefix + scope, JSON.stringify({ record: safe, open })) } catch { /* Optional display cache. */ }
+}
+
+export function clearDiceTrayHistory(scope: string): void {
+  try { window.sessionStorage.removeItem(prefix + scope) } catch { /* Optional display cache. */ }
 }

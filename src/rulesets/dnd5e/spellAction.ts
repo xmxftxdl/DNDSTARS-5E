@@ -81,7 +81,7 @@ import {
   dnd5eMapTokenDistanceFeet,
   dnd5eTokenToPointDistanceFeet,
 } from './verticalCombatGeometry'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eAttackerAttackDisadvantageReasons, dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
 import {
   mapGeometryCanSeeToken,
@@ -2011,6 +2011,7 @@ export function prepareDnd5eSpellCast(input: {
             .map((reason) => ({ active: advantageAllowed, reason })),
         ],
         disadvantage: [
+          ...dnd5eAttackerAttackDisadvantageReasons(actorCombatant).map(reason => ({ active: true, reason })),
           { active: rangedSpellThreatened, reason: '远程法术攻击者 5 尺内有敌人' },
           { active: actorCombatant.exhaustionLevel >= 3, reason: '3 级或更高力竭' },
           { active: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },
@@ -2072,6 +2073,7 @@ export function prepareDnd5eSpellCast(input: {
               .map((reason) => ({ active: currentAdvantageAllowed, reason })),
           ],
           disadvantage: [
+            ...dnd5eAttackerAttackDisadvantageReasons(actorCombatant).map(reason => ({ active: true, reason })),
             { active: rangedSpellThreatened, reason: '远程法术攻击者 5 尺内有敌人' },
             { active: actorCombatant.exhaustionLevel >= 3, reason: '3 级或更高力竭' },
             { active: targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },

@@ -37,6 +37,7 @@ export interface Dnd5eActivityTriggerConfirmationV1 {
 }
 
 export interface Dnd5eActivityTriggerRollRequestV1 {
+  rollerTokenId: string
   id: string
   label: string
   count: number
@@ -210,6 +211,7 @@ async function authoritativeRolls(input: {
         ...declaration,
         label: `${input.available.activity.name} · ${declaration.id}`,
         actorId: input.actorId,
+        rollerTokenId: input.actorId,
         targetName: actorName,
         kind: 'formula',
       })],
@@ -231,6 +233,7 @@ async function authoritativeRolls(input: {
             count: check.count,
             sides: check.sides,
             actorId: input.actorId,
+            rollerTokenId: input.actorId,
             targetId,
             targetName: target.name,
             kind: 'random-roll',
@@ -278,6 +281,7 @@ async function authoritativeRolls(input: {
             count: sourceMode === 'normal' ? 1 : 2,
             sides: 20,
             actorId: input.actorId,
+            rollerTokenId: input.actorId,
             targetId,
             targetName: target.name,
             kind: 'ability-check',
@@ -291,6 +295,7 @@ async function authoritativeRolls(input: {
             count: targetMode === 'normal' ? 1 : 2,
             sides: 20,
             actorId: input.actorId,
+            rollerTokenId: targetId,
             targetId,
             targetName: target.name,
             kind: 'ability-check',
@@ -336,6 +341,7 @@ async function authoritativeRolls(input: {
           count: mode === 'normal' ? 1 : 2,
           sides: 20,
           actorId: input.actorId,
+          rollerTokenId: check.kind === 'saving-throw' ? targetId : input.actorId,
           targetId,
           targetName: target.name,
           kind: check.kind === 'saving-throw'

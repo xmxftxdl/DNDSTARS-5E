@@ -379,7 +379,7 @@ describe('地图战斗结果结算器', () => {
         rollDice,
       })
 
-      expect(rollDice).toHaveBeenCalledWith(1, 6, '不退斗志·额外伤害', 'enemy')
+      expect(rollDice).toHaveBeenCalledWith(1, 6, '不退斗志·额外伤害', 'enemy', { rollerTokenId: 'enemy' })
       expect(settled.result.state.combatants.hero.currentHp).toBe(hpBeforeMechanic - 4)
       expect(dnd5ePendingMonsterMechanicResolutions(settled.result.state)).toEqual([])
       expect(settled.result.events).toContainEqual(expect.objectContaining({
@@ -512,7 +512,7 @@ describe('地图战斗结果结算器', () => {
       rollDice,
     })
 
-    expect(rollDice).toHaveBeenCalledWith(1, 6, '失去飞行支撑·坠落伤害', 'hero')
+    expect(rollDice).toHaveBeenCalledWith(1, 6, '失去飞行支撑·坠落伤害', 'hero', { rollerTokenId: 'hero' })
     expect(settled.result.state.combatants.hero.elevationFeet).toBe(0)
     expect(settled.result.state.combatants.hero.airborne).toBe(false)
     expect(settled.result.events).toContainEqual(expect.objectContaining({
@@ -598,7 +598,7 @@ describe('地图战斗结果结算器', () => {
       3,
       6,
       '失去飞行支撑·坠落伤害',
-      'hero',
+      'hero', { rollerTokenId: 'hero' },
     )
     expect(settled.result.state.combatants.hero).toMatchObject({
       currentHp: 11,
@@ -799,13 +799,13 @@ describe('地图战斗结果结算器', () => {
         1,
         100,
         '施法后随机表·结果',
-        'hero',
+        'hero', { rollerTokenId: 'hero' },
       )
       expect(rollDice).toHaveBeenCalledWith(
         8,
         6,
         '随机表核心法术·伤害',
-        'hero',
+        'hero', { rollerTokenId: 'hero' },
       )
       expect(settled.result.events).toContainEqual(expect.objectContaining({
         type: 'post-spell-random-table-outcome-resolved',

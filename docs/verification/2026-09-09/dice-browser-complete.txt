@@ -1,0 +1,21 @@
+[WebServer] (node:1268) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:2800) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 10 tests using 1 worker
+
+(node:35384) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 e2e\dice-pair.spec.ts:2:1 › slow iframe initialization still renders the dice and completes once (6.1s)
+  ok  2 e2e\dice-pair.spec.ts:19:13 › Pair advantage: pair, adopted die, immediate outcome and refresh (14.1s)
+  ok  3 e2e\dice-pair.spec.ts:19:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh (13.5s)
+  ok  4 e2e\dice-pair.spec.ts:19:13 › Pair save success: pair, adopted die, immediate outcome and refresh (14.3s)
+  ok  5 e2e\dice-pair.spec.ts:19:13 › Pair save failure: pair, adopted die, immediate outcome and refresh (12.9s)
+  ok  6 e2e\dice-pair.spec.ts:19:13 › Pair tie: pair, adopted die, immediate outcome and refresh (13.7s)
+  ok  7 e2e\dice-pair.spec.ts:47:1 › adopted aura respects reduced motion and clears on the next damage roll (8.5s)
+  ok  8 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (7.3s)
+  ok  9 e2e\dm-dice-correction.spec.ts:2:1 › player presents the corrected public value before the next broadcast (10.2s)
+  ok 10 e2e\room-dice.spec.ts:3:1 › room results and DM confirmation do not replace personal dice, including refresh (7.1s)
+
+  10 passed (2.4m)

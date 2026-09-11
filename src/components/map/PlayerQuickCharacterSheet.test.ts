@@ -288,3 +288,17 @@ describe('PlayerQuickCharacterSheet', () => {
     expect(html).not.toContain('奥秘')
   })
 })
+
+
+describe('quick ability and skill checks', () => {
+  it('exposes all six abilities and eighteen skills only for an authorized sheet', () => {
+    const props = { character: character(), onClose: () => {} }
+    const readOnly = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, props))
+    expect(readOnly).not.toContain('aria-label="投掷力量鉴定"')
+    const enabled = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { ...props, onQuickCheck: () => {} }))
+    expect(enabled.match(/aria-label="投掷[^"]+鉴定"/g)).toHaveLength(24)
+    expect(enabled).toContain('aria-label="投掷奥秘鉴定"')
+    const busy = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { ...props, onQuickCheck: () => {}, quickCheckDisabled: true }))
+    expect(busy.match(/aria-label="投掷[^"]+鉴定"[^>]*disabled=""/g)).toHaveLength(24)
+  })
+})

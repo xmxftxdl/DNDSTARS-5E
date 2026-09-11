@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   AlertTriangle,
@@ -119,9 +120,9 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
               ? SquareMousePointer
             : HelpCircle
 
-  return (
+  const dialog = (
     <div
-      className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/70 px-4 py-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-black/70 px-4 py-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby={`app-dialog-title-${active.id}`}
@@ -415,4 +416,5 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
       </section>
     </div>
   )
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body)
 }

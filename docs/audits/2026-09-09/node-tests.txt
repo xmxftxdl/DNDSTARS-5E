@@ -1,0 +1,17 @@
+✔ desktop version comparison handles stable and beta releases (1.3284ms)
+✔ desktop manifest parser only accepts the selected Windows channel and secure package URL (1.471ms)
+✔ archive paths cannot escape the version directory (0.2792ms)
+✔ client bundle activation verifies integrity and writes an atomic current pointer (48.1595ms)
+✔ desktop plugin store persists verified packages outside renderer storage (45.8509ms)
+✔ desktop plugin store quarantines a package whose content no longer matches the pinned integrity (16.055ms)
+✔ mobile session is player-only and cannot carry DM capabilities (0.9245ms)
+✔ mobile movement fails closed for an uncontrolled token (0.8835ms)
+✔ mobile movement accepts finite coordinates for the controlled token (0.1467ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 285.5585

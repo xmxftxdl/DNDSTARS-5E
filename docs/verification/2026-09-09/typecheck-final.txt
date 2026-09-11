@@ -1,0 +1,7 @@
+
+> dndstars-5e@0.1.0-beta.1 typecheck
+> tsc -b --pretty false
+
+src/lib/accountStorageQuota.test.ts(5,110): error TS7016: Could not find a declaration file for module '../../scripts/account-storage-quota.mjs'. 'C:/Users/Doco/Desktop/DND/DNDSTARS-5E/scripts/account-storage-quota.mjs' implicitly has an 'any' type.
+src/lib/accountStorageQuota.test.ts(26,51): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+src/lib/optionalPlayerAi.test.ts(2,39): error TS7016: Could not find a declaration file for module '../../scripts/optional-player-ai.mjs'. 'C:/Users/Doco/Desktop/DND/DNDSTARS-5E/scripts/optional-player-ai.mjs' implicitly has an 'any' type.

@@ -1,3 +1,4 @@
+import { createMapTokenOccupancy } from '../../lib/mapTokenOccupancy'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { isMovementLocked } from '../../lib/combatStatus'
 import {
@@ -249,6 +250,11 @@ export function prepareDnd5eExplorationMove(input: {
     },
   }
 
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
+  const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
+  const heightAboveGround = Math.max(0, fromElevationFeet - fromTerrainElevationFeet)
+  const occupancy = createMapTokenOccupancy(input.map, geometry, actorToken)
   const resolvedDrop = resolveTokenDropPosition(
     action.targetPosition.x,
     action.targetPosition.y,
@@ -259,12 +265,9 @@ export function prepareDnd5eExplorationMove(input: {
   const to = snapsToGrid
     ? ignoresMaterialCollision
       ? snapTokenToGridCenter(resolvedDrop.x, resolvedDrop.y, actorToken, input.map)
-      : resolveFreeDropCell(resolvedDrop.x, resolvedDrop.y, actorToken.id, input.map)
+      : resolveFreeDropCell(resolvedDrop.x, resolvedDrop.y, actorToken.id, input.map,
+          at => occupancy(mapGeometryTerrainElevationAtPoint(geometry, at) + heightAboveGround))
     : resolvedDrop
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
-  const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
-  const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
-  const heightAboveGround = Math.max(0, fromElevationFeet - fromTerrainElevationFeet)
   const targetTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, to)
   const toElevationFeet = ignoresMaterialCollision
     ? fromElevationFeet

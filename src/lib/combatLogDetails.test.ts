@@ -359,6 +359,25 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('冷冻射线寒冷伤害骰 4d8+5：6 + 2 + 7 + 5 +5 = 25')
   })
 
+  it('区分同一目标的连续射线并保留每颗骰值和加值', () => {
+    const details = formatDnd5eCombatLogDetails([
+      [4, 6], [5, 5], [2, 3],
+    ].map((rolls, attackIndex) => ({
+      type: 'spell-attack-damage-resolved' as const,
+      actorId: 'wizard', targetId: 'target', spellId: 'scorching-ray',
+      slotLevel: 2, critical: false, damageType: 'fire' as const, attackIndex,
+      roll: { sides: 6, rolls, bonus: attackIndex === 0 ? 5 : 0,
+        total: rolls[0] + rolls[1] + (attackIndex === 0 ? 5 : 0) },
+      damageAfterAttackAdjustments: attackIndex === 0 ? 15 : attackIndex === 1 ? 10 : 5,
+      finalDamage: attackIndex === 0 ? 15 : attackIndex === 1 ? 10 : 5,
+    })), { resolveName: () => '牛头人' })
+    expect(details).toEqual([
+      '第 1 次攻击 → 牛头人｜灼热射线火焰伤害骰 2d6+5：4 + 6 +5 = 15',
+      '第 2 次攻击 → 牛头人｜灼热射线火焰伤害骰 2d6：5 + 5 = 10',
+      '第 3 次攻击 → 牛头人｜灼热射线火焰伤害骰 2d6：2 + 3 = 5',
+    ])
+  })
+
   it('解释普通武器伤害被血肉魔像免疫而归零', () => {
     const details = formatDnd5eCombatLogDetails([
       {

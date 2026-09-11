@@ -1,3 +1,4 @@
+import weakenedIcon from './icons/condition-weakened.svg'
 import type { Dnd5eConditionMarkerStyle } from './dnd5eConditionMarkers'
 import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
 import {
@@ -23,7 +24,7 @@ const TACTICAL_MARKER_STYLES: Readonly<Record<
   concentrating: { glyph: '◈', fill: '#312e81', stroke: '#a78bfa', text: '#f5f3ff' },
   silenced: { glyph: '×', fill: '#334155', stroke: '#94a3b8', text: '#f8fafc' },
   slowed: { glyph: '∼', fill: '#164e63', stroke: '#67e8f9', text: '#ecfeff' },
-  weakened: { glyph: '−', fill: '#713f12', stroke: '#facc15', text: '#fefce8' },
+  weakened: { glyph: '衰', icon: weakenedIcon, fill: '#713f12', stroke: '#facc15', text: '#fefce8' },
   protected: { glyph: '◇', fill: '#14532d', stroke: '#4ade80', text: '#f0fdf4' },
   exposed: { glyph: '!', fill: '#7c2d12', stroke: '#fdba74', text: '#fff7ed' },
   hidden: { glyph: '◐', fill: '#134e4a', stroke: '#5eead4', text: '#f0fdfa' },

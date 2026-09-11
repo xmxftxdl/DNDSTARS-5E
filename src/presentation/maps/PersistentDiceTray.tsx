@@ -1,8 +1,12 @@
+import { MAX_DICE_POOL_COUNT } from '../../lib/dicePoolLimits'
+import type { DiceCheckPresentation } from './diceCheckPresentation'
 import { useState } from 'react'
 import DiceBoxRollOverlay from '../../components/DiceBoxRollOverlay'
 import type { DiceTrayHistoryRecord } from './diceTrayHistory'
 
 export interface PersistentDiceRequest {
+  check?: DiceCheckPresentation
+  dieSides?: number[]
   id: string
   staging?: boolean
   count: number
@@ -28,8 +32,8 @@ export default function PersistentDiceTray({ request, visible, onGrabReroll, fra
     ...restoredRecord,
     id: `restored:${restoredRecord.id}`,
     staging: true,
-    count: Math.min(12, restoredRecord.values.length),
-    values: restoredRecord.values.slice(0, 12),
+    count: Math.min(MAX_DICE_POOL_COUNT, restoredRecord.values.length),
+    values: restoredRecord.values.slice(0, MAX_DICE_POOL_COUNT),
     onComplete: () => undefined,
   } : null))
   if (request && request.id !== retained?.id) setRetained(request)
@@ -38,9 +42,11 @@ export default function PersistentDiceTray({ request, visible, onGrabReroll, fra
   return <DiceBoxRollOverlay
     key={`dice-ui-2:${current.sides}:${current.retainedValues?.length ?? current.count}`}
     staging={current.staging}
+    check={current.check}
     requestId={current.id}
     count={current.count}
     sides={current.sides}
+    dieSides={current.dieSides}
     values={current.values}
     label={current.label}
     targetName={current.targetName}

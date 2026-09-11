@@ -221,13 +221,13 @@ describe('CombatActionBanner', () => {
       'pointer-events-none absolute inset-x-0 top-5 z-[110] flex justify-center',
     )
     expect(mapsPageSource).toContain(
-      'absolute left-1/2 top-14 z-[110] flex -translate-x-1/2 items-center gap-3',
+      'map-combat-action-bar',
     )
     expect(mapsPageSource).toMatch(
-      /data-testid="dnd5e-spell-targeting-overlay"[\s\S]*?className="absolute left-1\/2 top-14 z-\[110\]/,
+      /data-testid="dnd5e-spell-targeting-overlay"[\s\S]*?map-combat-action-bar/,
     )
     expect(wallOfFireSource).toContain(
-      'data-testid="wall-of-fire-targeting-controls" className="absolute left-1/2 top-14 z-[110]',
+      'map-combat-action-bar',
     )
     expect(wallOfFireSource).toContain('current?.area && !current.areaTargetSelected')
     expect(wallOfFireSource).toContain('aria-label={`减小法术范围${control.label}`}')

@@ -1,0 +1,2 @@
+import { defineConfig, devices } from '@playwright/test'
+export default defineConfig({ testDir: '.', testMatch: 'map-voice.spec.ts', timeout: 30000, use: { ...devices['Desktop Chrome'] }, webServer: { cwd: process.cwd(), command: 'npx vite build --config e2e/map-voice.vite.ts && npx vite preview --config e2e/map-voice.vite.ts --host 127.0.0.1 --port 6384 --strictPort', url: 'http://127.0.0.1:6384/e2e/fixtures/map-voice.html', timeout: 60000 } })

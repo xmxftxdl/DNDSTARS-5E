@@ -1,0 +1,4 @@
+
+> dndstars-5e@0.1.0-beta.1 typecheck
+> tsc -b --pretty false
+

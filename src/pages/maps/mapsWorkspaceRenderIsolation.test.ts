@@ -138,7 +138,7 @@ describe('MapsWorkspacePage render isolation', () => {
       monsterAttackFlowStart,
     )
     const attackD20Roll = workspaceSource.indexOf(
-      'let d20 = tranquility.passed',
+      'let [d20, d20Second] = tranquility.passed',
       attackDecoyPrecheck,
     )
     const onHitRiderRolls = workspaceSource.indexOf(
@@ -392,7 +392,7 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('opens the dedicated player quick sheet while preserving the DM character detail panel', () => {
-    expect(workspaceSource).toContain("const PlayerQuickCharacterSheet = lazy(() => import('../components/map/PlayerQuickCharacterSheet'))")
+    expect(readFileSync(new URL('../mapsWorkspaceComposition.tsx', import.meta.url), 'utf8')).toContain("const PlayerQuickCharacterSheet = lazy(() => import('../components/map/PlayerQuickCharacterSheet'))")
     expect(workspaceSource).toContain('isDM ? (')
     expect(workspaceSource).toContain('<MapWorkspaceCharacterDetailPanel')
     expect(workspaceSource).toContain('<PlayerQuickCharacterSheet')

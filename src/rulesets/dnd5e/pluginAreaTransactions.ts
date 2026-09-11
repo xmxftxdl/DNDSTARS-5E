@@ -22,6 +22,7 @@ import { normalizeDnd5eActiveEffects } from './activeEffects'
 
 export interface Dnd5ePersistentAreaDamageRollRequest {
   areaId: string
+  rollerTokenId: string
   triggerId: string
   timing: Dnd5ePersistentAreaTriggerCandidate['trigger']['timing']
   count: number
@@ -49,16 +50,17 @@ export function createDnd5ePersistentAreaDamageRollCoordinator(
     sides: number,
     label: string,
     targetName: string,
+    ownership: { rollerTokenId: string },
   ) => Promise<readonly number[]>,
 ) {
   const rollsByWave = new Map<string, Promise<readonly number[]>>()
   return (input: Dnd5ePersistentAreaDamageRollRequest): Promise<readonly number[]> => {
     if (input.count === 0) return Promise.resolve([])
     const waveKey = dnd5ePersistentAreaDamageWaveKey(input)
-    if (!waveKey) return rollDice(input.count, input.sides, input.label, input.targetName)
+    if (!waveKey) return rollDice(input.count, input.sides, input.label, input.targetName, { rollerTokenId: input.rollerTokenId })
     const existing = rollsByWave.get(waveKey)
     if (existing) return existing
-    const pending = rollDice(input.count, input.sides, input.label, input.targetName)
+    const pending = rollDice(input.count, input.sides, input.label, input.targetName, { rollerTokenId: input.rollerTokenId })
     rollsByWave.set(waveKey, pending)
     return pending
   }

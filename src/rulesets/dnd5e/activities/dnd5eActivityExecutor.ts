@@ -853,10 +853,39 @@ function selectedSavingThrowAbility(
     savingThrowModifier(target, candidate) > savingThrowModifier(target, best) ? candidate : best, primary)
 }
 
+/** Resolve one submitted save before requesting damage, using the settlement rules. */
+export function previewDnd5eActivitySavingThrowV1(
+  input: Dnd5eActivityExecutionInput,
+  rollId: string,
+  rollerTokenId?: string,
+  resolvedRollMode?: Dnd5eActivityRollMode,
+): Dnd5eActivityCheckResult | undefined {
+  for (const check of input.activity.checks ?? []) {
+    if (check.kind !== 'saving-throw') continue
+    const target = input.targets.find(candidate => candidate.id === rollerTokenId)
+    if (!target || checkRollKey(check, target) !== rollId) continue
+    return resolveCheck(check, input, target, resolvedRollMode)
+  }
+}
+
+/** Preview an attack with the same rules as final settlement, without executing effects. */
+export function previewDnd5eActivityAttackV1(
+  input: Dnd5eActivityExecutionInput,
+  rollId: string,
+  resolvedRollMode?: Dnd5eActivityRollMode,
+): Dnd5eActivityCheckResult | undefined {
+  for (const check of input.activity.checks ?? []) {
+    if (check.kind !== 'attack-roll') continue
+    const target = input.targets.find(candidate => checkRollKey(check, candidate) === rollId)
+    if (target) return resolveCheck(check, input, target, resolvedRollMode)
+  }
+}
+
 function resolveCheck(
   check: Dnd5eActivityCheckV1,
   input: Dnd5eActivityExecutionInput,
   target?: Dnd5eActivityActorSnapshot,
+  resolvedRollMode?: Dnd5eActivityRollMode,
 ): Dnd5eActivityCheckResult {
   const key = checkKey(check, target)
   if (check.kind === 'random-roll') {
@@ -967,9 +996,9 @@ function resolveCheck(
   const modes = [baseMode, creatureTypeOverride, sizeRankOverride, opposedOverride].filter(
     (mode): mode is Dnd5eActivityRollMode => mode != null && mode !== 'normal',
   )
-  const mode: Dnd5eActivityRollMode = modes.includes('advantage') && modes.includes('disadvantage')
+  const mode: Dnd5eActivityRollMode = resolvedRollMode ?? (modes.includes('advantage') && modes.includes('disadvantage')
     ? 'normal'
-    : modes[0] ?? 'normal'
+    : modes[0] ?? 'normal')
   const roll = input.rolls[checkRollKey(check, target)]
   if (!roll) throw new Dnd5eFormulaEvaluationError(`missing d20 result: ${key}`)
   const d20 = selectedD20(roll.values, mode)

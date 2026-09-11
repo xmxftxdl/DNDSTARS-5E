@@ -216,13 +216,13 @@ for (const directory of ['src/pages', 'src/components', 'src/store']) {
 
 const requiredMigrations = [
   [mapsWorkspacePage, "from '../presentation/maps/combatViewModel'", 'MapsPage CombatViewModel projection'],
-  [mapsWorkspacePage, "import('../presentation/maps/MapViewportLayer')", 'MapsPage lazy viewport boundary'],
+  [await source('src/pages/mapsWorkspaceComposition.tsx'), "import('../presentation/maps/MapViewportLayer')", 'MapsPage lazy viewport boundary'],
   [mapViewportLayer, "from './SceneCanvas'", 'Viewport SceneCanvas boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useCombatInteraction'", 'MapsPage CombatInteraction boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useCombatDialog'", 'MapsPage combat dialog boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/useDicePresentation'", 'MapsPage dice presentation boundary'],
   [mapsWorkspacePage, "from '../presentation/maps/DicePresentationOverlays'", 'MapsPage dice overlay boundary'],
-  [mapsWorkspacePage, "from '../composition/browserCombatController'", 'MapsPage CombatController boundary'],
+  [await source('src/pages/mapsWorkspaceRuntime.ts'), "from '../composition/browserCombatController'", 'MapsPage CombatController boundary'],
   [mapsWorkspacePage, "from '../application/maps/MovementHazardCoordinator'", 'MapsPage movement hazard boundary'],
   [mapsWorkspacePage, "from '../application/maps/ForcedMovementPersistentAreaCoordinator'", 'MapsPage forced-movement area boundary'],
   [pluginApi, "from './plugins/pluginDeclarativeCompiler'", 'plugin declarative compiler boundary'],

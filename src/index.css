@@ -1001,7 +1001,7 @@ html[data-theme="light"] .public-landing-title-accent {
   position: absolute;
   left: 1rem;
   right: 1rem;
-  top: 8.75rem;
+  top: 6.05rem;
   bottom: 5.65rem;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 1.05rem;
@@ -1043,7 +1043,7 @@ html[data-theme="light"] .public-landing-title-accent {
   z-index: 6;
   left: 1rem;
   right: 1rem;
-  top: 3.45rem;
+  top: 0.75rem;
   display: flex;
   min-height: 4.85rem;
   align-items: center;
@@ -1162,7 +1162,7 @@ html[data-theme="light"] .public-landing-title-accent {
   z-index: 7;
   left: 1rem;
   right: 1rem;
-  top: 8.6rem;
+  top: 5.9rem;
   bottom: 0.8rem;
   overflow: hidden;
   pointer-events: auto;
@@ -1430,6 +1430,26 @@ html[data-theme="light"] .public-landing-title-accent {
   color: #c4b5fd;
 }
 
+.dice-tray-drawer__die.dice-result-value {
+  height: auto;
+  min-height: 2.65rem;
+  padding: 0.2rem 0.4rem;
+  gap: 0.05rem;
+  border-color: rgba(var(--die-result-color, 120, 145, 165), 0.65);
+  background: linear-gradient(145deg, rgba(var(--die-result-color, 120, 145, 165), 0.42), #111521);
+  flex-shrink: 0;
+}
+.dice-result-value[data-die-sides='4'] { --die-result-color: 234, 161, 60; }
+.dice-result-value[data-die-sides='6'] { --die-result-color: 55, 178, 127; }
+.dice-result-value[data-die-sides='8'] { --die-result-color: 52, 180, 214; }
+.dice-result-value[data-die-sides='10'] { --die-result-color: 92, 130, 232; }
+.dice-result-value[data-die-sides='12'] { --die-result-color: 183, 110, 232; }
+.dice-result-value[data-die-sides='20'] { --die-result-color: 229, 100, 141; }
+.dice-result-value[data-die-sides='100'] { --die-result-color: 180, 184, 199; }
+.dice-result-value__type { font-size: 0.58rem; line-height: 1; opacity: 0.85; }
+.dice-result-value strong { font-size: 0.88rem; line-height: 1.2; }
+.dice-tray-drawer__dice { overscroll-behavior: contain; pointer-events: auto; }
+
 .dice-tray-drawer__total {
   display: flex;
   min-width: 5.2rem;
@@ -1629,8 +1649,9 @@ html[data-theme="light"] .public-landing-title-accent {
 .combat-tray-tabs { position: absolute; z-index: 14; top: 0.45rem; left: 1rem; right: 1rem; display: flex; gap: 0.4rem; padding: 0.3rem; border: 0; background: transparent; pointer-events: auto; }
 .combat-tray-tabs button { padding: 0.35rem 0.85rem; border-radius: 0.5rem; color: #94a3b8; font-size: 0.75rem; font-weight: 700; }
 .combat-tray-tabs button[aria-pressed='true'] { background: #312e53; color: #f8fafc; }
-.dice-tray-drawer[data-tab='log'] { top: auto; bottom: 0.75rem; width: min(36rem, calc(100vw - 1.5rem)); height: auto; max-height: calc(100vh - 1.5rem); overflow-y: auto; pointer-events: auto; }
+.dice-tray-drawer[data-tab='log'] { top: auto; bottom: 0.75rem; width: min(36rem, calc(100vw - 1.5rem)); height: auto; max-height: calc(100vh - 1.5rem); overflow-x: hidden; overflow-y: auto; pointer-events: auto; }
 .dice-tray-drawer[data-tab='log'] .combat-tray-tabs { position: static; margin-bottom: 0.4rem; }
+.dice-tray-drawer[data-tab='log'] > div { max-width: 100%; }
 
 .map-combat-right-dock__recall button span {
   border-radius: 999px;
@@ -1757,10 +1778,11 @@ html[data-theme] .map-voice-panel :is(p, span, button, a) { color: #e2e8f0 !impo
   min-width: 0;
   overflow-x: auto;
   padding: 0.75rem;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .map-workspace-initiative > * {
+  pointer-events: none;
   width: max-content;
   margin-inline: auto;
 }
@@ -1903,6 +1925,11 @@ html[data-theme] .map-voice-panel :is(p, span, button, a) { color: #e2e8f0 !impo
   flex-wrap: wrap;
   flex-shrink: 0;
   max-width: calc(100% - 1rem);
+}
+.map-combat-action-bar.map-spell-targeting-standalone {
+  top: 3.5rem;
+  bottom: auto;
+  flex-wrap: wrap;
 }
 
 .map-combat-action-bar.map-sculpt-confirmation-compact {
@@ -3978,3 +4005,166 @@ html[data-theme="light"] :is([class~="fixed"][class~="inset-0"], [class~="fixed"
 
 /* The Log tab shares the tray's opaque felt, including its tab strip. */
 .dice-tray-drawer--foreground[data-tab='log'] { background: linear-gradient(145deg, #583622, #23141c 52%, #120d1b); border-radius: 1.7rem; padding: 0.6rem; }
+
+/* Independent room results beside the personal dice tray. */
+.room-dice-panel { position: absolute; pointer-events: auto; right: 1rem; bottom: 1rem; width: 16rem; max-width: calc(100vw - 2rem); border: 1px solid rgba(148,163,184,.24); border-radius: 14px; background: rgba(23,34,42,.86); backdrop-filter: blur(14px); color: #e2e8f0; box-shadow: 0 8px 32px #0005; overflow: hidden; }
+.room-dice-panel--beside { right: calc(23.75rem + 1.5rem); }
+.room-dice-panel__header { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .7rem .8rem; font-size: 12px; font-weight: 700; }
+.room-dice-panel__header small { margin-left: auto; color: #94a3b8; }
+.room-dice-panel__list { max-height: min(46vh, 26rem); overflow-y: auto; padding: 0 .5rem .5rem; }
+.room-dice-panel__card { border-top: 1px solid #94a3b826; }
+.room-dice-panel__card summary { display: flex; align-items: center; gap: .6rem; padding: .6rem .25rem; cursor: pointer; list-style: none; }
+.room-dice-panel__card summary::-webkit-details-marker { display: none; }
+.room-dice-panel__face { position: relative; display: grid; place-items: center; min-width: 36px; height: 36px; border-radius: 10px; background: #a78bfa18; color: #ddd6fe; }
+.room-dice-panel__face svg { opacity: .15; position: absolute; }
+.room-dice-panel__face b { font-size: 17px; }
+.room-dice-panel__identity { display: grid; gap: 2px; min-width: 0; flex: 1; font-size: 11px; }
+.room-dice-panel__identity strong { font-size: 12px; }
+.room-dice-panel__identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cbd5e1; }
+.room-dice-panel__identity small, .room-dice-panel__formula { color: #94a3b8; font-size: 10px; }
+.room-dice-panel__detail { padding: 0 .4rem .6rem; font-size: 11px; color: #cbd5e1; }
+.room-dice-panel__detail > div { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0; }
+.room-dice-panel__detail span { border: 1px solid #94a3b830; border-radius: 5px; padding: .2rem .35rem; }
+@media (max-width: 760px) { .room-dice-panel--beside { right: .75rem; bottom: auto; top: .75rem; width: 13rem; } .room-dice-panel__list { max-height: 24vh; } }
+.room-dice-panel__confirmation > div { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0; }
+.room-dice-panel__confirmation input { width: 3.5rem; padding: .3rem; border-radius: 5px; background: #0f172a; border: 1px solid #94a3b84d; color: #fff; }
+.room-dice-panel__confirmation button { border-radius: 6px; padding: .4rem .6rem; background: #065f46; color: #d1fae5; font-weight: 600; }
+.room-dice-panel__confirmation button:disabled { opacity: .45; }
+.room-dice-panel__heading { display: flex; align-items: center; }
+.room-dice-panel__heading .room-dice-panel__header { flex: 1; min-width: 0; }
+.room-dice-panel__close { display: grid; place-items: center; width: 2rem; height: 2rem; margin-right: .35rem; border-radius: 6px; color: #94a3b8; }
+.room-dice-panel__close:hover { background: #ffffff12; color: white; }
+.room-dice-panel.room-dice-panel--inline { position: static; width: 100%; max-width: none; margin-top: .4rem; box-shadow: none; }
+.room-dice-panel--inline .room-dice-panel__list { max-height: 12rem; }
+.combat-bar-dice-controls { display: flex; align-items: center; gap: .4rem; }
+.combat-bar-dice-controls button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: .3rem; min-width: 2rem; height: 1.8rem; padding: 0 .45rem; border: 1px solid #ffffff15; border-radius: .5rem; background: #ffffff08; color: #cbd5e1; }
+.combat-bar-dice-controls button:hover, .combat-bar-dice-controls button[aria-pressed='true'] { background: #8b5cf62b; color: #ede9fe; border-color: #a78bfa50; }
+.combat-bar-dice-controls button span { min-width: 1rem; padding: 0 .2rem; border-radius: .5rem; background: #a77b192b; color: #fde68a; font-size: .625rem; line-height: 1rem; }
+
+/* Keep dice selection beside the tray, outside the physics viewport. */
+.dice-tray-drawer[data-tab='dice'] { height: min(40rem, calc(100dvh - 5rem)); width: min(23rem, calc(100vw - 4.5rem)); }
+.dice-box-d20-frame.dice-box-frame--left-drawer,
+.dice-box-damage-frame.dice-box-frame--left-drawer { width: min(21rem, calc(100vw - 6.5rem)); }
+.dice-tray-drawer__controls { overflow: visible; }
+.map-dice-roller--embedded .map-dice-roller__die-picker { position: absolute; top: 0; left: -3.2rem; width: 2.65rem; display: flex; flex-direction: column; gap: .3rem; padding: .3rem; border: 1px solid #67e8f929; border-radius: .8rem; background: #091c1aed; box-shadow: 0 8px 24px #0005; }
+.map-dice-roller--embedded .map-dice-roller__die-picker button { width: 2rem; height: 2.2rem; padding: .1rem; border: 0; }
+.map-dice-roller__die-icon { width: 100%; height: 100%; }
+.dice-tray-drawer__controls--expanded .map-dice-roller__topbar { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.map-dice-roller--embedded .map-dice-roller__quick-actions { margin-top: 0; }
+.map-dice-roller--embedded .map-dice-roller__combat-visibility strong + span { display: none; }
+@media (max-height: 540px) {
+  .map-dice-roller--embedded .map-dice-roller__die-picker { max-height: calc(100dvh - 15rem); overflow-y: auto; }
+  .map-dice-roller--embedded .map-dice-roller__die-picker button { flex-shrink: 0; }
+}
+
+.pdf-reader button { padding: .35rem .45rem; border-radius: .375rem; }
+.pdf-reader button:hover { background: rgb(255 255 255 / .08); }
+.pdf-reader button:disabled { opacity: .4; }
+
+/* One connected tray and selector, with room results below the dice world. */
+.dice-tray-drawer--backdrop[data-tab='dice']::before { content: ''; position: absolute; top: 0; bottom: 0; left: -2.65rem; width: 3rem; border: 1px solid #bfa68a40; border-right: 0; border-radius: 1rem 0 0 1rem; background: linear-gradient(100deg, #49423feF, #292525f5); box-shadow: -8px 8px 24px #0004; }
+.dice-tray-drawer[data-tab='dice'] .dice-tray-drawer__surface { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.map-dice-roller--embedded .map-dice-roller__die-picker { top: -5.15rem; left: -3.65rem; width: 2.65rem; align-items: center; padding: 0 .3rem; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker button { color: #d6d3d1; background: #ffffff06; }
+.map-dice-roller--embedded .map-dice-roller__die-picker button[data-active='true'] { color: #a5f3fc; background: #22d3ee24; }
+.dice-tray-drawer[data-tab='dice'][data-room-rolls='true'] { height: min(34rem, calc(100dvh - 18rem)); }
+.dice-tray-drawer__room-results { position: absolute; top: calc(100% + .4rem); left: -2.65rem; right: 0; pointer-events: auto; }
+.dice-tray-drawer__room-results .room-dice-panel--inline { margin: 0; border-radius: .8rem; background: #272525eb; }
+.dice-tray-drawer__room-results .room-dice-panel__list { min-height: min(16vh, 8rem); max-height: min(26vh, 13rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+@media (max-height: 640px) {
+  .dice-tray-drawer[data-tab='dice'][data-room-rolls='true'] { height: calc(100dvh - 13rem); }
+  .dice-tray-drawer__room-results .room-dice-panel__list { min-height: 5rem; max-height: 22vh; }
+}
+
+/* Fit tray + measured room results to the viewport, keeping a small bottom gap. */
+.dice-tray-drawer[data-tab='dice'],
+.dice-tray-drawer[data-tab='dice'][data-room-rolls='true'] { right: 3.4rem; height: calc(100dvh - 5.15rem - var(--room-results-height, 0px)); }
+.dice-tray-drawer--backdrop[data-tab='dice']::before { left: auto; right: -2.65rem; border: 1px solid #bfa68a40; border-left: 0; border-radius: 0 1rem 1rem 0; }
+.dice-tray-drawer[data-tab='dice'] .dice-tray-drawer__surface { border-radius: 1.7rem 0 0 1.7rem; }
+.map-dice-roller--embedded .map-dice-roller__die-picker { left: auto; right: -3.65rem; max-height: calc(100dvh - 6.65rem - var(--room-results-height, 0px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker::-webkit-scrollbar { display: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker > button > span.absolute { right: 0; top: 0; }
+.map-dice-roller--embedded .map-dice-roller__die-picker > button { flex-shrink: 0; }
+.map-dice-roller__visibility-shortcuts { display: flex; flex-direction: column; gap: .3rem; margin-top: .4rem; padding-top: .4rem; border-top: 1px solid #ffffff26; }
+.map-dice-roller__visibility-shortcuts button { display: grid; place-items: center; }
+.map-dice-roller__visibility-shortcuts button[aria-pressed='true'] { color: #a5f3fc; background: #22d3ee30; }
+.map-dice-roller__visibility-shortcuts button:disabled { opacity: .3; cursor: not-allowed; }
+.dice-box-d20-frame.dice-box-frame--left-drawer,
+.dice-box-damage-frame.dice-box-frame--left-drawer { right: 4.4rem; }
+.dice-tray-drawer__room-results { left: 0; right: -2.65rem; }
+
+
+/* Companion dice log: compact rows, with all roll validation in the tray. */
+.room-dice-panel__card summary { padding: .4rem .55rem; gap: .5rem; }
+.room-dice-panel__face { width: 2rem; min-width: 2rem; height: 2rem; border: 0; background: transparent; }
+.room-dice-panel__identity strong { font-size: .72rem; }
+.room-dice-panel__detail { font-size: .7rem; }
+
+.dice-tray-drawer__result--settlement {
+  height: auto;
+  flex-wrap: wrap;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.dice-check-outcome {
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+  right: 2.5rem;
+  top: 38%;
+  width: 18rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  text-align: center;
+  animation: dice-check-flash 2.4s ease-out both;
+}
+.dice-check-outcome span { display: block; font-size: .75rem; }
+.dice-check-outcome strong { display: block; margin-top: .3rem; font-size: 1.65rem; }
+.dice-check-outcome--success {
+  color: #fff1b5;
+  background: radial-gradient(ellipse, #b8862477, #b8862400 75%);
+  text-shadow: 0 0 12px #ffc655;
+}
+.dice-check-outcome--failure {
+  color: #c7cbd6;
+  background: radial-gradient(ellipse, #050711dd, #05071100 75%);
+  text-shadow: 0 2px 12px #000;
+}
+@keyframes dice-check-flash {
+  0% { opacity: 0; transform: translateY(5px); }
+  15%, 75% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dice-check-outcome { animation: none; }
+}
+
+.dice-tray-drawer__header { flex-wrap: wrap; }
+.dice-check-mode { flex-basis: 100%; color: #fde68a; font-size: .78rem; font-weight: 700; }
+.dice-tray-drawer__die--adopted { border-color: #fbbf24 !important; background: #854d0e !important; color: #fff7c2 !important; box-shadow: 0 0 10px #fbbf2450; }
+.dice-tray-drawer__die--adopted small { display: block; font-size: .55rem; }
+.dice-check-inline { margin-left: auto; display: flex; gap: .65rem; align-items: center; color: #fde68a; font-size: .75rem; }
+.dice-tray-drawer__result:has(.dice-check-inline) { flex-wrap: wrap; height: auto; min-height: 4.35rem; }
+.dice-tray-drawer__secret--check { grid-template-columns: minmax(0, 1fr) auto; }
+
+/* The selector owns the roll action; the dice world has no floating action bar. */
+.map-dice-roller--embedded .map-dice-roller__topbar { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker .map-dice-roller__rail-roll { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; height: 2.2rem; margin-top: .35rem; border: 1px solid #67e8f94d; background: #0e746b80; color: #cffafe; font-size: .6rem; }
+.map-dice-roller--embedded .map-dice-roller__rail-roll:hover:not(:disabled) { background: #0e9488; }
+.map-dice-roller--embedded .map-dice-roller__rail-roll:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Keep the combat controls inside the space left by the visible right drawer.
+   :has also covers automatic dice presentation before the dock tab state catches up. */
+@media (min-width: 901px) {
+  .map-player-combat-hotbar { transition: right 180ms ease; }
+  body:has(.dice-tray-drawer[data-tab='dice']) .map-player-combat-hotbar {
+    right: calc(min(23rem, 100vw - 4.5rem) + 4.15rem);
+  }
+  body:has(.dice-tray-drawer[data-tab='log']) .map-player-combat-hotbar {
+    right: calc(min(36rem, 100vw - 1.5rem) + 1.5rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-player-combat-hotbar { transition: none; }
+}

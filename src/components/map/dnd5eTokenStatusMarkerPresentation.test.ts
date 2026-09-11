@@ -1,3 +1,4 @@
+import weakenedIcon from './icons/condition-weakened.svg'
 import { describe, expect, it } from 'vitest'
 import { dnd5eTokenStatusMarkerStyle } from './dnd5eTokenStatusMarkerPresentation'
 
@@ -31,4 +32,8 @@ describe('D&D 5e Token status marker presentation', () => {
       stroke: '#a78bfa',
     })
   })
+})
+
+it('uses a dedicated weakness silhouette for enfeeblement badges', () => {
+  expect(dnd5eTokenStatusMarkerStyle('weakened').icon).toBe(weakenedIcon)
 })

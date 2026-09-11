@@ -24,6 +24,7 @@ export function resolveSharedDiceEventApply(input: {
   state?: SharedDiceState | null
   mapId: string
   mode: Mode
+  memberId?: string
   now: number
   seenIds: ReadonlySet<string>
   maxAgeMs?: number
@@ -31,7 +32,9 @@ export function resolveSharedDiceEventApply(input: {
   const state = input.state
   if (!state) return { status: 'ignored', reason: 'missing-state' }
   if (state.mapId !== input.mapId) return { status: 'ignored', reason: 'wrong-map' }
-  if (state.sourceMode === input.mode) return { status: 'ignored', reason: 'same-source' }
+  if (state.sourceMemberId && input.memberId
+    ? state.sourceMemberId === input.memberId
+    : state.sourceMode === input.mode) return { status: 'ignored', reason: 'same-source' }
   if (state.visibility === 'dm' && input.mode !== 'dm') return { status: 'ignored', reason: 'private-roll' }
   if (input.now - state.updatedAt > (input.maxAgeMs ?? 60000)) {
     return { status: 'ignored', reason: 'stale' }

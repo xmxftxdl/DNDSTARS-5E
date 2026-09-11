@@ -6,6 +6,20 @@ const request = (id: string, sides: number, visibility: 'public' | 'dm-only'): D
 })
 
 describe('DM dice settlement confirmation', () => {
+  it('cancels active and queued confirmations without accepting any faces, and can be reused', async () => {
+    const present = vi.fn(() => new Promise<number[]>(() => {}))
+    const confirm = createDmDiceConfirmationQueue(present)
+    const first = confirm(request('attack', 20, 'public'))
+    const second = confirm(request('damage', 6, 'public'))
+    const results = Promise.allSettled([first, second])
+    await Promise.resolve()
+    confirm.cancelAll()
+    expect((await results).map(result => result.status)).toEqual(['rejected', 'rejected'])
+    expect(present).toHaveBeenCalledTimes(1)
+    present.mockImplementation(async () => [5])
+    await expect(confirm(request('next-combat', 20, 'public'))).resolves.toEqual([5])
+  })
+
   it('waits for DM approval and returns edited faces before presenting the next group', async () => {
     const pending: ((values: number[]) => void)[] = []
     const present = vi.fn(() => new Promise<number[]>(resolve => pending.push(resolve)))

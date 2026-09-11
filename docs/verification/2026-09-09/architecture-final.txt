@@ -1,0 +1,7 @@
+Architecture ratchet can be tightened:
+Architecture debt remains registered in scripts/architecture-ratchet.json (13 budgets above target).
+- MapsWorkspacePage.tsx line improved to 41289; lower maximum from 41294
+- shared-server-core.mjs line improved to 14974; lower maximum from 14989
+- MapCanvas.tsx line improved to 3413; lower maximum from 3418
+- src/components/map/MapTokenNode.tsx line improved to 1753; lower maximum from 1761
+Architecture audit passed: MapsPage 12 lines; MapsWorkspacePage 41289 lines; shared server 14974 lines; dependency ratchets intact.

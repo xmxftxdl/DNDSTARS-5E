@@ -174,6 +174,7 @@ describe('Flaming Sphere concentration damage transaction', () => {
       '专注·体质豁免 DC 10',
       targetToken.label,
       {
+        checkPreview: expect.objectContaining({ kind: 'save', evaluate: expect.any(Function) }),
         rollKind: 'saving-throw',
         rollerTokenId: targetToken.id,
         rollerCharacterId: 'target',

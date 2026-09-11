@@ -15,8 +15,9 @@
 // a d100+d10 PAIR: `1d100+1d10@50,7` → 57 (spike AC4c). See percentileNotation.
 // ============================================================================
 
-/** Inclusive die-count clamp (matches the legacy iframe + overlay bounds). */
-export const MAX_QTY = 12
+import { MAX_DICE_POOL_COUNT } from './dicePoolLimits'
+/** Inclusive die-count clamp shared with the iframe and overlay. */
+export const MAX_QTY = MAX_DICE_POOL_COUNT
 /** Inclusive sides clamp (matches DiceBoxRollOverlay's `Math.min(100, …)`). */
 export const MAX_SIDES = 100
 

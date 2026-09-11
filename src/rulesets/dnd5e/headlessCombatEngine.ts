@@ -3984,6 +3984,7 @@ export type Dnd5eCombatEvent = (
       type: 'spell-attack-damage-resolved'
       actorId: string
       targetId: string
+      attackIndex?: number
       spellId: string
       slotLevel: number
       critical: boolean
@@ -21618,11 +21619,32 @@ function resolveSpellCast(
             events,
           )
           if (finalDamage == null) return fail(state, events, 'invalid-class-feature')
-          applySpellDamage(
+          const damageAfterAttackAdjustments = adjustDamageForTarget(
+            affectedTarget, finalDamage, spell.damageType, spellDamageSource,
+          )
+          const damageTaken = applySpellDamage(
             affectedTarget,
-            adjustDamageForTarget(affectedTarget, finalDamage, spell.damageType, spellDamageSource),
+            damageAfterAttackAdjustments,
             critical,
           )
+          events.push({
+            type: 'spell-attack-damage-resolved',
+            actorId: actor.id,
+            targetId: affectedTarget.id,
+            attackIndex,
+            spellId: spell.id,
+            slotLevel: action.slotLevel,
+            critical,
+            damageType: selectedSpellDamageType,
+            roll: {
+              sides: spell.dice.sides,
+              rolls: [...damage.rolls],
+              bonus: damage.bonus,
+              total: damage.diceTotal + damage.bonus,
+            },
+            damageAfterAttackAdjustments,
+            finalDamage: damageTaken,
+          })
           triggerHurlThroughHell({
             state, actor, target: affectedTarget,
             damageRolls: supplied.hurlThroughHellDamageRolls,

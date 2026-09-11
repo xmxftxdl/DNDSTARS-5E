@@ -1,3 +1,4 @@
+import { createCombatPresentationReplayFilter } from '../../lib/combatBannerReplay'
 import { useEffect, useMemo, useState } from 'react'
 import { flushSync } from 'react-dom'
 import {
@@ -51,10 +52,13 @@ export function useCombatPresentationCoordinator(
     void refreshCombatPresentationClock().then(() => {
       if (!cancelled) setClockRevision((value) => value + 1)
     })
+    const acceptPresentation = createCombatPresentationReplayFilter(() => window.sessionStorage, 'received')
     const unsubscribe = browserSharedRoomService.subscribeSharedEvent(COMBAT_PRESENTATION_CHANNEL, (event) => {
+      if (!acceptPresentation(event)) return
       setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
     })
     const unsubscribeLocal = subscribeLocalCombatPresentationEvent((event) => {
+      if (!acceptPresentation(event)) return
       flushSync(() => {
         setState((current) => reduceCombatPresentationState(current, event, combatPresentationServerNow()))
       })

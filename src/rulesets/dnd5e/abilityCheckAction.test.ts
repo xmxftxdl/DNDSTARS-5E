@@ -147,3 +147,23 @@ describe('D&D 5e ability-check authority bridge', () => {
       .toEqual({ ok: false, reason: 'invalid-action' })
   })
 })
+
+
+describe('total-only quick checks', () => {
+  it('preserves expertise and does not spend the action', () => {
+    const input = fixture({ ability: 'cha', skill: 'performance', dc: 0, totalOnly: true, spendAction: false })
+    const prepared = prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const preview = previewPreparedDnd5eAbilityCheck(prepared.prepared, 10)
+    expect(preview).toMatchObject({ d20: 10, modifier: 14, total: 24 })
+    const resolved = resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 10 })
+    expect(resolved.result.state.combatants[prepared.prepared.actorToken.id].turn.actionAvailable).toBe(true)
+  })
+  it('rejects a total-only request that supplies a difficulty or spends an action', () => {
+    for (const extra of [{ dc: 15 }, { dc: 0, spendAction: true }]) {
+      const input = fixture({ ability: 'cha', totalOnly: true, ...extra })
+      expect(prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })).toEqual({ ok: false, reason: 'invalid-action' })
+    }
+  })
+})

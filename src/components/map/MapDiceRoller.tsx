@@ -1,5 +1,6 @@
+import { MAX_DICE_POOL_COUNT } from '../../lib/dicePoolLimits'
 import { useMemo, useState } from 'react'
-import { Dices, X } from 'lucide-react'
+import { Dices, Eye, EyeOff, RotateCcw, X } from 'lucide-react'
 import { ABILITIES, SKILLS } from '../../lib/dnd'
 import type { Dnd5eAbilityCheckPayload, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import {
@@ -13,15 +14,14 @@ import {
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 import {
-  addMapFreeDie,
-  mapFreeDiceSelectionFormula,
-  removeMapFreeDie,
+  mixedDiceFormula, updateMixedDice, type MapFreeDiceSelection,
   type MapFreeDiceResolution,
 } from './mapFreeDiceRoll'
 
 const DIE_SIDES = [4, 6, 8, 10, 12, 20, 100] as const
 
 export interface MapFreeDiceRollRequest {
+  groups?: MapFreeDiceSelection[]
   count: number
   sides: number
   bonus: number
@@ -31,6 +31,8 @@ export interface MapFreeDiceRollRequest {
 }
 
 interface MapDiceRollerProps {
+  visibility?: 'public' | 'dm'
+  onVisibilityChange?: (visibility: 'public' | 'dm') => void
   isDm: boolean
   embedded?: boolean
   onRequestClose?: () => void
@@ -43,10 +45,13 @@ interface MapDiceRollerProps {
   combatRollsVisible?: boolean
   onCombatRollsVisibleChange?: (visible: boolean) => void
   onRoll: (request: MapFreeDiceRollRequest) => Promise<void>
+  onReroll?: () => Promise<void>
   onCheck: (payload: Dnd5eAbilityCheckPayload) => void
 }
 
 export default function MapDiceRoller({
+  visibility: controlledVisibility,
+  onVisibilityChange,
   isDm,
   embedded = false,
   onRequestClose,
@@ -59,15 +64,22 @@ export default function MapDiceRoller({
   combatRollsVisible = true,
   onCombatRollsVisibleChange,
   onRoll,
+  onReroll,
   onCheck,
 }: MapDiceRollerProps) {
   const [open, setOpen] = useState(false)
   const [rolling, setRolling] = useState(false)
-  const [count, setCount] = useState(0)
+  const [groups, setGroups] = useState<MapFreeDiceSelection[]>([])
+  const count = groups.reduce((sum, group) => sum + group.count, 0)
   const [sides, setSides] = useState<number>(20)
   const [bonus, setBonus] = useState(0)
   const [label, setLabel] = useState('自由掷骰')
-  const [visibility, setVisibility] = useState<'public' | 'dm'>('public')
+  const [localVisibility, setLocalVisibility] = useState<'public' | 'dm'>('public')
+  const visibility = controlledVisibility ?? localVisibility
+  const setVisibility = (next: 'public' | 'dm') => {
+    setLocalVisibility(next)
+    onVisibilityChange?.(next)
+  }
   const [asCheck, setAsCheck] = useState(false)
   const [selection, setSelection] = useState('ability:str')
   const [dc, setDc] = useState(10)
@@ -179,21 +191,29 @@ export default function MapDiceRoller({
     setRolling(true)
     close()
     try {
-      await onRoll({ count, sides, bonus, label: label.trim() || '自由掷骰', visibility })
+      await onRoll({ count, sides: groups[0]?.sides ?? sides, groups, bonus, label: label.trim() || '自由掷骰', visibility })
+      setGroups([])
     } finally {
       setRolling(false)
     }
   }
-  const diceFormula = mapFreeDiceSelectionFormula({ count, sides })
+  const reroll = async () => {
+    if (!onReroll || rolling || pending) return
+    setRolling(true)
+    close()
+    try {
+      await onReroll()
+    } finally {
+      setRolling(false)
+    }
+  }
+  const diceFormula = mixedDiceFormula(groups) || '尚未添加骰子'
   const addDie = (die: number) => {
-    const next = addMapFreeDie({ count, sides }, die)
-    setCount(next.count)
-    setSides(next.sides)
+    setSides(die)
+    setGroups(current => updateMixedDice(current, die, (current.find(group => group.sides === die)?.count ?? 0) + 1))
   }
   const removeDie = (die: number) => {
-    const next = removeMapFreeDie({ count, sides }, die)
-    setCount(next.count)
-    setSides(next.sides)
+    setGroups(current => updateMixedDice(current, die, (current.find(group => group.sides === die)?.count ?? 0) - 1))
   }
 
   const panel = (
@@ -227,46 +247,50 @@ export default function MapDiceRoller({
                   event.preventDefault()
                   removeDie(die)
                 }}
-                aria-label={`添加 d${die}${sides === die && count > 0 ? `，当前 ${count} 枚` : ''}`}
-                data-active={sides === die && count > 0 ? 'true' : 'false'}
+                aria-label={`添加 d${die}，当前 ${groups.find(group => group.sides === die)?.count ?? 0} 枚`}
+                data-active={groups.some(group => group.sides === die) ? 'true' : 'false'}
                 title={`点击添加 d${die}；右键移除`}
-                className={`relative rounded-lg border px-1 py-2 text-xs font-black transition ${sides === die && count > 0 ? 'border-cyan-300/70 bg-cyan-500/20 text-cyan-100' : 'border-white/8 bg-white/[0.035] text-slate-400 hover:bg-white/[0.08]'}`}
+                className={`relative rounded-lg border px-1 py-2 text-xs font-black transition ${groups.some(group => group.sides === die) ? 'border-cyan-300/70 bg-cyan-500/20 text-cyan-100' : 'border-white/8 bg-white/[0.035] text-slate-400 hover:bg-white/[0.08]'}`}
               >
-                d{die}
-                {sides === die && count > 0 ? (
+                {embedded ? <svg className="map-dice-roller__die-icon" viewBox="0 0 36 36" aria-hidden="true">
+                  <path d={die === 4 ? 'M18 3 34 31H2Z' : die === 6 ? 'M6 5H30V31H6Z' : die === 8 ? 'M18 2 33 18 18 34 3 18Z' : 'M18 2 32 10V26L18 34 4 26V10Z'} fill="none" stroke="currentColor" strokeWidth="1.4" />
+                  <text x="18" y={die === 4 ? '24' : '22'} textAnchor="middle" fill="currentColor" fontSize={die === 100 ? '10' : '12'} fontWeight="700">{die}</text>
+                </svg> : <>d{die}</>}
+                {groups.some(group => group.sides === die) ? (
                   <span className="absolute -right-1.5 -top-1.5 grid min-h-4 min-w-4 place-items-center rounded-full bg-cyan-300 px-1 text-[9px] font-black text-cyan-950">
-                    {count}
+                    {groups.find(group => group.sides === die)?.count}
                   </span>
                 ) : null}
               </button>
             ))}
+            {embedded && !asCheck && <button
+              type="button"
+              disabled={count < 1 || rolling}
+              onClick={() => void roll()}
+              className="map-dice-roller__rail-roll"
+              aria-label={rolling ? '投掷中…' : `投掷 ${diceFormula}`}
+              title={rolling ? '投掷中…' : `投掷 ${diceFormula}${bonus === 0 ? '' : bonus > 0 ? ` + ${bonus}` : ` − ${Math.abs(bonus)}`}`}
+              data-testid="map-dice-roller-quick-roll"
+            ><Dices size={19} aria-hidden="true" /></button>}
+            {embedded && !asCheck && <button
+              type="button"
+              disabled={!onReroll || rolling || pending}
+              onClick={() => void reroll()}
+              className="map-dice-roller__rail-roll"
+              aria-label="重骰：重新投掷上一次的骰子组合"
+              title="重骰：重新投掷上一次的骰子组合"
+            ><RotateCcw size={18} aria-hidden="true" /></button>}
+            {embedded && isDm && <div className="map-dice-roller__visibility-shortcuts" role="group" aria-label="自由投掷明暗骰">
+              <button type="button" title="明骰：全房间可见" aria-label="明骰：全房间可见" aria-pressed={visibility === 'public'} onClick={() => setVisibility('public')}><Eye size={18} /></button>
+              <button type="button" title="暗骰：仅 DM 可见" aria-label="暗骰：仅 DM 可见" aria-pressed={visibility === 'dm'} disabled={asCheck} onClick={() => setVisibility('dm')}><EyeOff size={18} /></button>
+            </div>}
           </div>
-          {embedded && !asCheck ? (
-            <div className="map-dice-roller__quick-actions mt-2 flex items-center gap-2" data-testid="map-dice-roller-quick-actions">
-              <output className="min-w-0 flex-1 truncate font-mono text-xs font-bold text-cyan-100" aria-live="polite">
-                {diceFormula}{bonus === 0 || count < 1 ? '' : bonus > 0 ? ` + ${bonus}` : ` − ${Math.abs(bonus)}`}
-              </output>
-              <button
-                type="button"
-                disabled={count < 1 || rolling}
-                onClick={() => setCount(0)}
-                className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 transition hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-35"
-              >清空</button>
-              <button
-                type="button"
-                disabled={count < 1 || rolling}
-                onClick={() => void roll()}
-                className="rounded-lg border border-cyan-300/25 bg-cyan-500/20 px-3 py-1.5 text-[11px] font-bold text-cyan-100 transition hover:bg-cyan-500/35 disabled:cursor-not-allowed disabled:opacity-35"
-                data-testid="map-dice-roller-quick-roll"
-              >{rolling ? '投掷中…' : '投掷'}</button>
-            </div>
-          ) : null}
           </div>
 
           <div className={embedded ? 'map-dice-roller__settings' : undefined}>
           <div className="mt-3 grid grid-cols-[72px_82px_minmax(0,1fr)] gap-2">
             <label className="text-[10px] font-semibold text-slate-500">数量
-              <input type="number" min={0} max={12} value={count} onChange={(event) => setCount(Math.min(12, Math.max(0, Math.floor(Number(event.target.value) || 0))))} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100" />
+              <input aria-label={`d${sides} 数量`} type="number" min={0} max={MAX_DICE_POOL_COUNT} value={groups.find(group => group.sides === sides)?.count ?? 0} onChange={(event) => setGroups(current => updateMixedDice(current, sides, Number(event.target.value) || 0))} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100" />
             </label>
             <label className="text-[10px] font-semibold text-slate-500">调整值
               <input type="number" min={-99} max={99} value={bonus} onChange={(event) => setBonus(Math.min(99, Math.max(-99, Math.floor(Number(event.target.value) || 0))))} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100" />
@@ -284,7 +308,7 @@ export default function MapDiceRoller({
                   <option value="dm">暗骰 · 仅 DM 可见</option>
                 </select>
               </label>
-              <label className="flex items-start gap-2 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] px-3 py-2.5 text-xs text-fuchsia-100">
+              <label title="关闭后，怪物的命中、豁免、充能与伤害骰只在 DM 端显示；暗骰 d20 可由 DM 确认或修正。" className="map-dice-roller__combat-visibility flex items-start gap-2 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] px-3 py-2.5 text-xs text-fuchsia-100">
                 <input
                   type="checkbox"
                   checked={combatRollsVisible}
@@ -303,7 +327,7 @@ export default function MapDiceRoller({
           )}
 
           <label className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-300/10 bg-cyan-500/[0.04] px-3 py-2.5 text-xs font-semibold text-cyan-100">
-            <input type="checkbox" checked={asCheck} onChange={(event) => setAsCheck(event.target.checked)} className="accent-cyan-400" />
+            <input type="checkbox" checked={asCheck} onChange={(event) => { setAsCheck(event.target.checked); if (event.target.checked) setVisibility('public') }} className="accent-cyan-400" />
             作为属性／技能鉴定
           </label>
 
@@ -382,7 +406,7 @@ export default function MapDiceRoller({
               disabled={rolling || count < 1}
               onClick={() => void roll()}
               className="mt-3 w-full rounded-xl bg-cyan-500/20 px-4 py-2.5 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35 disabled:cursor-wait disabled:opacity-40"
-            >{rolling ? '骰子滚动中…' : count < 1 ? '请先点击上方骰子添加' : `投掷 ${count}d${sides}${bonus === 0 ? '' : bonus > 0 ? ` + ${bonus}` : ` − ${Math.abs(bonus)}`}`}</button>
+            >{rolling ? '骰子滚动中…' : count < 1 ? '请先选择骰子' : `投掷 ${diceFormula}${bonus === 0 ? '' : bonus > 0 ? ` + ${bonus}` : ` − ${Math.abs(bonus)}`}`}</button>
           )}
           </div>
     </section>

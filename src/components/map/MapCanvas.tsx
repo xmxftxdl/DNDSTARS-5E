@@ -1,3 +1,4 @@
+import { measurePointsEqual, tabletopLinePoints, type Point } from './mapCanvasGeometry'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow } from 'react-konva'
 import Konva from 'konva'
@@ -351,19 +352,6 @@ interface MapCanvasProps {
   isDM?: boolean
   /** Current player character used for source-only spell-entity presentation. */
   viewerCharacterId?: string
-}
-
-interface Point {
-  x: number
-  y: number
-}
-
-function measurePointsEqual(a: Point, b: Point): boolean {
-  return Math.hypot(b.x - a.x, b.y - a.y) < 1.5
-}
-
-function tabletopLinePoints(points: readonly MapTabletopPoint[]): number[] {
-  return points.flatMap((point) => [point.x, point.y])
 }
 
 export default function MapCanvas({

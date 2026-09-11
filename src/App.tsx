@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
-import { PanelLeftOpen } from 'lucide-react'
 import AccountAppShell from './components/AccountAppShell'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
@@ -71,7 +70,8 @@ export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => isMapWorkspacePath(location.pathname))
+  const [previousMapActive, setPreviousMapActive] = useState(() => isMapWorkspacePath(location.pathname))
   const [pdfSplitRequest, setPdfSplitRequest] = useState<PdfSplitViewRequest | null>(null)
   const sidebarCollapsedBeforePdfRef = useRef<boolean | null>(null)
   const [account, setAccount] = useState(() => getAccountSession())
@@ -104,6 +104,11 @@ export default function App() {
     legacyWorkspacePaths.has(location.pathname) ||
     (bypassRoomLobby && location.pathname === '/')
   const mapWorkspaceActive = isMapWorkspacePath(location.pathname)
+  // Entering the map compacts navigation; leaving it preserves the user's state.
+  if (previousMapActive !== mapWorkspaceActive) {
+    setPreviousMapActive(mapWorkspaceActive)
+    if (mapWorkspaceActive) setCollapsed(true)
+  }
 
   useEffect(() => subscribeAccountSession(setAccount), [])
   useEffect(() => subscribeRoomSession(setRoomSession), [])
@@ -441,18 +446,18 @@ export default function App() {
         sandbox="allow-scripts allow-same-origin"
         aria-hidden="true"
       />
-      {!collapsed && (
-        <Suspense fallback={null}>
+      <Suspense fallback={null}>
           <Sidebar
             mode={endpointMode ?? undefined}
             roomSession={roomSession ?? undefined}
             campaignBasePath={campaignBasePath}
             connection={connection}
+            compact={collapsed}
+            onExpand={() => setCollapsed(false)}
             onCollapse={() => setCollapsed(true)}
             onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
           />
-        </Suspense>
-      )}
+      </Suspense>
       {pdfSplitRequest && (
         <MapReferencePanel>
         <PageErrorBoundary scope="PDF 分屏阅读器">
@@ -462,16 +467,7 @@ export default function App() {
         </PageErrorBoundary>
         </MapReferencePanel>
       )}
-      <main className={`relative min-w-0 flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
-        {collapsed && (
-          <button
-            onClick={() => setCollapsed(false)}
-            title="展开侧边栏"
-            className="glass absolute left-3 top-3 z-50 flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 transition-colors hover:text-arcane-200"
-          >
-            <PanelLeftOpen className="h-5 w-5" />
-          </button>
-        )}
+      <main className="relative min-w-0 flex-1 overflow-y-auto py-6 pr-6 pl-6">
         {/* Keep the room's single combat processor alive across campaign pages.
             Dice portals remain visible outside this hidden map container. */}
         <div className="h-full" hidden={!mapWorkspaceActive} key={`combat-workspace:${campaignId}:${roomSession?.memberId ?? endpointMode}`}>

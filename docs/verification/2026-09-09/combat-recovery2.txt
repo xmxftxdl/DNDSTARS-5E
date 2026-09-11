@@ -1,0 +1,230 @@
+[WebServer] (node:36552) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] [voice] Saved local configuration could not be loaded: Command failed: powershell.exe -NoLogo -NoProfile -NonInteractive -Command Add-Type -AssemblyName System.Security;$encoded=[Console]::In.ReadToEnd().Trim();$protected=[Convert]::FromBase64String($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($protected,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes));
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] 
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] Player AI disabled: saved configuration could not be loaded. Run npm run local-ai:configure to repair it.
+[WebServer] (node:36476) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] [voice] Saved local configuration could not be loaded: Command failed: powershell.exe -NoLogo -NoProfile -NonInteractive -Command Add-Type -AssemblyName System.Security;$encoded=[Console]::In.ReadToEnd().Trim();$protected=[Convert]::FromBase64String($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($protected,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes));
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] 
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] Player AI disabled: saved configuration could not be loaded. Run npm run local-ai:configure to repair it.
+
+Running 1 test using 1 worker
+
+(node:27016) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] 23:53:38 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 23:53:38 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 23:53:46 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 23:53:57 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+recovery authority before player assertion {
+  mapId: 'recovery-map-1789015990377',
+  combatId: 'recovery-map-1789015990377:combat',
+  active: true,
+  round: 1,
+  initiativeIndex: 0,
+  initiativeOrder: [
+    {
+      slotId: 'recovery-token-1789015990377:normal',
+      tokenId: 'recovery-token-1789015990377',
+      label: '恢复测试法师',
+      emoji: 'W',
+      color: '#3b82f6',
+      roll: 18
+    },
+    {
+      slotId: 'recovery-enemy-1789015990377:normal',
+      tokenId: 'recovery-enemy-1789015990377',
+      label: '恢复目标',
+      emoji: 'M',
+      color: '#ef4444',
+      roll: 10
+    }
+  ],
+  settlementMode: 'automatic',
+  monsterControl: {
+    schemaVersion: 1,
+    mode: 'manual',
+    pauseRequested: false,
+    updatedAt: 1789015990378
+  },
+  dnd5eTurnEconomyByToken: {
+    'recovery-token-1789015990377': {
+      turnKey: 'recovery-map-1789015990377:combat:1:recovery-token-1789015990377:normal',
+      attacksUsed: 0,
+      action: [Object],
+      bonusAction: [Object],
+      reaction: [Object],
+      objectInteraction: [Object],
+      movement: [Object]
+    }
+  },
+  updatedAt: 1789016037043,
+  _sync: {
+    schemaVersion: 1,
+    revision: 5,
+    writerId: 'dm:8a4ddfd0-6b49-4fda-aea5-83a33fd0a608:recovery-dm-1789015990377',
+    writtenAt: 1789016037218
+  }
+}
+  x  1 e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 (1.3m)
+[WebServer] 23:56:37 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 23:56:37 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 23:56:39 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 23:56:51 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 23:57:02 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 00:01:03 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:01:03 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:01:04 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 00:01:09 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 00:03:00 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:03:00 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:03:01 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 00:03:05 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 00:03:07 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:03:07 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:03:07 [vite] (client) [console.warn] [共享状态迁移:characters] characters[0] 已升级为 ActiveEffect schema v2
+[WebServer] 00:03:11 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+
+
+  1) e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 ─────────
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator: getByTestId('player-combat-hotbar')
+    Expected: "0"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 5000ms
+      - waiting for getByTestId('player-combat-hotbar')
+        - waiting for" http://127.0.0.1:6474/campaign/HHQEA7/maps" navigation to finish...
+        - navigated to "http://127.0.0.1:6474/campaign/HHQEA7/maps"
+
+
+      282 |     const playerHotbar = player.getByTestId('player-combat-hotbar')
+      283 |     await expect(playerHotbar).toBeVisible({ timeout: 20_000 })
+    > 284 |     await expect(playerHotbar).toHaveAttribute('data-action-remaining', '0')
+          |                                ^
+      285 |     await expect(playerHotbar).toHaveAttribute('data-bonus-action-remaining', '0')
+      286 |     await expect(playerHotbar).toHaveAttribute('data-movement-remaining', '10')
+      287 |     await expect(playerHotbar.locator('[data-spell-slot-summary-level="2"]')).toHaveAttribute(
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\combat-authoritative-recovery.spec.ts:284:32
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 ──────────

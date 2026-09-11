@@ -168,7 +168,7 @@ describe('D&D 5e map end-turn authority bridge', () => {
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
     expect(resolved.application.characters[0].dnd5eCombatState?.raging).toBeUndefined()
-    expect(resolved.result.events).toContainEqual({ type: 'class-state-changed', actorId: 'barbarian-token', stateKey: 'rage', active: false })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'class-state-changed', actorId: 'barbarian-token', stateKey: 'rage', active: false }))
   })
 
   it('adds one persistent exhaustion level when a Frenzy ends', () => {
@@ -254,10 +254,10 @@ describe('D&D 5e map end-turn authority bridge', () => {
     const resolved = resolveDnd5ePlayerEndTurn({ action, map, characters: [mage, druid], initiativeOrder })
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'slow-delayed-spell-completed', actorId: druidToken.id,
       spellId: 'guidance', slotLevel: 0,
-    })
+    }))
     const liveDruid = resolved.result.state.combatants[druidToken.id]
     expect(liveDruid.turn).toMatchObject({ actionAvailable: false, bonusActionAvailable: false })
     expect(resolved.application.characters.find((entry) => entry.id === druid.id)

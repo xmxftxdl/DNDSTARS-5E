@@ -1,3 +1,4 @@
+import { originalInitiativeTotal } from '../components/map/combatInitiativeConfirmation'
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
 import { dnd5eAbilityCheckMode, resolveDnd5eInitiative } from '../rulesets/dnd5e/checks'
@@ -224,9 +225,11 @@ export function initiativeResultLogDetails(order: readonly InitiativeEntry[]): s
         calculation.mode === 'advantage' ? '优势取高' : '劣势取低'
       } ${calculation.d20}）`
     const base = `${d20} + 先攻调整值（${modifier}）`
+    const originalTotal = originalInitiativeTotal(entry)
+    const adjustment = originalTotal === entry.roll ? '' : `｜DM 调整先攻为 ${entry.roll}`
     return entry.turnKind === 'thief-reflexes'
-      ? `${index + 1}. ${entry.label}：${base} - 盗贼反射 10 = ${entry.roll}（首轮额外回合）`
-      : `${index + 1}. ${entry.label}：${base} = ${entry.roll}`
+      ? `${index + 1}. ${entry.label}：${base} - 盗贼反射 10 = ${originalTotal}（首轮额外回合）${adjustment}`
+      : `${index + 1}. ${entry.label}：${base} = ${originalTotal}${adjustment}`
   })
 }
 

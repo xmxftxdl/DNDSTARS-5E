@@ -1,0 +1,34 @@
+
+Running 1 test using 1 worker
+
+(node:27316) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool (1.1m)
+
+
+  1) e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 
+
+    Error: page.evaluate: Execution context was destroyed, most likely because of a navigation
+
+      47 |     await expect(dm.getByRole('button', { name: '投掷 20d6', exact: true })).toBeEnabled()
+      48 |     await dm.getByRole('button', { name: '投掷 20d6', exact: true }).click()
+    > 49 |     for (const page of [dm, player]) await expect.poll(() => page.evaluate(() => (window as ObservedWindow).poolResults.at(-1)?.values.length), { timeout: 45000 }).toBe(20)
+         |                                                                   ^
+      50 |     const values = await dm.evaluate(() => (window as ObservedWindow).poolResults.at(-1)!)
+      51 |     const mirrored = await player.evaluate(() => (window as ObservedWindow).poolResults.at(-1)!)
+      52 |     expect(values.fallback).not.toBe(true); expect(mirrored.fallback).not.toBe(true)
+        at expect.poll.timeout (C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice-room.spec.ts:49:67)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice-room.spec.ts:49:38
+
+    Error Context: e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 

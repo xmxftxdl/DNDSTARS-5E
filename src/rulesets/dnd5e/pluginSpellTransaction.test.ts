@@ -4856,10 +4856,10 @@ describe('plugin spell CombatTransaction', () => {
     expect(resolved.result.state.combatants[enemyToken.id].currentHp).toBe(90)
     expect(resolved.result.state.combatants[allyToken.id].currentHp).toBe(30)
     expect(resolved.result.state.combatants[actorToken.id].currentHp).toBe(30)
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'spell-sculpted', actorId: actorToken.id,
       targetId: allyToken.id, spellId: 'prismatic-spray',
-    })
+    }))
   })
 
   it('keeps Sculpt Spells and Overchannel on a workshop Wizard spell cast through a held arcane focus', () => {
@@ -4962,9 +4962,9 @@ describe('plugin spell CombatTransaction', () => {
       expect(resolved.result.state.combatants[enemy.id].currentHp).toBe(52)
       expect(resolved.result.state.combatants[allyToken.id].currentHp).toBe(30)
       expect(resolved.result.state.combatants[actorToken.id].classState.overchannelUsesSinceLongRest).toBe(1)
-      expect(resolved.result.events).toContainEqual({
+      expect(resolved.result.events).toContainEqual(expect.objectContaining({
         type: 'spell-sculpted', actorId: actorToken.id, targetId: allyToken.id, spellId,
-      })
+      }))
 
       action.dnd5eSpellCast!.focusItemInstanceId = 'forged-or-unheld-focus'
       expect(prepareDnd5ePluginSpellCast({ action, map, characters: [actor, ally], initiativeOrder }))

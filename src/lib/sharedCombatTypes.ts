@@ -1,3 +1,4 @@
+import type { DiceCheckPresentation } from '../presentation/maps/diceCheckPresentation'
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import type { AbilityKey } from './dnd'
@@ -108,6 +109,8 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'feature-extra-action-teleport'; targetCell: GridCell }
 
 export interface Dnd5eAbilityCheckPayload {
+  /** Quick sheet check: report a total without adjudicating a difficulty. Requires dc=0 and no action cost. */
+  totalOnly?: boolean
   ability: AbilityKey
   skill?: string
   /** Host-validated situational feature context selected before this check. */
@@ -808,6 +811,7 @@ export interface SharedPlayerActionAckState {
 }
 
 export interface SharedDiceState {
+  sourceMemberId?: string
   id: string
   mapId: string
   sourceMode: Mode
@@ -835,6 +839,10 @@ export interface SharedDiceEventsState {
 // A player-owned d20 uses request -> result so the player's browser generates
 // and animates the authoritative face before the Host resumes Headless combat.
 export interface SharedRollRequestEvent {
+  combatId?: string
+  check?: DiceCheckPresentation
+  rollerTokenId?: string
+  rollerName?: string
   eventId: string
   mapId: string
   sourceMode: Mode
@@ -845,7 +853,8 @@ export interface SharedRollRequestEvent {
   values: number[]
   label: string
   targetName: string
-  delivery?: 'broadcast-result' | 'player-roll-request' | 'player-roll-result'
+  delivery?: 'broadcast-result' | 'player-roll-request' | 'player-roll-start' | 'player-roll-result' | 'check-result' | 'combat-rolls-cancelled'
+  checkOutcome?: { rollId?: string; values?: number[]; mode?: 'normal' | 'advantage' | 'disadvantage'; id: string; kind: 'attack' | 'save'; success: boolean; actorName: string; targetName?: string; provisional?: boolean }
   targetCharacterId?: string
   rollKind?: 'attack' | 'ability-check' | 'saving-throw'
   savingThrowAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'

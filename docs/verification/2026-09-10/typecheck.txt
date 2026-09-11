@@ -1,0 +1,5 @@
+
+> dndstars-5e@0.1.0-beta.1 typecheck
+> tsc -b --pretty false
+
+src/presentation/maps/activitySavingThrowPreview.test.ts(10,3): error TS2741: Property 'automation' is missing in type '{ schemaVersion: 1; id: string; name: string; activation: { kind: "action"; cost: number; }; target: { kind: "self"; }; checks: { id: string; kind: "saving-throw"; scope: "per-target"; rollId: string; ability: "dex"; rollMode: "host-derived"; dc: { ...; }; }[]; outcomes: never[]; }' but required in type 'Dnd5eActivityDefinitionV1'.

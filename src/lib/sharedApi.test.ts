@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   configuredApiBases,
+  publishSharedEvent,
   defaultSharedApiCandidates,
   loadSharedResource,
   resetSharedResourceReadCacheForTests,
@@ -31,6 +32,21 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     resetSharedResourceReadCacheForTests()
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()
+  })
+
+  it('releases a stalled dice-result publish so the saved face can be retried', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('event-timeout')), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = publishSharedEvent('dice-roll-request-player-to-dm', { values: [18] })
+    const assertion = expect(result).rejects.toThrow('event-timeout')
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(fetchMock).toHaveBeenCalled()
+    fetchMock.mockImplementation(async () => new Response(null, { status: 204 }))
+    await expect(publishSharedEvent('dice-roll-request-player-to-dm', { values: [18] })).resolves.toBeUndefined()
   })
 
   it('coalesces concurrent reads for the same resource into one network request', async () => {

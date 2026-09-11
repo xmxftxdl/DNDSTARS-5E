@@ -1,3 +1,5 @@
+import { MAX_DICE_POOL_COUNT } from '../lib/dicePoolLimits'
+import { adoptedD20Index, type DiceCheckPresentation } from '../presentation/maps/diceCheckPresentation'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 // FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
@@ -8,6 +10,7 @@ import { onDiceDocumentHidden } from '../lib/diceVisibility'
 const MIN_VISIBLE_ROLL_MS = DICE_TIMING.ROLL_MIN_VISIBLE_MS
 
 interface DiceBoxRollOverlayProps {
+  check?: DiceCheckPresentation
   staging?: boolean
   retainedValues?: number[]
   rerollIndex?: number
@@ -15,6 +18,7 @@ interface DiceBoxRollOverlayProps {
   frameBounds?: { top: number; height: number }
   onGrabReroll?: (index: number) => Promise<void>
   count: number
+  dieSides?: number[]
   sides: number
   label: string
   targetName: string
@@ -34,12 +38,14 @@ function fallbackValues(count: number, sides: number) {
 
 export default function DiceBoxRollOverlay({
   staging = false,
+  check,
   retainedValues,
   rerollIndex,
   visible = true,
   frameBounds,
   onGrabReroll,
   count,
+  dieSides,
   sides,
   label,
   targetName,
@@ -67,7 +73,7 @@ export default function DiceBoxRollOverlay({
   const sentRequestRef = useRef<string | null>(null)
   const onCompleteRef = useRef(onComplete)
   const [flyX, flyY] = useMemo(() => resolveFlyOffset(requestId, flyIndex), [flyIndex, requestId])
-  const safeCountForFrame = Math.max(1, Math.min(12, retainedValues?.length ?? Math.round(count)))
+  const safeCountForFrame = Math.max(1, Math.min(MAX_DICE_POOL_COUNT, retainedValues?.length ?? Math.round(count)))
 
   useEffect(() => {
     const setInteractive = (enabled: boolean) => iframeRef.current?.contentWindow?.postMessage(
@@ -99,7 +105,7 @@ export default function DiceBoxRollOverlay({
     let completionTimer: number | undefined
     let deliverPending: (() => void) | undefined
     const startedAt = Date.now()
-    const safeCount = Math.max(1, Math.min(12, Math.round(count)))
+    const safeCount = Math.max(1, Math.min(MAX_DICE_POOL_COUNT, Math.round(count)))
     const safeSides = Math.max(2, Math.min(100, Math.round(sides)))
     const log = (stage: string, details?: Record<string, unknown>) => {
       console.info('[dice-box-roll-overlay]', {
@@ -156,6 +162,8 @@ export default function DiceBoxRollOverlay({
           requestId,
           qty: retainedValues?.length ?? safeCount,
           sides: safeSides,
+          dieSides,
+          adoptedIndex: adoptedD20Index(forcedValues ?? [], check),
           values: retainedValues && rerollIndex != null ? [] : forcedValues,
           rerollIndex,
         },
@@ -169,6 +177,9 @@ export default function DiceBoxRollOverlay({
       if (data?.type === 'dice-box-ready' && !readyRef.current) {
         readyRef.current = true
         setFrameReady(true)
+        // A pre-ready retry can be lost before the iframe installs its listener.
+        // The iframe deduplicates request IDs, so resending after ready is safe.
+        sentRequestRef.current = null
         log('iframe-ready')
         sendRoll()
         return
@@ -202,7 +213,7 @@ export default function DiceBoxRollOverlay({
       window.clearTimeout(fallback)
       window.removeEventListener('message', handleMessage)
     }
-  }, [count, forcedValues, requestId, retainedValues, rerollIndex, settledHoldMs, sides, staging])
+  }, [check, count, dieSides, forcedValues, requestId, retainedValues, rerollIndex, settledHoldMs, sides, staging])
 
   return (
     <DiceOverlayPortal layer={layout === 'left-drawer' ? 'dice' : 'foreground'}>

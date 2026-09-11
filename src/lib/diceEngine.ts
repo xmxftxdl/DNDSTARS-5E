@@ -16,7 +16,7 @@
 // recolor the dice, edit the constant here and nowhere else.
 // ============================================================================
 import DiceBox, { type DiceRollResults, type DiceColorset } from '@3d-dice/dice-box-threejs'
-import { settledDiceGrid } from './diceFrameLayout'
+import { settledDiceGrid, dicePixelSize } from './diceFrameLayout'
 import { diceThrowMotion, type DiceDragSample } from './diceThrowMotion'
 
 // AC3 — single source of truth. Accent parity with the legacy Babylon
@@ -58,6 +58,7 @@ export interface DiceOutcome {
 }
 
 export interface CreateDiceBoxOptions {
+  diceCount?: number
   scale?: number
   dimensions?: { x: number; y: number }
   theme?: DiceColorset
@@ -67,12 +68,13 @@ export interface CreateDiceBoxOptions {
 export interface DiceEngineBox {
   // Resolves with the same DiceOutcome that onComplete receives — exactly once.
   roll(notation: string): Promise<DiceOutcome>
-  stage(sides: number, values: number[]): Promise<void>
+  stage(sides: number, values: number[], dieSides?: number[]): Promise<void>
   reroll(index: number): Promise<number[]>
   grabDie(x: number, y: number): number | null
   moveGrabbedDie(x: number, y: number): void
   releaseDie(throwDie?: boolean): void
   correctVisibleFaces(values: number[]): boolean
+  highlightDie(index?: number): void
   visibleValues(): number[]
   arrangeSettledDice(values?: number[]): Promise<void>
   clear(): void
@@ -102,6 +104,7 @@ interface RuntimeQuaternion {
 }
 
 interface RuntimeGeometry {
+  dispose?: () => void
   groups?: Array<{ start?: number; count?: number; materialIndex?: number }>
   getAttribute?: (name: string) => { array?: ArrayLike<number> } | undefined
 }
@@ -112,6 +115,8 @@ interface RuntimeBody {
   velocity?: RuntimeVector
   angularVelocity?: RuntimeVector
 }
+
+
 
 interface RuntimeDie {
   notation?: { type?: string }
@@ -126,6 +131,8 @@ interface RuntimeDie {
 }
 
 interface RuntimeDiceBox {
+  DiceFactory?: { createGeometry: (shape: string, radius: number, ...args: unknown[]) => RuntimeGeometry }
+  setDimensions?: (dimensions?: { x: number; y: number }) => void
   startClickThrow?: (notation: string) => { vectors: unknown[] }
   spawnDice?: (vector: unknown) => void
   last_time?: number
@@ -134,7 +141,7 @@ interface RuntimeDiceBox {
   renderer?: { render: (scene: unknown, camera: unknown) => void }
   scene?: unknown
   camera?: unknown
-  display?: { containerWidth?: number; containerHeight?: number }
+  display?: { containerWidth?: number; containerHeight?: number; currentWidth?: number }
 }
 
 interface QuaternionValue {
@@ -213,7 +220,7 @@ function multiplyQuaternion(left: QuaternionValue, right: QuaternionValue): Quat
   })
 }
 
-function uprightTopFaceQuaternion(die: RuntimeDie): QuaternionValue {
+function uprightTopFaceQuaternion(die: RuntimeDie, targetValue?: number): QuaternionValue {
   const current = normalizedQuaternion({
     x: die.quaternion?.x ?? 0,
     y: die.quaternion?.y ?? 0,
@@ -226,8 +233,12 @@ function uprightTopFaceQuaternion(die: RuntimeDie): QuaternionValue {
 
   let upperNormal: VectorValue | undefined
   let upperLocalNormal: VectorValue | undefined
+  const targetMaterial = targetValue == null ? undefined : die.notation?.type === 'd100'
+    ? targetValue / 10 : die.shape === 'd10' || die.shape === 'd2' ? targetValue : targetValue + 1
+  const hasTargetFace = targetMaterial != null && groups.some(group => group.materialIndex === targetMaterial)
   for (let index = 0; index < groups.length; index += 1) {
     if (groups[index].materialIndex === 0) continue
+    if (hasTargetFace && groups[index].materialIndex !== targetMaterial) continue
     const localNormal = groupLocalNormal(normals, groups[index], index)
     if (!localNormal) continue
     const worldNormal = rotateVector(localNormal, current)
@@ -382,7 +393,7 @@ function d4ResultQuaternion(die: RuntimeDie, targetValue: number | undefined): Q
 
 function settledQuaternion(die: RuntimeDie, targetValue: number | undefined): QuaternionValue {
   if (die.shape === 'd4') return d4ResultQuaternion(die, targetValue)
-  return uprightTopFaceQuaternion(die)
+  return uprightTopFaceQuaternion(die, targetValue)
 }
 
 function geometryBounds(
@@ -499,15 +510,141 @@ export async function createDiceBox(
   let grabbed: { index: number; position: ProjectableVector; quaternion: QuaternionValue; heldSince: number; depth: number; offsetX: number; offsetY: number; radius: number; samples: DiceDragSample[] } | null = null
   let rerolling = false
   let released: { index: number; motion: ReturnType<typeof diceThrowMotion> } | null = null
+  // Screen-space cue: never modify a skin's material, emissive map, or geometry.
+  const adoptedMarker = document.createElement('div')
+  adoptedMarker.dataset.diceAdoptedMarker = 'true'
+  adoptedMarker.setAttribute('aria-hidden', 'true')
+  adoptedMarker.className = 'dice-adopted-aura'
+  adoptedMarker.style.display = 'none'
+  const adoptedStyle = document.createElement('style')
+  adoptedStyle.textContent = `
+    .dice-adopted-aura { position:fixed; pointer-events:none; z-index:20; }
+    .dice-adopted-aura::before, .dice-adopted-aura::after { content:''; position:absolute; inset:0; border-radius:45%; }
+    .dice-adopted-aura::before {
+      background:radial-gradient(ellipse,transparent 42%,rgba(255,222,125,.42) 62%,rgba(255,181,65,.14) 73%,transparent 86%);
+      filter:blur(3px); animation:dice-aura-breathe 3.2s ease-in-out infinite;
+    }
+    .dice-adopted-aura::after {
+      background:conic-gradient(from 25deg,transparent 0deg 25deg,#fff2b3 44deg,transparent 64deg 140deg,#f7c767 167deg,transparent 190deg 269deg,#fff4c7 300deg,transparent 325deg);
+      mask-image:radial-gradient(ellipse,transparent 53%,#000 66%,transparent 77%);
+      opacity:.65; filter:blur(2px); animation:dice-aura-drift 9s linear infinite;
+    }
+    .dice-adopted-aura i { position:absolute; width:3px; height:3px; border-radius:50%; background:#fff7d6;
+      box-shadow:0 0 5px 2px #ffdf8b88; animation:dice-aura-spark 2.8s ease-in-out infinite; }
+    .dice-adopted-aura i:nth-child(1) { left:17%; top:22%; }
+    .dice-adopted-aura i:nth-child(2) { right:13%; top:40%; animation-delay:-.9s; }
+    .dice-adopted-aura i:nth-child(3) { left:36%; bottom:10%; animation-delay:-1.8s; }
+    @keyframes dice-aura-breathe { 0%,100% {opacity:.65;transform:scale(.97)} 50% {opacity:1;transform:scale(1.04)} }
+    @keyframes dice-aura-drift { to {transform:rotate(360deg)} }
+    @keyframes dice-aura-spark { 0%,100% {opacity:.2;transform:translateY(3px) scale(.7)} 50% {opacity:.9;transform:translateY(-3px) scale(1)} }
+    @media (prefers-reduced-motion:reduce) { .dice-adopted-aura::before,.dice-adopted-aura::after,.dice-adopted-aura i { animation:none; } }
+  `
+  document.head.appendChild(adoptedStyle)
+  for (let index = 0; index < 3; index++) adoptedMarker.appendChild(document.createElement('i'))
+  document.body.appendChild(adoptedMarker)
+  let adoptedDieIndex: number | undefined
+  const updateAdoptedMarker = () => {
+    const die = adoptedDieIndex == null ? undefined : runtimeBox.diceList?.[adoptedDieIndex]
+    const point = die?.position?.clone?.()
+    const element = typeof container === 'string' ? document.querySelector(container) : container
+    if (!die?.position || !point || !runtimeBox.camera || !element) { adoptedMarker.style.display = 'none'; return }
+    const rect = element.getBoundingClientRect()
+    const bounds = geometryBounds(die, normalizedQuaternion(die.quaternion ?? { x:0, y:0, z:0, w:1 }))
+    let top = Infinity, left = Infinity, bottom = -Infinity, right = -Infinity
+    for (const x of [-1,1]) for (const y of [-1,1]) for (const z of [-1,1]) {
+      point.set(die.position.x + x*bounds.width/2, die.position.y + y*bounds.height/2,
+        die.position.z + z*bounds.height/2).project(runtimeBox.camera)
+      const screenX = (point.x+1)*rect.width/2
+      const screenY = (1-point.y)*rect.height/2
+      top = Math.min(top, screenY); bottom = Math.max(bottom, screenY)
+      left = Math.min(left, screenX); right = Math.max(right, screenX)
+    }
+    const padding = Math.max(10, (right-left)*.18)
+    adoptedMarker.style.left = `${rect.left + left - padding}px`
+    adoptedMarker.style.top = `${rect.top + top - padding}px`
+    adoptedMarker.style.width = `${right-left+padding*2}px`
+    adoptedMarker.style.height = `${bottom-top+padding*2}px`
+    adoptedMarker.style.display = 'block'
+  }
+  const hideAdoptedMarker = () => { adoptedDieIndex = undefined; adoptedMarker.style.display = 'none' }
   const renderScene = () => {
+    updateAdoptedMarker()
     if (runtimeBox.scene && runtimeBox.camera) runtimeBox.renderer?.render(runtimeBox.scene, runtimeBox.camera)
+  }
+  // Normalize geometry AND its physics shape before any mesh is spawned.
+  // A shared camera cannot normalize mixed dice by measuring the first die.
+  const worldDiameter = scale * 2
+  const factory = runtimeBox.DiceFactory
+  if (factory) {
+    const createGeometry = factory.createGeometry
+    factory.createGeometry = function (shape, radius, ...args) {
+      const probe = createGeometry.call(this, shape, radius, ...args)
+      const die: RuntimeDie = { shape, geometry: probe }
+      // D4 must be measured resting on a face, not in its factory orientation.
+      const bounds = geometryBounds(die, settledQuaternion(die, 1))
+      // A square's side is not its visual diameter: matching that side to a
+      // polyhedron's full outline makes D6 occupy a much larger footprint.
+      const footprintDiameter = shape === 'd6'
+        ? Math.hypot(bounds.width, bounds.height)
+        : Math.max(bounds.width, bounds.height)
+      const factor = worldDiameter / footprintDiameter * (shape === 'd20' ? 1.1 : 1)
+      probe.dispose?.()
+      return createGeometry.call(this, shape, radius * factor, ...args)
+    }
+  }
+  let fixedPixelSize: number | undefined
+  const calibrateCamera = () => {
+    const element = typeof container === 'string' ? document.querySelector(container) : container
+    const camera = runtimeBox.camera as {
+      zoom?: number; fov?: number; position?: { z: number }; updateProjectionMatrix?: () => void
+    } | undefined
+    if (!element || !camera?.position || !camera.updateProjectionMatrix || !camera.fov) return
+    const available = dicePixelSize(options.diceCount ?? 1, element.clientWidth, element.clientHeight)
+    // A confirmation panel may resize the viewport: never grow a settled pool.
+    fixedPixelSize = Math.min(fixedPixelSize ?? available, available)
+    const pixelsAtZoomOne = worldDiameter * element.clientHeight /
+      (2 * camera.position.z * Math.tan(camera.fov * Math.PI / 360))
+    if (!(pixelsAtZoomOne > 0)) return
+    camera.zoom = fixedPixelSize / pixelsAtZoomOne
+    camera.updateProjectionMatrix()
+  }
+  calibrateCamera()
+  const setDimensions = runtimeBox.setDimensions
+  if (setDimensions) runtimeBox.setDimensions = function (dimensions) {
+    // The vendor renders inside setDimensions. Suppress that intermediate
+    // frame until the replacement camera has the same pixel calibration.
+    const renderer = runtimeBox.renderer
+    const render = renderer?.render
+    if (renderer) renderer.render = () => {}
+    try {
+      // A room log can shrink the canvas during a throw. Preserve the large
+      // pool's physics floor instead of rebuilding its walls through the dice.
+      const floor = (options.diceCount ?? 1) > 12 ? options.dimensions : undefined
+      setDimensions.call(runtimeBox, floor ? {
+        x: Math.max(dimensions?.x ?? 0, floor.x),
+        y: Math.max(dimensions?.y ?? 0, floor.y),
+      } : dimensions)
+      calibrateCamera()
+    } finally {
+      if (renderer && render) renderer.render = render
+    }
+    renderScene()
   }
 
   return {
-    async stage(this: DiceEngineBox, sides, values) {
+    async stage(this: DiceEngineBox, sides, values, dieSides) {
       if (pending || rerolling) throw new Error('Dice are busy')
+      hideAdoptedMarker()
+      const existing = runtimeBox.diceList ?? []
+      if (existing.length === values.length && existing.every((die, index) =>
+        (die.notation?.type ?? die.shape) === `d${dieSides?.[index] ?? sides}`)) {
+        this.correctVisibleFaces(values)
+        await this.arrangeSettledDice(values)
+        this.correctVisibleFaces(values)
+        return
+      }
       box.clearDice()
-      const vectors = runtimeBox.startClickThrow?.(`${values.length}d${sides}`)?.vectors ?? []
+      const vectors = runtimeBox.startClickThrow?.(dieSides?.length === values.length ? dieSides.map(die => `1d${die}`).join('+') : `${values.length}d${sides}`)?.vectors ?? []
       for (const vector of vectors) runtimeBox.spawnDice?.(vector)
       for (const die of runtimeBox.diceList ?? []) {
         die.position?.set?.(0, 0, 0)
@@ -520,6 +657,7 @@ export async function createDiceBox(
       }
       this.correctVisibleFaces(values)
       await this.arrangeSettledDice(values)
+      this.correctVisibleFaces(values)
     },
     grabDie(x, y) {
       if (pending || rerolling || grabbed || !runtimeBox.camera) return null
@@ -614,6 +752,7 @@ export async function createDiceBox(
       if (pending || rerolling) {
         return Promise.reject(new Error('diceEngine: a roll is already in flight'))
       }
+      hideAdoptedMarker()
       const token = ++seq
       return new Promise<DiceOutcome>((resolve, reject) => {
         pending = { token, notation, settle: resolve }
@@ -650,7 +789,7 @@ export async function createDiceBox(
         const target = Math.round(values[index])
         const current = die?.getLastValue?.()
         if (!die || !Number.isFinite(target)) continue
-        const physicalValue = d4SettledFaceValue(die)
+        const physicalValue = physicalDieValue(die)
         const currentValue = physicalValue ?? current?.value
         if (currentValue === target) {
           if (current?.value !== target) {
@@ -677,6 +816,10 @@ export async function createDiceBox(
       }
       return changed
     },
+    highlightDie(index) {
+      adoptedDieIndex = index
+      updateAdoptedMarker()
+    },
     visibleValues(): number[] {
       return (runtimeBox.diceList ?? []).map((die) =>
         physicalDieValue(die) ?? Number(die.getLastValue?.().value),
@@ -693,7 +836,8 @@ export async function createDiceBox(
 
       const tableWidth = Math.max(320, runtimeBox.display?.containerWidth ?? 680)
       const tableHeight = Math.max(260, runtimeBox.display?.containerHeight ?? 420)
-      const grid = settledDiceGrid(dice.length, tableWidth, tableHeight)
+      const element = typeof container === 'string' ? document.querySelector(container) : container
+      const grid = settledDiceGrid(dice.length, element?.clientWidth || tableWidth, element?.clientHeight || tableHeight)
       const targets = dice.map((die, index) => {
         const targetValue = Number.isFinite(values[index]) ? Math.round(values[index]) : undefined
         const quaternion = settledQuaternion(die, targetValue)
@@ -797,9 +941,12 @@ export async function createDiceBox(
       })
     },
     clear() {
+      hideAdoptedMarker()
       box.clearDice()
     },
     destroy() {
+      adoptedMarker.remove()
+      adoptedStyle.remove()
       pending = null
       box.clearDice()
     },

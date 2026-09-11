@@ -50,6 +50,7 @@ export function prepareDnd5eAbilityCheck(input: {
   const skill = payload.skill ? SKILLS.find((candidate) => candidate.key === payload.skill) : undefined
   if (
     !Number.isInteger(payload.dc) || payload.dc < 0 || payload.dc > 100 ||
+    (payload.totalOnly && (payload.dc !== 0 || payload.spendAction === true)) ||
     (payload.skill && (!skill || skill.ability !== payload.ability)) ||
     (payload.perceivedTargetId != null && payload.skill !== 'perception') ||
     (payload.context != null &&

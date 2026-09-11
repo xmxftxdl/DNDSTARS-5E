@@ -562,3 +562,29 @@ describe('map viewport standard condition presentation', () => {
     expect(marks.map((mark) => mark.borderColor)).toEqual(['#3B82F6', '#94A3B8'])
   })
 })
+
+describe('status source border contract', () => {
+  it('recognizes renamed enfeeblement by rules ID and colors each instance by its own caster', () => {
+    const wizard = character('source-wizard', 'wizard')
+    const cleric = character('source-cleric', 'cleric')
+    const recipient = token('target', 'recipient', 200)
+    recipient.dnd5eCombatState = { activeEffects: [
+      ['wizard-effect', 'wizard-token'], ['cleric-effect', cleric.id], ['unknown-effect', undefined], ['missing-effect', 'missing-source'],
+    ].map(([id, actorId]) => createDnd5eMechanicalEffect({
+      definitionId: `custom:${id}`, label: 'Renamed effect',
+      source: { kind: 'spell', actorId, rulesId: 'ray-of-enfeeblement' },
+      targetId: recipient.id, duration: { type: 'permanent' },
+    })) }
+    const map: BattleMap = { id: 'status-source-test', name: 'Test', width: 400, height: 300,
+      gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [token('wizard-token', wizard.id, 50), recipient] }
+    const marks = buildMapViewportPresentation(map, [wizard, cleric, character('recipient', 'fighter')]).dnd5eTokenStatusMarkersByToken.target
+    expect(marks).toHaveLength(4)
+    expect(marks.every(mark => mark.statusId === 'weakened')).toBe(true)
+    expect(marks.find(mark => mark.sourceActorId === 'wizard-token')?.borderColor).toBe('#3B82F6')
+    expect(marks.find(mark => mark.sourceActorId === cleric.id)?.borderColor).not.toBe('#ffffff')
+    expect(marks.find(mark => mark.sourceActorId === cleric.id)?.borderColor).not.toBe('#3B82F6')
+    expect(marks.find(mark => !mark.sourceActorId)?.borderColor).toBe('#ffffff')
+    expect(marks.find(mark => mark.sourceActorId === 'missing-source')?.borderColor).toBe('#ffffff')
+  })
+})

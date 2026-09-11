@@ -5,7 +5,11 @@ import { writeDiceTrayHistory } from '../../presentation/maps/diceTrayHistory'
 
 export const PLAYER_D20_REQUEST_TIMEOUT_MS = 300_000
 
-type PendingRoll = { event: SharedRollRequestEvent; value?: number }
+export function playerDiceRequestMatchesCombat(event: SharedRollRequestEvent, combatId: string): boolean {
+  return event.combatId === undefined || event.combatId === combatId
+}
+
+type PendingRoll = { event: SharedRollRequestEvent; value?: number; values?: number[]; completed?: boolean }
 const memory = new Map<string, Record<string, PendingRoll>>()
 function storageKey() {
   const session = getRoomSession()
@@ -31,23 +35,56 @@ function writePending(records: Record<string, PendingRoll>) {
   try { window.sessionStorage.setItem(key, JSON.stringify(records)) } catch { /* Keep memory fallback. */ }
 }
 
-export function savedPlayerDiceRollValue(requestId: string): number | undefined {
-  const value = readPending()[requestId]?.value
-  return Number.isInteger(value) && value! >= 1 && value! <= 20 ? value : undefined
+function validPlayerDiceShape(event: Pick<SharedRollRequestEvent, 'kind' | 'count' | 'sides'>): boolean {
+  return (event.kind === 'd20' && event.count === 1 && event.sides === 20) ||
+    (event.kind === 'dice' && Number.isInteger(event.count) && event.count >= 1 && event.count <= 100 &&
+      Number.isInteger(event.sides) && event.sides >= 2 && event.sides <= 100)
 }
 
-/** Save BEFORE animation so refresh/retry cannot roll a second value. */
-export function savePlayerDiceRollValue(event: SharedRollRequestEvent, value: number): void {
-  if (!Number.isInteger(value) || value < 1 || value > 20) throw new Error('Invalid d20 value')
+export function savedPlayerDiceRollValues(requestId: string): number[] | undefined {
+  const record = readPending()[requestId]
+  if (!record) return undefined
+  const values = record.values ?? (record.value == null ? undefined : [record.value])
+  return values && validPlayerDiceShape(record.event) && values.length === record.event.count &&
+    values.every(value => Number.isInteger(value) && value >= 1 && value <= record.event.sides) ? [...values] : undefined
+}
+
+export function savedPlayerDiceRollValue(requestId: string): number | undefined {
+  return savedPlayerDiceRollValues(requestId)?.[0]
+}
+
+/** Save the entire authoritative pool before animation, including dice beyond the visual cap. */
+export function savePlayerDiceRollValues(event: SharedRollRequestEvent, values: number[]): void {
+  if (!validPlayerDiceShape(event) || values.length !== event.count ||
+    !values.every(value => Number.isInteger(value) && value >= 1 && value <= event.sides)) throw new Error('Invalid dice values')
   const records = readPending()
-  records[event.requestId] = { event, value: savedPlayerDiceRollValue(event.requestId) ?? value }
+  const saved = savedPlayerDiceRollValues(event.requestId) ?? [...values]
+  records[event.requestId] = { event, values: saved }
   writePending(records)
   const session = getRoomSession()
   const scope = combatPlaybackScope({ roomId: session?.roomId, memberId: session?.memberId, mode: 'player' })
   writeDiceTrayHistory(`${scope}:${event.mapId}`, {
-    id: `d20:${event.requestId}:player-authority`, label: event.label, targetName: event.targetName,
-    sides: 20, values: [records[event.requestId].value!], formula: '1d20',
+    id: `${event.kind}:${event.requestId}:player-authority`, label: event.label, targetName: event.targetName,
+    sides: event.sides, check: event.check, values: saved, formula: `${event.count}d${event.sides}`,
   }, true)
+}
+
+export function savePlayerDiceRollValue(event: SharedRollRequestEvent, value: number): void {
+  savePlayerDiceRollValues(event, [value])
+}
+
+/** The controlling player decides faces once; presentation cannot replace the saved pool. */
+export async function performPlayerDiceRoll(
+  request: SharedRollRequestEvent,
+  rollDie: (sides: number) => number,
+  present: (values: number[]) => Promise<unknown>,
+): Promise<number[]> {
+  const saved = savedPlayerDiceRollValues(request.requestId)
+  if (saved) return saved
+  const values = Array.from({ length: request.count }, () => rollDie(request.sides))
+  savePlayerDiceRollValues(request, values)
+  await present(values)
+  return values
 }
 
 export type PlayerSavingThrowAbility = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
@@ -86,11 +123,47 @@ export function isPlayerDiceRollRequestForClient(input: {
   return input.mode === 'player' &&
     !input.spectator &&
     input.event.delivery === 'player-roll-request' &&
-    input.event.kind === 'd20' &&
-    input.event.count === 1 &&
-    input.event.sides === 20 &&
+    validPlayerDiceShape(input.event) &&
     typeof input.event.targetCharacterId === 'string' &&
     input.controlledCharacterIds.has(input.event.targetCharacterId)
+}
+
+export function playerDiceRollResultValues(
+  event: SharedRollRequestEvent,
+  expected: Pick<SharedRollRequestEvent, 'kind' | 'count' | 'sides' | 'targetCharacterId'>,
+): number[] | null {
+  if (event.delivery !== 'player-roll-result' || !validPlayerDiceShape(event) ||
+    event.kind !== expected.kind || event.count !== expected.count || event.sides !== expected.sides ||
+    event.targetCharacterId !== expected.targetCharacterId || event.values.length !== expected.count ||
+    !event.values.every(value => Number.isInteger(value) && value >= 1 && value <= expected.sides)) return null
+  return [...event.values]
+}
+
+export interface PendingPlayerDicePresentation {
+  kind: SharedRollRequestEvent['kind']
+  count: number
+  sides: number
+  targetCharacterId?: string
+  presentationDone?: Promise<void>
+  resultReceived?: boolean
+  resolve: (values: number[]) => void
+}
+
+/** Mirror the player's authoritative faces once, then release settlement after animation. */
+export function receivePlayerDicePresentation(
+  event: SharedRollRequestEvent,
+  pending: PendingPlayerDicePresentation,
+  present: (values: number[]) => Promise<void>,
+): boolean {
+  if (event.delivery !== 'player-roll-start' && event.delivery !== 'player-roll-result') return false
+  const values = playerDiceRollResultValues({ ...event, delivery: 'player-roll-result' }, pending)
+  if (!values) return false
+  pending.presentationDone ??= present(values)
+  if (event.delivery === 'player-roll-result' && !pending.resultReceived) {
+    pending.resultReceived = true
+    void pending.presentationDone.then(() => pending.resolve(values))
+  }
+  return true
 }
 
 export function playerDiceRollResultValue(
@@ -122,6 +195,26 @@ export function rememberPendingPlayerDiceRollRequest(event: SharedRollRequestEve
   writePending(records)
 }
 
+/** Retry delivery, never randomness. Stop as soon as the Host receives a result. */
+export function retryPlayerDiceRollRequest(publish: () => Promise<void>, isPending: () => boolean): void {
+  const send = async () => {
+    if (!isPending()) return
+    try { await publish() } catch { /* A reconnect can deliver the next identical request. */ }
+    if (isPending()) setTimeout(() => { void send() }, 3_000)
+  }
+  void send()
+}
+
+export function completePlayerDiceRollRequest(requestId: string): void {
+  const records = readPending()
+  if (records[requestId]) records[requestId].completed = true
+  writePending(records)
+}
+
+export function completedPlayerDiceRollValues(requestId: string): number[] | undefined {
+  return readPending()[requestId]?.completed ? savedPlayerDiceRollValues(requestId) : undefined
+}
+
 export function pendingPlayerDiceRollRequests(now = Date.now()): SharedRollRequestEvent[] {
   const records = readPending()
   for (const [requestId, { event }] of Object.entries(records)) {
@@ -130,7 +223,7 @@ export function pendingPlayerDiceRollRequests(now = Date.now()): SharedRollReque
     }
   }
   writePending(records)
-  return Object.values(records).map(({ event }) => event)
+  return Object.values(records).filter(record => !record.completed).map(({ event }) => event)
 }
 
 export function forgetPendingPlayerDiceRollRequest(requestId: string): void {
@@ -140,5 +233,9 @@ export function forgetPendingPlayerDiceRollRequest(requestId: string): void {
 }
 
 export function resetPendingPlayerDiceRollRequestsForTests(): void {
+  writePending({})
+}
+
+export function clearPendingPlayerDiceRollRequests(): void {
   writePending({})
 }

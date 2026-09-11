@@ -38,13 +38,19 @@ describe('buildNotation — random path', () => {
     expect(buildNotation(3, 6, [null, undefined, NaN])).toBe('3d6')
   })
   it('clamps qty and sides', () => {
-    expect(buildNotation(99, 6)).toBe('12d6') // MAX_QTY
+    expect(buildNotation(101, 6)).toBe('100d6') // MAX_QTY
     expect(buildNotation(1, 999)).toBe('1d100') // MAX_SIDES
     expect(buildNotation(0, 1)).toBe('1d2') // floors
   })
 })
 
 describe('buildNotation — forced path', () => {
+  it('preserves every forced die for dragon breath and larger damage pools', () => {
+    for (const count of [20, 26, 40, 100]) {
+      const values = Array.from({ length: count }, (_, index) => index % 6 + 1)
+      expect(buildNotation(count, 6, values)).toBe(`${count}d6@${values.join(',')}`)
+    }
+  })
   it('emits NdS@values for a full forced set', () => {
     expect(buildNotation(1, 20, [20])).toBe('1d20@20')
     expect(buildNotation(3, 6, [4, 5, 6])).toBe('3d6@4,5,6')

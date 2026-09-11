@@ -1,3 +1,4 @@
+import { createDiceCheckPreview, type DiceCheckPreview } from '../../presentation/maps/diceCheckOutcome'
 import { canBonusDieChangeFailure } from '../../lib/d20InterruptPolicy'
 import type { BardicInspirationRollType } from '../../lib/combatInterruptProtocol'
 import type { AbilityKey } from '../../lib/dnd'
@@ -15,6 +16,7 @@ import {
 import type { Character } from '../../types/character'
 
 export interface Dnd5eD20RollInterruptContext {
+  checkPreview?: DiceCheckPreview
   rollKind: 'attack' | 'ability-check' | 'saving-throw'
   /** Battlefield token that actually rolls the d20; controls public/secret routing. */
   rollerTokenId?: string
@@ -80,6 +82,7 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
   mode: SavingThrowMode
   label: string
   previewTotal: (d20: number, d20Second?: number) => number | undefined
+  rollD20Pair?: (label: string, targetName: string, mode: SavingThrowMode, context: Dnd5eD20RollInterruptContext) => Promise<[number, number | undefined]>
   rollD20: (
     label: string,
     targetName: string,
@@ -117,14 +120,19 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
     rollerCharacterId,
     targetCharacterId: rollerCharacterId,
   }
-  const d20 = await input.rollD20(input.label, input.targetName, sharedContext)
-  const d20Second = input.mode === 'normal'
+  const [d20, d20Second] = input.rollD20Pair
+    ? await input.rollD20Pair(input.label, input.targetName, input.mode, sharedContext)
+    : await (async (): Promise<[number, number | undefined]> => {
+    const d20 = await input.rollD20(input.label, input.targetName, sharedContext)
+    const d20Second = input.mode === 'normal'
     ? undefined
     : await input.rollD20(
         `${input.label}（${input.mode === 'advantage' ? '优势' : '劣势'}）`,
         input.targetName,
         { ...sharedContext, skipChoiceReroll: true },
       )
+    return [d20, d20Second]
+  })()
   const halflingLuckyD20 = input.combatant.racialRules?.halflingLucky && d20 === 1
     ? await input.rollD20(
         '半身人幸运·属性检定重投',
@@ -242,12 +250,13 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
   dc: number
   mode: SavingThrowMode
   label: string
+  rollD20Pair?: (label: string, targetName: string, mode: SavingThrowMode, context: Dnd5eD20RollInterruptContext) => Promise<[number, number | undefined]>
   rollD20: (
     label: string,
     targetName: string,
     context?: Dnd5eD20RollInterruptContext,
   ) => Promise<number>
-  rollD4: (label: string, targetName: string) => Promise<number>
+  rollD4: (label: string, targetName: string, context?: Dnd5eD20RollInterruptContext) => Promise<number>
   requestBardicInspiration?: (request: {
     target?: Character
     targetName: string
@@ -281,19 +290,29 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
 }): Promise<Dnd5eSavingThrowInterruptResult> {
   const rollerCharacterId = input.target?.id
   const sharedContext: Dnd5eD20RollInterruptContext = {
+    checkPreview: createDiceCheckPreview('save', input.targetName, undefined, (first, second) => previewDnd5eSavingThrowRoll({
+      rolls: input.mode === 'normal' ? [first] : [first, second ?? first], mode: input.mode,
+      modifier: (input.combatant.savingThrowBonuses[input.ability] ?? Math.floor((input.combatant.abilities[input.ability] - 10) / 2)) +
+        dnd5eActiveSavingThrowBonus(input.combatant.classState.activeEffects, input.ability), dc: input.dc,
+    }).success, input.mode),
     rollKind: 'saving-throw',
     rollerTokenId: input.combatant.id,
     rollerCharacterId,
     targetCharacterId: rollerCharacterId,
   }
-  const d20 = await input.rollD20(input.label, input.targetName, sharedContext)
-  const d20Second = input.mode === 'normal'
+  const [d20, d20Second] = input.rollD20Pair
+    ? await input.rollD20Pair(input.label, input.targetName, input.mode, sharedContext)
+    : await (async (): Promise<[number, number | undefined]> => {
+    const d20 = await input.rollD20(input.label, input.targetName, sharedContext)
+    const d20Second = input.mode === 'normal'
     ? undefined
     : await input.rollD20(
         input.secondRollLabel ?? `${input.label}（第二枚 d20）`,
         input.targetName,
         { ...sharedContext, skipChoiceReroll: true },
       )
+    return [d20, d20Second]
+  })()
   const halflingLuckyD20 = input.combatant.racialRules?.halflingLucky && d20 === 1
     ? await input.rollD20(
         input.halflingLuckyLabel ?? `半身人幸运·${input.label}重投`,
@@ -309,10 +328,10 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
       )
     : undefined
   const blessRoll = dnd5eCombatantHasConcentrationEffect(input.state, input.combatant.id, 'bless')
-    ? await input.rollD4(input.blessLabel ?? `祝福术·${input.label}加值`, input.targetName)
+    ? await input.rollD4(input.blessLabel ?? `祝福术·${input.label}加值`, input.targetName, sharedContext)
     : undefined
   const baneRoll = dnd5eCombatantHasConcentrationEffect(input.state, input.combatant.id, 'bane')
-    ? await input.rollD4(input.baneLabel ?? `灾祸术·${input.label}减值`, input.targetName)
+    ? await input.rollD4(input.baneLabel ?? `灾祸术·${input.label}减值`, input.targetName, sharedContext)
     : undefined
   const modifier = (input.combatant.savingThrowBonuses[input.ability] ??
     Math.floor((input.combatant.abilities[input.ability] - 10) / 2)) +

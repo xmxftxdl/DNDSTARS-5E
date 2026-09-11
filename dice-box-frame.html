@@ -63,14 +63,15 @@
     -->
     <script type="module">
       import { createDiceBox, DICE_BASE_SCALE, DICE_D4_BASE_SCALE, DICE_D4_LABEL_SCALE, DICE_D4_THEME } from './src/lib/diceEngine'
-      import { diceFrameLayout } from './src/lib/diceFrameLayout'
+      import { MAX_DICE_POOL_COUNT } from './src/lib/dicePoolLimits'
+      import { diceFrameLayout, dicePhysicsDimensions } from './src/lib/diceFrameLayout'
       import { sameOrderedDiceValues } from './src/lib/diceFrameValues'
       import { buildNotation } from './src/lib/diceNotation'
 
       const params = new URLSearchParams(window.location.search)
       const ORIGIN = window.location.origin
       const frameSides = Math.max(2, Math.min(100, Math.round(Number(params.get('sides')) || 6)))
-      const frameQty = Math.max(1, Math.min(12, Math.round(Number(params.get('qty')) || 1)))
+      const frameQty = Math.max(1, Math.min(MAX_DICE_POOL_COUNT, Math.round(Number(params.get('qty')) || 1)))
 
       let boxPromise = null
       let interactive = false
@@ -121,6 +122,16 @@
       // event double-fire upstream), only one *-result leaves this frame (AC6).
       const completedRequestIds = new Set()
       const inFlightRequestIds = new Set()
+      // A background parent can acknowledge predetermined values before this
+      // frame's physics finishes. Keep roll/confirmation commands in one lane:
+      // clearing the world for the next roll while it is busy loses both dice.
+      let commandTail = Promise.resolve()
+      function enqueueCommand(requestId, run) {
+        commandTail = commandTail.then(run).catch((error) => {
+          inFlightRequestIds.delete(requestId)
+          console.error('[dice-box-frame] command failed', { requestId, error })
+        })
+      }
 
       function rememberCompleted(requestId) {
         completedRequestIds.add(requestId)
@@ -136,14 +147,16 @@
           const isD4 = frameSides === 4
           const { tableMultiplier, visualScaleMultiplier } = diceFrameLayout(frameQty, frameSides)
           const container = document.getElementById('dice')
-          const dimensions = {
+          const scale = (isD4 ? DICE_D4_BASE_SCALE : DICE_BASE_SCALE) * visualScaleMultiplier
+          const dimensions = dicePhysicsDimensions(frameQty, {
             x: Math.max(320, Math.round((container?.clientWidth || 680) * tableMultiplier)),
             y: Math.max(260, Math.round((container?.clientHeight || 420) * tableMultiplier)),
-          }
+          }, scale)
           // Single shared physics world; the wrapper serializes rolls (a second
           // roll while one is in flight rejects rather than corrupting delivery).
           boxPromise = createDiceBox('#dice', {
-            scale: (isD4 ? DICE_D4_BASE_SCALE : DICE_BASE_SCALE) * visualScaleMultiplier,
+            diceCount: frameQty,
+            scale,
             dimensions,
             theme: isD4 ? DICE_D4_THEME : undefined,
           })
@@ -176,7 +189,7 @@
       }
 
       function clampQty(qty) {
-        return Math.max(1, Math.min(12, Math.round(Number(qty) || 1)))
+        return Math.max(1, Math.min(MAX_DICE_POOL_COUNT, Math.round(Number(qty) || 1)))
       }
 
       function clampSides(sides) {
@@ -221,7 +234,7 @@
         window.parent.postMessage(payload, ORIGIN)
       }
 
-      async function handleRoll(kind, requestId, qty, sides, values, rerollIndex) {
+      async function handleRoll(kind, requestId, qty, sides, values, rerollIndex, dieSides, adoptedIndex) {
         if (requestId == null) return
         if (completedRequestIds.has(requestId)) return // dedup repeat requests
         if (inFlightRequestIds.has(requestId)) return // dedup repeat requests while physics is still rolling
@@ -247,7 +260,9 @@
 
         try {
           const box = await getBox()
-          const notation = buildNotation(qty, sides, values)
+          const notation = Array.isArray(dieSides) && dieSides.length === qty
+            ? dieSides.map(die => `1d${die}`).join('+') + (forced.length ? `@${forced.join(',')}` : '')
+            : buildNotation(qty, sides, values)
           box.releaseDie()
           const canReroll = Number.isInteger(rerollIndex) && rerollIndex >= 0 && rerollIndex < qty && box.visibleValues().length === qty
           if (physicalReroll && !canReroll) throw new Error('The retained dice pool is unavailable')
@@ -259,8 +274,7 @@
             deliver(outcome.values, false)
             return
           } else {
-            box.clear()
-            await new Promise((resolve) => requestAnimationFrame(resolve))
+            // roll() checks that physics is idle before replacing the pool.
             outcome = await box.roll(notation)
           }
           let vals =
@@ -304,6 +318,7 @@
               correctedAfterArrange,
             })
           }
+          box.highlightDie(adoptedIndex)
           deliver(presentedValues, false)
         } catch (error) {
           console.error('[dice-box-frame] roll failed', error)
@@ -321,24 +336,31 @@
         }
         if (data?.type === 'roll-d20') {
           // value present → forced (1d20@v); absent → random 1d20.
-          void handleRoll('d20', data.requestId, 1, 20, data.value == null ? [] : [data.value])
+          enqueueCommand(data.requestId, () => handleRoll('d20', data.requestId, 1, 20, data.value == null ? [] : [data.value]))
           return
         }
         if (data?.type === 'stage-dice') {
-          if (completedRequestIds.has(data.requestId) || inFlightRequestIds.has(data.requestId)) return
-          inFlightRequestIds.add(data.requestId)
-          latestRequestId = data.requestId
-          staged = true
-          interactive = false
-          void getBox().then(async (box) => {
-            await box.stage(data.sides, forcedValues(data.qty, data.sides, data.values))
-            postResult('dice', data.requestId, data.values, false)
+          enqueueCommand(data.requestId, async () => {
+            if (completedRequestIds.has(data.requestId) || inFlightRequestIds.has(data.requestId)) return
+            inFlightRequestIds.add(data.requestId)
+            latestRequestId = data.requestId
+            staged = true
+            interactive = false
+            const box = await getBox()
+            await box.stage(data.sides, forcedValues(data.qty, data.sides, data.values), data.dieSides)
+            const visible = box.visibleValues()
+            const verifyTopFaces = data.sides === 20 && (!Array.isArray(data.dieSides) || data.dieSides.every(side => side === 20))
+            if (verifyTopFaces && !sameOrderedDiceValues(visible, data.values)) throw new Error('Staged dice do not match authoritative faces')
+            box.highlightDie(data.adoptedIndex)
+            postResult('dice', data.requestId, verifyTopFaces ? visible : data.values, false)
           })
           return
         }
         if (data?.type === 'roll-dice') {
-          staged = false
-          void handleRoll('dice', data.requestId, data.qty, data.sides, data.values, data.rerollIndex)
+          enqueueCommand(data.requestId, async () => {
+            staged = false
+            await handleRoll('dice', data.requestId, data.qty, data.sides, data.values, data.rerollIndex, data.dieSides, data.adoptedIndex)
+          })
           return
         }
       })

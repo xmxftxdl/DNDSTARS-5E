@@ -1,0 +1,40 @@
+22:45:58 [vite] (ssr) Error when evaluating SSR module /src/rulesets/dnd5e/activities/dnd5eSrdAuditedSpellActivities.ts: transport invoke timed out after 60000ms (data: {"type":"custom","event":"vite:invoke","data":{"name":"fetchModule","id":"send:JOxf8baV-3g29cwZvwKZU","data":["/src/rulesets/dnd5e/spellNamesZh.ts","C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/spellCatalog.ts",{"cached":false,"startOffset":3}]}})
+      at reviveInvokeError (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:549:14)
+      at Object.invoke (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:623:11)
+      at async SSRCompatModuleRunner.getModuleInformation (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1198:7)
+      at async request (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1215:83)
+      at async eval (C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/spellCatalog.ts:9:31)
+      at async ESModulesEvaluator.runInlinedModule (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1005:3)
+      at async SSRCompatModuleRunner.directRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1258:59)
+      at async SSRCompatModuleRunner.directRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/chunks/node.js:11621:20)
+      at async SSRCompatModuleRunner.cachedRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1165:73)
+      at async eval (C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/activities/dnd5eSrdAuditedSpellActivities.ts:24:31)
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+Error: transport invoke timed out after 60000ms (data: {"type":"custom","event":"vite:invoke","data":{"name":"fetchModule","id":"send:JOxf8baV-3g29cwZvwKZU","data":["/src/rulesets/dnd5e/spellNamesZh.ts","C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/spellCatalog.ts",{"cached":false,"startOffset":3}]}})
+    at reviveInvokeError (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:549:14)
+    at Object.invoke (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:623:11)
+    at async SSRCompatModuleRunner.getModuleInformation (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1198:7)
+    at async request (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1215:83)
+    at async eval (C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/spellCatalog.ts:9:31)
+    at async ESModulesEvaluator.runInlinedModule (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1005:3)
+    at async SSRCompatModuleRunner.directRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1258:59)
+    at async SSRCompatModuleRunner.directRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/chunks/node.js:11621:20)
+    at async SSRCompatModuleRunner.cachedRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1165:73)
+    at async eval (C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/activities/dnd5eSrdAuditedSpellActivities.ts:24:31) {
+  runnerError: Error: RunnerError
+      at reviveInvokeError (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:550:64)
+      at Object.invoke (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:623:11)
+      at async SSRCompatModuleRunner.getModuleInformation (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1198:7)
+      at async request (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1215:83)
+      at async eval (C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/spellCatalog.ts:9:31)
+      at async ESModulesEvaluator.runInlinedModule (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1005:3)
+      at async SSRCompatModuleRunner.directRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1258:59)
+      at async SSRCompatModuleRunner.directRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/chunks/node.js:11621:20)
+      at async SSRCompatModuleRunner.cachedRequest (file:///C:/Users/Doco/Desktop/DND/DNDSTARS-5E/node_modules/.pnpm/vite@8.1.5_@types+node@24.13.3_jiti@2.7.0/node_modules/vite/dist/node/module-runner.js:1165:73)
+      at async eval (C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/activities/dnd5eSrdAuditedSpellActivities.ts:24:31)
+}
+
+Node.js v24.16.0

@@ -98,12 +98,13 @@ describe('D&D 5e plugin persistent areas', () => {
 
   it('reuses one damage roll for every target in a simultaneous area wave', async () => {
     let rollCount = 0
-    const coordinate = createDnd5ePersistentAreaDamageRollCoordinator(async (count, sides) => {
+    const coordinate = createDnd5ePersistentAreaDamageRollCoordinator(async (count, sides, _label, _targetName, owner) => {
+      expect(owner).toEqual({ rollerTokenId: 'caster' })
       rollCount += 1
       return Array.from({ length: count }, () => Math.min(sides, rollCount + 1))
     })
     const creation = {
-      areaId: 'wall-of-fire', triggerId: 'wall-of-fire-create', timing: 'on-create' as const,
+      rollerTokenId: 'caster', areaId: 'wall-of-fire', triggerId: 'wall-of-fire-create', timing: 'on-create' as const,
       count: 5, sides: 8, label: '火墙术·火墙出现', targetName: 'first target',
     }
     const first = await coordinate(creation)
@@ -127,7 +128,7 @@ describe('D&D 5e plugin persistent areas', () => {
     })
 
     await expect(coordinate({
-      areaId: 'guardian-of-faith', triggerId: 'guardian-strike', timing: 'on-enter',
+      rollerTokenId: 'caster', areaId: 'guardian-of-faith', triggerId: 'guardian-strike', timing: 'on-enter',
       count: 0, sides: 6, label: '信仰守卫·守卫打击', targetName: 'hostile creature',
     })).resolves.toEqual([])
     expect(rollCount).toBe(0)
@@ -175,7 +176,7 @@ describe('D&D 5e plugin persistent areas', () => {
     for (const candidate of candidates) {
       expect(saves.get(candidate.transactionId)).toBe(candidate.targetToken.id)
       await coordinateDamage({
-        areaId: candidate.area.id,
+        rollerTokenId: candidate.area.sourceTokenId, areaId: candidate.area.id,
         triggerId: candidate.trigger.id,
         timing: candidate.trigger.timing,
         count: 10,

@@ -1,3 +1,4 @@
+import { tokenScale, tokenLineWidth, tokenDash } from './tokenStrokeGeometry'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import Konva from 'konva'
@@ -127,19 +128,6 @@ function showTokenStatusTooltip(
   })
 }
 
-function tokenScale(radius: number): number {
-  return Math.max(0.35, Math.min(1, radius / 24))
-}
-
-function tokenLineWidth(radius: number, px: number): number {
-  return Math.max(0.5, px * tokenScale(radius))
-}
-
-function tokenDash(radius: number, dash: number[]): number[] {
-  const scale = tokenScale(radius)
-  return dash.map((value) => Math.max(1, value * scale))
-}
-
 function rightBadgeSize(radius: number): number {
   return Math.max(8, radius * 2 * DOUBLE_ARROW_BADGE_RATIO)
 }
@@ -259,7 +247,7 @@ function Dnd5eStandardConditionBadge({
       <Circle
         radius={size / 2}
         fill={mark?.backgroundColor ?? style?.fill ?? '#312e81'}
-        stroke={mark?.borderColor ?? style?.stroke ?? '#c4b5fd'}
+        stroke={mark?.borderColor ?? '#ffffff'}
         strokeWidth={tokenLineWidth(radius, 1.5)}
         shadowBlur={4 * tokenScale(radius)}
         shadowColor={mark?.glowColor ?? style?.stroke ?? '#a78bfa'}
@@ -334,7 +322,7 @@ function Dnd5eTokenStatusMarkerBadge({
       <Circle
         radius={size / 2}
         fill={marker.backgroundColor ?? style.fill}
-        stroke={marker.borderColor ?? style.stroke}
+        stroke={marker.borderColor ?? '#ffffff'}
         strokeWidth={tokenLineWidth(radius, 1.5)}
         shadowBlur={4 * tokenScale(radius)}
         shadowColor={marker.glowColor ?? marker.borderColor ?? style.stroke}

@@ -1,0 +1,44 @@
+[WebServer] (node:31708) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:33708) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:24460) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (2.8s)
+
+
+  1) e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ───────
+
+    Error: expect(received).toBeGreaterThan(expected)
+
+    Expected: > 10
+    Received:   0
+
+      39 |     return best
+      40 |   }, screenshot.toString('base64'))
+    > 41 |   expect(point.length).toBeGreaterThan(10)
+         |                        ^
+      42 |   // Clicking without dragging must leave the original pool intact.
+      43 |   await page.mouse.move(point.x, point.y)
+      44 |   await page.mouse.down()
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:41:24
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ────────

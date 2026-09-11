@@ -6,17 +6,17 @@ import DiceOverlayPortal, {
 } from './DiceOverlayPortal'
 
 describe('DiceOverlayPortal', () => {
-  it('uses a fixed, isolated layer above every authored application layer', () => {
+  it('uses a fixed, isolated layer above the map but below confirmation dialogs', () => {
     const html = renderToStaticMarkup(
       <DiceOverlayPortal><span>die</span></DiceOverlayPortal>,
     )
 
-    expect(DICE_OVERLAY_Z_INDEX).toBe(2_147_483_647)
+    expect(DICE_OVERLAY_Z_INDEX).toBe(2_147_483_637)
     expect(DICE_OVERLAY_ROOT_CLASS_NAME).toContain('fixed')
     expect(DICE_OVERLAY_ROOT_CLASS_NAME).toContain('isolate')
     expect(html).toContain('data-testid="dice-overlay-top-layer"')
     expect(html).toContain('data-dice-overlay-layer="foreground"')
-    expect(html).toContain('z-index:2147483647')
+    expect(html).toContain('z-index:2147483637')
   })
 
   it('keeps the tray text above the 3D dice and its leather backdrop', () => {

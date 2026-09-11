@@ -618,7 +618,9 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
     // Do not infer a second tactical marker from the same effect's label or
     // legacy alias (for example invisible -> hidden).
     if (effect.standardCondition) continue
-    const statusId = effect.definitionId === 'srd-5.1:spell:cone-of-cold:frozen-statue'
+    const statusId = effect.source?.rulesId === 'ray-of-enfeeblement' || /(?:^|:)ray-of-enfeeblement(?:$|:)/.test(effect.definitionId ?? '')
+      ? 'weakened'
+      : effect.definitionId === 'srd-5.1:spell:cone-of-cold:frozen-statue'
       ? 'frozen-statue'
       : effect.definitionId === 'srd-5.1:spell:nondetection'
         ? 'nondetection'

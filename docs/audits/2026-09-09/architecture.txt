@@ -1,0 +1,4 @@
+Architecture audit failed:
+- MapsWorkspacePage.tsx line budget exceeded: 41375 > 41294
+- MapCanvas.tsx line budget exceeded: 3425 > 3418
+- src/components/map/MapTokenNode.tsx line budget exceeded: 1765 > 1761

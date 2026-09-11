@@ -1,3 +1,4 @@
+import { ReverseGravityArea } from './ReverseGravityArea'
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import Konva from 'konva'
@@ -1612,7 +1613,9 @@ export function Dnd5ePluginAreaOverlays({
   return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
     const preset = dnd5ePersistentAreaRenderPreset(area)
     const namedPresentation = dnd5eNamedPersistentAreaPresentation(preset)
-    const overlay = area.coreSpellId === 'move-earth'
+    const overlay = area.coreSpellId === 'reverse-gravity'
+      ? <ReverseGravityArea area={area} map={map} />
+      : area.coreSpellId === 'move-earth'
       ? <Dnd5eMoveEarthAreaOverlay area={area} map={map} />
       : preset === 'toxic-cloud'
       ? <ZoomStableToxicCloudAreaOverlay area={area} map={map} />

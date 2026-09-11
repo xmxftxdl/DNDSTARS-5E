@@ -44,7 +44,8 @@ describe('dice tray display recovery', () => {
       onRollDone={complete} onD20Complete={complete} onDiceComplete={complete}
       onPreviewComplete={complete} onSecretConfirm={complete}
     />)
-    expect(html).toContain('各骰点数：4、3')
+    expect(html).toContain('aria-label="D6：4"')
+    expect(html).toContain('aria-label="D6：3"')
     expect(html).toContain('2d6+2')
     expect(html).toContain('<strong>9</strong>')
     expect(html).toContain('6-sided dice roller')

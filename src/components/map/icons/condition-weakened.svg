@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Draining rays and a stooped figure with a lowered sword. -->
+  <path d="m2 4 4 3M1.5 9h4M3 14l3-2"/>
+  <circle cx="13.5" cy="5" r="2"/>
+  <path d="m12 8-3 4 3 3-2 6m2-6 4 5M12 9l2 4 4 1m-8-3-3 5"/>
+  <path d="m19 12-1 8m-2-4 4 .5"/>
+</svg>

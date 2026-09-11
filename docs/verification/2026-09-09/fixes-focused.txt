@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 C:/Users/Doco/Desktop/DND/DNDSTARS-5E
+
+ ❯ src/lib/sharedServerCore.test.ts (169 tests | 1 failed) 835ms
+     × 超过 IMAGE_COUNT_LIMIT 时按最旧优先 GC 262ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/sharedServerCore.test.ts > enforceImageQuota — AC4 配额 > 超过 IMAGE_COUNT_LIMIT 时按最旧优先 GC
+AssertionError: expected +0 to be 5 // Object.is equality
+
+- Expected
++ Received
+
+- 5
++ 0
+
+ ❯ src/lib/sharedServerCore.test.ts:5005:28
+    5003|     }
+    5004|     const removed = await enforceImageQuota(dir)
+    5005|     expect(removed.length).toBe(5)
+       |                            ^
+    5006|     const remaining = (await readdir(dir)).filter((n) => !n.endsWith('…
+    5007|     expect(remaining.length).toBe(IMAGE_COUNT_LIMIT)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 180 passed (181)
+   Start at  23:19:22
+   Duration  6.12s (transform 4.27s, setup 0ms, import 5.60s, tests 895ms, environment 1ms)
+

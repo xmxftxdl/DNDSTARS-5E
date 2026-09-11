@@ -4116,6 +4116,14 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.result.state.combatants[enemy.id].currentHp).toBe(2)
     expect(resolved.result.state.combatants['wizard-token'].classResources['dnd5e-spell-slot-3'].current).toBe(0)
     expect(resolved.result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(4)
+    expect(resolved.result.events.filter((event) => event.type === 'spell-attack-damage-resolved'))
+      .toEqual(Array.from({ length: 4 }, (_, attackIndex) => expect.objectContaining({
+        targetId: enemy.id,
+        spellId: 'scorching-ray',
+        attackIndex,
+        roll: { sides: 6, rolls: [3, 4], bonus: 0, total: 7 },
+        finalDamage: 7,
+      })))
   })
 
   it('allows Chain Lightning secondary targets outside caster range when they remain within 30 feet of the first target', () => {
@@ -4205,7 +4213,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, d20: 15, effectRolls: [6, 7] })
     expect(resolved.result.ok ? 'ok' : resolved.result.reason).toBe('ok')
     expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(17)
-    expect(resolved.result.events).toContainEqual({ type: 'spell-cast', actorId: 'wizard-token', targetId: enemy.id, spellId: 'fire-bolt', slotLevel: 0 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'spell-cast', actorId: 'wizard-token', targetId: enemy.id, spellId: 'fire-bolt', slotLevel: 0 }))
   })
 
   it('applies one Cutting Words roll to shared area-spell damage before each target defense', () => {
@@ -4431,7 +4439,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === barbedDevil.id)?.hp).toBe(110)
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'spell-saving-throw-damage-resolved',
       actorId: 'wizard-token',
       targetId: barbedDevil.id,
@@ -4461,7 +4469,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
           reasons: ['static:immune:fire'],
         }],
       }],
-    })
+    }))
     expect(resolved.result.events.some((event) =>
       event.type === 'damage-applied' && event.targetId === barbedDevil.id)).toBe(false)
   })
@@ -4706,6 +4714,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       targetId: enemy.id,
       spellId: 'acid-arrow',
       amount: 6,
+      logContext: { names: { 'acid-arrow': '强酸箭' } },
     })
   })
 
@@ -4861,9 +4870,9 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(22)
     expect(resolved.application?.characters.find((entry) => entry.id === ally.id)?.currentHp).toBe(30)
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'spell-sculpted', actorId: 'wizard-token', targetId: allyToken.id, spellId: 'fireball',
-    })
+    }))
     expect(resolved.result.events.some((event) =>
       event.type === 'saving-throw-resolved' && event.targetId === allyToken.id,
     )).toBe(false)
@@ -5107,9 +5116,9 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.characters[0].classResources?.['dnd5e-sorcery-points']).toEqual({ current: 0, max: 5 })
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'metamagic-applied', actorId: 'sorcerer-token', spellId: 'fire-bolt', kind: 'subtle',
-    })
+    }))
   })
 
   it('resolves Twinned Spell attacks with independent attack and damage rolls', () => {
@@ -5242,12 +5251,12 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.result.ok ? 'ok' : resolved.result.reason).toBe('ok')
     expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(10)
     expect(resolved.application?.characters[0].classResources?.['dnd5e-sorcery-points']).toEqual({ current: 0, max: 5 })
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'metamagic-applied', actorId: 'sorcerer-token', spellId: 'fireball', kind: 'quickened',
-    })
-    expect(resolved.result.events).toContainEqual({
+    }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'metamagic-applied', actorId: 'sorcerer-token', spellId: 'fireball', kind: 'empowered',
-    })
+    }))
   })
 
   it('rejects forged Empowered Spell rerolls beyond the Charisma limit or without the feature request', () => {
@@ -6196,9 +6205,9 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(nextTurn.ok).toBe(true)
     if (!nextTurn.ok) return
     expect(nextTurn.state.combatants[wizardToken.id].classState.shieldSpellActive).toBeUndefined()
-    expect(nextTurn.events).toContainEqual({
+    expect(nextTurn.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: wizardToken.id, stateKey: 'shield-spell', active: false,
-    })
+    }))
   })
 
   it('lets Shield negate every Magic Missile dart assigned to its caster', () => {
@@ -6426,7 +6435,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       definitionId: 'srd-5.1:spell:ray-of-frost:speed-penalty',
       modifiers: { speedPenaltyFeet: 10 },
     }))
-    expect(cast.result.events).toContainEqual({
+    expect(cast.result.events).toContainEqual(expect.objectContaining({
       type: 'spell-attack-damage-resolved',
       actorId: 'wizard-token',
       targetId: enemy.id,
@@ -6437,7 +6446,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       roll: { sides: 8, rolls: [3, 4], bonus: 0, total: 7 },
       damageAfterAttackAdjustments: 7,
       finalDamage: 7,
-    })
+    }))
 
     const enemyTurn = resolveDnd5eHeadlessAction(cast.result.state, { type: 'end-turn', actorId: 'wizard-token' })
     expect(enemyTurn.ok).toBe(true)
@@ -6837,5 +6846,29 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     if (!second.ok) return
     expect(resolvePreparedDnd5eSpellCast({ prepared: second.prepared, effectRolls: [2] }).result)
       .toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+  })
+})
+
+
+describe('standard condition spell attack disadvantage', () => {
+  for (const condition of ['restrained', '束缚', 'poisoned']) it(`${condition} applies to fire bolt away from melee threats`, () => {
+    const wizard = character('restrained-wizard', '法师', { conditions: [condition], dnd5eClassLevels: { wizard: 5 }, dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } } } } })
+    wizard.dnd5eCombatState = { schemaVersion: 2, activeEffects: [createDnd5eConditionEffect({ condition: condition === 'poisoned' ? 'poisoned' : 'restrained', targetId: wizard.id, source: { kind: 'dm' }, duration: { type: 'permanent' } })] }
+    const input = fixture(wizard, 'fire-bolt', 0, token('target', 'enemy', 225))
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('disadvantage')
+    expect(prepared.prepared.attackModeResolution?.disadvantageReasons.length).toBeGreaterThan(0)
+    expect(previewDnd5eSpellAttack(prepared.prepared, 20, 1).hit).toBe(false)
+    const target = input.map.tokens[1]
+    target.dnd5eCombatState = { schemaVersion: 2, activeEffects: [createDnd5eConditionEffect({ condition: 'restrained', targetId: target.id, source: { kind: 'dm' }, duration: { type: 'permanent' } })] }
+    const cancelled = prepareDnd5eSpellCast(input)
+    expect(cancelled.ok && cancelled.prepared.attackMode).toBe('normal')
+    wizard.conditions = []
+    wizard.dnd5eCombatState.activeEffects = []
+    target.dnd5eCombatState.activeEffects = []
+    const cleared = prepareDnd5eSpellCast(input)
+    expect(cleared.ok && cleared.prepared.attackMode).toBe('normal')
   })
 })

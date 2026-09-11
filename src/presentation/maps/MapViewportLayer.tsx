@@ -157,6 +157,12 @@ export function buildMapViewportPresentation(
   gridCalibrationDraft?: MapViewportGridCalibrationDraft | null,
 ): MapViewportPresentation {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
+  const statusBorderColor = (sourceActorId?: string) => {
+    const sourceToken = sourceActorId ? map.tokens.find(token => token.id === sourceActorId) : undefined
+    const source = sourceActorId ? charactersById.get(sourceToken?.characterId ?? sourceActorId) : undefined
+    const colors = dnd5eCharacterPresentationColors(source)
+    return colors.classId ? colors.accentColor : '#ffffff'
+  }
   const projectedTokens = projectCharacterTokenPresentations(map.tokens, characters)
   const displayMap = projectedTokens === map.tokens ? map : { ...map, tokens: projectedTokens }
   const canvasMap = gridCalibrationDraft?.mapId === displayMap.id
@@ -340,6 +346,16 @@ export function buildMapViewportPresentation(
     ...spellEffectStatusTokenMarks,
     ...buildDnd5eMonsterStatusTokenMarks(map.tokens, [...characters]),
   ]
+  // Status borders describe the source, never the affected unit or status type.
+  const concentrationTokenMarks = buildDnd5eConcentrationTokenMarks(map.tokens, [...characters])
+  for (const mark of [...standardConditionTokenMarks, ...spellStatusTokenMarks, ...concentrationTokenMarks]) {
+    mark.borderColor = statusBorderColor(mark.instance.sourceActorId)
+  }
+  for (const [tokenId, markers] of Object.entries(dnd5eTokenStatusMarkersByToken)) {
+    dnd5eTokenStatusMarkersByToken[tokenId] = markers.map(marker => ({
+      ...marker, borderColor: statusBorderColor(marker.sourceActorId),
+    }))
+  }
   return {
     map: Object.keys(emittedLightByTokenId).length > 0
       ? {
@@ -361,7 +377,7 @@ export function buildMapViewportPresentation(
       .filter((mark) => mark.statusId === 'sanctuary')
       .map((mark) => mark.tokenId),
     spellStatusTokenMarks,
-    concentrationTokenMarks: buildDnd5eConcentrationTokenMarks(map.tokens, [...characters]),
+    concentrationTokenMarks,
     defeatedTokenIds: map.tokens.flatMap((token) => {
       const hitPoints = hpByToken[token.id]
       return hitPoints && hitPoints.hp <= 0 ? [token.id] : []

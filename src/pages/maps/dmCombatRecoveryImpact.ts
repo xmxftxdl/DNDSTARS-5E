@@ -42,6 +42,34 @@ export function combatRecoveryOperationTransactions(
     !isCombatRecoveryInternalTransaction(transaction))
 }
 
+/** Display one rollback boundary per contiguous turn; retain all server transactions. */
+export function combatRecoveryTurnCheckpoints(history: readonly DmUndoTransactionSummary[]): DmUndoTransactionSummary[] {
+  const groups: { key: string; rows: DmUndoTransactionSummary[] }[] = []
+  for (const transaction of [...history].reverse()) {
+    const combat = transaction.combat
+    const setup = combat?.beforeActive === false || transaction.label === '开始战斗'
+    const round = combat?.beforeRound ?? combat?.afterRound
+    const slot = combat?.beforeSlotId ?? combat?.beforeInitiativeIndex ?? combat?.afterSlotId ?? combat?.afterInitiativeIndex
+    const key = setup ? `setup:${transaction.transactionId}` : round != null && slot != null
+      ? `${combat?.mapId}:${combat?.combatId}:${round}:${slot}`
+      : `legacy:${transaction.transactionId}`
+    const previous = groups.at(-1)
+    if (previous?.key === key && !key.startsWith('setup:')) previous.rows.push(transaction)
+    else groups.push({ key, rows: [transaction] })
+  }
+  return groups.filter(group => combatRecoveryOperationTransactions(group.rows).length > 0).map(group => {
+    const first = group.rows[0]!
+    const named = group.rows.find(row => row.combat?.beforeActorLabel)
+    const actor = named?.combat?.beforeActorLabel
+    return {
+      ...first,
+      label: actor && !group.key.startsWith('setup:') ? `${actor} · 回合开始` : first.label,
+      combat: first.combat ? { ...first.combat, afterRound: first.combat.beforeRound ?? first.combat.afterRound } : undefined,
+      resources: [...new Set(group.rows.flatMap(row => row.resources))],
+    }
+  }).reverse()
+}
+
 /** Mirrors the server's newest-to-selected combat-cascade boundary. */
 export function combatRecoveryAffectedTransactions(
   history: readonly DmUndoTransactionSummary[],

@@ -1116,6 +1116,29 @@ describe('D&D 5e player map movement', () => {
       .toMatchObject({ x: 25, y: 5, elevationFeet: 40 })
   })
 
+  it('authoritatively places a flyer above a ground enemy and rejects landing into it', () => {
+    const hero = character()
+    hero.dnd5eMovementSpeeds = { fly: 60 }
+    const testMap = { ...map, tokens: [map.tokens[0], { ...map.tokens[1], x: 25 }] }
+    const input = { map: testMap, characters: [hero],
+      initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    }
+    const prepared = prepareDnd5ePlayerMove({ ...input,
+      action: { ...action, dnd5eTraversalMode: 'fly', targetElevationFeet: 10 } })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5ePlayerMove({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find(token => token.id === 'hero-token'))
+      .toMatchObject({ x: 25, y: 5, elevationFeet: 10 })
+    expect(prepareDnd5ePlayerMove({ ...input,
+      action: { ...action, dnd5eTraversalMode: 'fly', targetElevationFeet: 0 } }).ok).toBe(false)
+    expect(prepareDnd5ePlayerMove({ ...input, characters: [character()],
+      action: { ...action, dnd5eTraversalMode: 'fly', targetElevationFeet: 10 } }).ok).toBe(false)
+  })
+
   it('half-speed careful movement consumes twice the traversed distance in Headless', () => {
     const prepared = prepareDnd5ePlayerMove({
       action: { ...action, dnd5eCarefulMovement: true },

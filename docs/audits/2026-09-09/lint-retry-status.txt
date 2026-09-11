@@ -1,0 +1,4 @@
+The audit-owned ESLint retry used an 8192 MB V8 heap limit.
+It was manually stopped after reaching approximately 8.5 GB resident memory.
+The last output shows ESLint processing .codex-temp/monster-verification-20260904/snapshot/src/pages/MapsWorkspacePage.tsx.
+This retry is incomplete, not a successful lint check. The original default command failed with V8 heap exhaustion; see lint.txt.

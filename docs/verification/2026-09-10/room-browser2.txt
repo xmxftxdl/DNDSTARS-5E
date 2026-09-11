@@ -1,0 +1,40 @@
+
+Running 1 test using 1 worker
+
+(node:37632) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool (1.7m)
+
+
+  1) e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 
+
+    TimeoutError: page.goto: Timeout 60000ms exceeded.
+    Call log:
+      - navigating to "http://127.0.0.1:6474/campaign/7UAMS8/maps", waiting until "domcontentloaded"
+
+
+      39 |     await dm.goto(`${dmUrl}/campaign/${dmRoom.roomId}/maps`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+      40 |     await expect(dm.getByTestId('map-canvas')).toBeVisible({ timeout: 60000 })
+    > 41 |     await player.goto(`${playerUrl}/campaign/${dmRoom.roomId}/maps`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+         |                  ^
+      42 |     await expect(player.getByTestId('map-canvas')).toBeVisible({ timeout: 60000 })
+      43 |     await dm.getByTestId('dice-tray-recall').click({ timeout: 10000 })
+      44 |     for (let i = 0; i < 20; i++) await dm.getByRole('button', { name: /^添加 d6，/ }).click()
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice-room.spec.ts:41:18
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 

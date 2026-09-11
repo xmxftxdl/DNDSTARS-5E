@@ -2,7 +2,8 @@ import { Crosshair, Flame, Sparkles, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { showAppConfirm } from '../../lib/appDialog'
 import { dnd5eSpellAreaAtSlot, getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e/spells'
-import type { Dnd5ePluginArea } from '../../store/maps'
+import { usePersistentAreaPanelAnchor } from './usePersistentAreaPanelAnchor'
+import type { BattleMap, Dnd5ePluginArea } from '../../store/maps'
 
 export interface Dnd5ePersistentAreaEntityAttackResult {
   outcome: 'miss' | 'hit' | 'destroyed'
@@ -136,7 +137,8 @@ function hallowProtectionPresentation(area: Dnd5ePluginArea): {
   }
 }
 
-export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, excludedTargetNames, feetPerCell, currentRound, onResolveEntityAttack, onSetWebUnsupported, onIgniteWebCell, onDelete, onClose }: {
+export default function Dnd5ePersistentAreaDetailPanel({ area, map, sourceName, excludedTargetNames, feetPerCell, currentRound, onResolveEntityAttack, onSetWebUnsupported, onIgniteWebCell, onDelete, onClose }: {
+  map?: BattleMap
   area?: Dnd5ePluginArea
   sourceName?: string
   /** DM-facing labels for Host-captured cast-time trigger exemptions. */
@@ -165,6 +167,7 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
   const [strengthResult, setStrengthResult] = useState<string>()
   const [settlingWeb, setSettlingWeb] = useState(false)
   const [webResult, setWebResult] = useState<string>()
+  const panelRef = usePersistentAreaPanelAnchor(area, map)
   if (!area) return null
   const columns = area.cells.map((cell) => cell.col)
   const rows = area.cells.map((cell) => cell.row)
@@ -244,7 +247,7 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
       setSettlingAttack(false)
     }
   }
-  return <div data-testid="dnd5e-persistent-area-detail-panel" className="glass absolute bottom-3 right-3 z-[90] w-[min(320px,calc(100%-1.5rem))] overflow-hidden rounded-2xl border border-orange-300/20 shadow-2xl">
+  return <div ref={panelRef} data-testid="dnd5e-persistent-area-detail-panel" className="glass absolute z-[90] w-[min(320px,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-orange-300/20 shadow-2xl">
     <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-violet-300/35 bg-violet-500/15 text-violet-200"><Sparkles className="h-5 w-5" /></span>
       <div className="min-w-0 flex-1"><h2 className="truncate text-base font-bold text-slate-100">{area.label}</h2><p className="mt-0.5 text-xs text-slate-400">{sourceName ? `施法者：${sourceName}` : '持续法术区域'}</p></div>

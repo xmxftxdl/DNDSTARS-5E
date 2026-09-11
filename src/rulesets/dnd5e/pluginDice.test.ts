@@ -6,6 +6,23 @@ import {
 } from './pluginDice'
 
 describe('D&D 5e plugin declarative dice', () => {
+  it('starts independent player saves together and waits before the next damage roll', async () => {
+    const requests: string[] = []
+    const resolve = new Map<string, (values: number[]) => void>()
+    const declarations = ['save-a', 'save-b', 'damage'].map(id => ({ id, label: id, count: 1, sides: 20 }))
+    const result = executeDnd5ePluginDiceRolls({ rolls: declarations }, declaration => {
+      requests.push(declaration.id)
+      return new Promise<number[]>(done => resolve.set(declaration.id, done))
+    }, declaration => declaration.id.startsWith('save') ? declaration.id : undefined)
+    expect(requests).toEqual(['save-a', 'save-b'])
+    resolve.get('save-b')!([18])
+    await Promise.resolve()
+    expect(requests).toEqual(['save-a', 'save-b'])
+    resolve.get('save-a')!([12])
+    await vi.waitFor(() => expect(requests).toEqual(['save-a', 'save-b', 'damage']))
+    resolve.get('damage')!([6])
+    expect(await result).toMatchObject({ 'save-a': { values: [12] }, 'save-b': { values: [18] }, damage: { values: [6] } })
+  })
   const definition = {
     rolls: [
       { id: 'damage', label: '伤害', count: 2, sides: 6, modifier: 3, visibility: 'public' as const },

@@ -198,10 +198,8 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
       id: `${declaration.id}:${target.id}`,
       label: `${target.name?.trim() || target.id} · ${declaration.label}`,
       count,
-      ...(check?.kind === 'saving-throw' ? { rollerTokenId: target.id } : {}),
-      ...(check?.kind === 'attack-roll' ? { rollerTokenId: input.actor.id } : {}),
-      ...(check?.kind === 'ability-check' || check?.kind === 'skill-check' ||
-        check?.kind === 'concentration-check' ? { rollerTokenId: input.actor.id } : {}),
+      rollerTokenId: check?.kind === 'saving-throw' ||
+        (check?.kind === 'opposed-ability-check' && check.opposedRollId === declaration.id) ? target.id : input.actor.id,
       ...(d20RollKind ? { d20RollKind } : {}),
       ...(d20RollMode ? { d20RollMode } : {}),
       ...(acceptedCounts ? { acceptedCounts } : {}),

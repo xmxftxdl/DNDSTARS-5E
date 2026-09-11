@@ -1426,6 +1426,7 @@ export default function PlayerCombatHotbar({
       onFocus={(event) => showTooltip(entry, event.currentTarget)}
       onBlur={() => hideTooltip(entry.id)}
       aria-label={entry.label}
+      aria-pressed={entry.command.kind === 'toggle-spell-modifier' ? modifierActive : undefined}
       aria-disabled={!entry.enabled}
       title={entry.command.kind === 'cast-spell'
         ? entry.enabled ? [
@@ -1723,7 +1724,7 @@ export default function PlayerCombatHotbar({
             <div
               ref={featureActionsRailRef}
               data-testid="combat-hotbar-features-rail"
-              aria-label="职业特性两行横向滑栏"
+              aria-label="职业特性三列两行横向滑栏"
               tabIndex={0}
               onWheel={(event) => {
                 if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
@@ -1736,9 +1737,16 @@ export default function PlayerCombatHotbar({
                 event.preventDefault()
                 scrollActionsRail(featureActionsRailRef.current, event.key === 'ArrowLeft' ? -1 : 1)
               }}
-              className="grid h-[6.25rem] min-w-0 flex-1 auto-cols-[3rem] grid-flow-col grid-rows-2 gap-1 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex h-[6.25rem] min-w-0 flex-1 gap-1 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              {grouped.features.map(actionButton)}
+              {Array.from({ length: Math.max(1, Math.ceil(grouped.features.length / 6)) }, (_, page) => (
+                <div key={page} className="grid w-[9.5rem] shrink-0 grid-cols-3 grid-rows-2 gap-1">
+                  {Array.from({ length: 6 }, (_, index) => {
+                    const entry = grouped.features[page * 6 + index]
+                    return entry ? actionButton(entry) : <div key={`empty-feature-${index}`} aria-hidden="true" className="h-12 w-12 rounded-lg border border-dashed border-emerald-200/[0.07] bg-black/10" />
+                  })}
+                </div>
+              ))}
             </div>
             <button type="button" onClick={() => scrollActionsRail(featureActionsRailRef.current, 1)} aria-label="向右滚动职业特性" className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"><ChevronRight className="h-3.5 w-3.5" /></button>
           </div>

@@ -8,6 +8,7 @@ export type VfxRendererKey =
   | 'guidance'
   | 'resistance'
   | 'sanctuary'
+  | 'reverse-gravity'
   | 'new-spell'
   | 'status-spell'
   | 'sacred-flame'
@@ -192,6 +193,7 @@ register('eldritch-blast', ['eldritch-blast'], {
 register('guidance', ['guidance'])
 register('resistance', ['resistance'])
 register('sanctuary', ['sanctuary'])
+register('reverse-gravity', ['reverse-gravity'])
 register('new-spell', [
   'heal', 'mass-cure-wounds', 'mass-heal', 'mass-healing-word',
   'prayer-of-healing', 'dancing-lights', 'minor-illusion', 'thaumaturgy', 'shillelagh',

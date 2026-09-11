@@ -1,0 +1,58 @@
+[WebServer] (node:9924) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:35492) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:33248) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[dice-box-frame] roll failed TypeError: Cannot read properties of null (reading 'trim')
+    at new Ni (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3105:310)
+    at Object.b [as acquireProgram] (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3109:9911)
+    at qe (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:67681)
+    at Ye (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:70545)
+    at pa.renderBufferDirect (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:61878)
+    at b (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:3817)
+    at b (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:3992)
+    at ea.render (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:1572)
+    at pa.render (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3137:64279)
+    at Il.animateThrow (http://127.0.0.1:6373/assets/dice-box-frame-DjM26iWN.js:3178:40712)
+  x  1 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (17.5s)
+
+
+  1) e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ───────
+
+    Error: expect(received).toBeGreaterThan(expected)
+
+    Expected: > 10
+    Received:   0
+
+    Call Log:
+    - Timeout 15000ms exceeded while waiting on the predicate
+
+      41 |   }, screenshot.toString('base64'))
+      42 |   return point }
+    > 43 |   await expect.poll(async () => (await locateDie()).length, { timeout: 15000 }).toBeGreaterThan(10)
+         |                                                                                 ^
+      44 |   const point = await locateDie()
+      45 |   // Clicking without dragging must leave the original pool intact.
+      46 |   await page.mouse.move(point.x, point.y)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:43:81
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ────────

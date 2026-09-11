@@ -1,0 +1,209 @@
+[WebServer] (node:36368) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:1684) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 9 tests using 1 worker
+
+(node:29672) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\dice-pair.spec.ts:8:13 › Pair advantage: pair, adopted die, immediate outcome and refresh (50.1s)
+(node:36760) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  2 e2e\dice-pair.spec.ts:8:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh (34.1s)
+(node:11236) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 3 e2e\dice-pair.spec.ts:8:13 › Pair save success: pair, adopted die, immediate outcome and refresh (20.4s)
+  x  4 e2e\dice-pair.spec.ts:8:13 › Pair save failure: pair, adopted die, immediate outcome and refresh (10.7s)
+(node:32716) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 5 e2e\dice-pair.spec.ts:8:13 › Pair tie: pair, adopted die, immediate outcome and refresh (14.7s)
+  ok 6 e2e\dice-pair.spec.ts:36:1 › adopted aura respects reduced motion and clears on the next damage roll (8.6s)
+  x  7 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (8.3s)
+(node:29664) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 8 e2e\dm-dice-correction.spec.ts:2:1 › player presents the corrected public value before the next broadcast (19.6s)
+  x  9 e2e\room-dice.spec.ts:3:1 › room results and DM confirmation do not replace personal dice, including refresh (8.3s)
+
+
+  1) e2e\dice-pair.spec.ts:8:13 › Pair advantage: pair, adopted die, immediate outcome and refresh ─
+
+    Test timeout of 45000ms exceeded.
+
+    Error: page.goto: Test timeout of 45000ms exceeded.
+    Call log:
+      - navigating to "http://127.0.0.1:6373/e2e/fixtures/dice-queue.html", waiting until "load"
+
+
+       9 |  test.setTimeout(45000)
+      10 |  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message))
+    > 11 |  await page.goto('http://127.0.0.1:6373/e2e/fixtures/dice-queue.html')
+         |             ^
+      12 |  await page.getByRole('button',{name:button,exact:true}).click()
+      13 |  await expect(page.getByTestId('dice-check-mode')).toContainText(mode)
+      14 |  await expect(page.getByTestId('dice-check-inline')).toContainText(result)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:11:13
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) e2e\dice-pair.spec.ts:8:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')
+    Expected: 1
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')
+        13 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      13 |  await expect(page.getByTestId('dice-check-mode')).toContainText(mode)
+      14 |  await expect(page.getByTestId('dice-check-inline')).toContainText(result)
+    > 15 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1)
+         |                                                                                      ^
+      16 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+      17 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result,{timeout:20000})
+      18 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:15:86
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) e2e\dice-pair.spec.ts:8:13 › Pair save failure: pair, adopted die, immediate outcome and refresh 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')
+    Expected: 1
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')
+        13 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      13 |  await expect(page.getByTestId('dice-check-mode')).toContainText(mode)
+      14 |  await expect(page.getByTestId('dice-check-inline')).toContainText(result)
+    > 15 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1)
+         |                                                                                      ^
+      16 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+      17 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result,{timeout:20000})
+      18 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:15:86
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ───────
+
+    Error: page.evaluate: Execution context was destroyed, most likely because of a navigation
+
+       9 |   await page.setViewportSize({ width: 1100, height: 800 })
+      10 |   await page.goto(`http://127.0.0.1:${port}/e2e/fixtures/physical-dice-tray.html`, { waitUntil: 'commit' })
+    > 11 |   const completed = () => page.evaluate(() => (window as unknown as { completed: number[][] }).completed)
+         |                                ^
+      12 |   await expect.poll(completed, { timeout: 15000 }).toEqual([[2, 4, 6]])
+      13 |   await page.evaluate(() => window.addEventListener('message', (event) => {
+      14 |     if (event.data?.type === 'dice-box-roll-result') document.body.dataset.pool = JSON.stringify(event.data.values)
+        at completed (C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:11:32)
+        at expect.poll.timeout (C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:29:40)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:29:3
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) e2e\room-dice.spec.ts:3:1 › room results and DM confirmation do not replace personal dice, including refresh 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('region', { name: '投掷记录' }).locator('details')
+    Expected: 3
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for getByRole('region', { name: '投掷记录' }).locator('details')
+        14 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      11 |   await page.getByRole('button', { name: '接收三位玩家结果' }).click()
+      12 |   const room = page.getByRole('region', { name: '投掷记录' })
+    > 13 |   await expect(room.locator('details')).toHaveCount(3)
+         |                                         ^
+      14 |   await expect(page.locator('iframe')).toHaveCount(1)
+      15 |   await page.getByRole('textbox', { name: '第 1 枚 d20 骰面' }).fill('17')
+      16 |   await page.getByTestId('dice-tray-secret-confirm').click()
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\room-dice.spec.ts:13:41
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\room-dice-room-results-and-a77c3-onal-dice-including-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\room-dice-room-results-and-a77c3-onal-dice-including-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\room-dice-room-results-and-a77c3-onal-dice-including-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\room-dice-room-results-and-a77c3-onal-dice-including-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5 failed
+    e2e\dice-pair.spec.ts:8:13 › Pair advantage: pair, adopted die, immediate outcome and refresh ──
+    e2e\dice-pair.spec.ts:8:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh 
+    e2e\dice-pair.spec.ts:8:13 › Pair save failure: pair, adopted die, immediate outcome and refresh 
+    e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ────────
+    e2e\room-dice.spec.ts:3:1 › room results and DM confirmation do not replace personal dice, including refresh 
+  4 passed (5.6m)

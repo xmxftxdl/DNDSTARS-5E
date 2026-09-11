@@ -16,6 +16,59 @@ const battleMap = (patch: Partial<BattleMap> = {}): BattleMap => ({
 const geometry = (): MapGeometryState => createEmptyMapGeometry('map', 1)
 
 describe('map geometry pathfinding', () => {
+  it('allows flying above a ground creature but rejects overlapping body volumes in both solvers', () => {
+    const flyer = token({ elevationFeet: 10 })
+    const ground = token({ id: 'ground', x: 75, elevationFeet: 0, type: 'enemy' })
+    const map = battleMap({ tokens: [flyer, ground] })
+    for (const height of [0, 4, 5, 10]) {
+      const options = { map, token: { ...flyer, elevationFeet: height }, canFly: true, targetElevationFeet: height }
+      const direct = findMapGeometryPath({ ...options, to: ground })
+      const tree = createMapGeometryPathTree(options).pathTo(ground)
+      expect(!!direct, `direct flight at ${height}`).toBe(height >= 5)
+      expect(!!tree, `range preview at ${height}`).toBe(height >= 5)
+    }
+    const tallMap = { ...map, tokens: [flyer, { ...ground, size: 2 }] }
+    expect(findMapGeometryPath({ map: tallMap, token: flyer, canFly: true, targetElevationFeet: 9, to: ground })).toBeUndefined()
+  })
+
+  it('lets a ground creature walk beneath a flyer without granting flight to the walker', () => {
+    const walker = token()
+    const flyer = token({ id: 'flyer', x: 75, elevationFeet: 10, type: 'enemy' })
+    const map = battleMap({ tokens: [walker, flyer] })
+    expect(findMapGeometryPath({ map, token: walker, to: flyer })?.elevationsFeet).toEqual([0, 0])
+    expect(createMapGeometryPathTree({ map, token: walker }).pathTo(flyer)?.elevationsFeet).toEqual([0, 0])
+  })
+
+  it('blocks descent into a ground creature and ascent through a creature overhead', () => {
+    for (const [from, to, obstacleHeight] of [[10, 0, 0], [0, 20, 10]]) {
+      const mover = token({ elevationFeet: from })
+      const obstacle = token({ id: 'obstacle', elevationFeet: obstacleHeight })
+      const map = battleMap({ tokens: [mover, obstacle] })
+      const options = { map, token: mover, canFly: true, targetElevationFeet: to }
+      expect(findMapGeometryPath({ ...options, to: mover })).toBeUndefined()
+      expect(createMapGeometryPathTree(options).pathTo(mover)).toBeUndefined()
+      expect(findMapGeometryPath({ ...options, to: { x: 125, y: 25 } })).toBeUndefined()
+    }
+  })
+
+  it('uses terrain elevation for creature occupancy when no explicit altitude is stored', () => {
+    const mover = token({ elevationFeet: 20 })
+    const obstacle = token({ id: 'obstacle', x: 75 })
+    const map = battleMap({ tokens: [mover, obstacle] })
+    expect(findMapGeometryPath({ map, token: mover, canFly: true, to: obstacle })).toBeDefined()
+    expect(createMapGeometryPathTree({ map, token: mover, canFly: true }).pathTo(obstacle)?.elevationsFeet).toEqual([20, 20])
+    const state = geometry()
+    state.obstacles.push({
+      id: 'platform', kind: 'obstacle', label: '高台',
+      points: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainRegion: true, terrainElevationFeet: 20, createdAt: 1,
+    })
+    expect(findMapGeometryPath({ map, geometry: state, token: mover, canFly: true, to: obstacle })).toBeUndefined()
+    expect(createMapGeometryPathTree({ map, geometry: state, token: mover, canFly: true }).pathTo(obstacle)).toBeUndefined()
+    expect(findMapGeometryPath({ map, geometry: state, token: mover, canFly: true, targetElevationFeet: 25, to: obstacle })).toBeDefined()
+  })
+
   it('lets qualified forms use ordinary door cracks while explicit airtight barriers still block them', () => {
     const map = battleMap({ height: 50 })
     const state = geometry()

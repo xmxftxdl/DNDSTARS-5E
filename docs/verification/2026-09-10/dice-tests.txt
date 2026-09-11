@@ -1,0 +1,30 @@
+
+ RUN  v4.1.11 C:/Users/Doco/Desktop/DND/DNDSTARS-5E
+
+ ❯ src/presentation/maps/diceTrayHistory.test.tsx (4 tests | 1 failed) 50ms
+     × restores the player result and dice world without callbacks or reroll permissions 36ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/presentation/maps/diceTrayHistory.test.tsx > dice tray display recovery > restores the player result and dice world without callbacks or reroll permissions
+AssertionError: expected '<div data-testid="dice-overlay-top-la…' to contain '各骰点数：4、3'
+
+Expected: "各骰点数：4、3"
+Received: "<div data-testid="dice-overlay-top-layer" data-dice-overlay-layer="backdrop" class="pointer-events-none fixed inset-0 isolate" style="z-index:2147483645"><aside class="dice-tray-drawer dice-tray-drawer--backdrop" data-tab="dice" data-room-rolls="false" style="--room-results-height:0px" aria-hidden="true"><div class="dice-tray-drawer__surface"></div></aside></div><div data-testid="dice-overlay-top-layer" data-dice-overlay-layer="dice" class="pointer-events-none fixed inset-0 isolate" style="z-index:2147483646"><div class="absolute inset-0"><iframe title="6-sided dice roller" src="/dice-box-frame.html?badge=0&amp;ui=2&amp;sides=6&amp;qty=2" class="dice-box-damage-frame dice-box-frame--left-drawer dice-box-frame--pending" style="--dice-fly-x:-360px;--dice-fly-y:80px;pointer-events:none" sandbox="allow-scripts allow-same-origin"></iframe></div></div><div data-testid="dice-overlay-top-layer" data-dice-overlay-layer="foreground" class="pointer-events-none fixed inset-0 isolate" style="z-index:2147483647"><aside data-testid="dice-tray-drawer" data-state="open" data-tab="dice" data-room-rolls="false" style="--room-results-height:0px" class="dice-tray-drawer dice-tray-drawer--foreground" aria-label="战斗记录与骰盘"><div class="dice-tray-drawer__rim" aria-hidden="true"></div><div class="dice-tray-drawer__header"><div class="dice-tray-drawer__context"><div class="dice-tray-drawer__context-meta"><span>投掷结果</span><strong>2d6+2</strong></div><div class="dice-tray-drawer__title" title="伤害">伤害</div><div class="dice-tray-drawer__target" title="目标：地精"><span>目标</span>地精</div></div><div class="dice-tray-drawer__header-action"><button type="button" class="dice-tray-drawer__collapse" aria-label="收起掷骰盘">›</button></div></div><div class="dice-tray-drawer__result" aria-live="polite"><div class="dice-tray-drawer__total"><span>2d6+2</span><strong>9</strong></div><div class="dice-tray-drawer__dice" aria-label="各骰点数" tabindex="0"><span data-die-sides="6" class="dice-tray-drawer__die dice-result-value" title="D6 · 4" aria-label="D6：4"><small class="dice-result-value__type">D6</small><strong>4</strong></span><span data-die-sides="6" class="dice-tray-drawer__die dice-result-value" title="D6 · 3" aria-label="D6：3"><small class="dice-result-value__type">D6</small><strong>3</strong></span></div></div><div class="dice-tray-drawer__room-results"></div></aside></div>"
+
+ ❯ src/presentation/maps/diceTrayHistory.test.tsx:47:18
+     45|       onPreviewComplete={complete} onSecretConfirm={complete}
+     46|     />)
+     47|     expect(html).toContain('各骰点数：4、3')
+       |                  ^
+     48|     expect(html).toContain('2d6+2')
+     49|     expect(html).toContain('<strong>9</strong>')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 40 passed (41)
+   Start at  20:28:15
+   Duration  4.46s (transform 1.41s, setup 0ms, import 2.09s, tests 726ms, environment 1ms)
+

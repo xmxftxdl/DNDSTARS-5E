@@ -1,3 +1,4 @@
+import PdfLinkedText from '../../components/PdfLinkedText'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { combatLogChinese } from './combatLogChinese'
 import { getImage } from '../../lib/imageStore'
@@ -120,7 +121,7 @@ export default function CombatLogEntryCard({
             </span>
           </div>
           <p className="text-xs font-semibold leading-snug">
-            {localize(migrateLegacyApCombatLogText(entry.text))}
+            <PdfLinkedText text={localize(migrateLegacyApCombatLogText(entry.text))} />
           </p>
           {entry.details && entry.details.length > 0 && (
             <details className="group mt-2 border-t border-white/10 pt-1.5 text-[11px] leading-relaxed text-slate-300">
@@ -136,7 +137,7 @@ export default function CombatLogEntryCard({
                       aria-hidden="true"
                       className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-current opacity-55"
                     />
-                    <span>{localize(detail)}</span>
+                    <span><PdfLinkedText text={localize(detail)} /></span>
                   </div>
                 ))}
               </div>

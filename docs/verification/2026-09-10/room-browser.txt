@@ -1,0 +1,194 @@
+[WebServer] (node:28312) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] [voice] Saved local configuration could not be loaded: Command failed: powershell.exe -NoLogo -NoProfile -NonInteractive -Command Add-Type -AssemblyName System.Security;$encoded=[Console]::In.ReadToEnd().Trim();$protected=[Convert]::FromBase64String($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($protected,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes));
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] 
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] Player AI disabled: saved configuration could not be loaded. Run npm run local-ai:configure to repair it.
+[WebServer] (node:6908) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] [voice] Saved local configuration could not be loaded: Command failed: powershell.exe -NoLogo -NoProfile -NonInteractive -Command Add-Type -AssemblyName System.Security;$encoded=[Console]::In.ReadToEnd().Trim();$protected=[Convert]::FromBase64String($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($protected,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($bytes));
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] 
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] Player AI disabled: saved configuration could not be loaded. Run npm run local-ai:configure to repair it.
+
+Running 1 test using 1 worker
+
+(node:36416) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] 20:36:47 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 20:38:06 [vite] (client) [console.error] [room-state] initial hydration failed SharedResourceSaveError: shared-resource-save-rejected:spellbook:failed
+[WebServer]     at requireSharedResourceSaved (http://127.0.0.1:6473/src/lib/sharedApi.ts:46:39)
+[WebServer]     at http://127.0.0.1:6473/src/lib/sharedApi.ts:429:3
+[WebServer]     at async publish (http://127.0.0.1:6473/src/store/spellbook.ts:20:2)
+[WebServer]     at async loadShared (http://127.0.0.1:6473/src/store/spellbook.ts:29:31)
+[WebServer]     at async Promise.all (index 2)
+  x  1 e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool (3.0m)
+[WebServer] 20:40:40 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 20:43:18 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 20:43:30 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 20:45:08 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+[WebServer] 20:45:21 [vite] (client) [console.warn] Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.
+
+
+  1) e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 
+
+    Test timeout of 180000ms exceeded.
+
+    Error: browserContext.close: Test ended.
+    Browser logs:
+
+    <launching> C:\Users\Doco\AppData\Local\ms-playwright\chromium_headless_shell-1228\chrome-headless-shell-win64\chrome-headless-shell.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --use-angle=swiftshader --enable-unsafe-swiftshader --user-data-dir=C:\Users\Doco\AppData\Local\Temp\playwright_chromiumdev_profile-vuT8NP --remote-debugging-pipe --no-startup-window
+    <launched> pid=36708
+    [pid=36708][err] [0910/203602.751:INFO:CONSOLE:16] "Uncaught SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.", source:  (16)
+    [pid=36708][err] [0910/203602.938:INFO:CONSOLE:16] "Uncaught SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.", source:  (16)
+    [pid=36708][err] [0910/203613.346:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203613.475:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203623.292:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203623.326:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203634.055:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203634.132:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203643.331:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203643.337:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203644.009:INFO:CONSOLE:14089] "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold", source: http://127.0.0.1:6473/node_modules/.vite-6473/deps/react-dom_client.js?v=0456db52 (14089)
+    [pid=36708][err] [0910/203644.692:INFO:CONSOLE:0] "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.", source: http://127.0.0.1:6473/dice-box-frame.html?badge=0 (0)
+    [pid=36708][err] [0910/203644.908:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203644.922:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203647.017:INFO:CONSOLE:525] "Konva warning: The stage has 6 layers. Recommended maximum number of layers is 3-5. Adding more layers into the stage may drop the performance. Rethink your tree structure, you can use Konva.Group.", source: http://127.0.0.1:6473/@vite/client (525)
+    [pid=36708][err] [0910/203702.198:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203702.300:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203703.073:INFO:CONSOLE:14089] "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold", source: http://127.0.0.1:6473/node_modules/.vite-6473/deps/react-dom_client.js?v=0456db52 (14089)
+    [pid=36708][err] [0910/203703.799:INFO:CONSOLE:0] "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.", source: http://127.0.0.1:6473/dice-box-frame.html?badge=0 (0)
+    [pid=36708][err] [0910/203704.213:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203754.178:INFO:CONSOLE:525] "[room-state] initial hydration failed SharedResourceSaveError: shared-resource-save-rejected:spellbook:failed", source: http://127.0.0.1:6473/@vite/client (525)
+    [pid=36708][err] [0910/203806.510:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203807.275:INFO:CONSOLE:930] "[vite] hot updated: /src/index.css", source: http://127.0.0.1:6473/@vite/client (930)
+    [pid=36708][err] [0910/203809.333:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6473/@vite/client (851)
+    [pid=36708][err] [0910/203809.341:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6473/@vite/client (955)
+    [pid=36708][err] [0910/203810.643:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6474/@vite/client (851)
+    [pid=36708][err] [0910/203811.067:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6474/@vite/client (955)
+    [pid=36708][err] [0910/203811.724:INFO:CONSOLE:851] "[vite] connecting...", source: http://127.0.0.1:6474/@vite/client (851)
+    [pid=36708][err] [0910/203845.240:INFO:CONSOLE:955] "[vite] connected.", source: http://127.0.0.1:6474/@vite/client (955)
+    [pid=36708] <gracefully close start>
+
+      48 |     await dm.getByTestId('dice-tray-drawer').screenshot({ path: 'docs/verification/2026-09-10/20d6-real-dm.png' })
+      49 |     await player.getByTestId('dice-tray-drawer').screenshot({ path: 'docs/verification/2026-09-10/20d6-real-player.png' })
+    > 50 |   } finally { await Promise.all(contexts.map(context => context.close())) }
+         |               ^
+      51 | })
+      52 |
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice-room.spec.ts:50:15
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\combat-verification\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 

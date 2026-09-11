@@ -387,6 +387,7 @@ describe('SpellSettlementCoordinator', () => {
       actorTokenId: 'caster',
       areaAnchorCell: { col: 6, row: 4 },
     }
+    expect(areaSpellPresentationForSettlement({ ...common, spellId: 'reverse-gravity' })).toMatchObject({ spellId: 'reverse-gravity', shape: 'circle', radiusFeet: 50 })
     expect(areaSpellPresentationForSettlement({
       ...common,
       spellId: 'burning-hands',

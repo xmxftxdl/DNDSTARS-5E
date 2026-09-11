@@ -1,12 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
+import { ensureDnd5eCoreSpellActivitiesRegisteredV1 } from './activities/dnd5eCoreSpellActivities'
+import { dnd5ePluginSpellDefinition } from './plugins/pluginContentCatalog'
+import { dnd5ePluginSpellActivity } from './pluginSpellTransaction'
 import {
   dnd5eAvailableSpellModifierIntents,
+  mergeDnd5eArmedSpellModifierIntents,
+  dnd5ePluginSpellModifierCompatibilityV1,
   dnd5eSpellModifierIntentIdsFromOptions,
   resolveDnd5eSpellModifierIntents,
   toggleDnd5eSpellModifierIntent,
   type Dnd5eSpellModifierIntentId,
 } from './spellModifierIntents'
+
+it('offers Sculpt Spells for the registered Prismatic Spray activity', () => {
+  ensureDnd5eCoreSpellActivitiesRegisteredV1()
+  const spell = dnd5ePluginSpellDefinition('prismatic-spray')!
+  const result = resolveDnd5eSpellModifierIntents({
+    character: character({ charClass: '法师', level: 17, dnd5eClassLevels: { wizard: 17 },
+      dnd5eClassChoices: { classes: { wizard: { subclass: 'evocation', selections: {} } } } }),
+    castingClassId: 'wizard', spellId: spell.id, slotLevel: 7,
+    modifierIds: ['evocation-sculpt-spells'],
+    pluginSpell: dnd5ePluginSpellModifierCompatibilityV1(spell, dnd5ePluginSpellActivity(spell)),
+  })
+  expect(result).toMatchObject({ ok: true, options: { sculptSpell: true }, requiresTargetConfiguration: true })
+  const input = {
+    character: character({ charClass: '法师', level: 17, dnd5eClassLevels: { wizard: 17 },
+      dnd5eClassChoices: { classes: { wizard: { subclass: 'evocation', selections: {} } } } }),
+    castingClassId: 'wizard' as const, spellId: spell.id, slotLevel: 7,
+    explicitIds: [],
+    pluginSpell: dnd5ePluginSpellModifierCompatibilityV1(spell, dnd5ePluginSpellActivity(spell)),
+  }
+  expect(mergeDnd5eArmedSpellModifierIntents({ ...input, armedIds: ['evocation-sculpt-spells', 'evocation-overchannel'] }))
+    .toEqual(['evocation-sculpt-spells'])
+  expect(mergeDnd5eArmedSpellModifierIntents({ ...input, armedIds: [] })).toEqual([])
+})
 
 function character(patch: Partial<Character> = {}): Character {
   return {

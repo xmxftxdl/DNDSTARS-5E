@@ -1,3 +1,4 @@
+import PdfLinkedText from './PdfLinkedText'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, ChevronDown, Download, FileText, Swords, Trash2 } from 'lucide-react'
 import Card from './Card'
@@ -57,11 +58,11 @@ function CombatArchiveDetails({ session }: { session: CombatStatisticsSession })
               <span className="tabular-nums">{entry.time}</span>
               <span className="rounded bg-white/5 px-1.5 py-0.5">{KIND_LABEL[entry.kind]}</span>
             </div>
-            <p className="text-xs font-semibold leading-5 text-slate-200">{entry.text}</p>
+            <p className="text-xs font-semibold leading-5 text-slate-200"><PdfLinkedText text={entry.text} /></p>
             {entry.details?.length ? (
               <ul className="mt-2 space-y-1 border-l border-violet-400/20 pl-3 text-[11px] leading-5 text-slate-400">
                 {entry.details.map((detail, index) => (
-                  <li key={`${entry.id}:detail:${index}`}>{detail}</li>
+                  <li key={`${entry.id}:detail:${index}`}><PdfLinkedText text={detail} /></li>
                 ))}
               </ul>
             ) : null}

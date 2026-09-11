@@ -1,4 +1,4 @@
 {
   "comment": "ESLint standard-profile no-new-errors baseline after the repository-wide scan was split into bounded processes. The former value 0 had not represented main: the monolithic scan exhausted CI memory before emitting its 69 existing findings. Lower this value whenever errors are fixed; never raise it.",
-  "maxErrors": 69
+  "maxErrors": 68
 }

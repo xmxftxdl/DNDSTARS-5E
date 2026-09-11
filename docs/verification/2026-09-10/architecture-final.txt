@@ -1,0 +1,6 @@
+
+> dndstars-5e@0.1.0-beta.1 audit:architecture
+> node scripts/audit-architecture.mjs
+
+Architecture audit failed:
+- MapsWorkspacePage.tsx line budget exceeded: 41412 > 41294

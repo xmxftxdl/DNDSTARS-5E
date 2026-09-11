@@ -1,0 +1,15 @@
+import { expect, test } from '@playwright/test'
+for (const role of ['player', 'dm', 'spectator']) test(`${role} can move voice panel without collapsing it`, async ({ page }) => {
+  await page.goto(`http://127.0.0.1:6384/e2e/fixtures/map-voice.html?role=${role}`, { waitUntil: 'commit' })
+  const panel = page.getByLabel('地图房间语音', { exact: true })
+  const handle = page.getByRole('button', { name: '折叠房间语音', exact: true })
+  const before = await panel.boundingBox()
+  const box = await handle.boundingBox()
+  await page.mouse.move(box!.x + 80, box!.y + 15)
+  await page.mouse.down(); await page.mouse.move(box!.x - 40, box!.y + 115, { steps: 10 }); await page.mouse.up()
+  await expect.poll(async () => (await panel.boundingBox())!.x).toBeCloseTo(before!.x - 120, 0)
+  await expect.poll(async () => (await panel.boundingBox())!.y).toBeCloseTo(before!.y + 100, 0)
+  await expect(handle).toHaveAttribute('aria-expanded', 'true')
+  await handle.click()
+  await expect(page.getByRole('button', { name: '展开房间语音', exact: true })).toHaveAttribute('aria-expanded', 'false')
+})

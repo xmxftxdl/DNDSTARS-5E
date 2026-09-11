@@ -20,8 +20,9 @@ export interface InitiativeEntry {
   accent?: string
   /** Current-turn flowing border color, normally sourced from the actor's class palette. */
   turnGlowColor?: string
+  /** Confirmed scheduling score, including a possible DM rank override. */
   roll: number
-  /** The authoritative dice and modifier used to produce the initiative total. */
+  /** Original dice evidence belonging to this creature, never transferred by reordering. */
   initiativeCalculation?: {
     rolls: number[]
     d20: number

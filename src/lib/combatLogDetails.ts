@@ -614,6 +614,9 @@ function rawEventDetails(
     }
     case 'spell-attack-damage-resolved': {
       const spellName = getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId
+      const attackLabel = event.attackIndex == null
+        ? ''
+        : `第 ${event.attackIndex + 1} 次攻击 → ${resolveName(event.targetId)}｜`
       const damageType = event.damageType ? DND5E_DAMAGE_TYPE_LABELS[event.damageType] : ''
       const formula = `${event.roll.rolls.length}d${event.roll.sides}${event.roll.bonus === 0 ? '' : signed(event.roll.bonus)}`
       const faces = event.roll.rolls.join(' + ')
@@ -624,7 +627,7 @@ function rawEventDetails(
         ? ''
         : `｜最终伤害 ${event.finalDamage}`
       return [
-        `${spellName}${damageType}伤害骰 ${formula}：${faces}${event.roll.bonus === 0 ? '' : ` ${signed(event.roll.bonus)}`} = ${event.roll.total}${event.critical ? '｜重击' : ''}${attackAdjustment}${finalAdjustment}`,
+        `${attackLabel}${spellName}${damageType}伤害骰 ${formula}：${faces}${event.roll.bonus === 0 ? '' : ` ${signed(event.roll.bonus)}`} = ${event.roll.total}${event.critical ? '｜重击' : ''}${attackAdjustment}${finalAdjustment}`,
       ]
     }
     case 'ability-check-resolved':

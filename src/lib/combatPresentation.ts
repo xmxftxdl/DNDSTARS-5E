@@ -1,3 +1,4 @@
+import { createCombatPresentationReplayFilter } from './combatBannerReplay'
 import {
   publishSharedEvent as publishSharedTransportEvent,
   sampleSharedServerClock,
@@ -263,6 +264,7 @@ const COMBAT_PRESENTATION_ANIMATION_DURATION_BY_SPELL: Readonly<Record<string, n
   'stinking-cloud': STINKING_CLOUD_ANIMATION_DURATION_MS,
   'wall-of-fire': WALL_OF_FIRE_ANIMATION_DURATION_MS,
   'blade-barrier': BLADE_BARRIER_ANIMATION_DURATION_MS,
+  'reverse-gravity': 1800,
   cloudkill: CLOUDKILL_ANIMATION_DURATION_MS,
   'fog-cloud': FOG_CLOUD_ANIMATION_DURATION_MS,
   silence: SILENCE_ANIMATION_DURATION_MS,
@@ -327,6 +329,8 @@ const localCombatPresentationListeners = new Set<(event: unknown) => void>()
  * 发布端立即投影表现事件，随后再交给共享事件流同步至其他客户端。
  * 服务器 SSE 会把同一事件回送给发布端；表现 reducer 依靠稳定事件 ID 去重。
  */
+const acceptPublishedPresentation = createCombatPresentationReplayFilter(() => window.sessionStorage, 'published')
+
 async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
   if (channel === COMBAT_PRESENTATION_CHANNEL) {
     const type = data && typeof data === 'object' && 'type' in data
@@ -345,6 +349,7 @@ async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
     ) return
   }
   if (channel === COMBAT_PRESENTATION_CHANNEL) {
+    if (!acceptPublishedPresentation(data)) return
     for (const listener of [...localCombatPresentationListeners]) listener(data)
   }
   await publishSharedTransportEvent(channel, data)
@@ -715,6 +720,7 @@ export interface CombatPresentationMapProjectile {
     | 'minor-illusion'
     | 'thaumaturgy'
     | 'shillelagh'
+    | 'reverse-gravity'
     | 'cloudkill'
     | 'fog-cloud'
     | 'silence'

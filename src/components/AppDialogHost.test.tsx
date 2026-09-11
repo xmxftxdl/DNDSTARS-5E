@@ -26,7 +26,7 @@ describe('AppDialogHost', () => {
 
     expect(html).toContain('role="dialog"')
     expect(html).toContain('aria-modal="true"')
-    expect(html).toContain('z-[200000]')
+    expect(html).toContain('z-[2147483647]')
     expect(html).toContain('删除地图')
     expect(html).toContain('此操作无法撤销。')
     expect(html).toContain('data-testid="app-dialog-cancel"')

@@ -10,7 +10,6 @@ export default function MapVoicePanel({ belowInitiative = false }: { belowInitia
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
   const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null)
   const suppressClick = useRef(false)
-  const canDrag = voice.session?.role === 'dm'
   const clampPosition = (x: number, y: number) => {
     const panel = panelRef.current
     const parent = panel?.parentElement
@@ -32,7 +31,7 @@ export default function MapVoicePanel({ belowInitiative = false }: { belowInitia
     return () => observer.disconnect()
   }, [])
   const startDrag = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!canDrag || event.button !== 0 || !panelRef.current) return
+    if (event.button !== 0 || !panelRef.current) return
     suppressClick.current = false
     event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY,
@@ -54,8 +53,8 @@ export default function MapVoicePanel({ belowInitiative = false }: { belowInitia
   return (
     <aside ref={panelRef} className="map-voice-panel" data-below-initiative={belowInitiative || undefined} aria-label="地图房间语音"
       style={position ? { left: position.x, top: position.y, right: 'auto' } : undefined}>
-      <button type="button" className={`flex w-full shrink-0 items-center gap-2 px-3 py-2 text-xs text-slate-200 ${canDrag ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''}`}
-        title={canDrag ? '拖动标题移动面板；点击折叠或展开' : undefined}
+      <button type="button" className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-xs text-slate-200 cursor-grab touch-none select-none active:cursor-grabbing"
+        title="拖动标题移动面板；点击折叠或展开"
         onPointerDown={startDrag} onPointerMove={moveDrag}
         onPointerUp={() => { drag.current = null }}
         onPointerCancel={() => { drag.current = null; suppressClick.current = true }}

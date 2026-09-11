@@ -91,6 +91,7 @@ export function useCombatInterruptRegistry() {
   } | null>(null)
   const pendingD20ConfirmationsRef = useRef(new Map<string, {
     originalValue: number
+    reject: (error: Error) => void
     resolve: (value: {
       value: number
       postD20Adjustment?: Dnd5ePostD20AdjustmentUse

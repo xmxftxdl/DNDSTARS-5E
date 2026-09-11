@@ -29,6 +29,16 @@ const map = (tokens: Token[]): BattleMap => ({
 })
 
 describe('map Token drop planner', () => {
+  it('keeps a drop above another creature in the requested cell instead of moving it sideways', () => {
+    const flyer = token({ elevationFeet: 10 })
+    const ground = token({ id: 'ground', x: 125 })
+    expect(planMapTokenDrop({ token: flyer, map: map([flyer, ground]), x: 125, y: 25,
+      validateMovementLocally: true })).toEqual({ status: 'allowed', position: { x: 125, y: 25 }, elevationFeet: 10 })
+    const grounded = { ...flyer, elevationFeet: 0 }
+    const result = planMapTokenDrop({ token: grounded, map: map([grounded, ground]), x: 125, y: 25,
+      validateMovementLocally: true })
+    expect(result.status === 'allowed' && result.position).not.toEqual({ x: 125, y: 25 })
+  })
   it('snaps a Token and preserves its height above new terrain', () => {
     const actor = token({ elevationFeet: 10 })
     const geometry = createEmptyMapGeometry('map', 1)
