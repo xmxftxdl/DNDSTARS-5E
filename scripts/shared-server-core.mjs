@@ -10291,6 +10291,7 @@ function assertRoomRuntimeProjectionValue(value, key = '', depth = 0) {
 }
 
 function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy) {
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) throw new RoomProtocolError(400, 'starmod-requires-runtime-projection')
   const source = bytes.toString('utf8').trimStart()
   if (!source.startsWith('{')) {
     if (distributionPolicy === 'room-ephemeral') {
@@ -10329,6 +10330,7 @@ function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distribut
 }
 
 function assertAccountPluginPackagePolicy(bytes, pluginId, version, distributionPolicy) {
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) throw new RoomProtocolError(400, 'starmod-requires-runtime-projection')
   const source = bytes.toString('utf8').trimStart()
   if (!source.startsWith('{')) return
   let parsed

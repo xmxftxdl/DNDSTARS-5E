@@ -1,3 +1,4 @@
+import StarModEditor from '../components/rules/StarModEditor'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 import { Activity, AlertTriangle, CheckCircle2, Download, FileJson, Moon, Palette, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Sun, Trash2, Upload } from 'lucide-react'
@@ -44,6 +45,7 @@ import { getAppTheme, setAppTheme, subscribeAppTheme, type AppTheme } from '../l
 import { showAppConfirm } from '../lib/appDialog'
 
 export default function RulesPluginsPage() {
+  const [editorBytes, setEditorBytes] = useState<ArrayBuffer | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const localJsonRef = useRef<HTMLInputElement>(null)
   const collectionRef = useRef<HTMLInputElement>(null)
@@ -152,6 +154,11 @@ export default function RulesPluginsPage() {
           `安装内容包：${inspected.manifest.name} v${inspected.manifest.version}`,
           `来源：${inspected.provenance?.sourceTitle ?? inspected.manifest.publisher}`,
           `许可：${inspected.manifest.license}`,
+          ...(inspected.starModManifest ? [
+            `内容来源类别：${inspected.starModManifest.contentSource}`,
+            `请求权限：${inspected.starModManifest.permissions.join('、') || '无'}`,
+            `规则：${inspected.starModManifest.systemId ?? '通用'} ${inspected.starModManifest.systemVersion ?? ''}`,
+          ] : []),
           `分发策略：${inspected.manifest.distributionPolicy ?? '未声明'}`,
           `内容：种族 ${summary.races}、背景 ${summary.backgrounds}、特性 ${summary.features}、专长 ${summary.feats}、法术 ${summary.spells}、物品 ${summary.items}、职业 ${summary.classes}、子职 ${summary.subclasses}、怪物 ${summary.monsters}、图标 ${summary.imageAssets}`,
           ...(coverage ? [
@@ -346,18 +353,18 @@ export default function RulesPluginsPage() {
     }
   }
 
-  const downloadInstalledPlugin = async (plugin: InstalledDnd5eRulesPlugin) => {
+  const downloadInstalledPlugin = async (plugin: InstalledDnd5eRulesPlugin, starMod = false) => {
     if (!host) return
     setBusy(true)
     setNotice(null)
     setError(null)
     try {
-      const bytes = await host.readBytes(plugin.id)
-      const blob = new Blob([bytes], { type: 'text/javascript' })
+      const bytes = starMod ? await host.exportStarMod(plugin.id) : await host.readBytes(plugin.id)
+      const blob = new Blob([bytes], { type: starMod ? 'application/zip' : 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = plugin.source === 'file' ? plugin.fileName : `${plugin.id}.dndstars5e`
+      link.download = starMod ? `${plugin.id}.starmod` : plugin.source === 'file' ? plugin.fileName : `${plugin.id}.dndstars5e`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -425,7 +432,7 @@ export default function RulesPluginsPage() {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
+                  accept=".starmod,.dndstars5e,.json,.mjs,.js,application/zip,application/json,text/javascript,application/javascript"
                   className="hidden"
                   onChange={(event) => {
                     const file = event.currentTarget.files?.[0]
@@ -579,6 +586,7 @@ export default function RulesPluginsPage() {
       )}
 
       {settingsSection === 'plugins' && <div className="contents">
+      {editorBytes && roomSession?.role !== 'player' && <StarModEditor key={editorBytes.byteLength} bytes={editorBytes} onApply={installFile} onClose={() => setEditorBytes(null)}/>}
       <section className="mb-5 flex flex-col gap-4 rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="font-semibold text-slate-100">账号插件中心已经开放</h2>
@@ -889,7 +897,7 @@ export default function RulesPluginsPage() {
                       <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                         active ? 'bg-emerald-500/12 text-emerald-200' : 'bg-rose-500/12 text-rose-200'
                       }`}>
-                        {active ? `已启用 · v${active.version}` : '加载失败'}
+                        {active ? `已启用 · v${active.version}` : !plugin.enabled ? '已停用' : '加载失败'}
                       </span>
                       <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
                         {plugin.source === 'file'
@@ -928,9 +936,23 @@ export default function RulesPluginsPage() {
                         className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 disabled:opacity-50"
                       >
                         <Download className="h-4 w-4" />
-                        导出文件
+                        导出原文件
                       </button>
                     )}
+                    {roomSession?.role !== 'player' && plugin.source !== 'ephemeral' && (
+                      <button type="button" disabled={busy} onClick={() => void downloadInstalledPlugin(plugin, true)}
+                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 disabled:opacity-50">
+                        导出 .starmod
+                      </button>
+                    )}
+                    {!roomSession && plugin.source !== 'ephemeral' && <button type="button" disabled={busy} className="rounded-xl border border-white/10 px-3 py-2 text-sm" onClick={() => {
+                      if (!host) return
+                      setBusy(true)
+                      void host.setEnabled(plugin.id,!plugin.enabled).then(refresh).catch(reason => setError(String(reason))).finally(() => setBusy(false))
+                    }}>{plugin.enabled ? '停用' : '启用'}</button>}
+                    {roomSession?.role !== 'player' && plugin.source !== 'ephemeral' && <button type="button" disabled={busy} className="rounded-xl border border-white/10 px-3 py-2 text-sm" onClick={() => {
+                      if (host) void host.exportStarMod(plugin.id).then(setEditorBytes).catch(reason => setError(String(reason)))
+                    }}>编辑本地覆盖</button>}
                     {roomSession?.role === 'dm' && !hosted && active?.distributionPolicy === 'room-distributable' && (
                       <button
                         type="button"

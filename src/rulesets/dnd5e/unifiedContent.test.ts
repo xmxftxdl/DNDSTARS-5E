@@ -67,7 +67,7 @@ export function unifiedBackgroundBundle(): Dnd5eUnifiedContentBundleV1 {
 describe('D&D 5E unified content contract', () => {
   it('exposes every supported authoring kind through one public catalog', () => {
     expect(DND5E_UNIFIED_CONTENT_KINDS).toEqual([
-      'spell', 'feature', 'feat', 'class', 'subclass', 'race', 'background', 'item', 'monster',
+      'condition', 'spell', 'feature', 'feat', 'class', 'subclass', 'race', 'background', 'item', 'monster',
       'monster-action', 'ability-generation',
     ])
   })

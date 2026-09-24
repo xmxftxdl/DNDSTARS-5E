@@ -1,0 +1,236 @@
+{
+  "format": "dndstars5e-unified-content",
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "community.ember",
+    "name": "余烬法术示例",
+    "publisher": "Community",
+    "license": "CC0-1.0",
+    "version": "1.0.0",
+    "apiVersion": 2,
+    "rulesetId": "dnd5e-2014-srd-5.1",
+    "pluginKind": "content-package",
+    "distributionPolicy": "room-distributable"
+  },
+  "assets": [],
+  "definitions": [
+    {
+      "schemaVersion": 1,
+      "namespace": "community.ember",
+      "version": "1.0.0",
+      "automation": {
+        "schemaVersion": 1,
+        "level": "full",
+        "supportedPhases": [
+          "eligibility",
+          "cost",
+          "targeting",
+          "damage",
+          "effects",
+          "duration",
+          "persistence"
+        ],
+        "manualPhases": [],
+        "limitations": []
+      },
+      "id": "ember-mark",
+      "kind": "condition",
+      "name": "余烬印记",
+      "payload": {
+        "id": "ember-mark",
+        "name": "余烬印记",
+        "effectId": "ember-mark"
+      },
+      "effects": [
+        {
+          "schemaVersion": 1,
+          "id": "ember-mark",
+          "name": "余烬印记",
+          "duration": {
+            "kind": "rounds",
+            "rounds": 1,
+            "expiresAt": "target-turn-end"
+          },
+          "extensionCondition": "community.ember.ember-mark",
+          "tags": [
+            "fire",
+            "magical"
+          ],
+          "modifiers": [
+            {
+              "kind": "speed",
+              "mode": "bonus",
+              "value": {
+                "kind": "constant",
+                "value": -5
+              }
+            }
+          ],
+          "stacking": "refresh-duration"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "namespace": "community.ember",
+      "version": "1.0.0",
+      "automation": {
+        "schemaVersion": 1,
+        "level": "full",
+        "supportedPhases": [
+          "eligibility",
+          "cost",
+          "targeting",
+          "damage",
+          "effects",
+          "duration",
+          "persistence"
+        ],
+        "manualPhases": [],
+        "limitations": []
+      },
+      "id": "ember-touch",
+      "kind": "spell",
+      "name": "余烬之触",
+      "description": "示例自定义戏法：30尺内敌人受到1d4火焰伤害并获得余烬印记，移动速度降低5尺，持续至其回合结束。",
+      "payload": {
+        "id": "ember-touch",
+        "name": "余烬之触",
+        "level": 0,
+        "school": "evocation",
+        "ritual": false,
+        "castingTime": {
+          "value": 1,
+          "unit": "action"
+        },
+        "range": {
+          "type": "distance",
+          "feet": 30
+        },
+        "components": {
+          "verbal": true,
+          "somatic": true,
+          "material": false
+        },
+        "duration": {
+          "type": "timed",
+          "value": 1,
+          "unit": "round",
+          "concentration": false
+        },
+        "classes": [
+          "wizard"
+        ],
+        "description": "示例自定义戏法：30尺内敌人受到1d4火焰伤害并获得余烬印记，移动速度降低5尺，持续至其回合结束。",
+        "automation": {
+          "mode": "reference-only"
+        }
+      },
+      "activities": [
+        {
+          "schemaVersion": 1,
+          "id": "ember-touch",
+          "name": "余烬之触",
+          "activation": {
+            "kind": "action",
+            "cost": 1
+          },
+          "invocation": {
+            "kind": "active",
+            "confirmation": "actor-choice"
+          },
+          "target": {
+            "kind": "creature",
+            "relation": "enemy",
+            "rangeFeet": 30,
+            "count": 1,
+            "includeSelf": false
+          },
+          "consumption": [
+            {
+              "kind": "action-economy",
+              "economy": "action",
+              "amount": 1,
+              "consumeOn": "resolve"
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "resolve",
+              "when": {
+                "kind": "always"
+              },
+              "operations": [
+                {
+                  "id": "damage",
+                  "kind": "damage",
+                  "target": "target",
+                  "amount": {
+                    "kind": "dice",
+                    "rollId": "ember-damage",
+                    "count": 1,
+                    "sides": 4
+                  },
+                  "damageType": "fire"
+                },
+                {
+                  "id": "mark",
+                  "kind": "apply-effect",
+                  "target": "target",
+                  "effectId": "ember-mark"
+                }
+              ]
+            }
+          ],
+          "effects": [
+            {
+              "schemaVersion": 1,
+              "id": "ember-mark",
+              "name": "余烬印记",
+              "duration": {
+                "kind": "rounds",
+                "rounds": 1,
+                "expiresAt": "target-turn-end"
+              },
+              "extensionCondition": "community.ember.ember-mark",
+              "tags": [
+                "fire",
+                "magical"
+              ],
+              "modifiers": [
+                {
+                  "kind": "speed",
+                  "mode": "bonus",
+                  "value": {
+                    "kind": "constant",
+                    "value": -5
+                  }
+                }
+              ],
+              "stacking": "refresh-duration"
+            }
+          ],
+          "automation": {
+            "schemaVersion": 1,
+            "level": "full",
+            "supportedPhases": [
+              "eligibility",
+              "cost",
+              "targeting",
+              "damage",
+              "effects",
+              "duration",
+              "persistence"
+            ],
+            "manualPhases": [],
+            "limitations": []
+          },
+          "legacySource": {
+            "kind": "spell",
+            "id": "ember-touch"
+          }
+        }
+      ]
+    }
+  ]
+}

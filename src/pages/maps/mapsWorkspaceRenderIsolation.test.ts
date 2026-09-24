@@ -28,7 +28,7 @@ describe('MapsWorkspacePage render isolation', () => {
       workspaceSource.indexOf('const pluginCast = preparedPluginSpell.prepared'),
       workspaceSource.indexOf('const settledPluginSpell = pluginSettlement.settled'),
     )
-    expect(branch).toContain("spellAnimationsEnabled && pluginCast.spell.id === 'prismatic-spray'")
+    expect(branch).toContain("spellAnimationsEnabled && (pluginCast.spell.id === 'prismatic-spray'")
     expect(branch).toContain('areaAnchorCell: pluginCast.payload.areaTargetCell')
     expect(branch).toContain('await publishAreaSpellPresentation(presentation)')
     const publish = branch.indexOf('await publishAreaSpellPresentation')
@@ -178,8 +178,8 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('keeps passive enemy area warnings visible without turning them into pointer-input mode', () => {
-    expect(workspaceSource).toContain('const aoeHighlight = enemySpellAoeWarning?.highlight')
-    expect(workspaceSource).toContain('aoeSelectMode={mapAoeSelectMode({')
+    expect(workspaceSource).toContain('?? enemySpellAoeWarning?.highlight')
+    expect(workspaceSource).toContain('aoeSelectMode={!!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
     expect(workspaceSource).not.toContain('aoeSelectMode={!!enemySpellAoeWarning')
     expect(mapCanvasSource).toContain('const aoeHighlightVisible = aoeSelectMode || aoeHighlight != null')
     expect(mapCanvasSource).toContain('aoeHighlightVisible && aoeHighlight && aoeHighlight.cells.length > 0')
@@ -206,7 +206,7 @@ describe('MapsWorkspacePage render isolation', () => {
   it('keeps player spell area selection interactive after an ended combat locks other map actions', () => {
     expect(workspaceSource).toContain('const playerSpellAoeSelectActive = !!dnd5eSpellTargeting && (')
     expect(workspaceSource).toContain('!!activeAoeTargeting || dnd5eSpellTargeting.guessedTargeting === true')
-    expect(workspaceSource).toContain('aoeSelectMode={mapAoeSelectMode({')
+    expect(workspaceSource).toContain('aoeSelectMode={!!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
   })
 
   it('offers an accessible creature picker for non-area spell targeting', () => {
@@ -218,9 +218,9 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('keeps player-granted persistent area Activities interactive during exploration', () => {
-    expect(workspaceSource).toContain('const playerActivityAoeSelectActive = playerGrantedActivityAoeSelectActive({')
+    expect(workspaceSource).toContain('const playerActivityAoeSelectActive = (!isDM && !!dnd5eActivityMapTargeting) || playerGrantedActivityAoeSelectActive({')
     expect(workspaceSource).toContain('pluginArea: dnd5ePluginAreaTargeting,')
-    expect(workspaceSource).toContain('aoeSelectMode={mapAoeSelectMode({')
+    expect(workspaceSource).toContain('aoeSelectMode={!!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
   })
 
   it('offers an accessible creature picker for persistent-area granted Activities', () => {

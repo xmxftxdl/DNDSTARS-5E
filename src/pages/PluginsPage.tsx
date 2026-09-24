@@ -1,3 +1,4 @@
+import { prepareDnd5eModuleUploadFile } from '../rulesets/dnd5e/starModAdapter'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -947,7 +948,7 @@ export default function PluginsPage() {
     setNotice(null)
     setError(null)
     try {
-      const inspected = await host.inspectFile(file)
+      const inspected = await host.inspectFile(await prepareDnd5eModuleUploadFile(file))
       if (inspected.manifest.distributionPolicy === 'local-only') {
         throw new AccountApiError('plugin-local-only', 409)
       }
@@ -1195,7 +1196,7 @@ export default function PluginsPage() {
             <input
               ref={fileRef}
               type="file"
-              accept=".dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
+              accept=".starmod,.dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
               className="hidden"
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0]

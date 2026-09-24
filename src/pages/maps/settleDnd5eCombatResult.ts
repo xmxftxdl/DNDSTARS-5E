@@ -18,6 +18,7 @@ import {
   previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
   resolveDnd5eHeadlessAction,
   resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
+  type Dnd5eUnsupportedAirborneFallPreview,
   type Dnd5eAction,
   type Dnd5eActionResult,
   type Dnd5eCombatant,
@@ -37,6 +38,7 @@ export async function settleDnd5eConcentrationChecks(input: {
   result: Extract<Dnd5eActionResult, { ok: true }>
   /** State immediately before a non-action authority adjustment changed support. */
   priorState?: Dnd5eHeadlessCombatState
+  rollUnsupportedAirborneFalls?: (falls: readonly Dnd5eUnsupportedAirborneFallPreview[], map: BattleMap) => Promise<Readonly<Record<string, readonly number[]>>>
   map: BattleMap
   characters: readonly Character[]
   priorApplication?: Pick<
@@ -124,24 +126,33 @@ export async function settleDnd5eConcentrationChecks(input: {
   let state = input.result.state
   let map = input.map
   const events = [...input.result.events]
+  const collectFallRolls = async (falls: readonly Dnd5eUnsupportedAirborneFallPreview[]) => {
+    if (input.rollUnsupportedAirborneFalls) return input.rollUnsupportedAirborneFalls(falls, map)
+    const rolls: Record<string, readonly number[]> = {}
+    for (const fall of falls) {
+      if (fall.collisionCandidates?.length) throw new Error('fall-collision-target-selection-required')
+      if (fall.collision) {
+        const collision = fall.collision
+        const context = { rollerTokenId: collision.targetId, rollKind: 'saving-throw' as const }
+        const first = await input.rollD20('躲避坠落生物 · 敏捷豁免 DC 15', collision.targetName, context)
+        rolls[collision.rollKey] = collision.mode === 'normal' ? [first] : [first,
+          await input.rollD20('躲避坠落生物 · 敏捷豁免 DC 15', collision.targetName, context)]
+      }
+      if (fall.fallingDamageDice > 0) rolls[fall.combatantId] = await input.rollDice(
+        fall.fallingDamageDice, 6, '失去飞行支撑·坠落伤害',
+        map.tokens.find(token => token.id === fall.combatantId)?.label ?? state.combatants[fall.combatantId]?.name ?? fall.combatantId,
+        {rollerTokenId:fall.combatantId},
+      )
+    }
+    return rolls
+  }
   if (input.priorState) {
     const falls = previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
       input.priorState,
       state,
     )
     if (falls.length > 0) {
-      const fallDamageRollsByCombatantId: Record<string, readonly number[]> = {}
-      for (const fall of falls) {
-        if (fall.fallingDamageDice < 1) continue
-        const targetName = input.map.tokens.find((token) => token.id === fall.combatantId)?.label ??
-          state.combatants[fall.combatantId]?.name ?? fall.combatantId
-        fallDamageRollsByCombatantId[fall.combatantId] = await input.rollDice(
-          fall.fallingDamageDice,
-          6,
-          '失去飞行支撑·坠落伤害',
-          targetName, { rollerTokenId: fall.combatantId },
-        )
-      }
+      const fallDamageRollsByCombatantId = await collectFallRolls(falls)
       const fallen = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
         input.priorState,
         state,
@@ -160,18 +171,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     if (!preview.ok || preview.falls.length === 0) {
       return resolveDnd5eHeadlessAction(source, action)
     }
-    const airborneFallDamageRollsByCombatantId: Record<string, readonly number[]> = {}
-    for (const fall of preview.falls) {
-      if (fall.fallingDamageDice < 1) continue
-      const targetName = input.map.tokens.find((token) => token.id === fall.combatantId)?.label ??
-        source.combatants[fall.combatantId]?.name ?? fall.combatantId
-      airborneFallDamageRollsByCombatantId[fall.combatantId] = await input.rollDice(
-        fall.fallingDamageDice,
-        6,
-        '失去飞行支撑·坠落伤害',
-        targetName, { rollerTokenId: fall.combatantId },
-      )
-    }
+    const airborneFallDamageRollsByCombatantId = await collectFallRolls(preview.falls)
     return resolveDnd5eHeadlessAction(source, {
       ...action,
       airborneFallDamageRollsByCombatantId,

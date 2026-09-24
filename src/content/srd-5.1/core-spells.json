@@ -1,0 +1,3323 @@
+[
+  {
+    "id": "mage-hand",
+    "level": 0,
+    "school": "咒法",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "effectDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 0,
+      "placeRangeFeet": 30
+    }
+  },
+  {
+    "id": "dancing-lights",
+    "level": 0,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 0,
+      "placeRangeFeet": 120
+    },
+    "areaTargetCount": 4,
+    "minimumAreaTargetCount": 1
+  },
+  {
+    "id": "minor-illusion",
+    "level": 0,
+    "school": "幻术",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "narrative-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    }
+  },
+  {
+    "id": "thaumaturgy",
+    "level": 0,
+    "school": "变化",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "narrative-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    }
+  },
+  {
+    "id": "guidance",
+    "level": 0,
+    "school": "预言",
+    "classes": [
+      "cleric",
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "appliedEffect": "guidance"
+  },
+  {
+    "id": "resistance",
+    "level": 0,
+    "school": "防护",
+    "classes": [
+      "cleric",
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "appliedEffect": "resistance"
+  },
+  {
+    "id": "shillelagh",
+    "level": 0,
+    "school": "变化",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "shillelagh",
+    "effectDurationRounds": 10
+  },
+  {
+    "id": "magic-weapon",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "paladin",
+      "wizard"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "maximumTargets": 1,
+    "appliedEffect": "magic-weapon"
+  },
+  {
+    "id": "sanctuary",
+    "level": 1,
+    "school": "防护",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 30,
+    "target": "creature",
+    "effect": "active-effect",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "sanctuary",
+    "effectDurationRounds": 10
+  },
+  {
+    "id": "darkness",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 15,
+      "placeRangeFeet": 60
+    }
+  },
+  {
+    "id": "daylight",
+    "level": 3,
+    "school": "塑能",
+    "classes": [
+      "cleric",
+      "druid",
+      "paladin",
+      "ranger",
+      "sorcerer"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "effectDurationRounds": 600,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 120,
+      "placeRangeFeet": 60
+    }
+  },
+  {
+    "id": "mage-armor",
+    "level": 1,
+    "school": "防护",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "mage-armor",
+    "effectDurationRounds": 4800
+  },
+  {
+    "id": "jump",
+    "level": 1,
+    "school": "变化",
+    "classes": [
+      "druid",
+      "ranger",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "jump",
+    "effectDurationRounds": 10
+  },
+  {
+    "id": "darkvision",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "druid",
+      "ranger",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "darkvision",
+    "effectDurationRounds": 4800
+  },
+  {
+    "id": "see-invisibility",
+    "level": 2,
+    "school": "预言",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "see-invisibility",
+    "effectDurationRounds": 600
+  },
+  {
+    "id": "warding-bond",
+    "level": 2,
+    "school": "防护",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "warding-bond",
+    "effectDurationRounds": 600
+  },
+  {
+    "id": "misty-step",
+    "level": 2,
+    "school": "咒法",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 0,
+    "target": "area",
+    "effect": "teleport",
+    "requiresVisibleTarget": "placement",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 0,
+      "placeRangeFeet": 30
+    }
+  },
+  {
+    "id": "fly",
+    "level": 3,
+    "school": "变化",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "appliedEffect": "fly"
+  },
+  {
+    "id": "heroism",
+    "level": 1,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "paladin"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "appliedEffect": "heroism"
+  },
+  {
+    "id": "enlarge-reduce",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "creature",
+    "effect": "active-effect",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "unwillingSaveAbility": "con",
+    "appliedEffect": "enlarge-reduce",
+    "enlargeReduceOptions": [
+      "enlarge",
+      "reduce"
+    ]
+  },
+  {
+    "id": "enhance-ability",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "sorcerer"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 2,
+      "sides": 6,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "appliedEffect": "enhance-ability",
+    "enhanceAbilityOptions": [
+      "bear-endurance",
+      "bull-strength",
+      "cat-grace",
+      "eagle-splendor",
+      "fox-cunning",
+      "owl-wisdom"
+    ]
+  },
+  {
+    "id": "flame-blade",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 6,
+      "bonus": 0
+    },
+    "damageType": "fire",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 1,
+    "appliedEffect": "flame-blade",
+    "sustainedAttack": {
+      "id": "flame-blade",
+      "economy": "action",
+      "origin": "caster",
+      "rangeFeet": 5,
+      "spellAttackMode": "melee",
+      "dice": {
+        "count": 3,
+        "sides": 6,
+        "additionalDieEverySlotLevels": 2
+      },
+      "damageType": "fire"
+    }
+  },
+  {
+    "id": "expeditious-retreat",
+    "level": 1,
+    "school": "变化",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 1,
+    "appliedEffect": "expeditious-retreat",
+    "sustainedAttack": {
+      "id": "expeditious-retreat",
+      "economy": "bonus-action",
+      "origin": "caster",
+      "resolution": "dash",
+      "relation": "any",
+      "rangeFeet": 0,
+      "dice": {
+        "count": 0,
+        "sides": 4
+      },
+      "damageType": "force"
+    }
+  },
+  {
+    "id": "heat-metal",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "bard",
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "automatic-damage",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 2,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "fire",
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "sustainedAttack": {
+      "id": "heat-metal",
+      "economy": "bonus-action",
+      "origin": "caster",
+      "resolution": "automatic-damage",
+      "rangeFeet": 60,
+      "lockToConcentrationTarget": true,
+      "dice": {
+        "count": 2,
+        "sides": 8,
+        "additionalDieEverySlotLevels": 1
+      },
+      "damageType": "fire"
+    }
+  },
+  {
+    "id": "vampiric-touch",
+    "level": 3,
+    "school": "死灵",
+    "classes": [
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "melee",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 3,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "necrotic",
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "sustainedAttack": {
+      "id": "vampiric-touch",
+      "economy": "action",
+      "origin": "caster",
+      "resolution": "spell-attack",
+      "spellAttackMode": "melee",
+      "rangeFeet": 5,
+      "immediateAttack": true,
+      "healingFraction": 0.5,
+      "dice": {
+        "count": 3,
+        "sides": 6,
+        "additionalDieEverySlotLevels": 1
+      },
+      "damageType": "necrotic"
+    }
+  },
+  {
+    "id": "sunbeam",
+    "level": 6,
+    "school": "塑能",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 6,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "radiant",
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": false,
+    "area": {
+      "shape": "line",
+      "origin": "self",
+      "lengthFeet": 60,
+      "widthFeet": 5
+    },
+    "onFailedSaveEffect": "sunbeam-blindness",
+    "sustainedAttack": {
+      "id": "sunbeam",
+      "economy": "action",
+      "origin": "caster",
+      "resolution": "saving-throw",
+      "relation": "any",
+      "rangeFeet": 60,
+      "immediateAttack": true,
+      "dice": {
+        "count": 6,
+        "sides": 8
+      },
+      "damageType": "radiant"
+    }
+  },
+  {
+    "id": "spiritual-weapon",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "melee",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 1,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "force",
+    "addSpellcastingModifier": true,
+    "maximumTargets": 1,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 5,
+      "placeRangeFeet": 60
+    },
+    "sustainedAttack": {
+      "id": "spiritual-weapon",
+      "economy": "bonus-action",
+      "origin": "effect-token",
+      "rangeFeet": 5,
+      "movementFeet": 20,
+      "effectDurationRounds": 10,
+      "immediateAttack": true,
+      "spellAttackMode": "melee",
+      "dice": {
+        "count": 1,
+        "sides": 8,
+        "additionalDieEverySlotLevels": 2
+      },
+      "damageType": "force"
+    }
+  },
+  {
+    "id": "fog-cloud",
+    "level": 1,
+    "school": "咒法",
+    "classes": [
+      "druid",
+      "ranger",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 120
+    },
+    "areaRadiusFeetPerHigherSlot": 20
+  },
+  {
+    "id": "web",
+    "level": 2,
+    "school": "咒法",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 20,
+      "heightFeet": 20,
+      "placeRangeFeet": 60,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "silence",
+    "level": 2,
+    "school": "幻术",
+    "classes": [
+      "bard",
+      "cleric",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 120
+    }
+  },
+  {
+    "id": "sleet-storm",
+    "level": 3,
+    "school": "咒法",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 150,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 40,
+      "placeRangeFeet": 150
+    }
+  },
+  {
+    "id": "stinking-cloud",
+    "level": 3,
+    "school": "咒法",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 90
+    }
+  },
+  {
+    "id": "wind-wall",
+    "level": 3,
+    "school": "塑能",
+    "classes": [
+      "druid",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "str",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 3,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "bludgeoning",
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 50,
+      "minimumWidthFeet": 5,
+      "heightFeet": 5,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "wall-of-force",
+    "level": 5,
+    "school": "塑能",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 100,
+      "minimumWidthFeet": 5,
+      "heightFeet": 5,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "wall-of-stone",
+    "level": 5,
+    "school": "塑能",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 100,
+      "minimumWidthFeet": 5,
+      "heightFeet": 5,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "wall-of-ice",
+    "level": 6,
+    "school": "塑能",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "dex",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 10,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 2
+    },
+    "damageType": "cold",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 100,
+      "minimumWidthFeet": 5,
+      "heightFeet": 5,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "wall-of-thorns",
+    "level": 6,
+    "school": "咒法",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "dex",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 7,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "piercing",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 60,
+      "minimumWidthFeet": 5,
+      "heightFeet": 5,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "grease",
+    "level": 1,
+    "school": "咒法",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "effectDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 10,
+      "heightFeet": 10,
+      "placeRangeFeet": 60,
+      "gridAligned": true
+    }
+  },
+  {
+    "id": "entangle",
+    "level": 1,
+    "school": "咒法",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 20,
+      "heightFeet": 20,
+      "placeRangeFeet": 90,
+      "gridAligned": true
+    }
+  },
+  {
+    "id": "dispel-magic",
+    "level": 3,
+    "school": "防护",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "paladin",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "creature",
+    "effect": "dispel-magic",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 0,
+      "sides": 20,
+      "bonus": 0
+    }
+  },
+  {
+    "id": "flaming-sphere",
+    "level": 2,
+    "school": "咒法",
+    "classes": [
+      "druid",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 6,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 5,
+      "placeRangeFeet": 60
+    }
+  },
+  {
+    "id": "spike-growth",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "druid",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 150,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 150
+    }
+  },
+  {
+    "id": "spirit-guardians",
+    "level": 3,
+    "school": "咒法",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 8,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "self",
+      "radiusFeet": 15
+    }
+  },
+  {
+    "id": "moonbeam",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "dice": {
+      "count": 0,
+      "sides": 10,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 5,
+      "placeRangeFeet": 120
+    }
+  },
+  {
+    "id": "call-lightning",
+    "level": 3,
+    "school": "咒法",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "damageOnSuccessfulSave": "half",
+    "requiresVisibleTarget": "placement",
+    "dice": {
+      "count": 3,
+      "sides": 10,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "lightning",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 5,
+      "placeRangeFeet": 60
+    },
+    "sustainedAttack": {
+      "id": "call-lightning",
+      "economy": "action",
+      "origin": "persistent-area",
+      "resolution": "saving-throw",
+      "relation": "any",
+      "rangeFeet": 60,
+      "immediateAttack": true,
+      "dice": {
+        "count": 3,
+        "sides": 10,
+        "additionalDieEverySlotLevels": 1
+      },
+      "damageType": "lightning"
+    }
+  },
+  {
+    "id": "calm-emotions",
+    "level": 2,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "active-effect",
+    "unwillingSaveAbility": "cha",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 60
+    },
+    "appliedEffect": "calm-emotions"
+  },
+  {
+    "id": "faerie-fire",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 20,
+      "heightFeet": 20,
+      "placeRangeFeet": 60
+    },
+    "onFailedSaveEffect": "faerie-fire"
+  },
+  {
+    "id": "hypnotic-pattern",
+    "level": 3,
+    "school": "幻术",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 30,
+      "heightFeet": 30,
+      "placeRangeFeet": 120
+    },
+    "onFailedSaveEffect": "hypnotic-pattern"
+  },
+  {
+    "id": "slow",
+    "level": 3,
+    "school": "变化",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "creature",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 6,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 40,
+      "heightFeet": 40,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    },
+    "onFailedSaveEffect": "slow"
+  },
+  {
+    "id": "phantasmal-killer",
+    "level": 4,
+    "school": "幻术",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 10,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "onFailedSaveEffect": "phantasmal-killer"
+  },
+  {
+    "id": "black-tentacles",
+    "level": 4,
+    "school": "咒法",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "area",
+    "effect": "persistent-area",
+    "requiresVisibleTarget": "placement",
+    "dice": {
+      "count": 0,
+      "sides": 6,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 20,
+      "heightFeet": 20,
+      "placeRangeFeet": 90,
+      "gridAligned": true
+    }
+  },
+  {
+    "id": "wall-of-fire",
+    "level": 4,
+    "school": "塑能",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "dex",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 5,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "fire",
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 60,
+      "heightFeet": 5,
+      "placeRangeFeet": 120,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "insect-plague",
+    "level": 5,
+    "school": "咒法",
+    "classes": [
+      "cleric",
+      "druid",
+      "sorcerer"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 300,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "con",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 4,
+      "sides": 10,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "piercing",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 300
+    }
+  },
+  {
+    "id": "cloudkill",
+    "level": 5,
+    "school": "咒法",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "con",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 5,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "poison",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 120
+    }
+  },
+  {
+    "id": "blade-barrier",
+    "level": 6,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "area",
+    "effect": "persistent-area",
+    "saveAbility": "dex",
+    "damageOnSuccessfulSave": "half",
+    "dice": {
+      "count": 6,
+      "sides": 10,
+      "bonus": 0
+    },
+    "damageType": "slashing",
+    "concentration": true,
+    "concentrationDurationRounds": 100,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "rect",
+      "origin": "point",
+      "widthFeet": 100,
+      "heightFeet": 5,
+      "minimumWidthFeet": 5,
+      "placeRangeFeet": 90,
+      "rotatable": true
+    }
+  },
+  {
+    "id": "charm-person",
+    "level": 1,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "druid",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "creature",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "maximumTargetSeparationFeet": 30,
+    "onFailedSaveEffect": "charm-person",
+    "effectDurationRounds": 600
+  },
+  {
+    "id": "hideous-laughter",
+    "level": 1,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "onFailedSaveEffect": "hideous-laughter"
+  },
+  {
+    "id": "sleep",
+    "level": 1,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "area",
+    "effect": "sleep-hit-point-pool",
+    "dice": {
+      "count": 5,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 2
+    },
+    "effectDurationRounds": 10,
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 90
+    }
+  },
+  {
+    "id": "color-spray",
+    "level": 1,
+    "school": "幻术",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 15,
+    "target": "area",
+    "effect": "color-spray-hit-point-pool",
+    "dice": {
+      "count": 6,
+      "sides": 10,
+      "bonus": 0,
+      "perHigherSlot": 2
+    },
+    "maximumTargets": 20,
+    "area": {
+      "shape": "cone",
+      "origin": "self",
+      "lengthFeet": 15,
+      "aimRangeFeet": 15
+    }
+  },
+  {
+    "id": "invisibility",
+    "level": 2,
+    "school": "幻术",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "appliedEffect": "invisibility"
+  },
+  {
+    "id": "greater-invisibility",
+    "level": 4,
+    "school": "幻术",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "appliedEffect": "greater-invisibility"
+  },
+  {
+    "id": "blur",
+    "level": 2,
+    "school": "幻术",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "appliedEffect": "blur"
+  },
+  {
+    "id": "barkskin",
+    "level": 2,
+    "school": "变化",
+    "classes": [
+      "druid",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "appliedEffect": "barkskin"
+  },
+  {
+    "id": "protection-from-poison",
+    "level": 2,
+    "school": "防护",
+    "classes": [
+      "cleric",
+      "druid",
+      "paladin",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "protection-from-poison",
+    "effectDurationRounds": 600
+  },
+  {
+    "id": "protection-from-energy",
+    "level": 3,
+    "school": "防护",
+    "classes": [
+      "cleric",
+      "druid",
+      "ranger",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600,
+    "appliedEffect": "protection-from-energy",
+    "effectDamageTypeOptions": [
+      "acid",
+      "cold",
+      "fire",
+      "lightning",
+      "thunder"
+    ]
+  },
+  {
+    "id": "longstrider",
+    "level": 1,
+    "school": "变化",
+    "classes": [
+      "bard",
+      "druid",
+      "ranger",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "longstrider",
+    "effectDurationRounds": 600,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1
+  },
+  {
+    "id": "death-ward",
+    "level": 4,
+    "school": "防护",
+    "classes": [
+      "cleric",
+      "paladin"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "appliedEffect": "death-ward",
+    "effectDurationRounds": 4800
+  },
+  {
+    "id": "spare-the-dying",
+    "level": 0,
+    "school": "死灵",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "stabilize",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    }
+  },
+  {
+    "id": "false-life",
+    "level": 1,
+    "school": "死灵",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "temporary-hit-points",
+    "dice": {
+      "count": 1,
+      "sides": 4,
+      "bonus": 4
+    },
+    "fixedHealingPerHigherSlot": 5
+  },
+  {
+    "id": "guiding-bolt",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 4,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "radiant",
+    "onHitEffect": "guiding-bolt"
+  },
+  {
+    "id": "acid-arrow",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 4,
+      "sides": 4,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "acid",
+    "spellAttackMissDamage": "half",
+    "delayedDamage": {
+      "dice": {
+        "count": 2,
+        "sides": 4,
+        "bonus": 0,
+        "perHigherSlot": 1
+      },
+      "damageType": "acid",
+      "timing": "target-next-turn-end"
+    }
+  },
+  {
+    "id": "hellish-rebuke",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "warlock"
+    ],
+    "castingTime": "reaction",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 2,
+      "sides": 10,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "fire",
+    "damageOnSuccessfulSave": "half"
+  },
+  {
+    "id": "blindness-deafness",
+    "level": 2,
+    "school": "死灵",
+    "classes": [
+      "bard",
+      "cleric",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "onFailedSaveEffect": "blindness-deafness",
+    "conditionOptions": [
+      "blinded",
+      "deafened"
+    ]
+  },
+  {
+    "id": "hold-person",
+    "level": 2,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "maximumTargetSeparationFeet": 30,
+    "onFailedSaveEffect": "hold-person"
+  },
+  {
+    "id": "lesser-restoration",
+    "level": 2,
+    "school": "防护",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "paladin",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "remove-condition",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "conditionOptions": [
+      "blinded",
+      "deafened",
+      "paralyzed",
+      "poisoned",
+      "disease"
+    ]
+  },
+  {
+    "id": "prayer-of-healing",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "creature",
+    "effect": "healing",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 2,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "addSpellcastingModifier": true,
+    "maximumTargets": 6
+  },
+  {
+    "id": "mass-healing-word",
+    "level": 3,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 60,
+    "target": "creature",
+    "effect": "healing",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 1,
+      "sides": 4,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "addSpellcastingModifier": true,
+    "maximumTargets": 6
+  },
+  {
+    "id": "mass-cure-wounds",
+    "level": 5,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "creature",
+    "effect": "healing",
+    "dice": {
+      "count": 3,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "addSpellcastingModifier": true,
+    "maximumTargets": 6,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 30,
+      "placeRangeFeet": 60
+    },
+    "areaIncludesSelf": true
+  },
+  {
+    "id": "flame-strike",
+    "level": 5,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "dice": {
+      "count": 4,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "fire",
+    "primaryHigherSlotChoice": true,
+    "additionalDamageComponents": [
+      {
+        "dice": {
+          "count": 4,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        },
+        "damageType": "radiant",
+        "higherSlotChoice": true
+      }
+    ],
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 10,
+      "placeRangeFeet": 60
+    }
+  },
+  {
+    "id": "counterspell",
+    "level": 3,
+    "school": "防护",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "reaction",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "counterspell",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    }
+  },
+  {
+    "id": "banishment",
+    "level": 4,
+    "school": "防护",
+    "classes": [
+      "cleric",
+      "paladin",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "cha",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "onFailedSaveEffect": "banishment"
+  },
+  {
+    "id": "hold-monster",
+    "level": 5,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 90,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 1,
+    "additionalTargetsPerHigherSlot": 1,
+    "maximumTargetSeparationFeet": 30,
+    "onFailedSaveEffect": "hold-monster"
+  },
+  {
+    "id": "heal",
+    "level": 6,
+    "school": "塑能",
+    "classes": [
+      "cleric",
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "ally",
+    "effect": "fixed-healing",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "fixedHealing": 70,
+    "fixedHealingPerHigherSlot": 10
+  },
+  {
+    "id": "harm",
+    "level": 6,
+    "school": "死灵",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 14,
+      "sides": 6,
+      "bonus": 0
+    },
+    "damageType": "necrotic",
+    "damageOnSuccessfulSave": "half",
+    "minimumHitPointsAfterDamage": 1,
+    "hitPointMaximumReductionOnFailedSave": {
+      "durationRounds": 600,
+      "minimumMaximumHitPoints": 1,
+      "recovery": "greater-restoration-or-other-magic"
+    }
+  },
+  {
+    "id": "power-word-stun",
+    "level": 8,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "power-word-stun",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "hitPointThreshold": 150
+  },
+  {
+    "id": "mass-heal",
+    "level": 9,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "creature",
+    "effect": "healing-pool",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "healingPool": 700,
+    "maximumTargets": 100
+  },
+  {
+    "id": "acid-splash",
+    "level": 0,
+    "school": "咒法",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 1,
+      "sides": 6,
+      "bonus": 0
+    },
+    "damageType": "acid",
+    "cantripScaling": true,
+    "maximumTargets": 2,
+    "maximumTargetSeparationFeet": 5
+  },
+  {
+    "id": "hunters-mark",
+    "level": 1,
+    "school": "预言",
+    "classes": [
+      "ranger"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 90,
+    "target": "hostile",
+    "effect": "mark",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 6,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 600
+  },
+  {
+    "id": "fire-bolt",
+    "level": 0,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 1,
+      "sides": 10,
+      "bonus": 0
+    },
+    "damageType": "fire",
+    "cantripScaling": true
+  },
+  {
+    "id": "ray-of-frost",
+    "level": 0,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 1,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "cold",
+    "cantripScaling": true,
+    "onHitEffect": "ray-of-frost"
+  },
+  {
+    "id": "shocking-grasp",
+    "level": 0,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "melee",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 1,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "lightning",
+    "cantripScaling": true,
+    "onHitEffect": "shocking-grasp"
+  },
+  {
+    "id": "chill-touch",
+    "level": 0,
+    "school": "死灵",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 1,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "necrotic",
+    "cantripScaling": true,
+    "onHitEffect": "chill-touch"
+  },
+  {
+    "id": "eldritch-blast",
+    "level": 0,
+    "school": "塑能",
+    "classes": [
+      "warlock"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 1,
+      "sides": 10,
+      "bonus": 0
+    },
+    "damageType": "force",
+    "cantripScaling": true
+  },
+  {
+    "id": "produce-flame",
+    "level": 0,
+    "school": "咒法",
+    "classes": [
+      "druid"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "fire",
+    "maximumTargets": 1,
+    "appliedEffect": "produce-flame",
+    "effectDurationRounds": 100,
+    "sustainedAttack": {
+      "id": "produce-flame",
+      "economy": "action",
+      "origin": "caster",
+      "resolution": "spell-attack",
+      "spellAttackMode": "ranged",
+      "rangeFeet": 30,
+      "endsAfterUse": true,
+      "cantripScaling": true,
+      "dice": {
+        "count": 1,
+        "sides": 8
+      },
+      "damageType": "fire"
+    }
+  },
+  {
+    "id": "poison-spray",
+    "level": 0,
+    "school": "咒法",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 10,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 1,
+      "sides": 12,
+      "bonus": 0
+    },
+    "damageType": "poison",
+    "cantripScaling": true
+  },
+  {
+    "id": "sacred-flame",
+    "level": 0,
+    "school": "塑能",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 1,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "radiant",
+    "cantripScaling": true
+  },
+  {
+    "id": "vicious-mockery",
+    "level": 0,
+    "school": "附魔",
+    "classes": [
+      "bard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "wis",
+    "requiresVisibleTarget": true,
+    "requiresTargetCanHearSource": true,
+    "dice": {
+      "count": 1,
+      "sides": 4,
+      "bonus": 0
+    },
+    "damageType": "psychic",
+    "cantripScaling": true,
+    "onFailedSaveEffect": "vicious-mockery"
+  },
+  {
+    "id": "cure-wounds",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "paladin",
+      "ranger"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "ally",
+    "effect": "healing",
+    "dice": {
+      "count": 1,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "addSpellcastingModifier": true
+  },
+  {
+    "id": "healing-word",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 60,
+    "target": "ally",
+    "effect": "healing",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 1,
+      "sides": 4,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "addSpellcastingModifier": true
+  },
+  {
+    "id": "bane",
+    "level": 1,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "hostile",
+    "effect": "attack-save-debuff",
+    "requiresVisibleTarget": true,
+    "saveAbility": "cha",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 3,
+    "additionalTargetsPerHigherSlot": 1
+  },
+  {
+    "id": "bless",
+    "level": 1,
+    "school": "附魔",
+    "classes": [
+      "cleric",
+      "paladin"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "ally",
+    "effect": "attack-save-buff",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "maximumTargets": 3,
+    "additionalTargetsPerHigherSlot": 1
+  },
+  {
+    "id": "shield-of-faith",
+    "level": 1,
+    "school": "防护",
+    "classes": [
+      "cleric",
+      "paladin"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 60,
+    "target": "ally",
+    "effect": "armor-class-buff",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 100
+  },
+  {
+    "id": "divine-favor",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "paladin"
+    ],
+    "castingTime": "bonus-action",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "active-effect",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    },
+    "concentration": true,
+    "concentrationDurationRounds": 10,
+    "appliedEffect": "divine-favor"
+  },
+  {
+    "id": "inflict-wounds",
+    "level": 1,
+    "school": "死灵",
+    "classes": [
+      "cleric"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "melee",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 3,
+      "sides": 10,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "necrotic"
+  },
+  {
+    "id": "magic-missile",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "automatic-damage",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 3,
+      "sides": 4,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "force",
+    "bonusPerDie": true,
+    "maximumTargets": 3,
+    "additionalTargetsPerHigherSlot": 1
+  },
+  {
+    "id": "scorching-ray",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 120,
+    "target": "hostile",
+    "effect": "spell-attack",
+    "spellAttackMode": "ranged",
+    "allowsGuessedTargetCell": true,
+    "dice": {
+      "count": 2,
+      "sides": 6,
+      "bonus": 0
+    },
+    "damageType": "fire",
+    "baseProjectiles": 3,
+    "additionalProjectilesPerHigherSlot": 1
+  },
+  {
+    "id": "shield",
+    "level": 1,
+    "school": "防护",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "reaction",
+    "rangeFeet": 0,
+    "target": "ally",
+    "effect": "armor-class-buff",
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    }
+  },
+  {
+    "id": "burning-hands",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 15,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "dice": {
+      "count": 3,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "fire",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 20,
+    "maximumTargetSeparationFeet": 30,
+    "area": {
+      "shape": "cone",
+      "origin": "self",
+      "lengthFeet": 15,
+      "aimRangeFeet": 15
+    }
+  },
+  {
+    "id": "thunderwave",
+    "level": 1,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 15,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "dice": {
+      "count": 2,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "thunder",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 20,
+    "area": {
+      "shape": "line",
+      "origin": "self",
+      "widthFeet": 15,
+      "lengthFeet": 15,
+      "aimRangeFeet": 15
+    },
+    "onFailedSaveEffect": "thunderwave-push"
+  },
+  {
+    "id": "shatter",
+    "level": 2,
+    "school": "塑能",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "dice": {
+      "count": 3,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "thunder",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 20,
+    "maximumTargetSeparationFeet": 20,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 10,
+      "placeRangeFeet": 60
+    }
+  },
+  {
+    "id": "fireball",
+    "level": 3,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 150,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "dice": {
+      "count": 8,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "fire",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 20,
+    "maximumTargetSeparationFeet": 40,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 150
+    }
+  },
+  {
+    "id": "lightning-bolt",
+    "level": 3,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 100,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "dice": {
+      "count": 8,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "lightning",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 20,
+    "maximumTargetSeparationFeet": 100,
+    "area": {
+      "shape": "line",
+      "origin": "self",
+      "widthFeet": 5,
+      "lengthFeet": 100,
+      "aimRangeFeet": 100
+    }
+  },
+  {
+    "id": "circle-of-death",
+    "level": 6,
+    "school": "死灵",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 150,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "dice": {
+      "count": 8,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 2
+    },
+    "damageType": "necrotic",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "maximumTargetSeparationFeet": 120,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 60,
+      "placeRangeFeet": 150
+    }
+  },
+  {
+    "id": "blight",
+    "level": 4,
+    "school": "死灵",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 30,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 8,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "necrotic",
+    "damageOnSuccessfulSave": "half"
+  },
+  {
+    "id": "ice-storm",
+    "level": 4,
+    "school": "塑能",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 300,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "dice": {
+      "count": 2,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "bludgeoning",
+    "additionalDamageComponents": [
+      {
+        "dice": {
+          "count": 4,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        },
+        "damageType": "cold"
+      }
+    ],
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 20,
+      "placeRangeFeet": 300
+    }
+  },
+  {
+    "id": "cone-of-cold",
+    "level": 5,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "dice": {
+      "count": 8,
+      "sides": 8,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "cold",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "maximumTargetSeparationFeet": 120,
+    "area": {
+      "shape": "cone",
+      "origin": "self",
+      "lengthFeet": 60,
+      "aimRangeFeet": 60
+    }
+  },
+  {
+    "id": "chain-lightning",
+    "level": 6,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 150,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "requiresVisibleTarget": "primary",
+    "dice": {
+      "count": 10,
+      "sides": 8,
+      "bonus": 0
+    },
+    "damageType": "lightning",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 4,
+    "additionalTargetsPerHigherSlot": 1,
+    "secondaryTargetsWithinFeetOfFirst": 30
+  },
+  {
+    "id": "disintegrate",
+    "level": 6,
+    "school": "变化",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 10,
+      "sides": 6,
+      "bonus": 40,
+      "perHigherSlot": 3
+    },
+    "damageType": "force",
+    "damageOnSuccessfulSave": "none"
+  },
+  {
+    "id": "freezing-sphere",
+    "level": 6,
+    "school": "塑能",
+    "classes": [
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 300,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "dice": {
+      "count": 10,
+      "sides": 6,
+      "bonus": 0,
+      "perHigherSlot": 1
+    },
+    "damageType": "cold",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "maximumTargetSeparationFeet": 120,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 60,
+      "placeRangeFeet": 300
+    }
+  },
+  {
+    "id": "finger-of-death",
+    "level": 7,
+    "school": "死灵",
+    "classes": [
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 7,
+      "sides": 8,
+      "bonus": 30
+    },
+    "damageType": "necrotic",
+    "damageOnSuccessfulSave": "half"
+  },
+  {
+    "id": "sunburst",
+    "level": 8,
+    "school": "塑能",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 150,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "con",
+    "dice": {
+      "count": 12,
+      "sides": 6,
+      "bonus": 0
+    },
+    "damageType": "radiant",
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "maximumTargetSeparationFeet": 120,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 60,
+      "placeRangeFeet": 150
+    },
+    "onFailedSaveEffect": "sunburst-blindness"
+  },
+  {
+    "id": "meteor-swarm",
+    "level": 9,
+    "school": "塑能",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 5280,
+    "target": "area",
+    "effect": "saving-throw",
+    "saveAbility": "dex",
+    "requiresVisibleTarget": "placement",
+    "dice": {
+      "count": 20,
+      "sides": 6,
+      "bonus": 0
+    },
+    "damageType": "fire",
+    "additionalDamageComponents": [
+      {
+        "dice": {
+          "count": 20,
+          "sides": 6,
+          "bonus": 0
+        },
+        "damageType": "bludgeoning"
+      }
+    ],
+    "damageOnSuccessfulSave": "half",
+    "maximumTargets": 100,
+    "areaIncludesSelf": true,
+    "areaTargetCount": 4,
+    "area": {
+      "shape": "circle",
+      "origin": "point",
+      "radiusFeet": 40,
+      "placeRangeFeet": 5280
+    }
+  },
+  {
+    "id": "power-word-kill",
+    "level": 9,
+    "school": "附魔",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "castingTime": "action",
+    "rangeFeet": 60,
+    "target": "hostile",
+    "effect": "power-word-kill",
+    "requiresVisibleTarget": true,
+    "dice": {
+      "count": 0,
+      "sides": 4,
+      "bonus": 0
+    }
+  }
+]

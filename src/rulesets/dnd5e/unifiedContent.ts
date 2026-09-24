@@ -46,7 +46,7 @@ export const DND5E_UNIFIED_CONTENT_SCHEMA_VERSION = 1 as const
 export const DND5E_UNIFIED_CONTENT_MAX_DEFINITIONS = 512
 export const DND5E_UNIFIED_CONTENT_MAX_BYTES = 8 * 1024 * 1024
 export const DND5E_UNIFIED_CONTENT_KINDS = Object.freeze([
-  'spell', 'feature', 'feat', 'class', 'subclass', 'race', 'background', 'item', 'monster',
+  'condition', 'spell', 'feature', 'feat', 'class', 'subclass', 'race', 'background', 'item', 'monster',
   'monster-action', 'ability-generation',
 ] as const satisfies readonly ContentDefinitionKind[])
 
@@ -60,6 +60,7 @@ export type Dnd5eAuthorableFeatureDefinitionV1 = Omit<Dnd5ePluginFeatureDefiniti
 export type Dnd5eAuthorableFeatDefinitionV1 = Omit<Dnd5ePluginFeatDefinition, 'isAvailable'>
 
 export interface Dnd5eUnifiedContentPayloadByKindV1 {
+  condition: { id: string; name: string; description?: string; effectId: string }
   spell: Dnd5ePluginSpellDefinition
   feature: Dnd5eAuthorableFeatureDefinitionV1
   feat: Dnd5eAuthorableFeatDefinitionV1
@@ -318,8 +319,15 @@ export function validateDnd5eUnifiedContentBundleV1(value: unknown): readonly st
   }
   if (assetBytes > DND5E_PLUGIN_IMAGE_ASSETS_MAX_TOTAL_BYTES) errors.push('Unified content image assets exceed the total size limit')
 
+  for (const definition of bundle.definitions.filter(entry => entry.kind === 'condition')) {
+    const payload = definition.payload
+    if (!record(payload) || payload.id !== definition.id || typeof payload.name !== 'string' || !payload.name.trim() ||
+      typeof payload.effectId !== 'string' || !definition.effects?.some(effect => effect.id === payload.effectId)) {
+      errors.push(`condition ${definition.id} must reference its declared primary Effect`)
+    }
+  }
   const legacyDraft = legacyDraftFromBundle(bundle)
-  const hasLegacyPayload = bundle.definitions.some((definition) => definition.kind !== 'monster-action')
+  const hasLegacyPayload = bundle.definitions.some((definition) => definition.kind !== 'monster-action' && definition.kind !== 'condition')
   if (hasLegacyPayload) errors.push(...validateDnd5eCustomRulesPluginDraft(legacyDraft))
   for (const definition of bundle.definitions.filter((entry) => entry.kind === 'monster-action')) {
     const payload = definition.payload as Dnd5eMonsterActionContentPayloadV1

@@ -1,4 +1,5 @@
 import { stoneWallPanels } from '../../rulesets/dnd5e/stoneWall'
+import { fireWallVisualClip } from './fireWallVisualClip'
 import { ForceWallPanelsVisual } from './ForceWallPanelsVisual'
 import { IceWallVisual } from './IceWallVisual'
 import { LegacyStoneWallVisual, StoneWallVisual } from './StoneWallVisual'
@@ -1591,7 +1592,10 @@ export function Dnd5eCoreSpellAreaOverlay({
           radius={grid * ((area.wallOfFireGeometry.diameterFeet ?? (preset === 'blade-barrier' ? 60 : 20)) / 10)} reducedMotion={reducedMotion} persistent
         />
       ) : persistentAreaImage && spritePlacement ? (
-        <Group clipFunc={preset === 'wall-of-force' ? undefined : (context) => {
+        <Group clipFunc={preset === 'wall-of-force' ? undefined
+          : preset === 'wall-of-fire' && area.wallOfFireGeometry?.shape === 'line' && area.anchorCell
+            ? fireWallVisualClip({ cells: area.cells, anchor: area.anchorCell, geometry: area.wallOfFireGeometry, map })
+            : (context) => {
           context.beginPath()
           for (const cell of area.cells) {
             const point = cellTopLeft(cell, map)

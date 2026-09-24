@@ -1,3 +1,6 @@
+import neutralManifest from '../../../content/srd-5.1/manifest.json'
+import { communityPackageRegistry } from '../../../domain/packages/packageRegistry'
+import type { StarScarPackageManifest } from '../../../domain/packages/packageManifest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import {
   getRegisteredContentDefinition,
@@ -223,6 +226,15 @@ function coreSpellDefinitions(): readonly RegisteredContentDefinition[] {
 
 /** Re-establishes the built-in package after test/HMR registry resets. */
 export function ensureDnd5eCoreSpellActivitiesRegisteredV1(): void {
+  if (!communityPackageRegistry.list().some(p => p.packageId === DND5E_CORE_SPELL_PACKAGE_ID)) {
+    const definitions = coreSpellDefinitions()
+    const dictionary: Record<string,string> = {}
+    communityPackageRegistry.register({manifest:neutralManifest as StarScarPackageManifest,assets:{},localizations:{'zh-CN':dictionary},entries:definitions.map(d => {
+      dictionary[`${d.id}.name`] = d.name
+      dictionary[`${d.id}.description`] = d.description ?? ''
+      return {id:d.id,type:'Spell',systemId:'dnd5e',sourcePackageId:DND5E_CORE_SPELL_PACKAGE_ID,sourceEntryId:d.id,version:d.version,localizationKey:d.id,tags:d.tags ?? [],rulesData:d.payload,automationData:{activities:d.activities,effects:d.effects,advancements:d.advancements,capability:d.automation},assetReferences:[]}
+    })})
+  }
   if (getRegisteredContentDefinition(DND5E_CORE_SPELL_PACKAGE_ID, 'spell', DND5E_SRD_COMBAT_SPELLS[0]!.id)) return
   if (listRegisteredContentDefinitionPackages().some((entry) => entry.packageId === DND5E_CORE_SPELL_PACKAGE_ID)) {
     throw new Error('The SRD 5.1 Unified Content package is incomplete')

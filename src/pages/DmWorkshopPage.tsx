@@ -1,3 +1,4 @@
+import { prepareDnd5eModuleUploadFile } from '../rulesets/dnd5e/starModAdapter'
 import { useRef, useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, BadgeDollarSign, CheckCircle2, PackageCheck, Upload } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
@@ -153,7 +154,7 @@ export default function DmWorkshopPage() {
     setNotice(null)
     setError(null)
     try {
-      const inspected = await host.inspectFile(file)
+      const inspected = await host.inspectFile(await prepareDnd5eModuleUploadFile(file))
       setCoverage(inspected.automationCoverage ?? null)
       if (inspected.manifest.distributionPolicy !== 'room-distributable') {
         throw new AccountApiError(
@@ -270,7 +271,7 @@ export default function DmWorkshopPage() {
             <input
               ref={packageInputRef}
               type="file"
-              accept=".dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
+              accept=".starmod,.dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0]
