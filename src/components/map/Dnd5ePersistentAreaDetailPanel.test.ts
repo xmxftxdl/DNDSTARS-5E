@@ -5,6 +5,22 @@ import type { Dnd5ePluginArea } from '../../store/maps'
 import Dnd5ePersistentAreaDetailPanel from './Dnd5ePersistentAreaDetailPanel'
 
 describe('Dnd5ePersistentAreaDetailPanel', () => {
+  it('only offers Symbol activation while the glyph is dormant', () => {
+    const area: Dnd5ePluginArea = {
+      id: 'symbol-area', pluginId: 'srd-5.1', featureId: 'spell:symbol',
+      coreSpellId: 'symbol', label: '魔法徽记·死亡', color: '#a78bfa',
+      sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 1, expiresAfterRound: 100, symbol: { mode: 'death', activated: false },
+    }
+    const render = (activated: boolean) => renderToStaticMarkup(createElement(Dnd5ePersistentAreaDetailPanel, {
+      area: { ...area, symbol: { mode: 'death', activated } }, onActivateSymbol: () => undefined,
+      onClose: () => undefined, onDelete: () => undefined,
+    }))
+    expect(render(false)).toContain('激活魔法徽记')
+    expect(render(true)).not.toContain('激活魔法徽记')
+    expect(render(true)).toContain('60 尺微光')
+  })
+
   it('显示持续区域的平面、高度、时长与专注字段', () => {
     const area: Dnd5ePluginArea = {
       id: 'silent-image-area',

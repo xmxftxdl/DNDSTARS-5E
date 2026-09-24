@@ -1,3 +1,4 @@
+import { stoneWallIntersects } from '../shared/stone-wall-geometry.mjs'
 import { handleAccountStorageRequest, withAccountAssetBudget } from './account-storage-quota.mjs'
 // DM 与玩家服务端共用的权威协议、鉴权和原子持久化核心。
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -167,6 +168,8 @@ const EVENT_CHANNEL_POLICIES = Object.freeze({
   'player-action-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'dice-roll-request-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dice-roll-request-dm-to-player': { publish: ['dm'], subscribe: ['player', 'spectator'] },
+  'activity-placement-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
+  'activity-placement-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dnd5e-inventory-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dnd5e-inventory-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'dnd5e-shop-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
@@ -5935,7 +5938,7 @@ function magicalDarknessObstacleSuppressed(obstacle, map, spellLighting) {
 
 function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked) {
   const spellLighting = mapSpellLightingSources(map, geometry)
-  const magicalDarkness = (geometry?.obstacles ?? []).some((obstacle) =>
+  const magicalDarkness = fogPointState(geometry?.darknessFog, point.x, point.y) === 'covered' || (geometry?.obstacles ?? []).some((obstacle) =>
     obstacle?.magicalDarkness === true &&
     Array.isArray(obstacle.points) &&
     geometryPointInPolygon(point, obstacle.points) &&
@@ -6052,6 +6055,11 @@ function persistentAreaBlocksVisionRay(
     const blocksByObscuration = area?.obscuration?.kind === 'heavy' &&
       !(area.obscuration.sourceCanSeeThrough === true && area.sourceTokenId === viewerId)
     if (area?.blocking?.vision !== true && !blocksByObscuration) continue
+    if (area.stoneWall || area.forceWall) {
+      if (stoneWallIntersects(area, map, from, to, fromEyeElevationFeet, toEyeElevationFeet)) return true
+      continue
+    }
+
     const cells = new Set((Array.isArray(area.cells) ? area.cells : []).flatMap((cell) =>
       Number.isFinite(cell?.col) && Number.isFinite(cell?.row)
         ? [`${Math.floor(cell.col)}:${Math.floor(cell.row)}`]
@@ -6100,7 +6108,10 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
   // Darkness filters unlit targets below; it does not cap the ray distance to
   // a distant illuminated target. Dynamic line of sight therefore reaches the
   // map boundary in every ambient-light mode.
-  const ambientSightRangeFeet = !lightingEnabled || geometry?.vision?.enabled !== true
+  // Spell obstructions (such as Tiny Hut) also require lighting/line-of-sight
+  // checks with dynamic vision disabled. Do not apply the dormant default
+  // sight range in that case; match the client's forced visibility check.
+  const ambientSightRangeFeet = !lightingEnabled
     ? 0
     : Math.hypot(
         Math.max(1, Number(map.width) || 1),
@@ -6367,8 +6378,12 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
     : requestedCharacter && ownsCharacter(requestedCharacter)
       ? requestedCharacter.id
     : [...characterById.values()].find(ownsCharacter)?.id ?? null
+  // A portal changes only its traveler's scene, never the room-wide DM scene.
+  const arrivalMap = resolvedActiveCharacterId && value.maps.find(map =>
+    map.tokens?.some(token => token.characterId === resolvedActiveCharacterId && token.teleportationArrivalMapId === map.id))
   return {
     ...value,
+    ...(arrivalMap ? { selectedId: arrivalMap.id } : {}),
     maps: value.maps.map((map) => {
       if (!plainObject(map) || !Array.isArray(map.tokens)) return map
       const effectiveMap = {
@@ -6430,6 +6445,8 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const viewers = [...(!partyVisionShared
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players), ...sourceVisionEffects]
+      const hasSpellObstruction = (effectiveMap.dnd5ePluginAreas ?? []).some(area =>
+        area?.obscuration?.kind === 'heavy' || area?.blocking?.vision || area?.lighting?.kind === 'magical-darkness')
       const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
         if (token.type === 'player') {
@@ -6438,14 +6455,16 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             token.characterId === resolvedActiveCharacterId
           const requiresPlanarPerception = token.characterId !== resolvedActiveCharacterId &&
             tokenPlanarPlane(token, characterById) === 'ethereal'
-          const observingViewers = requiresPlanarPerception
+          const requiresSight = !viewerControlled && (requiresPlanarPerception || hasSpellObstruction || dynamicVision ||
+            fogPointState(fog, token.x, token.y) === 'covered' || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered')
+          const observingViewers = requiresSight
             ? viewers.filter((viewer) => playerCanSeeToken(
                 effectiveMap,
                 geometry,
                 viewer,
                 token,
                 dynamicVision ? null : manualFallbackRangeFeet,
-                dynamicVision,
+                dynamicVision || hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered',
                 characterById,
               ))
             : viewers
@@ -6486,7 +6505,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         // reveal 的区域即使开着动态视野也直接放行；两者都不命中时，动态视野
         // 决定是否仍要视野判定（探索过≠正在看见）。
         const fogState = manualFogActive ? fogPointState(fog, token.x, token.y) : 'neutral'
-        const needVision = fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
+        const needVision = hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered' || fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
         const observingViewers = viewers.filter((viewer) =>
           !needVision ||
           playerCanSeeToken(
@@ -6495,7 +6514,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             viewer,
             token,
             dynamicVision ? null : manualFallbackRangeFeet,
-            dynamicVision,
+            dynamicVision || hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered',
             characterById,
           ),
         )
@@ -6529,7 +6548,13 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         tokens,
         dnd5ePluginAreas: Array.isArray(map.dnd5ePluginAreas)
           ? map.dnd5ePluginAreas.filter((area) =>
-              (!area?.sourceTokenId || visibleIds.has(area.sourceTokenId)) &&
+              // A fixed portal survives its caster moving to the destination.
+              // Both rings are rendered from this source-map area, so filtering
+              // it by caster visibility also erases the player's exit ring.
+              (!area?.sourceTokenId || visibleIds.has(area.sourceTokenId) ||
+                (area?.coreSpellId === 'wall-of-stone' && area?.anchorMode === 'fixed') ||
+                (area?.coreSpellId === 'teleportation-circle' && area?.anchorMode === 'fixed' &&
+                  plainObject(area.teleportationExit))) &&
               (area?.anchorMode !== 'effect-token' || visibleIds.has(area?.anchorTokenId)) &&
               (area?.hiddenFromPlayers !== true || area?.sourceCharacterId === resolvedActiveCharacterId),
             )

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createDnd5eTurnEconomyCounts, projectDnd5eStartingTurnEconomy } from '../../rulesets/dnd5e/turnEconomy'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { cellsForAoe } from '../../lib/skillTargeting'
 import type { BattleMap, Token } from '../../store/maps'
@@ -83,6 +84,27 @@ function entry(tokenId: string, slotId = `${tokenId}-slot`): InitiativeEntry {
 }
 
 describe('persistent-area authoritative turn boundaries', () => {
+  it('refreshes consecutive Time Stop slots before deferred begin-turn without losing area action loss', () => {
+    const spentTurn = {
+      actionAvailable: false, bonusActionAvailable: false, reactionAvailable: false,
+      objectInteractionAvailable: false, movementRemaining: 0, movementSpent: 30,
+    }
+    let previous = createDnd5eTurnEconomyCounts('combat:1:hero', 30)
+    for (const slot of [1, 2, 3]) {
+      const fresh = createDnd5eTurnEconomyCounts(`combat:1:activity-extra-turns:hero:${slot}`, 30)
+      const projected = projectDnd5eStartingTurnEconomy(fresh, spentTurn, previous.turnKey)
+      const next = projectDnd5ePersistentAreaActionConsumption(projected, false, fresh.turnKey, {
+        ...previous, action: { current: 0, max: 1 },
+      })
+      expect(next).toEqual(fresh)
+      // The second projection after begin-turn must still preserve a real area penalty.
+      const cloud = projectDnd5ePersistentAreaActionConsumption(projected, true, fresh.turnKey)
+      expect(projectDnd5ePersistentAreaActionConsumption(fresh, false, fresh.turnKey, cloud).action.current).toBe(0)
+      expect(projectDnd5eStartingTurnEconomy(fresh, spentTurn, fresh.turnKey).action.current).toBe(0)
+      previous = next
+    }
+  })
+
   it('projects a failed Stinking Cloud save into the shared action economy only', () => {
     const economy = {
       turnKey: 'combat:1:target', attacksUsed: 0,
@@ -98,6 +120,17 @@ describe('persistent-area authoritative turn boundaries', () => {
       action: { current: 0, max: 1 },
     })
     expect(projectDnd5ePersistentAreaActionConsumption(economy, false)).toBe(economy)
+
+    const consumed = projectDnd5ePersistentAreaActionConsumption(economy, true)
+    // A deferred begin-turn reinitializes resources after the area's failed save.
+    expect(projectDnd5ePersistentAreaActionConsumption(economy, false, economy.turnKey, consumed))
+      .toEqual(consumed)
+    const nextTurn = { ...economy, turnKey: 'combat:2:target' }
+    expect(projectDnd5ePersistentAreaActionConsumption(nextTurn, false, nextTurn.turnKey, consumed))
+      .toBe(nextTurn)
+    const extraSlot = { ...economy, turnKey: 'combat:1:target:extra' }
+    expect(projectDnd5ePersistentAreaActionConsumption(extraSlot, false, extraSlot.turnKey, consumed))
+      .toBe(extraSlot)
 
     expect(projectDnd5ePersistentAreaActionConsumption(
       economy,
@@ -142,6 +175,44 @@ describe('persistent-area authoritative turn boundaries', () => {
       ],
     })
     expect(planDnd5ePersistentAreaTurnTransition(current, current).boundaries).toEqual([])
+  })
+
+  it.each([false, true])('presents the incoming turn before its save and clears presentation on failure=%s', async (rejectSave) => {
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [],
+    }
+    const cursor = dnd5ePersistentAreaTurnCursor({
+      mapId: map.id, combatId: 'combat', round: 2, initiativeIndex: 1,
+      initiativeOrder: [entry('hero'), entry('minotaur')],
+    })!
+    let presented: typeof cursor | null = null
+    let releaseSave!: () => void
+    const save = new Promise<void>(resolve => { releaseSave = resolve })
+    const pending = settleDnd5ePersistentAreaTurnTransition({
+      transition: { cursor, boundaries: [
+        { timing: 'turn-end', round: 2, tokenId: 'hero', turnKey: '2:hero-slot' },
+        { timing: 'turn-start', round: 2, tokenId: 'minotaur', turnKey: '2:minotaur-slot' },
+      ] },
+      map, characters: [],
+      presentTurnStart: value => { presented = value },
+      settleBoundary: async ({ boundary }) => {
+        if (boundary.timing === 'turn-end') expect(presented).toBeNull()
+        else {
+          expect(presented).toEqual(cursor)
+          await save
+          if (rejectSave) throw new Error('save cancelled')
+        }
+        return { map, characters: [], logs: [] }
+      },
+      expireBoundary: ({ map: resultMap }) => resultMap,
+    })
+    await Promise.resolve()
+    expect(presented).toEqual(cursor)
+    releaseSave()
+    if (rejectSave) await expect(pending).rejects.toThrow('save cancelled')
+    else await pending
+    expect(presented).toBeNull()
   })
 
   it('preserves boundary combat events for the next actor economy projection', async () => {

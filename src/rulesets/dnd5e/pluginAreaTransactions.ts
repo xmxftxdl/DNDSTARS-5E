@@ -1,3 +1,4 @@
+import { tokenCenterForAnchorCell } from '../../lib/gridCombat'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -242,6 +243,8 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
   const { prepared } = input
   const result = resolveDnd5ePersistentAreaTrigger(prepared.state, {
     areaId: prepared.candidate.area.id,
+    areaOrigin: prepared.candidate.area.anchorCell
+      ? tokenCenterForAnchorCell(prepared.candidate.area.anchorCell, { size: 1 }, prepared.map) : undefined,
     areaSourceKind: prepared.candidate.area.sourceKind,
     coreSpellId: prepared.candidate.area.coreSpellId,
     castingClassId: prepared.candidate.area.castingClassId,

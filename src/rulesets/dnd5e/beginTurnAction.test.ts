@@ -1,3 +1,8 @@
+import { tokenOccupiedCellsAt } from '../../lib/gridCombat'
+import { getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
+import { collectDnd5ePersistentAreaTriggers } from './pluginAreas'
+import { prepareDnd5ePersistentAreaTrigger, resolvePreparedDnd5ePersistentAreaTrigger } from './pluginAreaTransactions'
+import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
@@ -116,7 +121,92 @@ function fixture(order: 'hero-first' | 'basilisk-first' = 'hero-first') {
   }
 }
 
+function settleCloudBeforeBegin(input: ReturnType<typeof fixture>, actorId: string, failed: boolean) {
+  const actor = input.map.tokens.find(token => token.id === actorId)!
+  const source = input.map.tokens.find(token => token.id !== actorId)!
+  source.dnd5eCombatState = { ...source.dnd5eCombatState, concentrationSpellId: 'stinking-cloud', concentrationSpellLevel: 3 }
+  const sourceCharacter = input.characters.find(character => character.id === source.characterId)
+  if (sourceCharacter) {
+    sourceCharacter.concentrating = true
+    sourceCharacter.dnd5eCombatState = { ...sourceCharacter.dnd5eCombatState, concentrationSpellId: 'stinking-cloud', concentrationSpellLevel: 3 }
+  }
+  const slotId = input.initiativeOrder[input.initiativeIndex].slotId!
+  const trigger = getDnd5eCoreSpellAreaDeclaration('stinking-cloud')!.triggers![0]
+  input.map.dnd5ePluginAreas = [{
+    id: 'cloud', pluginId: 'srd', featureId: 'stinking-cloud', sourceKind: 'core-spell',
+    coreSpellId: 'stinking-cloud', label: 'cloud', color: '#aaa', createdRound: 1, expiresAfterRound: 11,
+    sourceTokenId: source.id, sourceCharacterId: source.characterId ?? source.id,
+    includeSelf: true, cells: tokenOccupiedCellsAt(actor, input.map, actor),
+    triggers: [{ id: trigger.id, label: trigger.label, timing: trigger.timing, oncePerTurn: true,
+      consumeActionOnFailedSave: trigger.consumeActionOnFailedSave, savingThrow: { ...trigger.savingThrow!, dc: 15 } }],
+  }]
+  const candidate = collectDnd5ePersistentAreaTriggers({ map: input.map, timing: 'turn-start',
+    round: input.round, turnKey: `${input.round}:${slotId}`, targetTokenId: actorId })[0]
+  expect(candidate).toBeDefined()
+  const prepared = prepareDnd5ePersistentAreaTrigger({ ...input, candidate })
+  if (!prepared.ok) throw new Error(prepared.reason)
+  const settled = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, d20: failed ? 1 : 20 })
+  expect(settled.result.ok, settled.result.ok ? undefined : settled.result.reason).toBe(true)
+  const event = settled.result.events.find(event => event.type === 'persistent-area-triggered')
+  expect(event).toMatchObject({ saveSuccess: !failed, actionConsumed: failed })
+  input.map = settled.application!.map
+  input.characters = settled.application!.characters
+  const economy = createDnd5eTurnEconomyCounts(`${COMBAT_ID}:${input.round}:${slotId}`)
+  economy.action.current = event?.type === 'persistent-area-triggered' && event.actionConsumed ? 0 : 1
+  return economy
+}
+
 describe('D&D 5e authoritative begin-turn bridge', () => {
+  it.each([false, true])('resolves player delayed spells after area action loss: consumed=%s', (consumed) => {
+    const input = fixture()
+    input.round = 2
+    input.map.tokens[1].poolId = undefined
+    input.characters[0] = {
+      ...hero(), charClass: '法师', level: 5,
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['magic-missile'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 4 } },
+      dnd5eCombatState: { slowDelayedSpell: {
+        schemaVersion: 1, createdTurnKey: `${COMBAT_ID}:1:hero-token:normal`,
+        action: { type: 'cast-spell', actorId: 'hero-token', targetId: 'basilisk-token',
+          targetIds: ['basilisk-token'], projectileTargetIds: Array(3).fill('basilisk-token'),
+          spellId: 'magic-missile', slotLevel: 1, effectRolls: [1, 1, 1] },
+      } },
+    }
+    const turnEconomy = settleCloudBeforeBegin(input, 'hero-token', consumed)
+    const resolved = resolveDnd5eBeginTurn({ ...input, turnEconomy })
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: consumed ? 'slow-delayed-spell-wasted' : 'slow-delayed-spell-completed',
+      actorId: 'hero-token', spellId: 'magic-missile',
+    }))
+    expect(resolved.result.state.combatants['hero-token'].classState.slowDelayedSpell).toBeUndefined()
+    expect(resolved.result.state.combatants['hero-token'].turn.actionAvailable).toBe(false)
+    expect(resolved.result.state.combatants['hero-token'].classResources['dnd5e-spell-slot-1'].current).toBe(0)
+    expect(resolved.result.events.some(event => event.type === 'damage-applied')).toBe(!consumed)
+  })
+
+  it.each([false, true])('resolves monster pending spells after area action loss: consumed=%s', (consumed) => {
+    const input = fixture('basilisk-first')
+    input.round = 2
+    const actor = input.map.tokens[1]
+    actor.poolId = 'srd-5.1:drow'
+    actor.dnd5eCombatState = { slowDelayedMonsterSpell: {
+      createdTurnKey: `${COMBAT_ID}:1:basilisk-token:normal`,
+      intent: { spellId: 'faerie-fire', spellName: '妖火术', slotLevel: 1,
+        targetTokenIds: ['hero-token'], effect: 'saving-throw', diceCount: 0,
+        diceSides: 4, castingTime: 'action', areaTargetCell: { col: 0, row: 0 } },
+    }, monsterSpellUsesBySpellId: { 'faerie-fire': { current: 0, max: 1 } } }
+    const turnEconomy = settleCloudBeforeBegin(input, 'basilisk-token', consumed)
+    const resolved = resolveDnd5eBeginTurn({ ...input, turnEconomy })
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    if (!resolved.ok) return
+    const caster = resolved.result.state.combatants[actor.id]
+    expect(caster.classState.slowDelayedMonsterSpell != null).toBe(!consumed)
+    expect(caster.classState.monsterSpellUsesBySpellId?.['faerie-fire'].current).toBe(0)
+    expect(resolved.result.events.some(event => event.type === 'slow-delayed-spell-wasted')).toBe(consumed)
+  })
+
   afterEach(() => {
     setDnd5eRoomMonsterCatalog([])
     setMapGeometryRuntime([])

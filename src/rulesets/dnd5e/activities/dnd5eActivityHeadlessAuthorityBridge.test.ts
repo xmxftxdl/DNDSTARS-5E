@@ -1,3 +1,4 @@
+import { endDnd5eActivityExtraTurnGroup } from '../headlessCombatEngine'
 import { afterEach, describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import { validateAndMigrateSharedResource } from '../../../lib/sharedResourceValidation'
@@ -536,7 +537,7 @@ describe('Activity Headless authority commit bridge', () => {
     const castResolution = resolveDnd5eActivity({
       activity: castActivity, actor: actorSnapshot, targets: [actorSnapshot], castLevel: 9,
       choices: {
-        mode: 'srd-5.1:adult-black-dragon', equipment: 'merge', seen: 'confirmed',
+        mode: 'srd-5.1:adult-black-dragon', equipment: 'merge',
       },
       rolls: {},
     })
@@ -584,14 +585,14 @@ describe('Activity Headless authority commit bridge', () => {
       .find((definition) => definition.id === 'shapechange')?.activities as readonly Dnd5eActivityDefinitionV1[] | undefined)
       ?.find((activity) => activity.id === 'spell:shapechange:change-form')!
     expect(dnd5eActivityManualAdjudicationOperationsV1(controlActivity, {
-      mode: 'srd-5.1:planetar', equipment: 'merge', seen: 'confirmed',
+      mode: 'srd-5.1:planetar', equipment: 'merge',
     })).toHaveLength(0)
     expect(dnd5eActivityManualAdjudicationOperationsV1(controlActivity, {
-      mode: 'srd-5.1:planetar', equipment: 'wear', seen: 'confirmed',
+      mode: 'srd-5.1:planetar', equipment: 'wear',
     })).toHaveLength(1)
     const controlResolution = resolveDnd5eActivity({
       activity: controlActivity, actor: actorSnapshot, targets: [actorSnapshot],
-      choices: { mode: 'srd-5.1:planetar', equipment: 'wear', seen: 'confirmed' }, rolls: {},
+      choices: { mode: 'srd-5.1:planetar', equipment: 'wear' }, rolls: {},
     })
     expect(controlResolution.ok, controlResolution.ok ? undefined : controlResolution.details.join('; ')).toBe(true)
     if (!controlResolution.ok) return
@@ -2439,4 +2440,26 @@ describe('Activity Headless authority commit bridge', () => {
       disposePlugin()
     }
   })
+})
+
+it('DM ending Time Stop clears controller, suspension and future extra turns together', () => {
+  const state = startDnd5eHeadlessCombat('dm-end-time-stop', [combatant('actor', 'player', 20), combatant('target', 'dm', 10)])
+  const result = commitDnd5eActivityExecution(state, {
+    actorId: 'actor', activityId: 'spell:time-stop', targetIds: ['actor'],
+    source: { kind: 'spell', id: 'time-stop' },
+    resolution: { ok: true, status: 'resolved', checks: [], consumptions: [], proposals: [{
+      kind: 'grant-extra-turns', operationId: 'time-stop-extra-turns', actorId: 'actor',
+      turns: 3, freezeOtherCreatures: true, endOnAffectOther: true,
+    }] },
+  })
+  expect(result.ok).toBe(true)
+  if (!result.ok) return
+  const group = result.state.combatants.actor.classState.activityExtraTurnGroup!
+  expect(result.state.combatants.actor.classState.activeEffects?.some(e => e.source.rulesId === 'time-stop')).toBe(true)
+  endDnd5eActivityExtraTurnGroup(result.state, group.groupId, [])
+  expect(result.state.initiativeOrder).toEqual(['actor', 'target'])
+  expect(result.state.combatants.actor.classState.activityExtraTurnGroup).toBeUndefined()
+  expect(result.state.combatants.target.classState.activityExtraTurnSuspension).toBeUndefined()
+  expect(result.state.combatants.target.turn.reactionAvailable).toBe(true)
+  expect(result.state.combatants.actor.classState.activeEffects?.some(e => e.source.rulesId === 'time-stop') ?? false).toBe(false)
 })

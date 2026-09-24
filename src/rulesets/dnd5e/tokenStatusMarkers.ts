@@ -15,6 +15,27 @@ export const DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS = [
   'concentrating',
   'silenced',
   'slowed',
+  'slow-spell',
+  'stoneskin',
+  'telekinesis',
+  'suggestion',
+  'symbol',
+  'telepathic-bond',
+  'faerie-fire',
+  'time-stop',
+  'tiny-hut',
+  'tongues',
+  'true-seeing',
+  'true-strike',
+  'vampiric-touch',
+  'teleportation-circle',
+  'water-breathing',
+  'weird',
+  'web',
+  'acid-arrow',
+  'alter-self',
+  'wish',
+
   'weakened',
   'protected',
   'exposed',
@@ -27,7 +48,9 @@ export const DND5E_TACTICAL_TOKEN_STATUS_MARKER_IDS = [
   'imprisoned',
   'frozen-statue',
   'nondetection',
+  'sequester',
   'plane-shifted',
+  'extradimensional',
 ] as const
 
 export type Dnd5eTacticalTokenStatusMarkerId =
@@ -201,6 +224,26 @@ const TACTICAL_DEFINITIONS: Readonly<Record<
   concentrating: { label: '专注', description: '地图标注：目标正在维持专注。' },
   silenced: { label: '沉默', description: '地图标注：目标无法正常发声。' },
   slowed: { label: '减速', description: '地图标注：目标的移动受到限制。' },
+  'slow-spell': { label: '缓慢术', description: '速度减半，AC与敏捷豁免−2，不能使用反应；每回合只能使用动作或附赠动作，至多进行一次近战或远程攻击。回合结束时进行感知豁免，成功则解除。' },
+  stoneskin: { label: '石肤术', description: '对非魔法攻击造成的钝击、穿刺和挥砍伤害具有抗性。需要施法者维持专注。' },
+  telekinesis: { label: '心灵遥控', description: '对抗失败，被心灵遥控束缚并悬浮，持续至施法者下回合结束；施法者可消耗动作继续对抗。' },
+  suggestion: { label: '暗示术', description: '遵循施法者提出的合理建议，需要维持专注，最长 8 小时。建议完成，或施法者及其同伴伤害目标时结束。' },
+  symbol: { label: '魔法徽记', description: '受魔法徽记影响。纷争：攻击和属性检定劣势；绝望：无法攻击或以有害效果指定生物；疯狂：无法行动或正常交流，移动由 DM 控制。' },
+  'telepathic-bond': { label: '心灵联结', description: '与同一次心灵联结的成员进行心灵交流，持续 1 小时，无需专注。交流不受语言或距离限制，但不能跨越位面。' },
+  'time-stop': { label: '时间停止', description: '额外回合期间其他生物暂停。' },
+  'tiny-hut': { label: '小屋术', description: '处于小屋术保护范围内。' },
+  'tongues': { label: '巧言术', description: '理解所有口语，所说的话可被掌握语言且能听见的生物理解。' },
+  'true-seeing': { label: '真知术', description: '获得 120 尺真实视觉，察觉魔法暗门与以太位面。' },
+  'true-strike': { label: '克敌机先', description: '施法者下一回合针对该目标的第一次攻击具有优势。' },
+  'vampiric-touch': { label: '吸血鬼之触', description: '可用动作重复近战法术攻击，并恢复造成黯蚀伤害一半的生命值。' },
+  'teleportation-circle': { label: '传送法阵', description: '进入法阵后由 DM 指定的出口传送；维持至施法者下一回合结束。' },
+  'water-breathing': { label: '水下呼吸', description: '可以在水下呼吸，保留原有呼吸能力；持续 24 小时，无需专注。' },
+  weird: { label: '怪影杀手', description: '受恐怖幻象影响而恐慌。回合结束进行感知豁免：失败受到 4d10 心灵伤害，成功结束此效果。' },
+  web: { label: '蛛网术·束缚', description: '被蛛网束缚；可以用动作进行力量检定挣脱。束缚结束时移除此标记。' },
+  'acid-arrow': { label: '强酸箭·后续伤害', description: '强酸仍在侵蚀；在目标下个回合结束时结算后续酸蚀伤害，随后移除此标记。' },
+  'alter-self': { label: '变身术', description: '处于变身术的当前形态；具体水生适应、外貌或天生武器效果见状态详情，随专注结束。' },
+  wish: { label: '祈愿术', description: '受到祈愿术产生的持续效果影响；具体增益、减益和持续时间以本次效果详情为准。' },
+  'faerie-fire': { label: '妖火术', description: '目标被妖火勾勒并发出微光，不能受益于隐形；能看见目标的攻击者对其攻击具有优势。需要施法者维持专注。' },
   weakened: { label: '虚弱', description: '地图标注：目标当前处于虚弱状态。' },
   protected: { label: '防护', description: '地图标注：目标当前受到额外防护。' },
   exposed: { label: '破绽', description: '地图标注：目标已暴露破绽。' },
@@ -231,6 +274,14 @@ const TACTICAL_DEFINITIONS: Readonly<Record<
   'plane-shifted': {
     label: '已被异界传送',
     description: '权威效果：该生物因异界传送豁免失败，已被送往施法者指定的存在位面。',
+  },
+  sequester: {
+    label: '隔离术',
+    description: '目标受到隔离术保护：隐形并免疫预言探知；生物进入假死，无法行动、移动且停止衰老。受到伤害或满足结束条件时解除。',
+  },
+  extradimensional: {
+    label: '异次元空间（魔绳术）',
+    description: '该生物已沿绳子进入魔绳术的异次元空间。退出空间或法术结束后，此标记自动移除。',
   },
 }
 
@@ -330,6 +381,7 @@ const LEGACY_EFFECT_TOKEN_STATUS_MARKERS: Readonly<Record<string, Dnd5eTacticalT
 
 interface Dnd5eTokenStatusMarkerActiveEffectProjection {
   id: string
+  tags?: readonly string[]
   definitionId?: string
   label?: string
   legacyCondition?: string
@@ -617,8 +669,24 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
     // Standard conditions already render through Dnd5eStandardConditionBadge.
     // Do not infer a second tactical marker from the same effect's label or
     // legacy alias (for example invisible -> hidden).
-    if (effect.standardCondition) continue
-    const statusId = effect.source?.rulesId === 'ray-of-enfeeblement' || /(?:^|:)ray-of-enfeeblement(?:$|:)/.test(effect.definitionId ?? '')
+    const isSequester = effect.source?.rulesId === 'sequester' || effect.definitionId?.startsWith('adjudicated:sequester:')
+    const isTelekinesis = effect.standardCondition === 'restrained' && /(?:^|:)telekinesis(?:$|:)/.test(effect.source?.rulesId ?? '')
+    const batchSpell = (['water-breathing', 'weird', 'web', 'acid-arrow', 'alter-self', 'wish'] as const)
+      .find(id => effect.tags?.includes(id) || [effect.source?.rulesId, effect.definitionId].some(value =>
+        value?.split(':').includes(id)))
+    if (effect.standardCondition && !isSequester && !isTelekinesis && !batchSpell) continue
+    const dedicatedSpell = batchSpell ?? (['time-stop', 'tiny-hut', 'tongues', 'true-seeing', 'true-strike', 'vampiric-touch', 'teleportation-circle'] as const)
+      .find(id => [effect.source?.rulesId, effect.definitionId, effect.legacyCondition].some(value =>
+        value?.includes(id) || id === 'time-stop' && value?.startsWith('activity-extra-turns:suspension:')))
+    const statusId = dedicatedSpell ?? (isTelekinesis ? 'telekinesis' : /(?:^|:)faerie-fire(?:$|:)/.test(effect.source?.rulesId ?? '') ||
+      /(?:^|:)faerie-fire(?:$|:)/.test(effect.definitionId ?? '')
+      ? 'faerie-fire' : effect.source?.rulesId === 'suggestion' || /(?:^|:)suggestion(?:$|:)/.test(effect.definitionId ?? '')
+      ? 'suggestion' : effect.source?.rulesId === 'telepathic-bond' || effect.definitionId === 'srd-5.1:spell:telepathic-bond' || effect.legacyCondition === 'telepathic-bond'
+      ? 'telepathic-bond' : effect.source?.rulesId === 'stoneskin' || /(?:^|:)stoneskin(?:$|:)/.test(effect.definitionId ?? '')
+      ? 'stoneskin' : effect.source?.rulesId === 'slow' || effect.definitionId === 'srd-5.1:spell:slow' || effect.label === '缓慢术'
+      ? 'slow-spell' : isSequester ? 'sequester' : effect.definitionId === 'srd-5.1:rope-trick:space'
+      ? 'extradimensional'
+      : effect.source?.rulesId === 'ray-of-enfeeblement' || /(?:^|:)ray-of-enfeeblement(?:$|:)/.test(effect.definitionId ?? '')
       ? 'weakened'
       : effect.definitionId === 'srd-5.1:spell:cone-of-cold:frozen-statue'
       ? 'frozen-statue'
@@ -630,7 +698,7 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
       dnd5eTacticalTokenStatusMarkerIdFromLegacyCondition(effect.label) ??
       (effect.definitionId?.startsWith('dm:custom-status:') && effect.label?.trim()
         ? dnd5eCustomTokenStatusMarkerId(effect.label)
-        : undefined)
+        : undefined))
     if (!statusId) continue
     const safeEffectId = effect.id
       .trim()
@@ -643,7 +711,13 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
       id: `headless:${safeEffectId}`,
       statusId,
       source: 'headless',
-      label: effect.label?.trim().slice(0, 80) || undefined,
+      label: dedicatedSpell === 'true-strike' ? '克敌机先·被锁定'
+        : batchSpell === 'alter-self' ? (effect.label?.startsWith('变身术') ? effect.label : `变身术${effect.label ? `：${effect.label}` : ''}`).slice(0, 80)
+        : batchSpell ? TACTICAL_DEFINITIONS[batchSpell].label
+        : isTelekinesis ? '心灵遥控·束缚' : effect.label?.trim().slice(0, 80) || undefined,
+      ...(dedicatedSpell === 'true-strike' ? {
+        detailDescription: '被施法者锁定：施法者下一回合对该目标的第一次攻击检定具有优势；该次攻击后或专注结束时移除此标记。',
+      } : {}),
       activeEffectId: effect.id,
       sourceActorId: effect.source?.actorId,
       sourceLabel: effect.source?.actorName ?? effect.source?.label ?? effect.source?.rulesId,

@@ -22,7 +22,7 @@ import {
   playerMapMovablePersistentAreas,
   playerMapSustainedAreaControls,
 } from './playerMapPersistentAreas'
-import { resolvePlayerMapSpellHotbarCharacter } from './playerMapSpellHotbarCharacter'
+import { resolvePlayerMapSpellHotbarCharacter, simulacrumHotbarTurnEconomy } from './playerMapSpellHotbarCharacter'
 
 interface PlayerMapSpellHotbarProps {
   isDM: boolean
@@ -37,6 +37,7 @@ interface PlayerMapSpellHotbarProps {
   pendingAction?: PendingPlayerActionLock | null
   characters: Character[]
   activeTurnEconomy: Dnd5eTurnEconomyCounts
+  turnEconomyByToken: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
   activeActionId?: string
   grappleEscapes?: readonly { grapplerTokenId: string; grapplerLabel: string; dc?: number }[]
   armedSpellModifiers?: readonly Dnd5eCombatSpellModifier[]
@@ -49,11 +50,8 @@ interface PlayerMapSpellHotbarProps {
 }
 
 export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
-  // The map bar belongs to the assigned player character, never to the
-  // combatant whose turn happens to be active. During an enemy turn there is
-  // no player-owned activeCharacter; deriving the bar from it made the whole
-  // UI disappear and also hid spell-reaction entry points such as Counterspell.
-  // `canAct` below remains the authority boundary for ordinary off-turn casts.
+  // Keep the player's bar during enemy turns, and switch to the independently
+  // projected simulacrum only on that owned companion's turn.
   const character = resolvePlayerMapSpellHotbarCharacter(props)
   if (props.isDM || !character) return null
   const token = props.currentInitiativeToken?.characterId === character.id
@@ -61,7 +59,9 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
     : props.map.tokens.find((candidate) =>
         candidate.type === 'player' && candidate.characterId === character.id && !candidate.dnd5eSimulacrum,
       )
-  const turnEconomy = character.id === props.activeCharacter?.id ||
+  const turnEconomy = token?.dnd5eSimulacrum
+    ? simulacrumHotbarTurnEconomy(token, props.turnEconomyByToken, dnd5eEffectiveWalkingSpeed(character))
+    : character.id === props.activeCharacter?.id ||
     ((props.triggeredReactionSpellIds?.length ?? 0) > 0 && character.id === props.playerCharacter?.id)
     ? props.activeTurnEconomy
     : token
@@ -111,7 +111,7 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
   return (
     <div className="map-player-combat-hotbar pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex flex-col items-center gap-2">
       <PlayerCombatHotbar
-        key={`${props.combatActive ? 'combat' : 'exploration'}:${character.id}`}
+        key={`${props.combatActive ? 'combat' : 'exploration'}:${token?.id ?? character.id}`}
         mode={props.combatActive ? 'combat' : 'exploration'}
         character={character}
         mapWeather={mapWeather}

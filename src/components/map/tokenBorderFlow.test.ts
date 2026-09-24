@@ -141,7 +141,7 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenForegroundLayer).toBeGreaterThan(borderFlowLayer)
     expect(tokenStatusContent).toBeGreaterThan(tokenForegroundLayer)
     expect(interactionOverlayContent).toBeGreaterThan(tokenStatusContent)
-    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(6)
+    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(7)
     expect(tokenNodeSource).toContain('const hasPresentationBorder = !!borderColor && !defeated')
     expect(tokenNodeSource).toContain('const bodyStrokeWidth = hasPresentationBorder ? 0 : baseStrokeW')
     expect(tokenNodeSource).toContain('const portraitClipInset = hasPresentationBorder ? 0')
@@ -150,6 +150,18 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenNodeSource).not.toContain("standardConditions.includes('poisoned')")
     expect(tokenNodeSource).not.toContain('<StunGlow')
     expect(tokenNodeSource).not.toContain('<PoisonCloud')
+  })
+
+  it('keeps drag paths and range previews off the retained background layer', () => {
+    const source = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const retainedBackground = source.slice(source.indexOf('const backgroundLayer = useMemo'), source.indexOf('const inv = 1 / view.scale'))
+    const groundOverlay = source.slice(source.indexOf('<Layer name="map-ground-overlay-layer"'), source.indexOf('<Layer name="token-body-layer"'))
+    expect(retainedBackground).toContain('<KonvaImage')
+    expect(retainedBackground).not.toContain('map.tokens')
+    expect(retainedBackground).not.toContain('dragPreviewPositions')
+    expect(groundOverlay).not.toContain('<KonvaImage')
+    expect(groundOverlay).toContain('<TokenMovementPathLine')
+    expect(groundOverlay).toContain('<AoeCellHighlights')
   })
 
   it('isolates player fog compositing from world lighting', () => {

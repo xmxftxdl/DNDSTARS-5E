@@ -44,11 +44,9 @@ describe('dice tray display recovery', () => {
       onRollDone={complete} onD20Complete={complete} onDiceComplete={complete}
       onPreviewComplete={complete} onSecretConfirm={complete}
     />)
-    expect(html).toContain('aria-label="D6：4"')
-    expect(html).toContain('aria-label="D6：3"')
-    expect(html).toContain('2d6+2')
-    expect(html).toContain('<strong>9</strong>')
-    expect(html).toContain('6-sided dice roller')
+    expect(html).toContain('展开上次掷骰结果，总值 9')
+    expect(html).toContain('style="display:none"')
+    expect(html).not.toContain('class="dice-tray-drawer__header"')
     expect(html).not.toContain('全部重投')
     expect(complete).not.toHaveBeenCalled()
   })

@@ -241,6 +241,14 @@ describe('server-authoritative player exploration movement', () => {
 
   it('rejects stale coordinates, active combat, and a different player owner', () => {
     expect(sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState, move({ x: 50, y: 50 }, { x: 100, y: 50 }), 10, member,
+      { combatActive: true, combatMapId: 'portal-source', characterState },
+    )).toMatchObject({ ok: true, acceptedPosition: { x: 100, y: 50 } })
+    expect(sharedServerCore.mutatePlayerExplorationMoveState(
+      mapsState, move({ x: 50, y: 50 }, { x: 100, y: 50 }), 10, member,
+      { combatActive: true, combatMapId: 'map-1', characterState },
+    )).toMatchObject({ ok: false, error: 'exploration-move-combat-active' })
+    expect(sharedServerCore.mutatePlayerExplorationMoveState(
       mapsState,
       move({ x: 100, y: 50 }, { x: 150, y: 50 }),
       10,
@@ -1321,6 +1329,35 @@ describe('map geometry player projection', () => {
       .toEqual(['shown-area', 'own-hidden-area'])
   })
 
+  it('keeps fixed teleportation portals after the caster leaves the source map without exposing hidden areas', () => {
+    const portal = {
+      id: 'portal', coreSpellId: 'teleportation-circle', anchorMode: 'fixed',
+      sourceTokenId: 'hero', sourceCharacterId: 'character-1',
+      teleportationExit: { mapId: 'destination', x: 30, y: 40, exploration: true },
+    }
+    const state = { selectedId: 'source', maps: [
+      { id: 'source', width: 100, height: 100, gridSize: 10, tokens: [], dnd5ePluginAreas: [
+        portal,
+        { ...portal, id: 'secret-portal', hiddenFromPlayers: true, sourceCharacterId: 'another-character' },
+        { id: 'unrelated-area', sourceTokenId: 'hero' },
+        { ...portal, id: 'missing-anchor', anchorMode: 'effect-token', anchorTokenId: 'absent' },
+      ] },
+      { id: 'destination', width: 100, height: 100, gridSize: 10, tokens: [
+        { id: 'hero', type: 'player', characterId: 'character-1', x: 30, y: 40,
+          teleportationArrivalMapId: 'destination' },
+      ] },
+    ] }
+    const projected = sharedServerCore.projectMapsForPlayer(state, { maps: [] }, 'character-1')
+    expect(projected.selectedId).toBe('destination')
+    expect(projected.maps[0].tokens).toEqual([])
+    expect(projected.maps[0].dnd5ePluginAreas).toEqual([portal])
+    // Closing the source portal must also remove its destination marker.
+    const closed = sharedServerCore.projectMapsForPlayer({ maps: [
+      { ...state.maps[0], dnd5ePluginAreas: [] }, state.maps[1],
+    ] }, { maps: [] }, 'character-1')
+    expect(closed.maps[0].dnd5ePluginAreas).toEqual([])
+  })
+
   it('keeps owned spell-effect anchors, exposes visible anchors through LOS, and removes orphaned projected areas', () => {
     const spellEffect = (spellId: string, sourceCharacterId: string) => ({
       schemaVersion: 1,
@@ -1469,7 +1506,6 @@ describe('map geometry player projection', () => {
     }, { memberId: 'member-a' })
     expect(projected.maps[0].tokens).toEqual([
       expect.objectContaining({ id: 'hero-a', viewerControlled: true }),
-      expect.objectContaining({ id: 'hero-b', viewerControlled: false }),
     ])
   })
 
@@ -1549,6 +1585,12 @@ describe('map geometry player projection', () => {
       .map((token: { id: string }) => token.id)).toContain('target')
     expect(project({ obscuration: { kind: 'heavy' } }).map((token: { id: string }) => token.id))
       .not.toContain('target')
+    expect(project({ obscuration: { kind: 'heavy' } }, { type: 'player', characterId: 'other-player' })
+      .map((token: { id: string }) => token.id)).not.toContain('target')
+    openGeometry.maps[0].vision.enabled = false
+    expect(project({ obscuration: { kind: 'heavy' } }).map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({ obscuration: { kind: 'heavy' } }, { type: 'player', characterId: 'other-player' })
+      .map((token: { id: string }) => token.id)).not.toContain('target')
     expect(project({ obscuration: { kind: 'heavy', sourceCanSeeThrough: true } })
       .map((token: { id: string }) => token.id)).toContain('target')
   })
@@ -1651,6 +1693,21 @@ describe('map geometry player projection', () => {
     }
     expect(project({ darkvisionRangeFeet: 60 }, magicalDarknessGeometry)
       .map((token: { id: string }) => token.id)).not.toContain('target')
+    const drawnDarkness = {
+      ...magicalDarknessGeometry,
+      obstacles: [],
+      darknessFog: {
+        mapId: baseMapGeometry.mapId, filled: false, color: '#05070f', opacity: 0.98, updatedAt: 1,
+        shapes: [{ id: 'circle-darkness', kind: 'circle', operation: 'cover', createdAt: 1, x: 80, y: 20, radius: 15 }],
+      },
+    }
+    expect(project({ darkvisionRangeFeet: 60 }, drawnDarkness)
+      .map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({ dnd5eClassChoices: { classes: { warlock: { selections: { 'eldritch-invocations': ['devils-sight'] } } } } }, drawnDarkness)
+      .map((token: { id: string }) => token.id)).toContain('target')
+    drawnDarkness.darknessFog.shapes.push({ id: 'reveal', kind: 'circle', operation: 'reveal', createdAt: 2, x: 80, y: 20, radius: 10 })
+    expect(project({ darkvisionRangeFeet: 60 }, drawnDarkness)
+      .map((token: { id: string }) => token.id)).toContain('target')
     expect(project({
       dnd5eCombatState: {
         activeEffects: [{ modifiers: { truesightRangeFeet: 120, seeInvisible: true } }],
@@ -1810,7 +1867,6 @@ describe('map geometry player projection', () => {
     }, { memberId: 'member-b', activeCharacterName: '乙' })
 
     expect(projected.maps[0].tokens).toEqual([
-      expect.objectContaining({ id: 'hero-a', viewerControlled: false }),
       expect.objectContaining({ id: 'hero-b', viewerControlled: true }),
     ])
   })
@@ -5222,5 +5278,16 @@ describe('mobile Expo push transport', () => {
     expect(JSON.parse(String(capturedRequest.init?.body))).toEqual([
       { to: 'ExpoPushToken[abcdefghijklmnop]', title: '战斗决断', body: '请返回房间' },
     ])
+  })
+})
+
+describe('player-owned Activity placement channels', () => {
+  it('delivers requests only from DM to players and replies only from players to DM', () => {
+    expect(eventChannelOperationAllowed('activity-placement-dm-to-player', 'publish', 'dm')).toBe(true)
+    expect(eventChannelOperationAllowed('activity-placement-dm-to-player', 'publish', 'player')).toBe(false)
+    expect(eventChannelOperationAllowed('activity-placement-dm-to-player', 'subscribe', 'player')).toBe(true)
+    expect(eventChannelOperationAllowed('activity-placement-dm-to-player', 'subscribe', 'spectator')).toBe(false)
+    expect(eventChannelOperationAllowed('activity-placement-player-to-dm', 'publish', 'player')).toBe(true)
+    expect(eventChannelOperationAllowed('activity-placement-player-to-dm', 'subscribe', 'dm')).toBe(true)
   })
 })

@@ -1,3 +1,4 @@
+import { stoneWallPanels, stoneWallCells, stoneWallNextAngle } from '../../rulesets/dnd5e/stoneWall'
 import type { GridCell } from '../../lib/gridCombat'
 import { cellsForAoe, canPlaceAoe } from '../../lib/skillTargeting'
 import type { Dnd5eSpellTargetingSession } from '../../presentation/maps/useCombatInteraction'
@@ -11,12 +12,26 @@ import {
 import type { BattleMap } from '../../store/maps'
 export { WallOfFireTargetingControls } from './WallOfFireTargetingControls'
 
+export function stoneWallTargetingPanels(targeting: Dnd5eSpellTargetingSession, anchor: GridCell, map: BattleMap) {
+  if (!targeting.areaTargetCell || !targeting.stoneWall) return []
+  const layout = targeting.stoneWall
+  const angles = !targeting.areaTargetSelected && layout.angles.length < 10
+    ? [...layout.angles, stoneWallNextAngle(layout, anchor, map)] : layout.angles
+  return stoneWallPanels({ ...layout, angles }, map)
+}
+
 export function wallOfFireTargetingCells(
   targeting: Dnd5eSpellTargetingSession | null,
   anchor: GridCell,
   map: BattleMap,
 ): GridCell[] | undefined {
   if (!targeting) return undefined
+  if ((targeting.spellId === 'wall-of-stone' || targeting.spellId === 'wall-of-ice' || (targeting.spellId === 'wall-of-force' && (targeting.wallOfForceShape ?? 'plane') === 'plane'))) {
+    return stoneWallCells(stoneWallTargetingPanels(targeting, anchor, map))
+  }
+  if (targeting.spellId === 'wall-of-force' && targeting.wallOfForceShape && targeting.wallOfForceShape !== 'plane') {
+    return cellsForAoe({ shape: 'circle', origin: 'point', radiusFeet: targeting.areaTargetRadiusFeet ?? 10 }, anchor, anchor)
+  }
   if (targeting.spellId !== 'wall-of-fire' && targeting.spellId !== 'blade-barrier') {
     if (!dnd5eSpellUsesThinWallCells(targeting.spellId) || targeting.area?.shape !== 'rect') return undefined
     return dnd5eThinWallCells({
@@ -46,12 +61,23 @@ export function wallOfFireTargetingPreview(input: {
 }) {
   const cells = wallOfFireTargetingCells(input.targeting, input.anchor, input.map)
   if (!cells || !input.targeting?.area) return undefined
-  const valid = canPlaceAoe(input.targeting.area, input.caster, input.anchor)
+  const valid = (input.targeting.spellId === 'wall-of-stone' || input.targeting.spellId === 'wall-of-ice' || (input.targeting.spellId === 'wall-of-force' && (input.targeting.wallOfForceShape ?? 'plane') === 'plane'))
+    ? (cells.length ? cells : [input.anchor]).every(cell => cell.col >= 0 && cell.row >= 0 &&
+      cell.col < Math.floor((input.map.width - input.map.gridOffsetX) / input.map.gridSize) &&
+      cell.row < Math.floor((input.map.height - input.map.gridOffsetY) / input.map.gridSize) &&
+      Math.max(Math.abs(cell.col - input.caster.col), Math.abs(cell.row - input.caster.row)) * (input.map.feetPerCell ?? 5) <= 120)
+    : canPlaceAoe(input.targeting.area, input.caster, input.anchor)
   const rangeCells = cellsForAoe(
     { shape: 'circle', origin: 'self', radiusFeet: ('placeRangeFeet' in input.targeting.area ? input.targeting.area.placeRangeFeet : undefined) ?? 120 },
     input.caster,
     input.caster,
   )
+  if ((input.targeting.spellId === 'wall-of-stone' || input.targeting.spellId === 'wall-of-ice' || (input.targeting.spellId === 'wall-of-force' && (input.targeting.wallOfForceShape ?? 'plane') === 'plane'))) {
+    const panels = stoneWallTargetingPanels(input.targeting, input.anchor, input.map)
+    const draft = !input.targeting.areaTargetSelected && (input.targeting.stoneWall?.angles.length ?? 0) < 10
+    return { cells: panels.length ? [] : [input.anchor], rangeCells, valid, variant: 'attack' as const,
+      iceWallPreview: input.targeting.spellId === 'wall-of-ice', forceWallPreview: input.targeting.spellId === 'wall-of-force', stoneWallPanels: panels, stoneWallDraftPanelId: draft ? panels.at(-1)?.id : undefined }
+  }
   if (input.targeting.spellId !== 'wall-of-fire' && input.targeting.spellId !== 'blade-barrier') {
     return { cells, hazardCells: [], rangeCells, valid, variant: 'attack' as const, areaPolygon: undefined }
   }
@@ -92,6 +118,8 @@ export function wallOfFireTargetingPreview(input: {
 }
 
 export function wallOfFirePayload(targeting: Dnd5eSpellTargetingSession | null) {
+  if (targeting?.spellId === 'wall-of-stone' || targeting?.spellId === 'wall-of-ice') return { stoneWall: targeting.stoneWall }
+  if (targeting?.spellId === 'wall-of-force') return { wallOfForceShape: targeting.wallOfForceShape ?? 'plane' as const, stoneWall: (targeting.wallOfForceShape ?? 'plane') === 'plane' ? targeting.stoneWall : undefined }
   if (targeting?.spellId === 'blade-barrier') return {
     bladeBarrierShape: targeting.bladeBarrierShape ?? 'line' as const,
     bladeBarrierAngleDegrees: targeting.bladeBarrierAngleDegrees ?? 0,

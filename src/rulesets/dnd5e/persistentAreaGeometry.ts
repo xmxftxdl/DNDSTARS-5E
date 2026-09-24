@@ -13,6 +13,7 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import { getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
 import { dnd5eTokenHeightFeet } from './verticalCombatGeometry'
+import { dnd5eTokenHasWebWalker } from './webTraits'
 
 function inferredLegacyCoreAreaVertical(
   area: Dnd5ePluginArea,
@@ -81,6 +82,17 @@ export function dnd5ePersistentAreaAffectsTokenVerticallyAt(input: {
     : vertical.baseElevationFeet
   const volumeTop = volumeBase + vertical.heightFeet
   const tokenTop = tokenBottom + dnd5eTokenHeightFeet(input.token)
+  if (input.area.symbol?.activated && input.area.anchorCell) {
+    const center = tokenCenterForAnchorCell(input.area.anchorCell, { size: 1 }, input.map)
+    const centerZ = vertical.baseElevationFeet + 60
+    const halfSizeFeet = input.token.size * (input.map.feetPerCell ?? 5) / 2
+    const scale = (input.map.feetPerCell ?? 5) / input.map.gridSize
+    const dx = Math.max(0, Math.abs(input.position.x - center.x) * scale - halfSizeFeet)
+    const dy = Math.max(0, Math.abs(input.position.y - center.y) * scale - halfSizeFeet)
+    const dz = Math.max(0, tokenBottom - centerZ, centerZ - tokenTop)
+    return dx * dx + dy * dy + dz * dz <= 60 * 60
+  }
+
   const restsOnMagicalTopBoundary =
     input.area.occupantModifiers?.magicallyHeldAloft === true &&
     Math.abs(tokenBottom - volumeTop) <= 1e-4
@@ -376,6 +388,7 @@ export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
   let multiplier = 1
   for (const area of input.map.dnd5ePluginAreas ?? []) {
     if (
+      (area.coreSpellId === 'web' && dnd5eTokenHasWebWalker(input.token)) ||
       (area.movementCostMultiplier ?? 1) <= 1 ||
       !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map) ||
       !dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.position)
@@ -400,7 +413,8 @@ export function dnd5ePersistentAreaDifficultTerrainMultiplierAt(input: {
       multiplier = Math.max(multiplier, 2)
     }
     if (
-      area.coreSpellId === 'spirit-guardians' ||
+        area.coreSpellId === 'spirit-guardians' ||
+        (area.coreSpellId === 'web' && dnd5eTokenHasWebWalker(input.token)) ||
       (area.movementCostMultiplier ?? 1) <= 1 ||
       !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map) ||
       !dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.position)

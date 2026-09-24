@@ -1,5 +1,24 @@
 import type { Token } from '../store/maps'
 
+export function directMoveSnapshotHasArrived(input: {
+  origin: { x: number; y: number }
+  destination: { x: number; y: number }
+  authoritative?: { x: number; y: number }
+}): boolean {
+  if (!input.authoritative) return true // Removed or transferred to another map.
+  const same = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y) < .001
+  return same(input.origin, input.destination) || !same(input.authoritative, input.origin)
+}
+
+/** Resolve visibility IDs to stored tokens so interactions never use display coordinates. */
+export function authoritativeVisibleTokens<T extends { id: string }>(
+  storedTokens: readonly T[], visibleTokens: readonly { id: string }[],
+): T[] {
+  const visibleIds = new Set(visibleTokens.map(token => token.id))
+  return storedTokens.filter(token => visibleIds.has(token.id))
+}
+
 export interface MapTokenDragPolicyInput {
   isDm: boolean
   combatActive: boolean

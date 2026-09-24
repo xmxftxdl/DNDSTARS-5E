@@ -14,6 +14,7 @@ import type {
 } from '../../lib/sharedCombatTypes'
 import { useCharacterStore } from '../../store/characters'
 import { useMapStore } from '../../store/maps'
+import { useMapGeometryStore } from '../../store/mapGeometry'
 
 interface RefCell<T> {
   current: T
@@ -22,6 +23,7 @@ interface RefCell<T> {
 interface PendingPlayerAction {
   id: string
   label: string
+  mapId?: string
 }
 
 interface PlayerActionAuthorityLockManager {
@@ -102,6 +104,7 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'invalid-spell-target-attack-fields': { title: '逐次法术攻击字段冲突', message: '多次法术攻击请求同时携带了只适用于单次攻击的顶层字段；本次结算已安全取消。' },
   'invalid-spell-attack-dice': { title: '逐次法术攻击骰无效', message: '某次法术攻击的攻击骰、优势/劣势骰或命中伤害骰与权威判定不一致；本次结算已安全取消。' },
   'invalid-dice': { title: '骰子数据无效', message: '提交的骰子数量、骰面或目标对应关系与该法术不一致；本次结算已安全取消，请重新施放。' },
+  'wall-attack-options-unsupported': { title: '请使用普通武器攻击', message: '墙段是物体，当前所选附加攻击特性不支持墙段；请取消特性后重选武器攻击。本次没有消耗资源。' },
   'target-out-of-range': { title: '距离不足', message: '目标已经超出该行动的有效距离，本次行动未消耗。' },
   'ammunition-unavailable': { title: '弹药不足', message: '当前武器没有可用弹药，本次攻击未结算。' },
   'projectile-blocked-by-wind-wall': { title: '飞射物被风墙偏转', message: '普通箭矢、弩矢或其他普通飞射物穿过风墙时自动未命中；本次攻击未消耗动作或弹药。' },
@@ -201,12 +204,14 @@ export async function waitForAuthoritativePlayerActionSync(
   const expectedCharactersRevision = authorityRevisions?.characters
   const expectedMapsRevision = authorityRevisions?.maps
   const expectedCombatRevision = authorityRevisions?.combat
-  if (expectedCharactersRevision || expectedMapsRevision || expectedCombatRevision) {
+  const expectedGeometryRevision = authorityRevisions?.['map-geometry']
+  if (expectedCharactersRevision || expectedMapsRevision || expectedCombatRevision || expectedGeometryRevision) {
     const deadline = Date.now() + 3000
     do {
       await Promise.all([
         useMapStore.getState().loadShared(),
         useCharacterStore.getState().loadShared(),
+        expectedGeometryRevision ? useMapGeometryStore.getState().loadShared() : Promise.resolve(),
         expectedCombatRevision
           ? (loadCombatState?.() ?? browserSharedRoomService.loadSharedResource('combat').then(() => undefined))
           : Promise.resolve(),
@@ -217,7 +222,9 @@ export async function waitForAuthoritativePlayerActionSync(
         browserSharedRoomService.getSharedResourceRevisionWatermark('characters') >= expectedCharactersRevision
       const combatReady = !expectedCombatRevision ||
         browserSharedRoomService.getSharedResourceRevisionWatermark('combat') >= expectedCombatRevision
-      if (mapsReady && charactersReady && combatReady) return
+      const geometryReady = !expectedGeometryRevision ||
+        browserSharedRoomService.getSharedResourceRevisionWatermark('map-geometry') >= expectedGeometryRevision
+      if (mapsReady && charactersReady && combatReady && geometryReady) return
       await new Promise((resolve) => window.setTimeout(resolve, 100))
     } while (Date.now() < deadline)
     throw new Error('player-action-authoritative-revision-timeout')
@@ -239,6 +246,7 @@ export async function waitForAuthoritativePlayerActionSync(
     // before the player's pending-action lock is released.
     loadCombatState,
   })
+  await useMapGeometryStore.getState().loadShared()
 }
 
 export function playerActionAckMustWaitForCombatReceipt(input: {

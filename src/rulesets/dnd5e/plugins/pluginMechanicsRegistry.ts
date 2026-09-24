@@ -539,7 +539,7 @@ for (const kind of [
   'saving-throw-proficiency', 'damage-resistance', 'conditional-damage-resistance', 'damage-immunity', 'damage-vulnerability',
   'condition-immunity', 'condition-immunity-by-source-creature-type', 'saving-throw-advantage-by-source-creature-type', 'condition-immunity-by-source-magic', 'attacks-against-target-by-creature-type', 'character-capability', 'racial-saving-throw-advantage',
   'prohibit-reaction', 'prevent-actions', 'forced-flee-from-source',
-  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'truesight', 'spell-targeting-immunity',
+  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'swim-speed', 'truesight', 'spell-targeting-immunity',
   'flight-speed', 'magically-held-aloft', 'safe-fall', 'controlled-descent', 'automatic-escape', 'ignore-magical-speed-reductions', 'action-restriction', 'see-invisible', 'emitted-light', 'language-capability', 'language-restriction', 'attack-decoys', 'planar-phase', 'tracking-capability', 'environmental-capability',
   'hit-point-maximum',
   'spell-save-disadvantage-aura', 'spell-action-as-bonus-action', 'attack-profile',

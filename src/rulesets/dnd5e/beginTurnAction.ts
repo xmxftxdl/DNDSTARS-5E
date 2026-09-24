@@ -1,3 +1,4 @@
+import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { AbilityKey } from '../../lib/dnd'
 import type { BattleMap, Token } from '../../store/maps'
@@ -113,6 +114,7 @@ export interface PreparedDnd5eBeginTurn {
 }
 
 export interface Dnd5eBeginTurnContext {
+  turnEconomy?: Dnd5eTurnEconomyCounts
   combatId: string
   round: number
   initiativeIndex: number
@@ -368,6 +370,7 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
   } = prepared.prepared
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(state, {
     type: 'begin-turn',
+    actionAlreadyConsumed: input.turnEconomy?.turnKey === `${input.combatId}:${input.round}:${turnSlotId}` && input.turnEconomy.action.current === 0,
     actorId: actorToken.id,
     turnSlotId,
     turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,

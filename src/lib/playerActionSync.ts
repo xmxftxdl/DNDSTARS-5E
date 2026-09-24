@@ -200,7 +200,7 @@ export async function publishPlayerActionRequest(input: {
 export async function submitPlayerActionRequestWithLock(input: {
   action: SharedPlayerActionState
   label: string
-  lockPendingAction: (pending: { id: string; label: string }) => void
+  lockPendingAction: (pending: { id: string; label: string; mapId?: string }) => void
   getPendingAction: () => PendingPlayerActionLock | null | undefined
   clearPendingAction: () => void
   appendAction?: (action: SharedPlayerActionState) => Promise<void>
@@ -209,7 +209,7 @@ export async function submitPlayerActionRequestWithLock(input: {
   publishAction: (action: SharedPlayerActionState) => Promise<void>
   now?: () => number
 }): Promise<void> {
-  input.lockPendingAction({ id: input.action.id, label: input.label })
+  input.lockPendingAction({ id: input.action.id, label: input.label, mapId: input.action.mapId })
   try {
     await publishPlayerActionRequest({
       action: input.action,
@@ -236,7 +236,9 @@ export function queuedPlayerActionsForDm(input: {
   return (input.queue?.requests ?? [])
     .filter((action) => {
       if (!action || action.status !== 'pending') return false
-      if (action.mapId !== input.mapId) return false
+      if (action.mapId !== input.mapId && !(
+        !action.combatId && action.type === 'dnd5e-map-interaction'
+      )) return false
       if (input.combatId && action.combatId && action.combatId !== input.combatId) return false
       if (input.processedActionIds.has(action.id)) return false
       return true
@@ -294,6 +296,7 @@ export async function loadDmPlayerActionBatch(input: {
 export interface PendingPlayerActionLock {
   id: string
   label?: string
+  mapId?: string
 }
 
 export type PlayerActionAckDecision =
@@ -313,7 +316,9 @@ export function resolvePlayerActionAckDecision(input: {
   pendingAction?: PendingPlayerActionLock | null
 }): PlayerActionAckDecision {
   const ack = input.ack
-  if (!ack || ack.mapId !== input.mapId) return { status: 'ignored' }
+  if (!ack || (ack.mapId !== input.mapId && !(
+    input.pendingAction?.id === ack.actionId && input.pendingAction.mapId === ack.mapId
+  ))) return { status: 'ignored' }
   if (input.seenAckIds.has(ack.id)) return { status: 'ignored' }
 
   if (!input.pendingAction || input.pendingAction.id !== ack.actionId) {

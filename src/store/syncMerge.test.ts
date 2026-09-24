@@ -1149,6 +1149,19 @@ describe('地图 Token HP 本地写入竞争保护', () => {
 })
 
 describe('地图 Token 权威补丁重试', () => {
+  it('高度调整冲突后保留新高度以及远端最新位置和生命值', async () => {
+    const save = vi.fn()
+      .mockResolvedValueOnce({ status: 'conflict' })
+      .mockResolvedValueOnce({ status: 'saved', revision: 3 })
+    const outcome = await saveMapsStateWithTokenPatchRetry({
+      payload: { maps: [map({ id: 'map-1', tokens: [token({ id: 'flyer', elevationFeet: 50 })] })], selectedId: 'map-1', updatedAt: 1000 },
+      mapId: 'map-1', tokenId: 'flyer', patch: { elevationFeet: 55 }, save,
+      load: async () => ({ maps: [map({ id: 'map-1', tokens: [token({ id: 'flyer', elevationFeet: 50, x: 225, hp: 7 })] })], selectedId: 'map-1', updatedAt: 1100 }),
+    })
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(outcome.payload.maps[0].tokens[0]).toMatchObject({ elevationFeet: 55, x: 225, hp: 7 })
+  })
+
   it('从胜出的 CAS 载荷重建提交字段，避免释放预览时暴露旧坐标', () => {
     const committed = committedTokenPatchFromSharedMaps(
       [map({

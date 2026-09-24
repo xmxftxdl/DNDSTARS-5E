@@ -1,11 +1,8 @@
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
-import type { Character } from '../../types/character'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
-import { cellDistance, type GridCell } from '../../lib/gridCombat'
-import { removePersistentAreaByDm } from './dmWallOfFireRemoval'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
   isCombatPresentationAreaSpellId,
@@ -791,66 +788,7 @@ export function planDnd5eCrossMapConcentrationProjectionCleanup(input: {
   })
 }
 
-export interface SunburstDarknessDispelSettlement {
-  map: BattleMap
-  characters: Character[]
-  removedAreaIds: string[]
-  changedCharacterIds: string[]
-  changedTokenIds: string[]
-}
-
-/**
- * Sunburst ends every spell-created darkness volume touched by its 60-foot
- * sphere. Removing the map area and its exact concentration controller in one
- * pure settlement prevents the UI from leaving an invisible, still-active
- * Darkness concentration behind after the visual volume disappears.
- */
-export function settleSunburstSpellDarknessDispels(input: {
-  map: BattleMap
-  characters: readonly Character[]
-  anchorCell: GridCell
-  radiusFeet: number
-}): SunburstDarknessDispelSettlement {
-  let map = input.map
-  let characters = [...input.characters]
-  const maximumCells = Math.floor(input.radiusFeet / Math.max(1, input.map.feetPerCell ?? 5))
-  const candidateIds = (input.map.dnd5ePluginAreas ?? []).flatMap((area) =>
-    area.sourceKind === 'core-spell' &&
-    area.lighting?.kind === 'magical-darkness' &&
-    area.cells.some((cell) => cellDistance(input.anchorCell, cell) <= maximumCells)
-      ? [area.id]
-      : [],
-  )
-  const removedAreaIds: string[] = []
-  const changedCharacterIds = new Set<string>()
-  const changedTokenIds = new Set<string>()
-  for (const areaId of candidateIds) {
-    const beforeTokens = new Map(map.tokens.map((token) => [token.id, token]))
-    const removal = removePersistentAreaByDm({ map, characters, areaId })
-    if (!removal) continue
-    map = removal.map
-    removedAreaIds.push(areaId)
-    if (removal.character) {
-      characters = characters.map((character) =>
-        character.id === removal.character!.id ? removal.character! : character,
-      )
-      changedCharacterIds.add(removal.character.id)
-    }
-    for (const token of map.tokens) {
-      if (JSON.stringify(beforeTokens.get(token.id)) !== JSON.stringify(token)) changedTokenIds.add(token.id)
-    }
-    for (const tokenId of beforeTokens.keys()) {
-      if (!map.tokens.some((token) => token.id === tokenId)) changedTokenIds.add(tokenId)
-    }
-  }
-  return {
-    map,
-    characters,
-    removedAreaIds,
-    changedCharacterIds: [...changedCharacterIds],
-    changedTokenIds: [...changedTokenIds],
-  }
-}
+export { settleSunburstSpellDarknessDispels } from '../../rulesets/dnd5e/sunburstDarknessDispel'
 
 /**
  * 只把本次法术事务实际改动的区域合并进最新地图。

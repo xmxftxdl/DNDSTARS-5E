@@ -1,3 +1,4 @@
+import { SunbeamEffect } from './SunbeamEffect'
 import { ReverseGravityEffect } from './ReverseGravityEffect'
 import { Group } from 'react-konva'
 import { memo, useEffect, useMemo, type ComponentType } from 'react'
@@ -97,6 +98,7 @@ function MaterialTargetSequenceRenderer({ projectile, section }: SequenceRendere
 }
 
 const VFX_RENDERERS: Readonly<Record<VfxRendererKey, ComponentType<SequenceRendererProps>>> = {
+  sunbeam: simpleRenderer(SunbeamEffect),
   'projectile-arrow': simpleRenderer(ProjectileArrow),
   'fire-projectile': assetRenderer(SequenceFireProjectileEffect),
   'ray-of-frost': assetRenderer(RayOfFrostProjectile),

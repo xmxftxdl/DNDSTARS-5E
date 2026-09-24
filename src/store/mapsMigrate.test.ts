@@ -504,3 +504,17 @@ describe('T10/AC3 — maps store version + migrate', () => {
     })
   })
 })
+
+
+it('preserves burning web squares across shared JSON and player map normalization', () => {
+  const webState = { burningCells: [{ col: 1, row: 1, ignitedRound: 3, expiresAtRound: 4,
+    expiresAtTurnTokenId: 'hidden-enemy' }] }
+  const snapshot = { maps: [{ id: 'map', width: 500, height: 500, gridSize: 50, tokens: [],
+    dnd5ePluginAreas: [{ id: 'web', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:web',
+      sourceKind: 'core-spell', coreSpellId: 'web', label: 'Web', color: '#ffffff',
+      sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 2, expiresAfterRound: 602, webState,
+    }] }] }
+  const player = migrateMapsState(JSON.parse(JSON.stringify(snapshot)))
+  expect(player.maps[0].dnd5ePluginAreas?.[0].webState).toEqual(webState)
+})

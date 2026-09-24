@@ -2,6 +2,8 @@ import { expect, it } from 'vitest'
 import { diceCheckOutcome, diceCheckOutcomeLabel, createDiceCheckPreview, createAttackDiceCheckPreview, previewDiceCheck } from './diceCheckOutcome'
 
 it('previews special attacks with natural dice, critical thresholds and the selected roll mode', () => {
+  expect(previewDiceCheck(createAttackDiceCheckPreview('角色', '目标', 4, 13), 9, 'formula'))
+    .toMatchObject({ modifier: 4, success: true })
   const preview = createAttackDiceCheckPreview('武僧', '目标', 5, 15)
   expect(preview.evaluate(10)).toBe(true)
   expect(preview.evaluate(9)).toBe(false)

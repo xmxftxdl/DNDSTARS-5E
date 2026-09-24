@@ -26,8 +26,12 @@ export function projectDnd5ePersistentAreaActionConsumption(
   economy: Dnd5eTurnEconomyCounts,
   actionConsumed: boolean,
   turnKey: string = economy.turnKey,
+  previousEconomy?: Dnd5eTurnEconomyCounts,
 ): Dnd5eTurnEconomyCounts {
-  if (!actionConsumed) return economy
+  // Deferred begin-turn settlement may project a second fresh economy for the
+  // same slot after its area triggers already consumed the action.
+  const alreadyConsumed = previousEconomy?.turnKey === turnKey && previousEconomy.action.current === 0
+  if (!actionConsumed && !alreadyConsumed) return economy
   if (economy.action.current === 0 && economy.turnKey === turnKey) return economy
   return {
     ...economy,
@@ -372,6 +376,8 @@ export function dnd5ePersistentAreaTurnCursor(input: {
 
 export async function settleDnd5ePersistentAreaTurnTransition(input: {
   transition: Dnd5ePersistentAreaTurnTransition
+  /** Presentation only: never advances authoritative resources before saves settle. */
+  presentTurnStart?: (cursor: Dnd5ePersistentAreaTurnCursor | null) => void
   map: BattleMap
   characters: readonly Character[]
   settleBoundary: (input: {
@@ -399,23 +405,28 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
   let characters = [...input.characters]
   const logs: string[] = []
   const events: Dnd5eCombatEvent[] = []
-  for (const boundary of input.transition.boundaries) {
-    const settled = await input.settleBoundary({ boundary, map, characters })
-    const expired = input.expireBoundary({
-      boundary,
-      map: settled.map,
-      characters: settled.characters,
-    })
-    if ('map' in expired && 'characters' in expired) {
-      map = expired.map
-      characters = expired.characters
-      logs.push(...(expired.logs ?? []))
-    } else {
-      map = expired
-      characters = settled.characters
+  try {
+    for (const boundary of input.transition.boundaries) {
+      input.presentTurnStart?.(boundary.timing === 'turn-start' ? input.transition.cursor : null)
+      const settled = await input.settleBoundary({ boundary, map, characters })
+      const expired = input.expireBoundary({
+        boundary,
+        map: settled.map,
+        characters: settled.characters,
+      })
+      if ('map' in expired && 'characters' in expired) {
+        map = expired.map
+        characters = expired.characters
+        logs.push(...(expired.logs ?? []))
+      } else {
+        map = expired
+        characters = settled.characters
+      }
+      logs.push(...settled.logs)
+      events.push(...(settled.events ?? []))
     }
-    logs.push(...settled.logs)
-    events.push(...(settled.events ?? []))
+    return { map, characters, logs, events }
+  } finally {
+    input.presentTurnStart?.(null)
   }
-  return { map, characters, logs, events }
 }

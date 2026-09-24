@@ -9,6 +9,8 @@ import type {
 import {
   combatRecoveryAffectedTransactions,
   combatRecoveryOperationTransactions,
+  combatRecoveryDisplayOperations,
+  combatRecoveryDetailLabel,
   combatRecoveryTurnCheckpoints,
   isCombatRecoveryResource,
 } from './dmCombatRecoveryImpact'
@@ -30,7 +32,7 @@ function combatTransactionLabel(transaction: DmUndoTransactionSummary): string {
   const generic = transaction.label === '结算玩家行动'
   const actor = transaction.combat?.beforeActorLabel
   const label = generic
-    ? transaction.details?.[0] ?? `${actor ? `${actor} · ` : ''}行动记录（明细缺失）`
+    ? (transaction.details?.[0] ? combatRecoveryDetailLabel(transaction.details[0]) : `${actor ? `${actor} · ` : ''}行动记录（明细缺失）`)
     : transaction.label || '行动记录'
   return `${round ? `R${round} · ` : ''}${label}`
 }
@@ -57,8 +59,9 @@ export function DmCombatRecoveryImpactDetails({
   expanded?: boolean
 }) {
   if (transactions.length === 0) return null
-  const operations = combatRecoveryOperationTransactions(transactions)
-  const internalCount = transactions.length - operations.length
+  const rawOperations = combatRecoveryOperationTransactions(transactions)
+  const operations = combatRecoveryDisplayOperations(transactions)
+  const internalCount = transactions.length - rawOperations.length
   const affectedResources = [...new Set(transactions.flatMap((transaction) =>
     transaction.resources.filter(isCombatRecoveryResource)))]
   return (
@@ -91,7 +94,7 @@ export function DmCombatRecoveryImpactDetails({
                 {new Date(transaction.createdAt).toLocaleTimeString('zh-CN')}
               </div>
               {!!transaction.details?.length && <ul className="ml-7 mt-2 space-y-1 text-xs leading-5 text-slate-300">
-                {transaction.details.slice(transaction.label === '结算玩家行动' ? 1 : 0).map((detail, detailIndex) => <li key={detailIndex}>{detail}</li>)}
+                {transaction.details.slice(transaction.label === '结算玩家行动' ? 1 : 0).map((detail, detailIndex) => <li key={detailIndex}>{combatRecoveryDetailLabel(detail)}</li>)}
               </ul>}
             </li>
           ))}
@@ -101,10 +104,10 @@ export function DmCombatRecoveryImpactDetails({
             另有 {internalCount} 条关联状态同步会随上述操作自动恢复，不是额外的玩家或 DM 操作。
           </p>
         )}
-        {transactions.filter(transaction => !operations.includes(transaction)).some(transaction => transaction.details?.length) && (
+        {transactions.filter(transaction => !rawOperations.includes(transaction)).some(transaction => transaction.details?.length) && (
           <div className="mt-3 text-xs leading-5 text-slate-300">
             <p className="font-semibold">同时撤回的关联结算：</p>
-            <ul>{[...new Set(transactions.filter(transaction => !operations.includes(transaction)).flatMap(transaction => transaction.details ?? []))].map((detail, index) => <li key={index}>{detail}</li>)}</ul>
+            <ul>{[...new Set(transactions.filter(transaction => !rawOperations.includes(transaction)).flatMap(transaction => transaction.details ?? []))].map((detail, index) => <li key={index}>{combatRecoveryDetailLabel(detail)}</li>)}</ul>
           </div>
         )}
         {affectedResources.length > 0 && (
@@ -152,7 +155,7 @@ export default function DmCombatRecoveryDialog({
     [history, selectedId],
   )
   const affectedOperationCount = useMemo(
-    () => combatRecoveryOperationTransactions(affectedTransactions).length,
+    () => combatRecoveryDisplayOperations(affectedTransactions).length,
     [affectedTransactions],
   )
 

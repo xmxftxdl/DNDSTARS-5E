@@ -240,6 +240,7 @@ export type Dnd5eEffectModifierV1 =
   | { kind: 'darkvision'; rangeFeet: number }
   /** Uses the creature's effective walking speed as its climbing speed. */
   | { kind: 'climb-speed'; mode: 'walking-speed' }
+  | { kind: 'swim-speed'; mode: 'walking-speed' }
   /** Grants true sight, including invisible and magically disguised targets, to this range. */
   | { kind: 'truesight'; rangeFeet: number }
   /** Prevents the target from being selected by spells of the listed schools. */

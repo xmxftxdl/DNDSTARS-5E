@@ -1,3 +1,4 @@
+import { stoneWallIntersects } from '../shared/stone-wall-geometry.mjs'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { compileGeometryCached, raycastGeometry } from '../shared/map-geometry-kernel.mjs'
@@ -100,7 +101,7 @@ function tokenPositionIsFree(map, movingToken, position) {
 
 /** Applies the only direct player map write: moving their own token outside combat. */
 export function mutatePlayerExplorationMoveState(current, mutation, now, member, context = {}) {
-  if (context.combatActive === true) {
+  if (context.combatActive === true && (!context.combatMapId || context.combatMapId === mutation?.mapId)) {
     return { ok: false, changed: false, status: 409, error: 'exploration-move-combat-active' }
   }
   if (!plainObject(current) || !Array.isArray(current.maps)) {
@@ -167,6 +168,11 @@ export function mutatePlayerExplorationMoveState(current, mutation, now, member,
     if (index === 0) continue
     if (Math.abs(routeElevationsFeet[index] - routeElevationsFeet[index - 1]) > 10.001) {
       return { ok: false, changed: false, status: 409, error: 'exploration-move-terrain-step' }
+    }
+    if ((map.dnd5ePluginAreas ?? []).some(area => (area?.stoneWall || area?.forceWall) && stoneWallIntersects(area, map,
+      pathPoints[index - 1], point, routeElevationsFeet[index - 1], routeElevationsFeet[index],
+      (map.feetPerCell ?? 5) * Math.max(1, token.size ?? 1) * .42, Math.max(5, (token.size ?? 1) * 5)))) {
+      return { ok: false, changed: false, status: 409, error: 'exploration-move-wall-blocked' }
     }
     if (geometry && raycastGeometry({
       geometry,
@@ -246,6 +252,7 @@ export function createPlayerExplorationMoveApi(deps) {
         path.join(ctx.stateRoot, 'maps.json'),
         (current) => mutatePlayerExplorationMoveState(current, mutation, now, authenticatedRoomMember, {
           combatActive: combatState.value?.active === true,
+          combatMapId: combatState.value?.mapId,
           characterState: characterState.value,
           geometryState: geometryState.value,
         }),

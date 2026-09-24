@@ -9,6 +9,7 @@ import {
   buildDnd5eLevelAdvancementPlan,
   dnd5eLevelAdvancementGrantedFeatures,
   reviseDnd5eLevelAdvancement,
+  reviseDnd5eCreationAdvancement,
   reviseLatestDnd5eLevelAdvancement,
 } from './levelAdvancement'
 import { DND5E_DECLARATIVE_CLASS_SCHEMA_VERSION, type DeclarativeClassDefinitionV1 } from './declarativeClass'
@@ -92,6 +93,18 @@ function advanceFighter(
 }
 
 describe('D&D 5e level advancement transaction', () => {
+  it('lets a player revise an unfinished build and preserves compatible later choices', () => {
+    const original = advanceFighter(fighter({ dnd5eCreationTargetLevel: 3 }), 3)
+    const changed = reviseDnd5eCreationAdvancement(original, 'adv-level-2', fighterDecision(2, undefined, { hitPointMethod: 'rolled', hitPointRolls: [8] }))
+    expect(changed.ok).toBe(true)
+    if (!changed.ok) return
+    expect(changed.character.level).toBe(3)
+    expect(changed.character.dnd5eLevelAdvancements?.map((record) => record.id)).toEqual(['adv-level-2', 'adv-level-3'])
+    expect(changed.record.completedBy).toBe('player')
+    expect(changed.record.revisions).toBeUndefined()
+    expect(original.dnd5eLevelAdvancements?.[0].decision.hitPointMethod).toBe('fixed')
+    expect(reviseDnd5eCreationAdvancement({ ...original, dnd5eCreationTargetLevel: undefined }, 'adv-level-2', fighterDecision(2)).ok).toBe(false)
+  })
   it('advances a package-namespaced class atomically and rebuilds grants and resources', () => {
     const definition: DeclarativeClassDefinitionV1 = {
       schemaVersion: DND5E_DECLARATIVE_CLASS_SCHEMA_VERSION,

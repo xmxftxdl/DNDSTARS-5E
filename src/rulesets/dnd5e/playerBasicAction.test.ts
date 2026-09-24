@@ -37,6 +37,22 @@ function request(payload: SharedPlayerActionState['dnd5eBasicAction']): SharedPl
 }
 
 describe('D&D 5e player basic action bridge', () => {
+  it.each(['other-action', 'other-bonus-action'] as const)('only spends the requested economy for %s shortcuts', (kind) => {
+    const prepared = prepareDnd5ePlayerBasicAction({ action: request({ kind, economyOnly: true }), map, characters: [hero],
+      initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events.filter(event => event.type === 'turn-resource-spent')).toEqual([
+      { type: 'turn-resource-spent', actorId: 'hero-token', resource: kind === 'other-action' ? 'action' : 'bonusAction' },
+    ])
+    expect(resolved.result.events.some(event => event.type === 'basic-action-adjudication-requested')).toBe(false)
+    expect(resolved.result.state.combatants['hero-token'].currentHp).toBe(hero.currentHp)
+    expect(resolved.result.state.combatants['hero-token'].conditions).toEqual([])
+  })
   it.each([
     {
       payload: { kind: 'other-action', description: '尝试翻过桌子压住机关。' } as const,

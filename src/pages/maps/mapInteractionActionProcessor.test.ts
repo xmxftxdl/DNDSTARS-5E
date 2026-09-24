@@ -9,7 +9,7 @@ describe('dnd5eMapInteractionRequiresDmAdjudication', () => {
     })).toBe(false)
   })
 
-  it('keeps DM adjudication for checks and every non-opening interaction', () => {
+  it('keeps DM adjudication for checks but closes an ordinary door directly', () => {
     expect(dnd5eMapInteractionRequiresDmAdjudication({
       operation: 'open',
       automaticSuccess: false,
@@ -25,6 +25,6 @@ describe('dnd5eMapInteractionRequiresDmAdjudication', () => {
     expect(dnd5eMapInteractionRequiresDmAdjudication({
       operation: 'close',
       automaticSuccess: true,
-    })).toBe(true)
+    })).toBe(false)
   })
 })

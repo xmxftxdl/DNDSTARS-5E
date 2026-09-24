@@ -10,7 +10,7 @@ import {
   TOKEN_MOVE_DURATION_S,
   type GridCell,
 } from '../../lib/gridCombat'
-import { tokenMovementAnimationPosition, type TokenMovementAnimation } from '../../lib/tokenMovementAnimation'
+import { tokenMovementAnimationOwnsPosition, tokenMovementAnimationPosition, type TokenMovementAnimation } from '../../lib/tokenMovementAnimation'
 import Dnd5eConcentrationTokenBadge, { DND5E_CONCENTRATION_TOKEN_IMAGE_SRC, type ConcentrationTokenMark } from './Dnd5eConcentrationTokenBadge'
 import { TOKEN_BORDER_FLOW_BASE_OPACITY, type TokenBorderFlowPalette, tokenBorderFlowGradientColorStops, tokenBorderFlowRotationDegrees, tokenBorderFlowWorldMetrics } from './tokenBorderFlow'
 import {
@@ -741,7 +741,7 @@ export function TokenBorderFlowRing({
   useLayoutEffect(() => {
     const group = groupRef.current
     if (!group || positionLockedRef.current) return
-    const movementPosition = token.movementAnimation
+    const movementPosition = tokenMovementAnimationOwnsPosition(token.movementAnimation, token, Date.now())
       ? tokenMovementAnimationPosition(
           token.movementAnimation,
           Date.now() - token.movementAnimation.issuedAt,
@@ -913,6 +913,7 @@ export function TokenNode({
   ]
   const movementAnimation = token.movementAnimation
   const latestPositionRef = useRef({ x: token.x, y: token.y })
+  const positionInitializedRef = useRef(false)
   const draggingRef = useRef(false)
   const externalPositionLockedRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
@@ -1044,13 +1045,14 @@ export function TokenNode({
   useLayoutEffect(() => {
     const node = groupRef.current
     if (!node) return
-    const animated = movementAnimation
+    const animated = tokenMovementAnimationOwnsPosition(movementAnimation, latestPositionRef.current, Date.now())
       ? tokenMovementAnimationPosition(
           movementAnimation,
           Date.now() - movementAnimation.issuedAt,
         )
       : undefined
-    node.position(animated ?? latestPositionRef.current)
+    if (animated || !positionInitializedRef.current) node.position(animated ?? latestPositionRef.current)
+    positionInitializedRef.current = true
   }, [movementAnimation])
 
   useLayoutEffect(() => {
@@ -1064,6 +1066,13 @@ export function TokenNode({
   useEffect(() => {
     const node = groupRef.current
     if (!node) return
+
+    // Detached map layers are positioned together by MapCanvas, including
+    // ordinary coordinate updates without a durable movement animation.
+    if (registerPositionNode) {
+      cancelPositionAnimation()
+      return
+    }
 
     if (prevGridSizeRef.current !== gridSize) {
       prevGridSizeRef.current = gridSize
@@ -1079,8 +1088,7 @@ export function TokenNode({
     }
 
     if (
-      movementAnimation &&
-      Date.now() < movementAnimation.issuedAt + movementAnimation.durationMs
+      tokenMovementAnimationOwnsPosition(movementAnimation, token, Date.now())
     ) {
       reconcileTweenRef.current?.destroy()
       reconcileTweenRef.current = null
@@ -1109,13 +1117,13 @@ export function TokenNode({
     })
     reconcileTweenRef.current = tween
     tween.play()
-  }, [cancelPositionAnimation, token.x, token.y, gridSize, instantPosition, movementAnimation])
+  }, [cancelPositionAnimation, token.x, token.y, gridSize, instantPosition, movementAnimation, registerPositionNode])
 
   useEffect(() => {
     const node = groupRef.current
     if (
       !node ||
-      !movementAnimation ||
+      !tokenMovementAnimationOwnsPosition(movementAnimation, token, Date.now()) ||
       instantPosition ||
       externalPositionLockedRef.current ||
       registerPositionNode
@@ -1382,6 +1390,8 @@ export function TokenNode({
 
   const handleTokenSelect = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true
+    // A right-click cancels targeting; Konva also emits click for that mouse-up.
+    if ('button' in e.evt && e.evt.button !== 0) return
     if (draggingRef.current || Date.now() < suppressClickUntilRef.current) return
     suppressClickUntilRef.current = Date.now() + 300
     onSelect()

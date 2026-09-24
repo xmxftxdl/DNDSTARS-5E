@@ -57,6 +57,8 @@ export interface Dnd5eSpellTargetingSession {
   guessedTargeting?: boolean
   area?: SkillAoeTargeting
   areaTargetCell?: GridCell
+  /** Absolute elevation of the area origin or the aimed point, in feet. */
+  targetElevationFeet?: number
   areaTargetCells?: GridCell[]
   dancingLightsForm?: Dnd5eSpellCastPayload['dancingLightsForm']
   areaTargetCount?: number
@@ -67,6 +69,8 @@ export interface Dnd5eSpellTargetingSession {
   areaTargetWidthFeet?: number
   areaTargetHeightFeet?: number
   areaTargetLengthFeet?: number
+  stoneWall?: import('../../../rulesets/dnd5e/stoneWall').StoneWallLayout
+  wallOfForceShape?: 'plane' | 'hemisphere' | 'sphere'
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
   wallOfFireDamagingSide?: 'left' | 'right' | 'inside' | 'outside'

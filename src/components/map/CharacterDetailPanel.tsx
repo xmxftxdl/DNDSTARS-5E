@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles, Trash2, Eye, Dices, PackageOpen, ArrowUp } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -43,6 +43,7 @@ interface CharacterDetailPanelProps {
   }) => void | Promise<unknown>
   onAdjustHitPoints?: (operation: ManualSettlementOperation, amount: number) => void | Promise<unknown>
   isDM?: boolean
+  afterConditions?: ReactNode
   canManageConditions?: boolean
   /** Effective union from the linked character and its map token. */
   conditionActiveEffects?: readonly Dnd5eActiveEffectInstance[]
@@ -70,6 +71,7 @@ export default function CharacterDetailPanel({
   onSetHitPoints,
   onAdjustHitPoints,
   isDM = false,
+  afterConditions,
   canManageConditions = false,
   conditionActiveEffects,
   onConditionsChange,
@@ -537,6 +539,7 @@ export default function CharacterDetailPanel({
           {simulacrum ? (
             <p className="mt-2 text-[10px] leading-4 text-violet-100/75">
               拟像不能通过治疗或休息恢复生命值；普通生命值编辑只能造成伤害。降至 0 HP 时会化为雪并离场。
+              法术位独立消耗且不能恢复，等级与法术能力固定为创造时的副本。轮到拟像时，使用底部行动栏操作；与施法者沿用同一先攻，各自消耗动作和资源。
             </p>
           ) : null}
         </section>
@@ -733,6 +736,7 @@ export default function CharacterDetailPanel({
             <Dnd5eConditionTags conditions={character.conditions} />
           </section>
         ) : null}
+        {afterConditions}
 
         {character.dnd5eCombatState?.resurrectionPenalty ? (
           <section className="mt-4 rounded-xl border border-amber-300/20 bg-amber-400/[0.06] p-3" data-testid="dnd5e-resurrection-penalty">

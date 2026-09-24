@@ -10,6 +10,17 @@ export interface TokenMovementAnimation {
   issuedAt: number
 }
 
+/** Only a live path to the current destination may own a Token's position. */
+export function tokenMovementAnimationOwnsPosition(
+  animation: TokenMovementAnimation | undefined,
+  destination: TokenMovementAnimationPoint,
+  now: number,
+): animation is TokenMovementAnimation {
+  if (!animation || now >= animation.issuedAt + animation.durationMs) return false
+  const end = animation.points.at(-1)
+  return !!end && Math.hypot(end.x - destination.x, end.y - destination.y) < 0.01
+}
+
 const MAX_PATH_POINTS = 128
 const MAX_ANIMATION_ID_LENGTH = 200
 const MIN_DURATION_MS = 240

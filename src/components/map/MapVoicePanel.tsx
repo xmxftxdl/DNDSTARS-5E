@@ -1,14 +1,30 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import { AudioLines, ChevronDown, ChevronUp, Mic, MicOff, Settings2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useVoiceRoom } from '../../voice/useVoiceRoom'
 
+type PanelPosition = { x: number; y: number }
+
+function readExpanded(key: string): boolean {
+  try { return localStorage.getItem(key) === 'true' } catch { return false }
+}
+
+function readPosition(key: string): PanelPosition | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) ?? 'null')
+    return value && Number.isFinite(value.x) && Number.isFinite(value.y)
+      ? { x: value.x, y: value.y } : null
+  } catch { return null }
+}
+
 export default function MapVoicePanel({ belowInitiative = false }: { belowInitiative?: boolean }) {
   const voice = useVoiceRoom()
-  const [expanded, setExpanded] = useState(true)
+  const storageKey = `stars-map-voice-position:v1:${voice.session?.memberId ?? 'anonymous'}`
+  const expandedStorageKey = `stars-map-voice-expanded:v1:${voice.session?.memberId ?? 'anonymous'}`
+  const [expanded, setExpanded] = useState(() => readExpanded(expandedStorageKey))
   const panelRef = useRef<HTMLElement>(null)
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
-  const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null)
+  const [position, setPosition] = useState<PanelPosition | null>(() => readPosition(storageKey))
+  const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; position?: PanelPosition } | null>(null)
   const suppressClick = useRef(false)
   const clampPosition = (x: number, y: number) => {
     const panel = panelRef.current
@@ -18,18 +34,25 @@ export default function MapVoicePanel({ belowInitiative = false }: { belowInitia
       y: Math.max(8, Math.min(y, (parent?.clientHeight ?? 0) - (panel?.offsetHeight ?? 0) - 8)),
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
+    setPosition(readPosition(storageKey))
+  }, [storageKey])
+  useLayoutEffect(() => {
+    setExpanded(readExpanded(expandedStorageKey))
+  }, [expandedStorageKey])
+  useLayoutEffect(() => {
     const panel = panelRef.current
     if (!panel?.parentElement) return
     const observer = new ResizeObserver(() => setPosition((current) => {
       if (!current) return current
+      if (!panel.parentElement?.clientWidth || !panel.parentElement.clientHeight) return current
       const next = clampPosition(current.x, current.y)
       return next.x === current.x && next.y === current.y ? current : next
     }))
     observer.observe(panel)
     observer.observe(panel.parentElement)
     return () => observer.disconnect()
-  }, [])
+  }, [storageKey, !!voice.session])
   const startDrag = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0 || !panelRef.current) return
     suppressClick.current = false
@@ -44,7 +67,14 @@ export default function MapVoicePanel({ belowInitiative = false }: { belowInitia
     const dy = event.clientY - origin.y
     if (Math.hypot(dx, dy) < 4 && !suppressClick.current) return
     suppressClick.current = true
-    setPosition(clampPosition(origin.left + dx, origin.top + dy))
+    origin.position = clampPosition(origin.left + dx, origin.top + dy)
+    setPosition(origin.position)
+  }
+  const endDrag = () => {
+    if (drag.current?.position) {
+      try { localStorage.setItem(storageKey, JSON.stringify(drag.current.position)) } catch { /* Keep dragging available when storage is disabled. */ }
+    }
+    drag.current = null
   }
   if (!voice.session) return null
   const config = voice.voiceChangerConfig
@@ -56,12 +86,14 @@ export default function MapVoicePanel({ belowInitiative = false }: { belowInitia
       <button type="button" className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-xs text-slate-200 cursor-grab touch-none select-none active:cursor-grabbing"
         title="拖动标题移动面板；点击折叠或展开"
         onPointerDown={startDrag} onPointerMove={moveDrag}
-        onPointerUp={() => { drag.current = null }}
-        onPointerCancel={() => { drag.current = null; suppressClick.current = true }}
+        onPointerUp={endDrag}
+        onPointerCancel={() => { endDrag(); suppressClick.current = true }}
         aria-expanded={expanded} aria-label={expanded ? '折叠房间语音' : '展开房间语音'}
         onClick={() => {
           if (suppressClick.current) { suppressClick.current = false; return }
-          setExpanded((value) => !value)
+          const next = !expanded
+          setExpanded(next)
+          try { localStorage.setItem(expandedStorageKey, String(next)) } catch { /* Keep toggling available when storage is disabled. */ }
         }}>
         <AudioLines className="h-4 w-4 shrink-0 text-cyan-300" />
         <span className="min-w-0 flex-1 truncate text-left">{active ? `扮演：${active.npcName}` : '房间语音'}</span>

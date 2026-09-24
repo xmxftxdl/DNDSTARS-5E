@@ -28,10 +28,11 @@ export default function DiceResultValues({ values, sides, dieSides, adoptedIndex
       const die = dieSides?.[index] ?? sides
       const adopted = index === adoptedIndex
       return <span key={index} data-die-sides={die} data-adopted={adopted || undefined}
+        style={{ position: 'relative' }}
         className={`dice-tray-drawer__die dice-result-value${adopted ? ' dice-tray-drawer__die--adopted' : ''}`}
         title={`D${die} · ${value}`} aria-label={`D${die}：${value}${adopted ? '，采用' : ''}`}>
         <small className="dice-result-value__type">D{die}</small><strong>{value}</strong>
-        {adopted && <small>采用</small>}
+        {adopted && <small className="dice-adopted-corner" aria-label="采用">✓</small>}
       </span>
     })}
   </div>

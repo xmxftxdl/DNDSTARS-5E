@@ -1399,7 +1399,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
         targetId: caster.id, targetIds: [caster.id], distanceFeet: 0, castLevel: 9,
         payload: {
           activityChoices: {
-            mode: 'srd-5.1:adult-black-dragon', equipment: 'merge', seen: 'confirmed',
+            mode: 'srd-5.1:adult-black-dragon', equipment: 'merge',
           },
         },
         rolls: {}, interruptChoiceId: 'dm-apply',
@@ -7373,7 +7373,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(recovered.state.initiativeIndex).toBe(0)
   })
 
-  it('applies unconscious and prone at 0 HP and enforces massive-damage instant death', () => {
+  it('applies unconscious and prone at 0 HP, including player overkill', () => {
     const dropped = resolveDnd5eHeadlessAction(
       startDnd5eHeadlessCombat('drop-to-zero', [
         fighter('attacker', 20, { controller: 'dm' }),
@@ -7408,8 +7408,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(killed.ok).toBe(true)
     if (!killed.ok) return
-    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 3, dead: true })
-    expect(killed.events).toContainEqual(expect.objectContaining({
+    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 0, dead: false })
+    expect(killed.events).not.toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: 'attacker', targetId: 'target',
     }))
   })

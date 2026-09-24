@@ -1,3 +1,4 @@
+import { activeEffectDisplayName } from './activeEffectDisplayName'
 import { useMemo, useState } from 'react'
 import { Clock3, Eye, Link2, Plus, ShieldCheck, Tags, Trash2 } from 'lucide-react'
 import type { AbilityKey } from '../../lib/dnd'
@@ -569,13 +570,13 @@ export default function Dnd5eConditionEditor({
       {effects.length > 0 ? <div className="mt-3 space-y-1.5" data-testid="dnd5e-active-effect-list">
         {effects.map((effect) => <div key={effect.id} className="rounded-lg border border-white/8 bg-void-950/35 px-2 py-1.5 text-[10px]">
           <div className="flex items-center gap-1.5 text-slate-200">
-            <span className="font-semibold">{effect.label}</span>
+            <span className="font-semibold">{activeEffectDisplayName(effect.label)}</span>
             <span className="text-slate-500">· {effect.source.actorName ?? effect.source.label ?? effect.source.rulesId ?? '未知来源'}</span>
             <button
               type="button"
               onClick={() => setSelectedEffectId(effect.id)}
               className="ml-auto inline-flex items-center gap-1 text-slate-500 hover:text-violet-200"
-              title={`查看${effect.label}的全部结构化字段`}
+              title={`查看${activeEffectDisplayName(effect.label)}的全部结构化字段`}
             >
               <Eye className="h-3 w-3" />查看详情
             </button>

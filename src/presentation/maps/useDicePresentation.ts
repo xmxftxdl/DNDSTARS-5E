@@ -1,4 +1,5 @@
-import { createDiceCheckCueLedger } from './diceCheckCueLedger'
+import { createDiceCheckCueLedger, enqueueDiceCheckCue } from './diceCheckCueLedger'
+import { diceCheckAwaitsSettlement } from './diceCheckSettlement'
 import type { DiceCheckPresentation } from './diceCheckPresentation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { enqueueDicePreview, finishDicePreview } from './dicePreviewQueue'
@@ -7,6 +8,7 @@ import { DICE_TIMING } from '../../lib/diceOverlayShared'
 import type { DiceCheckOutcome } from './diceCheckOutcome'
 
 export interface DiceBoxD20Request {
+  checkRollId?: string
   check?: DiceCheckPresentation
   id: number
   label: string
@@ -19,6 +21,8 @@ export interface DiceBoxD20Request {
 }
 
 export interface DiceBoxRollRequest {
+  checkRollId?: string
+  appendFrom?: number
   check?: DiceCheckPresentation
   dieSides?: number[]
   formula?: string
@@ -39,6 +43,7 @@ export interface DiceBoxRollRequest {
 }
 
 export interface SharedRollRequestPreview {
+  appendFrom?: number
   check?: DiceCheckPresentation
   settlement?: DiceRoll['settlement']
   dieSides?: number[]
@@ -75,7 +80,7 @@ export function useDicePresentation(
   const enqueueAuthority = useCallback((incoming: AuthorityRequest) => {
     const queue = authorityQueueRef.current
     if (queue.some(item => item.kind === incoming.kind && item.request.id === incoming.request.id)) return
-    publishAuthorityQueue([...queue, incoming])
+    publishAuthorityQueue(incoming.kind === 'dice' && incoming.request.appendFrom != null ? [incoming, ...queue] : [...queue, incoming])
   }, [publishAuthorityQueue])
   const clearAuthorityKind = useCallback((kind: AuthorityRequest['kind']) => {
     const removed = authorityQueueRef.current.filter(item => item.kind === kind)
@@ -95,10 +100,10 @@ export function useDicePresentation(
     else clearAuthorityKind('dice')
   }, [enqueueAuthority, clearAuthorityKind])
   const diceBoxD20 = !authorityPaused && authorityQueue[0]?.kind === 'd20' ? authorityQueue[0].request : null
-  const diceBoxRoll = !authorityPaused && authorityQueue[0]?.kind === 'dice' ? authorityQueue[0].request : null
+  const diceBoxRoll = authorityQueue[0]?.kind === 'dice' && (!authorityPaused || authorityQueue[0].request.appendFrom != null) ? authorityQueue[0].request : null
   const finishAuthority = useCallback((request: DiceBoxD20Request | DiceBoxRollRequest) => {
-    if (authorityQueueRef.current[0]?.request !== request) return false
-    publishAuthorityQueue(authorityQueueRef.current.slice(1))
+    if (!authorityQueueRef.current.some(item => item.request === request)) return false
+    publishAuthorityQueue(authorityQueueRef.current.filter(item => item.request !== request))
     return true
   }, [publishAuthorityQueue])
   const [previewQueue, setPreviewQueue] = useState<SharedRollRequestPreview[]>([])
@@ -110,7 +115,12 @@ export function useDicePresentation(
   const [checkResult, setCheckResult] = useState<DiceCheckOutcome | null>(null)
   const [checkOutcomes, setCheckOutcomes] = useState<DiceCheckOutcome[]>([])
   // A resolved check must not wait behind unrelated damage or room dice animations.
-  const checkOutcome = checkOutcomes[0] ?? null
+  const pendingCheckRollIds = [
+    ...authorityQueue.map(item => item.request.checkRollId ?? item.request.requestKey),
+    ...previewQueue.filter(item => !item.settled).map(item => item.id),
+  ]
+  const checkOutcome = diceCheckAwaitsSettlement(checkOutcomes[0]?.rollId, pendingCheckRollIds)
+    ? null : checkOutcomes[0] ?? null
   const cueLedgerRef = useRef<ReturnType<typeof createDiceCheckCueLedger> | null>(null)
   if (cueLedgerRef.current === null) {
     let storage: Storage | undefined
@@ -120,8 +130,7 @@ export function useDicePresentation(
   const enqueueCheckOutcome = useCallback((outcome: DiceCheckOutcome) => {
     if (outcome.rollId) setCheckResult(outcome)
     if (!cueLedgerRef.current!(outcome)) return
-    setCheckOutcomes(queue => outcome.provisional ? [outcome, ...queue.filter(item => !item.provisional)]
-      : queue.some(item => item.id === outcome.id) ? queue : [...queue, outcome])
+    setCheckOutcomes(queue => enqueueDiceCheckCue(queue, outcome))
   }, [])
   const clearCheckOutcomes = useCallback(() => setCheckOutcomes([]), [])
   useEffect(() => {
@@ -178,7 +187,7 @@ export function useDicePresentation(
 
   return {
     checkOutcome,
-    checkResult,
+    checkResult: diceCheckAwaitsSettlement(checkResult?.rollId, pendingCheckRollIds) ? null : checkResult,
     enqueueCheckOutcome,
     clearCheckOutcomes,
     roll,

@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>魔绳术外观预览</title><style>body{margin:0;background:#121421;color:#d6cee8;font:14px system-ui}h1,p{margin:24px 32px}h1{font-size:22px}</style></head><body><h1>魔绳术 · 异次元入口</h1><p>地图原尺寸与放大细节</p><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {Stage,Layer,Rect} from 'react-konva';
+import {RopeTrickVisual} from '/src/components/map/RopeTrickVisual.tsx';
+const h=React.createElement;
+createRoot(document.getElementById('root')).render(h(Stage,{width:650,height:330},h(Layer,null,
+...[20,50,100,220].map((size,i)=>h(React.Fragment,{key:size},h(Rect,{x:[35,105,210,360][i],y:40,width:size,height:size,fill:'#343b30',stroke:'#50554d',strokeWidth:1}),h(RopeTrickVisual,{x:[35,105,210,360][i],y:40,size}))))));
+</script></body></html>

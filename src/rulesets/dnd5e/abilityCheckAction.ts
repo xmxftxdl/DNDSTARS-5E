@@ -62,6 +62,8 @@ export function prepareDnd5eAbilityCheck(input: {
       !(
         payload.context === 'interact-with-dragons' &&
         payload.ability === 'cha'
+      ) && !(
+        payload.context === 'climbing' && payload.ability === 'str' && payload.skill === 'athletics'
       ))
   ) return { ok: false, reason: 'invalid-action' }
   const actor = input.characters.find((character) => character.id === action.characterId)
@@ -121,6 +123,7 @@ export function prepareDnd5eAbilityCheck(input: {
           ability: payload.ability,
           skill: payload.skill,
           perceivedTargetId: payload.perceivedTargetId,
+          context: payload.context,
           requestedMode: payload.mode ?? 'normal',
         }),
         advantage: [

@@ -204,6 +204,10 @@ export function dnd5eSpellbookEntryHasFullHeadlessAutomation(
 }
 
 const DND5E_STRUCTURED_PARTIAL_CAST_SPELL_IDS = new Set([
+  // Initial mode selection, natural weapons and concentration are executable
+  // Activities. Remaining appearance narration/mode switching must not route
+  // the implemented cast back through the generic DM approval dialog.
+  'alter-self',
   // The fixed 15-foot magical-darkness volume, concentration lifecycle and
   // vision suppression are deterministic map transactions. Object anchoring,
   // covering the source and following a carried object remain explicit map

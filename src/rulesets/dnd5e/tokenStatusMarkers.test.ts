@@ -161,6 +161,48 @@ describe('D&D 5e Token status markers', () => {
     })
   })
 
+  it('projects Sequester separately from invisibility and retains its source and effect link', () => {
+    const effect = {
+      id: 'sequester:target', definitionId: 'adjudicated:sequester:隔离术·假死',
+      label: '隔离术·假死（隐形／预言免疫）', standardCondition: 'invisible' as const,
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'sequester' },
+    }
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([effect])).toEqual([expect.objectContaining({
+      statusId: 'sequester', activeEffectId: effect.id, sourceActorId: 'wizard', sourceLabel: '法师', mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([{ ...effect, suspendedBy: ['antimagic'] }])).toEqual([])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([])).toEqual([])
+  })
+
+  it('gives Slow its own sourced effect marker instead of a generic speed label', () => {
+    const effect = { id: 'slow:target', definitionId: 'srd-5.1:spell:slow', label: '缓慢术',
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'slow' } }
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([effect])).toEqual([expect.objectContaining({
+      statusId: 'slow-spell', activeEffectId: effect.id, sourceActorId: 'wizard', mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([{ ...effect, suspendedBy: ['antimagic'] }])).toEqual([])
+  })
+
+  it('projects Suggestion as its own badge without granting the charmed condition', () => {
+    const effect = { id: 'suggestion:target', definitionId: 'activity:suggestion:suggestion', label: '暗示术',
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'suggestion' } }
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([effect])).toEqual([expect.objectContaining({
+      statusId: 'suggestion', activeEffectId: effect.id, sourceActorId: 'wizard', mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([{ ...effect, suspendedBy: ['antimagic'] }])).toEqual([])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([])).toEqual([])
+  })
+
+  it('projects Stoneskin with its source and removes it when absent or suspended', () => {
+    const effect = { id: 'stoneskin:target', definitionId: 'activity:stoneskin:stoneskin:modifiers:0', label: '石肤术',
+      source: { actorId: 'wizard', actorName: '法师', rulesId: 'stoneskin' } }
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([effect])).toEqual([expect.objectContaining({
+      statusId: 'stoneskin', activeEffectId: effect.id, sourceActorId: 'wizard', mechanical: true,
+    })])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([{ ...effect, suspendedBy: ['antimagic'] }])).toEqual([])
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([])).toEqual([])
+  })
+
   it('projects a failed Plane Shift save as a removable transported Token badge', () => {
     const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
       id: 'effect:plane-shift:transferred:target',
@@ -364,3 +406,15 @@ describe('D&D 5e Token status markers', () => {
     expect(forCloaker.map((option) => option.definition.id)).not.toContain('suffocating')
   })
 })
+
+it.each(['time-stop', 'tongues', 'true-seeing', 'true-strike', 'vampiric-touch'] as const)(
+  'projects %s into its own removable effect marker', (id) => {
+    const markers = dnd5eTokenStatusMarkersFromActiveEffects([{
+      id: 'instance', definitionId: `srd-5.1:spell:${id}`,
+      label: id, source: { rulesId: id, actorId: 'caster' },
+    }])
+    expect(markers).toHaveLength(1)
+    expect(markers[0]).toMatchObject({ statusId: id, activeEffectId: 'instance', sourceActorId: 'caster' })
+    expect(dnd5eTokenStatusMarkersFromActiveEffects([])).toEqual([])
+  },
+)

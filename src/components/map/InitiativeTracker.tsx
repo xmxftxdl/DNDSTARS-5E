@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react'
 import { getImage } from '../../lib/imageStore'
 import { resolveAvailablePortraitSource } from '../../lib/portraitPresentation'
 
@@ -35,8 +35,13 @@ const VISIBLE_MAX = 7
 const PORTRAIT_WIDTH = Math.round(Math.round(72 * 1.05) * 1.1)
 const PORTRAIT_HEIGHT = Math.round(Math.round(94 * 1.05) * 1.1)
 const ACTIVE_PORTRAIT_SCALE = 1.15
+const COLLAPSED_STORAGE_KEY = 'stars-map-initiative-collapsed:v1'
 
-function InitiativePortrait({ entry, active }: { entry: InitiativeEntry; active: boolean }) {
+function readCollapsedPreference(): boolean {
+  try { return localStorage.getItem(COLLAPSED_STORAGE_KEY) === 'true' } catch { return false }
+}
+
+function InitiativePortrait({ entry, active, compact }: { entry: InitiativeEntry; active: boolean; compact: boolean }) {
   const [loaded, setLoaded] = useState<{ imageId: string; src: string }>()
   const sourceKey = JSON.stringify([entry.tokenId, entry.portrait ?? null, entry.portraitImageId ?? null])
   const [failed, setFailed] = useState<{ key: string; sources: string[] }>({ key: sourceKey, sources: [] })
@@ -78,7 +83,7 @@ function InitiativePortrait({ entry, active }: { entry: InitiativeEntry; active:
     )
   }
   return (
-    <span className="leading-none transition-transform duration-300" style={{ fontSize: active ? 40 : 36 }}>
+    <span className="leading-none transition-transform duration-300" style={{ fontSize: compact ? 22 : active ? 40 : 36 }}>
       {entry.emoji}
     </span>
   )
@@ -105,6 +110,7 @@ export default function InitiativeTracker({
   onScroll,
   onSelect,
 }: InitiativeTrackerProps) {
+  const [collapsed, setCollapsed] = useState(readCollapsedPreference)
   if (entries.length === 0) return null
 
   const maxScroll = Math.max(0, entries.length - VISIBLE_MAX)
@@ -114,12 +120,26 @@ export default function InitiativeTracker({
   const canNext = clampedScroll < maxScroll
 
   return (
-    <div className="pointer-events-none relative flex items-center gap-[7px] px-1 pb-1 pt-[22px] drop-shadow-[0_8px_14px_rgba(0,0,0,0.72)]">
+    <div data-map-initiative="true" data-collapsed={collapsed} style={{ zoom: 0.9 }} className="pointer-events-none relative flex items-center gap-[7px] px-1 pb-1 pt-[36px] drop-shadow-[0_8px_14px_rgba(0,0,0,0.72)]">
+      <div className="absolute left-1 top-0 flex items-center gap-2">
       {round != null && (
-        <span className="pointer-events-none absolute left-1 top-0 rounded-full border border-amber-300/55 bg-amber-950/75 px-[9px] py-1 text-xs font-black leading-none tabular-nums text-amber-100 shadow-lg backdrop-blur-sm">
+        <span className="pointer-events-none rounded-full border border-amber-300/55 bg-amber-950/75 px-[9px] py-1 text-xs font-black leading-none tabular-nums text-amber-100 shadow-lg backdrop-blur-sm">
           R{round}
         </span>
       )}
+      <button type="button" aria-expanded={!collapsed}
+        aria-label={collapsed ? '展开先攻栏' : '收起先攻栏'}
+        title={collapsed ? '展开先攻栏' : '收起为缩略头像'}
+        className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/20 bg-slate-950/90 px-2 py-1 text-xs leading-none text-slate-200 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+        onClick={() => {
+          const next = !collapsed
+          setCollapsed(next)
+          try { localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next)) } catch { /* Keep the in-session preference when storage is unavailable. */ }
+        }}>
+        {collapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+        {collapsed ? '展开' : '收起'}
+      </button>
+      </div>
       <button
         type="button"
         disabled={!canPrev}
@@ -145,8 +165,8 @@ export default function InitiativeTracker({
           const hpPct = hp ? Math.max(0, Math.min(1, hp.hp / hpDenominator)) : 0
           const tempHpPct = hp ? Math.max(0, Math.min(1 - hpPct, tempHp / hpDenominator)) : 0
           const realHpPct = hp ? Math.max(0, Math.min(1, hp.hp / Math.max(1, hp.max))) : 0
-          const portraitWidth = Math.round(PORTRAIT_WIDTH * (isActive && !defeated ? ACTIVE_PORTRAIT_SCALE : 1))
-          const portraitHeight = Math.round(PORTRAIT_HEIGHT * (isActive && !defeated ? ACTIVE_PORTRAIT_SCALE : 1))
+          const portraitWidth = Math.round((collapsed ? 36 : PORTRAIT_WIDTH) * (isActive && !defeated ? ACTIVE_PORTRAIT_SCALE : 1))
+          const portraitHeight = collapsed ? portraitWidth : Math.round(PORTRAIT_HEIGHT * (isActive && !defeated ? ACTIVE_PORTRAIT_SCALE : 1))
           const hpColor =
             realHpPct > 0.55 ? 'bg-emerald-400' : realHpPct > 0.25 ? 'bg-amber-400' : 'bg-rose-400'
           return (
@@ -183,12 +203,13 @@ export default function InitiativeTracker({
                       : {}),
                   } as CSSProperties}
                 >
-                  <InitiativePortrait entry={entry} active={isActive} />
+                  <InitiativePortrait entry={entry} active={isActive} compact={collapsed} />
                 </div>
                 <span
                   data-testid={`initiative-roll-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
                   className={[
-                    'absolute -right-[7px] -top-[9px] z-20 flex min-w-[31px] items-center justify-center rounded-full border px-[7px] py-1 text-[15px] font-black leading-none tabular-nums shadow-[0_3px_8px_rgba(0,0,0,0.8)]',
+                    'absolute z-20 flex items-center justify-center rounded-full border font-black leading-none tabular-nums shadow-[0_3px_8px_rgba(0,0,0,0.8)]',
+                    collapsed ? '-right-1 -top-2 min-w-5 px-1 py-0.5 text-[10px]' : '-right-[7px] -top-[9px] min-w-[31px] px-[7px] py-1 text-[15px]',
                     defeated
                       ? 'border-slate-500/70 bg-slate-900 text-slate-500'
                       : isActive
@@ -202,7 +223,7 @@ export default function InitiativeTracker({
               </div>
               <div
                 data-testid={`initiative-health-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
-                className="h-2 overflow-hidden rounded-full bg-slate-950/90 shadow-md ring-1 ring-white/15 transition-[width] duration-200"
+                className={`${collapsed ? 'h-1' : 'h-2'} overflow-hidden rounded-full bg-slate-950/90 shadow-md ring-1 ring-white/15 transition-[width] duration-200`}
                 style={{ width: portraitWidth }}
                 title={hp ? `HP ${hp.hp}/${hp.max}${tempHp > 0 ? ` + ${tempHp} 临时生命` : ''}` : '无生命值数据'}
               >

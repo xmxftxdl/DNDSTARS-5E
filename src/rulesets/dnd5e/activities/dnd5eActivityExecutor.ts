@@ -1,3 +1,4 @@
+import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
 import { activityLogPredicate } from './dnd5eActivityLogPredicates'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eStandardConditionId } from '../conditions'
@@ -308,7 +309,7 @@ export type Dnd5eActivityCapabilityProposal = (
   | { kind: 'recover-ability-score'; operationId: string; targetId: string; ability: AbilityKey; maximumCount?: number }
   | { kind: 'recover-hit-point-maximum'; operationId: string; targetId: string; maximumCount?: number }
   | { kind: 'spend-resource' | 'restore-resource'; operationId: string; subjectId: string; resourceId: string; amount: number }
-  | { kind: 'move'; operationId: string; targetId: string; mode: 'push' | 'pull' | 'teleport' | 'swap' | 'ascend' | 'descend'; distanceFeet: number; verticalDestination?: 'area-top' | 'ground'; placement?: 'host-automatic-maximum'; originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; requiresLineOfSight?: boolean; ignoresOpportunityAttacks?: boolean; usesActorMovement?: boolean; usesTargetReactionIfAvailable?: boolean; provokesOpportunityAttacks?: boolean }
+  | { kind: 'move'; operationId: string; targetId: string; mode: 'push' | 'pull' | 'forced' | 'teleport' | 'swap' | 'ascend' | 'descend'; distanceFeet: number; maximumDistanceFromActorFeet?: number; verticalDestination?: 'area-top' | 'ground'; placement?: 'host-automatic-maximum'; originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; requiresLineOfSight?: boolean; ignoresOpportunityAttacks?: boolean; usesActorMovement?: boolean; usesTargetReactionIfAvailable?: boolean; provokesOpportunityAttacks?: boolean }
   | { kind: 'set-directional-command'; operationId: string; actorId: string; commandKey: string; angleDegrees: number }
   | {
       kind: 'relocate-granting-area'
@@ -501,6 +502,7 @@ export type Dnd5eActivityCapabilityProposal = (
       }
       hallow?: import('../persistentAreaTypes').Dnd5eHallowAreaState
       hallucinatoryTerrain?: import('../persistentAreaTypes').Dnd5eHallucinatoryTerrainAreaState
+      symbolMode?: import('../symbolSpell').SymbolMode
       programmedIllusion?: import('../persistentAreaTypes').Dnd5eProgrammedIllusionAreaState
       entityProfile?: {
         armorClass: number
@@ -967,7 +969,7 @@ function resolveCheck(
     const total = d20 + sourceModifier
     const opposedTotal = opposedD20 + opposedModifier
     return {
-      key, kind: check.kind, checkId: check.id, targetId: target.id, ability: check.sourceAbility,
+      key, kind: check.kind, checkId: check.id, targetId: target.id, ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, input.actor),
       rollMode: sourceMode,
       d20, modifier: sourceModifier, total, success: total > opposedTotal,
       criticalSuccess: false, criticalFailure: false,
@@ -1420,6 +1422,8 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
       }
     } else if (modifier.kind === 'darkvision') {
       base.darkvisionRangeFeet = Math.max(base.darkvisionRangeFeet ?? 0, modifier.rangeFeet)
+    } else if (modifier.kind === 'swim-speed') {
+      base.swimSpeedEqualsWalking = modifier.mode === 'walking-speed'
     } else if (modifier.kind === 'climb-speed') {
       base.climbSpeedEqualsWalking = modifier.mode === 'walking-speed'
     } else if (modifier.kind === 'truesight') {
@@ -2220,6 +2224,7 @@ function operationProposals(
       hallow,
       hallucinatoryTerrain,
       programmedIllusion,
+      symbolMode: operation.symbolMode,
       entityProfile: operation.entityProfile ? {
         ...operation.entityProfile,
         hitPoints: operation.entityProfile.hitPoints === 'actor-max-hit-points'
@@ -2431,6 +2436,7 @@ function operationProposals(
     if (operation.kind === 'move') return {
       kind: 'move', operationId: operation.id, targetId: target.id, mode: operation.mode,
       distanceFeet: evaluateAmount(operation.distanceFeet, input, target, false, false),
+      maximumDistanceFromActorFeet: operation.maximumDistanceFromActorFeet,
       verticalDestination: operation.verticalDestination,
       placement: operation.placement,
       originIllumination: operation.originIllumination,

@@ -7,6 +7,17 @@ import {
 } from './vfxSequence'
 
 describe('VFX sequence compiler', () => {
+  it('routes Sunbeam to a continuous beam instead of the arrow fallback', () => {
+    const sequence = compileMapProjectileVfxSequence({
+      id: 'sunbeam:cast', kind: 'sunbeam',
+      from: { x: 0, y: 0 }, to: { x: 600, y: 0 },
+      areaWidthPx: 50, issuedAt: 1000, durationMs: 1800,
+    })
+    expect(sequence.sections[0]).toMatchObject({ renderer: 'sunbeam', durationMs: 1800 })
+    expect(activeVfxSequenceSections(sequence, 2400)).toHaveLength(1)
+    expect(activeVfxSequenceSections(sequence, 2800)).toHaveLength(0)
+  })
+
   it('compiles a projectile into a JSON-serializable deterministic plan', () => {
     const input = {
       id: 'spell:burning-hands:42',

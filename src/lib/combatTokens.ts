@@ -26,6 +26,11 @@ export function tokenPresentationHitPoints(
   token: Token,
   character?: Character,
 ): TokenPresentationHitPoints | undefined {
+  if (token.dnd5eSimulacrum) return {
+    hp: Math.max(0, token.hp ?? token.dnd5eSimulacrum.maximumHitPoints),
+    max: token.dnd5eSimulacrum.maximumHitPoints,
+    temp: Math.max(0, token.dnd5eCombatState?.temporaryHp ?? 0),
+  }
   const activeCreatureFormId = character?.dnd5eCombatState?.wildShapeFormId
   if (character && activeCreatureFormId) {
     const activeCreatureForm = getDnd5eSrdMonster(activeCreatureFormId)
@@ -82,6 +87,7 @@ export function isTokenDefeated(
 }
 
 export function isTokenAlive(token: Token, characters: Character[]): boolean {
+  if (token.dnd5eSimulacrum) return (token.hp ?? token.dnd5eSimulacrum.maximumHitPoints) > 0
   if (token.characterId) {
     const ch = characters.find((c) => c.id === token.characterId)
     if (ch) return ch.currentHp > 0

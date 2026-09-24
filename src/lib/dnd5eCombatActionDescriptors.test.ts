@@ -80,6 +80,15 @@ describe('CombatActionDescriptorV1', () => {
       explicitlyConfigured: true,
     })
   })
+  it('provides separate spend-only actions and gates each by its own remaining resource', () => {
+    const actions = build({ actionRemaining: 0, bonusActionRemaining: 1 })
+    expect(actions.find(entry => entry.id === 'system:other-actions')).toMatchObject({
+      label: '更多主动动作', enabled: false, command: { kind: 'spend-action', economy: 'action' }, targeting: 'none',
+    })
+    expect(actions.find(entry => entry.id === 'system:other-bonus-actions')).toMatchObject({
+      label: '更多附赠动作', enabled: true, command: { kind: 'spend-action', economy: 'bonus-action' }, targeting: 'none',
+    })
+  })
 
   it('玩家战斗法术栏固定按基础环位从低到高排列', () => {
     const spells = [

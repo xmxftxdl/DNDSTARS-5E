@@ -77,3 +77,9 @@ describe('combat banner coverage', () => {
     expect(playerActionCombatBannerName(action)).toBe('操纵死尸·心灵命令')
   })
 })
+
+it('uses the spell name for repeated Telekinesis instead of a continue-control banner', () => {
+  expect(playerActionCombatBannerName({ type: 'dnd5e-plugin-action',
+    dnd5ePluginAction: { featureId: 'srd-5.1:effect-control.spell:telekinesis:control' },
+  } as SharedPlayerActionState, { pluginFeatureName: () => '心灵遥控·继续控制' })).toBe('心灵遥控')
+})

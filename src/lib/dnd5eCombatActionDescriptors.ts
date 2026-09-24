@@ -41,6 +41,7 @@ export interface Dnd5eCombatSpellOptions {
 export type Dnd5eCombatSpellModifier = Dnd5eSpellModifierIntentId
 
 export type Dnd5eCombatActionCommand =
+  | { kind: 'spend-action'; economy: 'action' | 'bonus-action' }
   | { kind: 'select-move' }
   | { kind: 'select-weapon-target'; options?: Dnd5eWeaponAttackOptions }
   | { kind: 'basic-action'; action: 'dash' | 'hide'; sourceSpellId?: 'expeditious-retreat' }
@@ -291,9 +292,13 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       icon: dnd5eSystemActionIcon('other-actions', 'control'), economy: 'special', targeting: 'configure', command: { kind: 'open-panel', panel: 'skills' },
     }, availability(input, 'none')),
     descriptor({
-      id: 'system:other-actions', sourceKind: 'system', label: '更多基础行动', description: '打开擒抱、推撞、协助、准备动作与使用物件等完整控制面板。',
-      icon: dnd5eSystemActionIcon('other-basic-actions', 'control'), economy: 'special', targeting: 'configure', command: { kind: 'open-panel', panel: 'skills' },
-    }, availability(input, 'none')),
+      id: 'system:other-actions', sourceKind: 'system', label: '更多主动动作', description: '扣除一次主动动作。',
+      icon: dnd5eSystemActionIcon('other-basic-actions', 'control'), economy: 'action', targeting: 'none', command: { kind: 'spend-action', economy: 'action' },
+    }, availability(input, 'action')),
+    descriptor({
+      id: 'system:other-bonus-actions', sourceKind: 'system', label: '更多附赠动作', description: '扣除一次附赠动作。',
+      icon: dnd5eSystemActionIcon('other-basic-actions', 'control'), economy: 'bonus-action', targeting: 'none', command: { kind: 'spend-action', economy: 'bonus-action' },
+    }, availability(input, 'bonus-action')),
     descriptor({
       id: 'system:end-turn', sourceKind: 'system', label: '结束回合', description: '提交结束回合请求；下一回合将恢复行动经济。',
       icon: dnd5eSystemActionIcon('end-turn', 'arcane'), economy: 'none', targeting: 'none', command: { kind: 'end-turn' },

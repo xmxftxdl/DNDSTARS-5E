@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import { cellToPixel } from '../../../lib/gridCombat'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../../lib/mapGeometry'
+beforeEach(() => setMapGeometryRuntime([]))
 import type { BattleMap, Token } from '../../../store/maps'
 import type { Dnd5eActivityAuthorityHandoffs } from '../headlessCombatEngine'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
@@ -48,6 +49,62 @@ const activity: Dnd5eActivityDefinitionV1 = {
 }
 
 describe('unified Activity production map interaction', () => {
+  it('moves telekinetically in any planar direction, respecting movement and caster range limits', () => {
+    const current = map()
+    current.tokens[1] = token(current, 'target', 7, 1, 'enemy')
+    const apply = (col: number, row: number) => applyDnd5eActivityMapHandoffsV1({
+      map: current, activity, packageId: 'srd-5.1', actionId: 'tele-move', actorId: 'actor', round: 1,
+      handoffs: { persistentAreas: [], summons: [], invocations: [], movements: [{
+        kind: 'move', operationId: 'tele-move', targetId: 'target', mode: 'forced', distanceFeet: 30,
+        maximumDistanceFromActorFeet: 60, ignoresOpportunityAttacks: true,
+      }] }, selection: { movementCellsByOperationId: { 'tele-move': { col, row } } },
+    })
+    for (const [col, row] of [[7, 4], [4, 1], [13, 1], [7, 1]]) {
+      const result = apply(col, row)
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        const moved = result.map.tokens.find(t => t.id === 'target')!
+        expect(moved).toMatchObject(cellToPixel({ col, row }, current))
+        if (col !== 7 || row !== 1) {
+          expect(moved.movementAnimation?.points[0]).toEqual({ x: current.tokens[1].x, y: current.tokens[1].y })
+          expect(moved.movementAnimation?.points.at(-1)).toEqual({ x: moved.x, y: moved.y })
+        } else expect(moved.movementAnimation).toBeUndefined()
+      }
+    }
+    expect(apply(14, 1).ok).toBe(false)
+    expect(apply(1, 1).ok).toBe(false)
+    current.tokens[1] = token(current, 'target', 12, 1, 'enemy')
+    expect(apply(14, 1).ok).toBe(false)
+    const geometry = createEmptyMapGeometry(current.id, 1)
+    geometry.doors.push({ id: 'door', kind: 'door', label: 'door',
+      points: [{ x: 650, y: 0 }, { x: 650, y: 200 }], state: 'closed', openState: 'closed',
+      lockState: 'unlocked', physicalState: 'intact', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1 })
+    setMapGeometryRuntime([geometry])
+    expect(apply(13, 1).ok).toBe(false)
+  })
+
+  it('raises and lowers a non-flying Minotaur without exceeding the caster range', () => {
+    const current = map()
+    current.tokens[1].poolId = 'srd-5.1:minotaur'
+    const apply = (mode: 'ascend' | 'descend') => applyDnd5eActivityMapHandoffsV1({
+      map: current, activity, packageId: 'srd-5.1', actionId: 'tele-vertical', actorId: 'actor', round: 1,
+      handoffs: { persistentAreas: [], summons: [], invocations: [], movements: [{
+        kind: 'move', operationId: 'tele-move', targetId: 'target', mode, distanceFeet: 30,
+        maximumDistanceFromActorFeet: 60,
+      }] }, selection: {},
+    })
+    const raised = apply('ascend')
+    expect(raised.ok).toBe(true)
+    if (raised.ok) expect(raised.map.tokens[1].elevationFeet).toBe(30)
+    current.tokens[1].elevationFeet = 50
+    expect(apply('ascend').ok).toBe(false)
+    const lowered = apply('descend')
+    expect(lowered.ok).toBe(true)
+    if (lowered.ok) expect(lowered.map.tokens[1].elevationFeet).toBe(20)
+  })
+
   it('rebuilds a rotatable area and its affected targets from the Host map', () => {
     const current = map()
     const actor = current.tokens[0]!

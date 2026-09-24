@@ -64,6 +64,7 @@ export interface Dnd5ePluginDiceRollDeclaration {
   visibility?: 'public' | 'dm'
   /** Host-derived identity of the creature actually rolling this die pool. */
   rollerTokenId?: string
+  ownerOnlyPresentation?: boolean
   /** Host-derived d20 test metadata used by the shared player-interrupt bridge. */
   d20RollKind?: 'attack' | 'ability-check' | 'saving-throw'
   /** Inspiration grants advantage and therefore cannot add another die to an existing mode. */

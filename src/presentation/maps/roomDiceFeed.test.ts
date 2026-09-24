@@ -1,11 +1,32 @@
+import { shouldPresentSharedDiceInPlayerTray } from './roomDiceFeed'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearCompletedRoomDice, clearedRoomDiceReplay, readRoomDiceFeed, roomDiceRequest, upsertRoomDice, type RoomDiceEntry } from './roomDiceFeed'
+import { clearCompletedRoomDice, clearedRoomDiceReplay, readRoomDiceFeed, roomDiceRequest, roomDiceResult, sharedDicePresentationLabels, upsertRoomDice, type RoomDiceEntry } from './roomDiceFeed'
 import { resolveSharedDiceEventApply } from '../../lib/sharedDiceSync'
 
 const entry = (id: string): RoomDiceEntry => ({ id, rollerName: id, label: '敏捷豁免', targetName: id,
   sides: 20, values: [12], total: 12, formula: '1d20', status: 'review', updatedAt: 100 })
 
 describe('independent room dice', () => {
+  it('uses the same target and title for an original roll and its DM confirmation', () => {
+    const original = { label: '粉碎音波效果', targetName: '牛头人', rollerName: '新冒险者' }
+    expect(sharedDicePresentationLabels(original)).toEqual({ label: '粉碎音波效果', targetName: '牛头人' })
+    expect(sharedDicePresentationLabels({ ...original, label: '粉碎音波效果（DM 修正）' }))
+      .toEqual(sharedDicePresentationLabels(original))
+    expect(sharedDicePresentationLabels({ ...original, targetName: '' }).targetName).toBe('')
+  })
+  it.each([
+    { sides: 20, values: [17], bonus: 7, total: 24, formula: '1d20+7' },
+    { sides: 6, values: [5, 6], bonus: 4, total: 15, formula: '2d6+4' },
+    { sides: 20, values: [10], bonus: -2, total: 8, formula: '1d20-2' },
+  ])('preserves the modifier and final total in $formula', ({ formula, ...roll }) => {
+    const result = roomDiceResult({ id: 'result', mapId: 'map', sourceMode: 'dm', updatedAt: 110,
+      rollerName: '新冒险者', roll: { ...roll, sourceRollIds: ['raw'], label: '形态攻击', targetName: '牛头人' } })!
+    expect(result).toMatchObject({ formula, bonus: roll.bonus, total: roll.total })
+    const merged = upsertRoomDice([{ ...entry('raw'), status: 'confirmed' }], result)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].total).toBe(roll.total)
+    expect(upsertRoomDice(merged, { ...entry('raw'), status: 'confirmed', updatedAt: 120 })).toEqual(merged)
+  })
   it('replaces raw check rows with one final total and ignores late confirmations after reload', () => {
     const raw = { ...entry('check-a'), total: 15, status: 'confirmed' as const }
     const other = entry('check-b')
@@ -56,5 +77,15 @@ describe('independent room dice', () => {
     expect(resolveSharedDiceEventApply(input).status).toBe('apply')
     expect(resolveSharedDiceEventApply({ ...input, memberId: 'b' })).toMatchObject({ reason: 'same-source' })
     expect(resolveSharedDiceEventApply({ ...input, state: { ...input.state, visibility: 'dm' } })).toMatchObject({ reason: 'private-roll' })
+  })
+})
+
+describe('opposed dice tray ownership', () => {
+  it('keeps the caster die on its player and the monster die on the DM', () => {
+    const owner = new Set(['wizard'])
+    expect(shouldPresentSharedDiceInPlayerTray({ ownerOnlyPresentation: true, targetCharacterId: 'wizard' }, owner)).toBe(true)
+    expect(shouldPresentSharedDiceInPlayerTray({ ownerOnlyPresentation: true }, owner)).toBe(false)
+    expect(shouldPresentSharedDiceInPlayerTray({ ownerOnlyPresentation: true, targetCharacterId: 'other-player' }, owner)).toBe(false)
+    expect(shouldPresentSharedDiceInPlayerTray({}, owner)).toBe(true)
   })
 })

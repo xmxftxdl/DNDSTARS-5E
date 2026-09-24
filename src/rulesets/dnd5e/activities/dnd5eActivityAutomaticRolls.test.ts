@@ -1,3 +1,5 @@
+import { dnd5ePluginSpellDefinition } from '../plugins/pluginContentCatalog'
+import { dnd5ePluginSpellActivity } from '../pluginSpellTransaction'
 import { describe, expect, it } from 'vitest'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { planDnd5eAutomaticAlliedSavingThrowRolls } from './dnd5eActivityAutomaticRolls'
@@ -30,4 +32,18 @@ describe('automatic allied Activity saving throws', () => {
       values: [1, 1], modifier: 0, total: 2,
     })
   })
+})
+
+it('Seeming skips friendly and self saves but retains the hostile Charisma save', () => {
+  const spell = dnd5ePluginSpellDefinition('seeming')!
+  const seeming = dnd5ePluginSpellActivity(spell)!
+  expect(seeming.outcomes.flatMap(outcome => outcome.operations).some(operation => operation.kind === 'manual-adjudication')).toBe(false)
+  expect(seeming.effects?.[0]).toMatchObject({ id: 'seeming-appearance' })
+  expect(seeming.outcomes.flatMap(outcome => outcome.operations)).toContainEqual(expect.objectContaining({ kind: 'apply-effect', effectId: 'seeming-appearance' }))
+  expect(seeming.checks?.[0]).toMatchObject({ ability: 'cha', automaticFailureIfAllied: true })
+  const result = planDnd5eAutomaticAlliedSavingThrowRolls({ activity: seeming,
+    actor: { id: 'caster', controller: 'players' },
+    targets: [{ id: 'caster', controller: 'players' }, { id: 'ally', controller: 'players' }, { id: 'enemy', controller: 'dm' }],
+    declarations: ['caster', 'ally', 'enemy'].map(id => ({ id: 'spell-save-d20:' + id, label: id, count: 1, sides: 20 })) })
+  expect(result.declarations.map(roll => roll.id)).toEqual(['spell-save-d20:enemy'])
 })

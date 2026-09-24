@@ -86,6 +86,7 @@ export default function MapDiceRoller({
   const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
   const [spendAction, setSpendAction] = useState(false)
   const [bearAspectTask, setBearAspectTask] = useState(false)
+  const [climbingTask, setClimbingTask] = useState(false)
   const [draconicInteraction, setDraconicInteraction] = useState(false)
   const [perceivedTargetId, setPerceivedTargetId] = useState('')
 
@@ -177,6 +178,8 @@ export default function MapDiceRoller({
         : undefined,
       context: bearAspectAvailable && bearAspectTask
         ? 'push-pull-lift-break'
+        : selectedCheck.skill === 'athletics' && climbingTask
+          ? 'climbing'
         : draconicInteractionAvailable && draconicInteraction
           ? 'interact-with-dragons'
           : undefined,
@@ -370,6 +373,12 @@ export default function MapDiceRoller({
                   ) : (
                     <p className="mt-2 text-[11px] leading-5 text-emerald-300/80">战斗外鉴定不会消耗行动；骰值、调整值与是否通过会公开同步。</p>
                   )}
+                  {selectedCheck.skill === 'athletics' ? (
+                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+                      <input type="checkbox" checked={climbingTask} onChange={event => setClimbingTask(event.target.checked)} />
+                      本次用于攀爬
+                    </label>
+                  ) : null}
                   {bearAspectAvailable ? (
                     <label className="mt-2 flex items-center gap-2 text-[11px] text-amber-200">
                       <input

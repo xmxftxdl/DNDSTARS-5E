@@ -1,9 +1,22 @@
+import { stoneWallPanels } from '../../rulesets/dnd5e/stoneWall'
+import { ForceWallPanelsVisual } from './ForceWallPanelsVisual'
+import { IceWallVisual } from './IceWallVisual'
+import { LegacyStoneWallVisual, StoneWallVisual } from './StoneWallVisual'
+import { ForceShellVisual } from './ForceShellVisual'
+import { persistentAreaUnobstructedCells } from '../../rulesets/dnd5e/coreSpellAreas'
 import { ReverseGravityArea } from './ReverseGravityArea'
+import { RopeTrickVisual } from './RopeTrickVisual'
+import { SymbolSigilVisual } from './SymbolSigilVisual'
+import { TinyHutVisual } from './TinyHutVisual'
+import { AlarmAreaVisual } from './AlarmAreaVisual'
+import { GridAreaOutline } from './GridAreaOutline'
+import { TeleportationCircleVisual, TeleportationCircleDestinations } from './TeleportationCircleVisual'
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
-import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
+import { Circle, Group, Image as KonvaImage, Line, Rect, Shape, Text } from 'react-konva'
 import Konva from 'konva'
 import { cellKey, cellTopLeft, tokenCenterForAnchorCell } from '../../lib/gridCombat'
 import { collectMapDifficultTerrainCells } from '../../lib/mapDifficultTerrain'
+import { difficultTerrainLabelCells } from './difficultTerrainLabels'
 import { dnd5ePersistentAreaPresentationVisual } from '../../rulesets/dnd5e/persistentAreaPresentation'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { MapGeometryPoint, MapGeometryState } from '../../lib/mapGeometry'
@@ -27,6 +40,7 @@ import {
 } from './persistentAreaRangePresentation'
 import { dnd5ePersistentAreaRenderPreset } from './persistentAreaRenderPreset'
 import { createWebAreaStrands } from './webAreaPresentation'
+import { WebBurningCells } from './WebBurningCells'
 import { moveEarthAreaPixelBounds } from './moveEarthAreaPresentation'
 
 interface Point {
@@ -129,6 +143,24 @@ function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; ma
   })}</>
 }
 
+// A 60-foot Symbol covers hundreds of cells. Draw one compound path rather
+// than mounting a fill, dashed border and hit node for every cell.
+const SymbolAreaField = memo(function SymbolAreaField({ area, map, interactive }: {
+  area: Dnd5ePluginArea; map: BattleMap; interactive: boolean
+}) {
+  const grid = Math.max(1, map.gridSize)
+  const points = useMemo(() => area.cells.map(cell => cellTopLeft(cell, map)),
+    [area.cells, map.gridSize, map.gridOffsetX, map.gridOffsetY])
+  const draw = useCallback((context: Konva.Context, shape: Konva.Shape) => {
+    context.beginPath()
+    for (const point of points) context.rect(point.x, point.y, grid, grid)
+    context.closePath()
+    context.fillShape(shape)
+  }, [points, grid])
+  return <Shape name="symbol-area-field" sceneFunc={draw} hitFunc={draw}
+    fill="rgba(167,139,250,0.10)" listening={interactive} perfectDrawEnabled={false} />
+})
+
 function Dnd5eMoveEarthAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
   const bounds = moveEarthAreaPixelBounds(area.cells, map)
   if (!bounds) return null
@@ -178,12 +210,12 @@ function PersistentCircularAreaRangeBoundary({
   const innerRingRef = useRef<Konva.Circle>(null)
   const reducedMotion = usePrefersReducedMotion()
   const geometry = useMemo(() => persistentAreaCircularRangeGeometry({
-    cells: area.cells,
+    cells: persistentAreaUnobstructedCells(area),
     anchorCell: area.anchorCell,
     gridSize: map.gridSize,
     gridOffsetX: map.gridOffsetX,
     gridOffsetY: map.gridOffsetY,
-  }), [area.anchorCell, area.cells, map.gridOffsetX, map.gridOffsetY, map.gridSize])
+  }), [area.anchorCell, area.cells, area.coreSpellId, area.slotLevel, area.obstructionRadiusFeet, map.gridOffsetX, map.gridOffsetY, map.gridSize])
   const phaseMs = useMemo(() => stableAnimationPhaseMs(area.id, 20_000), [area.id])
 
   useStatusAnimation(
@@ -818,7 +850,7 @@ function PersistentAreaSpriteAtlas({
       primarySpriteRef.current?.opacity(opacity * (1 - smoothMix))
       secondarySpriteRef.current?.opacity(opacity * smoothMix)
     },
-    { active: !reducedMotion, fps: isSlowCloud ? 12 : 20 },
+    { active: !reducedMotion && loopFrames.length > 1, fps: isSlowCloud ? 12 : 20 },
   )
 
   useEffect(() => {
@@ -1024,7 +1056,8 @@ function persistentAreaSpritePlacement(
   preset: string,
 ): { x: number; y: number; width: number; height: number; rotation: number } | undefined {
   const grid = Math.max(1, map.gridSize)
-  const cells = area.cells.length > 0 ? area.cells : area.anchorCell ? [area.anchorCell] : []
+  const nominalCells = persistentAreaUnobstructedCells(area)
+  const cells = nominalCells.length > 0 ? nominalCells : area.anchorCell ? [area.anchorCell] : []
   if (cells.length === 0) return undefined
   const centers = cells.map((cell) => {
     const point = cellTopLeft(cell, map)
@@ -1399,11 +1432,18 @@ export function Dnd5eCoreSpellAreaOverlay({
       iconRef.current?.scale({ x: iconScale, y: iconScale })
       if (preset === 'spirit-guardians') iconRef.current?.rotation(Math.sin(seconds * 1.4) * 8)
     },
-    { active: !reducedMotion, fps: 16 },
+    { active: !reducedMotion && preset !== 'wall-of-stone', fps: 16 },
   )
 
   return (
-    <Group ref={groupRef} listening={false}>
+    <Group ref={groupRef} listening={false} clipFunc={preset === 'web' || persistentAreaUnobstructedCells(area) !== area.cells ? context => {
+      context.beginPath()
+      for (const cell of area.cells) {
+        const point = cellTopLeft(cell, map)
+        context.rect(point.x, point.y, grid, grid)
+      }
+      context.closePath()
+    } : undefined}>
       {preset === 'dancing-lights' && area.dancingLightsForm === 'humanoid' && firstCell ? (() => {
         const point = cellTopLeft(firstCell, map)
         const centerX = point.x + grid / 2
@@ -1519,6 +1559,16 @@ export function Dnd5eCoreSpellAreaOverlay({
           ) / 2)}
           reducedMotion={reducedMotion}
         />
+      ) : area.stoneWall?.mode === 'ice' ? (
+        <IceWallVisual area={area} map={map} />
+      ) : area.stoneWall ? (
+        <StoneWallVisual panels={area.stoneWall.panels} map={map} />
+      ) : preset === 'wall-of-stone' ? (
+        <LegacyStoneWallVisual cells={area.cells} map={map} />
+      ) : area.forceWall ? (
+        <ForceWallPanelsVisual panels={stoneWallPanels(area.forceWall, map)} map={map} />
+      ) : area.forceShell && area.anchorCell ? (
+        <ForceShellVisual area={area} map={map} />
       ) : area.cells.length > 0 && preset === 'web' ? (
         <PersistentWebField
           areaId={area.id}
@@ -1541,6 +1591,14 @@ export function Dnd5eCoreSpellAreaOverlay({
           radius={grid * ((area.wallOfFireGeometry.diameterFeet ?? (preset === 'blade-barrier' ? 60 : 20)) / 10)} reducedMotion={reducedMotion} persistent
         />
       ) : persistentAreaImage && spritePlacement ? (
+        <Group clipFunc={preset === 'wall-of-force' ? undefined : (context) => {
+          context.beginPath()
+          for (const cell of area.cells) {
+            const point = cellTopLeft(cell, map)
+            context.rect(point.x, point.y, grid, grid)
+          }
+          context.closePath()
+        }}>
         <PersistentAreaSpriteAtlas
           image={persistentAreaImage}
           {...spritePlacement}
@@ -1550,6 +1608,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           preset={preset}
           animationId={area.id}
         />
+        </Group>
       ) : firstCell && !namedPresentation && (
         <Text
           ref={iconRef}
@@ -1613,7 +1672,15 @@ export function Dnd5ePluginAreaOverlays({
   return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
     const preset = dnd5ePersistentAreaRenderPreset(area)
     const namedPresentation = dnd5eNamedPersistentAreaPresentation(preset)
-    const overlay = area.coreSpellId === 'reverse-gravity'
+    const overlay = preset === 'alarm'
+      ? <AlarmAreaVisual area={area} map={map} />
+      : area.coreSpellId === 'tiny-hut'
+      ? <TinyHutVisual area={area} map={map} />
+      : area.coreSpellId === 'teleportation-circle'
+      ? <TeleportationCircleVisual area={area} map={map} />
+      : area.coreSpellId === 'symbol'
+      ? <SymbolAreaField area={area} map={map} interactive={!!(isDM && onAreaClick)} />
+      : area.coreSpellId === 'reverse-gravity'
       ? <ReverseGravityArea area={area} map={map} />
       : area.coreSpellId === 'move-earth'
       ? <Dnd5eMoveEarthAreaOverlay area={area} map={map} />
@@ -1653,11 +1720,29 @@ export function Dnd5ePluginAreaOverlays({
       )}
       x={renderOffset.x}
       y={renderOffset.y}
-      onClick={isDM && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
-      onTap={isDM && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
+      onClick={(isDM || area.coreSpellId === 'rope-trick') && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
+      onTap={(isDM || area.coreSpellId === 'rope-trick') && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
     >
-      {overlay}
-      {isDM && onAreaClick && area.cells.map((cell) => { const point = cellTopLeft(cell, map); return <Rect key={`persistent-area-hit:${area.id}:${cellKey(cell)}`} x={point.x} y={point.y} width={map.gridSize} height={map.gridSize} fill="rgba(255,255,255,0.001)" /> })}
+      {area.coreSpellId !== 'rope-trick' && overlay}
+      {area.coreSpellId === 'web' && <WebBurningCells area={area} map={map} />}
+      {area.coreSpellId === 'wall-of-fire' && <>
+        <GridAreaOutline map={map} cells={[...area.cells, ...(area.triggers ?? []).flatMap(trigger => trigger.cells ?? [])]} color="#fbbf24" dashed />
+        <GridAreaOutline map={map} cells={area.cells} color="#fff7d6" />
+      </>}
+      {area.symbol && area.anchorCell && (() => {
+        const point = tokenCenterForAnchorCell(area.anchorCell, { size: 1 }, map)
+        return <Group x={point.x} y={point.y}>
+          {area.symbol.activated && <Circle radius={60 / (map.feetPerCell ?? 5) * map.gridSize}
+            stroke="#c4b5fd" strokeWidth={2} dash={[8, 6]} opacity={0.7} listening={false} />}
+          <SymbolSigilVisual size={map.gridSize} activated={area.symbol.activated} />
+        </Group>
+      })()}
+
+      {area.coreSpellId === 'rope-trick' && area.cells[0] && (() => {
+        const point = cellTopLeft(area.cells[0], map)
+        return <RopeTrickVisual x={point.x} y={point.y} size={map.gridSize} />
+      })()}
+      {area.coreSpellId !== 'symbol' && (isDM || area.coreSpellId === 'rope-trick') && onAreaClick && area.cells.map((cell) => { const point = cellTopLeft(cell, map); return <Rect key={`persistent-area-hit:${area.id}:${cellKey(cell)}`} x={point.x} y={point.y} width={map.gridSize} height={map.gridSize} fill="rgba(255,255,255,0.001)" /> })}
       {isDM && area.coreSpellId === 'spike-growth' && center && onVisibilityToggle && <Group
         x={center.x}
         y={center.y}
@@ -1668,7 +1753,7 @@ export function Dnd5ePluginAreaOverlays({
         <Text x={-31} y={-5} width={62} align="center" text={area.hiddenFromPlayers ? '仅 DM' : '已揭示'} fill="#f8fafc" fontSize={11} />
       </Group>}
     </Group>
-  })}</>
+  })}<TeleportationCircleDestinations map={map} /></>
 }
 
 
@@ -1676,12 +1761,15 @@ export function Dnd5ePluginAreaOverlays({
 export function DifficultTerrainCellOverlays({
   map,
   cells,
+  showLabels = false,
 }: {
   map: BattleMap
   cells: ReturnType<typeof collectMapDifficultTerrainCells>
+  showLabels?: boolean
 }) {
   const grid = Math.max(1, map.gridSize)
-  const badgeWidth = Math.max(20, Math.min(34, grid * 0.46))
+  const labelCells = useMemo(() => difficultTerrainLabelCells(cells), [cells])
+  const badgeWidth = Math.max(84, Math.min(112, grid * 1.8))
   const badgeHeight = Math.max(14, Math.min(22, grid * 0.3))
   const inset = Math.max(2, Math.min(5, grid * 0.06))
   const fontSize = Math.max(8, Math.min(13, grid * 0.18))
@@ -1704,7 +1792,7 @@ export function DifficultTerrainCellOverlays({
               strokeWidth={1}
               dash={[Math.max(3, grid * 0.1), Math.max(2, grid * 0.07)]}
             />
-            <Group x={x + grid - badgeWidth - inset} y={y + inset} listening={false}>
+            {showLabels && labelCells.has(`${cell.col},${cell.row}`) && <Group x={x + (grid - badgeWidth) / 2} y={y + inset} listening={false}>
               <Rect
                 width={badgeWidth}
                 height={badgeHeight}
@@ -1716,14 +1804,14 @@ export function DifficultTerrainCellOverlays({
               <Text
                 width={badgeWidth}
                 height={badgeHeight}
-                text={`×${formattedMultiplier}`}
+                text={`困难地形 ×${formattedMultiplier}`}
                 align="center"
                 verticalAlign="middle"
                 fontSize={fontSize}
                 fontStyle="bold"
                 fill="#fef3c7"
               />
-            </Group>
+            </Group>}
           </Group>
         )
       })}
@@ -1758,43 +1846,43 @@ export function TerrainElevationContours({
           }
         : longest
     }, { point: region.points[0] ?? { x: 0, y: 0 }, lengthSquared: -1 }).point
-    const color = elevationFeet < 0 ? '#38bdf8' : '#fbbf24'
+    const color = elevationFeet < 0 ? '#a5f3fc' : '#fff1bb'
     const label = `${elevationFeet > 0 ? '+' : ''}${elevationFeet} 尺`
     return (
       <Group key={`terrain-contour:${region.id}`}>
         <Line
           points={geometryEntityPoints(region)}
           closed
-          stroke="rgba(2,6,23,0.92)"
-          strokeWidth={5 * inv}
+          stroke="#020617"
+          strokeWidth={7 * inv}
           lineJoin="round"
         />
         <Line
           points={geometryEntityPoints(region)}
           closed
           stroke={color}
-          strokeWidth={2 * inv}
+          strokeWidth={3 * inv}
           lineJoin="round"
-          opacity={0.95}
+          opacity={1}
         />
         <Group x={labelAnchor.x} y={labelAnchor.y}>
           <Rect
-            x={-25 * inv}
-            y={-9 * inv}
-            width={50 * inv}
-            height={18 * inv}
+            x={-30 * inv}
+            y={-11 * inv}
+            width={60 * inv}
+            height={22 * inv}
             cornerRadius={6 * inv}
-            fill="rgba(2,6,23,0.82)"
+            fill="#020617"
             stroke={color}
             strokeWidth={inv}
           />
           <Text
-            x={-25 * inv}
-            y={-5.5 * inv}
-            width={50 * inv}
+            x={-30 * inv}
+            y={-6.5 * inv}
+            width={60 * inv}
             text={label}
             align="center"
-            fontSize={10 * inv}
+            fontSize={12 * inv}
             fontStyle="bold"
             fill="#f8fafc"
           />

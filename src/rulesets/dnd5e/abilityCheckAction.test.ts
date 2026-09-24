@@ -5,6 +5,7 @@ import type { Character } from '../../types/character'
 import { prepareDnd5eAbilityCheck, previewPreparedDnd5eAbilityCheck, resolvePreparedDnd5eAbilityCheck } from './abilityCheckAction'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { DND5E_CHAIN_MAIL } from './equipment'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function bard(): Character {
   return {
@@ -37,6 +38,23 @@ function fixture(payload: NonNullable<SharedPlayerActionState['dnd5eAbilityCheck
 }
 
 describe('D&D 5e ability-check authority bridge', () => {
+  it('uses climbing advantage in both preparation and final resolution without widening Athletics', () => {
+    const input = fixture({ ability: 'str', skill: 'athletics', context: 'climbing', dc: 10 })
+    input.actor.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({
+      definitionId: 'test:climbing', label: '攀爬药水', targetId: input.actor.id, source: { kind: 'item' },
+      modifiers: { climbingCheckAdvantage: true, climbSpeedEqualsWalking: true },
+    })] }
+    const prepared = prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.rollMode).toBe('advantage')
+    const resolved = resolvePreparedDnd5eAbilityCheck({ prepared: prepared.prepared, d20: 2, d20Second: 18 })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'ability-check-resolved', success: true }))
+    input.action.dnd5eAbilityCheck!.context = undefined
+    const ordinary = prepareDnd5eAbilityCheck({ ...input, characters: [input.actor] })
+    expect(ordinary.ok && ordinary.prepared.rollMode).toBe('normal')
+  })
   it('previews and persists Peerless Skill through the map bridge', () => {
     const input = fixture({ ability: 'cha', skill: 'performance', dc: 20 })
     const prepared = prepareDnd5eAbilityCheck({

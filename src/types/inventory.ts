@@ -230,6 +230,10 @@ export interface Dnd5eDeathPreventionEffect extends Dnd5eInventoryHeadlessEffect
 }
 
 export type Dnd5eInventoryHeadlessEffect =
+  | (Dnd5eInventoryHeadlessEffectBase & {
+      kind: 'equipped-passive'
+      modifiers: import('../rulesets/dnd5e/activeEffects').Dnd5eActiveEffectModifiers
+    })
   | Dnd5eAttackRollRerollEffect
   | Dnd5eOnHitBonusDamageEffect
   | Dnd5eDamageReductionEffect
@@ -283,6 +287,14 @@ export interface Dnd5eItemCost {
 }
 
 export type Dnd5eInventoryUseEffect =
+  | { kind: 'stabilize' }
+  | {
+      kind: 'active-effect'
+      durationRounds: number
+      condition?: import('../rulesets/dnd5e/conditions').Dnd5eStandardConditionId
+      modifiers?: import('../rulesets/dnd5e/activeEffects').Dnd5eActiveEffectModifiers
+      breakOn?: readonly import('../rulesets/dnd5e/activeEffects').Dnd5eActiveEffectBreakTrigger[]
+    }
   | {
       kind: 'healing'
       dice: { count: number; sides: number; bonus: number }

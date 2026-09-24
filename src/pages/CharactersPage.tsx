@@ -21,6 +21,8 @@ import {
   setAssignedPlayerCharacterId,
 } from '../lib/playerView'
 import { getRoomSession } from '../lib/roomSession'
+import { characterCreationDraftKey, clearCharacterCreationDraft, copyCharacterCreationDraft, hasCharacterCreationDraft, readCharacterCreationDraft, writeCharacterCreationDraft } from '../lib/characterCreationDraft'
+import type { Character } from '../types/character'
 import { characterExportFileName, makeCharacterExport, parseCharacterExport } from '../lib/characterTransfer'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { declarativeClassContentBindingV1 } from '../rulesets/dnd5e/declarativeClass'
@@ -43,6 +45,7 @@ export default function CharactersPage() {
   const [selectedMode, setSelectedMode] = useState<Mode>('player')
   const mode = forcedMode ?? selectedMode
   const [showCreate, setShowCreate] = useState(false)
+  const [editingCreationId, setEditingCreationId] = useState<string | null>(null)
   const [pendingCreation, setPendingCreation] = useState<{
     characterId: string
     targetLevel: number
@@ -69,6 +72,7 @@ export default function CharactersPage() {
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
 
   const openCreateDialog = () => {
+    setEditingCreationId(null)
     setShowCreate(true)
   }
 
@@ -85,19 +89,26 @@ export default function CharactersPage() {
   const confirmCreate = (setup: CharacterSetupResult) => {
     const definition = dnd5eClassDefinition(setup.charClass)
     const classContentBinding = definition ? declarativeClassContentBindingV1(definition.id) : undefined
-    const id = add(setup.name)
+    const existing = editingCreationId ? useCharacterStore.getState().characters.find((character) => character.id === editingCreationId) : undefined
+    const baseline = editingCreationId ? readCharacterCreationDraft(characterCreationDraftKey(`base:${editingCreationId}`), { character: undefined as Character | undefined }).character : undefined
+    if (editingCreationId && (!existing?.dnd5eCreationTargetLevel || !baseline)) return
+    const id = editingCreationId ?? add(setup.name)
     const startingEquipment = resolveDnd5eStartingEquipment(
       id,
       dnd5eStartingEquipmentPlan(setup.charClass, setup.background),
       setup.startingEquipment,
     )
     update(id, {
+      ...(existing && baseline ? {
+        ...Object.fromEntries(Object.keys(existing).filter((key) => !(key in baseline)).map((key) => [key, undefined])),
+        ...baseline,
+        dnd5eLevelAdvancements: [],
+      } : {}),
+      name: setup.name,
       charClass: setup.charClass,
       race: setup.race,
       dnd5eRaceId: setup.dnd5eRaceId,
-      ...(setup.dragonbornAncestry ? {
-        dnd5eRacialChoices: { dragonbornAncestry: setup.dragonbornAncestry },
-      } : {}),
+      dnd5eRacialChoices: setup.dragonbornAncestry ? { dragonbornAncestry: setup.dragonbornAncestry } : undefined,
       alignment: setup.alignment,
       background: setup.background,
       dnd5eBackgroundId: setup.dnd5eBackgroundId,
@@ -107,21 +118,21 @@ export default function CharactersPage() {
       dnd5eBackgroundVariantId: setup.backgroundVariantId,
       level: 1,
       ...(definition ? { dnd5eClassLevels: { [definition.id]: 1 } } : {}),
-      ...(classContentBinding ? { dnd5eClassContentBindings: { [classContentBinding.classId]: classContentBinding } } : {}),
+      dnd5eClassContentBindings: classContentBinding ? { [classContentBinding.classId]: classContentBinding } : undefined,
       abilities: setup.abilities,
       skills: [...new Set([
         ...setup.classSkillProficiencies,
         ...(setup.backgroundSkillProficiencies ?? []),
         ...(setup.racialSkillProficiencies ?? []),
       ])],
-      ...(setup.racialFeatIds?.length ? { dnd5eFeatIds: [...setup.racialFeatIds] } : {}),
+      dnd5eFeatIds: setup.racialFeatIds ? [...setup.racialFeatIds] : [],
       savingThrows: definition ? [...definition.savingThrows] : [],
       speed: dnd5eRaceSpeed(setup.dnd5eRaceId ?? setup.race),
       hitPointMaximumMode: 'fixed',
       equipment: startingEquipment.equipment,
       dnd5eInventory: startingEquipment.inventory,
       dnd5eClassChoices: setup.initialClassChoices,
-      ...(setup.targetLevel > 1 ? { dnd5eCreationTargetLevel: setup.targetLevel } : {}),
+      dnd5eCreationTargetLevel: setup.targetLevel > 1 ? setup.targetLevel : undefined,
       dnd5eAbilityGeneration: {
         method: setup.method,
         baseScores: setup.baseAbilities,
@@ -135,6 +146,12 @@ export default function CharactersPage() {
         })) } : {}),
       },
     })
+    if (setup.targetLevel > 1) {
+      const baseCharacter = useCharacterStore.getState().characters.find((character) => character.id === id)
+      if (baseCharacter) writeCharacterCreationDraft(characterCreationDraftKey(`base:${id}`), { character: baseCharacter })
+      if (!editingCreationId) copyCharacterCreationDraft(characterCreationDraftKey(), characterCreationDraftKey(`setup:${id}`))
+    }
+    setEditingCreationId(null)
     if (!isDM) {
       setAssignedPlayerCharacterId(id, playerSlot)
     }
@@ -159,30 +176,23 @@ export default function CharactersPage() {
     selectedCharacterId: selectedId,
   })
   const activeCharacter = activeId ? visibleList.find((c) => c.id === activeId) ?? null : null
-  const unfinishedCreation = !isDM && !showCreate
-    ? visibleList.find((character) =>
-        (character.dnd5eCreationTargetLevel ?? 0) > character.level)
-    : undefined
-  const effectivePendingCreation = pendingCreation ?? (
-    unfinishedCreation?.dnd5eCreationTargetLevel
-      ? {
-          characterId: unfinishedCreation.id,
-          targetLevel: unfinishedCreation.dnd5eCreationTargetLevel,
-        }
-      : null
-  )
+  const unfinishedCreations = visibleList.filter((character) => (character.dnd5eCreationTargetLevel ?? 0) > 1)
+  const effectivePendingCreation = pendingCreation
 
-  const finishPendingCreation = () => {
-    if (effectivePendingCreation) {
-      update(effectivePendingCreation.characterId, { dnd5eCreationTargetLevel: undefined })
-    }
-    setPendingCreation(null)
-  }
-
-  const abandonPendingCreation = () => {
+  const finishPendingCreation = async () => {
     if (!effectivePendingCreation) return
-    remove(effectivePendingCreation.characterId)
-    setPendingCreation(null)
+    const character = useCharacterStore.getState().characters.find((entry) => entry.id === effectivePendingCreation.characterId)
+    if (!character || character.level < effectivePendingCreation.targetLevel) return
+    update(character.id, { dnd5eCreationTargetLevel: undefined })
+    try {
+      await useCharacterStore.getState().saveSharedNow()
+      clearCharacterCreationDraft(characterCreationDraftKey(`base:${character.id}`))
+      clearCharacterCreationDraft(characterCreationDraftKey(`setup:${character.id}`))
+      setPendingCreation(null)
+    } catch (error) {
+      update(character.id, { dnd5eCreationTargetLevel: effectivePendingCreation.targetLevel })
+      throw error
+    }
   }
 
   const exportCharacter = () => {
@@ -454,6 +464,11 @@ export default function CharactersPage() {
         </div>
       )}
 
+      {!isDM && !showCreate && !effectivePendingCreation && <div className="space-y-2">
+        {hasCharacterCreationDraft(characterCreationDraftKey()) && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-300/20 bg-violet-500/10 p-4 text-sm text-violet-100"><span>你有一份尚未完成的建卡草稿。</span><button type="button" onClick={openCreateDialog} className="rounded-lg bg-violet-500/25 px-4 py-2 font-semibold">继续建卡草稿</button></div>}
+        {unfinishedCreations.map((character) => <div key={character.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100"><span>{character.name} · 建卡进度 {character.level}/{character.dnd5eCreationTargetLevel} 级，尚未最终确认</span><button type="button" onClick={() => { select(character.id); setPendingCreation({ characterId: character.id, targetLevel: character.dnd5eCreationTargetLevel! }) }} className="rounded-lg bg-amber-500/25 px-4 py-2 font-semibold">继续创建 {character.name}</button></div>)}
+      </div>}
+
       {!isDM && <AccountCharacterVaultPanel />}
 
       {!isDM && visibleList.length === 0 ? (
@@ -467,14 +482,27 @@ export default function CharactersPage() {
       ) : null}
 
       {!isDM && showCreate && (
-        <CharacterSetupDialog onCancel={() => setShowCreate(false)} onComplete={confirmCreate} />
+        <CharacterSetupDialog
+          key={editingCreationId ?? 'new'}
+          draftKey={editingCreationId ? characterCreationDraftKey(`setup:${editingCreationId}`) : characterCreationDraftKey()}
+          clearOnComplete={!editingCreationId}
+          onCancel={() => { setShowCreate(false); setEditingCreationId(null) }}
+          onComplete={confirmCreate}
+        />
       )}
       {!isDM && effectivePendingCreation && (
         <CharacterCreationAdvancementFlow
+          key={effectivePendingCreation.characterId}
           characterId={effectivePendingCreation.characterId}
           targetLevel={effectivePendingCreation.targetLevel}
           onComplete={finishPendingCreation}
-          onAbandon={abandonPendingCreation}
+          onPause={() => setPendingCreation(null)}
+          onEditBase={hasCharacterCreationDraft(characterCreationDraftKey(`base:${effectivePendingCreation.characterId}`)) && hasCharacterCreationDraft(characterCreationDraftKey(`setup:${effectivePendingCreation.characterId}`)) ? async () => {
+            if (!await showAppConfirm({ title: '修改起始选择', message: '将保留当前角色。修改并确认起始职业、属性或种族后，需要从 2 级起重新选择后续等级；关闭编辑不会更改当前角色。', confirmLabel: '编辑起始选择' })) return
+            setEditingCreationId(effectivePendingCreation.characterId)
+            setPendingCreation(null)
+            setShowCreate(true)
+          } : undefined}
         />
       )}
       {excelImportPreview && (

@@ -576,7 +576,10 @@ export default function CharacterSheet({
           <section className="glass rounded-2xl p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-200">状态</h3>
             <div className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-2 text-sm text-slate-300">
-              {c.conditions.length > 0 ? c.conditions.join('、') : '当前没有状态效果'}
+              {c.conditions.length > 0 ? c.conditions.map((condition) =>
+                c.dnd5eCombatState?.activeEffects?.find((effect) =>
+                  effect.legacyCondition === condition && effect.source.rulesId === 'rope-trick')?.label ?? condition,
+              ).join('、') : '当前没有状态效果'}
             </div>
             <p className="mt-2 text-xs text-slate-500">此处为 ActiveEffect 的只读投影；状态由 DM 战斗面板、法术、特性或规则插件修改。</p>
           </section>

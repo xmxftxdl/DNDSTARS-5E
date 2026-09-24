@@ -1,6 +1,7 @@
 import type { Dnd5eCombatEvent } from '../../rulesets/dnd5e/headlessCombatEngine'
 
 export interface DiceCheckOutcome {
+  modifier?: number
   rollId?: string
   values?: number[]
   mode?: 'normal' | 'advantage' | 'disadvantage'
@@ -13,6 +14,7 @@ export interface DiceCheckOutcome {
 }
 
 export interface DiceCheckPreview {
+  modifier?: number
   mode: 'normal' | 'advantage' | 'disadvantage'
   kind: DiceCheckOutcome['kind']
   actorName: string
@@ -22,14 +24,14 @@ export interface DiceCheckPreview {
 }
 
 export function createDiceCheckPreview(kind: DiceCheckOutcome['kind'], actorName: string, targetName: string | undefined,
-  evaluate: DiceCheckPreview['evaluate'], mode: DiceCheckPreview['mode'] = 'normal'): DiceCheckPreview {
-  return { kind, actorName, targetName, evaluate, mode, values: [] }
+  evaluate: DiceCheckPreview['evaluate'], mode: DiceCheckPreview['mode'] = 'normal', modifier?: number): DiceCheckPreview {
+  return { kind, actorName, targetName, evaluate, mode, modifier, values: [] }
 }
 
 export function previewDiceCheck(preview: DiceCheckPreview, value: number, id: string, index = preview.values.length): DiceCheckOutcome {
   preview.values[index] = value
   const values = preview.values.slice(preview.mode === 'normal' ? -1 : -2)
-  return { id, provisional: true, kind: preview.kind, actorName: preview.actorName, targetName: preview.targetName,
+  return { id, provisional: true, kind: preview.kind, modifier: preview.modifier, actorName: preview.actorName, targetName: preview.targetName,
     success: preview.evaluate(values[0], values[1]) }
 }
 
@@ -41,12 +43,12 @@ export function createAttackDiceCheckPreview(
     const die = mode === 'advantage' ? Math.max(first, second ?? first)
       : mode === 'disadvantage' ? Math.min(first, second ?? first) : first
     return die !== 1 && (die >= criticalThreshold || die + modifier >= armorClass)
-  }, mode)
+  }, mode, modifier)
 }
 
 export function diceCheckOutcome(event: Dnd5eCombatEvent, id: string, name: (id: string) => string): DiceCheckOutcome | undefined {
   if (event.type === 'attack-resolved') return {
-    id, kind: 'attack', success: event.hit, actorName: name(event.actorId), targetName: name(event.targetId),
+    id, kind: 'attack', modifier: event.total - event.d20, success: event.hit, actorName: name(event.actorId), targetName: name(event.targetId),
   }
   if (event.type === 'saving-throw-resolved' && !event.automaticOutcome) return {
     id, kind: 'save', success: event.success, actorName: name(event.targetId),

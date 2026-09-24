@@ -22,7 +22,7 @@ describe('committed area Sculpt Spells Token selection', () => {
   })
 
   it('keeps protection selection on map Tokens instead of duplicating names in the action bar', () => {
-    expect(workspaceSource.includes('点击蓝框角色，金边表示已保护。')).toBe(true)
+    expect(workspaceSource.includes('点击蓝框角色或先攻头像，金边表示已保护。')).toBe(true)
     expect(workspaceSource).not.toContain('或直接点击下方名字')
     expect(workspaceSource).not.toContain('aria-label="法术塑型保护目标"')
   })

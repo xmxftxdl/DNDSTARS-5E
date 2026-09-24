@@ -1,4 +1,5 @@
 export interface DiceCheckPresentation {
+  modifier?: number
   mode: 'normal' | 'advantage' | 'disadvantage'
   kind?: 'attack' | 'save' | 'check'
   success?: boolean

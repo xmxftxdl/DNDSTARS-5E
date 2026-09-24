@@ -1,5 +1,8 @@
 import type { D20RollMode } from '../../contracts'
-import type { Dnd5eCombatant } from '../headlessCombatEngine'
+import { dnd5eAbilityCheckRollMode, type Dnd5eCombatant } from '../headlessCombatEngine'
+import { dnd5eClassDefinition } from '../classes'
+import { getDnd5eSrdMonster } from '../monsters'
+import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
 import { dnd5eFleshToStoneTargetHasFlesh } from '../fleshToStone'
 import { dnd5eSavingThrowMode } from '../passiveDefenses'
 import type {
@@ -127,6 +130,7 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
   actor: Dnd5eActivityRollTargetV1
   targets: readonly Dnd5eActivityRollTargetV1[]
   choices?: Readonly<Record<string, string>>
+  combatants?: Readonly<Record<string, Dnd5eCombatant>>
   hostSavingThrowMode: (targetId: string, check: Extract<Dnd5eActivityCheckV1, { kind: 'saving-throw' }>) => D20RollMode
   hostAttackRollMode: (targetId: string, delivery?: 'melee' | 'ranged') => D20RollMode
   hostAbilityCheckMode?: (
@@ -158,7 +162,30 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
     let acceptedCounts: readonly number[] | undefined
     let d20RollKind: Dnd5ePluginDiceRollDeclaration['d20RollKind']
     let d20RollMode: D20RollMode | undefined
-    if (check?.kind === 'saving-throw') {
+    if (check?.kind === 'opposed-ability-check') {
+      const sourceSide = declaration.id === check.rollId
+      const declared = (sourceSide ? check.sourceRollMode : check.targetRollMode) ?? 'normal'
+      const combatant = input.combatants?.[sourceSide ? input.actor.id : target.id]
+      let baseMode: D20RollMode = declared === 'host-derived' ? 'normal' : declared
+      if (declared === 'host-derived' && combatant) {
+        const option = sourceSide
+          ? { ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, {
+              spellcastingAbility: (combatant.classId ? dnd5eClassDefinition(combatant.classId)?.spellcasting?.ability : undefined) ??
+                (combatant.statBlockId ? getDnd5eSrdMonster(combatant.statBlockId)?.spellcasting?.ability : undefined),
+            }) }
+          : check.targetOptions[0]!
+        baseMode = dnd5eAbilityCheckRollMode(combatant, option)
+      }
+      const sizeRule = sourceSide ? check.sourceRollModeByTargetSizeRank : undefined
+      const sizeMode = sizeRule && target.sizeRank != null &&
+        (sizeRule.minimum == null || target.sizeRank >= sizeRule.minimum) &&
+        (sizeRule.maximum == null || target.sizeRank <= sizeRule.maximum) ? sizeRule.mode : undefined
+      d20RollMode = combineRollModes([baseMode, sizeMode])
+      d20RollKind = 'ability-check'
+      count = d20RollMode === 'normal' ? 1 : 2
+      // Accept already-open requests created before opposed recipes were mode-aware.
+      acceptedCounts = declaration.count === 2 && count === 1 ? [1, 2] : undefined
+    } else if (check?.kind === 'saving-throw') {
       const mode = savingThrowModeForTarget({
         check,
         actor: input.actor,
@@ -198,6 +225,7 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
       id: `${declaration.id}:${target.id}`,
       label: `${target.name?.trim() || target.id} · ${declaration.label}`,
       count,
+      ...(check?.kind === 'opposed-ability-check' ? { ownerOnlyPresentation: true } : {}),
       rollerTokenId: check?.kind === 'saving-throw' ||
         (check?.kind === 'opposed-ability-check' && check.opposedRollId === declaration.id) ? target.id : input.actor.id,
       ...(d20RollKind ? { d20RollKind } : {}),

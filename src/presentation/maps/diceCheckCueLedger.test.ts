@@ -1,6 +1,18 @@
 import { expect, it } from 'vitest'
-import { createDiceCheckCueLedger } from './diceCheckCueLedger'
+import { createDiceCheckCueLedger, enqueueDiceCheckCue } from './diceCheckCueLedger'
 const preview = { id: 'preview-1', rollId: 'roll-1', values: [15, 3], mode: 'disadvantage' as const, kind: 'attack' as const, actorName: '法师', targetName: '目标', success: false, provisional: true }
+it('replaces a successful save cue when the same 19/3 pool changes to disadvantage', () => {
+  const accept = createDiceCheckCueLedger()
+  const success = { ...preview, kind: 'save' as const, values: [19, 3], mode: 'advantage' as const, success: true }
+  const failure = { ...success, mode: 'disadvantage' as const, success: false }
+  expect(accept(success)).toBe(true)
+  expect(accept(failure)).toBe(true)
+  const unrelated = { ...preview, id: 'other', rollId: 'other' }
+  expect(enqueueDiceCheckCue([success, unrelated], failure)).toEqual([failure, unrelated])
+  expect(accept({ ...failure, id: 'repeat-delivery' })).toBe(false)
+  expect(accept(success)).toBe(true)
+  expect(accept(failure)).toBe(true)
+})
 function memoryStorage() {
   const values = new Map<string, string>()
   return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) } }

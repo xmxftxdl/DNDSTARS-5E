@@ -72,6 +72,7 @@ const TOOL_LABELS: Record<MapGeometryTool, string> = {
   door: '门',
   window: '窗户',
   obstacle: '区域/障碍',
+  'magical-darkness': '魔法黑暗',
   'difficult-terrain': '困难地形',
   elevation: '格子高度',
   light: '光源',
@@ -175,7 +176,6 @@ export default function MapGeometryToolbar({
   const removeEntity = useMapGeometryStore((state) => state.removeEntity)
   const setVision = useMapGeometryStore((state) => state.setVision)
   const setEnvironment = useMapGeometryStore((state) => state.setEnvironment)
-  const setWeather = useMapGeometryStore((state) => state.setWeather)
   const setOverheadSpace = useMapGeometryStore((state) => state.setOverheadSpace)
   const clearMap = useMapGeometryStore((state) => state.clearMap)
   const duplicateEntity = useMapGeometryStore((state) => state.duplicateEntity)
@@ -365,18 +365,6 @@ export default function MapGeometryToolbar({
                 <option value="indoors">室内</option>
                 <option value="underground">地下</option>
                 <option value="underwater">水下</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-1 text-[10px] text-slate-400" title="权威天气会参与需要既有暴风雨的法术结算；召雷术会自动增加 1d10">
-              全图天气
-              <select
-                value={geometry.weather ?? 'normal'}
-                onChange={(event) => setWeather(mapId, event.target.value as NonNullable<MapGeometryState['weather']>)}
-                className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-                aria-label="全图天气规则"
-              >
-                <option value="normal">普通／未指定</option>
-                <option value="storm">暴风雨</option>
               </select>
             </label>
             <label className="flex items-center gap-1 text-[10px] text-slate-400" title="受限表示施法者看不到可容纳高 10 尺、半径 60 尺云层的高空空间；召雷术会在消耗资源前失败">
@@ -1022,12 +1010,11 @@ export default function MapGeometryToolbar({
                     checked={selectedEntity.magicalDarkness === true}
                     onChange={(event) => updateEntity(mapId, selectedEntity.id, {
                       magicalDarkness: event.target.checked,
-                      darknessSpellLevel: event.target.checked ? selectedEntity.darknessSpellLevel ?? 2 : undefined,
+                      darknessSpellLevel: undefined,
                     })}
                   />
                   魔法黑暗
                 </label>
-                {selectedEntity.magicalDarkness && <NumberField label="环级" min={0} value={selectedEntity.darknessSpellLevel ?? 2} onChange={(darknessSpellLevel) => updateEntity(mapId, selectedEntity.id, { darknessSpellLevel: Math.min(9, darknessSpellLevel) })} />}
               </>
             )
           )}
@@ -1135,7 +1122,7 @@ export default function MapGeometryToolbar({
             <span><b className="text-slate-100">地形标高：</b>定义脚下地面的绝对海拔，并显示等高线；它不是障碍物高度。</span>
             <span><b className="text-slate-100">地形倍率：</b>1 为正常，2 为困难地形；攀爬／游泳还会读取相应移动速度。</span>
             <span><b className="text-slate-100">掩护：</b>只在攻击射线确实穿过区域时生效，不会无条件提高目标 AC。</span>
-            <span><b className="text-slate-100">魔法黑暗：</b>压制普通光源；环级用于法术光照与黑暗互相解除的判定。</span>
+            <span><b className="text-slate-100">魔法黑暗：</b>场景黑暗由 DM 手动删除，不随光照法术自动解除。</span>
             <span><b className="text-slate-100">纯山坡／高台：</b>使用“格子高度”单击或拖动选择地图格；完成后仅显示合并选区的外边界。</span>
           </div>
         </section>

@@ -66,7 +66,7 @@
       import { MAX_DICE_POOL_COUNT } from './src/lib/dicePoolLimits'
       import { diceFrameLayout, dicePhysicsDimensions } from './src/lib/diceFrameLayout'
       import { sameOrderedDiceValues } from './src/lib/diceFrameValues'
-      import { buildNotation } from './src/lib/diceNotation'
+      import { buildNotation, percentileFaces, percentileResults } from './src/lib/diceNotation'
 
       const params = new URLSearchParams(window.location.search)
       const ORIGIN = window.location.origin
@@ -143,10 +143,21 @@
 
       function getBox() {
         if (!boxPromise) {
+          boxPromise = (async () => {
+          const container = document.getElementById('dice')
+          if (!(container.clientWidth > 0 && container.clientHeight > 0)) {
+            await new Promise(resolve => {
+              const observer = new ResizeObserver(() => {
+                if (!(container.clientWidth > 0 && container.clientHeight > 0)) return
+                observer.disconnect()
+                resolve()
+              })
+              observer.observe(container)
+            })
+          }
           if (frameSides === 4) installD4LabelScale()
           const isD4 = frameSides === 4
           const { tableMultiplier, visualScaleMultiplier } = diceFrameLayout(frameQty, frameSides)
-          const container = document.getElementById('dice')
           const scale = (isD4 ? DICE_D4_BASE_SCALE : DICE_BASE_SCALE) * visualScaleMultiplier
           const dimensions = dicePhysicsDimensions(frameQty, {
             x: Math.max(320, Math.round((container?.clientWidth || 680) * tableMultiplier)),
@@ -154,12 +165,13 @@
           }, scale)
           // Single shared physics world; the wrapper serializes rolls (a second
           // roll while one is in flight rejects rather than corrupting delivery).
-          boxPromise = createDiceBox('#dice', {
+          return createDiceBox('#dice', {
             diceCount: frameQty,
             scale,
             dimensions,
             theme: isD4 ? DICE_D4_THEME : undefined,
           })
+          })()
         }
         return boxPromise
       }
@@ -234,7 +246,7 @@
         window.parent.postMessage(payload, ORIGIN)
       }
 
-      async function handleRoll(kind, requestId, qty, sides, values, rerollIndex, dieSides, adoptedIndex) {
+      async function handleRoll(kind, requestId, qty, sides, values, rerollIndex, dieSides, adoptedIndex, appendFrom) {
         if (requestId == null) return
         if (completedRequestIds.has(requestId)) return // dedup repeat requests
         if (inFlightRequestIds.has(requestId)) return // dedup repeat requests while physics is still rolling
@@ -244,6 +256,8 @@
 
         let settled = false
         const forced = forcedValues(qty, sides, values)
+        const percentile = sides === 100 && (!Array.isArray(dieSides) || dieSides.every(side => side === 100))
+        const forcedFaces = percentile ? forced.flatMap(percentileFaces) : forced
         const physicalReroll = Number.isInteger(rerollIndex) && rerollIndex >= 0 && rerollIndex < qty
         const deliver = (vals, fallback) => {
           if (settled) return
@@ -260,14 +274,16 @@
 
         try {
           const box = await getBox()
-          const notation = Array.isArray(dieSides) && dieSides.length === qty
+          const notation = !percentile && Array.isArray(dieSides) && dieSides.length === qty
             ? dieSides.map(die => `1d${die}`).join('+') + (forced.length ? `@${forced.join(',')}` : '')
             : buildNotation(qty, sides, values)
           box.releaseDie()
           const canReroll = Number.isInteger(rerollIndex) && rerollIndex >= 0 && rerollIndex < qty && box.visibleValues().length === qty
           if (physicalReroll && !canReroll) throw new Error('The retained dice pool is unavailable')
           let outcome
-          if (canReroll) {
+          if (Number.isInteger(appendFrom) && appendFrom > 0 && appendFrom < qty && forced.length === qty) {
+            outcome = { values: await box.append(sides, forced, appendFrom) }
+          } else if (canReroll) {
             outcome = { values: await box.reroll(rerollIndex) }
             // A manual rethrow settles to the physical upper face. Never relabel
             // it to a separately generated number after the user has seen it.
@@ -277,16 +293,18 @@
             // roll() checks that physics is idle before replacing the pool.
             outcome = await box.roll(notation)
           }
+          console.info('[dice-box-frame] initial settled faces ' + JSON.stringify({ requestId, expected: forced, visible: box.visibleValues() }))
           let vals =
             Array.isArray(outcome.values) && outcome.values.length > 0
               ? outcome.values
               : fallbackValues(qty, sides)
+          if (percentile) vals = percentileResults(box.visibleValues())
           if (forced.length > 0 && !sameOrderedDiceValues(vals, forced)) {
             // The engine simulates once, swaps face materials, then replays the
             // same launch. Multi-die collisions can diverge slightly on replay,
             // leaving a different material face uppermost. Correct only the
             // settled material mapping; position/quaternion remain untouched.
-            const corrected = box.correctVisibleFaces(forced)
+            const corrected = box.correctVisibleFaces(forcedFaces)
             await new Promise((resolve) => requestAnimationFrame(resolve))
             console.info('[dice-box-frame] corrected settled forced faces', {
               requestId,
@@ -298,18 +316,19 @@
             vals = forced
           }
           const presentedValues = forced.length > 0 ? forced : vals
+          const presentedFaces = percentile ? presentedValues.flatMap(percentileFaces) : presentedValues
           // D4 forced notation in dice-box-threejs can return a different value
           // for an individual die even when the aggregate multiset looks right.
           // Pin each physical die before and after gathering so the visible D4
           // face cannot drift away from the authoritative result.
-          box.correctVisibleFaces(presentedValues)
+          box.correctVisibleFaces(presentedFaces)
           // Keep the physical roll, then gather every result (including a lone
           // d20) into a readable central grid. Every non-d4 die retains its
           // rolled top face while being leveled so no result remains leaning.
-          if (!canReroll) await box.arrangeSettledDice(presentedValues)
-          const correctedAfterArrange = box.correctVisibleFaces(presentedValues)
+          if (!canReroll) await box.arrangeSettledDice(presentedFaces)
+          const correctedAfterArrange = box.correctVisibleFaces(presentedFaces)
           const visibleValues = box.visibleValues()
-          if (!sameOrderedDiceValues(visibleValues, presentedValues)) {
+          if (!sameOrderedDiceValues(visibleValues, presentedFaces)) {
             console.warn('[dice-box-frame] visible faces differ after arrangement', {
               requestId,
               notation,
@@ -329,6 +348,15 @@
       window.addEventListener('message', (event) => {
         if (event.origin !== ORIGIN || event.source !== window.parent) return
         const data = event.data
+        if (data?.type === 'dice-box-highlight') {
+          if (data.requestId !== latestRequestId || !completedRequestIds.has(data.requestId)) return
+          void getBox().then(box => {
+            if (data.requestId !== latestRequestId) return
+            const index = data.adoptedIndex
+            box.highlightDie(Number.isInteger(index) && index >= 0 && index < box.visibleValues().length ? index : undefined)
+          })
+          return
+        }
         if (data?.type === 'dice-box-interactive' && data.requestId === latestRequestId) {
           interactive = data.enabled === true
           surface.style.cursor = interactive ? 'grab' : 'default'
@@ -347,7 +375,10 @@
             staged = true
             interactive = false
             const box = await getBox()
-            await box.stage(data.sides, forcedValues(data.qty, data.sides, data.values), data.dieSides)
+            const percentile = data.sides === 100 && (!Array.isArray(data.dieSides) || data.dieSides.every(side => side === 100))
+            const values = forcedValues(data.qty, data.sides, data.values)
+            await box.stage(data.sides, percentile ? values.flatMap(percentileFaces) : values,
+              percentile ? values.flatMap(() => [100, 10]) : data.dieSides)
             const visible = box.visibleValues()
             const verifyTopFaces = data.sides === 20 && (!Array.isArray(data.dieSides) || data.dieSides.every(side => side === 20))
             if (verifyTopFaces && !sameOrderedDiceValues(visible, data.values)) throw new Error('Staged dice do not match authoritative faces')
@@ -359,7 +390,7 @@
         if (data?.type === 'roll-dice') {
           enqueueCommand(data.requestId, async () => {
             staged = false
-            await handleRoll('dice', data.requestId, data.qty, data.sides, data.values, data.rerollIndex, data.dieSides, data.adoptedIndex)
+            await handleRoll('dice', data.requestId, data.qty, data.sides, data.values, data.rerollIndex, data.dieSides, data.adoptedIndex, data.appendFrom)
           })
           return
         }

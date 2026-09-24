@@ -30,6 +30,17 @@ const targeting: Dnd5eSpellTargetingSession = {
 }
 
 describe('SpellTargetingCoordinator', () => {
+  it('preserves the chosen altitude for all area anchors and omits it for single targets', () => {
+    const draft = { ...targeting, spellId: 'fireball', targetElevationFeet: 35,
+      area: { shape: 'circle' as const, origin: 'point' as const, radiusFeet: 20 } }
+    expect(buildSpellTargetingSubmission({ targeting: draft, selectedTargetIds: [],
+      areaTargetCell: { col: 2, row: 2 }, areaTargetCells: [{ col: 2, row: 2 }, { col: 6, row: 2 }],
+    })).toMatchObject({ targetElevationFeet: 35, areaTargetCells: [{ col: 2, row: 2 }, { col: 6, row: 2 }] })
+    expect(buildSpellTargetingSubmission({ targeting: { ...draft, area: undefined },
+      selectedTargetIds: ['enemy-1'],
+    }).targetElevationFeet).toBeUndefined()
+  })
+
   it('deduplicates authority targets while preserving projectile assignments', () => {
     const payload = buildSpellTargetingSubmission({
       targeting,

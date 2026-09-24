@@ -1,3 +1,5 @@
+import { SYMBOL_MODES, SYMBOL_LABELS } from '../symbolSpell'
+import { telekinesisCreatureActivity } from './telekinesisActivity'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import type { RegisteredContentDefinition } from '../../../domain/content/contentDefinitionRegistry'
 import type { Dnd5ePluginSpellDefinition } from '../pluginApi'
@@ -243,7 +245,7 @@ function pluginSpell(id: string): RegisteredDnd5ePluginSpell | undefined {
     : parsedRange
   const effectiveHeadlessTarget = id === 'magic-mouth'
     ? 'partial'
-    : id === 'disguise-self' || id === 'illusory-script' || id === 'mirage-arcane'
+    : id === 'telekinesis' || id === 'suggestion' || id === 'disguise-self' || id === 'illusory-script' || id === 'mirage-arcane'
       ? 'full'
       : decision[0]
   return {
@@ -300,7 +302,31 @@ function pluginSpell(id: string): RegisteredDnd5ePluginSpell | undefined {
  * owns spell slots, costly/consumed materials and long casting time; only the
  * answer itself remains a DM decision.
  */
+function narrativeStatusActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1 | undefined {
+  if (!['speak-with-animals', 'speak-with-dead', 'speak-with-plants', 'stone-shape'].includes(spell.id)) return undefined
+  const base = dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition, 'headless-action')
+  const ongoing = spell.id !== 'stone-shape'
+  return {
+    ...base,
+    target: { kind: 'self' },
+    checks: [],
+    outcomes: [{ id: 'resolved', when: { kind: 'always' }, operations:
+      [{ id: 'conversation-status', kind: 'apply-effect', target: 'actor', effectId: `${spell.id}-conversation` }] }],
+    effects: [{
+      schemaVersion: 1, id: `${spell.id}-conversation`, name: spell.name,
+      tags: ['communication', 'narrative'],
+      duration: ongoing ? { kind: 'rounds', rounds: 100, expiresAt: 'target-turn-end' } : { kind: 'instantaneous' },
+      stacking: 'replace',
+    }],
+    automation: automationCapabilityFromLegacyStatus('full', [
+      '自动结算法术资源及持续状态；对话答案、尸体资格和场景改动由桌面叙事处理，无需 DM 批准。',
+    ]),
+  }
+}
+
 function manualActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1 {
+  const narrative = narrativeStatusActivity(spell)
+  if (narrative) return narrative
   const activity = dnd5eActivityFromSpellDefinition(
     spell as Dnd5ePluginSpellDefinition,
     'headless-action',
@@ -1676,7 +1702,61 @@ function programmedIllusionActivity(
   }
 }
 
+function symbolActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1 {
+  const base = dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition, 'headless-action')
+  return {
+    ...base,
+    target: { kind: 'area', relation: 'any', origin: 'point', shape: 'cube',
+      placeRangeFeet: 5, lengthFeet: 5, widthFeet: 5, heightFeet: 5,
+      gridAligned: true, rotatable: false, maximumTargets: 256, includeSelf: true,
+      requiresLineOfSight: false, requiresLineOfEffect: true },
+    checks: undefined, effects: undefined,
+    choices: [{ id: 'symbol-mode', label: '选择魔法徽记效果', defaultOptionId: 'death',
+      options: SYMBOL_MODES.map(id => ({ id, label: SYMBOL_LABELS[id] })) }],
+    outcomes: SYMBOL_MODES.map(mode => ({
+      id: `inscribe-${mode}`, when: { kind: 'choice', choiceId: 'symbol-mode', optionId: mode },
+      operations: [{ id: `symbol-${mode}`, kind: 'create-persistent-area',
+        label: `魔法徽记·${SYMBOL_LABELS[mode]}（待触发）`, symbolMode: mode,
+        durationRounds: 5_256_000, permanent: true, concentration: false,
+        anchorMode: 'fixed', color: '#a78bfa', visual: { preset: 'arcane', intensity: 'subtle' } }],
+    })),
+    automation: automationCapabilityFromLegacyStatus('full'),
+  }
+}
+
 function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1 {
+  if (spell.id === 'alter-self') {
+    const base = dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition, 'headless-action')
+    const modes = [
+      { id: 'aquatic', label: '水生适应' },
+      { id: 'appearance', label: '改变外貌' },
+      { id: 'slashing', label: '天生武器·挥砍（爪）' },
+      { id: 'piercing', label: '天生武器·穿刺（尖牙／角）' },
+      { id: 'bludgeoning', label: '天生武器·钝击' },
+    ] as const
+    return {
+      ...base, target: { kind: 'self' }, checks: [],
+      choices: [{ id: 'alter-self-mode', label: '变身术形态', defaultOptionId: 'slashing', options: modes }],
+      effects: modes.map(mode => ({
+        schemaVersion: 1 as const, id: `alter-self-${mode.id}`, name: `变身术·${mode.label}`,
+        duration: { kind: 'rounds' as const, rounds: 600, expiresAt: 'target-turn-end' as const },
+        concentration: true, stacking: 'replace' as const,
+        tags: ['alter-self', ...(mode.id === 'aquatic' ? ['alter-self-aquatic-adaptation']
+          : mode.id === 'appearance' ? ['alter-self-appearance']
+          : ['alter-self-natural-weapon', `alter-self-natural-weapon:${mode.id}`])],
+        ...(mode.id === 'aquatic' ? { modifiers: [{ kind: 'environmental-capability' as const, breatheIn: ['water' as const] },
+          { kind: 'swim-speed' as const, mode: 'walking-speed' as const }] } : {}),
+      })),
+      outcomes: modes.map(mode => ({ id: `apply-${mode.id}`,
+        when: { kind: 'choice' as const, choiceId: 'alter-self-mode', optionId: mode.id },
+        operations: [{ id: `alter-self-${mode.id}`, kind: 'apply-effect' as const, target: 'actor' as const, effectId: `alter-self-${mode.id}` }],
+      })),
+      automation: automationCapabilityFromLegacyStatus('partial', ['天生武器与水生适应自动结算；外貌细节由玩家描述。']),
+    }
+  }
+  const narrative = narrativeStatusActivity(spell)
+  if (narrative) return narrative
+  if (spell.id === 'symbol') return symbolActivity(spell)
   if (spell.id === 'hallow') return hallowActivity(spell)
   if (spell.id === 'hallucinatory-terrain') return hallucinatoryTerrainActivity(spell)
   if (spell.id === 'programmed-illusion') return programmedIllusionActivity(spell)
@@ -1772,6 +1852,13 @@ function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefini
     // Guards and Wards protects connected building geometry rather than a
     // creature; self is only its authoritative transaction anchor.
     ? { kind: 'self' }
+    : spell.id === 'rope-trick'
+    ? {
+        kind: 'area', relation: 'any', origin: 'point', shape: 'cube',
+        placeRangeFeet: 5, lengthFeet: 5, widthFeet: 5, heightFeet: 5,
+        rotatable: false, maximumTargets: 256, includeSelf: true,
+        requiresLineOfSight: true, requiresLineOfEffect: true,
+      }
     : spell.id === 'transport-via-plants'
     ? {
         // The spell opens a passage in a plant; it never targets a creature.
@@ -1856,7 +1943,8 @@ function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefini
         id: 'spell-save', kind: 'saving-throw', rollId: 'spell-save-d20', ability: saveAbility,
         dc: { kind: 'reference', reference: { kind: 'actor-spell-save-dc' } },
         rollMode: 'host-derived', scope: 'per-target',
-        ...(concreteEffect?.conditions?.includes('charmed') ? {
+        ...(spell.id === 'seeming' ? { automaticFailureIfAllied: true } : {}),
+        ...(spell.id === 'suggestion' || concreteEffect?.conditions?.includes('charmed') ? {
           automaticSuccessIfConditionImmune: 'charmed' as const,
         } : {}),
       }]
@@ -1865,6 +1953,7 @@ function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefini
           id: 'spell-attack', kind: 'attack-roll', rollId: 'spell-attack-d20',
           attackBonus: { kind: 'reference', reference: { kind: 'actor-spell-attack-bonus' } },
           rollMode: 'host-derived', scope: 'per-target',
+          ...(spell.id === 'arcane-sword' ? { delivery: 'melee' as const } : {}),
         }]
       : undefined
   const persistentAreaOperation = isPersistentArea
@@ -2057,7 +2146,7 @@ function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefini
           effectId: concreteEffect.id,
         }],
       }] : []) as Dnd5eActivityDefinitionV1['outcomes']),
-      ...(!['disguise-self', 'illusory-script', 'mirage-arcane', 'plane-shift', 'unseen-servant'].includes(spell.id) ? [{
+      ...(!['suggestion', 'disguise-self', 'illusory-script', 'mirage-arcane', 'plane-shift', 'unseen-servant', 'rope-trick', 'seeming'].includes(spell.id) ? [{
         id: 'dm-boundary',
         when: spell.id === 'modify-memory' && checks?.[0]
           ? { kind: 'check' as const, checkId: checks[0].id, result: 'failure' as const }
@@ -2086,12 +2175,14 @@ function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefini
       }] : []),
     ],
     automation: automationCapabilityFromLegacyStatus(
-      spell.id === 'disguise-self' || spell.id === 'illusory-script' ||
+      spell.id === 'suggestion' || spell.id === 'disguise-self' || spell.id === 'illusory-script' ||
         spell.id === 'mirage-arcane' || spell.id === 'plane-shift' ||
-        spell.id === 'unseen-servant'
+        spell.id === 'unseen-servant' || spell.id === 'seeming'
         ? 'full'
         : 'partial', [
-      spell.id === 'guards-and-wards'
+      spell.id === 'seeming'
+        ? '友方直接接受外观伪装，敌方魅力豁免失败后生效；外观细节通过语音说明，无需 DM 额外批准。'
+        : spell.id === 'guards-and-wards'
         ? 'Host 自动校验 V/S/M、保留价值至少 10 gp 的小银棒、推进 10 分钟施法时间并消费所选法术位；建筑区域与其中全部开放式结界效果由共享 DM 边界裁定。'
         : spell.id === 'transport-via-plants'
         ? 'Host 自动校验 V/S、10 尺入口落点、施法动作与法术位，并追踪 1 轮的植物连接；入口植物资格、同位面且熟悉的出口和每名穿越者 5 尺移动消耗由共享 DM 边界裁定。'
@@ -2308,13 +2399,6 @@ function truePolymorphActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivity
         permanentAfterConcentrationCompletes: true, concentration: true,
         maximumChallengeRating: 'target-level-or-challenge-rating',
       }],
-    }, {
-      id: 'dm-boundary', when: { kind: 'always' }, operations: [{
-        id: 'true-polymorph-adjudication', kind: 'manual-adjudication',
-        prompt: '确认目标可见且在 30 尺内；不愿意的生物采用 Host 的感知豁免。确认所选新生物 CR 不高于原目标 CR（无 CR 时不高于等级）；维持完整 1 小时专注后变化成为永久效果。对象相关的两种变化模式不由 VTT 自动执行，玩家通过语音描述。',
-        reason: '开放式生物目录需要 DM 明示确认；地图或生物与物体之间的变化不进入自动化。',
-        requiresDmApproval: true,
-      }],
     }],
     automation: automationCapabilityFromLegacyStatus('partial', [
       'Host 只自动结算生物变生物：30 尺目标、感知豁免、形态数据与生命池、0 HP 超额伤害、装备不可用、专注及满 1 小时永久化；对象相关模式只通过语音叙事。',
@@ -2331,6 +2415,11 @@ function partialConcreteEffects(
     ? { kind: 'concentration', maximumRounds: rounds }
     : { kind: 'rounds', rounds, expiresAt: 'target-turn-end' }
   if (spell.id === 'etherealness') return [concreteAuditedEffect(spell)!]
+  if (spell.id === 'suggestion') return [{
+    schemaVersion: 1, id: 'suggestion', name: spell.name,
+    duration, concentration: true, stacking: 'replace', tags: ['suggestion'],
+    sourceLink: { targetHarmedBySourceAlly: true },
+  }]
   // Truth-detection semantics keep Glibness partial, but the one-hour
   // Charisma-check floor is deterministic. Keep it in the safe subset so a
   // live ability check can actually replace a raw d20 below 15.
@@ -2459,6 +2548,14 @@ function partialConcreteEffects(
     // until a DM removes it after the creature returns or leaves the scene.
     duration: { kind: 'permanent' },
     extensionCondition: 'plane-shifted',
+    stacking: 'replace',
+  }]
+  if (spell.id === 'seeming') return [{
+    schemaVersion: 1,
+    id: 'seeming-appearance',
+    name: spell.name,
+    tags: ['illusion', 'disguise', 'appearance'],
+    duration,
     stacking: 'replace',
   }]
   if (spell.id === 'disguise-self') return [{
@@ -3165,7 +3262,6 @@ function auditedChoiceOperations(
     maximumChallengeRating: spell.id === 'animal-shapes' ? 4 : 'target-level-or-challenge-rating',
     maximumSizeRank: spell.id === 'animal-shapes' ? 3 : undefined,
     equipmentChoiceId: spell.id === 'shapechange' ? 'equipment' : undefined,
-    seenConfirmationChoiceId: spell.id === 'shapechange' ? 'seen' : undefined,
   }]
   if (spell.id === 'alarm' && (optionId === 'mental' || optionId === 'audible')) return [{
     id: `alarm-area-${optionId}`,
@@ -3254,13 +3350,6 @@ function auditedModeChoices(
           { id: 'drop', label: '掉落在地', description: '装备留在施法位置。' },
         ],
         defaultOptionId: 'merge',
-      }, {
-        id: 'seen', label: '形态熟悉度',
-        options: [
-          { id: 'confirmed', label: '我至少见过该种生物一次' },
-          { id: 'not-confirmed', label: '我没有见过该种生物（不能采用此形态）' },
-        ],
-        defaultOptionId: 'confirmed',
       }]
     : [modeChoice]
 }
@@ -4071,6 +4160,7 @@ function auditedChoiceEffects(spell: RegisteredDnd5ePluginSpell): readonly Dnd5e
 }
 
 function auditedTriggeredActivities(spell: RegisteredDnd5ePluginSpell): readonly Dnd5eActivityDefinitionV1[] {
+  if (spell.id === 'telekinesis') return [telekinesisCreatureActivity(dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition, 'headless-action'), true)]
   if (spell.id === 'geas') return [{
     schemaVersion: 1,
     id: 'spell:geas:violate-command',
@@ -5045,7 +5135,8 @@ function auditedTriggeredActivities(spell: RegisteredDnd5ePluginSpell): readonly
     }, {
       ...common,
       id: 'spell:arcane-hand:forceful-hand', name: `${spell.name}·推击之掌`,
-      checks: [opposed],
+      // Forceful Hand contests Athletics only; Acrobatics is a grapple option.
+      checks: [{ ...opposed, targetOptions: [{ ability: 'str' as const, skill: 'athletics' }] }],
       outcomes: [{ id: 'command', when: { kind: 'always' }, operations: [clearPreviousCommand, relocate] }, {
         id: 'push', when: { kind: 'check', checkId: opposed.id, result: 'success' },
         operations: [{
@@ -5149,7 +5240,7 @@ function auditedTriggeredActivities(spell: RegisteredDnd5ePluginSpell): readonly
     checks: [{
       id: 'spell-attack', kind: 'attack-roll', rollId: 'arcane-sword-attack-d20',
       attackBonus: { kind: 'reference', reference: { kind: 'actor-spell-attack-bonus' } },
-      rollMode: 'host-derived', scope: 'per-target',
+      rollMode: 'host-derived', delivery: 'melee', scope: 'per-target',
     }],
     outcomes: [{
       id: 'move-sword', when: { kind: 'always' },
@@ -5216,7 +5307,7 @@ function auditedTriggeredActivities(spell: RegisteredDnd5ePluginSpell): readonly
           id: `shapechange-change-${option.id}`, kind: 'transform-creature' as const, target: 'actor' as const,
           formChoiceId: 'mode', profile: 'shapechange' as const, durationRounds: auditedDurationRounds(spell),
           concentration: true, maximumChallengeRating: 'target-level-or-challenge-rating' as const,
-          equipmentChoiceId: 'equipment', seenConfirmationChoiceId: 'seen',
+          equipmentChoiceId: 'equipment',
           requiresExistingSourceActivityId: 'spell:shapechange',
         }],
       })),
@@ -6123,6 +6214,7 @@ function auditedPersistentAreaExtension(
  * executable branches or trusting prose supplied by a client.
  */
 function fullActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1 {
+  if (spell.id === 'telekinesis') return telekinesisCreatureActivity(dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition, 'headless-action'))
   if (spell.id === 'conjure-celestial') return conjureCelestialActivity(spell)
   if (spell.id === 'conjure-elemental') return conjureElementalActivity(spell)
   if (spell.id === 'conjure-fey') return conjureFeyActivity(spell)
@@ -6132,7 +6224,7 @@ function fullActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitio
   if (spell.id === 'command') return commandActivity(spell)
   if (spell.id === 'legend-lore') return legendLoreActivity(spell)
   if (
-    spell.id === 'disguise-self' || spell.id === 'illusory-script' ||
+    spell.id === 'suggestion' || spell.id === 'disguise-self' || spell.id === 'illusory-script' ||
     spell.id === 'mirage-arcane' || spell.id === 'unseen-servant'
   ) {
     return partialActivity(spell)
@@ -6168,8 +6260,9 @@ function fullActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitio
       : spell.id === 'arcane-eye'
         ? {
             kind: 'area', relation: 'any', origin: 'point', shape: 'circle',
-            placeRangeFeet: 30, radiusFeet: 5, maximumTargets: 1,
-            requiresLineOfSight: true, requiresLineOfEffect: true,
+            placeRangeFeet: 30, radiusFeet: 0, maximumTargets: 256, includeSelf: true,
+            // The sensor targets a point, not the creatures standing near it.
+            requiresLineOfSight: false, requiresLineOfEffect: true,
           }
       : spell.id === 'mislead'
         ? {
@@ -6312,6 +6405,7 @@ function fullActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitio
           id: 'spell-attack', kind: 'attack-roll', rollId: 'spell-attack-d20',
           attackBonus: { kind: 'reference', reference: { kind: 'actor-spell-attack-bonus' } },
           rollMode: 'host-derived', scope: 'per-target',
+          ...(spell.id === 'arcane-sword' ? { delivery: 'melee' as const } : {}),
         }]
       : undefined
   const stateCodes = (AUDITED_RULE_STATE_CODE_OVERRIDES[spell.id] ?? decision.slice(1))
@@ -6526,7 +6620,7 @@ function fullActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitio
 
 const partialSpells = Object.entries(decisions)
   .filter(([id, decision]) =>
-    (decision[0] === 'partial' && id !== 'disguise-self' && id !== 'illusory-script' && id !== 'mirage-arcane') ||
+    (decision[0] === 'partial' && id !== 'telekinesis' && id !== 'suggestion' && id !== 'disguise-self' && id !== 'illusory-script' && id !== 'mirage-arcane') ||
     id === 'magic-mouth')
   .flatMap(([id]) => {
     const spell = pluginSpell(id)
@@ -6547,7 +6641,7 @@ const manualSpellById = new Map(manualSpells.map((spell) => [spell.id, spell]))
 const fullSpells = Object.entries(decisions)
   .filter(([id, decision]) =>
     (decision[0] === 'full' && id !== 'magic-mouth') ||
-    id === 'disguise-self' || id === 'illusory-script' || id === 'mirage-arcane')
+    id === 'telekinesis' || id === 'suggestion' || id === 'disguise-self' || id === 'illusory-script' || id === 'mirage-arcane')
   .flatMap(([id]) => {
     const spell = pluginSpell(id)
     return spell ? [spell] : []

@@ -19,8 +19,10 @@ export function createDiceCheckCueLedger(storage?: Pick<Storage, 'getItem' | 'se
     const identity = outcome.rollId && outcome.values
       ? JSON.stringify([outcome.rollId, outcome.kind, outcome.mode, outcome.values, outcome.success])
       : outcome.id
-    if (state.seen.includes(identity) || state.seen.includes(outcome.id)) return false
     const signature = outcome.rollId ? JSON.stringify([outcome.kind, outcome.rollId]) : undefined
+    const correctedPreview = outcome.provisional && signature && signature in state.previews &&
+      state.previews[signature] !== outcome.success
+    if (state.seen.includes(identity) && !correctedPreview) return false
     let show = true
     if (outcome.provisional && signature) state.previews[signature] = outcome.success
     else if (signature && signature in state.previews) {
@@ -32,4 +34,13 @@ export function createDiceCheckCueLedger(storage?: Pick<Storage, 'getItem' | 'se
     try { storage?.setItem(key, JSON.stringify(state)) } catch { /* Retain memory fallback. */ }
     return show
   }
+}
+
+/** Corrections to one roll replace its pending/visible cue instead of trailing it. */
+export function enqueueDiceCheckCue(queue: DiceCheckOutcome[], outcome: DiceCheckOutcome): DiceCheckOutcome[] {
+  const index = queue.findIndex(item => outcome.rollId
+    ? item.rollId === outcome.rollId && item.kind === outcome.kind
+    : item.id === outcome.id)
+  if (index < 0) return [...queue, outcome]
+  return queue.map((item, candidate) => candidate === index ? outcome : item)
 }

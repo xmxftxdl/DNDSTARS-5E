@@ -54,6 +54,9 @@ export default function RoomDicePanel({ entries, besideTray, onClear, historySco
             {entry.targetName && <p>目标：{entry.targetName}</p>}
             <div aria-label="各骰点数">{entry.values.map((value, index) => <span key={index}>d{entry.dieSides?.[index] ?? entry.sides} · {value}</span>)}</div>
             <p>{entry.check ? diceCheckModeLabel(entry.check) : entry.formula}{entry.total == null ? ' · 尚未返回骰值' : ` = ${entry.total}`}</p>
+            {entry.bonus != null && entry.total != null && <p>
+              骰点 {entry.total - entry.bonus} {entry.bonus >= 0 ? '+' : '−'} 加值 {Math.abs(entry.bonus)} = {entry.total}
+            </p>}
           </div>
         </details>)}
       </div>}

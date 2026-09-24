@@ -33,6 +33,7 @@ export interface RoomDiceEntry {
   values: number[]
   formula: string
   total?: number
+  bonus?: number
   status: 'waiting' | 'review' | 'confirmed' | 'result'
   updatedAt: number
 }
@@ -48,6 +49,10 @@ export function upsertRoomDice(entries: readonly RoomDiceEntry[], incoming: Room
     .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 24)
 }
 
+export function sharedDicePresentationLabels(event: Pick<SharedRollRequestEvent, 'label' | 'targetName'>) {
+  return { label: event.label.replace(/（DM 修正）$/, ''), targetName: event.targetName }
+}
+
 export function roomDiceRequest(event: SharedRollRequestEvent): RoomDiceEntry {
   const adopted = event.sides === 20 ? adoptedD20Index(event.values, event.check) : undefined
   const confirmed = event.requestId.endsWith(':dm-confirmed')
@@ -56,7 +61,7 @@ export function roomDiceRequest(event: SharedRollRequestEvent): RoomDiceEntry {
     rollerTokenId: event.rollerTokenId, rollerCharacterId: event.targetCharacterId,
     rollerName: event.rollerName || (event.delivery === 'player-roll-result' || event.delivery === 'player-roll-request'
       ? event.targetName : event.sourceMode === 'dm' ? 'DM' : '玩家'),
-    label: event.label.replace(/（DM 修正）$/, ''), targetName: event.targetName,
+    ...sharedDicePresentationLabels(event),
     sides: event.sides, values: event.values, check: event.check,
     formula: `${event.count}d${event.sides}`,
     total: adopted != null ? event.values[adopted] : event.values.length ? event.values.reduce((sum, value) => sum + value, 0) : undefined,
@@ -72,8 +77,8 @@ export function roomDiceResult(event: SharedDiceState): RoomDiceEntry | null {
     id: event.roll.sourceRollIds?.[0] ?? event.id, sourceRollIds: event.roll.sourceRollIds,
     rollerName: event.rollerName || (event.sourceMode === 'dm' ? 'DM' : '玩家'),
     label: event.roll.label, targetName: event.roll.targetName,
-    sides: event.roll.sides, values: event.roll.values, total: event.roll.total,
-    formula: event.roll.formula || `${event.roll.values.length}d${event.roll.sides}`,
+    sides: event.roll.sides, values: event.roll.values, total: event.roll.total, bonus: event.roll.bonus,
+    formula: event.roll.formula || `${event.roll.values.length}d${event.roll.sides}${event.roll.bonus ? `${event.roll.bonus > 0 ? '+' : ''}${event.roll.bonus}` : ''}`,
     status: 'result', updatedAt: event.updatedAt,
   }
 }
@@ -94,4 +99,13 @@ export function readRoomDiceFeed(scope: string): RoomDiceEntry[] {
 
 export function writeRoomDiceFeed(scope: string, entries: readonly RoomDiceEntry[]) {
   try { window.sessionStorage.setItem(`astraltrace:room-dice:v1:${scope}`, JSON.stringify(entries.slice(0, 24))) } catch { /* Optional display cache. */ }
+}
+
+/** Public records do not imply animating another creature's opposed die in this player's tray. */
+export function shouldPresentSharedDiceInPlayerTray(
+  event: Pick<SharedRollRequestEvent, 'ownerOnlyPresentation' | 'targetCharacterId'>,
+  controlledCharacterIds: ReadonlySet<string>,
+): boolean {
+  if (event.targetCharacterId) return controlledCharacterIds.has(event.targetCharacterId)
+  return !event.ownerOnlyPresentation
 }

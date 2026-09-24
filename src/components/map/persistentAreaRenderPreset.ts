@@ -15,5 +15,6 @@ export function dnd5ePersistentAreaRenderPreset(
   area: PersistentAreaRenderPresetSource,
 ): string {
   if (area.coreSpellId === 'magic-circle') return 'magic-circle'
+  if (area.coreSpellId === 'alarm') return 'alarm'
   return dnd5ePersistentAreaPresentationVisual(area)?.preset ?? ''
 }

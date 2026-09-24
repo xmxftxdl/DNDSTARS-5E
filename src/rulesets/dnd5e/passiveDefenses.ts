@@ -250,6 +250,9 @@ export function dnd5eSavingThrowModeExplanation(
   const rageStrength = defensiveClassLevel(creature, 'barbarian') >= 1 && creature.classState.raging === true && ability === 'str'
   const poisonProtection = ['poisoned', '中毒'].includes((context.condition ?? '').trim().toLowerCase()) &&
     hasMechanicalEffect(creature, 'srd-5.1:spell:protection-from-poison')
+  const antitoxin = (context.damageType === 'poison' || ['poisoned', '中毒'].includes((context.condition ?? '').trim().toLowerCase())) &&
+    !['construct', 'undead', '构装体', '构装生物', '亡灵', '不死生物'].includes(normalizedCreatureType(creature.creatureType)) &&
+    effectiveDnd5eActiveEffects(creature.classState.activeEffects).some(effect => effect.modifiers?.poisonSavingThrowAdvantage)
   const sourceType = normalizedCreatureType(context.sourceCreatureType)
   const holyNimbus = defensiveClassLevel(creature, 'paladin') >= 20 && defensiveHasSubclass(creature, 'paladin', 'devotion') &&
     (creature.classState.holyNimbusRoundsRemaining ?? 0) > 0 && context.sourceIsSpell === true &&
@@ -301,6 +304,7 @@ export function dnd5eSavingThrowModeExplanation(
       { active: racialSaveAdvantage, reason: 'racial-save-advantage' },
       { active: sourceQualifiedConditionSaveAdvantage, reason: 'source-qualified-condition-save-advantage' },
       { active: poisonProtection, reason: 'protection-from-poison' },
+      { active: antitoxin, reason: 'antitoxin' },
       { active: dodgeDexterity, reason: 'dodge' },
       { active: strengthEffect.advantage, reason: 'active-effect-strength-advantage' },
       {

@@ -60,6 +60,7 @@ const MONSTER_CORE_ACTIVE_EFFECT_SPELL_IDS = new Set([
 ])
 
 const MONSTER_CORE_CONTROL_SPELL_IDS = new Set([
+  'faerie-fire',
   'banishment',
   'hold-person',
   'slow',
@@ -129,6 +130,7 @@ export function dnd5eMonsterCoreSpellCompatibility(
     (spell.onHitEffect && !MONSTER_CORE_ON_HIT_EFFECT_SPELL_IDS.has(spell.id)) ||
     (spell.onFailedSaveEffect &&
       spell.onFailedSaveEffect !== 'charm-person' &&
+      !(spell.id === 'sunburst' && spell.onFailedSaveEffect === 'sunburst-blindness') &&
       !(MONSTER_CORE_CONTROL_SPELL_IDS.has(spell.id) && spell.onFailedSaveEffect === spell.id) &&
       !(spell.id === 'thunderwave' && spell.onFailedSaveEffect === 'thunderwave-push')) ||
     spell.sustainedAttack ||

@@ -1,3 +1,5 @@
+import { dnd5eActivityActorSnapshotFromCombatantV1 } from './dnd5eActivityCombatAuthority'
+import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
 import type { Character } from '../../../types/character'
 import {
   dnd5eAbilityCheckRollMode,
@@ -258,7 +260,7 @@ async function authoritativeRolls(input: {
           targetModifier(candidate) > targetModifier(best) ? candidate : best,
         check.targetOptions[0]!)
         const sourceDeclared = check.sourceRollMode === 'host-derived'
-          ? dnd5eAbilityCheckRollMode(actor, { ability: check.sourceAbility })
+          ? dnd5eAbilityCheckRollMode(actor, { ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, dnd5eActivityActorSnapshotFromCombatantV1(actor)) })
           : check.sourceRollMode ?? 'normal'
         const sizeMode = check.sourceRollModeByTargetSizeRank &&
           (check.sourceRollModeByTargetSizeRank.minimum == null || target.sizeRank >= check.sourceRollModeByTargetSizeRank.minimum) &&
@@ -277,7 +279,7 @@ async function authoritativeRolls(input: {
         rolls[rollKey] = {
           values: [...await input.roll({
             id: rollKey,
-            label: `${input.available.activity.name} · ${check.sourceAbility.toUpperCase()} 对抗检定`,
+            label: `${input.available.activity.name} · ${check.sourceAbility === 'spellcasting' ? '施法属性' : check.sourceAbility.toUpperCase()} 对抗检定`,
             count: sourceMode === 'normal' ? 1 : 2,
             sides: 20,
             actorId: input.actorId,

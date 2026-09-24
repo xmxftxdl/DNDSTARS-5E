@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createEmptyMapGeometry } from '../../lib/mapGeometry'
+import { createEmptyMapFog, fogCoversPoint } from '../../lib/fogOfWar'
+import { settleSunburstSpellDarknessDispels } from '../../rulesets/dnd5e/sunburstDarknessDispel'
 import {
   createDnd5eConditionEffect,
   createDnd5eCombatant,
@@ -69,6 +72,23 @@ function map(): BattleMap {
 const unusedRoll = async () => 1
 
 describe('地图战斗结果结算器', () => {
+  it('preserves Sunburst scene darkness dispelling through concentration settlement', async () => {
+    const currentMap = map()
+    const geometry = createEmptyMapGeometry(currentMap.id)
+    geometry.darknessFog = { ...createEmptyMapFog(currentMap.id), filled: true }
+    const dispel = settleSunburstSpellDarknessDispels({ map: currentMap, characters: [],
+      geometry, anchorCell: { col: 1, row: 1 }, radiusFeet: 60 })
+    expect(dispel.geometry).toBeDefined()
+    const priorApplication = { ...dispel }
+    const settled = await settleDnd5eConcentrationChecks({
+      result: { ok: true, state: startDnd5eHeadlessCombat('combat', [combatant('hero', 20), combatant('enemy', 10)]), events: [] },
+      map: currentMap, characters: [], characterIdByCombatantId: {}, priorApplication,
+      rollD20: unusedRoll, rollD4: unusedRoll, rollDice: async () => [],
+    })
+    expect(settled.application.geometry).toEqual(dispel.geometry)
+    expect(fogCoversPoint(settled.application.geometry!.darknessFog!, 75, 75)).toBe(false)
+  })
+
   it('没有待处理事件时不请求骰子并直接生成地图应用计划', async () => {
     const state = startDnd5eHeadlessCombat('combat', [combatant('hero', 20), combatant('enemy', 10)])
     const result: Extract<Dnd5eActionResult, { ok: true }> = { ok: true, state, events: [] }

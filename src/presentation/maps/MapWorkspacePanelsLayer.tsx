@@ -174,7 +174,7 @@ const MemoizedMapWorkspacePanelsLayer = memo(function MapWorkspacePanelsLayer({
       )}
 
       {showFloatingInitiative && (
-        <div className="pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center px-2">
+        <div className="pointer-events-none fixed inset-x-0 top-[26px] z-30 flex justify-center px-2">
           <MapWorkspaceInitiativePanel
             entries={initiativeEntries}
             activeIndex={initiativeActiveIndex}

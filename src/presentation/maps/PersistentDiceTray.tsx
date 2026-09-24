@@ -1,10 +1,11 @@
 import { MAX_DICE_POOL_COUNT } from '../../lib/dicePoolLimits'
 import type { DiceCheckPresentation } from './diceCheckPresentation'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import DiceBoxRollOverlay from '../../components/DiceBoxRollOverlay'
 import type { DiceTrayHistoryRecord } from './diceTrayHistory'
 
 export interface PersistentDiceRequest {
+  appendFrom?: number
   check?: DiceCheckPresentation
   dieSides?: number[]
   id: string
@@ -21,7 +22,8 @@ export interface PersistentDiceRequest {
 }
 
 /** Keep the same WebGL world after settlement; only a new pool replaces it. */
-export default function PersistentDiceTray({ request, visible, onGrabReroll, frameBounds, restoredRecord }: {
+export default function PersistentDiceTray({ request, visible, onGrabReroll, frameBounds, restoredRecord, check }: {
+  check?: DiceCheckPresentation
   restoredRecord?: DiceTrayHistoryRecord
   request: PersistentDiceRequest | null
   visible: boolean
@@ -38,11 +40,14 @@ export default function PersistentDiceTray({ request, visible, onGrabReroll, fra
   } : null))
   if (request && request.id !== retained?.id) setRetained(request)
   const current = request && request.id !== retained?.id ? request : retained
+  const worldCount = useRef(current?.count ?? 1)
   if (!current) return null
+  if (!current.staging && current.appendFrom == null) worldCount.current = current.retainedValues?.length ?? current.count
   return <DiceBoxRollOverlay
-    key={`dice-ui-2:${current.sides}:${current.retainedValues?.length ?? current.count}`}
+    key={`dice-ui-2:${current.sides}:${worldCount.current}`}
+    appendFrom={current.appendFrom}
     staging={current.staging}
-    check={current.check}
+    check={check ?? request?.check ?? current.check}
     requestId={current.id}
     count={current.count}
     sides={current.sides}

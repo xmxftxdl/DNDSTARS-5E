@@ -102,6 +102,16 @@ function makeBaseline(
 }
 
 describe('player action ack helpers', () => {
+  it('routes a rejected destination-map interaction back to its own map, not the DM scene', () => {
+    const ack = buildPlayerActionAck({
+      action: makeAction({ mapId: 'portal-destination', combatId: undefined, type: 'dnd5e-map-interaction' }),
+      mapId: 'dm-source', combatId: 'old-combat', status: 'rejected', reason: 'door-out-of-reach',
+      round: 1, initiativeIndex: 0, appliedAt: 2000,
+    })
+    expect(ack).toMatchObject({ mapId: 'portal-destination', actionId: 'action-1', reason: 'door-out-of-reach' })
+    expect(ack.combatId).toBeUndefined()
+  })
+
   it('builds an accepted ack with appliedAt and action result summary', () => {
     const before = makeBaseline()
     const after = makeBaseline(

@@ -161,7 +161,7 @@ export function dnd5eActivityRollLogDetails(
 
 export interface Dnd5eActivityMovementLogDetail {
   targetId: string
-  mode: 'push' | 'pull' | 'teleport' | 'swap' | 'ascend' | 'descend'
+  mode: 'push' | 'pull' | 'forced' | 'teleport' | 'swap' | 'ascend' | 'descend'
   distanceFeet: number
 }
 

@@ -303,6 +303,47 @@ describe('D&D 5e map bridge', () => {
     expect(ended.state.initiativeIndex).toBe(1)
   })
 
+  it('persists Time Stop monster suspension and cleans legacy orphan markers on rehydration', () => {
+    const groupId = 'activity-extra-turns:combat:1:caster:time-stop'
+    const enemy = token({ id: 'enemy', type: 'enemy', dnd5eCombatState: {
+      schemaVersion: 2,
+      activityExtraTurnSuspension: { groupId, reactionAvailableBefore: true },
+      activeEffects: [createDnd5eMechanicalEffect({
+        id: 'suspension', definitionId: `activity-extra-turns:suspension:${groupId}`,
+        label: '时间停止', targetId: 'enemy', duration: { type: 'permanent' },
+        source: { kind: 'spell', actorId: 'caster', rulesId: 'time-stop' },
+        modifiers: { preventReactions: true },
+      })],
+    } })
+    const caster = token({ id: 'caster', type: 'enemy', x: 20, dnd5eCombatState: {
+      schemaVersion: 2,
+      activityExtraTurnGroup: { groupId, slotIds: [`${groupId}:1`], endOnAffectOther: true },
+    } })
+    const map: BattleMap = { id: 'map', name: 'map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [caster, enemy] }
+    const initiativeOrder = [
+      { tokenId: 'caster', slotId: `${groupId}:1`, label: '', emoji: '', color: '', roll: 20 },
+      { tokenId: 'enemy', slotId: 'enemy', label: '', emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'combat', map, characters: [], initiativeOrder })
+    const persisted = planDnd5eMapResultApplication({ state: snapshot.state, map, characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId })
+    expect(persisted.map.tokens[0].dnd5eCombatState?.activityExtraTurnGroup?.groupId).toBe(groupId)
+    expect(persisted.map.tokens[1].dnd5eCombatState?.activityExtraTurnSuspension?.groupId).toBe(groupId)
+    const rebuilt = createDnd5eMapCombatSnapshot({ combatId: 'combat', map: persisted.map, characters: [], initiativeOrder })
+    const ended = resolveDnd5eHeadlessAction(rebuilt.state, { type: 'end-turn', actorId: 'caster' })
+    expect(ended.ok).toBe(true)
+    expect(ended.state.combatants.enemy.classState.activeEffects ?? []).toEqual([])
+    expect(ended.state.combatants.enemy.classState.activityExtraTurnSuspension).toBeUndefined()
+    // Old versions saved only the icon, with neither owner nor suspension metadata.
+    const legacyMap = { ...persisted.map, tokens: persisted.map.tokens.map(t => ({ ...t,
+      dnd5eCombatState: { ...t.dnd5eCombatState, activityExtraTurnGroup: undefined, activityExtraTurnSuspension: undefined },
+    })) }
+    const repaired = createDnd5eMapCombatSnapshot({ combatId: 'combat', map: legacyMap, characters: [],
+      initiativeOrder: [initiativeOrder[1]] })
+    expect(repaired.state.combatants.enemy.classState.activeEffects ?? []).toEqual([])
+  })
+
   it('projects an authoritative summoned-creature walking-speed override', () => {
     const hero = token({ id: 'hero-token', type: 'player', characterId: 'char', x: 0, y: 0 })
     const steed = token({

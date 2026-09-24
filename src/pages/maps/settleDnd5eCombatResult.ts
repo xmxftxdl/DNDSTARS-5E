@@ -41,7 +41,7 @@ export async function settleDnd5eConcentrationChecks(input: {
   characters: readonly Character[]
   priorApplication?: Pick<
     Dnd5eMapResultPlan,
-    'changedTokenIds' | 'changedCharacterIds' | 'tokenPatches' | 'characterPatches'
+    'changedTokenIds' | 'changedCharacterIds' | 'tokenPatches' | 'characterPatches' | 'geometry'
   >
   characterIdByCombatantId: Readonly<Record<string, string>>
   rollD20: (
@@ -871,6 +871,8 @@ export async function settleDnd5eConcentrationChecks(input: {
     result,
     application: {
       ...application,
+      // Sunburst also edits scene darkness, which the entity planner cannot rebuild.
+      geometry: application.geometry ?? input.priorApplication?.geometry,
       // The follow-up planner compares against the already-materialized map and
       // character snapshots from the first pass. An entity changed only by the
       // original action therefore has no new patch in this pass even though it

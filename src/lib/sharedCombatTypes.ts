@@ -114,7 +114,7 @@ export interface Dnd5eAbilityCheckPayload {
   ability: AbilityKey
   skill?: string
   /** Host-validated situational feature context selected before this check. */
-  context?: 'push-pull-lift-break' | 'interact-with-dragons'
+  context?: 'push-pull-lift-break' | 'interact-with-dragons' | 'climbing'
   /** Host token inspected by a Perception check; required for source-relative obscuration effects. */
   perceivedTargetId?: string
   mode?: 'normal' | 'advantage' | 'disadvantage'
@@ -248,6 +248,8 @@ export interface Dnd5eAntipathySympathyConfigV1 {
 }
 
 export interface Dnd5eSpellCastPayload {
+  /** Absolute area origin / aim elevation; omitted preserves terrain placement. */
+  targetElevationFeet?: number
   spellId: string
   /** Host-validated ritual protocol; executes the ordinary spell effect but spends no action or slot. */
   ritual?: true
@@ -322,6 +324,8 @@ export interface Dnd5eSpellCastPayload {
   areaTargetHeightFeet?: number
   areaTargetLengthFeet?: number
   /** Wall of Fire uses host-validated geometry independent from the legacy four-way rectangle. */
+  stoneWall?: import('../rulesets/dnd5e/stoneWall').StoneWallLayout
+  wallOfForceShape?: 'plane' | 'hemisphere' | 'sphere'
   wallOfFireShape?: 'line' | 'ring'
   wallOfFireAngleDegrees?: number
   wallOfFireDamagingSide?: 'left' | 'right' | 'inside' | 'outside'
@@ -609,6 +613,8 @@ export type Dnd5eAdjudicatedSpellCastingVariant =
   | 'plant-growth-8-hours'
 
 export interface Dnd5eAdjudicatedSpellPayload {
+  /** Optional NPC markers chosen across room maps; validated by the Host. */
+  telepathicBondTargets?: { mapId: string; tokenId: string }[]
   spellId: string
   /** The class whose spellcasting feature authorizes this cast. */
   castingClassId?: Dnd5eClassId
@@ -704,8 +710,8 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'wake'; targetTokenId: string }
   | { kind: 'command-animate-dead'; targetTokenIds: string[]; command: string }
   | { kind: 'command-animate-objects'; targetTokenIds: string[]; command: string }
-  | { kind: 'other-action'; description?: string }
-  | { kind: 'other-bonus-action'; description?: string }
+  | { kind: 'other-action'; description?: string; economyOnly?: true }
+  | { kind: 'other-bonus-action'; description?: string; economyOnly?: true }
 
 export interface SharedPlayerActionState {
   id: string
@@ -736,6 +742,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-basic-action'
   actorTokenId: string
   characterId: string
+  dnd5eWallTarget?: { areaId: string; panelId: string }
   targetTokenId?: string
   targetTokenIds?: string[]
   targetCell?: GridCell
@@ -839,6 +846,9 @@ export interface SharedDiceEventsState {
 // A player-owned d20 uses request -> result so the player's browser generates
 // and animates the authoritative face before the Host resumes Headless combat.
 export interface SharedRollRequestEvent {
+  /** Opposed rolls animate only on their owner client; results remain public. */
+  ownerOnlyPresentation?: boolean
+  appendFrom?: number
   combatId?: string
   check?: DiceCheckPresentation
   rollerTokenId?: string

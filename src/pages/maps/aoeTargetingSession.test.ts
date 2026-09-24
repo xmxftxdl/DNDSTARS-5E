@@ -51,6 +51,13 @@ describe('mapAoeSelectMode', () => {
     guessedSpellTargetingActive: false,
   }
 
+  it('gives granted creature selection priority over every stale area tool', () => {
+    expect(mapAoeSelectMode({ ...base, creatureActivityTargetingActive: true,
+      playerSpellAoeSelectActive: true, playerActivityAoeSelectActive: true,
+      coreAreaMoveTargetingActive: true, activeAoeTargeting: true, itemAreaTargetingActive: true,
+    })).toBe(false)
+  })
+
   it('keeps a player-owned persistent spell move clickable after combat settlement', () => {
     expect(mapAoeSelectMode({ ...base, coreAreaMoveTargetingActive: true })).toBe(true)
   })

@@ -1,3 +1,4 @@
+import { projectSimulacrumCharacterForMapDetail } from './simulacrum'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap, Token } from '../../store/maps'
 import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
@@ -23,9 +24,10 @@ import {
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDeclarativeCompanionProfileUpgrade, dnd5eDeclarativeEnvironmentalMovementSpeed, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, dnd5eHeadlessTurnKey, hydrateDnd5eWildShapeCombatant, reconcileDnd5eSourceLinkedRelations, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eCombatEvent, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDeclarativeCompanionProfileUpgrade, dnd5eDeclarativeEnvironmentalMovementSpeed, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, dnd5eHeadlessTurnKey, hydrateDnd5eWildShapeCombatant, reconcileDnd5eSourceLinkedRelations, reconcileDnd5eActivityExtraTurnGroups, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eCombatEvent, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
+import { igniteDnd5eWebAreasFromFire, reconcileDnd5eWebRestraints } from './webAreaRules'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
 import { dnd5eStandardConditionId } from './conditions'
 import { dnd5eChallengeRatingValue } from './wildShape'
@@ -705,7 +707,7 @@ export function createDnd5eMapCombatSnapshot(input: {
     // that loses class, subclass, equipment, and plugin mechanics.
     if (token.type === 'player' && token.characterId && !character) return []
     if (character) {
-      const migrated = migrateCharacterToDnd5e(character)
+      const migrated = migrateCharacterToDnd5e(projectSimulacrumCharacterForMapDetail(token, character))
       const visionProfile = compileDnd5eEffectiveVisionProfile({
         token,
         character: migrated,
@@ -1124,6 +1126,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       ? oneShotInitiativeSlotIds
       : undefined
   }
+  if (authoritativeSlots.length > 0) reconcileDnd5eActivityExtraTurnGroups(state)
   state.mapId = input.map.id
   state.coordinateUnitsPerFoot = input.map.gridSize /
     Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
@@ -1137,6 +1140,16 @@ export function createDnd5eMapCombatSnapshot(input: {
       ? undefined
       : dnd5eEffectiveRulesContextForCombat(input.combatId, roomRules)
   const combatantTokens = input.map.tokens.filter((token) => state.combatants[token.id])
+  for (const token of combatantTokens) {
+    const combatant = state.combatants[token.id]
+    combatant.symbolFearSourceVisible = (combatant.classState.activeEffects ?? []).some(effect => {
+      if (effect.standardCondition !== 'frightened' || effect.suspendedBy?.length) return false
+      const origin = effect.tags?.find(tag => tag.startsWith('symbol-origin:'))?.split(':').slice(1).map(Number)
+      if (!origin || origin.length !== 2 || !origin.every(Number.isFinite)) return false
+      return !mapGeometryLineOfSightBlocked({ geometry, map: input.map, from: token, to: { x: origin[0], y: origin[1] } })
+    })
+  }
+
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   state.gridDistance = {
     cellUnits: Math.max(1, input.map.gridSize),
@@ -1272,6 +1285,7 @@ export function createDnd5eMapCombatSnapshot(input: {
 }
 
 export interface Dnd5eMapResultPlan {
+  geometry?: import('../../lib/mapGeometry').MapGeometryState
   map: BattleMap
   characters: Character[]
   changedTokenIds: readonly string[]
@@ -1362,6 +1376,7 @@ export function refreshDnd5eMapSpatialRelations(
     }
   }
   reconcileDnd5eSourceLinkedRelations(state, events)
+  reconcileDnd5eWebRestraints(state, spatialMap, events)
 }
 
 export function planDnd5eMapResultApplication(input: {
@@ -1457,6 +1472,10 @@ export function planDnd5eMapResultApplication(input: {
             attacksMadeTurnKey: combatant.classState.attacksMadeTurnKey,
             attacksMadeThisTurn: combatant.classState.attacksMadeThisTurn,
             turnStartResolvedTurnKey: combatant.classState.turnStartResolvedTurnKey,
+            activityExtraTurnGroup: combatant.classState.activityExtraTurnGroup,
+            activityExtraTurnSuspension: combatant.classState.activityExtraTurnSuspension,
+            slowSpellGate: combatant.classState.slowSpellGate,
+            slowDelayedMonsterSpell: combatant.classState.slowDelayedMonsterSpell,
             slowDelayedSpell: combatant.classState.slowDelayedSpell
               ? structuredClone(combatant.classState.slowDelayedSpell)
               : undefined,
@@ -1815,5 +1834,9 @@ export function planDnd5eMapResultApplication(input: {
   for (const tokenId of Object.keys(input.state.combatants)) {
     if (!tokenById.has(tokenId)) throw new Error(`Headless combatant has no map token: ${tokenId}`)
   }
+  map = igniteDnd5eWebAreasFromFire({ map, events: input.events,
+    round: input.state.round,
+    turnTokenId: input.state.initiativeOrder[input.state.initiativeIndex] ?? '',
+  })
   return { map, characters, changedTokenIds, changedCharacterIds, tokenPatches, characterPatches }
 }

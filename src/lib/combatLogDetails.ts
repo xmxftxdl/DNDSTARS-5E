@@ -293,7 +293,7 @@ function fallingDamageDetails(
   resolveName: (id: string) => string,
   revealDice: boolean,
 ): string[] {
-  if (event.damage === 0 && event.dice > 0) {
+  if (event.damage === 0 && event.dice > 0 && event.prevention) {
     const source = event.prevention?.label
       ?? (event.prevention?.definitionId.includes('feather-fall') ? '羽落术' : undefined)
       ?? '安全坠落效果'
@@ -569,6 +569,8 @@ function rawEventDetails(
         `${resolveName(event.targetId)}｜受到${resolveName(event.actorId)}的法师特性「法术塑形」保护｜对${spellName}的豁免自动成功，且不受伤害`,
       ]
     }
+    case 'spell-save-skipped-damage-immunity':
+      return [`${resolveName(event.targetId)}｜${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId}｜雷鸣伤害免疫，跳过豁免，最终伤害 0`]
     case 'magic-missile-damage-resolved':
       return magicMissileDetails(event, resolveName, correlatedDamageEvents)
     case 'spell-saving-throw-damage-resolved': {
@@ -673,9 +675,9 @@ function rawEventDetails(
       ]
     case 'slow-spell-delay-resolved':
       return [
-        `${resolveName(event.actorId)}｜缓慢术施法延迟 d20 ${event.d20}｜${event.delayed
-          ? `${event.spellId} 暂不生效，须在下回合再用动作完成`
-          : `${event.spellId} 立即生效`}`,
+        `${resolveName(event.actorId)}｜缓慢术施法延迟检定 d20 ${event.d20}（11–20 延迟）｜${event.delayed
+          ? `${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId} 暂不生效，须在下回合再用动作完成`
+          : `${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId} 正常施放`}`,
       ]
     case 'slow-delayed-spell-completed':
       return [`${resolveName(event.actorId)}｜使用本回合动作完成缓慢术延迟的 ${event.spellId}`]
@@ -792,6 +794,8 @@ function rawEventDetails(
       return [`${resolveName(event.actorId)}｜${event.spellId}传送 ${event.distanceFeet} 尺｜${formatPosition(event.from)} → ${formatPosition(event.to)}`]
     case 'elevation-changed':
       return [`${resolveName(event.actorId)}｜${event.mode === 'fly' ? '飞行' : event.mode === 'climb' ? '攀爬' : '移动'}高度变化 ${event.fromElevationFeet} 尺 → ${event.toElevationFeet} 尺`]
+    case 'falling-collision-resolved':
+      return [`${resolveName(event.actorId)} 坠落撞向 ${resolveName(event.targetId)}｜敏捷豁免 DC ${event.dc}，总值 ${event.total}，${event.success ? '成功避开' : '失败撞中'}${event.sharedDamage != null ? `｜双方各分摊 ${event.sharedDamage} 点坠落伤害（减伤前）` : ''}｜${resolveName(event.targetId)} 实际受到 ${event.damage} 点钝击伤害${event.landedProne ? '｜被撞倒地' : ''}`]
     case 'falling-damage-resolved':
       return fallingDamageDetails(event, resolveName, true)
     case 'controlled-descent-resolved':
@@ -901,7 +905,7 @@ export function formatDnd5eSecretCombatOutcomeDetails(
           `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.skill ? `（${event.skill}）` : ''}检定结果：${event.success == null ? '已结算' : event.success ? '成功' : '失败'}`,
         ]
       case 'slow-spell-delay-resolved':
-        return [`${resolveName(event.actorId)}｜缓慢术施法延迟结果：${event.delayed ? `${event.spellId} 延迟至下回合` : `${event.spellId} 立即生效`}`]
+        return [`${resolveName(event.actorId)}｜缓慢术施法延迟检定已完成：${event.delayed ? `${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId} 延迟至下回合` : `${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId} 正常施放`}`]
       case 'item-last-charge-check':
         return [`${resolveName(event.actorId)}｜${event.itemName}最后一发检定：${event.destroyed ? '物品损毁' : '物品保留'}`]
       case 'post-spell-random-table-check-required':
@@ -938,6 +942,8 @@ export function formatDnd5eSecretCombatOutcomeDetails(
         return [`${resolveName(event.actorId)}｜${event.success ? '维持专注' : '专注中断'}`]
       case 'death-save-resolved':
         return [`${resolveName(event.actorId)}｜死亡豁免结果：成功 ${event.successes} / 失败 ${event.failures}${event.dead ? '｜死亡' : event.stable ? '｜伤势稳定' : event.currentHp > 0 ? `｜恢复至 ${event.currentHp} HP` : ''}`]
+      case 'falling-collision-resolved':
+        return [`${resolveName(event.actorId)} 坠落撞向 ${resolveName(event.targetId)}｜${event.success ? '避开撞击' : '被撞中'}｜受到 ${event.damage} 点钝击伤害${event.landedProne ? '｜被撞倒地' : ''}`]
       case 'falling-damage-resolved':
         return fallingDamageDetails(event, resolveName, false)
       case 'controlled-descent-resolved':

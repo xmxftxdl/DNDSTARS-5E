@@ -883,6 +883,37 @@ export function applyDnd5eLevelAdvancement(
   }
 }
 
+/** Rebuild an unfinished character without mislabelling player choices as DM edits.
+ * Compatible later decisions are preserved; stop before a level requiring new choices.
+ */
+export function reviseDnd5eCreationAdvancement(
+  character: Character,
+  recordId: string,
+  decision: Dnd5eLevelAdvancementDecisionV1,
+): Dnd5eLevelAdvancementResult {
+  if (!character.dnd5eCreationTargetLevel) return { ok: false, reason: 'invalid-level-gain' }
+  const records = character.dnd5eLevelAdvancements ?? []
+  const index = records.findIndex((record) => record.id === recordId)
+  const original = records[index]
+  if (!original || decision.levelsGained !== original.decision.levelsGained) return { ok: false, reason: 'invalid-level-gain' }
+  let draft = restoreAdvancementSnapshot({ ...character, dnd5eLevelAdvancements: records.slice(0, index) }, original.before)
+  let changed: Dnd5eLevelAdvancementRecordV1 | undefined
+  for (let cursor = index; cursor < records.length; cursor += 1) {
+    const record = records[cursor]
+    const result = applyDnd5eLevelAdvancement(draft, cursor === index ? decision : record.decision, {
+      completedBy: 'player', recordId: record.id,
+      completedAt: cursor === index ? Date.now() : record.completedAt,
+    })
+    if (!result.ok) {
+      if (!changed) return result
+      break
+    }
+    draft = result.character
+    if (cursor === index) changed = result.record
+  }
+  return changed ? { ok: true, character: draft, record: changed } : { ok: false, reason: 'invalid-level-gain' }
+}
+
 export function reviseDnd5eLevelAdvancement(
   character: Character,
   recordId: string,

@@ -7,6 +7,8 @@ export interface DmDiceConfirmation {
   sides: number
   values: number[]
   visibility: 'public' | 'dm-only'
+  onModeChange?: (mode: DiceCheckPresentation['mode'], values: number[]) => Promise<void>
+  settleValues?: (values: number[]) => number[]
 }
 
 /** Confirmation has no timer: only the DM's submitted faces release the next group. */
@@ -24,7 +26,8 @@ export function createDmDiceConfirmationQueue(
     cancellations.add(cancel)
     const result = tail.then(async () => {
       if (cancelled) throw new Error('combat-dice-cancelled')
-      const values = await Promise.race([present(request), cancellation])
+      const submitted = await Promise.race([present(request), cancellation])
+      const values = request.settleValues ? request.settleValues(submitted) : submitted
       if (values.length !== request.values.length || values.some(value =>
         !Number.isInteger(value) || value < 1 || value > request.sides)) {
         throw new Error('骰子确认结果无效')

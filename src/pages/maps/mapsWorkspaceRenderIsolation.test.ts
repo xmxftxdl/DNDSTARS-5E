@@ -122,10 +122,10 @@ describe('MapsWorkspacePage render isolation', () => {
 
   it('opens character details from map and initiative portraits without routing initiative clicks through movement', () => {
     expect(workspaceSource).toContain('const openTokenDetails = (tokenId: string) =>')
-    expect(workspaceSource).toContain('if (!token) return\n    setMapToolsOpen(false)')
+    expect(workspaceSource).not.toContain('setMapToolsOpen(false)')
     expect(workspaceSource).toContain('if (playerCombatLocked && !dnd5eSpellTargeting) {\n      openTokenDetails(tokenId)')
     expect(workspaceSource).toContain('onInitiativeSelect={openTokenDetails}')
-    expect(workspaceSource).toContain('onSelect={openTokenDetails}')
+    expect(workspaceSource).toContain('openTokenDetails(tokenId)')
     expect(workspaceSource).not.toContain('onInitiativeSelect={handleSelectToken}')
   })
 

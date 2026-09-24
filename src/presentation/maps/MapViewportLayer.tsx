@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react'
 import type { SpellStatusTokenMark, StandardConditionTokenMark } from '../../components/map/MapCanvas'
 import { spellStatusTokenTooltip, standardConditionTokenTooltip } from '../../components/map/tokenStatusTooltip'
 import { useBrowserSceneWorldMinute } from '../../composition/browserSceneClock'
-import { realignTokensToGrid } from '../../lib/gridCombat'
+import { realignTokensToGrid, cellToPixel } from '../../lib/gridCombat'
 import { isDnd5eTokenBanished, tokenPresentationHitPoints } from '../../lib/combatTokens'
 import { dnd5eCharacterPresentationColors } from '../dnd5e/characterPresentation'
 import {
@@ -253,6 +253,19 @@ export function buildMapViewportPresentation(
         glowColor: colors.glowColor,
       }
     })
+    for (const area of map.dnd5ePluginAreas ?? []) {
+      if (!['tiny-hut', 'teleportation-circle'].includes(area.coreSpellId ?? '') ||
+        !dnd5eTokenIntersectsPersistentAreaAt(token, map, area, token)) continue
+      statusMarkers.push({
+        schemaVersion: 1, id: `area-status:${area.id}:${token.id}`,
+        statusId: area.coreSpellId as 'tiny-hut' | 'teleportation-circle',
+        source: 'headless', mechanical: true, sourceActorId: area.sourceTokenId,
+        label: area.label,
+        detailDescription: area.coreSpellId === 'tiny-hut'
+          ? '小屋术范围内：穹顶阻挡外来生物与跨边界法术。施法者离开后结束。'
+          : '传送法阵入口：移动进入法阵后传送到 DM 指定的出口。',
+      })
+    }
     if (statusMarkers.length > 0) dnd5eTokenStatusMarkersByToken[token.id] = statusMarkers
     const shillelaghEffect = effects.find((effect) =>
       effect.definitionId === 'srd-5.1:spell:shillelagh' && effect.source.rulesId === 'shillelagh')
@@ -401,6 +414,11 @@ function MapViewportLayerComponent({
     [characters, gridCalibrationDraft, map],
   )
 
+  const shelteredCircles = useMemo(() => (presentation.map.dnd5ePluginAreas ?? []).flatMap(area =>
+    area.coreSpellId === 'tiny-hut' && area.anchorCell
+      ? [{ ...cellToPixel(area.anchorCell, presentation.map), radius: 10 * presentation.map.gridSize / (presentation.map.feetPerCell ?? 5) }]
+      : []), [presentation.map])
+
   return (
     <div
       className="relative h-full w-full overflow-hidden rounded-2xl"
@@ -427,6 +445,7 @@ function MapViewportLayerComponent({
       />
       {orchestratedScene ? (
         <SceneWeatherLayer
+          shelteredCircles={shelteredCircles}
           sceneId={orchestratedScene.id}
           weather={orchestratedScene.weather}
           mapWidth={presentation.map.width}

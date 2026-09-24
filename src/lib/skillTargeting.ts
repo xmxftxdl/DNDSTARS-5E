@@ -391,6 +391,17 @@ export function cellsInRect(
   return uniqueCells(cells)
 }
 
+export function gridAlignedRectBounds(anchor: GridCell, widthFeet: number, heightFeet: number) {
+  const widthCells = feetToDimensionCells(widthFeet)
+  const heightCells = feetToDimensionCells(heightFeet)
+  return {
+    firstCol: anchor.col - Math.floor((widthCells - 1) / 2),
+    firstRow: anchor.row - Math.floor((heightCells - 1) / 2),
+    widthCells,
+    heightCells,
+  }
+}
+
 export function cellsForAoe(
   aoe: SkillAoeTargeting,
   casterCell: GridCell,
@@ -407,10 +418,7 @@ export function cellsForAoe(
       return cellsInCone(casterCell, anchorCell, aoe.lengthFeet)
     case 'rect':
       if (aoe.gridAligned) {
-        const widthCells = feetToDimensionCells(aoe.widthFeet)
-        const heightCells = feetToDimensionCells(aoe.heightFeet)
-        const firstCol = anchorCell.col - Math.floor((widthCells - 1) / 2)
-        const firstRow = anchorCell.row - Math.floor((heightCells - 1) / 2)
+        const { widthCells, heightCells, firstCol, firstRow } = gridAlignedRectBounds(anchorCell, aoe.widthFeet, aoe.heightFeet)
         return Array.from({ length: widthCells * heightCells }, (_, index) => ({
           col: firstCol + (index % widthCells),
           row: firstRow + Math.floor(index / widthCells),

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  authoritativeVisibleTokens,
+  directMoveSnapshotHasArrived,
   canDragMapToken,
   dmTokenPlacementBypassesMovementBlockers,
   resolveOptimisticTokenMovePreview,
@@ -21,6 +23,26 @@ const base = {
 }
 
 describe('map Token drag policy', () => {
+  it('retains the token preview when save resolves before the map render catches up', () => {
+    const origin = { x: 100, y: 100 }
+    const destination = { x: 200, y: 150 }
+    expect(directMoveSnapshotHasArrived({ origin, destination, authoritative: origin })).toBe(false)
+    expect(directMoveSnapshotHasArrived({ origin, destination, authoritative: destination })).toBe(true)
+    expect(directMoveSnapshotHasArrived({ origin, destination, authoritative: { x: 195, y: 150 } })).toBe(true)
+    expect(directMoveSnapshotHasArrived({ origin, destination: origin, authoritative: origin })).toBe(true)
+    expect(directMoveSnapshotHasArrived({ origin, destination })).toBe(true)
+  })
+  it('uses stored positions for visible-token interactions during and after a drag', () => {
+    const original = { id: 'hero', x: 2775, y: 975 }
+    const hidden = { id: 'hidden', x: 100, y: 100 }
+    const preview = { ...original, x: 2925, y: 1125 }
+    expect(authoritativeVisibleTokens([original, hidden], [preview])).toEqual([original])
+    expect(authoritativeVisibleTokens([original, hidden], [preview])[0]).toBe(original)
+    const moved = { ...original, x: 2925, y: 1125 }
+    const nextPreview = { ...moved, x: 3075 }
+    expect(authoritativeVisibleTokens([moved, hidden], [nextPreview])[0]).toBe(moved)
+    expect(authoritativeVisibleTokens([hidden], [preview])).toEqual([])
+  })
   it('lets a player drag only an explicitly authorized player Token', () => {
     expect(canDragMapToken({
       ...base,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect, dnd5eActiveEffectId } from './activeEffects'
 import { prepareDnd5eMonsterMovementSavingThrows, resolveDnd5eMonsterMapMove } from './monsterMoveAction'
@@ -788,7 +788,7 @@ describe('D&D 5e monster map movement', () => {
     if (standing.ok) expect(standing.result.ok).toBe(true)
   })
 
-  it('uses an active Spider Climb effect as the monster walking speed', () => {
+  it.each(['flat', 'wall', 'cliff'] as const)('uses an active Spider Climb effect as the monster walking speed: %s', (surface) => {
     const spiderClimb = createDnd5eMechanicalEffect({
       id: 'goblin-spider-climb',
       definitionId: 'activity:spider-climb:spider-climb:modifiers:0',
@@ -812,6 +812,20 @@ describe('D&D 5e monster map movement', () => {
       tokens: [goblin, heroToken],
     }
 
+    const geometry = createEmptyMapGeometry(climbMap.id, 1)
+    if (surface === 'wall') geometry.walls.push({
+      id: 'wall', kind: 'wall', label: 'Wall', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+      blocksMovement: true, blocksVision: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 60, createdAt: 1,
+    })
+    if (surface === 'cliff') geometry.obstacles.push({
+      id: 'cliff', kind: 'obstacle', label: 'Cliff', points: [{ x: 10, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 60 }, { x: 10, y: 60 }],
+      blocksMovement: false, blocksVision: false, blocksLineOfEffect: false,
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 20, cover: 'none', createdAt: 1,
+    })
+    setMapGeometryRuntime([geometry])
+    const destination = surface === 'wall' ? { x: 5, y: 5 } : surface === 'cliff' ? { x: 15, y: 5 } : { x: 45, y: 5 }
+    const expectedDistance = surface === 'cliff' ? 25 : 20
     const result = resolveDnd5eMonsterMapMove({
       combatId: 'combat', map: climbMap, characters: [hero],
       initiativeOrder: [
@@ -819,16 +833,17 @@ describe('D&D 5e monster map movement', () => {
         { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
       ],
       actorTokenId: goblin.id,
-      to: { x: 45, y: 5 },
+      to: destination,
+      targetElevationFeet: surface === 'wall' ? 20 : undefined,
       traversalMode: 'climb',
       turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
     })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.distanceFeet).toBe(20)
+    expect(result.distanceFeet).toBe(expectedDistance)
     expect(result.result.events).toContainEqual(expect.objectContaining({
-      type: 'turn-resource-spent', actorId: goblin.id, resource: 'movement', amount: 20,
+      type: 'turn-resource-spent', actorId: goblin.id, resource: 'movement', amount: expectedDistance,
     }))
   })
 

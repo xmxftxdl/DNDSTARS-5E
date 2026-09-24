@@ -19,6 +19,33 @@ function transaction(input: Partial<DmUndoTransactionSummary> & Pick<DmUndoTrans
 }
 
 describe('DM combat recovery impact details', () => {
+  it('shows only initial and final HP for continuous edits and retains every rollback snapshot', () => {
+    const rows = [[52, 59], [46, 52], [40, 46], [30, 40], [23, 30], [15, 23]].map(([before, after], index) => transaction({
+      transactionId: `hp-${index}`, label: '更新 maps', createdAt: 10000 - index * 400,
+      details: [`牛头人：HP ${before} → ${after}（恢复为 ${before}）`],
+    }))
+    const html = renderToStaticMarkup(<DmCombatRecoveryImpactDetails transactions={rows} />)
+    expect(html).toContain('将撤回 1 个实际操作')
+    expect(html).toContain('牛头人：HP 59 → 15（撤回后）')
+    expect(html).not.toContain('HP 52 → 59')
+    expect(html).not.toContain('同时撤回的关联结算')
+    expect(combatRecoveryAffectedTransactions(rows, 'hp-5')).toHaveLength(6)
+    expect(rows[0].details?.[0]).toContain('HP 52 → 59')
+    const separated = [rows[0], { ...rows[1], createdAt: 1000 }]
+    expect(renderToStaticMarkup(<DmCombatRecoveryImpactDetails transactions={separated} />)).toContain('将撤回 2 个实际操作')
+  })
+  it('collapses empty authority flushes while retaining real changes and rollback boundaries', () => {
+    const empty = transaction({ transactionId: 'empty', label: '提交战斗结算', createdAt: 2 })
+    const changed = transaction({ transactionId: 'damage', label: '提交战斗结算', createdAt: 1,
+      details: ['牛头人：HP 61 → 51'] })
+    expect(combatRecoveryOperationTransactions([empty, changed])).toEqual([changed])
+    expect(combatRecoveryAffectedTransactions([empty, changed], 'damage')).toEqual([empty, changed])
+    expect(combatRecoveryTurnCheckpoints([empty])).toHaveLength(1)
+    const html = renderToStaticMarkup(<DmCombatRecoveryImpactDetails transactions={[empty, changed]} />)
+    expect(html).toContain('将撤回 1 个实际操作')
+    expect(html).toContain('另有 1 条关联状态同步')
+    expect(html).toContain('牛头人：HP 61 → 51')
+  })
   it('groups a whole player turn including saves and its ending transition, then separates monster and next round', () => {
     const turn = (id: string, actor: string, round: number, slot: number, label = '结算玩家行动') => transaction({
       transactionId: id, label, createdAt: 100,
@@ -51,7 +78,7 @@ describe('DM combat recovery impact details', () => {
     ]} />)
     expect(html).toContain('open=""')
     expect(html).toContain('火焰箭')
-    expect(html).toContain('恢复为 51')
+    expect(html).toContain('HP 27 → 51（撤回后）')
   })
   it('lists every server-cascade transaction from newest through the selected checkpoint', () => {
     const history = [

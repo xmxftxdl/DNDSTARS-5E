@@ -1,3 +1,6 @@
+import { projectSimulacrumCharacterForMapDetail } from './simulacrum'
+import { resolveSpellAreaObstruction, spellAreaPointElevation } from './spellAreaObstruction'
+import { mapGeometryRuntimeForMap, mapGeometryTokenElevation, mapGeometryLineOfEffectBlocked } from '../../lib/mapGeometry'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eSpellCastPayload, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import {
@@ -434,8 +437,9 @@ export function prepareDnd5ePluginSpellCast(input: {
       if (missingDnd5eRulesPluginRequirements([requirement]).length > 0) return { ok: false, reason: 'plugin-version-mismatch' }
     }
   }
-  const actor = input.characters.find((character) => character.id === input.action.characterId)
+  const actorSubject = input.characters.find((character) => character.id === input.action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
+  const actor = actorSubject && actorToken ? projectSimulacrumCharacterForMapDetail(actorToken, actorSubject) : actorSubject
   const enforceSpellcastingPrerequisites =
     input.effectiveRules?.houseRules.spellcastingPrerequisitesEnabled !== false
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
@@ -741,12 +745,27 @@ export function prepareDnd5ePluginSpellCast(input: {
       }
     }
     const { cols: mapColumns, rows: mapRows } = mapCellExtent(input.map)
+    const geometry = mapGeometryRuntimeForMap(input.map.id)
+    const areaObstructions: ReturnType<typeof resolveSpellAreaObstruction>[] = []
+    if (area.origin === 'point' && activityAreaTarget?.requiresLineOfEffect !== false && anchorCells.some(cell => {
+      const aim = cellToPixel(cell, input.map)
+      return mapGeometryLineOfEffectBlocked({ geometry, map: input.map, from: actorToken, to: aim,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken), toElevationFeet: spellAreaPointElevation(geometry, aim, payload.targetElevationFeet) })
+    })) return { ok: false, reason: 'effect-line-blocked' }
     const affectedCells = [...new Map(anchorCells.flatMap((anchorCell) => {
       const orientFrom = aoeOrientFromCell(area, casterCell, anchorCell, {
         rectRotation: payload.areaTargetOrientation,
         rectAngleDegrees: payload.areaTargetAngleDegrees,
       })
-      return cellsForAoe(area, orientFrom, anchorCell)
+      const aim = cellToPixel(anchorCell, input.map)
+      const obstruction = resolveSpellAreaObstruction({ spellId: spell.id, map: input.map, geometry,
+        cells: cellsForAoe(area, orientFrom, anchorCell), area,
+        origin: area.origin === 'point' ? aim : actorToken,
+        elevationFeet: area.origin === 'point' ? spellAreaPointElevation(geometry, aim, payload.targetElevationFeet) : mapGeometryTokenElevation(geometry, actorToken),
+        ignoresWalls: activityAreaTarget?.requiresLineOfEffect === false,
+      })
+      areaObstructions.push(obstruction)
+      return obstruction.cells
     }).filter((cell) =>
       cell.col >= 0 && cell.row >= 0 && cell.col < mapColumns && cell.row < mapRows,
     ).map((cell) => [`${cell.col}:${cell.row}`, cell])).values()]
@@ -793,6 +812,7 @@ export function prepareDnd5ePluginSpellCast(input: {
         // one of them leak into an area spell's authoritative target list makes
         // an otherwise valid exploration cast fail later as combatant-missing.
         if ((token.type !== 'player' && token.type !== 'enemy') || isDefeatedAreaToken(token)) return false
+        if (!areaObstructions.some(obstruction => obstruction.affectsToken(token))) return false
         if (
           spell.id === 'fire-storm' && payload.activityChoices?.mode === 'spare-plants' &&
           token.creatureTypes?.some((type) => {
@@ -1069,6 +1089,7 @@ export function prepareDnd5ePluginSpellCast(input: {
       targetCombatant.classState.activeEffects,
       actorCombatant.id,
       actorCombatant.creatureType,
+      { ...snapshot.state, initiativeIndex: actorIndex },
     )
     const attackAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) && (
       dnd5eTargetGrantsAttackAdvantage(targetCombatant) || actorCombatant.classState.hiddenCheckTotal != null ||

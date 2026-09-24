@@ -311,3 +311,21 @@ describe('shared sustained spell controls', () => {
     )
   })
 })
+
+it.each([
+  { hp: 60, temp: 20, resistance: false, expected: 16 },
+  { hp: 2, temp: 0, resistance: false, expected: 16 },
+  { hp: 60, temp: 20, resistance: true, expected: 13 },
+])('Vampiric Touch heals damage dealt despite HP pools: %j', ({ hp, temp, resistance, expected }) => {
+  const actor = caster('wizard', 'wizard', 'vampiric-touch', 5, 3)
+  actor.currentHp = 10
+  const target = enemy('target', hp)
+  target.temporaryHp = temp
+  if (resistance) target.damageResistances = ['necrotic']
+  const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('drain', [actor, target]), {
+    type: 'cast-spell', actorId: actor.id, targetId: target.id, targetIds: [target.id],
+    spellId: 'vampiric-touch', slotLevel: 3, d20: 15, effectRolls: [6, 4, 2],
+  })
+  expect(result.ok).toBe(true)
+  expect(result.state.combatants[actor.id].currentHp).toBe(expected)
+})

@@ -133,6 +133,7 @@ export function pluginAreaTargetingAllowsEmptyArea(input: {
 }
 
 export function mapAoeSelectMode(input: {
+  creatureActivityTargetingActive?: boolean
   playerSpellAoeSelectActive: boolean
   playerActivityAoeSelectActive: boolean
   coreAreaMoveTargetingActive: boolean
@@ -142,6 +143,7 @@ export function mapAoeSelectMode(input: {
   guessedSpellTargetingActive: boolean
   spellAreaSelectionLocked?: boolean
 }): boolean {
+  if (input.creatureActivityTargetingActive) return false
   if (input.spellAreaSelectionLocked) return false
   return input.playerSpellAoeSelectActive ||
     input.playerActivityAoeSelectActive ||

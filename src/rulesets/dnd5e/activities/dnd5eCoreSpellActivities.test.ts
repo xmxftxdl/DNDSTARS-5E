@@ -47,6 +47,7 @@ import {
   startDnd5eHeadlessCombat,
 } from '../headlessCombatEngine'
 import { createDnd5eMechanicalEffect } from '../activeEffects'
+import { dnd5eTokenStatusMarkersFromActiveEffects } from '../tokenStatusMarkers'
 import { dnd5ePluginSpellTargetCapacity } from '../pluginSpellTargeting'
 import { settleDnd5eActivityTriggerWindowsV1 } from './dnd5eActivityTriggerSettlement'
 import { listDnd5eActivityTriggerWindowsV1 } from './dnd5eActivityTriggerWindows'
@@ -54,6 +55,49 @@ import { listDnd5eActivityTriggerWindowsV1 } from './dnd5eActivityTriggerWindows
 afterEach(clearContentDefinitionRegistryForTests)
 
 describe('built-in spell Unified Activity migration', () => {
+  it.each(['slashing', 'piercing', 'bludgeoning', 'aquatic', 'appearance'])('casts Alter Self %s without adjudication and removes it with concentration', (mode) => {
+    ensureDnd5eCoreSpellActivitiesRegisteredV1()
+    const activity = dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition('alter-self'))!
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    expect(dnd5eActivityManualAdjudicationOperationsV1(activity)).toEqual([])
+    const actor: Dnd5eActivityActorSnapshot = {
+      id: 'alter-caster', controller: 'players', level: 5, proficiencyBonus: 3,
+      abilities: { str: 16, dex: 14, con: 14, int: 18, wis: 10, cha: 10 },
+      armorClass: 12, conditions: [], currentHp: 30, maxHp: 30, spellSaveDc: 15,
+    }
+    const resolution = resolveDnd5eActivity({
+      activity, actor, targets: [actor], castLevel: 2, choices: { 'alter-self-mode': mode }, rolls: {},
+    })
+    expect(resolution.ok, JSON.stringify(resolution)).toBe(true)
+    if (!resolution.ok) return
+    const caster = createDnd5eCombatant({
+      id: actor.id, name: 'Wizard', controller: 'player', initiative: 20,
+      abilities: actor.abilities, proficiencyBonus: 3, armorClass: 12,
+      currentHp: 30, maxHp: 30, temporaryHp: 0, speed: 30, position: { x: 0, y: 0 },
+      concentrating: false, classResources: { 'dnd5e-spell-slot-2': { current: 2, max: 2 } },
+    })
+    const committed = commitDnd5eActivityExecution(startDnd5eHeadlessCombat('alter', [caster, { ...caster, id: 'observer', initiative: 1 }]), {
+      actorId: caster.id, activityId: activity.id, castLevel: 2, targetIds: [], resolution,
+      dmApproved: false, source: { kind: 'spell', id: 'alter-self' },
+    })
+    expect(committed.ok, committed.ok ? undefined : committed.reason).toBe(true)
+    if (!committed.ok) return
+    const affected = committed.state.combatants[caster.id]
+    const effect = affected.classState.activeEffects?.find(effect => effect.tags?.includes('alter-self'))
+    expect(effect).toBeDefined()
+    expect(dnd5eTokenStatusMarkersFromActiveEffects(affected.classState.activeEffects)).toContainEqual(
+      expect.objectContaining({ statusId: 'alter-self', activeEffectId: effect!.id, label: effect!.label }),
+    )
+    if (['slashing', 'piercing', 'bludgeoning'].includes(mode)) {
+      expect(effect?.tags).toContain('alter-self-natural-weapon')
+      expect(effect?.tags).toContain(`alter-self-natural-weapon:${mode}`)
+    } else if (mode === 'aquatic') {
+      expect(effect?.modifiers).toMatchObject({ swimSpeedEqualsWalking: true, environmentalCapabilities: { breatheIn: ['water'] } })
+    }
+    endDnd5eConcentration(committed.state, affected, [])
+    expect(affected.classState.activeEffects?.some(effect => effect.tags?.includes('alter-self')) ?? false).toBe(false)
+    expect(dnd5eTokenStatusMarkersFromActiveEffects(affected.classState.activeEffects)).toEqual([])
+  })
   it('bootstraps built-in trigger activities in a fresh map authority tab', () => {
     const caster = createDnd5eCombatant({ concentrating: false,
       id: 'cold-map-caster', name: 'Wizard', controller: 'player', initiative: 20,
@@ -125,8 +169,8 @@ describe('built-in spell Unified Activity migration', () => {
     ensureDnd5eCoreSpellActivitiesRegisteredV1()
     const registered = listRegisteredContentDefinitionPackages()
       .find((entry) => entry.packageId === DND5E_CORE_SPELL_PACKAGE_ID)
-    expect(DND5E_SRD_AUDITED_PARTIAL_SPELL_IDS).toHaveLength(93)
-    expect(DND5E_SRD_AUDITED_FULL_SPELL_IDS).toHaveLength(97)
+    expect(DND5E_SRD_AUDITED_PARTIAL_SPELL_IDS).toHaveLength(91)
+    expect(DND5E_SRD_AUDITED_FULL_SPELL_IDS).toHaveLength(99)
     expect(DND5E_SRD_AUDITED_MANUAL_SPELL_IDS).toHaveLength(6)
     expect(registered?.definitions).toHaveLength(319)
     expect(registered?.definitions.every((definition) =>
@@ -323,13 +367,14 @@ describe('built-in spell Unified Activity migration', () => {
       .toEqual([expect.objectContaining({ targetId: 'confusion-save-failure', effectId: 'confusion' })])
   })
 
-  it('models True Polymorph creature-to-creature replacement and earned permanence without object automation', () => {
+  it('casts True Polymorph without DM approval and retains creature replacement and earned permanence', () => {
     ensureDnd5eCoreSpellActivitiesRegisteredV1()
     const activity = getRegisteredContentDefinition(
       DND5E_CORE_SPELL_PACKAGE_ID, 'spell', 'true-polymorph',
     )?.activities?.[0] as Dnd5eActivityDefinitionV1
     expect(activity.target).toMatchObject({ kind: 'creature', rangeFeet: 30, count: 1 })
     expect(activity.choices?.map((choice) => choice.id)).toEqual(['creature-form'])
+    expect(dnd5eActivityManualAdjudicationOperationsV1(activity)).toEqual([])
     expect(activity.checks).toEqual([expect.objectContaining({
       id: 'spell-save', ability: 'wis',
     })])
@@ -353,7 +398,7 @@ describe('built-in spell Unified Activity migration', () => {
       distanceFeetByTargetId: { 'true-poly-target': 20 },
       rolls: { 'spell-save-d20:true-poly-target': { values: [1] } },
       checkRollModes: { 'spell-save:true-poly-target': 'normal' },
-      choices, dmApproved: true,
+      choices, dmApproved: false,
     })
     expect(resolved, JSON.stringify(resolved)).toMatchObject({ ok: true })
     expect(resolved.ok && resolved.proposals).toEqual(expect.arrayContaining([
@@ -392,7 +437,7 @@ describe('built-in spell Unified Activity migration', () => {
       {
         actorId: caster.id, activityId: activity.id, castLevel: 9,
         targetIds: [target.id], resolution: resolved,
-        dmApproved: true,
+        dmApproved: false,
         source: { kind: 'spell', id: 'true-polymorph' },
       },
     )
@@ -489,8 +534,11 @@ describe('built-in spell Unified Activity migration', () => {
       const activity = definition?.activities?.[0] as Dnd5eActivityDefinitionV1 | undefined
       expect(activity, spellId).toBeDefined()
       if (!activity) continue
-      expect(dnd5eActivityAutomationAnalysisV1(activity).capability.level, spellId).toBe('assisted')
-      expect(dnd5eActivityManualAdjudicationOperationsV1(activity), spellId).toHaveLength(1)
+      // Narrative conversation spells now settle resources directly; their
+      // table conversation no longer creates an approval operation.
+      const narrativeOnly = ['speak-with-animals', 'speak-with-dead', 'speak-with-plants', 'stone-shape'].includes(spellId)
+      expect(dnd5eActivityAutomationAnalysisV1(activity).capability.level, spellId).toBe(narrativeOnly ? 'full' : 'assisted')
+      expect(dnd5eActivityManualAdjudicationOperationsV1(activity), spellId).toHaveLength(narrativeOnly ? 0 : 1)
       expect(() => compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction: true }), spellId)
         .not.toThrow()
     }

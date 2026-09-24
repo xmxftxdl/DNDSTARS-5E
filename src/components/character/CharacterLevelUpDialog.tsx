@@ -28,8 +28,11 @@ import { dnd5eClassFeatureActionIcon } from '../../lib/dnd5eActionIcons'
 import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import Dnd5eSpellAdvancementPicker from './Dnd5eSpellAdvancementPicker'
 import { dnd5eAdvancementFeatOptions } from './featAdvancementOptions'
+import { useCharacterCreationDraft } from './useCharacterCreationDraft'
+import { reviseDnd5eCreationAdvancement } from '../../rulesets/dnd5e/levelAdvancement'
 
 interface CharacterLevelUpDialogProps {
+  creationDraftKey?: string
   character: Character
   classId: Dnd5eClassId
   levelsGained: number
@@ -105,6 +108,7 @@ export default function CharacterLevelUpDialog({
   classId,
   levelsGained,
   revisionRecord,
+  creationDraftKey,
   onCancel,
   onConfirm,
 }: CharacterLevelUpDialogProps) {
@@ -120,48 +124,29 @@ export default function CharacterLevelUpDialog({
     [character, revisionRecord],
   )
   const initialDecision = revisionRecord?.decision
-  const [subclassId, setSubclassId] = useState(
-    initialDecision?.subclassId ??
-    (classId === 'fighter'
-      ? baseCharacter.dnd5eClassChoices?.fighter?.subclass
-      : baseCharacter.dnd5eClassChoices?.classes?.[classId]?.subclass) ??
-    '',
-  )
-  const [hpMethod, setHpMethod] = useState<'fixed' | 'rolled'>(
-    initialDecision?.hitPointMethod ?? 'fixed',
-  )
-  const [hpRolls, setHpRolls] = useState<number[]>(initialDecision?.hitPointRolls ?? [])
-  const [asiDrafts, setAsiDrafts] = useState<Record<number, AsiDraft>>(
-    () => initialAsiDrafts(revisionRecord),
-  )
-  const [classSelections, setClassSelections] = useState<Record<string, string[]>>(
-    initialDecision?.classChoiceSelections ?? {},
-  )
-  const [fighterSubclassSelections, setFighterSubclassSelections] = useState<Record<string, string[]>>(
-    initialDecision?.fighterSubclassSelections ?? {},
-  )
-  const [fighterStyles, setFighterStyles] = useState<FighterFightingStyleId[]>(
-    initialDecision?.fighterFightingStyles ??
-    baseCharacter.dnd5eClassChoices?.fighter?.fightingStyles ??
-    [],
-  )
-  const [spellSelections, setSpellSelections] = useState<Dnd5eAdvancementSpellSelectionsV1 | undefined>(
-    initialDecision?.spellSelections,
-  )
-  const [contentChoiceSelections, setContentChoiceSelections] = useState<
-    Record<string, Record<string, string[]>>
-  >(initialDecision?.contentChoiceSelections ?? {})
+  const creationDraft = useCharacterCreationDraft(creationDraftKey, () => ({
+    subclassId: initialDecision?.subclassId ?? (classId === 'fighter' ? baseCharacter.dnd5eClassChoices?.fighter?.subclass : baseCharacter.dnd5eClassChoices?.classes?.[classId]?.subclass) ?? '',
+    hpMethod: (initialDecision?.hitPointMethod ?? 'fixed') as 'fixed' | 'rolled',
+    hpRolls: initialDecision?.hitPointRolls ?? [] as number[],
+    asiDrafts: initialAsiDrafts(revisionRecord),
+    classSelections: initialDecision?.classChoiceSelections ?? {} as Record<string, string[]>,
+    fighterSubclassSelections: initialDecision?.fighterSubclassSelections ?? {} as Record<string, string[]>,
+    fighterStyles: initialDecision?.fighterFightingStyles ?? baseCharacter.dnd5eClassChoices?.fighter?.fightingStyles ?? [] as FighterFightingStyleId[],
+    spellSelections: initialDecision?.spellSelections as Dnd5eAdvancementSpellSelectionsV1 | undefined,
+    contentChoiceSelections: initialDecision?.contentChoiceSelections ?? {} as Record<string, Record<string, string[]>>,
+  }))
+  const [subclassId, setSubclassId] = creationDraft.field('subclassId')
+  const [hpMethod, setHpMethod] = creationDraft.field('hpMethod')
+  const [hpRolls, setHpRolls] = creationDraft.field('hpRolls')
+  const [asiDrafts, setAsiDrafts] = creationDraft.field('asiDrafts')
+  const [classSelections, setClassSelections] = creationDraft.field('classSelections')
+  const [fighterSubclassSelections, setFighterSubclassSelections] = creationDraft.field('fighterSubclassSelections')
+  const [fighterStyles, setFighterStyles] = creationDraft.field('fighterStyles')
+  const [spellSelections, setSpellSelections] = creationDraft.field('spellSelections')
+  const [contentChoiceSelections, setContentChoiceSelections] = creationDraft.field('contentChoiceSelections')
   const [error, setError] = useState('')
   const [confirmPending, setConfirmPending] = useState(false)
-  const plan = useMemo(
-    () => buildDnd5eLevelAdvancementPlan(
-      baseCharacter,
-      classId,
-      levelsGained,
-      subclassId || undefined,
-    ),
-    [baseCharacter, classId, levelsGained, subclassId],
-  )
+  const plan = buildDnd5eLevelAdvancementPlan(baseCharacter, classId, levelsGained, subclassId || undefined)
   const effectiveHpMethod = plan?.rolledHitPointsAllowed ? hpMethod : 'fixed'
   const definition = dnd5eClassDefinition(classId)
   const targetFighter = plan && classId === 'fighter'
@@ -299,7 +284,7 @@ export default function CharacterLevelUpDialog({
       ...(Object.keys(contentChoiceSelections).length > 0 ? { contentChoiceSelections } : {}),
     }
     const result = revisionRecord
-      ? reviseDnd5eLevelAdvancement(
+      ? (creationDraftKey ? reviseDnd5eCreationAdvancement : reviseDnd5eLevelAdvancement)(
           character,
           revisionRecord.id,
           decision,
@@ -312,6 +297,7 @@ export default function CharacterLevelUpDialog({
     setConfirmPending(true)
     try {
       await onConfirm(result.character)
+      creationDraft.clear()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '升级保存失败，请重试。')
     } finally {
@@ -337,13 +323,13 @@ export default function CharacterLevelUpDialog({
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-violet-300">
               <Sparkles className="h-4 w-4" />
-              {revisionRecord ? 'DM 升级修订' : '升级结算'}
+              {creationDraftKey ? '建卡等级选择' : revisionRecord ? 'DM 升级修订' : '升级结算'}
             </div>
             <h2 id="level-up-title" className="mt-2 text-xl font-bold text-white">
               {plan.className} {plan.fromClassLevel} → {plan.toClassLevel} 级
             </h2>
             <p className="mt-1 text-sm text-slate-400">
-              角色总等级 {plan.fromLevel} → {plan.toLevel}。所有选择会作为一笔原子事务保存。
+              角色总等级 {plan.fromLevel} → {plan.toLevel}。确认后保存本级选择。
             </p>
           </div>
           <button
@@ -359,7 +345,8 @@ export default function CharacterLevelUpDialog({
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-7">
           <div className="rounded-2xl border border-amber-300/20 bg-amber-500/[0.07] px-4 py-3 text-sm leading-6 text-amber-100">
             <LockKeyhole className="mr-2 inline h-4 w-4" />
-            玩家确认后不能自行更改本次升级。DM 可以在角色检视页修订任意一次升级；系统会安全重放后续升级。
+            {creationDraftKey ? '建卡期间可返回修改已完成的等级；修改后不再满足条件的后续等级需要重新选择。未确认的选项也会自动保存为草稿。' : '玩家确认后不能自行更改本次升级。DM 可以在角色检视页修订任意一次升级；系统会重新检查后续升级。'}
+            {creationDraft.saveError && <p role="alert" className="mt-2 text-amber-100">草稿未能保存，请保持此面板打开并重试输入。</p>}
           </div>
 
           <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">

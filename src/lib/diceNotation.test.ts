@@ -3,6 +3,8 @@ import {
   buildNotation,
   clampDie,
   percentileNotation,
+  percentileFaces,
+  percentileResults,
   sanitizeForced,
 } from './diceNotation'
 
@@ -39,7 +41,7 @@ describe('buildNotation — random path', () => {
   })
   it('clamps qty and sides', () => {
     expect(buildNotation(101, 6)).toBe('100d6') // MAX_QTY
-    expect(buildNotation(1, 999)).toBe('1d100') // MAX_SIDES
+    expect(buildNotation(1, 999)).toBe('1d100+1d10') // MAX_SIDES
     expect(buildNotation(0, 1)).toBe('1d2') // floors
   })
 })
@@ -80,15 +82,15 @@ describe('buildNotation — length mismatch (AC5/AC7)', () => {
 describe('percentileNotation (d100 pair — spike AC4c)', () => {
   it('forces an arbitrary percentile as a d100+d10 pair', () => {
     expect(percentileNotation(57)).toBe('1d100+1d10@50,7')
-    expect(percentileNotation(100)).toBe('1d100+1d10@90,10') // d10 face "0" == 10
-    expect(percentileNotation(60)).toBe('1d100+1d10@50,10')
-    expect(percentileNotation(10)).toBe('1d100+1d10@0,10') // known limit: tens 0
+    expect(percentileNotation(100)).toBe('1d100+1d10@100,10') // d10 face "0" == 10
+    expect(percentileNotation(60)).toBe('1d100+1d10@60,10')
+    expect(percentileNotation(10)).toBe('1d100+1d10@10,10')
   })
   it('buildNotation routes a single forced d100 through the pair form', () => {
     expect(buildNotation(1, 100, [57])).toBe('1d100+1d10@50,7')
   })
-  it('random d100 stays a lone die', () => {
-    expect(buildNotation(1, 100)).toBe('1d100')
+  it('random d100 uses a tens and units pair', () => {
+    expect(buildNotation(1, 100)).toBe('1d100+1d10')
   })
 })
 
@@ -97,5 +99,19 @@ describe('sanitizeForced', () => {
     expect(sanitizeForced([1, 2, 3], 2, 6)).toEqual([1, 2])
     expect(sanitizeForced([0, 99, NaN], 5, 6)).toEqual([1, 6])
     expect(sanitizeForced('nope', 3, 6)).toEqual([])
+  })
+})
+
+
+describe('percentile physical face round trips', () => {
+  it('preserves all 100 results across settle, correction and staging', () => {
+    for (let value = 1; value <= 100; value++) {
+      expect(percentileResults(percentileFaces(value))).toEqual([value])
+    }
+    expect(percentileFaces(10)).toEqual([10, 10])
+    expect(percentileFaces(20)).toEqual([20, 10])
+    expect(percentileFaces(100)).toEqual([100, 10])
+    expect(percentileFaces(1)).toEqual([100, 1])
+    expect(buildNotation(2, 100, [10, 100])).toBe('1d100+1d10+1d100+1d10@10,10,100,10')
   })
 })

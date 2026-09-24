@@ -230,6 +230,7 @@ export function resolveDnd5eMonsterMapMove(input: {
   const path = findMapGeometryPath({
     geometry, map: pathfindingMap, token: actorToken, to: input.to,
     allowOpenUnlockedDoors: true,
+    climbVerticalSurfaces: traversalMode === 'climb',
     canClimb: traversalMode === 'climb' || (monster.speed.climb ?? 0) > 0,
     canSwim: traversalMode === 'swim' || (monster.speed.swim ?? 0) > 0 ||
       environmentalCapabilities.treatsLiquidSurfacesAsSolidGround,
@@ -265,7 +266,7 @@ export function resolveDnd5eMonsterMapMove(input: {
   }
   const finalElevationFeet = path.elevationsFeet.at(-1) ?? actorElevationFeet
   const verticalDistanceFeet = Math.abs(finalElevationFeet - actorElevationFeet)
-  const distanceFeet = path.distanceFeet + verticalDistanceFeet
+  const distanceFeet = path.distanceFeet + (traversalMode === 'climb' ? 0 : verticalDistanceFeet)
   const draggedMovementTraces: Dnd5eMonsterMapMovementTrace[] = []
   if (draggedTargetTokens.length > 0) {
     const openedDoorIds = new Set(path.doorsToOpen)
@@ -435,7 +436,7 @@ export function resolveDnd5eMonsterMapMove(input: {
   const traversal = dnd5eTraversalMovementCost({
     distanceFeet: runningJump?.jumpDistanceFeet ?? path.distanceFeet,
     baseMovementCostFeet: path.movementCostFeet,
-    elevationGainFeet: usesFlight
+    elevationGainFeet: traversalMode === 'climb' ? 0 : usesFlight
       ? Math.abs(finalElevationFeet - actorElevationFeet)
       : Math.max(0, finalElevationFeet - actorElevationFeet),
     mode: traversalMode,
@@ -464,6 +465,7 @@ export function resolveDnd5eMonsterMapMove(input: {
       type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet,
       monsterLegendaryMovement: input.legendaryMovement ? true : undefined,
       jumpDistance: runningJump?.jumpDistanceFeet,
+      climbDistanceIncludesElevation: traversalMode === 'climb' ? true : undefined,
       movementCost: movementCostFeet, movementCostIncludesDrag: true,
       traversalMode,
       toElevationFeet: finalElevationFeet,

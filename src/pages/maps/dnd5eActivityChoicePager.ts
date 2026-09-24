@@ -149,7 +149,7 @@ export async function promptSearchableDnd5eActivityChoice(input: {
     message: `${input.choiceLabel}：请选择一个选项。`,
     cancelLabel: '取消',
     layout: 'list',
-    searchable: true,
+    searchable: input.options.length > 2 && input.choiceLabel !== '变身术形态',
     searchPlaceholder: `搜索${input.choiceLabel}`,
     options: input.options.map((option) => ({
       id: option.id,

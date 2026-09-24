@@ -11,6 +11,12 @@ import {
 } from './combatLogDetails'
 
 describe('formatDnd5eCombatLogDetails', () => {
+  it('explains immunity without inventing a saving throw result', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'spell-save-skipped-damage-immunity', actorId: 'wizard', targetId: 'minotaur',
+      spellId: 'shatter', damageType: 'thunder',
+    }], { resolveName: () => '牛头人' })).toEqual(['牛头人｜粉碎音波｜雷鸣伤害免疫，跳过豁免，最终伤害 0'])
+  })
   const resolveName = (id: string) => ({
     hero: '艾莉雅',
     wizard: '新冒险者',
@@ -962,4 +968,16 @@ describe('formatDnd5eCombatLogDetails', () => {
       }],
     }], { resolveName })).toContain('艾莉雅｜侦测毒性和疾病更新｜新冒险者（15 尺；带毒生物）')
   })
+})
+
+it('shows the Slow delay die to the DM while keeping secret dice out of the player result', () => {
+  const event: Dnd5eCombatEvent = { type: 'slow-spell-delay-resolved', actorId: 'drow', spellId: 'faerie-fire', slotLevel: 1, d20: 10, delayed: false }
+  const full = formatDnd5eCombatLogDetails([event], { resolveName: () => '卓尔' }).join(' ')
+  expect(full).toContain('d20 10')
+  expect(full).toContain('11–20')
+  expect(full).toContain('妖火 正常施放')
+  const shared = formatDnd5eSecretCombatOutcomeDetails([event], { resolveName: () => '卓尔' }).join(' ')
+  expect(shared).toContain('检定已完成')
+  expect(shared).toContain('妖火 正常施放')
+  expect(shared).not.toContain('d20')
 })

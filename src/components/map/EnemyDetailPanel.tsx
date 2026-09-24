@@ -110,6 +110,7 @@ export default function EnemyDetailPanel({
   onSetHitPoints,
   onAdjustHitPoints,
   removeToken,
+  afterConditions,
   canManageConditions = false,
   onConditionsChange,
   onMonsterBerserkChange,
@@ -146,6 +147,7 @@ export default function EnemyDetailPanel({
   }) => void | Promise<unknown>
   onAdjustHitPoints?: (operation: ManualSettlementOperation, amount: number) => void | Promise<unknown>
   removeToken?: (mapId: string, tokenId: string) => void
+  afterConditions?: ReactNode
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
   /** @deprecated Use onMonsterRuntimeStatusChange for all structured monster states. */
@@ -779,6 +781,7 @@ export default function EnemyDetailPanel({
             <Dnd5eConditionTags conditions={standardConditions} />
           </section>
         ) : null}
+        {afterConditions}
         {canEdit ? (
           <details className="mb-4 rounded-xl border border-sky-300/15 p-2"><summary className="cursor-pointer text-xs font-semibold text-sky-200">仅地图图标 · {token.dnd5eTokenStatusMarkers?.length ?? 0} 项</summary>
             <Dnd5eTokenStatusMarkerEditor

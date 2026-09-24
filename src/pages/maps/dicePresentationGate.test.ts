@@ -63,4 +63,21 @@ describe('settleAuthoritativeDicePresentation', () => {
       authoritativeValues: [20], presentation: new Promise(() => undefined), maximumWaitMs: 60_000,
     })).resolves.toEqual([20])
   })
+
+  it.each(['hidden', 'deadline', 'completed'] as const)('retires the animation before DM confirmation on %s', async (exit) => {
+    vi.useFakeTimers()
+    vi.stubGlobal('document', Object.assign(new EventTarget(), { hidden: exit === 'hidden' }))
+    const pending = new Set(['previous', 'suggestion', 'next'])
+    const retirePresentation = vi.fn(() => { pending.delete('suggestion') })
+    const result = settleAuthoritativeDicePresentation({
+      authoritativeValues: [6],
+      presentation: exit === 'completed' ? Promise.resolve([6]) : new Promise(() => undefined),
+      maximumWaitMs: 100,
+      retirePresentation,
+    })
+    if (exit === 'deadline') await vi.advanceTimersByTimeAsync(100)
+    await expect(result).resolves.toEqual([6])
+    expect(retirePresentation).toHaveBeenCalledOnce()
+    expect([...pending]).toEqual(['previous', 'next'])
+  })
 })

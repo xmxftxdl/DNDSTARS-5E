@@ -10,6 +10,7 @@ import { onDiceDocumentHidden } from '../lib/diceVisibility'
 const MIN_VISIBLE_ROLL_MS = DICE_TIMING.ROLL_MIN_VISIBLE_MS
 
 interface DiceBoxRollOverlayProps {
+  appendFrom?: number
   check?: DiceCheckPresentation
   staging?: boolean
   retainedValues?: number[]
@@ -37,6 +38,7 @@ function fallbackValues(count: number, sides: number) {
 }
 
 export default function DiceBoxRollOverlay({
+  appendFrom,
   staging = false,
   check,
   retainedValues,
@@ -72,8 +74,25 @@ export default function DiceBoxRollOverlay({
   const completedRef = useRef(false)
   const sentRequestRef = useRef<string | null>(null)
   const onCompleteRef = useRef(onComplete)
+  const checkRef = useRef(check)
+  checkRef.current = check
+  const settledFacesRef = useRef<{ requestId: string; values: number[] } | null>(null)
+
+  const syncAdoptedDie = (values: readonly number[]) => {
+    iframeRef.current?.contentWindow?.postMessage({
+      type: 'dice-box-highlight', requestId,
+      adoptedIndex: adoptedD20Index(values, checkRef.current),
+    }, window.location.origin)
+  }
+  useEffect(() => {
+    const settled = settledFacesRef.current
+    if (settled?.requestId === requestId) syncAdoptedDie(settled.values)
+  // Highlight metadata never restarts the physical roll or its completion timer.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [check?.mode, requestId])
   const [flyX, flyY] = useMemo(() => resolveFlyOffset(requestId, flyIndex), [flyIndex, requestId])
   const safeCountForFrame = Math.max(1, Math.min(MAX_DICE_POOL_COUNT, retainedValues?.length ?? Math.round(count)))
+  const initialFrameCount = useRef(safeCountForFrame).current
 
   useEffect(() => {
     const setInteractive = (enabled: boolean) => iframeRef.current?.contentWindow?.postMessage(
@@ -163,9 +182,10 @@ export default function DiceBoxRollOverlay({
           qty: retainedValues?.length ?? safeCount,
           sides: safeSides,
           dieSides,
-          adoptedIndex: adoptedD20Index(forcedValues ?? [], check),
+          adoptedIndex: adoptedD20Index(forcedValues ?? [], checkRef.current),
           values: retainedValues && rerollIndex != null ? [] : forcedValues,
           rerollIndex,
+          appendFrom,
         },
         window.location.origin,
       )
@@ -186,6 +206,11 @@ export default function DiceBoxRollOverlay({
       }
       if (data?.type === 'dice-box-roll-result' && data.requestId === requestId) {
         log('result-message', { values: data.values })
+        if (Array.isArray(data.values) && data.values.every(value => Number.isInteger(value) && value >= 1 && value <= safeSides)) {
+          const values = data.values.map(Number)
+          settledFacesRef.current = { requestId, values }
+          syncAdoptedDie(values)
+        }
         finish(data.values)
       }
     }
@@ -213,7 +238,7 @@ export default function DiceBoxRollOverlay({
       window.clearTimeout(fallback)
       window.removeEventListener('message', handleMessage)
     }
-  }, [check, count, dieSides, forcedValues, requestId, retainedValues, rerollIndex, settledHoldMs, sides, staging])
+  }, [appendFrom, count, dieSides, forcedValues, requestId, retainedValues, rerollIndex, settledHoldMs, sides, staging])
 
   return (
     <DiceOverlayPortal layer={layout === 'left-drawer' ? 'dice' : 'foreground'}>
@@ -221,7 +246,7 @@ export default function DiceBoxRollOverlay({
         <iframe
           ref={iframeRef}
           title={`${sides}-sided dice roller`}
-          src={`/dice-box-frame.html?badge=0&ui=2&sides=${iframeSides}&qty=${safeCountForFrame}`}
+          src={`/dice-box-frame.html?badge=0&ui=2&sides=${iframeSides}&qty=${initialFrameCount}`}
           className={`dice-box-damage-frame ${layout === 'left-drawer' ? 'dice-box-frame--left-drawer' : 'dice-box-roll-flight'} ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
           style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY, ...(layout === 'left-drawer' ? frameBounds : undefined), pointerEvents: onGrabReroll ? 'auto' : 'none' } as CSSProperties}
           sandbox="allow-scripts allow-same-origin"

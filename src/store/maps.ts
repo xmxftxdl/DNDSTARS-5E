@@ -1,3 +1,8 @@
+import { validStoneWallLayout } from '../rulesets/dnd5e/stoneWall'
+import { iceWallFromCells } from '../rulesets/dnd5e/wallObjectRules'
+import { normalizeStoneWallState } from '../rulesets/dnd5e/stoneWall'
+import { normalizeTeleportationCircleExit, type TeleportationCircleExit } from '../rulesets/dnd5e/teleportationCircle'
+import { normalizeSymbolAreaState } from '../rulesets/dnd5e/symbolSpell'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Dnd5eMonsterLegendaryMovementGrant } from '../rulesets/dnd5e/monsterLegendaryMovement'
@@ -944,6 +949,9 @@ export interface Token {
   /** Persistent duplicate created by the generic duplicate-creature Activity operation. */
   dnd5eSimulacrum?: {
     schemaVersion: 1
+    subjectProfile?: Pick<import('../types/character').Character,
+      'charClass' | 'race' | 'dnd5eRaceId' | 'dnd5eClassChoices' | 'dnd5eFeatIds' |
+      'dnd5eContentChoices' | 'savingThrows' | 'skills' | 'background'>
     sourceTokenId: string
     subjectTokenId: string
     sourceCharacterId: string
@@ -992,6 +1000,8 @@ export interface Token {
   dnd5eCombatState?: {
     activityExtraTurnGroup?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnGroup']
     activityExtraTurnSuspension?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnSuspension']
+    slowSpellGate?: import('../rulesets/dnd5e/slowSpellGate').Dnd5eSlowSpellGate
+    slowDelayedMonsterSpell?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['slowDelayedMonsterSpell']
     slowDelayedSpell?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['slowDelayedSpell']
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
     /**
@@ -1274,6 +1284,7 @@ export interface Token {
   perceptionVisibility?: 'detected-unseen'
   /** DM 权威路径；各端只按路径做本地插值，最终坐标仍以 x/y 为准。 */
   movementAnimation?: TokenMovementAnimation
+  teleportationArrivalMapId?: string
 }
 
 type LegacyTokenSave = Omit<Partial<Token>, 'dnd5eCombatState'> & {
@@ -1338,12 +1349,15 @@ export interface Dnd5eItemArea {
 }
 
 export interface Dnd5ePluginArea {
+  teleportationExit?: TeleportationCircleExit
   id: string
   pluginId: string
   featureId: string
   /** 旧存档缺省为 plugin-feature；核心 SRD 法术使用 core-spell。 */
   sourceKind?: Dnd5ePersistentAreaSourceKind
   coreSpellId?: string
+  /** Original continuous-field radius, before clipping against doors/walls. */
+  obstructionRadiusFeet?: number
   /** Content-neutral projection identity used by feature spell origins and attack predicates. */
   utilityProjectionId?: string
   /** Core spellcasting source captured when the area was created. */
@@ -1409,6 +1423,7 @@ export interface Dnd5ePluginArea {
   /** Hallucinatory Terrain's selected natural-terrain appearance. */
   hallucinatoryTerrain?: Dnd5eHallucinatoryTerrainAreaState
   /** Programmed Illusion's selected form and trigger-sense declaration. */
+  symbol?: import('../rulesets/dnd5e/symbolSpell').SymbolAreaState
   programmedIllusion?: Dnd5eProgrammedIllusionAreaState
   /** A bounded interior light level that overrides brighter ambient light inside this area. */
   illuminationOverride?: 'dim' | 'darkness'
@@ -1450,6 +1465,9 @@ export interface Dnd5ePluginArea {
   dancingLightsForm?: 'lights' | 'humanoid'
   visual?: Dnd5ePersistentAreaVisual
   /** Exact host-approved Wall of Fire placement used by presentation and turn-end damage. */
+  stoneWall?: import('../rulesets/dnd5e/stoneWall').StoneWallState
+  forceWall?: import('../rulesets/dnd5e/stoneWall').StoneWallLayout
+  forceShell?: { shape: 'hemisphere' | 'sphere'; radiusFeet: number }
   wallOfFireGeometry?: {
     shape: 'line' | 'ring'
     angleDegrees: number
@@ -1787,6 +1805,7 @@ function normalizeToken(raw: unknown): Token {
       : undefined,
     perceptionVisibility: t.perceptionVisibility === 'detected-unseen' ? t.perceptionVisibility : undefined,
     movementAnimation: normalizeTokenMovementAnimation(t.movementAnimation),
+    teleportationArrivalMapId: typeof t.teleportationArrivalMapId === 'string' ? t.teleportationArrivalMapId : undefined,
     dnd5eWorldTimeAppliedMinute:
       Number.isSafeInteger(t.dnd5eWorldTimeAppliedMinute) && Number(t.dnd5eWorldTimeAppliedMinute) >= 0
         ? Number(t.dnd5eWorldTimeAppliedMinute)
@@ -1985,6 +2004,7 @@ function normalizeMap(raw: unknown): BattleMap {
           ? normalizeDnd5eHallucinatoryTerrainAreaState(area.hallucinatoryTerrain)
           : undefined
         if (area.hallucinatoryTerrain != null && !hallucinatoryTerrain) return []
+        if (area.symbol != null && !normalizeSymbolAreaState(area.symbol)) return []
         const programmedIllusion = area.programmedIllusion
           ? normalizeDnd5eProgrammedIllusionAreaState(area.programmedIllusion)
           : undefined
@@ -2144,6 +2164,9 @@ function normalizeMap(raw: unknown): BattleMap {
           sourceCharacterId: typeof area.sourceCharacterId === 'string' ? area.sourceCharacterId : '',
           sourceTokenId: typeof area.sourceTokenId === 'string' ? area.sourceTokenId : '',
           cells,
+          obstructionRadiusFeet: Number.isFinite(area.obstructionRadiusFeet) && Number(area.obstructionRadiusFeet) > 0 && Number(area.obstructionRadiusFeet) <= 5280
+            ? Number(area.obstructionRadiusFeet) : undefined,
+          teleportationExit: area.coreSpellId === 'teleportation-circle' ? normalizeTeleportationCircleExit(area.teleportationExit) : undefined,
           createdRound: area.createdRound!,
           expiresAfterRound: area.expiresAfterRound!,
           createdWorldMinute,
@@ -2193,6 +2216,7 @@ function normalizeMap(raw: unknown): BattleMap {
           hallow,
           hallucinatoryTerrain,
           programmedIllusion,
+          symbol: normalizeSymbolAreaState(area.symbol),
           illuminationOverride: area.illuminationOverride === 'dim' || area.illuminationOverride === 'darkness'
             ? area.illuminationOverride
             : undefined,
@@ -2226,6 +2250,13 @@ function normalizeMap(raw: unknown): BattleMap {
             ? 'humanoid'
             : coreSpellId === 'dancing-lights' ? 'lights' : undefined,
           visual: visual ? { ...visual } : undefined,
+          stoneWall: coreSpellId === 'wall-of-stone' ? normalizeStoneWallState(area.stoneWall) : coreSpellId === 'wall-of-ice'
+            ? normalizeStoneWallState(area.stoneWall) ?? iceWallFromCells(cells, m.feetPerCell ?? 5, area.sourceSpellSaveDc ?? 10) : undefined,
+          forceWall: coreSpellId === 'wall-of-force' && area.forceWall?.mode === 'thick' && validStoneWallLayout(area.forceWall) ? area.forceWall : undefined,
+          forceShell: coreSpellId === 'wall-of-force' && area.forceShell &&
+            ['hemisphere', 'sphere'].includes(area.forceShell.shape) &&
+            Number.isFinite(area.forceShell.radiusFeet) && area.forceShell.radiusFeet > 0 && area.forceShell.radiusFeet <= 10
+              ? { shape: area.forceShell.shape, radiusFeet: area.forceShell.radiusFeet } : undefined,
           wallOfFireGeometry,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,

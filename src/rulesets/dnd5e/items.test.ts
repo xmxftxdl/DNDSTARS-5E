@@ -1068,24 +1068,24 @@ describe('SRD 5.1 inventory', () => {
 
   it('tracks all ten healer kit uses without consuming the kit early', () => {
     const hero = character('healer')
-    const granted = applyDnd5eInventoryMutation([hero], {
+    const granted = applyDnd5eInventoryMutation([hero, character('patient', 0)], {
       type: 'grant', characterId: hero.id, templateId: 'srd-5.1:item:healers-kit', quantity: 1,
     })
     let current = granted.characters
     let stack = inventoryEntry(current[0], 'srd-5.1:item:healers-kit')
     expect(stack.resources?.uses.current).toBe(10)
     for (let index = 0; index < 9; index += 1) {
-      const used = applyDnd5eInventoryMutation(current, { type: 'use', characterId: hero.id, instanceId: stack.instanceId })
+      const used = applyDnd5eInventoryMutation(current, { type: 'use', characterId: hero.id, targetCharacterId: 'patient', instanceId: stack.instanceId })
       expect(used.ok).toBe(true)
       current = used.characters
       stack = inventoryEntry(current[0], 'srd-5.1:item:healers-kit')
     }
     expect(stack.resources?.uses.current).toBe(1)
-    const finalUse = applyDnd5eInventoryMutation(current, { type: 'use', characterId: hero.id, instanceId: stack.instanceId })
+    const finalUse = applyDnd5eInventoryMutation(current, { type: 'use', characterId: hero.id, targetCharacterId: 'patient', instanceId: stack.instanceId })
     const depleted = inventoryEntry(finalUse.characters[0], stack.templateId)
     expect(depleted.quantity).toBe(1)
     expect(depleted.resources?.uses.current).toBe(0)
-    const exhausted = applyDnd5eInventoryMutation(finalUse.characters, { type: 'use', characterId: hero.id, instanceId: stack.instanceId })
+    const exhausted = applyDnd5eInventoryMutation(finalUse.characters, { type: 'use', characterId: hero.id, targetCharacterId: 'patient', instanceId: stack.instanceId })
     expect(exhausted).toMatchObject({ ok: false, reason: 'insufficient-quantity' })
   })
 

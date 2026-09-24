@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import Overlays from '/src/presentation/maps/DicePresentationOverlays.tsx';
+import {useDicePresentation} from '/src/presentation/maps/useDicePresentation.ts';
+import {createDmDiceModeSelection} from '/src/presentation/maps/dmDiceMode.ts';
+import '/src/index.css';
+const player=location.search.includes('player');const channel=new BroadcastChannel('dm-supplement-regression');
+function App(){
+ const dice=useDicePresentation(()=>6);const [result,setResult]=React.useState({mode:'normal',values:[6]});const [completed,setCompleted]=React.useState(0);const [confirmed,setConfirmed]=React.useState(false);
+ const [selection]=React.useState(()=>createDmDiceModeSelection([6],'normal',async (prefix,mode)=>{
+   const values=[...prefix,18];const request={id:'supplement-test',kind:'dice',count:2,sides:20,values,check:{mode,kind:'attack'},appendFrom:1,label:'补骰',targetName:'测试目标'};
+   channel.postMessage(request);
+   await new Promise(resolve=>dice.setDiceBoxRoll({...request,id:1,resolve}));return 18;
+ }));
+ React.useEffect(()=>{dice.setDicePreviewPaused(!player,!player);channel.onmessage=e=>dice.setRollRequestPreview(e.data);if(player)dice.setRollRequestPreview({id:'original',kind:'dice',count:1,sides:20,values:[6],settled:true,label:'原骰',targetName:'测试目标'});return()=>{channel.onmessage=null}},[]);
+ return React.createElement(React.Fragment,null,React.createElement('p',{style:{color:'white'}},`${player?'玩家':'DM'} 动画完成 ${completed} ${confirmed?'已确认':'等待确认'}`),React.createElement(Overlays,{...dice,roll:null,isDM:!player,activeRollStatus:null,dockTab:'dice',
+  secretConfirmation:!player&&!confirmed?{id:'test',label:'命中',targetName:'测试目标',sides:20,values:result.values,check:{mode:result.mode,kind:'attack'},onModeChange:async(mode,values)=>setResult(await selection.change(mode,values))}:null,
+  onSecretConfirm:()=>setConfirmed(true),onRollDone:()=>{},onD20Complete:dice.completeDiceBoxD20,
+  onDiceComplete:(request,values)=>{setCompleted(n=>n+1);dice.completeDiceBoxRoll(request,values)},
+  onPreviewComplete:(id,delay)=>{if(id==='supplement-test')setCompleted(n=>n+1);dice.completeRollRequestPreview(id,delay)}
+ }));
+}createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

@@ -3,6 +3,8 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eMechanicalEffect } from '../../rulesets/dnd5e/activeEffects'
 import { buildMapViewportPresentation } from './MapViewportLayer'
+import { dnd5eTokenStatusMarkerStyle, dnd5eTokenStatusMarkerTooltip } from '../../components/map/dnd5eTokenStatusMarkerPresentation'
+import { normalizeDnd5eTokenStatusMarkers } from '../../rulesets/dnd5e/tokenStatusMarkers'
 
 function character(id: string, charClass: string, sourceActorId?: string): Character {
   return {
@@ -68,6 +70,45 @@ function token(id: string, characterId: string, x: number): Token {
     size: 1,
   }
 }
+
+describe('batch 132–151 spell badges follow authoritative effects', () => {
+  const spells = ['water-breathing', 'weird', 'web', 'acid-arrow', 'alter-self', 'wish'] as const
+  for (const spellId of spells) {
+    it.each(['character', 'monster'] as const)(`${spellId}: %s receives a sourced badge that disappears with the effect`, (kind) => {
+      const effect = createDnd5eMechanicalEffect({
+        id: `${spellId}:caster:target`, definitionId: `srd-5.1:spell:${spellId}:effect`,
+        label: spellId === 'alter-self' ? '水生适应' : '规则效果', kind: 'debuff',
+        source: { kind: 'spell', actorId: 'caster', actorName: '施法者', rulesId: `spell:${spellId}` },
+        targetId: 'target', duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end' },
+        ...(spellId === 'weird' ? { standardCondition: 'frightened' as const }
+          : spellId === 'web' ? { standardCondition: 'restrained' as const } : {}),
+      })
+      const target = character('target', 'fighter')
+      const targetToken: Token = { ...token('target-token', kind === 'character' ? target.id : '', 150),
+        type: kind === 'character' ? 'player' : 'enemy' }
+      if (kind === 'character') target.dnd5eCombatState = { activeEffects: [effect] }
+      else targetToken.dnd5eCombatState = { schemaVersion: 2, activeEffects: [effect] }
+      const map: BattleMap = { id: 'batch-marker-map', name: 'Map', width: 500, height: 500,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+        tokens: [targetToken, token('caster', 'wizard', 50)] }
+      const chars = [target, character('wizard', 'wizard')]
+      const presentation = buildMapViewportPresentation(map, chars)
+      const markers = presentation.dnd5eTokenStatusMarkersByToken[targetToken.id]
+      expect(markers).toEqual([expect.objectContaining({ statusId: spellId, activeEffectId: effect.id,
+        sourceActorId: 'caster', sourceLabel: '施法者', mechanical: true })])
+      expect(normalizeDnd5eTokenStatusMarkers(JSON.parse(JSON.stringify(markers)))).toHaveLength(1)
+      expect(dnd5eTokenStatusMarkerStyle(spellId).icon).toBe(`/assets/icons/${spellId}-spell-action.png`)
+      expect(dnd5eTokenStatusMarkerTooltip(markers[0]).title).not.toContain('规则效果')
+      expect(presentation.dnd5eTokenStatusMarkersByToken.caster ?? []).toHaveLength(0)
+      // Suspension is a reversible lifecycle state; it must hide the badge too.
+      effect.suspendedBy = ['test-suspension']
+      expect(buildMapViewportPresentation(map, chars).dnd5eTokenStatusMarkersByToken[targetToken.id] ?? []).toHaveLength(0)
+      target.dnd5eCombatState = { activeEffects: [] }
+      targetToken.dnd5eCombatState = { schemaVersion: 2, activeEffects: [] }
+      expect(buildMapViewportPresentation(map, chars).dnd5eTokenStatusMarkersByToken[targetToken.id] ?? []).toHaveLength(0)
+    })
+  }
+})
 
 describe('map viewport standard condition presentation', () => {
   it('shows the selected Imprisonment mode above a monster token', () => {
@@ -587,4 +628,27 @@ describe('status source border contract', () => {
     expect(marks.find(mark => !mark.sourceActorId)?.borderColor).toBe('#ffffff')
     expect(marks.find(mark => mark.sourceActorId === 'missing-source')?.borderColor).toBe('#ffffff')
   })
+})
+
+it('marks the monster targeted by True Strike with its own named badge, and clears it after the effect', () => {
+  const effect = createDnd5eMechanicalEffect({
+    id: 'true-strike:caster:monster',
+    definitionId: 'activity:true-strike:rule-state:spell:true-strike:target-linked-effect:extension',
+    label: 'spell:true-strike:target-linked-effect',
+    kind: 'debuff',
+    source: { kind: 'spell', actorId: 'caster', rulesId: 'true-strike' },
+    targetId: 'monster', legacyCondition: 'rule-state:spell:true-strike:target-linked-effect',
+    duration: { type: 'concentration', sourceActorId: 'caster', remainingRounds: 1 },
+  })
+  const monster: Token = { ...token('monster', '', 150), characterId: undefined, type: 'enemy',
+    dnd5eCombatState: { schemaVersion: 2, activeEffects: [effect] } }
+  const map: BattleMap = { id: 'true-strike-map', name: 'Map', width: 500, height: 500,
+    gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [monster, token('caster', 'wizard', 50)] }
+  const presentation = buildMapViewportPresentation(map, [character('wizard', '法师')])
+  expect(presentation.dnd5eTokenStatusMarkersByToken.monster).toEqual(expect.arrayContaining([
+    expect.objectContaining({ statusId: 'true-strike', activeEffectId: effect.id, label: '克敌机先·被锁定', sourceActorId: 'caster' }),
+  ]))
+  expect(presentation.dnd5eTokenStatusMarkersByToken.caster ?? []).toHaveLength(0)
+  const cleared = buildMapViewportPresentation({ ...map, tokens: [{ ...monster, dnd5eCombatState: { schemaVersion: 2 } }] }, [])
+  expect(cleared.dnd5eTokenStatusMarkersByToken.monster ?? []).toHaveLength(0)
 })

@@ -1,3 +1,4 @@
+import { installForcedDiceReplay, type ForcedReplayRuntime } from './diceForcedReplay'
 // ============================================================================
 // diceEngine — thin wrapper around @3d-dice/dice-box-threejs (T-P2-396).
 //
@@ -68,6 +69,7 @@ export interface CreateDiceBoxOptions {
 export interface DiceEngineBox {
   // Resolves with the same DiceOutcome that onComplete receives — exactly once.
   roll(notation: string): Promise<DiceOutcome>
+  append(sides: number, values: number[], from: number): Promise<number[]>
   stage(sides: number, values: number[], dieSides?: number[]): Promise<void>
   reroll(index: number): Promise<number[]>
   grabDie(x: number, y: number): number | null
@@ -110,6 +112,7 @@ interface RuntimeGeometry {
 }
 
 interface RuntimeBody {
+  type?: number
   position?: RuntimeVector
   quaternion?: RuntimeQuaternion
   velocity?: RuntimeVector
@@ -125,16 +128,18 @@ interface RuntimeDie {
   position?: RuntimeVector
   quaternion?: RuntimeQuaternion
   body?: RuntimeBody
+  getFaceValue?: () => { value?: number; label?: string; reason?: string }
   getLastValue?: () => { value?: number; label?: string; reason?: string }
   setLastValue?: (value: { value: number; label: string; reason: string }) => void
   storeRolledValue?: (reason: string) => void
 }
 
 interface RuntimeDiceBox {
+  notationVectors?: unknown
   DiceFactory?: { createGeometry: (shape: string, radius: number, ...args: unknown[]) => RuntimeGeometry }
   setDimensions?: (dimensions?: { x: number; y: number }) => void
   startClickThrow?: (notation: string) => { vectors: unknown[] }
-  spawnDice?: (vector: unknown) => void
+  spawnDice?: (vector: unknown, existing?: RuntimeDie) => void
   last_time?: number
   diceList?: RuntimeDie[]
   swapDiceFace?: (die: RuntimeDie, value: number) => void
@@ -331,18 +336,18 @@ function d4SettledFaceValue(die: RuntimeDie): number | undefined {
   return value != null && value >= 1 && value <= 4 ? value : undefined
 }
 
-function physicalDieValue(die: RuntimeDie): number | undefined {
+function physicalDieValue(die: RuntimeDie, pose = die.quaternion): number | undefined {
   if (die.shape === 'd4') return d4SettledFaceValue(die)
   const normals = die.geometry?.getAttribute?.('normal')?.array
   const groups = die.geometry?.groups
-  if (!normals || !groups || !die.quaternion) return undefined
+  if (!normals || !groups || !pose) return undefined
   let highest = -Infinity
   let materialIndex: number | undefined
   for (let index = 0; index < groups.length; index += 1) {
     if (!groups[index].materialIndex) continue
     const normal = groupLocalNormal(normals, groups[index], index)
     if (!normal) continue
-    const world = rotateVector(normal, normalizedQuaternion(die.quaternion))
+    const world = rotateVector(normal, normalizedQuaternion(pose))
     if (world.z > highest) {
       highest = world.z
       materialIndex = groups[index].materialIndex
@@ -507,6 +512,24 @@ export async function createDiceBox(
   await box.initialize?.()
 
   const runtimeBox = box as unknown as RuntimeDiceBox
+  // Native getFaceValue indexes normals as groupIndex * 9. Numbered faces
+  // can contain multiple triangles; use actual group spans during the hidden
+  // simulation too, before forced labels are chosen and any frame is shown.
+  const patchedFaceReaders = new WeakSet<RuntimeDie>()
+  const spawnDice = runtimeBox.spawnDice
+  if (spawnDice) runtimeBox.spawnDice = function (vector, existing) {
+    spawnDice.call(runtimeBox, vector, existing)
+    for (const die of runtimeBox.diceList ?? []) {
+      if (!die.getFaceValue || patchedFaceReaders.has(die)) continue
+      patchedFaceReaders.add(die)
+      const nativeRead = die.getFaceValue.bind(die)
+      die.getFaceValue = () => {
+        const result = nativeRead()
+        const value = physicalDieValue(die, die.body?.quaternion ?? die.quaternion)
+        return value == null ? result : { ...result, value, label: String(value) }
+      }
+    }
+  }
   let grabbed: { index: number; position: ProjectableVector; quaternion: QuaternionValue; heldSince: number; depth: number; offsetX: number; offsetY: number; radius: number; samples: DiceDragSample[] } | null = null
   let rerolling = false
   let released: { index: number; motion: ReturnType<typeof diceThrowMotion> } | null = null
@@ -599,12 +622,15 @@ export async function createDiceBox(
       zoom?: number; fov?: number; position?: { z: number }; updateProjectionMatrix?: () => void
     } | undefined
     if (!element || !camera?.position || !camera.updateProjectionMatrix || !camera.fov) return
+    // A retained iframe can initialize or resize while its drawer is hidden.
+    // Zero is not a usable viewport and must never become the permanent size cap.
+    if (!(element.clientWidth > 0 && element.clientHeight > 0)) return
     const available = dicePixelSize(options.diceCount ?? 1, element.clientWidth, element.clientHeight)
     // A confirmation panel may resize the viewport: never grow a settled pool.
-    fixedPixelSize = Math.min(fixedPixelSize ?? available, available)
     const pixelsAtZoomOne = worldDiameter * element.clientHeight /
       (2 * camera.position.z * Math.tan(camera.fov * Math.PI / 360))
-    if (!(pixelsAtZoomOne > 0)) return
+    if (!(pixelsAtZoomOne > 0) || !Number.isFinite(pixelsAtZoomOne)) return
+    fixedPixelSize = Math.min(fixedPixelSize ?? available, available)
     camera.zoom = fixedPixelSize / pixelsAtZoomOne
     camera.updateProjectionMatrix()
   }
@@ -617,13 +643,11 @@ export async function createDiceBox(
     const render = renderer?.render
     if (renderer) renderer.render = () => {}
     try {
-      // A room log can shrink the canvas during a throw. Preserve the large
-      // pool's physics floor instead of rebuilding its walls through the dice.
-      const floor = (options.diceCount ?? 1) > 12 ? options.dimensions : undefined
-      setDimensions.call(runtimeBox, floor ? {
-        x: Math.max(dimensions?.x ?? 0, floor.x),
-        y: Math.max(dimensions?.y ?? 0, floor.y),
-      } : dimensions)
+      // A room log can shrink any tray during a throw, including a single die.
+      // Keep the existing physics bounds: rebuilding smaller walls can leave
+      // a body outside the tray. Only the camera/renderer should follow resize.
+      const floor = options.dimensions
+      setDimensions.call(runtimeBox, floor ?? dimensions)
       calibrateCamera()
     } finally {
       if (renderer && render) renderer.render = render
@@ -631,7 +655,43 @@ export async function createDiceBox(
     renderScene()
   }
 
-  return {
+  // Showing a retained iframe does not reliably fire window.resize. Rebuild
+  // the camera once a real viewport exists, including the first hidden mount.
+  const viewport = typeof container === 'string' ? document.querySelector(container) : container
+  if (viewport && typeof ResizeObserver !== 'undefined') {
+    let previousWidth = 0
+    let previousHeight = 0
+    const observer = new ResizeObserver(() => {
+      const width = viewport.clientWidth
+      const height = viewport.clientHeight
+      if (!(width > 0 && height > 0) || (width === previousWidth && height === previousHeight)) return
+      previousWidth = width
+      previousHeight = height
+      runtimeBox.setDimensions?.({ x: width, y: height })
+    })
+    observer.observe(viewport)
+  }
+
+  const engine: DiceEngineBox = {
+    async append(sides, values, from) {
+      if (pending || rerolling || from < 1 || from >= values.length) throw new Error('Invalid or busy dice append')
+      const prefix = values.slice(0, from)
+      if (this.visibleValues().length !== from) await this.stage(sides, prefix)
+      this.correctVisibleFaces(prefix)
+      const retainedBodies = (runtimeBox.diceList ?? []).slice(0, from).map(die => ({ body: die.body, type: die.body?.type }))
+      // Keep the confirmed dice still during the vendor's hidden preflight
+      // and visible replay. Only the newly added die is dynamic.
+      for (const entry of retainedBodies) if (entry.body && entry.type != null) entry.body.type = 2
+      rerolling = true
+      hideAdoptedMarker()
+      try {
+        await box.add(`${values.length - from}d${sides}@${values.slice(from).join(',')}`)
+        return values
+      } finally {
+        for (const entry of retainedBodies) if (entry.body && entry.type != null) entry.body.type = entry.type
+        rerolling = false
+      }
+    },
     async stage(this: DiceEngineBox, sides, values, dieSides) {
       if (pending || rerolling) throw new Error('Dice are busy')
       hideAdoptedMarker()
@@ -644,7 +704,9 @@ export async function createDiceBox(
         return
       }
       box.clearDice()
-      const vectors = runtimeBox.startClickThrow?.(dieSides?.length === values.length ? dieSides.map(die => `1d${die}`).join('+') : `${values.length}d${sides}`)?.vectors ?? []
+      const notation = runtimeBox.startClickThrow?.(dieSides?.length === values.length ? dieSides.map(die => `1d${die}`).join('+') : `${values.length}d${sides}`)
+      if (notation) runtimeBox.notationVectors = notation
+      const vectors = notation?.vectors ?? []
       for (const vector of vectors) runtimeBox.spawnDice?.(vector)
       for (const die of runtimeBox.diceList ?? []) {
         die.position?.set?.(0, 0, 0)
@@ -951,4 +1013,6 @@ export async function createDiceBox(
       box.clearDice()
     },
   }
+  installForcedDiceReplay(box as unknown as ForcedReplayRuntime, values => engine.correctVisibleFaces(values))
+  return engine
 }

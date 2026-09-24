@@ -40,7 +40,8 @@ function publish(state: Pick<FogStoreState, 'maps'>): void {
     updatedAt,
   }
   void saveSharedResourceWithResult(MAP_FOG_RESOURCE, payload).then((result) => {
-    sharedWriteWatermark.settle(ticket, result.status === 'saved')
+    const settled = sharedWriteWatermark.settle(ticket, result.status === 'saved', result.status === 'saved' ? result.revision : undefined)
+    if (settled && result.status !== 'saved') void useFogStore.getState().loadShared()
   })
 }
 
@@ -60,10 +61,10 @@ export const useFogStore = create<FogStoreState>()(
       maps: [],
       redoByMap: {},
       loadShared: async () => {
-        const shared = await loadSharedResource<SharedMapFogState>(MAP_FOG_RESOURCE)
+        const shared = await loadSharedResource<SharedMapFogState & { _sync?: { revision?: number } }>(MAP_FOG_RESOURCE)
         const normalized = normalizeSharedMapFog(shared)
-        if (!normalized || !sharedWriteWatermark.shouldApplyRemote(normalized.updatedAt)) return
-        sharedWriteWatermark.acceptRemote(normalized.updatedAt)
+        if (!normalized || !sharedWriteWatermark.shouldApplyRemote(normalized.updatedAt, shared?._sync?.revision)) return
+        sharedWriteWatermark.acceptRemote(normalized.updatedAt, shared?._sync?.revision)
         set({ maps: normalized.maps, redoByMap: {} })
       },
       fill: (mapId) => {

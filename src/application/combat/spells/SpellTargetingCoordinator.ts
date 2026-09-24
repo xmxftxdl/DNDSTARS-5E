@@ -126,6 +126,7 @@ export function buildSpellTargetingSubmission(
     targetTokenId: targetTokenIds[0] ?? input.currentTokenId ?? '',
     targetTokenIds,
     areaTargetCell: usesAreaTargeting ? input.areaTargetCell : undefined,
+    targetElevationFeet: usesAreaTargeting ? targeting.targetElevationFeet : undefined,
     areaTargetCells: usesAreaTargeting && input.areaTargetCells?.length
       ? input.areaTargetCells.map((cell) => ({ ...cell }))
       : undefined,

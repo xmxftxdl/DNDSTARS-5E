@@ -4,6 +4,7 @@ export interface SettleAuthoritativeDicePresentationInput {
   authoritativeValues: readonly number[]
   presentation: Promise<readonly number[]>
   maximumWaitMs: number
+  retirePresentation?: () => void
 }
 
 /**
@@ -35,6 +36,10 @@ export async function settleAuthoritativeDicePresentation(
   } finally {
     if (timeout) clearTimeout(timeout)
     unsubscribe()
+    // The hidden-tab/deadline branches can win before the renderer completes.
+    // Remove that exact request before opening DM confirmation, or unpausing
+    // the presentation queue will replay it after confirmation.
+    input.retirePresentation?.()
   }
 
   return [...input.authoritativeValues]

@@ -5,6 +5,7 @@ export type AppDialogKind =
   | 'direction-stepper'
   | 'choice-groups'
   | 'action-choice'
+  | 'multi-choice'
 
 export type AppDialogTone = 'default' | 'danger'
 
@@ -77,6 +78,11 @@ export interface AppActionChoiceOptions extends AppDialogOptions {
   searchPlaceholder?: string
 }
 
+export interface AppMultiChoiceOptions extends AppDialogOptions {
+  options: readonly AppChoiceGroupOption[]
+  selectedIds?: readonly string[]
+}
+
 export interface AppDialogRequest extends AppDialogOptions {
   id: number
   kind: AppDialogKind
@@ -96,6 +102,7 @@ export interface AppDialogRequest extends AppDialogOptions {
   actionChoiceLayout?: AppActionChoiceLayout
   actionChoiceSearchable?: boolean
   actionChoiceSearchPlaceholder?: string
+  selectedIds?: readonly string[]
 }
 
 export interface AppDialogSnapshot {
@@ -103,7 +110,7 @@ export interface AppDialogSnapshot {
   queuedCount: number
 }
 
-type DialogResult = boolean | string | AppDirectionStepperResult | AppChoiceGroupsResult | null
+type DialogResult = boolean | string | string[] | AppDirectionStepperResult | AppChoiceGroupsResult | null
 
 interface PendingDialog {
   request: AppDialogRequest
@@ -301,7 +308,7 @@ export async function showAppChoiceGroups(
     choiceGroups: groups,
     choiceGroupDefaultValues: defaultValues,
   })
-  if (typeof result !== 'object' || result === null || !('values' in result)) return null
+  if (typeof result !== 'object' || result === null || Array.isArray(result) || !('values' in result)) return null
   const valid = groups.every((group) =>
     group.options.some((option) => option.id === result.values[group.id]))
   return valid ? result : null
@@ -354,6 +361,19 @@ export function filterAppActionChoices(
   })
 }
 
+export async function showAppMultiChoice(input: AppMultiChoiceOptions): Promise<string[] | null> {
+  const choices = input.options.filter(option => option.id.trim() && option.label.trim())
+  const validIds = new Set(choices.map(option => option.id))
+  const result = await enqueueDialog({
+    ...normalizeOptions(input, { title: '选择生物', confirmLabel: '确认', cancelLabel: '取消' }),
+    kind: 'multi-choice',
+    actionChoices: choices,
+    selectedIds: [...new Set(input.selectedIds ?? [])].filter(id => validIds.has(id)),
+  })
+  if (!Array.isArray(result) || !result.every(id => validIds.has(id))) return null
+  return [...new Set(result)]
+}
+
 export function resetAppDialogsForTests() {
   while (queue.length > 0) {
     const pending = queue.shift()
@@ -362,6 +382,7 @@ export function resetAppDialogsForTests() {
       pending.request.kind === 'prompt' ||
       pending.request.kind === 'direction-stepper' ||
       pending.request.kind === 'choice-groups' ||
+      pending.request.kind === 'multi-choice' ||
       pending.request.kind === 'action-choice'
         ? null
         : false,

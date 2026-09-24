@@ -1,3 +1,4 @@
+import { planDnd5eMapResultApplication } from './mapBridge'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
@@ -367,6 +368,38 @@ describe('monster core spell map action', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(28)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id)
       ?.dnd5eCombatState?.monsterSpellSlots?.['1'].current).toBe(0)
+  })
+
+  it('settles Sunburst darkness removal in the monster bridge', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:archmage')!
+    const previousSpells = monster.spellcasting!.spells
+    monster.spellcasting!.spells = [...(previousSpells ?? []), { id: 'sunburst', level: 8, name: 'Sunburst' }]
+    try {
+      const mage = token({ id: 'mage', poolId: 'srd-5.1:archmage',
+        dnd5eCombatState: { monsterSpellSlots: { 8: { current: 1, max: 1 } } } })
+      const hero = token({ id: 'hero-token', type: 'player', characterId: 'hero', x: 155 })
+      const map = battleMap([mage, hero])
+      map.dnd5ePluginAreas = [{
+        id: 'darkness', pluginId: 'srd', featureId: 'darkness', sourceKind: 'core-spell',
+        coreSpellId: 'darkness', label: 'darkness', color: '#000', sourceTokenId: 'other',
+        sourceCharacterId: 'other', createdRound: 1, expiresAfterRound: 101, cells: [{ col: 15, row: 0 }],
+        lighting: { kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2 },
+      }]
+      const prepared = prepareDnd5eMonsterCoreSpell({
+        combatId: 'sunburst', map, characters: [character()], initiativeOrder: initiative(map.tokens),
+        actorTokenId: mage.id, targetTokenIds: [hero.id], areaTargetCell: { col: 15, row: 0 },
+        spellId: 'sunburst', slotLevel: 8,
+      })
+      expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+      if (!prepared.ok) return
+      const resolved = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepared.prepared,
+        resolution: { targetSavingThrows: [{ targetId: hero.id, d20: 1 }], effectRolls: [Array(12).fill(1)] } })
+      expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+      expect(resolved.application?.map.dnd5ePluginAreas).toEqual([])
+      expect(resolved.result.state.combatants[hero.id].conditions).toContain('blinded')
+    } finally {
+      monster.spellcasting!.spells = previousSpells
+    }
   })
 
   it('shares the authoritative area target declaration with manual DM spell placement', () => {
@@ -1565,4 +1598,233 @@ describe('monster core spell map action', () => {
     expect(settled.result.ok, settled.result.ok ? undefined : settled.result.reason).toBe(true)
     expect(settled.result.state.combatants[heroToken.id].conditions).toContain('restrained')
   })
+})
+
+
+describe('Slow on monster spellcasting', () => {
+  it('retains persisted Slow when a drow prepares Faerie Fire', () => {
+    const drow = token({ id: 'drow', poolId: 'srd-5.1:drow' })
+    drow.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:slow', label: 'Slow', targetId: drow.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'slow' },
+      duration: { type: 'concentration', sourceActorId: 'caster', concentrationId: 'slow', remainingRounds: 10 },
+      modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 }, actionOrBonusActionOnly: true },
+    })] }
+    const target = token({ id: 'target', type: 'player', characterId: 'hero', x: 55, y: 35 })
+    const map = battleMap([drow, target])
+    const result = prepareDnd5eMonsterCoreSpell({ combatId: 'persisted-slow', round: 2, map, characters: [character()],
+      initiativeOrder: initiative(map.tokens), actorTokenId: drow.id, targetTokenIds: [target.id],
+      spellId: 'faerie-fire', slotLevel: 1, areaTargetCell: { col: 5, row: 3 } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.prepared.state.combatants.drow.classState.activeEffects?.[0]?.modifiers?.actionSpellDelay).toEqual({ dieSides: 20, delayMinimum: 11 })
+    const delayed = resolvePreparedDnd5eMonsterCoreSpell({ prepared: result.prepared, resolution: {
+      effectRolls: [], slowSpellDelayD20: 11,
+      slowSpellIntent: { spellId: 'faerie-fire', spellName: '妖火', slotLevel: 1, targetTokenIds: [target.id],
+        effect: 'saving-throw', diceCount: 0, diceSides: 4, castingTime: 'action', areaTargetCell: { col: 5, row: 3 } },
+    } }).result
+    expect(delayed.ok, delayed.ok ? undefined : delayed.reason).toBe(true)
+    expect(delayed.events.some(event => event.type === 'saving-throw-resolved' || event.type === 'spell-cast')).toBe(false)
+    expect(delayed.state.combatants.drow.classState.concentrationSpellId).not.toBe('faerie-fire')
+    expect(delayed.state.combatants.target.classState.activeEffects?.some(effect => effect.definitionId === 'srd-5.1:spell:faerie-fire') ?? false).toBe(false)
+
+    expect(resolvePreparedDnd5eMonsterCoreSpell({ prepared: result.prepared, resolution: { effectRolls: [], targetSavingThrows: [{ targetId: target.id, d20: 1 }] } }).result.ok).toBe(false)
+  })
+
+  const prepare = () => {
+    const drow = token({ id: 'drow', label: '卓尔', poolId: 'srd-5.1:drow' })
+    const map = battleMap([drow])
+    const result = prepareDnd5eMonsterCoreSpell({ combatId: 'slow-monster', round: 1, map, characters: [],
+      initiativeOrder: initiative(map.tokens), actorTokenId: drow.id, targetTokenIds: [],
+      spellId: 'darkness', slotLevel: 2, areaTargetCell: { col: 3, row: 3 } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    result.prepared.state.combatants.drow.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:slow', label: '缓慢术', targetId: 'drow', source: { kind: 'spell', rulesId: 'slow' },
+      modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 }, actionOrBonusActionOnly: true },
+    })]
+    return result.prepared
+  }
+  const intent = { spellId: 'darkness', spellName: '黑暗术', slotLevel: 2, targetTokenIds: [],
+    effect: 'persistent-area' as const, diceCount: 0, diceSides: 4, castingTime: 'action' as const,
+    areaTargetCell: { col: 3, row: 3 } }
+  it('rejects omitted dice; 10 casts normally and 11 defers without creating darkness', () => {
+    expect(resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepare(), resolution: { effectRolls: [] } }).result)
+      .toMatchObject({ ok: false, reason: 'invalid-dice' })
+    const immediate = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepare(), resolution: { effectRolls: [], slowSpellDelayD20: 10 } })
+    expect(immediate.result.ok).toBe(true)
+    expect(immediate.createdAreaId).toBeTruthy()
+    const delayed = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepare(), resolution: { effectRolls: [], slowSpellDelayD20: 11, slowSpellIntent: intent } })
+    expect(delayed.result.ok).toBe(true)
+    expect(delayed.createdAreaId).toBeUndefined()
+    expect(delayed.result.state.combatants.drow.classState.concentrationSpellId).not.toBe('darkness')
+    expect(delayed.result.state.combatants.drow.classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
+    const savedMap = JSON.parse(JSON.stringify(delayed.application!.map)) as BattleMap
+    expect(savedMap.tokens[0].dnd5eCombatState?.slowDelayedMonsterSpell?.intent.spellId).toBe('darkness')
+    const resumed = prepareDnd5eMonsterCoreSpell({ combatId: 'slow-monster', round: 2, map: savedMap, characters: [],
+      initiativeOrder: initiative(savedMap.tokens), actorTokenId: 'drow', targetTokenIds: [], spellId: 'darkness', slotLevel: 2,
+      areaTargetCell: intent.areaTargetCell })
+    expect(resumed.ok).toBe(true)
+    if (!resumed.ok) throw new Error(resumed.reason)
+    const completed = resolvePreparedDnd5eMonsterCoreSpell({ prepared: resumed.prepared, resolution: { effectRolls: [], completeSlowSpell: true } })
+    expect(completed.result.ok).toBe(true)
+    expect(completed.createdAreaId).toBeTruthy()
+    expect(completed.result.state.combatants.drow.classState.slowDelayedMonsterSpell).toBeUndefined()
+    expect(completed.result.state.combatants.drow.classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
+    expect(completed.result.state.combatants.drow.turn.actionAvailable).toBe(false)
+  })
+  it('defers a damaging spell before any save or damage rolls are required', () => {
+    const mage = token({ id: 'mage', poolId: 'srd-5.1:mage' })
+    const target = token({ id: 'target', type: 'player', characterId: 'hero', x: 55, y: 35 })
+    const map = battleMap([mage, target])
+    const prepared = prepareDnd5eMonsterCoreSpell({ combatId: 'slow-fireball', map, characters: [character()],
+      initiativeOrder: initiative(map.tokens), actorTokenId: mage.id, targetTokenIds: [target.id],
+      spellId: 'fireball', slotLevel: 3, areaTargetCell: { col: 9, row: 3 } })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw new Error(prepared.reason)
+    prepared.prepared.state.combatants.mage.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'slow', label: '缓慢术', targetId: mage.id, source: { kind: 'spell', rulesId: 'slow' },
+      modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 } },
+    })]
+    const delayed = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepared.prepared, resolution: {
+      effectRolls: [], slowSpellDelayD20: 20, slowSpellIntent: { ...intent, spellId: 'fireball', spellName: '火球术',
+        slotLevel: 3, effect: 'saving-throw', targetTokenIds: [target.id] },
+    } })
+    expect(delayed.result.ok).toBe(true)
+    expect(delayed.result.events.some(event => event.type === 'saving-throw-resolved' || event.type === 'damage-applied')).toBe(false)
+    const repeat = resolvePreparedDnd5eMonsterCoreSpell({ prepared: { ...prepared.prepared, state: delayed.result.state },
+      resolution: { effectRolls: [], completeSlowSpell: true } })
+    expect(repeat.result.ok).toBe(false)
+  })
+
+})
+
+describe('Drow faerie fire automation', () => {
+  function prepare(slow = false) {
+    const drow = token({ id: 'drow', poolId: 'srd-5.1:drow' })
+    const hero = token({ id: 'target', type: 'player', characterId: 'hero', x: 55, y: 35 })
+    const map = battleMap([drow, hero])
+    const prepared = prepareDnd5eMonsterCoreSpell({ combatId: 'faerie', round: 1, map, characters: [character()],
+      initiativeOrder: initiative(map.tokens), actorTokenId: drow.id, targetTokenIds: [hero.id],
+      spellId: 'faerie-fire', slotLevel: 1, areaTargetCell: { col: 5, row: 3 } })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw new Error(prepared.reason)
+    if (slow) prepared.prepared.state.combatants.drow.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'slow', label: '缓慢术', targetId: 'drow', source: { kind: 'spell', rulesId: 'slow' },
+      modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 } },
+    })]
+    return prepared.prepared
+  }
+  it.each([1, 20])('resolves target save %i and only marks failed saves', d20 => {
+    const result = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepare(), resolution: {
+      effectRolls: [], targetSavingThrows: [{ targetId: 'target', d20 }],
+    } }).result
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.target.currentHp).toBe(40)
+    expect(result.state.combatants.target.classState.activeEffects?.some(effect => effect.definitionId === 'srd-5.1:spell:faerie-fire') ?? false).toBe(d20 === 1)
+    if (d20 === 1) expect(result.state.combatants.drow.classState.concentrationSpellId).toBe('faerie-fire')
+  })
+  it('requires Slow d20 and defers before target saves', () => {
+    expect(resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepare(true), resolution: { effectRolls: [],
+      targetSavingThrows: [{ targetId: 'target', d20: 1 }] } }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    const result = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepare(true), resolution: {
+      effectRolls: [], slowSpellDelayD20: 11, slowSpellIntent: { spellId: 'faerie-fire', spellName: '妖火',
+        slotLevel: 1, targetTokenIds: ['target'], effect: 'saving-throw', diceCount: 0, diceSides: 4,
+        castingTime: 'action', areaTargetCell: { col: 5, row: 3 } },
+    } }).result
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.drow.classState.slowDelayedMonsterSpell?.intent.spellId).toBe('faerie-fire')
+    expect(result.events.some(event => event.type === 'saving-throw-resolved')).toBe(false)
+  })
+  it('casts faerie fire from the same prepared UI transaction after a non-delaying Slow check', () => {
+    const prepared = prepare(true)
+    const checked = resolveDnd5eHeadlessAction(prepared.state, {
+      type: 'check-slow-spell', actorId: 'drow', requestId: 'same-transaction',
+      spellId: 'faerie-fire', spellName: '妖火', slotLevel: 1, d20: 10,
+      intent: { kind: 'monster-core', spell: {
+        spellId: 'faerie-fire', spellName: '妖火', slotLevel: 1, targetTokenIds: ['target'],
+        effect: 'saving-throw', diceCount: 0, diceSides: 4, castingTime: 'action',
+        areaTargetCell: { col: 5, row: 3 },
+      } },
+    })
+    expect(checked.ok).toBe(true)
+    Object.assign(prepared.state, checked.state)
+    const result = resolvePreparedDnd5eMonsterCoreSpell({ prepared, resolution: {
+      effectRolls: [], targetSavingThrows: [{ targetId: 'target', d20: 1 }],
+    } }).result
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.target.classState.activeEffects?.some(
+      effect => effect.definitionId === 'srd-5.1:spell:faerie-fire')).toBe(true)
+    expect(result.state.combatants.drow.classState.slowSpellGate).toBeUndefined()
+    expect(result.state.combatants.drow.classState.monsterSpellUsesBySpellId?.['faerie-fire'].current).toBe(0)
+  })
+})
+
+describe('Slow on manual monster spell adjudication', () => {
+  it('requires a check, persists deferred intent on the token and applies the adjudication next turn', () => {
+    const drow = token({ id: 'manual-drow', poolId: 'srd-5.1:drow' })
+    const map = battleMap([drow])
+    const prepared = prepareDnd5eMonsterCoreSpell({ combatId: 'manual-slow', round: 1, map, characters: [],
+      initiativeOrder: initiative(map.tokens), actorTokenId: drow.id, targetTokenIds: [],
+      spellId: 'darkness', slotLevel: 2, areaTargetCell: { col: 3, row: 3 } })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    prepared.prepared.state.combatants[drow.id].classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'slow', label: '缓慢术', targetId: drow.id, source: { kind: 'spell', rulesId: 'slow' },
+      modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 }, actionOrBonusActionOnly: true },
+    })]
+    const command = { type: 'monster-spell' as const, actorId: drow.id, spellId: 'darkness', slotLevel: 2,
+      effects: [{ targetId: drow.id, addCondition: '测试状态' }] }
+    expect(resolveDnd5eHeadlessAction(prepared.prepared.state, command)).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    const checked = resolveDnd5eHeadlessAction(prepared.prepared.state, { type: 'check-slow-spell', actorId: drow.id,
+      requestId: 'manual-check', spellId: 'darkness', spellName: '黑暗术', slotLevel: 2, d20: 20,
+      intent: { kind: 'monster-manual', spellId: 'darkness', spellName: '黑暗术', slotLevel: 2 } })
+    expect(checked.ok, checked.ok ? undefined : checked.reason).toBe(true)
+    expect(checked.state.combatants[drow.id].conditions).not.toContain('测试状态')
+    const application = planDnd5eMapResultApplication({ state: checked.state, map, characters: [],
+      characterIdByCombatantId: prepared.prepared.characterIdByCombatantId, events: [...checked.events] })
+    const savedMap = JSON.parse(JSON.stringify(application.map)) as BattleMap
+    expect(savedMap.tokens[0].dnd5eCombatState?.slowSpellGate?.delayed).toBe(true)
+    const next = prepareDnd5eMonsterCoreSpell({ combatId: 'manual-slow', round: 2, map: savedMap, characters: [],
+      initiativeOrder: initiative(savedMap.tokens), actorTokenId: drow.id, targetTokenIds: [],
+      spellId: 'darkness', slotLevel: 2, areaTargetCell: { col: 3, row: 3 } })
+    expect(next.ok).toBe(true)
+    if (!next.ok) return
+    const completed = resolveDnd5eHeadlessAction(next.prepared.state, command)
+    expect(completed.ok, completed.ok ? undefined : completed.reason).toBe(true)
+    expect(completed.state.combatants[drow.id].classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
+    expect(completed.state.combatants[drow.id].classState.slowSpellGate).toBeUndefined()
+    expect(completed.state.combatants[drow.id].conditions).toContain('测试状态')
+  })
+})
+
+it('uses the same deferred resource timing for an automated monster area spell', () => {
+  const drow = token({ id: 'unified-drow', poolId: 'srd-5.1:drow' })
+  const map = battleMap([drow])
+  const input = { combatId: 'unified-slow', round: 1, map, characters: [], initiativeOrder: initiative(map.tokens),
+    actorTokenId: drow.id, targetTokenIds: [], spellId: 'darkness', slotLevel: 2, areaTargetCell: { col: 3, row: 3 } }
+  const prepared = prepareDnd5eMonsterCoreSpell(input)
+  expect(prepared.ok).toBe(true)
+  if (!prepared.ok) return
+  prepared.prepared.state.combatants[drow.id].classState.activeEffects = [createDnd5eMechanicalEffect({
+    definitionId: 'slow', label: '缓慢术', targetId: drow.id, source: { kind: 'spell', rulesId: 'slow' },
+    modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 } },
+  })]
+  const checked = resolveDnd5eHeadlessAction(prepared.prepared.state, { type: 'check-slow-spell', actorId: drow.id,
+    requestId: 'unified-check', spellId: 'darkness', spellName: '黑暗术', slotLevel: 2, d20: 11,
+    intent: { kind: 'monster-core', spell: { spellId: 'darkness', spellName: '黑暗术', slotLevel: 2,
+      targetTokenIds: [], effect: 'persistent-area', diceCount: 0, diceSides: 4, castingTime: 'action', areaTargetCell: input.areaTargetCell } } })
+  expect(checked.ok, checked.ok ? undefined : checked.reason).toBe(true)
+  expect(checked.state.combatants[drow.id].classState.monsterSpellUsesBySpellId?.darkness.current).toBe(1)
+  const application = planDnd5eMapResultApplication({ state: checked.state, map, characters: [],
+    characterIdByCombatantId: prepared.prepared.characterIdByCombatantId, events: [...checked.events] })
+  expect(application.map.dnd5ePluginAreas ?? []).toHaveLength(0)
+  const resumed = prepareDnd5eMonsterCoreSpell({ ...input, round: 2, map: JSON.parse(JSON.stringify(application.map)) })
+  expect(resumed.ok).toBe(true)
+  if (!resumed.ok) return
+  const cast = resolvePreparedDnd5eMonsterCoreSpell({ prepared: resumed.prepared, resolution: { effectRolls: [] } })
+  expect(cast.result.ok, cast.result.ok ? undefined : cast.result.reason).toBe(true)
+  expect(cast.createdAreaId).toBeTruthy()
+  expect(cast.result.state.combatants[drow.id].classState.slowSpellGate).toBeUndefined()
+  expect(cast.result.state.combatants[drow.id].classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
 })

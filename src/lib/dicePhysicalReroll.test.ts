@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const runtime = vi.hoisted(() => ({ dice: [] as unknown[], swap: vi.fn() }))
+const runtime = vi.hoisted(() => ({ dice: [] as unknown[], swap: vi.fn(), add: vi.fn() }))
 vi.mock('@3d-dice/dice-box-threejs', () => ({ default: class {
   diceList = runtime.dice
   swapDiceFace = runtime.swap
   async initialize() {}
   async reroll() { return [] }
+  add(notation: string) { return runtime.add(notation) }
 } }))
 
 import { createDiceBox } from './diceEngine'
@@ -31,6 +32,20 @@ function die(physicalValue: number, recordedValue: number) {
 }
 
 describe('physical reroll outcome', () => {
+  it('appends a pre-generated die without clearing the existing pool', async () => {
+    const original = die(6, 6)
+    runtime.dice = [original]
+    runtime.add.mockImplementation(async (notation: string) => {
+      expect(notation).toBe('1d20@18')
+      expect(runtime.dice[0]).toBe(original)
+      runtime.dice.push(die(18, 18))
+      return []
+    })
+    const box = await createDiceBox('#dice')
+    await expect(box.append(20, [6, 18], 1)).resolves.toEqual([6, 18])
+    expect(runtime.dice[0]).toBe(original)
+    expect(runtime.add).toHaveBeenCalledTimes(1)
+  })
   beforeEach(() => {
     runtime.swap.mockClear()
     const element = () => ({ dataset: {}, style: {}, setAttribute() {}, appendChild() {}, remove() {}, getBoundingClientRect: () => ({ width: 100, height: 100, left: 0, top: 0 }) })

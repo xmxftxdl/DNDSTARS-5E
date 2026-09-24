@@ -602,6 +602,7 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
     case 'other-action':
     case 'other-bonus-action': action = {
       type: 'adjudicate-basic-action',
+      economyOnly: payload.economyOnly,
       actorId: prepared.actorTokenId,
       economy: payload.kind === 'other-bonus-action' ? 'bonusAction' : 'action',
       description: payload.description?.trim() ||

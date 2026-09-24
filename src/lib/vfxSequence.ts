@@ -1,6 +1,7 @@
 import type { MapProjectile } from '../components/map/mapCanvasContracts'
 
 export type VfxRendererKey =
+  | 'sunbeam'
   | 'projectile-arrow'
   | 'fire-projectile'
   | 'ray-of-frost'
@@ -228,6 +229,7 @@ register('poison-spray', ['poison-spray'], {
 register('magic-missile', ['magic-missile'], {
   'magic-missile': 'projectile.magic-missile.v1',
 })
+register('sunbeam', ['sunbeam'])
 register('material-projectile', [
   'scorching-ray', 'guiding-bolt', 'acid-arrow', 'chain-lightning',
   'disintegrate', 'healing-word', 'inflict-wounds',

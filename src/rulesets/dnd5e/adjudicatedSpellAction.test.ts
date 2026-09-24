@@ -1,3 +1,5 @@
+import { planDnd5eMapResultApplication } from './mapBridge'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
@@ -76,6 +78,51 @@ function fixture() {
 }
 
 describe('DM-adjudicated spell deterministic-cost transaction', () => {
+  it('casts Teleport without selecting travelers or requesting manual effects', () => {
+    const input = fixture()
+    input.characters = [{ ...wizard('teleport'), level: 13,
+      classResources: { 'dnd5e-spell-slot-7': { current: 1, max: 1 } } }]
+    input.spell = dnd5eSpellbookEntries([]).find(spell => spell.id === 'teleport')!
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'teleport', slotLevel: 7, narrativeOnly: true }
+    const prepared = prepareDnd5eAdjudicatedSpell(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const settled = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared,
+      response: { decision: 'approved', effects: [] } })
+    expect(settled.result.ok).toBe(true)
+    expect(settled.application?.characters[0].classResources?.['dnd5e-spell-slot-7'].current).toBe(0)
+    expect(settled.result.events).toContainEqual(expect.objectContaining({ type: 'turn-resource-spent', resource: 'action' }))
+  })
+
+  it.each([false, true])('spends a Telepathic Bond action and slot with optional remote NPC markers: selected=%s', selected => {
+    const input = fixture()
+    const actor = { ...wizard('telepathic-bond'), level: 9, classResources: { 'dnd5e-spell-slot-5': { current: 1, max: 1 } } }
+    input.characters = [actor]
+    input.spell = dnd5eSpellbookEntries([]).find(spell => spell.id === 'telepathic-bond')!
+    const remote = { ...input.map, id: 'remote', tokens: [{ ...input.enemy, type: 'npc' as const }] }
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'telepathic-bond', slotLevel: 5, narrativeOnly: true,
+      telepathicBondTargets: selected ? [{ mapId: remote.id, tokenId: input.enemy.id }] : [] }
+    const prepared = prepareDnd5eAdjudicatedSpell({ ...input, maps: [input.map, remote] })
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const settled = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared, response: { decision: 'approved', effects: [] } })
+    expect(settled.result.ok, settled.result.ok ? undefined : settled.result.reason).toBe(true)
+    expect(settled.application?.characters[0].classResources?.['dnd5e-spell-slot-5'].current).toBe(0)
+    expect(settled.result.events.filter(event => event.type === 'turn-resource-spent')).toEqual([
+      expect.objectContaining({ type: 'turn-resource-spent', actorId: input.actorToken.id, resource: 'action' }),
+    ])
+    const exhausted = resolvePreparedDnd5eAdjudicatedSpell({
+      prepared: { ...prepared.prepared, state: { ...prepared.prepared.state,
+        combatants: { ...prepared.prepared.state.combatants,
+          [input.actorToken.id]: { ...settled.result.state.combatants[input.actorToken.id],
+            classResources: prepared.prepared.state.combatants[input.actorToken.id].classResources },
+        } } },
+      response: { decision: 'approved', effects: [] },
+    })
+    expect(exhausted.result).toMatchObject({ ok: false, reason: 'action-unavailable' })
+    expect(prepareDnd5eAdjudicatedSpell({ ...input, maps: [] }).ok).toBe(!selected)
+  })
+
   it('converts printed long casting times and ritual overhead into campaign minutes', () => {
     const input = fixture()
     const mending = dnd5eSpellbookEntries([]).find((entry) => entry.id === 'mending')!
@@ -266,6 +313,34 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
     }))).toEqual(input.map.tokens.map((token) => ({
       id: token.id, x: token.x, y: token.y, hp: token.hp, maxHp: token.maxHp,
     })))
+  })
+
+  it('settles Scrying with only its slot, without saves, concentration or effects', () => {
+    const input = fixture()
+    const spell = dnd5eSpellbookEntries([]).find(entry => entry.id === 'scrying')!
+    input.actor.charClass = '牧师'
+    input.actor.level = 20
+    input.actor.dnd5eClassLevels = { cleric: 20 }
+    input.actor.dnd5eClassChoices = { classes: { cleric: { selections: { 'spell-prepared': ['scrying'] } } } }
+    input.actor.classResources = { 'dnd5e-spell-slot-5': { current: 2, max: 3 } }
+    const granted = applyDnd5eInventoryMutation([input.actor], { type: 'grant', characterId: input.actor.id,
+      templateId: 'srd-5.1:item:scrying-focus-1000gp', quantity: 1 })
+    expect(granted.ok).toBe(true)
+    input.actor = granted.characters[0]
+    input.characters = [input.actor]
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'scrying', castingClassId: 'cleric', slotLevel: 5, narrativeOnly: true }
+    const prepared = prepareDnd5eAdjudicatedSpell({ ...input, spell })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.elapsedCastingMinutes).toBe(0)
+    const resolved = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared, response: { decision: 'approved', effects: [] } })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters[0]?.classResources?.['dnd5e-spell-slot-5'].current).toBe(1)
+    expect(resolved.result.state.combatants[input.action.actorTokenId!].concentrating).toBe(false)
+    for (const type of ['saving-throw', 'condition-applied', 'damage-applied', 'turn-resource-spent']) {
+      expect(resolved.result.events).not.toContainEqual(expect.objectContaining({ type }))
+    }
+    expect(normalizeDnd5eInventory(resolved.application!.characters[0]).entries).toEqual(normalizeDnd5eInventory(input.actor).entries)
   })
 
   it('settles Divination through voice narrative at base, ritual and upcast levels', () => {
@@ -870,6 +945,22 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
     }
   })
 
+  it('casts narrative Sending without a map recipient or DM resolution payload', () => {
+    const input = fixture()
+    input.spell = dnd5eSpellbookEntries([]).find(entry => entry.id === 'sending')!
+    input.actor.level = 20
+    input.actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-prepared': ['sending'] } } } }
+    input.actor.classResources = { 'dnd5e-spell-slot-3': { current: 2, max: 3 } }
+    input.actor.equipment = { offHand: { id: 'focus', name: '奥术法器', slot: 'mainWeapon', spellcastingFocusClassIds: ['wizard'] } }
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'sending', slotLevel: 3, narrativeOnly: true }
+    const prepared = prepareDnd5eAdjudicatedSpell(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const result = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared, response: { decision: 'approved', effects: [] } })
+    expect(result.result.ok).toBe(true)
+    expect(result.application?.characters[0].classResources?.['dnd5e-spell-slot-3'].current).toBe(1)
+  })
+
   it('requires a bounded Sending declaration and spends an upcast slot without inventing scaling', () => {
     const input = fixture()
     input.spell = dnd5eSpellbookEntries([]).find((entry) => entry.id === 'sending')!
@@ -1073,6 +1164,38 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
       },
     }
     expect(prepareDnd5eAdjudicatedSpell(input)).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
+  it('animates weighted objects atomically and rejects capacity overflow or carried items', () => {
+    const input = fixture()
+    input.spell = dnd5eSpellbookEntries([]).find(entry => entry.id === 'animate-objects')!
+    input.actor.level = 20
+    input.actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-prepared': ['animate-objects'] } } } }
+    input.actor.classResources = { 'dnd5e-spell-slot-5': { current: 1, max: 3 } }
+    const object = (id: string, size: number, x: number): Token => ({
+      id, label: id, x, y: 125, size, type: 'obstacle', color: '', emoji: '',
+    })
+    const objects = [object('large', 2, 125), object('medium', 1, 275)]
+    input.map.tokens = [input.actorToken, ...objects]
+    input.action.combatId = undefined
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'animate-objects', slotLevel: 5,
+      animateObjects: { schemaVersion: 1, targets: objects.map(token => ({ tokenId: token.id, targetName: token.label })) },
+    }
+    const prepared = prepareDnd5eAdjudicatedSpell(input)
+    expect(prepared.ok, prepared.ok ? '' : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared,
+      response: { decision: 'approved', effects: [], concentrationRounds: 10, animateObjects: { schemaVersion: 1, targetsConfirmed: true } },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? '' : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.tokens.filter(token => token.dnd5eSummon?.featureId === 'spell:animate-objects')).toHaveLength(2)
+    expect(resolved.application?.map.tokens.some(token => objects.some(object => object.id === token.id))).toBe(false)
+    objects[0].dnd5eObjectState = { schemaVersion: 1, wornOrCarried: true }
+    expect(prepareDnd5eAdjudicatedSpell(input)).toMatchObject({ ok: false })
+    objects[0].dnd5eObjectState = undefined
+    objects[0].size = 3
+    objects[1].size = 2
+    expect(prepareDnd5eAdjudicatedSpell(input)).toMatchObject({ ok: false })
   })
 
   it('atomically turns three nearby remains into controlled undead when Animate Dead is cast at 4th level', () => {
@@ -1476,6 +1599,9 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
     if (!resolved.result.ok) return
     expect(resolved.result.state.combatants[input.actorToken.id].classResources['dnd5e-spell-slot-8'])
       .toEqual({ current: 0, max: 1 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: input.actorToken.id, resource: 'action',
+    }))
     expect(resolved.result.events).not.toContainEqual(expect.objectContaining({ type: 'damage-applied' }))
     expect(resolved.result.state.combatants[input.enemy.id].classState.activeEffects)
       .toContainEqual(expect.objectContaining({
@@ -2051,4 +2177,35 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
     })
     expect(resolved.result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
   })
+})
+
+it('restores a Slow-delayed player declaration from shared character and token state', () => {
+  const input = fixture()
+  const prepared = prepareDnd5eAdjudicatedSpell(input)
+  expect(prepared.ok).toBe(true)
+  if (!prepared.ok) return
+  const actor = prepared.prepared.state.combatants[input.actorToken.id]
+  actor.classState.activeEffects = [createDnd5eMechanicalEffect({ definitionId: 'slow', label: '缓慢术',
+    targetId: actor.id, source: { kind: 'spell', rulesId: 'slow' },
+    modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 }, actionOrBonusActionOnly: true },
+  })]
+  const checked = resolveDnd5eHeadlessAction(prepared.prepared.state, { type: 'check-slow-spell', actorId: actor.id,
+    requestId: input.action.id, spellId: input.spell.id, spellName: input.spell.name, slotLevel: 1, d20: 11,
+    intent: { kind: 'player', action: input.action } })
+  expect(checked.ok, checked.ok ? undefined : checked.reason).toBe(true)
+  const stored = planDnd5eMapResultApplication({ state: checked.state, map: input.map, characters: input.characters,
+    characterIdByCombatantId: prepared.prepared.characterIdByCombatantId, events: [...checked.events] })
+  expect(validateSharedStateShape('maps', { maps: [stored.map], updatedAt: 1 }).ok).toBe(true)
+  expect(validateSharedStateShape('characters', { characters: stored.characters, updatedAt: 1 }).ok).toBe(true)
+  const reloaded = JSON.parse(JSON.stringify(stored)) as typeof stored
+  const resumed = prepareDnd5eAdjudicatedSpell({ ...input, map: reloaded.map, characters: reloaded.characters,
+    action: { ...input.action, id: 'resumed', round: 2 } })
+  expect(resumed.ok).toBe(true)
+  if (!resumed.ok) return
+  expect(resumed.prepared.state.combatants[actor.id].classState.slowSpellGate?.delayed).toBe(true)
+  const result = resolvePreparedDnd5eAdjudicatedSpell({ prepared: resumed.prepared,
+    response: { decision: 'approved', effects: [] } })
+  expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
+  expect(result.result.state.combatants[actor.id].classState.slowSpellGate).toBeUndefined()
+  expect(result.application!.characters[0].classResources!['dnd5e-spell-slot-1'].current).toBe(0)
 })
