@@ -47,7 +47,7 @@ assets/icons/*.png|jpg|jpeg|webp
 compatibility/dnd5e-content-v2.json   # 仅旧内容适配包
 ```
 
-清单的 `files` 覆盖每个非清单文件的 SHA-256。新条目通过 `automationFile` 引用自动化数据；读入后还原为 `automationData` 并进入现有规则校验器。不得添加 JavaScript、HTML 或外部网络资源以绕过数据包权限。
+清单的 `files` 覆盖每个非清单文件的 SHA-256。新条目通过 `automationFile` 引用自动化数据；读入后还原为 `automationData` 并进入现有规则校验器。声明式包不执行脚本。SDK 1 脚本包可声明 automation.script 权限和 scripts/main.mjs 入口，见 [社区模块 SDK](community-module-sdk.md)；不得添加 HTML 或外部网络资源绕过权限。
 
 限制：压缩包 32 MiB、单文件 8 MiB、展开总量 48 MiB、文件数 4096、资料条目 2048；D&D Unified 导入仍受自身 512 条目和 8 MiB 校验限制。拒绝路径穿越、重名、符号链接、加密 ZIP、截断目录、缺失/损坏哈希和不支持的文件。哈希保证字节完整性，不代表作者身份签名。
 
@@ -78,3 +78,8 @@ compatibility/dnd5e-content-v2.json   # 仅旧内容适配包
 `starModHost.test.ts` 使用真实 Host 和内存桌面存储适配器，覆盖安装、持久化、依赖乱序重载、禁止破坏依赖的更新、失败恢复、停用与卸载；另验证停用包更新失败后仍保持停用。
 
 前端构建已更新本地 `dist`，浏览器刷新后载入。服务端对原始 ZIP 上传的新增拒绝检查，需要共享服务下次正常重启或部署后生效；正常房间流程发送的是已验证 JSON 运行投影。
+
+
+## 后续 SDK 接入
+
+独立 Condition、状态引用、Worker registerContent/registerImageAsset、归档脚本入口和完整脚本房间投影已接入；可导入示例及边界见 [社区模块 SDK](community-module-sdk.md)。本次扩展回归为 43 文件 421 项通过，涵盖此前记录的 9 项回归失败。轮数用例纠正为经过完整一轮；墙段、可旋转蛛网及地图选择模式测试匹配现有行为；专注终止引发坠落的缺失碰撞骰流程已修复。历史架构预算审计不在这些通过项之内。原生专属结算兼容层仍待逐项迁移。

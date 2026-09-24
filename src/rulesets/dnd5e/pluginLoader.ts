@@ -349,8 +349,10 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string): ReturnT
   if (bytes.byteLength < 1) throw new Error('插件文件为空')
   if (getRoomSession() && isStarModArchive(bytes)) {
     const original = await loadPluginArtifact(bytes)
-    const projected = await inspectPluginBytes(await projectDnd5eStarModRuntime(bytes), fileName.replace(/\.starmod$/i, '.runtime.json'))
-    return { ...projected, ...('starModManifest' in original ? {starModManifest:original.starModManifest} : {}) }
+    try {
+      const projected = await inspectPluginBytes(await projectDnd5eStarModRuntime(bytes), fileName.replace(/\.starmod$/i, original.kind === 'worker' ? '.runtime.mjs' : '.runtime.json'))
+      return { ...projected, ...('starModManifest' in original ? {starModManifest:original.starModManifest} : {}) }
+    } finally { terminatePluginArtifact(original) }
   }
   const integrity = await sha256Integrity(bytes)
   const artifact = await loadPluginArtifact(bytes)
@@ -368,6 +370,12 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string): ReturnT
         provenance: structuredClone(artifact.package.provenance),
       } : artifact.kind === 'unified-v1' ? {
         contentSummary: dnd5eUnifiedContentSummaryV1(artifact.package),
+      } : artifact.kind === 'worker' && artifact.session.definitions?.length ? {
+        contentSummary: dnd5eUnifiedContentSummaryV1({
+          format:'dndstars5e-unified-content', schemaVersion:1,
+          manifest:artifact.manifest, definitions:artifact.session.definitions,
+          assets:artifact.session.assets ?? [],
+        }),
       } : {}),
     }
   } finally {
@@ -395,6 +403,8 @@ async function descriptorBytes(descriptor: InstalledDnd5eRulesPlugin): Promise<A
 type LoadedDnd5ePluginArtifact =
   | {
       kind: 'worker'
+      starModManifest?: StarScarPackageManifest
+      neutral?: StarModPackage
       adapterKind: 'worker-module-adapter'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
@@ -472,6 +482,11 @@ function withNeutralRegistry(plugin: Dnd5eRulesPlugin, neutral: StarModPackage):
 async function loadPluginArtifact(bytes: ArrayBuffer): Promise<LoadedDnd5ePluginArtifact> {
   if (isStarModArchive(bytes)) {
     const neutral = await compendiumImporters.preview('starmod',{fileName:'module.starmod',bytes})
+    if (neutral.script) {
+      const artifact = await loadPluginArtifact(await projectDnd5eStarModRuntime(bytes))
+      if (artifact.kind !== 'worker') throw new Error('script-runtime-invalid')
+      return {...artifact, starModManifest:neutral.manifest, neutral}
+    }
     const legacy = await readLegacyDnd5eStarMod(bytes)
     if (legacy) return {kind:'content-v2',adapterKind:'content-v2-adapter',manifest:legacy.package.manifest,starModManifest:legacy.manifest,package:legacy.package,plugin:withNeutralRegistry(dnd5eRulesPluginFromContentPackageV2(legacy.package), neutral),trust:dnd5ePluginTrustProfile('content-package','content-v2')}
     const { bundle, manifest } = await readDnd5eStarMod(bytes)
@@ -539,9 +554,10 @@ function activatePlugin(artifact: LoadedDnd5ePluginArtifact, integrity: string):
   // behind after the runtime index has already disappeared. Remove only the
   // package owned by the plugin being replaced before registering it again.
   unregisterContentDefinitionPackage(artifact.manifest.id)
-  const plugin = artifact.kind === 'worker'
+  let plugin = artifact.kind === 'worker'
     ? activateDnd5ePluginSandbox(artifact.session)
     : artifact.plugin
+  if (artifact.kind === 'worker' && artifact.neutral) plugin = withNeutralRegistry(plugin, artifact.neutral)
   try {
     registerDnd5eRulesPlugin(plugin, { integrity, adapterKind: artifact.adapterKind })
   } catch (error) {

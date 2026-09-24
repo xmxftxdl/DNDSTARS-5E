@@ -3,6 +3,7 @@ import type { AutomationCapability } from '../automation/automationCapability'
 export const CONTENT_DEFINITION_SCHEMA_VERSION = 1 as const
 
 export type ContentDefinitionKind =
+  | 'condition'
   | 'spell'
   | 'feature'
   | 'feat'

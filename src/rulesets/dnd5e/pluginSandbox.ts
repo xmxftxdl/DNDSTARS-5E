@@ -1,3 +1,5 @@
+import type { Dnd5ePluginImageAssetDefinition } from './pluginAssets'
+import { dnd5eRulesPluginFromUnifiedContentBundleV1, type Dnd5eUnifiedContentDefinitionV1 } from './unifiedContent'
 import type {
   Dnd5ePluginAbilityGenerationDefinition,
   Dnd5ePluginAction,
@@ -51,6 +53,8 @@ export interface Dnd5ePluginStateMigrationDeclaration {
 }
 
 interface SandboxContributions {
+  assets?: Dnd5ePluginImageAssetDefinition[]
+  definitions?: Dnd5eUnifiedContentDefinitionV1[]
   manifest: Dnd5eRulesPluginManifest
   features: Dnd5ePluginFeatureDefinition[]
   feats: Dnd5ePluginFeatDefinition[]
@@ -106,6 +110,8 @@ export interface Dnd5ePluginStateMigrationResult {
 }
 
 export interface Dnd5ePluginSandboxSession {
+  readonly assets?: readonly Dnd5ePluginImageAssetDefinition[]
+  readonly definitions?: readonly Dnd5eUnifiedContentDefinitionV1[]
   readonly manifest: Dnd5eRulesPluginManifest
   readonly features: readonly Dnd5ePluginFeatureDefinition[]
   readonly feats: readonly Dnd5ePluginFeatDefinition[]
@@ -345,6 +351,8 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
 
   const session: Dnd5ePluginSandboxSession = {
     get manifest() { return initialized.manifest },
+    get assets() { return initialized.assets ?? [] },
+    get definitions() { return initialized.definitions ?? [] },
     get features() { return initialized.features },
     get feats() { return initialized.feats ?? [] },
     get actions() { return initialized.actions },
@@ -414,29 +422,55 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
     },
   }
   void contributions
+  sandboxContentPlugin(session)
   return session
 }
 
+function sandboxContentPlugin(session: Dnd5ePluginSandboxSession): Dnd5eRulesPlugin | undefined {
+  try {
+    if (session.assets?.length && !session.definitions?.length) throw new Error('Image assets require a content definition')
+    return session.definitions?.length ? dnd5eRulesPluginFromUnifiedContentBundleV1({
+      format: 'dndstars5e-unified-content', schemaVersion: 1,
+      manifest: { ...session.manifest, pluginKind: 'content-package' },
+      assets: session.assets ?? [], definitions: session.definitions,
+    }) : undefined
+  } catch (error) {
+    session.terminate()
+    throw error
+  }
+}
+
 export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): Dnd5eRulesPlugin {
+  const content = sandboxContentPlugin(session)
   activeSessions.get(session.manifest.id)?.terminate()
   activeSessions.set(session.manifest.id, session)
   return {
     manifest: session.manifest,
     setup(api) {
-      for (const action of session.actions) {
-        api.registerHeadlessAction({ ...action, execution: 'worker' })
+      let disposeContent: void | (() => void) = undefined
+      try {
+        disposeContent = content?.setup(api)
+        for (const action of session.actions) {
+          api.registerHeadlessAction({ ...action, execution: 'worker' })
+        }
+        for (const feature of session.features) api.registerFeature(feature)
+        for (const feat of session.feats) api.registerFeat(feat)
+        for (const subclass of session.subclasses) api.registerSubclass(subclass)
+        for (const resource of session.resources) api.registerResource(resource)
+        for (const race of session.races) api.registerRace(race)
+        for (const background of session.backgrounds) api.registerBackground(background)
+        for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
+        for (const spell of session.spells) api.registerSpell(spell)
+        for (const item of session.items) api.registerItem(item)
+        for (const monster of session.monsters) api.registerMonster(monster)
+      } catch (error) {
+        if (typeof disposeContent === 'function') disposeContent()
+        if (activeSessions.get(session.manifest.id) === session) activeSessions.delete(session.manifest.id)
+        session.terminate()
+        throw error
       }
-      for (const feature of session.features) api.registerFeature(feature)
-      for (const feat of session.feats) api.registerFeat(feat)
-      for (const subclass of session.subclasses) api.registerSubclass(subclass)
-      for (const resource of session.resources) api.registerResource(resource)
-      for (const race of session.races) api.registerRace(race)
-      for (const background of session.backgrounds) api.registerBackground(background)
-      for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
-      for (const spell of session.spells) api.registerSpell(spell)
-      for (const item of session.items) api.registerItem(item)
-      for (const monster of session.monsters) api.registerMonster(monster)
       return () => {
+        if (typeof disposeContent === 'function') disposeContent()
         if (activeSessions.get(session.manifest.id) === session) {
           activeSessions.delete(session.manifest.id)
           session.terminate()

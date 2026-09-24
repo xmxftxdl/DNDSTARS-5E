@@ -1,7 +1,7 @@
 export const PACKAGE_SCHEMA_VERSION = 1 as const
 export const PACKAGE_PERMISSIONS = [
   'compendium.read', 'compendium.write', 'character.read', 'character.write',
-  'scene.read', 'scene.write', 'automation.register', 'network.external', 'localStorage', 'ui.extend',
+  'scene.read', 'scene.write', 'automation.script', 'automation.register', 'network.external', 'localStorage', 'ui.extend',
 ] as const
 export type PackagePermission = typeof PACKAGE_PERMISSIONS[number]
 export const CONTENT_SOURCE_CATEGORIES = [
@@ -11,6 +11,7 @@ export type ContentSourceCategory = typeof CONTENT_SOURCE_CATEGORIES[number]
 export interface PackageDependency { packageId: string; minimumVersion: string; versionRange?: string; optional?: boolean }
 export interface StarScarPackageManifest {
   schemaVersion: 1
+  script?: { apiVersion: 1; entry: 'scripts/main.mjs'; stateSchemaVersion?: number }
   packageId: string
   name: string
   author: string
@@ -73,6 +74,12 @@ export function validatePackageManifest(value: unknown, context?: PackageValidat
     fail('manifest-invalid', '', '清单必须为对象'); return issues
   }
   const m = value as Record<string, unknown>
+  if (m.script != null) {
+    const script = m.script as Record<string, unknown>
+    if (typeof script !== 'object' || Array.isArray(script) || script.apiVersion !== 1 || script.entry !== 'scripts/main.mjs') fail('script-invalid', 'script', '脚本必须声明 SDK 1 与 scripts/main.mjs')
+    if (script.stateSchemaVersion != null && (!Number.isInteger(script.stateSchemaVersion) || Number(script.stateSchemaVersion) < 1 || Number(script.stateSchemaVersion) > 1000)) fail('script-state-version-invalid', 'script', '状态版本必须是 1–1000 的整数')
+    if (!Array.isArray(m.permissions) || !m.permissions.includes('automation.script')) fail('script-permission-missing', 'permissions', '脚本需要 automation.script 权限')
+  }
   if (m.schemaVersion !== 1) fail('schema-unsupported', 'schemaVersion', '不支持的清单版本')
   if (typeof m.packageId !== 'string' || !PACKAGE_ID.test(m.packageId)) fail('package-id-invalid', 'packageId', '无效的包 ID')
   for (const field of ['name', 'author', 'license']) {

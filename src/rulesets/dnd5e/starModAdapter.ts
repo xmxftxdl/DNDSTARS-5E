@@ -1,3 +1,4 @@
+import { dnd5eActivitiesWithConditionReferences } from './activities/dnd5eConditionReferences'
 import builtInManifest from '../../content/srd-5.1/manifest.json'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { parseDnd5eContentPackageV2, type Dnd5eContentPackageV2 } from './contentPackageV2'
@@ -12,7 +13,7 @@ import { automationCapabilityFromLegacyStatus } from '../../domain/automation/au
 import { comparePackageVersions, packageVersionSatisfies, validPackageVersionRange } from '../../domain/packages/packageManifest'
 
 const KIND_MAP: Partial<Record<CompendiumEntryType, ContentDefinitionKind>> = {
-  Class: 'class', Subclass: 'subclass', Species: 'race', Background: 'background', Feat: 'feat',
+  Condition: 'condition', Class: 'class', Subclass: 'subclass', Species: 'race', Background: 'background', Feat: 'feat',
   Spell: 'spell', Item: 'item', Monster: 'monster', Feature: 'feature', MonsterAction: 'monster-action', AbilityGeneration: 'ability-generation',
 }
 export function legacyManifestToStarMod(manifest: Dnd5eRulesPluginManifest): StarScarPackageManifest {
@@ -38,7 +39,7 @@ export async function readDnd5eStarMod(bytes: ArrayBuffer): Promise<{ bundle: Dn
     checkDependencies: false,
   })
   if (manifest.contentSource === 'RestrictedLicensed' || manifest.distributionPolicy === 'account-entitled') throw new Error('此内容包需要授权提供方；当前适配器不能验证授权。')
-  if (manifest.permissions.some(p => !['compendium.read', 'compendium.write', 'automation.register'].includes(p))) throw new Error('声明式内容包不能申请网络、脚本、角色写入或文件系统权限。')
+  if (manifest.permissions.some(p => !['compendium.read', 'compendium.write', 'automation.register', ...(manifest.script ? ['automation.script'] : [])].includes(p))) throw new Error('声明式内容包不能申请网络、脚本、角色写入或文件系统权限。')
   if (pkg.entries.length && !manifest.permissions.includes('compendium.write')) throw new Error('permission-missing: compendium.write')
   if (pkg.entries.some(e => e.automationData?.activities?.length || e.automationData?.effects?.length || e.automationData?.advancements?.length) && !manifest.permissions.includes('automation.register')) throw new Error('permission-missing: automation.register')
   if (pkg.compatibility != null) throw new Error('starmod-legacy-adapter-required')
@@ -54,6 +55,7 @@ export async function readDnd5eStarMod(bytes: ArrayBuffer): Promise<{ bundle: Dn
       id: manifest.packageId, name: manifest.name, version: manifest.version, publisher: manifest.author,
       license: manifest.license, description: manifest.description, homepage: manifest.homepage,
       apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', pluginKind: 'content-package',
+      ...(manifest.script?.stateSchemaVersion ? {stateSchemaVersion:manifest.script.stateSchemaVersion} : {}),
       dependencies: manifest.dependencies.map(d => ({ id: d.packageId, versionRange: d.versionRange ?? `>=${d.minimumVersion}`, optional: d.optional })),
       distributionPolicy: manifest.distributionPolicy ?? 'local-only',
     }, assets,
@@ -66,7 +68,7 @@ export async function readDnd5eStarMod(bytes: ArrayBuffer): Promise<{ bundle: Dn
       return { schemaVersion: 1, id: entry.id, namespace: manifest.packageId, version: manifest.version,
         kind, ...text, tags: entry.tags, source: { packageId: manifest.packageId, packageVersion: manifest.version, contentVersion: entry.version },
         payload: { ...payload, ...(kind !== 'monster-action' ? {name:text.name} : {}), ...('description' in payload || ['spell','feature','feat'].includes(kind) ? {description:text.description} : {}) },
-        activities: entry.automationData?.activities, effects: entry.automationData?.effects,
+        activities: dnd5eActivitiesWithConditionReferences(pkg,entry.id,entry.type), effects: entry.automationData?.effects,
         advancements: entry.automationData?.advancements,
         automation: entry.automationData?.capability ?? automationCapabilityFromLegacyStatus('manual', ['未声明结构化自动化']),
       }
@@ -168,8 +170,11 @@ export async function readLegacyDnd5eStarMod(bytes: ArrayBuffer): Promise<{packa
 /** Rooms pin the validated runtime projection, so every client executes identical bytes. */
 export async function projectDnd5eStarModRuntime(bytes: ArrayBuffer): Promise<ArrayBuffer> {
  const legacy = await readLegacyDnd5eStarMod(bytes)
- const value = legacy?.package ?? (await readDnd5eStarMod(bytes)).bundle
- return new TextEncoder().encode(JSON.stringify(value)).buffer
+ if (legacy) return new TextEncoder().encode(JSON.stringify(legacy.package)).buffer
+ const neutral = await readStarModArchive(bytes)
+ const {bundle} = await readDnd5eStarMod(bytes)
+ if (!neutral.script) return new TextEncoder().encode(JSON.stringify(bundle)).buffer
+ return new TextEncoder().encode(compileDnd5eStarModScript(neutral.script, bundle)).buffer
 }
 
 function canonical(value: unknown): string {
@@ -180,5 +185,29 @@ export async function prepareDnd5eModuleUploadFile(file: File): Promise<File> {
  const bytes = await file.arrayBuffer()
  if (!isStarModArchive(bytes)) return file
  const runtime = await projectDnd5eStarModRuntime(bytes)
- return new File([runtime],file.name.replace(/\.starmod$/i,'.runtime.json'),{type:'application/json'})
+ const script = !!(await readStarModArchive(bytes)).script
+ return new File([runtime],file.name.replace(/\.starmod$/i,script ? '.runtime.mjs' : '.runtime.json'),{type:script ? 'text/javascript' : 'application/json'})
+}
+
+/** Compose text only; execution remains exclusively inside the hardened Worker. */
+export function compileDnd5eStarModScript(source: string, bundle: Dnd5eUnifiedContentBundleV1): string {
+ const ending = /export\s+default\s+([A-Za-z_$][\w$]*)\s*;?\s*$/
+ const match = source.match(ending)
+ if (!match || /\bimport\b/.test(source)) throw new Error('script-must-be-self-contained-default-export')
+ const body = source.replace(ending, `return ${match[1]}`)
+ const manifest = {...bundle.manifest, pluginKind:'automation-plugin'}
+ return `const extension = (() => {\n${body}\n})();
+const content = ${JSON.stringify(bundle)};
+const modulePlugin = {
+ manifest: ${JSON.stringify(manifest)},
+ migrations: extension.migrations,
+ setup(api) {
+  if (!extension || typeof extension.setup !== 'function') throw new Error('Script setup is required');
+  if (extension.manifest && (extension.manifest.id !== content.manifest.id || extension.manifest.version !== content.manifest.version)) throw new Error('Script manifest mismatch');
+  for (const definition of content.definitions) api.registerContent(definition);
+  for (const asset of content.assets) api.registerImageAsset(asset);
+  return extension.setup(api);
+ }
+};
+export default modulePlugin;`
 }

@@ -7010,6 +7010,7 @@ export default function MapsWorkspacePage() {
       try {
         const settled = plan.headless
           ? await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
               result: plan.headless.result,
               priorState: plan.headless.sourceState,
               map: latestMap,
@@ -8546,6 +8547,7 @@ export default function MapsWorkspacePage() {
         }
       }
       const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: resolved.result,
         map: resolved.application.map,
         characters: resolved.application.characters,
@@ -9766,6 +9768,7 @@ export default function MapsWorkspacePage() {
     )
     if (!initialResolved.result.ok) return false
     const resolved = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
       result: initialResolved.result,
       map: attack.map,
       characters: attack.characters,
@@ -18992,6 +18995,7 @@ export default function MapsWorkspacePage() {
         return false
       }
       const resolved = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: { ...initialResult, events: [...monsterOnHitReactionEvents, ...initialResult.events] },
         map: monsterAttack.map,
         characters: monsterAttack.characters,
@@ -19121,6 +19125,7 @@ export default function MapsWorkspacePage() {
         }, resolved.application.map)
         if (returned.ok) {
           const returnedSettled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
             result: returned,
             map: resolved.application.map,
             characters: resolved.application.characters,
@@ -20494,6 +20499,7 @@ export default function MapsWorkspacePage() {
       return false
     }
     const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
       result: initial.result,
       map: initial.application.map,
       characters: initial.application.characters,
@@ -21060,6 +21066,7 @@ export default function MapsWorkspacePage() {
       return reject(initial.result.ok ? 'missing-application' : initial.result.reason)
     }
     const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
       result: initial.result,
       map: initial.application.map,
       characters: initial.application.characters,
@@ -22102,6 +22109,7 @@ export default function MapsWorkspacePage() {
     )
     if (!resolved.ok || !resolved.result.ok) return false
     const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
       result: resolved.result,
       map: input.map,
       characters: input.characters,
@@ -23250,6 +23258,7 @@ export default function MapsWorkspacePage() {
         return false
       }
       const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: resolved.result,
         map: latestMap,
         characters,
@@ -24500,6 +24509,7 @@ export default function MapsWorkspacePage() {
         return
       }
       const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result,
         map: authorityMap,
         characters: useCharacterStore.getState().characters,
@@ -24755,6 +24765,7 @@ export default function MapsWorkspacePage() {
         return
       }
       const settledEndTurn = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: dnd5eEndTurn.result,
         map: authorityMap,
         characters: useCharacterStore.getState().characters,
@@ -26651,6 +26662,7 @@ export default function MapsWorkspacePage() {
               throw new Error(`plugin-spell-settlement-received-failed-result:${resolved.result.reason}`)
             }
             return settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
             result: resolved.result,
             map: application.map,
             characters: application.characters,
@@ -29606,6 +29618,7 @@ export default function MapsWorkspacePage() {
             throw new Error(`spell-settlement-received-failed-result:${resolved.result.reason}`)
           }
           return settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
           result: resolved.result,
           map: application.map,
           characters: application.characters,
@@ -30383,6 +30396,7 @@ export default function MapsWorkspacePage() {
         return
       }
       const settled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: initial.result,
         map: initial.application.map,
         characters: initial.application.characters,
@@ -32200,6 +32214,7 @@ export default function MapsWorkspacePage() {
         return
       }
       const resolved = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: initialResolved.result,
         map: feature.map,
         characters: feature.characters,
@@ -32886,6 +32901,7 @@ export default function MapsWorkspacePage() {
           return
         }
         const resolved = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
           result: initialResolved.result,
           map: multiattack.map,
           characters: multiattack.characters,
@@ -32980,6 +32996,7 @@ export default function MapsWorkspacePage() {
           }, returnMap)
           if (!returned.ok) continue
           const returnedSettled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
             result: returned,
             map: returnMap,
             characters: returnCharacters,
@@ -33615,6 +33632,7 @@ export default function MapsWorkspacePage() {
           return
         }
         const resolved = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
           result: { ...initialResult, events: [...monsterOnHitReactionEvents, ...initialResult.events] },
           map: wildShapeAttack.map,
           characters: wildShapeAttack.characters,
@@ -35272,6 +35290,7 @@ export default function MapsWorkspacePage() {
         return
       }
       const resolved = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
         result: initialResolved.result,
         map: initialResolved.application.map,
         characters: initialResolved.application.characters,
@@ -35443,6 +35462,7 @@ export default function MapsWorkspacePage() {
         }, resolved.application.map)
         if (returned.ok) {
           const returnedSettled = await settleDnd5eConcentrationChecks({
+        rollUnsupportedAirborneFalls: rollDnd5eUnsupportedAirborneFalls,
             result: returned,
             map: resolved.application.map,
             characters: resolved.application.characters,

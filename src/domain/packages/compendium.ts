@@ -13,7 +13,7 @@ export interface CompendiumEntry {
   tags: readonly string[]
   rulesData: unknown
   automationFile?: string
-  automationData?: { activities?: readonly unknown[]; effects?: readonly unknown[]; advancements?: readonly unknown[]; capability?: unknown }
+  automationData?: { conditionRefs?: readonly { activityId: string; conditionId: string; packageId?: string }[]; activities?: readonly unknown[]; effects?: readonly unknown[]; advancements?: readonly unknown[]; capability?: unknown }
   assetReferences: readonly string[]
 }
 export interface EntryProvenance {
@@ -42,6 +42,8 @@ export function validateCompendiumEntries(value: unknown, packageId: string): as
     if (entry.automationFile != null && (typeof entry.automationFile !== 'string' || !/^automation\/[a-z0-9._-]+\.json$/.test(entry.automationFile) || !safePackagePath(entry.automationFile) || entry.automationData != null)) throw new Error('automation-reference-invalid')
     if (entry.automationData != null) {
       if (typeof entry.automationData !== 'object' || Array.isArray(entry.automationData)) throw new Error('automation-invalid')
+      const refs = entry.automationData.conditionRefs
+      if (refs != null && (!Array.isArray(refs) || refs.length > 128 || refs.some((r: {activityId?: unknown; conditionId?: unknown; packageId?: unknown} | null) => !r || typeof r.activityId !== 'string' || !/^[a-z0-9][a-z0-9._:-]{0,127}$/.test(r.activityId) || typeof r.conditionId !== 'string' || !PACKAGE_ID.test(r.conditionId) || (r.packageId != null && (typeof r.packageId !== 'string' || !PACKAGE_ID.test(r.packageId)))))) throw new Error('condition-reference-invalid')
       for (const field of ['activities', 'effects', 'advancements']) {
         const list = entry.automationData[field]
         if (list != null && (!Array.isArray(list) || list.length > 256)) throw new Error('automation-invalid')

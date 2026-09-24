@@ -35,6 +35,7 @@ function validateZipDirectory(bytes: ArrayBuffer): void {
   if(offset!==end) throw new Error('archive-directory-invalid')
 }
 export interface StarModPackage {
+  script?: string
   compatibility?: unknown
   manifest: StarScarPackageManifest
   entries: readonly CompendiumEntry[]
@@ -89,12 +90,15 @@ export async function readStarModArchive(bytes: ArrayBuffer): Promise<StarModPac
   const manifest = parsePackageManifest(strFromU8(files.get('manifest.json')!))
   assertPackageManifest(manifest)
   const automationFiles = new Map<string, CompendiumEntry['automationData']>()
+  let script: string | undefined
   let compatibility: unknown
   const entries: CompendiumEntry[] = [], localizations: Record<string, Record<string, string>> = Object.create(null), assets: Record<string, Uint8Array> = Object.create(null)
   for (const [path, data] of files) {
     if (path === 'manifest.json') continue
     if (!manifest.files?.[path] || await hash(data) !== manifest.files[path]) throw new Error(`archive-integrity-failed: ${path}`)
-    if (path === 'compatibility/dnd5e-content-v2.json') {
+    if (path === 'scripts/main.mjs' && manifest.script) {
+      script = strFromU8(data)
+    } else if (path === 'compatibility/dnd5e-content-v2.json') {
       compatibility = JSON.parse(strFromU8(data))
     } else if (/^compendium\/[a-z-]+\.json$/.test(path)) {
       const parsed: unknown = JSON.parse(strFromU8(data))
@@ -125,12 +129,18 @@ export async function readStarModArchive(bytes: ArrayBuffer): Promise<StarModPac
     if (manifest.systemId && entry.systemId !== manifest.systemId) throw new Error('entry-system-mismatch')
     for (const path of entry.assetReferences) if (!assets[path]) throw new Error('entry-asset-missing')
   }
-  return { manifest, entries, localizations, assets, ...(compatibility == null ? {} : { compatibility }) }
+  if (manifest.script && !script?.trim()) throw new Error('script-file-missing')
+  if (script && compatibility != null) throw new Error('script-legacy-compatibility-unsupported')
+  return { manifest, entries, localizations, assets, ...(script == null ? {} : {script}), ...(compatibility == null ? {} : { compatibility }) }
 }
 export async function writeStarModArchive(value: StarModPackage): Promise<ArrayBuffer> {
   assertPackageManifest(value.manifest)
   validateCompendiumEntries(value.entries, value.manifest.packageId)
   const files: Record<string, Uint8Array> = Object.create(null)
+  if (value.script != null) {
+    if (!value.manifest.script) throw new Error('script-undeclared')
+    files['scripts/main.mjs'] = strToU8(value.script)
+  }
   const storedEntries = value.entries.map(entry => {
     if (!entry.automationData) return entry
     const path = `automation/${entry.type.toLowerCase()}-${entry.id}.json`

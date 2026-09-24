@@ -290,7 +290,13 @@ describe('unified Activity Host combat E2E', () => {
     const ended = resolveDnd5eHeadlessAction(resolved.result.state, { type: 'end-turn', actorId: 'actor' })
     expect(ended.ok).toBe(true)
     if (!ended.ok) return
-    const remaining = ended.state.combatants.actor.classState.activeEffects ?? []
+    // A rounds duration lasts through a full round, including the application turn.
+    expect(ended.state.combatants.actor.classState.activeEffects?.some(effect => effect.id === transition?.id)).toBe(true)
+    const targetEnded = resolveDnd5eHeadlessAction(ended.state, {type:'end-turn',actorId:'target'})
+    expect(targetEnded.ok).toBe(true)
+    const nextEnded = resolveDnd5eHeadlessAction(targetEnded.state, {type:'end-turn',actorId:'actor'})
+    expect(nextEnded.ok).toBe(true)
+    const remaining = nextEnded.state.combatants.actor.classState.activeEffects ?? []
     expect(remaining.some((effect) => effect.id === transition?.id)).toBe(false)
     expect(remaining.find((effect) => effect.id === cloud?.id)?.suspendedBy).toBeUndefined()
   })

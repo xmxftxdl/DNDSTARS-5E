@@ -520,6 +520,7 @@ describe('地图战斗结果结算器', () => {
     delete after.combatants.hero.classState.concentrationTargetIds
     delete after.combatants.hero.classState.concentrationRoundsRemaining
     const rollDice = vi.fn(async () => [4])
+    const rollD20 = vi.fn(async () => 20)
 
     const settled = await settleDnd5eConcentrationChecks({
       result: { ok: true, state: after, events: [] },
@@ -527,12 +528,14 @@ describe('地图战斗结果结算器', () => {
       map: map(),
       characters: [],
       characterIdByCombatantId: {},
-      rollD20: unusedRoll,
+      rollD20,
       rollD4: unusedRoll,
       rollDice,
     })
 
     expect(rollDice).toHaveBeenCalledWith(1, 6, '失去飞行支撑·坠落伤害', 'hero', { rollerTokenId: 'hero' })
+    expect(rollD20).toHaveBeenCalledWith('躲避坠落生物 · 敏捷豁免 DC 15', 'enemy', {rollerTokenId:'enemy',rollKind:'saving-throw'})
+    expect(settled.result.state.combatants.enemy.currentHp).toBe(20)
     expect(settled.result.state.combatants.hero.elevationFeet).toBe(0)
     expect(settled.result.state.combatants.hero.airborne).toBe(false)
     expect(settled.result.events).toContainEqual(expect.objectContaining({
@@ -593,7 +596,7 @@ describe('地图战斗结果结算器', () => {
       duration: { type: 'concentration', sourceActorId: hero.id, concentrationId: 'fly' },
       modifiers: { flySpeedFeet: 60 },
     })]
-    const state = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10)])
+    const state = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10, false, {position:{x:20,y:0}})])
     const result: Extract<Dnd5eActionResult, { ok: true }> = {
       ok: true,
       state,

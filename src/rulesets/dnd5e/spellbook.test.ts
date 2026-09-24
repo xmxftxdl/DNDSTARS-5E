@@ -423,7 +423,7 @@ describe('D&D 5e room spellbook import', () => {
       automationLevel: 'partial',
       combat: {
         effect: 'persistent-area',
-        area: { shape: 'rect', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, gridAligned: true },
+        area: { shape: 'rect', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, rotatable: true },
         concentration: true,
         concentrationDurationRounds: 600,
       },

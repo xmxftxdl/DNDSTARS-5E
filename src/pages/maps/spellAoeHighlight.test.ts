@@ -241,7 +241,7 @@ describe('spellAoeHighlight', () => {
     expect(new Set(highlight?.hazardCells?.map((cell) => cell.row))).toEqual(new Set([6, 7]))
   })
 
-  it('previews a 100-foot Wall of Force as the same one-lane geometry the Host settles', () => {
+  it('previews ten contiguous Wall of Force panels using Host panel geometry', () => {
     const spellTargeting = {
       characterId: 'wizard',
       spellId: 'wall-of-force',
@@ -264,19 +264,25 @@ describe('spellAoeHighlight', () => {
       area: { shape: 'rect', origin: 'point', widthFeet: 100, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
       areaTargetAngleDegrees: 0,
       areaTargetWidthFeet: 100,
+      areaTargetCell: {col:10,row:5},
+      areaTargetSelected: true,
+      stoneWall: {mode:'thick',start:{col:10,row:5},angles:Array(10).fill(0)},
     } satisfies Dnd5eSpellTargetingSession
     const highlight = buildSpellOrSkillAoeHighlight({
       targeting: spellTargeting.area,
       previewCell: { col: 10, row: 5 },
-      casterCell: { col: 3, row: 5 },
-      map: { ...map, width: 1_200 },
+      casterCell: { col: 10, row: 5 },
+      map: { ...map, width: 2_000 },
       rectRotation: 0,
       spellTargeting,
     })
 
-    expect(highlight?.cells).toHaveLength(20)
-    expect(highlight?.hazardCells).toEqual([])
-    expect(new Set(highlight?.cells.map((cell) => cell.row))).toEqual(new Set([5]))
+    expect(highlight?.forceWallPreview).toBe(true)
+    expect(highlight?.stoneWallPanels).toHaveLength(10)
+    expect(highlight?.stoneWallPanels?.[0].start).toEqual({col:10,row:5})
+    expect(highlight?.stoneWallPanels?.[9].end).toEqual({col:30,row:5})
+    expect(highlight?.cells).toEqual([])
+    expect(highlight?.valid).toBe(true)
   })
 
   it('keeps Thunderwave freely rotatable while excluding edge-only cells', () => {

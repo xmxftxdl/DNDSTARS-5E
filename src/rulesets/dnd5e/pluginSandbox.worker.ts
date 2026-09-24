@@ -196,6 +196,8 @@ function initializePlugin(source: string): {
   monsters: readonly Record<string, unknown>[]
   resources: readonly Record<string, unknown>[]
   subclasses: readonly Record<string, unknown>[]
+  assets: readonly Record<string, unknown>[]
+  definitions: readonly Record<string, unknown>[]
   migrations: readonly { fromVersion: number; toVersion: number }[]
 } {
   const factory = pluginFactory(source)
@@ -245,7 +247,26 @@ function initializePlugin(source: string): {
   const monsters: Record<string, unknown>[] = []
   const resources: Record<string, unknown>[] = []
   const subclasses: Record<string, unknown>[] = []
+  const assets: Record<string, unknown>[] = []
+  const definitions: Record<string, unknown>[] = []
   const api = Object.freeze({
+    sdkVersion: 1,
+    registerImageAsset(asset: unknown) {
+      const safe = clonePlain(asset, 'asset') as Record<string, unknown>
+      assertId(safe.id, 'asset id')
+      if (assets.length >= 512) throw new Error('Too many assets')
+      assets.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
+    registerContent(definition: unknown) {
+      const safe = clonePlain(definition, 'content') as Record<string, unknown>
+      assertId(safe.id, 'content id')
+      if (safe.namespace !== manifest.id) throw new Error('Content namespace must match the plugin')
+      if (definitions.length >= 512) throw new Error('Too many content definitions')
+      if (definitions.some(d => d.kind === safe.kind && d.id === safe.id)) throw new Error('Duplicate content definition')
+      definitions.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
     apiVersion: 2,
     rulesetId: 'dnd5e-2014-srd-5.1',
     registerFighterSubclass() {
@@ -348,6 +369,8 @@ function initializePlugin(source: string): {
     monsters,
     resources,
     subclasses,
+    assets,
+    definitions,
     migrations: migrationDeclarations,
   }
 }
