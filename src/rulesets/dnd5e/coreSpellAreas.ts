@@ -16,7 +16,8 @@ import {
   mapGeometryTokenElevation,
   type MapGeometryState,
 } from '../../lib/mapGeometry'
-import type { SkillAoeTargeting } from '../../lib/skillTargeting'
+import { cellsForAoe, type SkillAoeTargeting } from '../../lib/skillTargeting'
+import { resolveSpellAreaObstruction } from './spellAreaObstruction'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Dnd5eClassId } from './classes'
@@ -223,7 +224,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     spellId: 'web',
     label: '蛛网术',
     minimumSlotLevel: 2,
-    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, gridAligned: true },
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, rotatable: true },
     durationRounds: 600,
     concentration: true,
     anchorMode: 'fixed',
@@ -237,23 +238,25 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     triggers: [
       {
         id: 'web-enter', frequencyGroupId: 'web-restraint',
+        skipSaveWhenSourceConditionActive: 'restrained',
         label: '蛛网术·进入蛛网', timing: 'on-enter', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: {
           condition: 'restrained', duration: { expiresAt: 'permanent' },
           escapeCheck: { ability: 'str', economy: 'action' },
         },
-        dmAdjustable: true,
+        dmAdjustable: false,
       },
       {
         id: 'web-turn-start', frequencyGroupId: 'web-restraint',
+        skipSaveWhenSourceConditionActive: 'restrained',
         label: '蛛网术·回合开始', timing: 'turn-start', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: {
           condition: 'restrained', duration: { expiresAt: 'permanent' },
           escapeCheck: { ability: 'str', economy: 'action' },
         },
-        dmAdjustable: true,
+        dmAdjustable: false,
       },
     ],
   },
@@ -298,21 +301,21 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         label: '雪雨暴·进入区域', timing: 'on-enter', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
-        dmAdjustable: true,
+        dmAdjustable: false,
       },
       {
         id: 'sleet-storm-turn-start', frequencyGroupId: 'sleet-storm-prone',
         label: '雪雨暴·回合开始', timing: 'turn-start', oncePerTurn: true,
         savingThrow: { ability: 'dex', onSuccess: 'none' },
         condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
-        dmAdjustable: true,
+        dmAdjustable: false,
       },
       {
         id: 'sleet-storm-concentration-turn-start', frequencyGroupId: 'sleet-storm-concentration',
         label: '雪雨暴·专注干扰', timing: 'turn-start', oncePerTurn: true,
         savingThrow: { ability: 'con', onSuccess: 'none' },
         endTargetConcentrationOnFailedSave: true,
-        dmAdjustable: true,
+        dmAdjustable: false,
       },
     ],
   },
@@ -335,7 +338,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
       label: '臭云术·回合开始', timing: 'turn-start', oncePerTurn: true,
       savingThrow: { ability: 'con', onSuccess: 'none', automaticSuccessForDamageImmunity: 'poison' },
       consumeActionOnFailedSave: true,
-      dmAdjustable: true,
+      dmAdjustable: false,
     }],
   },
   {
@@ -428,7 +431,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
       id: 'wall-of-ice-create', label: '冰墙术·冰墙出现', timing: 'on-create',
       savingThrow: { ability: 'dex', onSuccess: 'half' },
       damage: { count: 10, sides: 6, perHigherSlot: 2, type: 'cold' },
-      dmAdjustable: true,
+      dmAdjustable: false,
     }],
   },
   {
@@ -970,6 +973,42 @@ function resolvedTrigger(
   }
 }
 
+// Continuous fields follow current barriers; placed material (webs, walls, plants)
+// must not regenerate cells that were destroyed during play.
+const LIVE_OBSTRUCTION_SPELLS = new Set([
+  'fog-cloud', 'darkness', 'sleet-storm', 'stinking-cloud', 'cloudkill',
+  'incendiary-cloud', 'insect-plague', 'spirit-guardians', 'silence', 'moonbeam',
+])
+
+export function persistentAreaUnobstructedCells(area: Dnd5ePluginArea): GridCell[] {
+  const declaration = getDnd5eCoreSpellAreaDeclaration(area.coreSpellId ?? '')
+  if (!LIVE_OBSTRUCTION_SPELLS.has(area.coreSpellId ?? '') || !area.anchorCell || declaration?.template.shape !== 'circle') return area.cells
+  const radiusFeet = area.obstructionRadiusFeet ?? declaration.template.radiusFeet * (
+    area.coreSpellId === 'fog-cloud' ? Math.max(1, area.slotLevel ?? 1) : 1
+  )
+  return cellsForAoe({ ...declaration.template, radiusFeet }, area.anchorCell, area.anchorCell)
+}
+
+function reconcileAreaObstruction(area: Dnd5ePluginArea, map: BattleMap): Dnd5ePluginArea {
+  const nominalCells = persistentAreaUnobstructedCells(area)
+  if (nominalCells === area.cells || !area.anchorCell) return area
+  const declaration = getDnd5eCoreSpellAreaDeclaration(area.coreSpellId!)!
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  const origin = tokenCenterForAnchorCell(area.anchorCell, { size: 1 }, map)
+  const radiusFeet = area.obstructionRadiusFeet ?? (declaration.template.shape === 'circle' ? declaration.template.radiusFeet * (area.coreSpellId === 'fog-cloud' ? Math.max(1, area.slotLevel ?? 1) : 1) : 0)
+  const { cols, rows } = mapCellExtent(map)
+  const cells = resolveSpellAreaObstruction({
+    spellId: area.coreSpellId, map, geometry,
+    cells: nominalCells.filter(cell => cell.col >= 0 && cell.row >= 0 && cell.col < cols && cell.row < rows),
+    area: { shape: 'circle', origin: 'point', radiusFeet }, origin,
+    elevationFeet: area.vertical?.mode === 'volume'
+      ? area.vertical.baseElevationFeet - (area.vertical.anchorOffsetFeet ?? 0)
+      : mapGeometryTerrainElevationAtPoint(geometry, origin),
+  }).cells
+  if (cells.length === area.cells.length && cells.every((cell, index) => cellKey(cell) === cellKey(area.cells[index]))) return area
+  return { ...area, cells }
+}
+
 export function createDnd5eCoreSpellArea(input: {
   declaration: Dnd5eCoreSpellAreaDeclaration
   actionId: string
@@ -980,6 +1019,7 @@ export function createDnd5eCoreSpellArea(input: {
   sourceSaveDc: number
   round: number
   cells: readonly GridCell[]
+  obstructionRadiusFeet?: number
   anchorCell: GridCell
   anchorTokenId?: string
   /** Terrain/token elevation captured by the authoritative caster at creation. */
@@ -1036,6 +1076,7 @@ export function createDnd5eCoreSpellArea(input: {
     sourceCharacterId: input.sourceCharacterId,
     sourceTokenId: input.sourceTokenId,
     cells: input.cells.map((cell) => ({ ...cell })),
+    obstructionRadiusFeet: input.obstructionRadiusFeet,
     createdRound: input.round,
     expiresAfterRound: input.round + durationRounds,
     expiresAtSourceTurnEndAfterRound: declaration.expiresAtSourceNextTurnEnd
@@ -1706,10 +1747,15 @@ export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {
     changed = true
     return { ...area, cells, anchorCell, vertical }
   })
+  const obstructedAreas = areas.map(area => {
+    const next = reconcileAreaObstruction(area, { ...map, tokens })
+    if (next !== area) changed = true
+    return next
+  })
   return changed ? {
     ...map,
     tokens: tokens.filter((token) => !removedTokenIds.has(token.id)),
-    dnd5ePluginAreas: areas,
+    dnd5ePluginAreas: obstructedAreas,
   } : map
 }
 

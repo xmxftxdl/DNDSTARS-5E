@@ -625,6 +625,11 @@ function resolveSimulationHeadlessAction(
         ] as const]
       : []),
   )
+  for (const fall of preview.falls) {
+    const collision = fall.collision ?? fall.collisionCandidates?.[0]
+    if (collision) airborneFallDamageRollsByCombatantId[collision.rollKey] =
+      Array.from({ length: collision.mode === 'normal' ? 1 : 2 }, () => random.die(20))
+  }
   return resolveDnd5eHeadlessAction(state, {
     ...action,
     airborneFallDamageRollsByCombatantId,

@@ -1,3 +1,5 @@
+import { dnd5eClassDefinition } from '../classes'
+import { getDnd5eSrdMonster } from '../monsters'
 import type { Character } from '../../../types/character'
 import { dnd5eCombatantCanHearSource } from '../audibility'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../conditions'
@@ -51,6 +53,7 @@ export function dnd5eActivityActorSnapshotFromCombatantV1(
     illumination: combatant.illumination,
     spellSaveDc: combatant.saveDc,
     spellAttackBonus,
+    spellcastingAbility: (combatant.classId ? dnd5eClassDefinition(combatant.classId)?.spellcasting?.ability : undefined) ?? (combatant.statBlockId ? getDnd5eSrdMonster(combatant.statBlockId)?.spellcasting?.ability : undefined),
     spellcastingAbilityModifier: spellAttackBonus == null
       ? undefined
       : spellAttackBonus - combatant.proficiencyBonus,

@@ -1,3 +1,4 @@
+import { dnd5eActiveActionOrBonusActionOnly } from './activeEffects'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
@@ -82,6 +83,10 @@ export function prepareDnd5eFighterFeature(input: {
       bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
       reactionAvailable: input.turnEconomy.reaction.current > 0,
     }
+  }
+  if (feature === 'second-wind' && (!actorCombatant.turn.bonusActionAvailable ||
+    (dnd5eActiveActionOrBonusActionOnly([...(actorCombatant.classState.activeEffects ?? []), ...(actorToken.dnd5eCombatState?.activeEffects ?? [])]) && !actorCombatant.turn.actionAvailable))) {
+    return { ok: false, reason: 'bonus-action-unavailable' }
   }
   return {
     ok: true,

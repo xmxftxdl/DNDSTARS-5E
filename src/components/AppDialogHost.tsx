@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   AlertTriangle,
@@ -38,6 +39,7 @@ interface AppDialogContentProps {
 }
 
 function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
+  const [selectedIds, setSelectedIds] = useState<readonly string[]>(() => active.selectedIds ?? [])
   const [draft, setDraft] = useState(() => active.defaultValue ?? '')
   const [stepDirection, setStepDirection] = useState(() => active.stepperDefaultDirection ?? 'up')
   const [stepValue, setStepValue] = useState(() => active.stepperDefaultValue ?? 0)
@@ -87,6 +89,7 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
       active.kind === 'prompt' ||
       active.kind === 'direction-stepper' ||
       active.kind === 'choice-groups' ||
+      active.kind === 'multi-choice' ||
       active.kind === 'action-choice'
         ? null
         : false,
@@ -97,6 +100,7 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
       active.id,
       active.kind === 'prompt'
         ? draft
+        : active.kind === 'multi-choice' ? [...selectedIds]
         : active.kind === 'direction-stepper'
           ? { direction: stepDirection, value: stepValue }
           : active.kind === 'choice-groups'
@@ -119,9 +123,9 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
               ? SquareMousePointer
             : HelpCircle
 
-  return (
+  const dialog = (
     <div
-      className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/70 px-4 py-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-black/70 px-4 py-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby={`app-dialog-title-${active.id}`}
@@ -275,6 +279,30 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
               </div>
             ) : null}
 
+            {active.kind === 'multi-choice' ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm text-slate-400">
+                  <span>已选择 {selectedIds.length} 个</span>
+                  <button type="button" onClick={() => setSelectedIds([])} className="text-violet-300 hover:text-violet-100">清空选择</button>
+                </div>
+                <div className="max-h-[48dvh] space-y-2 overflow-y-auto">
+                  {active.actionChoices?.map(option => (
+                    <label key={option.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 hover:bg-white/[0.08]">
+                      <input type="checkbox" checked={selectedIds.includes(option.id)}
+                        onChange={event => {
+                          const checked = event.currentTarget.checked
+                          setSelectedIds(ids => checked ? [...ids, option.id] : ids.filter(id => id !== option.id))
+                        }}
+                        className="h-4 w-4 accent-violet-500" />
+                      <span className="text-sm font-semibold text-slate-100">{option.label}
+                        {option.description ? <span className="mt-1 block text-xs font-normal text-slate-400">{option.description}</span> : null}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             {active.kind === 'choice-groups' ? (
               <div className="space-y-5" data-testid="app-dialog-choice-groups">
                 {active.choiceGroups?.map((group) => (
@@ -415,4 +443,5 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
       </section>
     </div>
   )
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body)
 }

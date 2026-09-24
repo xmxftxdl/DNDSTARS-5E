@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { colorSpraySpriteAnchor } from './colorSpraySpriteAnchor'
 import { Arrow, Circle, Group, Image as KonvaImage, Line } from 'react-konva'
 import Konva from 'konva'
 import { areaSeed, nextAreaRandom } from './deterministicAreaRandom'
@@ -250,6 +251,7 @@ export function DirectionalSpriteAtlasEffect({
   const imageX = -distance * 0.055
   const frameWidth = (image.naturalWidth || image.width) / 4
   const frameHeight = (image.naturalHeight || image.height) / 4
+  const anchoredSpray = projectile.kind === 'color-spray' || projectile.kind === 'prismatic-spray'
   const particles = useMemo(() => Array.from({ length: 10 }, (_, index) => {
     const random = (field: string) => nextAreaRandom(
       areaSeed(`${projectile.id}:directional-sprite:${index}:${field}`),
@@ -274,6 +276,12 @@ export function DirectionalSpriteAtlasEffect({
       const raw = Math.min(1, elapsed / duration)
       const spriteRaw = Math.min(1, raw / 0.9)
       const frameIndex = Math.min(15, Math.floor(spriteRaw * 16))
+      if (anchoredSpray) {
+        const anchor = colorSpraySpriteAnchor(frameIndex)
+        // Offset is transformed together with the sprite: its emission core
+        // stays at the caster even while the cone rotates or pulses in height.
+        sprite.offset({ x: anchor.x * width, y: anchor.y * height })
+      }
       const fade = raw < 0.82 ? 1 : Math.max(0, (1 - raw) / 0.18)
       sprite.crop({
         x: (frameIndex % 4) * frameWidth,
@@ -309,6 +317,8 @@ export function DirectionalSpriteAtlasEffect({
   }, [
     dx,
     dy,
+    anchoredSpray,
+    height,
     frameHeight,
     frameWidth,
     imageX,
@@ -324,8 +334,8 @@ export function DirectionalSpriteAtlasEffect({
         ref={spriteRef}
         image={image}
         crop={{ x: 0, y: 0, width: frameWidth, height: frameHeight }}
-        x={imageX}
-        y={-height / 2}
+        x={anchoredSpray ? 0 : imageX}
+        y={anchoredSpray ? 0 : -height / 2}
         width={width}
         height={height}
         shadowColor={shadowColor}

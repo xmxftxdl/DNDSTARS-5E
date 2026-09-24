@@ -15,7 +15,7 @@ export default function Dnd5eActivityMapTargetingOverlay(props: {
   return <div
     data-testid="dnd5e-activity-map-targeting-overlay"
     aria-live="polite"
-    className="absolute left-1/2 top-14 z-[114] flex max-w-[min(94vw,920px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-violet-400/40 bg-void-950/95 px-3 py-2 text-sm shadow-2xl backdrop-blur-sm"
+    className="map-combat-action-bar border-violet-400/40"
   >
     <Sparkles className="h-4 w-4 shrink-0 text-violet-300" />
     <span className="text-violet-100">{prompt}</span>

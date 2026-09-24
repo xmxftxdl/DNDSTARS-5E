@@ -5,10 +5,34 @@ import {
   mapFreeDiceKeepSuffix,
   mapFreeDiceSelectionFormula,
   removeMapFreeDie,
+  replaceMapFreeDie,
   resolveMapFreeDiceRoll,
+  mixedDiceFormula, mixedDiceSides, updateMixedDice,
 } from './mapFreeDiceRoll'
 
 describe('map free dice roll resolution', () => {
+  it('adds and removes independent dice types and caps the entire pool', () => {
+    const pool = updateMixedDice(updateMixedDice([], 6, 4), 4, 2)
+    expect(mixedDiceFormula(pool)).toBe('4d6 + 2d4')
+    expect(mixedDiceSides(pool)).toEqual([6, 6, 6, 6, 4, 4])
+    expect(updateMixedDice(pool, 4, 0)).toEqual([{ sides: 6, count: 4 }])
+    expect(mixedDiceSides(updateMixedDice(pool, 20, 200))).toHaveLength(100)
+    expect(buildMapFreeDiceRollPresentation({ groups: pool, count: 6, sides: 6, values: [6, 5, 4, 3, 2, 1], bonus: 2, rollerName: 'DM', privateRoll: false })).toMatchObject({ formula: '4d6 + 2d4 + 2', total: 23 })
+  })
+  it('replaces only the selected position, retains duplicate dice and applies the bonus once', () => {
+    const original = [4, 4, 6]
+    const values = replaceMapFreeDie(original, 1, 2)
+    expect(values).toEqual([4, 2, 6])
+    expect(original).toEqual([4, 4, 6])
+    expect(resolveMapFreeDiceRoll(values, 3).total).toBe(15)
+    expect(resolveMapFreeDiceRoll(values, 3, { keep: 'lowest' }).total).toBe(5)
+  })
+
+  it('rejects invalid single-die selections', () => {
+    for (const index of [-1, 2, 0.5, NaN]) {
+      expect(() => replaceMapFreeDie([3, 3], index, 6)).toThrow('Invalid die index')
+    }
+  })
   it('adds repeated die clicks to the tray and allows right-click removal', () => {
     const first = addMapFreeDie({ count: 0, sides: 20 }, 10)
     const second = addMapFreeDie(first, 10)

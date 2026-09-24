@@ -8,6 +8,7 @@ import {
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eMovementPathCells } from './itemAreas'
+import { dnd5eTokenHasWebWalker } from './webTraits'
 import type {
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaTriggerTiming,
@@ -20,6 +21,7 @@ import { normalizeDnd5eActiveEffects, projectDnd5eActiveEffectState } from './ac
 import {
   dnd5eHallowAdditionalEffectAllowsTarget,
   dnd5ePersistentAreaAllowsTarget,
+  dnd5eTokenFullyContainedInPersistentAreaAt,
   dnd5eTokenIntersectsPersistentAreaAt,
 } from './persistentAreaGeometry'
 
@@ -40,26 +42,26 @@ export interface Dnd5ePersistentAreaTriggerCandidate {
   turnKey?: string
 }
 
-export interface Dnd5eGreaseMovementCheckpoint {
+export interface Dnd5eAreaMovementCheckpoint {
   candidate: Dnd5ePersistentAreaTriggerCandidate
   position: { x: number; y: number }
   pathIndex: number
 }
 
 /**
- * Grease interrupts movement at the first occupied anchor cell that enters
+ * Grease and Web interrupt movement at the first occupied anchor cell that enters
  * the area.  Keep this projection beside the trigger collector so player
  * previews, Host animation and authoritative settlement all use the exact
  * same large-token-aware grid geometry.
  */
-export function dnd5eFirstGreaseMovementCheckpoint(input: {
+export function dnd5eFirstAreaMovementCheckpoint(input: {
   map: BattleMap
   token: Token
   candidates: readonly Dnd5ePersistentAreaTriggerCandidate[]
-}): Dnd5eGreaseMovementCheckpoint | undefined {
+}): Dnd5eAreaMovementCheckpoint | undefined {
   const candidate = input.candidates
     .filter((entry) =>
-      entry.area.coreSpellId === 'grease' &&
+      (entry.area.coreSpellId === 'grease' || entry.area.coreSpellId === 'web') &&
       entry.trigger.timing === 'on-enter' &&
       entry.targetToken.id === input.token.id &&
       entry.enteredAt != null)
@@ -72,8 +74,8 @@ export function dnd5eFirstGreaseMovementCheckpoint(input: {
   }
 }
 
-/** Returns the earliest Grease entry whose Dexterity save actually failed. */
-export function dnd5eFailedGreaseMovementCheckpoint(input: {
+/** Returns the earliest failed entry that actually stops movement. */
+export function dnd5eFailedAreaMovementCheckpoint(input: {
   map: BattleMap
   token: Token
   candidates: readonly Dnd5ePersistentAreaTriggerCandidate[]
@@ -83,18 +85,20 @@ export function dnd5eFailedGreaseMovementCheckpoint(input: {
     triggerId?: string
     targetId?: string
     saveSuccess?: boolean
+    conditionApplied?: string
   }[]
-}): Dnd5eGreaseMovementCheckpoint | undefined {
+}): Dnd5eAreaMovementCheckpoint | undefined {
   const failedCandidates = input.candidates.filter((candidate) =>
-    candidate.area.coreSpellId === 'grease' &&
+    (candidate.area.coreSpellId === 'grease' || candidate.area.coreSpellId === 'web') &&
     candidate.trigger.timing === 'on-enter' &&
     input.events.some((event) =>
       event.type === 'persistent-area-triggered' &&
       event.areaId === candidate.area.id &&
       event.triggerId === candidate.trigger.id &&
       event.targetId === input.token.id &&
-      event.saveSuccess === false))
-  return dnd5eFirstGreaseMovementCheckpoint({
+      event.saveSuccess === false &&
+      (candidate.area.coreSpellId !== 'web' || event.conditionApplied === 'restrained')))
+  return dnd5eFirstAreaMovementCheckpoint({
     map: input.map,
     token: input.token,
     candidates: failedCandidates,
@@ -128,6 +132,11 @@ function persistentAreaTriggerAllowsTarget(
   // the authoritative trigger pipeline.
   if (token.type === 'obstacle' || token.dnd5eSpellEffect) return false
   if (!(trigger.targetKinds ?? ['creature']).includes('creature')) return false
+  if (area.coreSpellId === 'web' && trigger.condition?.condition === 'restrained' &&
+    dnd5eTokenHasWebWalker(token)) return false
+  // Stinking Cloud requires the creature to start its turn entirely in the cloud.
+  if (area.coreSpellId === 'stinking-cloud' && trigger.timing === 'turn-start' &&
+    !dnd5eTokenFullyContainedInPersistentAreaAt(token, map, area, token)) return false
   if (area.hallow &&
     !dnd5eHallowAdditionalEffectAllowsTarget(area, token, map)) return false
   return areaAllowsTarget(area, token, map)
@@ -322,6 +331,11 @@ export function normalizeDnd5ePersistentAreaTriggerForRuntime(
   area: Dnd5ePluginArea,
   trigger: Dnd5ePersistentAreaTriggerSnapshot,
 ): Dnd5ePersistentAreaTriggerSnapshot {
+  if (area.sourceKind === 'core-spell' && area.coreSpellId === 'web' &&
+    (trigger.id === 'web-enter' || trigger.id === 'web-turn-start')) {
+    return { ...trigger, frequencyGroupId: 'web-restraint', oncePerTurn: true,
+      skipSaveWhenSourceConditionActive: 'restrained' }
+  }
   if (
     area.sourceKind !== 'core-spell' ||
     area.coreSpellId !== 'flaming-sphere' ||
@@ -960,13 +974,18 @@ export function reconcileDnd5ePluginAreasAndConcentrationOnMap(
     }
   }
 
-  const endedActorIds = new Set(endedSources.flatMap((source) => [
-    source.sourceTokenId,
-    ...(source.sourceCharacterId ? [source.sourceCharacterId] : []),
-  ]))
+  // A stale area may disappear after its caster has already started another
+  // concentration spell. Remove only links owned by the ended spell, not every
+  // concentration effect from that caster (which would erase the new spell).
+  const normalizeSpellId = (id: string) => id.replace(/^(?:srd-5\.1:)?spell:/, '')
+  const isEndedLink = (sourceActorId: string, spellId: string | undefined) =>
+    spellId != null && endedSources.some((source) =>
+      (source.sourceTokenId === sourceActorId || source.sourceCharacterId === sourceActorId) &&
+      normalizeSpellId(source.concentrationId) === normalizeSpellId(spellId))
   const effectIsEnded = (effect: ReturnType<typeof normalizeDnd5eActiveEffects>[number]) =>
     effect.duration.type === 'concentration' &&
-    endedActorIds.has(effect.duration.sourceActorId)
+    isEndedLink(effect.duration.sourceActorId,
+      effect.duration.concentrationId ?? effect.source.rulesId)
   const clearLinkedState = <T extends {
     activeEffects?: Character['dnd5eCombatState'] extends infer S
       ? S extends { activeEffects?: infer E } ? E : never
@@ -987,8 +1006,8 @@ export function reconcileDnd5ePluginAreasAndConcentrationOnMap(
     const activeEffects = currentEffects.filter((effect) => !effectIsEnded(effect))
     const effectsChanged = activeEffects.length !== currentEffects.length
     const concentrationEffectsBySource = Object.fromEntries(
-      Object.entries(state.concentrationEffectsBySource ?? {}).filter(([sourceId]) =>
-        !endedActorIds.has(sourceId)),
+      Object.entries(state.concentrationEffectsBySource ?? {}).filter(([sourceId, spellId]) =>
+        !isEndedLink(sourceId, spellId)),
     )
     const linkedStateChanged = Object.keys(concentrationEffectsBySource).length !==
       Object.keys(state.concentrationEffectsBySource ?? {}).length

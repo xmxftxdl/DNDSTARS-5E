@@ -1,3 +1,4 @@
+import { DND5E_DAMAGE_TYPE_LABELS } from './damageTypes'
 import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type {
   Dnd5eInventoryIconId,
@@ -98,6 +99,54 @@ function magicStaffEquipment(id: string, name: string): EquipmentItem {
  * 未完成人工审校的条目只保留 SRD 目录元数据，不装载旧机器译文。
  */
 const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
+  'potion-of-climbing': {
+    use: { economy: 'action', consumeQuantity: 1, effect: { kind: 'active-effect', durationRounds: 600,
+      modifiers: { climbSpeedEqualsWalking: true, climbingCheckAdvantage: true } } },
+    automation: 'headless',
+  },
+  'periapt-of-proof-against-poison': {
+    equipment: { id: 'srd-5.1:magic-item:periapt-of-proof-against-poison', name: '防毒护符', slot: 'necklace' },
+    headlessEffects: [{ kind: 'equipped-passive', modifiers: { damageImmunity: 'poison', conditionImmunities: ['poisoned'] } }],
+    automation: 'headless',
+  },
+  'wand-of-binding': {
+    resources: [chargedSpellResource(7, 1)],
+    useActions: [
+      chargedSpellAction({ id: 'hold-person', label: '人类定身术', spellId: 'hold-person', castAtLevel: 2, chargeCost: 2, spellSaveDc: 17 }),
+      chargedSpellAction({ id: 'hold-monster', label: '怪物定身术', spellId: 'hold-monster', castAtLevel: 5, chargeCost: 5, spellSaveDc: 17 }),
+    ],
+    // Spell actions are automated; the conditional pre-roll reaction still needs DM adjudication.
+    automation: 'dm-adjudication',
+  },
+  'ring-of-water-walking': {
+    headlessEffects: [{ kind: 'equipped-passive', modifiers: { environmentalCapabilities: { treatLiquidSurfacesAsSolidGround: true } } }], automation: 'headless',
+  },
+  'ring-of-feather-falling': {
+    headlessEffects: [{ kind: 'equipped-passive', modifiers: { controlledDescent: { maximumFeetPerRound: 60, safeLanding: true, endsOnLanding: true } } }], automation: 'headless',
+  },
+  'ring-of-free-action': {
+    headlessEffects: [{ kind: 'equipped-passive', modifiers: { ignoreMagicalSpeedReductions: true,
+      environmentalCapabilities: { ignoreDifficultTerrain: true },
+      conditionImmunitiesBySourceMagic: [{ conditions: ['paralyzed', 'restrained'], sourceMagical: true }],
+    } }], automation: 'headless',
+  },
+
+  ...Object.fromEntries([['wand-of-fireballs', 'fireball'], ['wand-of-lightning-bolts', 'lightning-bolt']].map(([id, spellId]) => [id, {
+    resources: [chargedSpellResource(7, 1)],
+    useActions: Array.from({ length: 7 }, (_, index) => chargedSpellAction({ id: `cast-level-${index + 3}`, label: `${index + 3}环`, spellId,
+      castAtLevel: index + 3, chargeCost: index + 1, spellSaveDc: 15 })),
+    automation: 'headless' as const,
+  }])),
+
+  'potion-of-invisibility': {
+    use: { economy: 'action', consumeQuantity: 1, effect: { kind: 'active-effect', durationRounds: 600, condition: 'invisible', breakOn: ['makes-attack', 'casts-spell'] } },
+    automation: 'headless',
+  },
+  'potion-of-water-breathing': {
+    use: { economy: 'action', consumeQuantity: 1, effect: { kind: 'active-effect', durationRounds: 600, modifiers: { environmentalCapabilities: { breatheIn: ['water'] } } } },
+    automation: 'headless',
+  },
+
   'amulet-of-the-planes': {
     description: '一枚用于跨位面旅行的极珍稀奇物。只有完成同调并佩戴它的生物才能激活；检定失败时，它可能把佩戴者与周围所有生物和物件送往随机目的地。',
     rulesText: [
@@ -962,7 +1011,31 @@ const ABSTRACT_MAGIC_ITEM_CATALOG_TEMPLATE_IDS = new Set([
   'srd-5.1:magic-item:spell-scroll',
 ])
 
+const RESISTANCE_TYPES = ['acid', 'cold', 'fire', 'force', 'lightning', 'necrotic', 'poison', 'psychic', 'radiant', 'thunder'] as const
+const RESISTANCE_ITEM_VARIANTS: Dnd5eInventoryItemTemplate[] = RESISTANCE_TYPES.flatMap(type => {
+  const ring = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(item => item.id === 'srd-5.1:magic-item:ring-of-resistance')!
+  const potion = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(item => item.id === 'srd-5.1:magic-item:potion-of-resistance')!
+  return [{ ...ring, id: `${ring.id}-${type}`, name: `${DND5E_DAMAGE_TYPE_LABELS[type]}抗性戒指`,
+    equipment: { ...ring.equipment!, id: `${ring.id}-${type}`, name: `${DND5E_DAMAGE_TYPE_LABELS[type]}抗性戒指` },
+    headlessEffects: [{ kind: 'equipped-passive' as const, modifiers: { damageResistance: type } }],
+    magicItem: { ...ring.magicItem!, automation: 'headless' as const },
+  }, { ...potion, id: `${potion.id}-${type}`, name: `${DND5E_DAMAGE_TYPE_LABELS[type]}抗性药水`,
+    use: { economy: 'action' as const, consumeQuantity: 1, effect: { kind: 'active-effect' as const, durationRounds: 600, modifiers: { damageResistance: type } } },
+    magicItem: { ...potion.magicItem!, automation: 'headless' as const },
+  }]
+})
+
 export const DND5E_SRD_MAGIC_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
+  ...BASE_ARMOR.flatMap(armor => RESISTANCE_TYPES.map(type => {
+    const base = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(item => item.id === 'srd-5.1:magic-item:armor-of-resistance')!
+    const id = `${base.id}-${armor.id}-${type}`
+    const name = `${DND5E_DAMAGE_TYPE_LABELS[type]}抗性${armor.name}`
+    return { ...base, id, name, equipment: { ...armor, id, name, baseEquipmentId: armor.baseEquipmentId ?? armor.id },
+      headlessEffects: [{ kind: 'equipped-passive' as const, modifiers: { damageResistance: type } }],
+      magicItem: { ...base.magicItem!, automation: 'headless' as const },
+    }
+  })),
+  ...RESISTANCE_ITEM_VARIANTS,
   ...DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.filter((item) => !ABSTRACT_MAGIC_ITEM_CATALOG_TEMPLATE_IDS.has(item.id)),
   ...DND5E_SRD_MAGIC_WEAPON_TEMPLATES,
   ...DND5E_SRD_MAGIC_ARMOR_TEMPLATES,

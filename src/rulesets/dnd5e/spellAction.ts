@@ -1,3 +1,10 @@
+import { iceWallFromCells } from './wallObjectRules'
+import { stoneWallEnclosure } from './stoneWallEscape'
+import { stoneWallPanels, stoneWallCells, validStoneWallLayout } from './stoneWall'
+import { settleSunburstSpellDarknessDispels } from './sunburstDarknessDispel'
+import { igniteDnd5eWebAreasFromSpell } from './webAreaRules'
+import { projectSimulacrumCharacterForMapDetail } from './simulacrum'
+import { resolveSpellAreaObstruction } from './spellAreaObstruction'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   DND_FEET_PER_CELL,
@@ -23,6 +30,7 @@ import {
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
   dnd5eAttackerIsUnseenForAttack,
+  dnd5eSpellDamageImmunitySkipsSave,
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eCombatantPairKey,
   dnd5eCombatantCanSee,
@@ -78,10 +86,11 @@ import { dnd5eWearingUnproficientArmor } from './equipment'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode, type Dnd5eRollModeResolution } from './rollMode'
 import {
   dnd5eInstantAoeAffectsTokenVertically,
+  dnd5eAreaRequiresGround,
   dnd5eMapTokenDistanceFeet,
   dnd5eTokenToPointDistanceFeet,
 } from './verticalCombatGeometry'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eAttackerAttackDisadvantageReasons, dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
 import {
   mapGeometryCanSeeToken,
@@ -202,6 +211,7 @@ export interface PreparedDnd5eSpellCast {
   targetTokens: readonly Token[]
   guessedTargetCell?: { col: number; row: number }
   blindTargetMiss: boolean
+  webIgnitionCell?: { col: number; row: number }
   /** Host-bound mapped Arcane Lock selected by Dispel Magic's guessed cell. */
   projectileTargetIds?: readonly string[]
   spell: Dnd5eSrdSpellDefinition
@@ -258,6 +268,7 @@ export interface PreparedDnd5eSpellCast {
   calmEmotionsMode?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['calmEmotionsMode']
   calmEmotionsIndifferenceScope?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['calmEmotionsIndifferenceScope']
   healingAllocations?: readonly { targetId: string; amount: number }[]
+  obstructionRadiusFeet?: number
   areaCells?: readonly { col: number; row: number }[]
   areaAnchorCell?: { col: number; row: number }
   areaAnchorCells?: readonly { col: number; row: number }[]
@@ -443,14 +454,25 @@ export function prepareDnd5eSpellCast(input: {
 }): { ok: true; prepared: PreparedDnd5eSpellCast } | { ok: false; reason: Dnd5eSpellCastRejectReason } {
   const payload = input.action.dnd5eSpellCast
   if (input.action.type !== 'dnd5e-spell-cast' || !payload) return { ok: false, reason: 'invalid-action' }
-  const actor = input.characters.find((character) => character.id === input.action.characterId)
+  const actorSubject = input.characters.find((character) => character.id === input.action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
+  const actor = actorSubject && actorToken ? projectSimulacrumCharacterForMapDetail(actorToken, actorSubject) : actorSubject
   const runtimeDefinition = getDnd5eCoreSpellRuntimeDefinitionV1(payload.spellId)
   const spell = runtimeDefinition?.spell
   const enforceSpellcastingPrerequisites =
     input.effectiveRules?.houseRules.spellcastingPrerequisitesEnabled !== false
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
   if (!spell) return { ok: false, reason: 'spell-definition-unavailable' }
+  const targetElevationFeet = input.action.targetElevationFeet ?? payload.targetElevationFeet
+  if (targetElevationFeet != null && (!Number.isFinite(targetElevationFeet) ||
+    targetElevationFeet < -1000 || targetElevationFeet > 10000)) {
+    return { ok: false, reason: 'invalid-target' }
+  }
+  if (input.action.targetElevationFeet != null && payload.targetElevationFeet != null &&
+    input.action.targetElevationFeet !== payload.targetElevationFeet) return { ok: false, reason: 'invalid-target' }
+  // Keep one elevation on the prepared request for both immediate and persistent effects.
+  input = { ...input, action: { ...input.action, targetElevationFeet } }
+
   if (dnd5eCharacterIsBlinded(actor) && dnd5eSpellTargetRequiresSight({
     requiresVisibleTarget: spell.requiresVisibleTarget,
     activityTarget: runtimeDefinition.activity.target,
@@ -595,7 +617,7 @@ export function prepareDnd5eSpellCast(input: {
     (itemEntry.item.equipment != null && itemEntry.equippedSlot == null) ||
     itemSpellEffect.spellId !== spell.id || itemSpellEffect.castAtLevel !== payload.slotLevel ||
     (spell.effect === 'spell-attack' && itemSpellEffect.spellAttackBonus == null && itemSpellEffect.useCharacterSpellcasting !== true) ||
-    ((spell.saveAbility != null || spell.unwillingSaveAbility != null) && itemSpellEffect.spellSaveDc == null && itemSpellEffect.useCharacterSpellcasting !== true) ||
+    ((spell.saveAbility != null || spell.unwillingSaveAbility != null) && itemSpellEffect.targeting !== 'self-only' && itemSpellEffect.spellSaveDc == null && itemSpellEffect.useCharacterSpellcasting !== true) ||
     (itemSpellEffect.spellcastingClassIds?.length && itemSpellcastingSources.length < 1) ||
     payload.castingClassId != null || payload.racialInnate === true || sustainedAttack != null
     || payload.alternateResourceSpell != null
@@ -913,6 +935,15 @@ export function prepareDnd5eSpellCast(input: {
     (totalSorceryPointCost > 0 && (!sorceryPoints || sorceryPoints.current < totalSorceryPointCost))
   ) return { ok: false, reason: 'invalid-action' }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  if (targetElevationFeet != null && dnd5eAreaRequiresGround(spell.id)) {
+    const anchors = payload.areaTargetCells?.length ? payload.areaTargetCells :
+      payload.areaTargetCell ? [payload.areaTargetCell] : []
+    if (anchors.some((cell) => Math.abs(targetElevationFeet - mapGeometryTerrainElevationAtPoint(geometry, {
+      x: input.map.gridOffsetX + (cell.col + 0.5) * input.map.gridSize,
+      y: input.map.gridOffsetY + (cell.row + 0.5) * input.map.gridSize,
+    })) > 1e-4)) return { ok: false, reason: 'invalid-target' }
+  }
+
   if (spell.id === 'call-lightning' && !sustainedAttack && geometry?.overheadSpace === 'confined') {
     return { ok: false, reason: 'spell-environment-unavailable' }
   }
@@ -968,6 +999,7 @@ export function prepareDnd5eSpellCast(input: {
     })
   ) return { ok: false, reason: 'invalid-target' }
   let blindTargetMiss = false
+  let webIgnitionCell: { col: number; row: number } | undefined
   let guessedTargetId: string | undefined
   if (guessedTargetCell != null) {
     const guessedSpiritualWeapon = spell.id === 'spiritual-weapon' && sustainedAttack == null
@@ -1052,6 +1084,16 @@ export function prepareDnd5eSpellCast(input: {
       )
       .sort((left, right) => left.id.localeCompare(right.id))[0]?.id
     blindTargetMiss = guessedTargetId == null
+    // Empty web is an environmental fire target, not a guessed creature.
+    // Reuse the targetless resource settlement without inventing a defender.
+    if (blindTargetMiss && spell.effect === 'spell-attack' &&
+      (payload.effectDamageType ?? spell.damageType) === 'fire' &&
+      input.map.dnd5ePluginAreas?.some(area => area.sourceKind === 'core-spell' &&
+        area.coreSpellId === 'web' && area.cells.some(cell => cellKey(cell) === guessedKey) &&
+        (area.vertical?.mode !== 'volume' || (guessedElevation >= area.vertical.baseElevationFeet &&
+          guessedElevation < area.vertical.baseElevationFeet + area.vertical.heightFeet)))) {
+      webIgnitionCell = { ...guessedTargetCell }
+    }
     if (guessedTargetId && repeatedTargets && projectileCount != null) {
       const authoritativeTargetId = guessedTargetId
       projectileTargetIds = Array.from({ length: projectileCount }, () => authoritativeTargetId)
@@ -1142,7 +1184,12 @@ export function prepareDnd5eSpellCast(input: {
   let areaAnchorCells: readonly { col: number; row: number }[] | undefined
   let wallOfFireGeometry: Dnd5eWallOfFireGeometry | undefined
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
-  const spellArea = dnd5eSpellAreaAtSlot(spell, slotLevel)
+  if (payload.wallOfForceShape != null && (spell.id !== 'wall-of-force' ||
+    !['plane', 'hemisphere', 'sphere'].includes(payload.wallOfForceShape))) return { ok: false, reason: 'invalid-target' }
+  const forceShell = spell.id === 'wall-of-force' && payload.wallOfForceShape != null && payload.wallOfForceShape !== 'plane'
+  const spellArea = forceShell
+    ? { shape: 'circle' as const, origin: 'point' as const, radiusFeet: 10, minimumRadiusFeet: 5, placeRangeFeet: 120 }
+    : dnd5eSpellAreaAtSlot(spell, slotLevel)
   const areaTemplate = spellArea && sustainedUsesArea
     ? {
         ...spellArea,
@@ -1212,7 +1259,36 @@ export function prepareDnd5eSpellCast(input: {
       diameterFeet,
     }
   }
-  if (areaTargeting && (spell.areaTargetCount ?? 1) > 1 && dancingLightsForm !== 'humanoid') {
+  if (payload.stoneWall != null && spell.id !== 'wall-of-stone' && spell.id !== 'wall-of-force' && spell.id !== 'wall-of-ice') return { ok: false, reason: 'invalid-target' }
+  if ((spell.id === 'wall-of-stone' || spell.id === 'wall-of-force' || spell.id === 'wall-of-ice') && payload.stoneWall) {
+    if (spell.id === 'wall-of-ice' && payload.stoneWall.mode !== 'thick') return { ok: false, reason: 'invalid-target' }
+    if (spell.id === 'wall-of-force' && (payload.stoneWall.mode !== 'thick' || forceShell)) return { ok: false, reason: 'invalid-target' }
+    if (!validStoneWallLayout(payload.stoneWall)) return { ok: false, reason: 'invalid-target' }
+    if (input.action.targetElevationFeet != null && (!Number.isFinite(input.action.targetElevationFeet) || input.action.targetElevationFeet < -1000 || input.action.targetElevationFeet > 10000)) return { ok: false, reason: 'invalid-target' }
+    const panels = stoneWallPanels(payload.stoneWall, input.map)
+    const cells = stoneWallCells(panels)
+    const casterCell = tokenAnchorCellFromPixel(spellOriginToken.x, spellOriginToken.y, spellOriginToken, input.map)
+    const columns = Math.floor((input.map.width - input.map.gridOffsetX) / input.map.gridSize)
+    const rows = Math.floor((input.map.height - input.map.gridOffsetY) / input.map.gridSize)
+    for (const cell of cells) {
+      if (cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows) return { ok: false, reason: 'spell-area-target-out-of-bounds' }
+      if (Math.max(Math.abs(cell.col - casterCell.col), Math.abs(cell.row - casterCell.row)) * (input.map.feetPerCell ?? 5) > 120) return { ok: false, reason: 'spell-area-target-out-of-range' }
+      const point = { x: input.map.gridOffsetX + (cell.col + .5) * input.map.gridSize, y: input.map.gridOffsetY + (cell.row + .5) * input.map.gridSize }
+      const targetElevation = input.action.targetElevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, point)
+      if (spell.id === 'wall-of-ice') {
+        const startPoint = { x: input.map.gridOffsetX + (payload.stoneWall.start.col + .5) * input.map.gridSize, y: input.map.gridOffsetY + (payload.stoneWall.start.row + .5) * input.map.gridSize }
+        const base = input.action.targetElevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, startPoint)
+        if (Math.abs(base - mapGeometryTerrainElevationAtPoint(geometry, point)) > .01) return { ok: false, reason: 'invalid-target' }
+      }
+      if (dnd5eTokenToPointDistanceFeet({ geometry, token: spellOriginToken, pointElevationFeet: targetElevation,
+        horizontalDistanceFeet: Math.max(Math.abs(cell.col - casterCell.col), Math.abs(cell.row - casterCell.row)) * (input.map.feetPerCell ?? 5) }) > 120) return { ok: false, reason: 'spell-area-target-out-of-range' }
+      if (mapGeometryLineOfEffectBlocked({ geometry, map: input.map, from: spellOriginToken, to: point,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, spellOriginToken),
+        toElevationFeet: input.action.targetElevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, point) })) return { ok: false, reason: 'effect-line-blocked' }
+    }
+    areaCells = cells
+    areaAnchorCell = payload.stoneWall.start
+  } else if (areaTargeting && (spell.areaTargetCount ?? 1) > 1 && dancingLightsForm !== 'humanoid') {
     const requiredAreaTargetCount = spell.areaTargetCount ?? 1
     const minimumAreaTargetCount = Math.max(1, Math.min(requiredAreaTargetCount, spell.minimumAreaTargetCount ?? requiredAreaTargetCount))
     const submittedAreaCells = payload.areaTargetCells
@@ -1266,7 +1342,7 @@ export function prepareDnd5eSpellCast(input: {
         x: input.map.gridOffsetX + (areaCell.col + 0.5) * input.map.gridSize,
         y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
       }
-      const areaPointElevation = mapGeometryTerrainElevationAtPoint(geometry, areaPoint)
+      const areaPointElevation = targetElevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, areaPoint)
       const areaPointToken = {
         ...actorToken,
         id: `${actorToken.id}:spell-area-placement:${areaCell.col}:${areaCell.row}`,
@@ -1311,7 +1387,8 @@ export function prepareDnd5eSpellCast(input: {
       })) return { ok: false, reason: 'effect-line-blocked' }
 
       const cells = cellsForAoe(areaTargeting, casterCell, areaCell)
-      for (const cell of cells) unionCells.set(cellKey(cell), cell)
+      const obstruction = resolveSpellAreaObstruction({ spellId: spell.id, map: input.map, geometry, cells, area: areaTargeting, origin: areaPoint, elevationFeet: areaPointElevation })
+      for (const cell of obstruction.cells) unionCells.set(cellKey(cell), cell)
       for (const candidate of tokensInCells(input.map, input.map.tokens, cells)) {
         if (
           candidate.type === 'obstacle' ||
@@ -1334,14 +1411,7 @@ export function prepareDnd5eSpellCast(input: {
           effectAim: areaPoint,
           effectAimElevationFeet: areaPointElevation,
         })) continue
-        if (mapGeometryLineOfEffectBlocked({
-          geometry,
-          map: input.map,
-          from: areaPoint,
-          to: candidate,
-          fromElevationFeet: areaPointElevation,
-          toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
-        })) continue
+        if (!obstruction.affectsToken(candidate)) continue
         zoneTargets.set(candidate.id, candidate)
       }
     }
@@ -1483,7 +1553,10 @@ export function prepareDnd5eSpellCast(input: {
           .some((cell) => cellKey(cell) === cellKey(areaCell)),
       )) return { ok: false, reason: 'invalid-target' }
     }
-    const orientFrom = aoeOrientFromCell(areaTargeting, casterCell, areaCell, { rectRotation: orientation })
+    const orientFrom = aoeOrientFromCell(areaTargeting, casterCell, areaCell, {
+      rectRotation: orientation,
+      rectAngleDegrees: payload.areaTargetAngleDegrees,
+    })
     const cells = wallOfFireGeometry
       ? dnd5eWallOfFireCells({ anchor: areaCell, ...wallOfFireGeometry, map: input.map })
       : dnd5eSpellUsesThinWallCells(spell.id) && areaTargeting.shape === 'rect'
@@ -1507,6 +1580,8 @@ export function prepareDnd5eSpellCast(input: {
     const effectOriginElevation = areaTargeting.origin === 'point'
       ? effectAimElevation
       : mapGeometryTokenElevation(geometry, spellOriginToken)
+    const obstruction = resolveSpellAreaObstruction({ spellId: spell.id, map: input.map, geometry, cells, area: areaTargeting, origin: effectOrigin, elevationFeet: effectOriginElevation })
+    areaCells = obstruction.cells
     const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cells).filter((candidate) => {
       if (
         candidate.type === 'obstacle' ||
@@ -1534,14 +1609,7 @@ export function prepareDnd5eSpellCast(input: {
         effectAim,
         effectAimElevationFeet: effectAimElevation,
       })) return false
-      return !mapGeometryLineOfEffectBlocked({
-        geometry,
-        map: input.map,
-        from: effectOrigin,
-        to: candidate,
-        fromElevationFeet: effectOriginElevation,
-        toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
-      })
+      return obstruction.affectsToken(candidate)
     })
     const authoritativeIds = new Set(authoritativeTargets.map((candidate) => candidate.id))
     if (spell.target !== 'area' && requestedTargetIds.some((targetId) => !authoritativeIds.has(targetId))) {
@@ -1988,8 +2056,30 @@ export function prepareDnd5eSpellCast(input: {
     targetCombatant.classState.activeEffects,
     actorCombatant.id,
     actorCombatant.creatureType,
+    { ...snapshot.state, initiativeIndex: actorIndex },
   ).advantage
-  const attackModeResolution = usesSpellAttackRoll && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
+  const attackModeResolution = usesSpellAttackRoll && blindTargetMiss
+    // Empty guesses have no defender: the fallback target is the caster, whose
+    // defensive conditions must not affect this presentation-only attack roll.
+    ? resolveDnd5eRollMode({
+        advantage: [
+          { active: actorCombatant.classState.hiddenCheckTotal != null, reason: '攻击者处于隐藏状态' },
+          { active: actorCombatant.conditions.some(condition => ['invisible', '隐形'].includes(condition.toLowerCase())), reason: '攻击者处于隐形状态' },
+          { active: dnd5eNextD20AdvantageApplies(actorCombatant, 'attack'), reason: '下一次 d20 攻击优势' },
+          ...actorAttackRollEffect.advantageReasons.map(reason => ({ active: true, reason })),
+        ],
+        disadvantage: [
+          { active: true, reason: '攻击者看不见目标' },
+          ...dnd5eAttackerAttackDisadvantageReasons(actorCombatant).map(reason => ({ active: true, reason })),
+          { active: rangedSpellThreatened, reason: '远程法术攻击者 5 尺内有敌人' },
+          { active: actorCombatant.exhaustionLevel >= 3, reason: '3 级或更高力竭' },
+          { active: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },
+          { active: dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant), reason: '攻击者处于恐慌且能看见恐惧源' },
+          { active: actorProne, reason: '攻击者处于倒地状态' },
+          ...actorAttackRollEffect.disadvantageReasons.map(reason => ({ active: true, reason })),
+        ],
+      })
+    : usesSpellAttackRoll && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
     ? resolveDnd5eRollMode({
         advantage: [
           ...dnd5eTargetAttackAdvantageReasons(targetCombatant)
@@ -2011,6 +2101,7 @@ export function prepareDnd5eSpellCast(input: {
             .map((reason) => ({ active: advantageAllowed, reason })),
         ],
         disadvantage: [
+          ...dnd5eAttackerAttackDisadvantageReasons(actorCombatant).map(reason => ({ active: true, reason })),
           { active: rangedSpellThreatened, reason: '远程法术攻击者 5 尺内有敌人' },
           { active: actorCombatant.exhaustionLevel >= 3, reason: '3 级或更高力竭' },
           { active: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },
@@ -2047,6 +2138,7 @@ export function prepareDnd5eSpellCast(input: {
             currentTarget.classState.activeEffects,
             actorCombatant.id,
             actorCombatant.creatureType,
+            { ...snapshot.state, initiativeIndex: actorIndex },
           ).advantage &&
           !sequencedSpellAttackTargets.slice(0, targetIndex)
             .some((earlierTarget) => earlierTarget.id === currentTarget.id)
@@ -2072,6 +2164,7 @@ export function prepareDnd5eSpellCast(input: {
               .map((reason) => ({ active: currentAdvantageAllowed, reason })),
           ],
           disadvantage: [
+            ...dnd5eAttackerAttackDisadvantageReasons(actorCombatant).map(reason => ({ active: true, reason })),
             { active: rangedSpellThreatened, reason: '远程法术攻击者 5 尺内有敌人' },
             { active: actorCombatant.exhaustionLevel >= 3, reason: '3 级或更高力竭' },
             { active: targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },
@@ -2158,10 +2251,12 @@ export function prepareDnd5eSpellCast(input: {
     : undefined
   const targetSavingThrows = spell.effect === 'attack-save-debuff' ||
     (spell.effect === 'saving-throw' &&
-      (validTargetTokens.length > 1 || sculptedTargetIds.length > 0 || carefulTargetIds.length > 0)) ||
+      (validTargetTokens.length > 1 || sculptedTargetIds.length > 0 || carefulTargetIds.length > 0 ||
+        validTargetTokens.some((token) => dnd5eSpellDamageImmunitySkipsSave(spell.id, snapshot.state.combatants[token.id]!)))) ||
     (spell.effect === 'active-effect' && unwillingTargetTokens.length > 0 && validTargetTokens.length > 1)
     ? (spell.effect === 'active-effect' ? unwillingTargetTokens : validTargetTokens).filter((currentTargetToken) =>
-      !sculptedTargetIdSet.has(currentTargetToken.id) && !carefulTargetIdSet.has(currentTargetToken.id),
+      !sculptedTargetIdSet.has(currentTargetToken.id) && !carefulTargetIdSet.has(currentTargetToken.id) &&
+      !dnd5eSpellDamageImmunitySkipsSave(spell.id, snapshot.state.combatants[currentTargetToken.id]!),
     ).map((currentTargetToken) => {
         const currentTarget = snapshot.state.combatants[currentTargetToken.id]!
         return {
@@ -2214,6 +2309,7 @@ export function prepareDnd5eSpellCast(input: {
       targetTokens: validTargetTokens,
       guessedTargetCell,
       blindTargetMiss,
+      webIgnitionCell,
       projectileTargetIds,
       spell,
       activity: runtimeDefinition!.activity,
@@ -2259,6 +2355,7 @@ export function prepareDnd5eSpellCast(input: {
       calmEmotionsIndifferenceScope,
       healingAllocations,
       areaCells,
+      obstructionRadiusFeet: areaTargeting?.shape === 'circle' ? areaTargeting.radiusFeet : undefined,
       areaAnchorCell,
       areaAnchorCells,
       dancingLightsForm,
@@ -2313,7 +2410,7 @@ export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: n
     prepared.targetToken.id,
     'spell',
   )
-  return previewDnd5ePostD20AdjustedAttack({
+  const preview = previewDnd5ePostD20AdjustedAttack({
     state: prepared.state,
     affectedId: prepared.actorToken.id,
     targetAc,
@@ -2325,6 +2422,8 @@ export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: n
     }),
     use: postD20Adjustment,
   })
+  // An empty guessed location misses even on a natural 20, just as in settlement.
+  return prepared.blindTargetMiss ? { ...preview, hit: false, critical: false } : preview
 }
 
 export function previewDnd5eSpellTargetAttack(
@@ -2490,6 +2589,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     targetId: prepared.targetToken.id,
     targetIds: prepared.targetTokens.map((target) => target.id),
     blindTargetMiss: prepared.blindTargetMiss || undefined,
+    environmentalFireTarget: prepared.webIgnitionCell != null || undefined,
     projectileTargetIds: prepared.projectileTargetIds,
     sculptedTargetIds: prepared.sculptedTargetIds,
     metamagic: prepared.metamagic,
@@ -2703,6 +2803,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
         sourceSaveDc,
         round: result.state.round,
         cells: coreAreaCells,
+        obstructionRadiusFeet: prepared.obstructionRadiusFeet,
         anchorCell: coreAreaAnchorCell,
         baseElevationFeet: coreAreaBaseElevationFeet,
         durationRounds: prepared.areaDurationRounds,
@@ -2718,6 +2819,37 @@ export function resolvePreparedDnd5eSpellCast(input: {
         dancingLightsForm: prepared.dancingLightsForm,
         excludedTargetIds: declaration.spellId === 'spirit-guardians' ? prepared.excludedAreaTargetIds : undefined,
       })
+      if (prepared.spell.id === 'wall-of-force' && prepared.action.dnd5eSpellCast?.stoneWall) {
+        area.forceWall = prepared.action.dnd5eSpellCast.stoneWall
+        area.cells = stoneWallCells(stoneWallPanels(area.forceWall, application.map))
+      }
+      if (prepared.spell.id === 'wall-of-ice') {
+        const layout = prepared.action.dnd5eSpellCast?.stoneWall
+        area.stoneWall = layout ? { mode: 'ice', saveDc: sourceSaveDc, panels: stoneWallPanels(layout, application.map).map(panel => ({ ...panel, hitPoints: 30, maxHitPoints: 30 })) }
+          : iceWallFromCells(area.cells, application.map.feetPerCell ?? 5, sourceSaveDc)
+        if (area.stoneWall) area.cells = stoneWallCells(area.stoneWall.panels)
+      }
+      if (prepared.spell.id === 'wall-of-stone' && prepared.action.dnd5eSpellCast?.stoneWall) {
+        const layout = prepared.action.dnd5eSpellCast.stoneWall
+        const panels = stoneWallPanels(layout, application.map)
+        area.stoneWall = { mode: layout.mode, panels, saveDc: sourceSaveDc,
+          escapes: application.map.tokens.filter(token => token.type !== 'obstacle' &&
+            stoneWallEnclosure(application.map, panels, token).size > 0 &&
+            mapGeometryTokenElevation(coreAreaGeometry, token) < coreAreaBaseElevationFeet + 10 &&
+            mapGeometryTokenElevation(coreAreaGeometry, token) >= coreAreaBaseElevationFeet)
+            .map(token => ({ tokenId: token.id, status: 'pending' as const,
+              origin: tokenAnchorCellFromPixel(token.x, token.y, token, application.map) })) }
+        area.cells = stoneWallCells(panels)
+      }
+      if (prepared.spell.id === 'wall-of-force' && prepared.action.dnd5eSpellCast?.wallOfForceShape &&
+        prepared.action.dnd5eSpellCast.wallOfForceShape !== 'plane') {
+        const shape = prepared.action.dnd5eSpellCast.wallOfForceShape
+        const radiusFeet = prepared.action.dnd5eSpellCast.areaTargetRadiusFeet ?? 10
+        area.forceShell = { shape, radiusFeet }
+        area.blocking = { movement: true, movementMode: 'boundary', lineOfEffect: true, lineOfEffectMode: 'boundary' }
+        area.vertical = { mode: 'volume', baseElevationFeet: coreAreaBaseElevationFeet - (shape === 'sphere' ? radiusFeet : 0),
+          heightFeet: shape === 'sphere' ? radiusFeet * 2 : radiusFeet }
+      }
       const effectToken = effectTokenId
         ? {
             id: effectTokenId,
@@ -2815,6 +2947,31 @@ export function resolvePreparedDnd5eSpellCast(input: {
         dnd5ePluginAreas: lightingConflict.areas,
       }
     }
+  }
+  if (!counterspelled && !slowDelayed) {
+    application.map = igniteDnd5eWebAreasFromSpell({
+      map: application.map, spell: prepared.spell,
+      cells: prepared.webIgnitionCell ? [prepared.webIgnitionCell] : prepared.areaCells,
+      damageType: prepared.action.dnd5eSpellCast?.effectDamageType,
+      elevationFeet: prepared.action.targetElevationFeet,
+      round: result.state.round,
+      turnTokenId: result.state.initiativeOrder[result.state.initiativeIndex] ?? prepared.actorToken.id,
+    })
+  }
+  if (prepared.spell.id === 'sunburst' && prepared.areaAnchorCell &&
+    !counterspelled && !result.events.some(event => event.type === 'slow-spell-delay-resolved' && event.delayed)) {
+    const dispel = settleSunburstSpellDarknessDispels({
+      map: application.map, characters: application.characters,
+      state: result.state,
+      anchorCell: prepared.areaAnchorCell, radiusFeet: 60,
+      elevationFeet: prepared.action.targetElevationFeet,
+    })
+    result.events = [...result.events, ...dispel.events]
+    application.geometry = dispel.geometry
+    application.map = dispel.map
+    application.characters = dispel.characters
+    application.changedCharacterIds = [...new Set([...application.changedCharacterIds, ...dispel.changedCharacterIds])]
+    application.changedTokenIds = [...new Set([...application.changedTokenIds, ...dispel.changedTokenIds])]
   }
   return {
     result,

@@ -8,7 +8,7 @@ import {
 } from './shared-server-core.mjs'
 import { loadArtAssetPack, serveArtAsset } from './art-asset-server.mjs'
 import { createSharedServerContext } from './shared-server-context.mjs'
-import { createPlayerAiServiceFromPersistedConfig } from './player-ai-service.mjs'
+import { startOptionalPlayerAi } from './optional-player-ai.mjs'
 import {
   applyLocalVoiceConfigToEnvironment,
   loadLocalVoiceConfig,
@@ -113,7 +113,7 @@ const sharedRoot = process.env.STARS_SHARED_ROOT
       'StarsApp',
       'shared',
     )
-const playerAi = await createPlayerAiServiceFromPersistedConfig()
+const playerAi = await startOptionalPlayerAi()
 // /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只挂中间件。
 const apiCtx = createSharedServerContext({
   sharedRoot,

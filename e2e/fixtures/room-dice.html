@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import Overlays from '/src/presentation/maps/DicePresentationOverlays.tsx';
+import { useDicePresentation } from '/src/presentation/maps/useDicePresentation.ts';
+import { useRoomDiceFeed } from '/src/presentation/maps/useRoomDiceFeed.ts';
+import '/src/index.css';
+function App() {
+  const dice = useDicePresentation(() => 1);
+  const feed = useRoomDiceFeed('isolated-room-dice-test');
+  const [confirmation, setConfirmation] = React.useState(null);
+  const [dock, setDock] = React.useState('dice');
+  const start = () => dice.setDiceBoxRoll({ id: 1, requestKey: 'own-roll', count: 2, sides: 6, values: [4, 3], label: '我的自由投掷', targetName: 'DM', resolve: () => {} });
+  const receive = () => {
+    for (const [id, name, value] of [['a', '战士', 12], ['b', '游荡者', 18], ['c', '法师', 6]]) {
+      feed.add({ id, rollerName: name, label: '火球术·敏捷豁免', targetName: name, sides: 20, values: [value], total: value, formula: '1d20', status: 'review', updatedAt: Date.now() });
+    }
+    setConfirmation({ id: 'a', label: '火球术·敏捷豁免', targetName: '战士', sides: 20, values: [12], visibility: 'public' });
+  };
+  return React.createElement(React.Fragment, null,
+    React.createElement('button', { onClick: start }, '开始本人投掷'),
+    React.createElement('button', { onClick: receive }, '接收三位玩家结果'),
+    React.createElement(Overlays, { ...dice, historyScope: 'isolated-own-dice-test', roomRolls: feed.entries, isDM: true,
+      secretConfirmation: confirmation, activeRollStatus: null, dockTab: dock, onDockTabChange: setDock, onClearRoomRolls: feed.clear,
+      onRollDone: () => dice.setRoll(null), onD20Complete: dice.completeDiceBoxD20, onDiceComplete: dice.completeDiceBoxRoll,
+      onPreviewComplete: dice.completeRollRequestPreview, onSecretConfirm: (id, values) => {
+        const entry = feed.entries.find(entry => entry.id === id);
+        feed.add({ ...entry, values, total: values[0], status: 'confirmed', updatedAt: Date.now() }); setConfirmation(null);
+      },
+    }),
+  );
+}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

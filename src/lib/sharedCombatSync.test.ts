@@ -23,6 +23,14 @@ function makeState(patch: Partial<SharedCombatState> = {}): SharedCombatState {
 }
 
 describe('shared combat sync', () => {
+  it('ignores an old combat reload while the DM is committing a new combat', () => {
+    const input = { state: makeState(), mapId: 'map-1', validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'new-combat', pendingStartCombatId: 'new-combat', lastAppliedCombatId: 'combat-1',
+      lastAppliedUpdatedAt: 0, lastSnapshot: '', isDm: true }
+    expect(resolveSharedCombatStateApply(input)).toEqual({ status: 'ignored', reason: 'stale' })
+    expect(resolveSharedCombatStateApply({ ...input, state: makeState({ combatId: 'new-combat' }) }).status).toBe('apply')
+    expect(resolveSharedCombatStateApply({ ...input, pendingStartCombatId: undefined }).status).toBe('apply')
+  })
   it('physically removes the retired enemy AP ledger from a persisted snapshot', () => {
     const legacy = {
       ...makeState(),

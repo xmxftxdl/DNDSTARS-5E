@@ -147,6 +147,8 @@ function itemEffectDefinitions(
   for (const [index, headless] of (item.headlessEffects ?? []).entries()) {
     const localId = safeSegment(headless.id ?? `${headless.kind}.${index}`)
     const id = `${ownerId}.headless.${localId}`
+    // Equipped passive modifiers are projected into combatant ActiveEffects by the inventory boundary.
+    if (headless.kind === 'equipped-passive') continue
     const resource = headless.resourceId ? {
       resourceId: headless.resourceId,
       resourceCost: headless.resourceCost ?? 1,

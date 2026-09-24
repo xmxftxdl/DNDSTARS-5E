@@ -1,0 +1,10 @@
+? Verifying lockfile against supply-chain policies (535 entries)...
+✓ Lockfile passes supply-chain policies (535 entries in 2.5s)
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Progress: resolved 32, reused 0, downloaded 0, added 0
+Progress: resolved 146, reused 0, downloaded 0, added 0
+Progress: resolved 323, reused 0, downloaded 0, added 0
+Progress: resolved 528, reused 0, downloaded 0, added 0
+[WARN] 5 deprecated subdependencies found: boolean@3.2.0, glob@7.2.3, inflight@1.0.6, lodash.isequal@4.5.0, rimraf@2.6.3
+Progress: resolved 535, reused 0, downloaded 0, added 0, done
+

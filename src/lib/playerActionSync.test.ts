@@ -264,11 +264,12 @@ describe('player action sync barrier', () => {
           { ...base, id: 'done', seq: 1, updatedAt: 1000 },
           { ...base, id: 'early', seq: 1, updatedAt: 1000 },
           { ...base, id: 'other-map', mapId: 'map-2', seq: 3, updatedAt: 3000 },
+          { ...base, id: 'remote-door', mapId: 'map-2', combatId: undefined, type: 'dnd5e-map-interaction', seq: 4, updatedAt: 4000 },
         ],
       },
     })
 
-    expect(queued.map((action) => action.id)).toEqual(['early', 'late'])
+    expect(queued.map((action) => action.id)).toEqual(['early', 'late', 'remote-door'])
   })
 
   it('hydrates processed action ids only for the current map and combat', () => {
@@ -538,6 +539,10 @@ describe('player action sync barrier', () => {
         pendingAction: { id: 'action-1' },
       }),
     ).toEqual({ status: 'ignored' })
+    expect(resolvePlayerActionAckDecision({
+      ack, mapId: 'portal-destination', seenAckIds: new Set(),
+      pendingAction: { id: 'action-1', mapId: 'map-1' },
+    })).toMatchObject({ status: 'handle', actionId: 'action-1' })
 
     expect(
       resolvePlayerActionAckDecision({

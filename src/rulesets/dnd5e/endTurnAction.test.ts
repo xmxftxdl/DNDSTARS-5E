@@ -39,6 +39,34 @@ function fixture(actor: Character) {
 }
 
 describe('D&D 5e map end-turn authority bridge', () => {
+  it('defers a player delayed spell until map areas and the explicit begin-turn settle', () => {
+    const input = fixture(barbarian(false))
+    const wizard: Character = { ...barbarian(false), id: 'wizard', charClass: '法师',
+      classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 4 } },
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['magic-missile'] } } } },
+      dnd5eCombatState: { slowDelayedSpell: {
+        schemaVersion: 1, createdTurnKey: 'combat:2:enemy-token',
+        action: { type: 'cast-spell', actorId: 'enemy-token', targetId: 'barbarian-token',
+          spellId: 'magic-missile', slotLevel: 1, projectileTargetIds: Array(3).fill('barbarian-token'), effectRolls: [1, 1, 1] },
+      } },
+    }
+    input.characters.push(wizard)
+    input.map.tokens[1] = { ...input.map.tokens[1], type: 'player', characterId: wizard.id }
+    const advanced = resolveDnd5ePlayerEndTurn({ ...input, deferNextTurnStart: true })
+    expect(advanced.ok, advanced.ok ? undefined : advanced.reason).toBe(true)
+    if (!advanced.ok || !advanced.result.ok) return
+    expect(advanced.result.events.some(event => event.type === 'slow-delayed-spell-completed')).toBe(false)
+    expect(advanced.result.state.combatants['enemy-token'].classState.slowDelayedSpell).toBeDefined()
+    const turnEconomy = createDnd5eTurnEconomyCounts('combat:3:enemy-token')
+    turnEconomy.action.current = 0
+    const begun = resolveDnd5eBeginTurn({ combatId: 'combat', round: 3, initiativeIndex: 1,
+      map: advanced.application.map, characters: advanced.application.characters, initiativeOrder: input.initiativeOrder, turnEconomy })
+    expect(begun.ok, begun.ok ? undefined : begun.reason).toBe(true)
+    if (!begun.ok) return
+    expect(begun.result.events).toContainEqual(expect.objectContaining({ type: 'slow-delayed-spell-wasted', actorId: 'enemy-token' }))
+    expect(begun.result.events.some(event => event.type === 'damage-applied')).toBe(false)
+  })
+
   afterEach(() => setDnd5eRoomMonsterCatalog([]))
 
   it('rejects ending a forged first-round-only slot after round one', () => {
@@ -168,7 +196,7 @@ describe('D&D 5e map end-turn authority bridge', () => {
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
     expect(resolved.application.characters[0].dnd5eCombatState?.raging).toBeUndefined()
-    expect(resolved.result.events).toContainEqual({ type: 'class-state-changed', actorId: 'barbarian-token', stateKey: 'rage', active: false })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'class-state-changed', actorId: 'barbarian-token', stateKey: 'rage', active: false }))
   })
 
   it('adds one persistent exhaustion level when a Frenzy ends', () => {
@@ -254,10 +282,10 @@ describe('D&D 5e map end-turn authority bridge', () => {
     const resolved = resolveDnd5ePlayerEndTurn({ action, map, characters: [mage, druid], initiativeOrder })
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
-    expect(resolved.result.events).toContainEqual({
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'slow-delayed-spell-completed', actorId: druidToken.id,
       spellId: 'guidance', slotLevel: 0,
-    })
+    }))
     const liveDruid = resolved.result.state.combatants[druidToken.id]
     expect(liveDruid.turn).toMatchObject({ actionAvailable: false, bonusActionAvailable: false })
     expect(resolved.application.characters.find((entry) => entry.id === druid.id)

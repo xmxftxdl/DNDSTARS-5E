@@ -1,0 +1,6054 @@
+{
+  "summary": {
+    "spells": 319,
+    "callSites": 364,
+    "freeRollExceptions": 1,
+    "testedDeclarations": 146,
+    "routes": {
+      "core-spell": 123,
+      "activity": 196,
+      "manual-no-generated-dice": 0
+    },
+    "errors": 0
+  },
+  "errors": [],
+  "spells": [
+    {
+      "id": "acid-arrow",
+      "name": "强酸箭",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 4,
+          "sides": 4,
+          "bonus": 0,
+          "perHigherSlot": 1
+        },
+        "delayedDamage": {
+          "dice": {
+            "count": 2,
+            "sides": 4,
+            "bonus": 0,
+            "perHigherSlot": 1
+          },
+          "damageType": "acid",
+          "timing": "target-next-turn-end"
+        }
+      }
+    },
+    {
+      "id": "acid-splash",
+      "name": "酸液飞溅",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 1,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "aid",
+      "name": "援助术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "alarm",
+      "name": "警报术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "alter-self",
+      "name": "变身术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "animal-friendship",
+      "name": "化兽为友",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "animal-messenger",
+      "name": "动物信使",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "animal-shapes",
+      "name": "动物形态",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "animate-dead",
+      "name": "操纵死尸",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "animate-objects",
+      "name": "活化物件",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "antilife-shell",
+      "name": "防活物护罩",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "antimagic-field",
+      "name": "反魔法力场",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "antipathy-sympathy",
+      "name": "嫌恶/关怀术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "arcane-eye",
+      "name": "秘法眼",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "arcane-hand",
+      "name": "奥术之手",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 6,
+      "testedDeclarations": 14
+    },
+    {
+      "id": "arcane-lock",
+      "name": "秘法锁",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "arcane-sword",
+      "name": "奥术之剑",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 8
+    },
+    {
+      "id": "arcanists-magic-aura",
+      "name": "奥法师魔法灵光",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "astral-projection",
+      "name": "星界投影",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "augury",
+      "name": "卜筮术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "awaken",
+      "name": "启蒙术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "bane",
+      "name": "灾祸术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "attack-save-debuff",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "banishment",
+      "name": "放逐术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "barkskin",
+      "name": "树肤术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "beacon-of-hope",
+      "name": "希望信标",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "bestow-curse",
+      "name": "降咒",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "black-tentacles",
+      "name": "黑触手",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "blade-barrier",
+      "name": "剑刃护壁",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 6,
+          "sides": 10,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "bless",
+      "name": "祝福术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "attack-save-buff",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "blight",
+      "name": "枯萎术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 8,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "blindness-deafness",
+      "name": "目盲/耳聋术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "blink",
+      "name": "闪现术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "blur",
+      "name": "朦胧术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "branding-smite",
+      "name": "印记斩",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "burning-hands",
+      "name": "燃烧之手",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 3,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "call-lightning",
+      "name": "召雷术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 3,
+          "sides": 10,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "calm-emotions",
+      "name": "安定心神",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "chain-lightning",
+      "name": "连锁闪电",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 10,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "charm-person",
+      "name": "魅惑人类",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "chill-touch",
+      "name": "冻寒之触",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 1,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "circle-of-death",
+      "name": "死亡法阵",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 8,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 2
+        }
+      }
+    },
+    {
+      "id": "clairvoyance",
+      "name": "鹰眼术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "clone",
+      "name": "克隆术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "cloudkill",
+      "name": "死云术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 5,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "color-spray",
+      "name": "七彩喷射",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "color-spray-hit-point-pool",
+        "dice": {
+          "count": 6,
+          "sides": 10,
+          "bonus": 0,
+          "perHigherSlot": 2
+        }
+      }
+    },
+    {
+      "id": "command",
+      "name": "命令术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "commune",
+      "name": "通神术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "commune-with-nature",
+      "name": "问道自然",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "comprehend-languages",
+      "name": "通晓语言",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "compulsion",
+      "name": "强迫术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "cone-of-cold",
+      "name": "寒冰锥",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 8,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "confusion",
+      "name": "困惑术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "conjure-animals",
+      "name": "召唤动物",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "conjure-celestial",
+      "name": "召唤天界生物",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "conjure-elemental",
+      "name": "召唤元素生物",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "conjure-fey",
+      "name": "召唤精类生物",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "conjure-minor-elementals",
+      "name": "召唤次级元素生物",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "conjure-woodland-beings",
+      "name": "召唤林地之精",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "contact-other-plane",
+      "name": "异界探知",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "contagion",
+      "name": "疫病术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "contingency",
+      "name": "触发术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 25,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "continual-flame",
+      "name": "不灭明焰",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "control-water",
+      "name": "操控水体",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "control-weather",
+      "name": "操控天气",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "counterspell",
+      "name": "法术反制",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "counterspell",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "create-food-and-water",
+      "name": "造粮术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "create-undead",
+      "name": "唤起死灵",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "create-or-destroy-water",
+      "name": "造水/枯水术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "creation",
+      "name": "造物术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "cure-wounds",
+      "name": "疗伤术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "healing",
+        "dice": {
+          "count": 1,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "dancing-lights",
+      "name": "舞光术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "darkness",
+      "name": "黑暗术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "darkvision",
+      "name": "黑暗视觉",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "daylight",
+      "name": "昼明术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "death-ward",
+      "name": "防死结界",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "delayed-blast-fireball",
+      "name": "延迟爆裂火球",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "demiplane",
+      "name": "创造半位面",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "detect-evil-and-good",
+      "name": "侦测善恶",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "detect-magic",
+      "name": "侦测魔法",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "detect-poison-and-disease",
+      "name": "侦测毒性和疾病",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "detect-thoughts",
+      "name": "侦测思想",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 5,
+      "testedDeclarations": 6
+    },
+    {
+      "id": "dimension-door",
+      "name": "任意门",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "disguise-self",
+      "name": "易容术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "disintegrate",
+      "name": "解离术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 10,
+          "sides": 6,
+          "bonus": 40,
+          "perHigherSlot": 3
+        }
+      }
+    },
+    {
+      "id": "dispel-evil-and-good",
+      "name": "反制善恶",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "dispel-magic",
+      "name": "解除魔法",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "dispel-magic",
+        "dice": {
+          "count": 0,
+          "sides": 20,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "divination",
+      "name": "预言术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "divine-favor",
+      "name": "神恩",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "divine-word",
+      "name": "圣言术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "dominate-beast",
+      "name": "支配野兽",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "dominate-monster",
+      "name": "支配怪物",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "dominate-person",
+      "name": "支配人类",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "dream",
+      "name": "托梦术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "druidcraft",
+      "name": "德鲁伊伎俩",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "earthquake",
+      "name": "地震术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "eldritch-blast",
+      "name": "魔能爆",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 1,
+          "sides": 10,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "enhance-ability",
+      "name": "强化属性",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 2,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "enlarge-reduce",
+      "name": "变巨/缩小术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "entangle",
+      "name": "纠缠术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "enthrall",
+      "name": "注目术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "etherealness",
+      "name": "以太化",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "expeditious-retreat",
+      "name": "脚底抹油",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "eyebite",
+      "name": "摄心目光",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "fabricate",
+      "name": "鬼斧神工",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "faerie-fire",
+      "name": "妖火",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "faithful-hound",
+      "name": "忠犬术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "false-life",
+      "name": "虚假生命",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "temporary-hit-points",
+        "dice": {
+          "count": 1,
+          "sides": 4,
+          "bonus": 4
+        }
+      }
+    },
+    {
+      "id": "fear",
+      "name": "恐惧术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "feather-fall",
+      "name": "羽落术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "feeblemind",
+      "name": "弱智术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "find-familiar",
+      "name": "获得魔宠",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "find-steed",
+      "name": "召唤坐骑",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "find-traps",
+      "name": "寻找陷阱",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "find-the-path",
+      "name": "寻路术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "finger-of-death",
+      "name": "死亡一指",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 7,
+          "sides": 8,
+          "bonus": 30
+        }
+      }
+    },
+    {
+      "id": "fire-bolt",
+      "name": "火焰箭",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 1,
+          "sides": 10,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "fire-shield",
+      "name": "火焰护盾",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "fire-storm",
+      "name": "火焰风暴",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "fireball",
+      "name": "火球术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 8,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "flame-blade",
+      "name": "火焰刀",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "flame-strike",
+      "name": "焰击术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 4,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "flaming-sphere",
+      "name": "炽焰法球",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "flesh-to-stone",
+      "name": "石化术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "floating-disk",
+      "name": "浮碟术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "fly",
+      "name": "飞行术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "fog-cloud",
+      "name": "云雾术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "forbiddance",
+      "name": "禁制术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "forcecage",
+      "name": "魔力监牢",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "foresight",
+      "name": "预警术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "freedom-of-movement",
+      "name": "行动自如",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "freezing-sphere",
+      "name": "冰封法球",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 10,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "gaseous-form",
+      "name": "气化形体",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "gate",
+      "name": "异界之门",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "geas",
+      "name": "指使术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "gentle-repose",
+      "name": "遗体防腐",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "giant-insect",
+      "name": "巨虫术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "glibness",
+      "name": "花言巧语",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "globe-of-invulnerability",
+      "name": "法术无效结界",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "glyph-of-warding",
+      "name": "守卫刻文",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "goodberry",
+      "name": "神莓术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "grease",
+      "name": "油腻术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "greater-invisibility",
+      "name": "高等隐形术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "greater-restoration",
+      "name": "高等复原术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "guardian-of-faith",
+      "name": "信仰守卫",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "guards-and-wards",
+      "name": "铜墙铁壁",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "guidance",
+      "name": "神导术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "guiding-bolt",
+      "name": "曳光弹",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 4,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "gust-of-wind",
+      "name": "造风术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "hallow",
+      "name": "圣居",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "hallucinatory-terrain",
+      "name": "幻景",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "harm",
+      "name": "重伤术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 14,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "haste",
+      "name": "加速术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "heal",
+      "name": "医疗术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "fixed-healing",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "healing-word",
+      "name": "治愈真言",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "healing",
+        "dice": {
+          "count": 1,
+          "sides": 4,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "heat-metal",
+      "name": "灼热金属",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "automatic-damage",
+        "dice": {
+          "count": 2,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "hellish-rebuke",
+      "name": "炼狱叱喝",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 2,
+          "sides": 10,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "heroes-feast",
+      "name": "英雄宴",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "heroism",
+      "name": "英雄气概",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "hideous-laughter",
+      "name": "狂笑术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "hold-monster",
+      "name": "怪物定身术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "hold-person",
+      "name": "人类定身术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "holy-aura",
+      "name": "圣洁灵光",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "hunters-mark",
+      "name": "猎人印记",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "mark",
+        "dice": {
+          "count": 0,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "hypnotic-pattern",
+      "name": "催眠图纹",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "ice-storm",
+      "name": "冰风暴",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 2,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "identify",
+      "name": "鉴定术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "illusory-script",
+      "name": "迷幻手稿",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "imprisonment",
+      "name": "禁锢术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "incendiary-cloud",
+      "name": "焚云术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "inflict-wounds",
+      "name": "致伤术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 3,
+          "sides": 10,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "insect-plague",
+      "name": "疫病虫群",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 4,
+          "sides": 10,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "instant-summons",
+      "name": "瞬间召唤",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "invisibility",
+      "name": "隐形术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "irresistible-dance",
+      "name": "迷舞术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "jump",
+      "name": "跳跃术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "knock",
+      "name": "敲击术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "legend-lore",
+      "name": "通晓传奇",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "lesser-restoration",
+      "name": "次级复原术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "remove-condition",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "levitate",
+      "name": "浮空术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "light",
+      "name": "光亮术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "lightning-bolt",
+      "name": "闪电束",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 8,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "locate-animals-or-plants",
+      "name": "动植物定位术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "locate-creature",
+      "name": "生物定位术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "locate-object",
+      "name": "物件定位术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "longstrider",
+      "name": "大步奔行",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "mage-armor",
+      "name": "法师护甲",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "mage-hand",
+      "name": "法师之手",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "magic-circle",
+      "name": "防护法阵",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "magic-jar",
+      "name": "魔魂壶",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 4,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "magic-missile",
+      "name": "魔法飞弹",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "automatic-damage",
+        "dice": {
+          "count": 3,
+          "sides": 4,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "magic-mouth",
+      "name": "魔嘴术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "magic-weapon",
+      "name": "魔化武器",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "magnificent-mansion",
+      "name": "豪宅术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "major-image",
+      "name": "高等幻影",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "mass-cure-wounds",
+      "name": "群体疗伤术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "healing",
+        "dice": {
+          "count": 3,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "mass-heal",
+      "name": "群体医疗术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "healing-pool",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "mass-healing-word",
+      "name": "群体治愈真言",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "healing",
+        "dice": {
+          "count": 1,
+          "sides": 4,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "mass-suggestion",
+      "name": "群体暗示术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "maze",
+      "name": "迷宫术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "meld-into-stone",
+      "name": "融身入石",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 4,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "mending",
+      "name": "修复术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "message",
+      "name": "传讯术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "meteor-swarm",
+      "name": "流星爆",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 20,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "mind-blank",
+      "name": "心灵屏障",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "minor-illusion",
+      "name": "次级幻影",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "narrative-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "mirage-arcane",
+      "name": "海市蜃楼",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "mirror-image",
+      "name": "镜影术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "mislead",
+      "name": "假象术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "misty-step",
+      "name": "迷踪步",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "teleport",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "modify-memory",
+      "name": "篡改记忆",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "moonbeam",
+      "name": "月华之光",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 10,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "move-earth",
+      "name": "地动术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "nondetection",
+      "name": "回避侦测",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "pass-without-trace",
+      "name": "行动无踪",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "passwall",
+      "name": "穿墙术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "phantasmal-killer",
+      "name": "魅影杀手",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 10,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "phantom-steed",
+      "name": "魅影驹",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "planar-ally",
+      "name": "异界盟誓",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "planar-binding",
+      "name": "异界誓缚",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "plane-shift",
+      "name": "异界传送",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 4
+    },
+    {
+      "id": "plant-growth",
+      "name": "植物滋长",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "poison-spray",
+      "name": "毒气喷溅",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 1,
+          "sides": 12,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "polymorph",
+      "name": "变形术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "power-word-kill",
+      "name": "律令死亡",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "power-word-kill",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "power-word-stun",
+      "name": "律令震慑",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "power-word-stun",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "prayer-of-healing",
+      "name": "治疗祷言",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "healing",
+        "dice": {
+          "count": 2,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "prestidigitation",
+      "name": "魔法伎俩",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "prismatic-spray",
+      "name": "虹光喷射",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 14
+    },
+    {
+      "id": "prismatic-wall",
+      "name": "虹光法墙",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "private-sanctum",
+      "name": "私人密室",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "produce-flame",
+      "name": "燃火术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "programmed-illusion",
+      "name": "预置幻影",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "project-image",
+      "name": "投影术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "protection-from-energy",
+      "name": "防护能量伤害",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "protection-from-evil-and-good",
+      "name": "防护善恶",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "protection-from-poison",
+      "name": "防护毒素",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "purify-food-and-drink",
+      "name": "净化食粮",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "raise-dead",
+      "name": "死者复活",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "ray-of-enfeeblement",
+      "name": "衰弱射线",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "ray-of-frost",
+      "name": "冷冻射线",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 1,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "regenerate",
+      "name": "再生术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "reincarnate",
+      "name": "转生术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "remove-curse",
+      "name": "移除诅咒",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "resilient-sphere",
+      "name": "弹力法球",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "resistance",
+      "name": "抗力术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "resurrection",
+      "name": "复生术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "reverse-gravity",
+      "name": "反重力",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "revivify",
+      "name": "回生术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "rope-trick",
+      "name": "魔绳术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "sacred-flame",
+      "name": "圣火术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 1,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "sanctuary",
+      "name": "庇护术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "scorching-ray",
+      "name": "灼热射线",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 2,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "scrying",
+      "name": "探知",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "secret-chest",
+      "name": "秘藏箱",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "see-invisibility",
+      "name": "识破隐形",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "seeming",
+      "name": "伪装术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "sending",
+      "name": "短讯术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "sequester",
+      "name": "隔离术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "shapechange",
+      "name": "形体变化",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "shatter",
+      "name": "粉碎音波",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 3,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "shield",
+      "name": "护盾术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "armor-class-buff",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "shield-of-faith",
+      "name": "虔诚护盾",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "armor-class-buff",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "shillelagh",
+      "name": "橡棍术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "shocking-grasp",
+      "name": "电爪",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 1,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "silence",
+      "name": "沉默术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "silent-image",
+      "name": "无声幻影",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "simulacrum",
+      "name": "拟像术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "sleep",
+      "name": "睡眠术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "sleep-hit-point-pool",
+        "dice": {
+          "count": 5,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 2
+        }
+      }
+    },
+    {
+      "id": "sleet-storm",
+      "name": "雪雨暴",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "slow",
+      "name": "缓慢术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "spare-the-dying",
+      "name": "维生术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "stabilize",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "speak-with-animals",
+      "name": "动物交谈术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "speak-with-dead",
+      "name": "死者交谈",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "speak-with-plants",
+      "name": "植物交谈",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "spider-climb",
+      "name": "蛛行术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "spike-growth",
+      "name": "荆棘丛生",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "spirit-guardians",
+      "name": "灵体卫士",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "spiritual-weapon",
+      "name": "灵体武器",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 1,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "stinking-cloud",
+      "name": "臭云术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "stone-shape",
+      "name": "塑石术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "stoneskin",
+      "name": "石肤术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "storm-of-vengeance",
+      "name": "复仇风暴",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "suggestion",
+      "name": "暗示术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "sunbeam",
+      "name": "阳炎射线",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 6,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "sunburst",
+      "name": "阳炎爆",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 12,
+          "sides": 6,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "symbol",
+      "name": "魔法徽记",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "telekinesis",
+      "name": "心灵遥控",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "telepathic-bond",
+      "name": "心灵联结",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "teleport",
+      "name": "传送术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "teleportation-circle",
+      "name": "传送法阵",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "thaumaturgy",
+      "name": "奇术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "narrative-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "thunderwave",
+      "name": "雷鸣波",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 2,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "time-stop",
+      "name": "时间停止",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "tiny-hut",
+      "name": "小屋术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "tongues",
+      "name": "巧言术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "transport-via-plants",
+      "name": "木遁术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "tree-stride",
+      "name": "树跃术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 2,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "true-polymorph",
+      "name": "完全变形术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "true-resurrection",
+      "name": "完全复生术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "true-seeing",
+      "name": "真知术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "true-strike",
+      "name": "克敌机先",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "unseen-servant",
+      "name": "隐形仆役",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "vampiric-touch",
+      "name": "吸血鬼之触",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "spell-attack",
+        "dice": {
+          "count": 3,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "vicious-mockery",
+      "name": "恶言相加",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "saving-throw",
+        "dice": {
+          "count": 1,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "wall-of-fire",
+      "name": "火墙术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 5,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "wall-of-force",
+      "name": "力场墙",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "wall-of-ice",
+      "name": "冰墙术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 10,
+          "sides": 6,
+          "bonus": 0,
+          "perHigherSlot": 2
+        }
+      }
+    },
+    {
+      "id": "wall-of-stone",
+      "name": "石墙术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "wall-of-thorns",
+      "name": "棘墙术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 7,
+          "sides": 8,
+          "bonus": 0,
+          "perHigherSlot": 1
+        }
+      }
+    },
+    {
+      "id": "warding-bond",
+      "name": "守护之链",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "active-effect",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "water-breathing",
+      "name": "水下呼吸",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "water-walk",
+      "name": "水上行走",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "web",
+      "name": "蛛网术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 0,
+          "sides": 4,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "weird",
+      "name": "怪影杀手",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 2
+    },
+    {
+      "id": "wind-walk",
+      "name": "御风而行",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 3,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "wind-wall",
+      "name": "风墙术",
+      "route": "core-spell",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 0,
+      "testedDeclarations": 0,
+      "nativeDice": {
+        "effect": "persistent-area",
+        "dice": {
+          "count": 3,
+          "sides": 8,
+          "bonus": 0
+        }
+      }
+    },
+    {
+      "id": "wish",
+      "name": "祈愿术",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "word-of-recall",
+      "name": "回返真言",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    },
+    {
+      "id": "zone-of-truth",
+      "name": "诚实之域",
+      "route": "activity",
+      "attackOwner": "caster",
+      "damageOwner": "caster",
+      "savingThrowOwner": "saving-character",
+      "activities": 1,
+      "testedDeclarations": 0
+    }
+  ],
+  "callSites": [
+    {
+      "line": 3189,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          rollerTokenId: playerD20Token.id, rollerCharacterId: playerD20Token.characterId,\r\n          checkPreview: options.checkPreview, rollKind: options.d20RollKind, existingRollMode: options.d20RollMode,\r\n          skipChoiceReroll: options.skipChoiceReroll || count !== 1 || options.d20RollMode === 'advantage' || options.d20RollMode === 'disadvantage',\r\n        }"
+    },
+    {
+      "line": 3319,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: fall.combatantId }"
+    },
+    {
+      "line": 3533,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: fall.combatantId }"
+    },
+    {
+      "line": 3649,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 3704,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: fall.combatantId }"
+    },
+    {
+      "line": 3724,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 6220,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: latestToken!.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 6226,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: latestToken!.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 6602,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ freeRoll: true, broadcast: false, forcePublic: !isPrivate, skipDmConfirmation: true }"
+    },
+    {
+      "line": 6675,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 7807,
+      "kind": "rollDiceBoxValues",
+      "ownership": "ownership"
+    },
+    {
+      "line": 7859,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 7997,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 8030,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: candidate.area.sourceTokenId }"
+    },
+    {
+      "line": 8167,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 8469,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: combatant.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 8471,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: combatant.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 8474,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: combatant.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 8477,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: combatant.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 8480,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: combatant.id }"
+    },
+    {
+      "line": 9114,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 9117,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          ...attackRollContext,\r\n          skipChoiceReroll: true,\r\n        }"
+    },
+    {
+      "line": 9123,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 9126,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 9129,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          ...attackRollContext,\r\n          skipChoiceReroll: true,\r\n        }"
+    },
+    {
+      "line": 9135,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          ...attackRollContext,\r\n          skipChoiceReroll: true,\r\n        }"
+    },
+    {
+      "line": 9264,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 9294,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 9328,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 9373,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 9395,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 13977,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.actor.id }"
+    },
+    {
+      "line": 13987,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.actor.id }"
+    },
+    {
+      "line": 14235,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: rollRequest.rollerTokenId, d20RollKind: rollRequest.kind === 'saving-throw' ? 'saving-throw' : rollRequest.kind === 'attack-roll' ? 'attack' : rollRequest.kind === 'ability-check' ? 'ability-check' : undefined }"
+    },
+    {
+      "line": 14312,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 14318,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 14524,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 14530,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 14537,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          ...attackRollContext,\r\n          skipChoiceReroll: true,\r\n        }"
+    },
+    {
+      "line": 14543,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          ...attackRollContext,\r\n          skipChoiceReroll: true,\r\n        }"
+    },
+    {
+      "line": 14549,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 14552,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 14562,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 14579,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 14897,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 14899,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 14901,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 14904,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 14908,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 14909,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 15259,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.casterTokenId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15262,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.casterTokenId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15267,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.casterTokenId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15270,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.casterTokenId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15273,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.casterTokenId }"
+    },
+    {
+      "line": 15276,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.casterTokenId }"
+    },
+    {
+      "line": 15455,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerCharacterId: input.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15457,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerCharacterId: input.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15537,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerCharacterId: input.target?.id }"
+    },
+    {
+      "line": 15553,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerCharacterId: input.target.id }"
+    },
+    {
+      "line": 15619,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: candidate.token.id }"
+    },
+    {
+      "line": 15679,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerCharacterId: input.target?.id }"
+    },
+    {
+      "line": 15781,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 15786,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 15792,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.targetToken.id }"
+    },
+    {
+      "line": 15800,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.targetToken.id }"
+    },
+    {
+      "line": 15868,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 15875,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16036,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attacker.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16038,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attacker.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16041,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attacker.id }"
+    },
+    {
+      "line": 16044,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attacker.id }"
+    },
+    {
+      "line": 16047,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attacker.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16050,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attacker.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16166,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.combatant.id }"
+    },
+    {
+      "line": 16189,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 16309,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attacker.id }"
+    },
+    {
+      "line": 16357,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attacker.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 16362,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attacker.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 16367,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 16372,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 16443,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 16448,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 16454,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.targetToken.id }"
+    },
+    {
+      "line": 16457,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.targetToken.id }"
+    },
+    {
+      "line": 16506,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16509,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 16647,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attacker.id }"
+    },
+    {
+      "line": 16680,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attacker.id }"
+    },
+    {
+      "line": 16894,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 16897,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 16900,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 16903,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: input.attackerToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 16908,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 16911,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 17015,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 17026,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 17049,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 17087,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: input.attackerToken.id }"
+    },
+    {
+      "line": 17160,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: prepared.prepared.actorToken.id }"
+    },
+    {
+      "line": 17472,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attackTargetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 17517,
+      "kind": "rollDiceBoxD20",
+      "ownership": "monsterAttackRollContext"
+    },
+    {
+      "line": 17524,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...monsterAttackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 17531,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 17534,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 17732,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attackTargetToken.id }"
+    },
+    {
+      "line": 17741,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 17763,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 17784,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 17829,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18161,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 18167,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 18175,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 18180,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 18238,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18256,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18301,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: childTargetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 18307,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: childTargetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 18353,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18395,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18403,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18428,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: monsterAttack.actorToken.id }"
+    },
+    {
+      "line": 18485,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 18588,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: deflectTargetToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 18591,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: deflectTargetToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 18595,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: deflectTargetToken.id }"
+    },
+    {
+      "line": 18619,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 19265,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 19719,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n          rollKind: 'saving-throw',\r\n          rollerTokenId: targetToken.id,\r\n          rollerCharacterId: targetToken.characterId,\r\n        }"
+    },
+    {
+      "line": 19730,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              rollKind: 'saving-throw',\r\n              rollerTokenId: targetToken.id,\r\n              rollerCharacterId: targetToken.characterId,\r\n            }"
+    },
+    {
+      "line": 19740,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 19749,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 19758,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              rollKind: 'saving-throw',\r\n              rollerTokenId: targetToken.id,\r\n              rollerCharacterId: targetToken.characterId,\r\n              skipChoiceReroll: true,\r\n            }"
+    },
+    {
+      "line": 19770,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              rollKind: 'saving-throw',\r\n              rollerTokenId: targetToken.id,\r\n              rollerCharacterId: targetToken.characterId,\r\n              skipChoiceReroll: true,\r\n            }"
+    },
+    {
+      "line": 19843,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 19858,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 19960,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 20008,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 20190,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              rollKind: 'ability-check', rollerTokenId: counterspellCandidate.combatant.id,\r\n              rollerCharacterId: counterspellCandidate.character.id,\r\n            }"
+    },
+    {
+      "line": 20236,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n        checkPreview: liveSpellPreview, rollKind: 'attack', rollerTokenId: casting.actorToken.id,\r\n      }"
+    },
+    {
+      "line": 20240,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ checkPreview: liveSpellPreview, rollKind: 'attack', rollerTokenId: casting.actorToken.id, skipChoiceReroll: true }"
+    },
+    {
+      "line": 20317,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 20323,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 20331,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 20336,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 20338,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 20341,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 20408,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'ability-check', rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 20445,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 20454,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 20579,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 21048,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ forcePublic: true, rollerCharacterId: accepted?.characterId }"
+    },
+    {
+      "line": 21069,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ forcePublic: true, rollerCharacterId: accepted?.characterId }"
+    },
+    {
+      "line": 21206,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.actorId }"
+    },
+    {
+      "line": 21230,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId }"
+    },
+    {
+      "line": 21364,
+      "kind": "rollDiceBoxD20",
+      "ownership": "saveRollContext"
+    },
+    {
+      "line": 21366,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...saveRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 21374,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...saveRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 21377,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...saveRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 21380,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.targetId }"
+    },
+    {
+      "line": 21383,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.targetId }"
+    },
+    {
+      "line": 21422,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21428,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21437,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21444,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21450,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.targetId }"
+    },
+    {
+      "line": 21458,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.targetId }"
+    },
+    {
+      "line": 21509,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 21526,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: prepared.actorToken.id }"
+    },
+    {
+      "line": 21556,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21561,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21570,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21574,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: requirement.targetId, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 21577,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.targetId }"
+    },
+    {
+      "line": 21580,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.targetId }"
+    },
+    {
+      "line": 21584,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 21613,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.actorId }"
+    },
+    {
+      "line": 21648,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 21834,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: actor.id }"
+    },
+    {
+      "line": 21922,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: candidate.token.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 22648,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 22688,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 22738,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.actorId }"
+    },
+    {
+      "line": 22785,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 23620,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23629,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23636,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetTokenId, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23639,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetTokenId, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23646,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23649,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23652,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetTokenId, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23655,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetTokenId, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 23866,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 23912,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 23944,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.actorId }"
+    },
+    {
+      "line": 23955,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 23958,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 23961,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 23964,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 23970,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id }"
+    },
+    {
+      "line": 23975,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: dnd5eActionActorToken?.id, rollerCharacterId: dnd5eActionActor.id }"
+    },
+    {
+      "line": 24008,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 24123,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 24176,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.effect.source.actorId, rollerCharacterId: requirement.effect.source.characterId }"
+    },
+    {
+      "line": 24211,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: requirement.actorId }"
+    },
+    {
+      "line": 24265,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 24498,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: actorToken?.id, rollerCharacterId: actor.id }"
+    },
+    {
+      "line": 25759,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{\r\n                broadcast: declaration.visibility !== 'dm',\r\n                rollerTokenId: declaration.rollerTokenId ?? pluginCast.actorToken.id,\r\n                d20RollKind: declaration.d20RollKind,\r\n                d20RollMode: declaration.d20RollMode,\r\n              }"
+    },
+    {
+      "line": 25898,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: pluginCast.actorToken.id }"
+    },
+    {
+      "line": 25909,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 25912,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 25919,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'saving-throw', rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 25928,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'saving-throw', rollerTokenId: target.token.id, skipChoiceReroll: true }"
+    },
+    {
+      "line": 25946,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: pluginCast.actorToken.id }"
+    },
+    {
+      "line": 25957,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: pluginCast.actorToken.id }"
+    },
+    {
+      "line": 26050,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 26376,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 26382,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 26825,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: spellCast.actorToken.id, ...options }"
+    },
+    {
+      "line": 26883,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: spellCast.actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 27002,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'ability-check', rollerTokenId: spellCast.actorToken.id, rollerCharacterId: spellCast.actor.id }"
+    },
+    {
+      "line": 27112,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'ability-check', rollerTokenId: counterspellCandidate.combatant.id,\r\n                  rollerCharacterId: counterspellCandidate.character?.id }"
+    },
+    {
+      "line": 27342,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'attack', rollerTokenId: spellCast.actorToken.id, rollerCharacterId: spellCast.actor.id, skipChoiceReroll: true }"
+    },
+    {
+      "line": 27347,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollKind: 'attack', rollerTokenId: spellCast.actorToken.id, rollerCharacterId: spellCast.actor.id, skipChoiceReroll: true }"
+    },
+    {
+      "line": 27419,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 27425,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 27434,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                ...attackRollContext,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 27440,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                ...attackRollContext,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 27666,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 27672,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 27679,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              ...attackRollContext,\r\n              skipChoiceReroll: true,\r\n            }"
+    },
+    {
+      "line": 27685,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              ...attackRollContext,\r\n              skipChoiceReroll: true,\r\n            }"
+    },
+    {
+      "line": 27873,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n              checkPreview: liveSavePreview, rollKind: 'saving-throw',\r\n              rollerTokenId: targetSave.targetToken.id,\r\n              rollerCharacterId: targetSave.targetToken.characterId,\r\n            }"
+    },
+    {
+      "line": 27883,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                  checkPreview: liveSavePreview, rollKind: 'saving-throw',\r\n                  rollerTokenId: targetSave.targetToken.id,\r\n                  rollerCharacterId: targetSave.targetToken.characterId,\r\n                  skipChoiceReroll: true,\r\n                }"
+    },
+    {
+      "line": 27895,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetSave.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 27948,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetSave.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 27951,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetSave.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 28213,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n            checkPreview: liveSavePreview, rollKind: 'saving-throw',\r\n            rollerTokenId: spellCast.targetToken.id,\r\n            rollerCharacterId: spellCast.targetToken.characterId,\r\n          }"
+    },
+    {
+      "line": 28223,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                checkPreview: liveSavePreview, rollKind: 'saving-throw',\r\n                rollerTokenId: spellCast.targetToken.id,\r\n                rollerCharacterId: spellCast.targetToken.characterId,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 28283,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: spellCast.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 28286,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: spellCast.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 28382,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: spellCast.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 28387,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: spellCast.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 29061,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 29785,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 29791,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 29796,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 29799,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetToken.id }"
+    },
+    {
+      "line": 29802,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 29805,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 29817,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: casting.actorToken.id }"
+    },
+    {
+      "line": 29848,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 30087,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{\r\n                  broadcast: declaration.visibility !== 'dm',\r\n                  rollerTokenId: declaration.rollerTokenId ?? prepared.prepared.actorToken.id,\r\n                  d20RollKind: declaration.d20RollKind,\r\n                  d20RollMode: declaration.d20RollMode,\r\n                }"
+    },
+    {
+      "line": 30193,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: prepared.prepared.actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 30443,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 30449,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 30920,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: feature.actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 30922,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: feature.actorToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 30980,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 30983,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 30990,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                ...attackRollContext,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 30996,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                ...attackRollContext,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 31002,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 31005,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 31089,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31092,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31096,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31100,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31103,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 31106,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 31194,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31196,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31203,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31207,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31210,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 31213,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 31298,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 31382,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetSave.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31384,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: targetSave.token.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31390,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetSave.token.id }"
+    },
+    {
+      "line": 31393,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: targetSave.token.id }"
+    },
+    {
+      "line": 31479,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 31483,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: presence.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31485,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: presence.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31488,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: presence.target.id }"
+    },
+    {
+      "line": 31491,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: presence.target.id }"
+    },
+    {
+      "line": 31495,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: presence.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31498,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: presence.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31556,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: release.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31558,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: release.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31561,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: release.target.id }"
+    },
+    {
+      "line": 31564,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: release.target.id }"
+    },
+    {
+      "line": 31568,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: release.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31571,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: release.target.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 31636,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 31640,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 31682,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 31964,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: feature.actorToken.id }"
+    },
+    {
+      "line": 32084,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 32090,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 32097,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                ...attackRollContext,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 32103,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n                ...attackRollContext,\r\n                skipChoiceReroll: true,\r\n              }"
+    },
+    {
+      "line": 32109,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: multiattack.actorToken.id }"
+    },
+    {
+      "line": 32112,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: multiattack.actorToken.id }"
+    },
+    {
+      "line": 32222,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 32226,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: multiattack.actorToken.id }"
+    },
+    {
+      "line": 32237,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: multiattack.actorToken.id }"
+    },
+    {
+      "line": 32255,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: multiattack.actorToken.id }"
+    },
+    {
+      "line": 32341,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 32409,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 32412,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: target.token.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 32416,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: target.token.id }"
+    },
+    {
+      "line": 32440,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 32540,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: wildShapeActorToken.id }"
+    },
+    {
+      "line": 32758,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attackTargetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 32796,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 32805,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 32814,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: wildShapeAttack.actorToken.id }"
+    },
+    {
+      "line": 32817,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: wildShapeAttack.actorToken.id }"
+    },
+    {
+      "line": 32946,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: wildShapeAttack.actorToken.id }"
+    },
+    {
+      "line": 32956,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: wildShapeAttack.actorToken.id }"
+    },
+    {
+      "line": 32984,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: wildShapeAttack.actorToken.id }"
+    },
+    {
+      "line": 33068,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 33284,
+      "kind": "rollDiceBoxD20",
+      "ownership": "attackRollContext"
+    },
+    {
+      "line": 33287,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 33372,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ ...attackRollContext, skipChoiceReroll: true }"
+    },
+    {
+      "line": 33411,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n            ...attackRollContext,\r\n            skipChoiceReroll: true,\r\n          }"
+    },
+    {
+      "line": 33417,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{\r\n            ...attackRollContext,\r\n            skipChoiceReroll: true,\r\n          }"
+    },
+    {
+      "line": 33427,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 33430,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 33452,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 33651,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33690,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33744,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33747,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33750,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33754,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33758,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33761,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33764,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33831,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33836,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33842,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33850,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 33915,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 33923,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 34062,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 34114,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 34119,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'ability-check' }"
+    },
+    {
+      "line": 34125,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 34129,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'saving-throw' }"
+    },
+    {
+      "line": 34136,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 34143,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 34535,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 34554,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 34562,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 34568,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 34631,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.actorToken.id }"
+    },
+    {
+      "line": 34784,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 34928,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 34931,
+      "kind": "rollDiceBoxD20",
+      "ownership": "{ rollerTokenId: attack.targetToken.id, rollKind: 'attack' }"
+    },
+    {
+      "line": 34935,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: attack.targetToken.id }"
+    },
+    {
+      "line": 34959,
+      "kind": "rollDiceBoxValues",
+      "ownership": "context"
+    },
+    {
+      "line": 35276,
+      "kind": "rollDiceBoxValues",
+      "ownership": "{ rollerTokenId: combatantId }"
+    }
+  ]
+}

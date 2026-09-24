@@ -1,3 +1,5 @@
+import { createDnd5eMechanicalEffect } from './activeEffects'
+import { constrainDnd5eTurnEconomyForEffects } from './turnEconomy'
 import { describe, expect, it } from 'vitest'
 import {
   createDnd5eTurnEconomyCounts,
@@ -151,5 +153,19 @@ describe('D&D 5e counted turn economy', () => {
       reaction: { current: 1, max: 1 },
       movement: { current: 40, max: 40 },
     })
+  })
+})
+
+describe('Slow shared action choice', () => {
+  const slow = createDnd5eMechanicalEffect({ definitionId: 'spell:slow', label: 'Slow', targetId: 'hero', source: { kind: 'spell' }, modifiers: { actionOrBonusActionOnly: true } })
+  it.each(['action', 'bonusAction'] as const)('using %s exhausts both pools immediately', resource => {
+    const fresh = createDnd5eTurnEconomyCounts('turn')
+    expect(constrainDnd5eTurnEconomyForEffects(fresh, [slow])).toBe(fresh)
+    const spent = spendDnd5eTurnResource(fresh, resource).economy
+    const constrained = constrainDnd5eTurnEconomyForEffects(spent, [slow])
+    expect(constrained.action.current).toBe(0)
+    expect(constrained.bonusAction.current).toBe(0)
+    expect(constrained.reaction).toEqual(fresh.reaction)
+    expect(constrainDnd5eTurnEconomyForEffects(spent, [])).toBe(spent)
   })
 })

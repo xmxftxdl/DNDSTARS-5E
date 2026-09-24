@@ -88,3 +88,14 @@ export function redactSecretMonsterCombatLog(text: string): string {
   }
   return `怪物暗骰：${[...new Set(outcomes)].join('；')}。`
 }
+
+/** Unknown/legacy free text is never used as authorization to expose dice. */
+export function publicActivityRollDetails(
+  extra: readonly (string | import('./dnd5eActivityHandoffLogDetails').ActivityRollLogEvidence)[],
+  publicRollerIds: ReadonlySet<string>,
+  _legacyCasterIsPublic?: boolean,
+): string[] {
+  void _legacyCasterIsPublic // Retained for legacy callers; never used to authorize visibility.
+  return extra.flatMap(entry => typeof entry !== 'string' && entry.kind === 'activity-roll' &&
+    entry.rollerId != null && publicRollerIds.has(entry.rollerId) ? [entry.text] : [])
+}

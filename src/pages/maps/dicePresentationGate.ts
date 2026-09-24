@@ -1,7 +1,10 @@
+import { onDiceDocumentHidden } from '../../lib/diceVisibility'
+
 export interface SettleAuthoritativeDicePresentationInput {
   authoritativeValues: readonly number[]
   presentation: Promise<readonly number[]>
   maximumWaitMs: number
+  retirePresentation?: () => void
 }
 
 /**
@@ -16,6 +19,10 @@ export async function settleAuthoritativeDicePresentation(
 ): Promise<number[]> {
   const maximumWaitMs = Math.max(0, Math.round(input.maximumWaitMs))
   let timeout: ReturnType<typeof setTimeout> | undefined
+  let unsubscribe = () => undefined as void
+  const hidden = new Promise<void>((resolve) => {
+    unsubscribe = onDiceDocumentHidden(resolve)
+  })
   const deadline = new Promise<void>((resolve) => {
     timeout = setTimeout(resolve, maximumWaitMs)
   })
@@ -24,9 +31,15 @@ export async function settleAuthoritativeDicePresentation(
     await Promise.race([
       input.presentation.then(() => undefined, () => undefined),
       deadline,
+      hidden,
     ])
   } finally {
     if (timeout) clearTimeout(timeout)
+    unsubscribe()
+    // The hidden-tab/deadline branches can win before the renderer completes.
+    // Remove that exact request before opening DM confirmation, or unpausing
+    // the presentation queue will replay it after confirmation.
+    input.retirePresentation?.()
   }
 
   return [...input.authoritativeValues]

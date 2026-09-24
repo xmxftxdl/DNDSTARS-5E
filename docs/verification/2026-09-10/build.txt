@@ -1,0 +1,11 @@
+
+> dndstars-5e@0.1.0-beta.1 build:check
+> npm run build && node scripts/check-bundle-budget.mjs
+
+
+> dndstars-5e@0.1.0-beta.1 build
+> node scripts/audit-architecture.mjs && tsc -b && vite build && node scripts/audit-local-content-boundary.mjs --dist dist
+
+Architecture audit failed:
+- MapsWorkspacePage.tsx line budget exceeded: 41395 > 41294
+- MapsWorkspacePage.tsx lib dependency budget exceeded: 73 > 72

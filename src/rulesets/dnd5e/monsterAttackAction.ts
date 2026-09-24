@@ -918,6 +918,7 @@ export function prepareDnd5eMonsterAttack(input: {
       attackTarget.classState.activeEffects,
       actorCombatant.id,
       actorCombatant.creatureType,
+      snapshot.state,
     )
     const packTactics = dnd5eMonsterPackTacticsApplies({
       monster,

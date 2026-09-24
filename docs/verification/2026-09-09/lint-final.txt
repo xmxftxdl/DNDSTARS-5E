@@ -1,0 +1,33 @@
+
+> dndstars-5e@0.1.0-beta.1 lint:ratchet
+> node scripts/eslint-ratchet.mjs
+
+[eslint-ratchet] linting shard 1/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 2/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 3/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 4/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 5/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 6/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 7/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 8/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 9/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 10/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 11/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 12/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 13/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 14/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 15/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 16/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 17/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 18/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 19/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 20/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 21/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 22/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 23/25 (75 files, standard profile)
+[eslint-ratchet] linting shard 24/25 (21 files, standard profile)
+[eslint-ratchet] linting shard 25/25 (1 files, oversized-file profile)
+[eslint-ratchet] standardErrors=68 (baseline 69), mapsWorkspaceErrors=0 (baseline 5), warnings=35
+[eslint-ratchet] PASS
+[eslint-ratchet] NOTE: 68 < baseline 69. You cleared errors — please lower maxErrors in .eslint-ratchet.json to 68 to ratchet the gate down.
+[eslint-ratchet] NOTE: 0 < MapsWorkspace baseline 5. Lower .eslint-maps-workspace-ratchet.json to 0.

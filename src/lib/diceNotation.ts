@@ -15,8 +15,9 @@
 // a d100+d10 PAIR: `1d100+1d10@50,7` → 57 (spike AC4c). See percentileNotation.
 // ============================================================================
 
-/** Inclusive die-count clamp (matches the legacy iframe + overlay bounds). */
-export const MAX_QTY = 12
+import { MAX_DICE_POOL_COUNT } from './dicePoolLimits'
+/** Inclusive die-count clamp shared with the iframe and overlay. */
+export const MAX_QTY = MAX_DICE_POOL_COUNT
 /** Inclusive sides clamp (matches DiceBoxRollOverlay's `Math.min(100, …)`). */
 export const MAX_SIDES = 100
 
@@ -56,19 +57,22 @@ export function sanitizeForced(values: unknown, qty: number, sides: number): num
     .slice(0, qty)
 }
 
-/**
- * Force a single arbitrary percentile (1..100) as a d100+d10 pair.
- * `units = ((v-1) % 10) + 1` (1..10, where the d10 face "0" reads as value 10);
- * `tens = v - units` (0,10,…,90). KNOWN LIMITATION (spike AC4b): values 1..9
- * yield `tens = 0`, which a d100 (faces 10..100) cannot show — the tens die keeps
- * a natural face. d100 is not a gameplay path here; this branch exists for the
- * AC5 smoke matrix only, where a representable value (e.g. 57) is used.
- */
-export function percentileNotation(value: number): string {
+/** Engine face values: 100 displays 00; 10 on the units die displays 0. */
+export function percentileFaces(value: number): number[] {
   const v = clampDie(value, 100) ?? 1
-  const units = ((v - 1) % 10) + 1
-  const tens = v - units
-  return `1d100+1d10@${tens},${units}`
+  return [Math.floor((v % 100) / 10) * 10 || 100, v % 10 || 10]
+}
+
+export function percentileResults(faces: readonly number[]): number[] {
+  const results: number[] = []
+  for (let index = 0; index + 1 < faces.length; index += 2) {
+    results.push(((faces[index] % 100) + (faces[index + 1] % 10)) || 100)
+  }
+  return results
+}
+
+export function percentileNotation(value: number): string {
+  return `1d100+1d10@${percentileFaces(value).join(',')}`
 }
 
 /**
@@ -77,13 +81,16 @@ export function percentileNotation(value: number): string {
  *   - forced values           → `"{n}d{sides}@v1,v2,…"` where n = forced count
  *     (forcing only the values provided, matching the legacy force-only-provided
  *     behavior; a partial list rolls fewer dice rather than padding).
- * Single-die d100 forcing routes through percentileNotation (pair form).
+ * Each d100 uses a tens/units pair, including random rolls and multi-die pools.
  */
 export function buildNotation(qty: unknown, sides: unknown, values?: unknown): string {
   const q = clampQty(qty)
   const s = clampSides(sides)
   const forced = sanitizeForced(values, q, s)
+  if (s === 100) {
+    const pool = Array.from({ length: forced.length || q }, () => '1d100+1d10').join('+')
+    return pool + (forced.length ? `@${forced.flatMap(percentileFaces).join(',')}` : '')
+  }
   if (forced.length === 0) return `${q}d${s}`
-  if (s === 100 && forced.length === 1) return percentileNotation(forced[0])
   return `${forced.length}d${s}@${forced.join(',')}`
 }

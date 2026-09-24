@@ -1,0 +1,225 @@
+[WebServer] (node:33696) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:9924) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 12 tests using 1 worker
+
+(node:28312) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 e2e\dice-pair.spec.ts:2:1 › slow iframe initialization still renders the dice and completes once (6.5s)
+  x   2 e2e\dice-pair.spec.ts:19:13 › Pair advantage: pair, adopted die, immediate outcome and refresh (25.3s)
+(node:6908) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   3 e2e\dice-pair.spec.ts:19:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh (26.0s)
+(node:23272) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   4 e2e\dice-pair.spec.ts:19:13 › Pair save success: pair, adopted die, immediate outcome and refresh (25.8s)
+(node:5296) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   5 e2e\dice-pair.spec.ts:19:13 › Pair save failure: pair, adopted die, immediate outcome and refresh (25.9s)
+(node:11752) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   6 e2e\dice-pair.spec.ts:19:13 › Pair tie: pair, adopted die, immediate outcome and refresh (25.6s)
+(node:17332) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  7 e2e\dice-pair.spec.ts:47:1 › adopted aura respects reduced motion and clears on the next damage roll (10.7s)
+  ok  8 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (8.9s)
+  ok  9 e2e\large-dice.spec.ts:23:1 › 20d6 free roll renders every die and mirrors all 20 values to DM (14.6s)
+  ok 10 e2e\large-dice.spec.ts:55:1 › 20d6 owned damage preserves every physical face on player and DM (7.2s)
+  ok 11 e2e\large-dice.spec.ts:69:31 › DM free 26d6 retains every face after settlement (10.2s)
+  ok 12 e2e\large-dice.spec.ts:69:31 › DM free 40d6 retains every face after settlement (14.2s)
+
+
+  1) e2e\dice-pair.spec.ts:19:13 › Pair advantage: pair, adopted die, immediate outcome and refresh 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('dice-check-outcome')
+    Expected substring: "命中"
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 20000ms
+      - waiting for getByTestId('dice-check-outcome')
+
+
+      26 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1,{timeout:20000})
+      27 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+    > 28 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result,{timeout:20000})
+         |                                                       ^
+      29 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+      30 |  await expect(page.frameLocator('iframe').locator('[data-dice-adopted-marker]')).toBeVisible()
+      31 |  await expect(page.locator('.dice-tray-drawer__total')).toHaveCount(0)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:28:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) e2e\dice-pair.spec.ts:19:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('dice-check-outcome')
+    Expected substring: "未命中"
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 20000ms
+      - waiting for getByTestId('dice-check-outcome')
+
+
+      26 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1,{timeout:20000})
+      27 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+    > 28 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result,{timeout:20000})
+         |                                                       ^
+      29 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+      30 |  await expect(page.frameLocator('iframe').locator('[data-dice-adopted-marker]')).toBeVisible()
+      31 |  await expect(page.locator('.dice-tray-drawer__total')).toHaveCount(0)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:28:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-disadvantag-478f0-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) e2e\dice-pair.spec.ts:19:13 › Pair save success: pair, adopted die, immediate outcome and refresh 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('dice-check-outcome')
+    Expected substring: "豁免成功"
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 20000ms
+      - waiting for getByTestId('dice-check-outcome')
+
+
+      26 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1,{timeout:20000})
+      27 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+    > 28 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result,{timeout:20000})
+         |                                                       ^
+      29 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+      30 |  await expect(page.frameLocator('iframe').locator('[data-dice-adopted-marker]')).toBeVisible()
+      31 |  await expect(page.locator('.dice-tray-drawer__total')).toHaveCount(0)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:28:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-save-succes-2fab0-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-save-succes-2fab0-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-save-succes-2fab0-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-save-succes-2fab0-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) e2e\dice-pair.spec.ts:19:13 › Pair save failure: pair, adopted die, immediate outcome and refresh 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('dice-check-outcome')
+    Expected substring: "豁免失败"
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 20000ms
+      - waiting for getByTestId('dice-check-outcome')
+
+
+      26 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result)
+      27 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1,{timeout:20000})
+    > 28 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+         |                                                       ^
+      29 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+      30 |  await expect(page.frameLocator('iframe').locator('[data-dice-adopted-marker]')).toBeVisible()
+      31 |  await expect(page.locator('.dice-tray-drawer__total')).toHaveCount(0)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:28:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-save-failur-bf431-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) e2e\dice-pair.spec.ts:19:13 › Pair tie: pair, adopted die, immediate outcome and refresh ──────
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('dice-check-outcome')
+    Expected substring: "命中"
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 20000ms
+      - waiting for getByTestId('dice-check-outcome')
+
+
+      26 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result)
+      27 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toHaveCount(1,{timeout:20000})
+    > 28 |  await expect(page.getByTestId('dice-tray-drawer').locator('[data-adopted="true"]')).toContainText(String(selected))
+         |                                                       ^
+      29 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+      30 |  await expect(page.frameLocator('iframe').locator('[data-dice-adopted-marker]')).toBeVisible()
+      31 |  await expect(page.locator('.dice-tray-drawer__total')).toHaveCount(0)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:28:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-tie-pair-ad-d872c-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-tie-pair-ad-d872c-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-tie-pair-ad-d872c-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-tie-pair-ad-d872c-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5 failed
+    e2e\dice-pair.spec.ts:19:13 › Pair advantage: pair, adopted die, immediate outcome and refresh ─
+    e2e\dice-pair.spec.ts:19:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh 
+    e2e\dice-pair.spec.ts:19:13 › Pair save success: pair, adopted die, immediate outcome and refresh 
+    e2e\dice-pair.spec.ts:19:13 › Pair save failure: pair, adopted die, immediate outcome and refresh 
+    e2e\dice-pair.spec.ts:19:13 › Pair tie: pair, adopted die, immediate outcome and refresh ───────
+  7 passed (5.0m)

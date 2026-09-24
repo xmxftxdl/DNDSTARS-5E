@@ -152,6 +152,66 @@ function obstacleSegments(obstacle) {
   }))
 }
 
+// Terrain surfaces are solid below their top. Only exposed height differences
+// become barriers; later painted regions can flatten or cut into earlier ones.
+function terrainCliffSegments(geometry) {
+  const regions = (geometry.obstacles ?? []).filter(region =>
+    Number.isFinite(region.terrainElevationFeet) && !(region.terrainRegion !== true &&
+      region.traversal === 'ground' && region.terrainCostMultiplier > 1 && region.heightFeet <= 0))
+  if (!regions.length) return []
+  const contains = (point, points) => {
+    let inside = false
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const a = points[i], b = points[j]
+      if ((a.y > point.y) !== (b.y > point.y) &&
+        point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside
+    }
+    return inside
+  }
+  const heightAt = point => {
+    let height = 0
+    for (const region of regions) if (contains(point, region.points)) height = region.terrainElevationFeet
+    return height
+  }
+  const edges = regions.flatMap(region => region.points.map((a, index) => ({
+    a, b: region.points[(index + 1) % region.points.length], region,
+  })))
+  return edges.flatMap(({ a, b, region }) => {
+    const length = Math.hypot(b.x - a.x, b.y - a.y)
+    if (length <= EPSILON) return []
+    const cuts = new Set([0, 1])
+    for (const edge of edges) {
+      const t = segmentIntersectionParameter(a, b, edge.a, edge.b)
+      if (t != null) cuts.add(t)
+      // Collinear overlaps also change which painted region is authoritative.
+      for (const point of [edge.a, edge.b]) {
+        const projected = projectPointToSegment(point, a, b)
+        if (projected.distance < EPSILON) cuts.add(projected.t)
+      }
+    }
+    const ordered = [...cuts].sort((left, right) => left - right)
+    return ordered.slice(1).flatMap((end, index) => {
+      const start = ordered[index]
+      if (end - start <= EPSILON) return []
+      const midpoint = interpolatePoint(a, b, (start + end) / 2)
+      const offset = Math.min(0.001, length * (end - start) * 0.01)
+      const dx = -(b.y - a.y) / length * offset
+      const dy = (b.x - a.x) / length * offset
+      const left = heightAt({ x: midpoint.x + dx, y: midpoint.y + dy })
+      const right = heightAt({ x: midpoint.x - dx, y: midpoint.y - dy })
+      if (Math.abs(left - right) <= EPSILON) return []
+      return [{
+        entityId: region.id, entityKind: 'obstacle',
+        a: interpolatePoint(a, b, start), b: interpolatePoint(a, b, end),
+        blocksVision: true, blocksLineOfEffect: true,
+        // Traversal already resolves climbing, falling and flying from terrain heights.
+        blocksMovement: false, cover: 'total',
+        baseHeightFeet: Math.min(left, right), heightFeet: Math.abs(left - right),
+      }]
+    })
+  })
+}
+
 export function effectiveGeometrySegments(geometry) {
   if (!geometry) return []
   const walls = (geometry.walls ?? []).flatMap((wall) =>
@@ -201,7 +261,7 @@ export function effectiveGeometrySegments(geometry) {
       cover: window.cover,
     }]
   })
-  return [...walls, ...doors, ...windows, ...(geometry.obstacles ?? []).flatMap(obstacleSegments)]
+  return [...walls, ...doors, ...windows, ...(geometry.obstacles ?? []).flatMap(obstacleSegments), ...terrainCliffSegments(geometry)]
 }
 
 function segmentBounds(segment) {
@@ -328,7 +388,7 @@ function geometryCacheSignature(geometry) {
   ).join('|')
   const obstacles = (geometry.obstacles ?? []).map((obstacle) =>
     `${obstacle.id}:${obstacle.points?.map((point) => `${point.x},${point.y}`).join(';') ?? ''}:` +
-      `${obstacle.blocksVision}:${obstacle.blocksMovement}:${obstacle.blocksLineOfEffect}:${obstacle.baseHeightFeet}:${obstacle.heightFeet}`,
+      `${obstacle.blocksVision}:${obstacle.blocksMovement}:${obstacle.blocksLineOfEffect}:${obstacle.baseHeightFeet}:${obstacle.heightFeet}:${obstacle.terrainElevationFeet}:${obstacle.terrainRegion}:${obstacle.traversal}:${obstacle.terrainCostMultiplier}`,
   ).join('|')
   return `${geometry.updatedAt ?? ''}#${walls}#${openings}#${obstacles}`
 }

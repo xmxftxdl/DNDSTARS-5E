@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createEmptyMapFog, type FogShape } from './fogOfWar'
 import type { BattleMap, Token } from '../store/maps'
 import { createDnd5eMechanicalEffect } from '../rulesets/dnd5e/activeEffects'
 import {
@@ -8,6 +9,7 @@ import {
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
+  mapGeometryLightPolygon,
   mapGeometryLineOfEffectBlocked,
   mapGeometryLineOfSightBlocked,
   mapGeometryGridSelectionBoundary,
@@ -50,6 +52,70 @@ const geometry = (): MapGeometryState => ({
 })
 
 describe('map geometry', () => {
+  it('treats raised terrain as solid for light, sight and spell rays, but permits rays above it', () => {
+    const g = createEmptyMapGeometry(map.id, 1)
+    g.vision.ambientLight = 'darkness'
+    g.obstacles = [{
+      id: 'hill', kind: 'obstacle', label: 'Hill',
+      points: [{ x: 200, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 400 }, { x: 200, y: 400 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainRegion: true, terrainElevationFeet: 20, createdAt: 1,
+    }]
+    const from = { x: 100, y: 250 }, to = { x: 400, y: 250 }
+    expect(mapGeometryLineOfSightBlocked({ geometry: g, from, to })).toBe(true)
+    expect(mapGeometryLineOfEffectBlocked({ geometry: g, from, to })).toBe(true)
+    expect(mapGeometryLineOfSightBlocked({ geometry: g, from, to, elevationFeet: 25 })).toBe(false)
+    const polygon = mapGeometryLightPolygon({ geometry: g, map, source: from, radiusFeet: 40 })
+    expect(polygon.find(point => Math.abs(point.y - from.y) < 1e-6 && point.x > from.x)?.x).toBeCloseTo(200)
+    const lightMap = { ...map, tokens: [token('sunbeam', from.x, from.y, {
+      lightSource: { enabled: true, brightRadiusFeet: 60, dimRadiusFeet: 0, color: '#fff', sourceKind: 'spell' },
+    })] }
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map: lightMap, point: to })).toBe('darkness')
+    // A later flattened corridor must remove the old hillside barrier in that strip.
+    g.obstacles.push({ ...g.obstacles[0], id: 'corridor', terrainElevationFeet: 0,
+      points: [{ x: 150, y: 225 }, { x: 350, y: 225 }, { x: 350, y: 275 }, { x: 150, y: 275 }] })
+    expect(mapGeometryLineOfSightBlocked({ geometry: g, from, to })).toBe(false)
+    expect(mapGeometryLineOfEffectBlocked({ geometry: g, from, to })).toBe(false)
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map: lightMap, point: to })).toBe('bright')
+  })
+
+  it.each(['light', 'vision'] as const)('traces the %s boundary once when wall rays cross the angular seam', (kind) => {
+    const g = geometry()
+    g.obstacles = []
+    g.walls[0].points = [{ x: 320, y: 180 }, { x: 320, y: 250 }]
+    const source = token('light-source', 250, 250)
+    const polygon = kind === 'light'
+      ? mapGeometryLightPolygon({ geometry: g, map, source, radiusFeet: 20 })
+      : mapGeometryVisibilityPolygon({ geometry: g, map, viewer: source, rangeOverrideFeet: 20 })
+    const tau = Math.PI * 2
+    const angles = polygon.map(point => Math.atan2(point.y - source.y, point.x - source.x))
+    const turn = angles.reduce((sum, angle, index) => {
+      const next = angles[(index + 1) % angles.length]
+      const delta = (next - angle + tau) % tau
+      return sum + (delta > tau - 1e-8 ? 0 : delta)
+    }, 0)
+    expect(turn).toBeCloseTo(tau, 6)
+  })
+
+  it('uses every fog shape for scene magical darkness and respects ordered reveals', () => {
+    const shapes: FogShape[] = [
+      { id: 'rect', kind: 'rect', operation: 'cover', createdAt: 1, x: 10, y: 10, width: 80, height: 80 },
+      { id: 'circle', kind: 'circle', operation: 'cover', createdAt: 1, x: 50, y: 50, radius: 40 },
+      { id: 'polygon', kind: 'polygon', operation: 'cover', createdAt: 1, points: [10, 10, 90, 10, 90, 90, 10, 90] },
+      { id: 'brush', kind: 'brush', operation: 'cover', createdAt: 1, points: [10, 50, 90, 50], width: 20 },
+    ]
+    for (const shape of shapes) {
+      const g = createEmptyMapGeometry(map.id, 1)
+      g.darknessFog = { ...createEmptyMapFog(map.id, 1), shapes: [shape] }
+      const query = { geometry: g, map, point: { x: 50, y: 50 } }
+      expect(mapGeometryIlluminationAtPoint(query)).toBe('magical-darkness')
+      g.darknessFog.shapes.push({ id: 'reveal', kind: 'circle', operation: 'reveal', createdAt: 2, x: 50, y: 50, radius: 10 })
+      expect(mapGeometryIlluminationAtPoint(query)).toBe('bright')
+      expect(mapGeometryIlluminationAtPoint({ ...query, point: { x: 75, y: 50 } })).toBe('magical-darkness')
+      const normalized = normalizeSharedMapGeometry({ schemaVersion: 1, maps: [g], updatedAt: 2 })
+      expect(normalized?.maps[0].darknessFog?.shapes).toHaveLength(2)
+    }
+  })
   it('blocks movement and line of sight with closed walls but allows elevated creatures to pass over them', () => {
     const g = geometry()
     expect(mapGeometryMovementBlocked({ geometry: g, map, token: token('a', 50, 50), to: { x: 150, y: 50 } }))
@@ -709,6 +775,15 @@ describe('map geometry', () => {
       blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
       baseHeightFeet: 0, heightFeet: 20, createdAt: 1,
     }]
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g, map: { ...map, dnd5ePluginAreas: [daylight] }, point: target,
+    })).toBe('bright')
+    // Scene darkness ignores daylight and persists until the DM removes it.
+    g.obstacles[0].darknessSpellLevel = undefined
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g, map: { ...map, dnd5ePluginAreas: [daylight] }, point: target,
+    })).toBe('magical-darkness')
+    g.obstacles = []
     expect(mapGeometryIlluminationAtPoint({
       geometry: g, map: { ...map, dnd5ePluginAreas: [daylight] }, point: target,
     })).toBe('bright')

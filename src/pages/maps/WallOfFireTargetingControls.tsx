@@ -5,11 +5,13 @@ import { normalizeWallOfFireAngle } from '../../rulesets/dnd5e/wallOfFireGeometr
 import { moveEarthSquareTargetingPatch } from './moveEarthTargeting'
 
 interface Props {
+  inline?: boolean
   targeting: Dnd5eSpellTargetingSession | null
   setTargeting: Dispatch<SetStateAction<Dnd5eSpellTargetingSession | null>>
 }
 
-export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) {
+export function WallOfFireTargetingControls({ targeting, setTargeting, inline = false }: Props) {
+  const controlsClassName = (color: string) => `${inline ? 'flex flex-wrap items-center gap-2 min-w-0' : 'map-combat-action-bar'} ${color} text-xs`
   const wallActive = targeting?.spellId === 'wall-of-fire' && targeting.area && !targeting.areaTargetSelected
   const bladeActive = targeting?.spellId === 'blade-barrier' && targeting.area && !targeting.areaTargetSelected
   const genericRectActive = targeting?.spellId !== 'wall-of-fire' && targeting?.area?.shape === 'rect' &&
@@ -22,7 +24,8 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     ('minimumHeightFeet' in targeting.area && targeting.area.minimumHeightFeet != null) ||
     ('minimumLengthFeet' in targeting.area && targeting.area.minimumLengthFeet != null)
   )
-  const active = wallActive || bladeActive || moveEarthActive || genericRectActive || adjustableAreaActive
+  const forceActive = targeting?.spellId === 'wall-of-force' && !!targeting.area && !targeting.areaTargetSelected
+  const active = forceActive || wallActive || bladeActive || moveEarthActive || genericRectActive || adjustableAreaActive
   const shape = targeting?.wallOfFireShape ?? 'line'
   const angle = wallActive
     ? targeting?.wallOfFireAngleDegrees ?? 0
@@ -32,16 +35,13 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
   const side = targeting?.wallOfFireDamagingSide ?? (shape === 'ring' ? 'outside' : 'right')
   const lengthFeet = targeting?.wallOfFireLengthFeet ?? 60
   const diameterFeet = targeting?.wallOfFireDiameterFeet ?? 20
-  const placeRangeFeet = targeting?.area && 'placeRangeFeet' in targeting.area
-    ? targeting.area.placeRangeFeet ?? 120
-    : 120
   const patch = useCallback((values: Partial<Dnd5eSpellTargetingSession>) => setTargeting((current) =>
     current?.area && !current.areaTargetSelected
       ? { ...current, ...values }
       : current), [setTargeting])
 
   useEffect(() => {
-    if (!active || moveEarthActive || (wallActive && shape !== 'line')) return
+    if (!active || targeting?.spellId === 'wall-of-stone' || targeting?.spellId === 'wall-of-ice' || targeting?.spellId === 'wall-of-force' || moveEarthActive || (wallActive && shape !== 'line')) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (!['q', 'e'].includes(event.key.toLowerCase())) return
       event.preventDefault()
@@ -50,15 +50,50 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [active, angle, bladeActive, moveEarthActive, patch, shape, wallActive])
+  }, [active, angle, bladeActive, moveEarthActive, patch, shape, wallActive, targeting?.spellId])
 
   if (!active) return null
+  if (targeting?.spellId === 'wall-of-stone' || targeting?.spellId === 'wall-of-ice') {
+    const ice = targeting.spellId === 'wall-of-ice'
+    const layout = targeting.stoneWall
+    return <div className={controlsClassName('text-amber-100')}>
+      <strong>{ice ? '冰墙术' : '石墙术'}</strong>
+      {ice ? <span>10×10 尺 · 厚 1 尺 · AC 12 · HP 30 · 贴合实体表面</span> : (['thick', 'thin'] as const).map(mode => <button type="button" key={mode}
+        className={`rounded px-2 py-1 ${(layout?.mode ?? 'thick') === mode ? 'bg-amber-500/40' : 'bg-white/5'}`}
+        onClick={() => patch({ stoneWall: { mode, start: layout?.start ?? { col: 0, row: 0 }, angles: [] }, areaTargetCell: undefined })}>
+        {mode === 'thick' ? '10×10 尺 · 厚 6 英寸 · HP 180' : '20×10 尺 · 厚 3 英寸 · HP 90'}</button>)}
+      <span>{layout?.angles.length ?? 0}/10 段 · 点击起点，再点击各段方向（可自由转向）</span>
+      <button type="button" disabled={!layout?.angles.length} onClick={() => patch({ stoneWall: { ...layout!, angles: layout!.angles.slice(0, -1) } })}>撤销一段</button>
+      <button type="button" disabled={!layout?.angles.length} className="rounded bg-amber-500/30 px-2 py-1"
+        onClick={() => patch({ areaTargetSelected: true })}>完成布局</button>
+    </div>
+  }
+  if (forceActive) {
+    const forceShape = targeting.wallOfForceShape ?? 'plane'
+    return <div className={controlsClassName('text-violet-100')}>
+      <strong>力场墙</strong>
+      {(['plane', 'hemisphere', 'sphere'] as const).map((value, index) => <button key={value} type="button"
+        className={`rounded px-2 py-1 ${forceShape === value ? 'bg-violet-500/40' : 'bg-white/5'}`}
+        onClick={() => patch({ wallOfForceShape: value, areaTargetRadiusFeet: value === 'plane' ? undefined : 10,
+          areaTargetWidthFeet: undefined, areaTargetHeightFeet: undefined, stoneWall: undefined, areaTargetCell: undefined,
+          area: value === 'plane' ? { shape: 'rect', origin: 'point', widthFeet: 100, minimumWidthFeet: 10, heightFeet: 5, placeRangeFeet: 120, rotatable: true }
+            : { shape: 'circle', origin: 'point', radiusFeet: 10, minimumRadiusFeet: 5, placeRangeFeet: 120 } })}>
+        {['平面墙', '半球', '球体'][index]}</button>)}
+      {forceShape === 'plane' ? <>
+        <span>{targeting.stoneWall?.angles.length ?? 0}/10 块 · 每块 10×10 尺 · 点击起点，再点击各块方向（可自由转向）</span>
+        <button type="button" disabled={!targeting.stoneWall?.angles.length} onClick={() => patch({ stoneWall: { ...targeting.stoneWall!, angles: targeting.stoneWall!.angles.slice(0, -1) } })}>撤销一块</button>
+        <button type="button" disabled={!targeting.stoneWall?.angles.length} className="rounded bg-violet-500/30 px-2 py-1" onClick={() => patch({ areaTargetSelected: true })}>完成布局</button>
+      </> : <label>半径 <input type="range" min="5" max="10" step="5" value={targeting.areaTargetRadiusFeet ?? 10}
+        onChange={event => patch({ areaTargetRadiusFeet: Number(event.target.value) })} /> {targeting.areaTargetRadiusFeet ?? 10} 尺</label>}
+      <span>{forceShape === 'hemisphere' ? '高度为穹顶底面，底部开放' : forceShape === 'sphere' ? '高度为球心，形成完整球壳' : '平面墙高 10 尺'}</span>
+    </div>
+  }
   if (bladeActive) {
     const bladeShape = targeting?.bladeBarrierShape ?? 'line'
     const bladeAngle = targeting?.bladeBarrierAngleDegrees ?? 0
     const bladeLength = targeting?.bladeBarrierLengthFeet ?? 100
     const bladeDiameter = targeting?.bladeBarrierDiameterFeet ?? 60
-    return <div data-testid="blade-barrier-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,980px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-sky-300/50 bg-void-950/95 px-3 py-2 text-xs text-sky-50 shadow-2xl backdrop-blur-sm">
+    return <div data-testid="blade-barrier-targeting-controls" className={controlsClassName('border-sky-300/50 text-sky-50')}>
       <strong className="text-sky-200">剑刃障壁</strong>
       <button type="button" onClick={() => patch({ bladeBarrierShape: 'line' })} className={`rounded px-2 py-1 ${bladeShape === 'line' ? 'bg-sky-500/35' : 'bg-white/5'}`}>直线</button>
       <button type="button" onClick={() => patch({ bladeBarrierShape: 'ring' })} className={`rounded px-2 py-1 ${bladeShape === 'ring' ? 'bg-sky-500/35' : 'bg-white/5'}`}>环形</button>
@@ -74,7 +109,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
       targeting.areaTargetWidthFeet ?? targeting.areaTargetHeightFeet ?? 40,
     ).areaTargetWidthFeet
     return (
-      <div data-testid="move-earth-area-size-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,760px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-amber-300/55 bg-void-950/95 px-3 py-2 text-xs text-amber-50 shadow-2xl backdrop-blur-sm">
+      <div data-testid="move-earth-area-size-controls" className={controlsClassName('border-amber-300/55 text-amber-50')}>
         <strong className="text-amber-200">地动术区域</strong>
         <label className="flex items-center gap-2">正方形边长
           <button
@@ -124,7 +159,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
       value: targeting.areaTargetLengthFeet ?? targeting.area.lengthFeet,
     })
     return (
-      <div data-testid="adjustable-area-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,900px)] -translate-x-1/2 flex-wrap items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-void-950/95 px-3 py-2 text-xs text-cyan-50 shadow-2xl backdrop-blur-sm">
+      <div data-testid="adjustable-area-targeting-controls" className={controlsClassName('border-cyan-300/50 text-cyan-50')}>
         <strong className="text-cyan-200">调整法术范围</strong>
         {controls.map((control) => {
           const stepFeet = control.min % 5 !== 0 ? 2.5 : 5
@@ -149,12 +184,12 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
           <input aria-label="法术范围角度" type="range" min="0" max="359" step="1" value={angle} onChange={(event) => patch({ areaTargetAngleDegrees: Number(event.target.value) })} className="w-40 accent-cyan-400" />
           <output className="w-11 tabular-nums">{Math.round(angle)}°</output>
         </label> : null}
-        <span className="text-slate-400">移动鼠标预览，点击地图确认；Host 会重新校验尺寸。</span>
+        <span className="text-slate-400">移动鼠标预览，点击地图确认。</span>
       </div>
     )
   }
   if (genericRectActive) return (
-    <div data-testid="rotatable-rect-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,820px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-cyan-300/50 bg-void-950/95 px-3 py-2 text-xs text-cyan-50 shadow-2xl backdrop-blur-sm">
+    <div data-testid="rotatable-rect-targeting-controls" className={controlsClassName('border-cyan-300/50 text-cyan-50')}>
       <strong className="text-cyan-200">长方形范围</strong>
       <label className="flex items-center gap-2">角度
         <input aria-label="长方形范围角度" type="range" min="0" max="359" step="1" value={angle} onChange={(event) => patch({ areaTargetAngleDegrees: Number(event.target.value) })} className="w-48 accent-cyan-400" />
@@ -164,7 +199,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
     </div>
   )
   return (
-    <div data-testid="wall-of-fire-targeting-controls" className="absolute left-1/2 top-14 z-[110] flex max-w-[min(96vw,980px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-orange-300/50 bg-void-950/95 px-3 py-2 text-xs text-orange-50 shadow-2xl backdrop-blur-sm">
+    <div data-testid="wall-of-fire-targeting-controls" className={controlsClassName('border-orange-300/50 text-orange-50')}>
       <strong className="text-orange-200">火墙术</strong>
       <button type="button" onClick={() => patch({ wallOfFireShape: 'line', wallOfFireDamagingSide: side === 'left' ? 'left' : 'right' })} className={`rounded px-2 py-1 ${shape === 'line' ? 'bg-orange-500/35' : 'bg-white/5'}`}>直线</button>
       <button type="button" onClick={() => patch({ wallOfFireShape: 'ring', wallOfFireDamagingSide: side === 'inside' ? 'inside' : 'outside' })} className={`rounded px-2 py-1 ${shape === 'ring' ? 'bg-orange-500/35' : 'bg-white/5'}`}>环形</button>
@@ -188,9 +223,6 @@ export function WallOfFireTargetingControls({ targeting, setTargeting }: Props) 
         <button type="button" onClick={() => patch({ wallOfFireDamagingSide: 'inside' })} className={`rounded px-2 py-1 ${side === 'inside' ? 'bg-rose-500/40' : 'bg-white/5'}`}>内侧灼热</button>
         <button type="button" onClick={() => patch({ wallOfFireDamagingSide: 'outside' })} className={`rounded px-2 py-1 ${side === 'outside' ? 'bg-rose-500/40' : 'bg-white/5'}`}>外侧灼热</button>
       </>}
-      <span className="text-slate-300">
-        蓝色：{placeRangeFeet} 尺施法范围 · 红色：所选侧 10 尺灼烧范围 · 移动鼠标预览，点击地图确认
-      </span>
     </div>
   )
 }

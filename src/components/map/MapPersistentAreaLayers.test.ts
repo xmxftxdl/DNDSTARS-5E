@@ -9,11 +9,12 @@ describe('persistent area sprite atlas loops', () => {
   it('keeps other fade-out atlases on stable sustain frames', () => {
     for (const preset of [
       'cloudkill', 'stinking-cloud', 'daylight', 'entangle', 'moonbeam',
-      'fog-cloud', 'sleet-storm', 'wind-wall', 'wall-of-force', 'wall-of-stone',
+      'fog-cloud', 'sleet-storm', 'wind-wall', 'wall-of-force',
       'wall-of-ice', 'wall-of-thorns',
     ]) {
       expect(persistentAreaAtlasLoopFrames(preset)).toEqual([8, 9, 10, 11])
     }
+    expect(persistentAreaAtlasLoopFrames('wall-of-stone')).toEqual([10])
     expect(persistentAreaAtlasLoopFrames('spirit-guardians')).toEqual([
       8, 9, 10, 11, 12, 13, 14, 15,
     ])

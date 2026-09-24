@@ -1,3 +1,4 @@
+import PdfLinkedText from '../PdfLinkedText'
 import { useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { BookMarked, BookOpen, Bot, Check, Search, Sparkles, X } from 'lucide-react'
@@ -675,7 +676,7 @@ function SpellDetail({ label, value }: { label: string; value: string }) {
 }
 
 function SpellRuleBlock({ title, text }: { title: string; text: string }) {
-  return <div className="mt-5"><h4 className="text-sm font-semibold text-slate-200">{title}</h4><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-400">{text}</p></div>
+  return <div className="mt-5"><h4 className="text-sm font-semibold text-slate-200">{title}</h4><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-400"><PdfLinkedText text={text} /></p></div>
 }
 
 function ToggleButton({ active, disabled, onClick, label }: { active: boolean; disabled?: boolean; onClick: () => void; label: string }) {

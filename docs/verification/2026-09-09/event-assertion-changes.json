@@ -1,0 +1,26 @@
+[
+  {
+    "path": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/declarativeSubclassAbility.test.ts",
+    "assertions": 1
+  },
+  {
+    "path": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/endTurnAction.test.ts",
+    "assertions": 2
+  },
+  {
+    "path": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/playerBasicAction.test.ts",
+    "assertions": 1
+  },
+  {
+    "path": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/pluginSpellTransaction.test.ts",
+    "assertions": 2
+  },
+  {
+    "path": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/spellAction.test.ts",
+    "assertions": 7
+  },
+  {
+    "path": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/src/rulesets/dnd5e/sustainedSpellControls.test.ts",
+    "assertions": 1
+  }
+]

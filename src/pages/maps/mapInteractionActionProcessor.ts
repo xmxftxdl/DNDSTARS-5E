@@ -99,7 +99,7 @@ export interface Dnd5eMapInteractionActionContext {
 }
 
 /**
- * Opening a door that the authoritative rules have already validated as an
+ * Opening or closing a door that the authoritative rules have validated as an
  * automatic success is a complete object interaction. It must not pause for a
  * second DM approval. Checks, forced entry, searches, and other interactions
  * keep the adjudication boundary.
@@ -107,7 +107,7 @@ export interface Dnd5eMapInteractionActionContext {
 export function dnd5eMapInteractionRequiresDmAdjudication(
   prepared: Pick<PreparedDnd5eMapInteraction, 'operation' | 'automaticSuccess'>,
 ): boolean {
-  return prepared.operation !== 'open' || !prepared.automaticSuccess
+  return !['open', 'close'].includes(prepared.operation) || !prepared.automaticSuccess
 }
 
 export async function processDnd5eMapInteractionAction(
@@ -123,6 +123,11 @@ export async function processDnd5eMapInteractionAction(
   } = context
 
   const payload = action.dnd5eMapInteraction
+  if (payload?.operation === 'rope-trick' || payload?.operation === 'teleportation-circle') {
+    acknowledgePlayerAction(action, 'rejected', 'invalid-map-interaction-route')
+    completePlayerActionRequest(action)
+    return
+  }
         const geometry = useMapGeometryStore.getState().maps.find((entry) => entry.mapId === authorityMap.id)
         if (!payload || (
           payload.operation === 'search'

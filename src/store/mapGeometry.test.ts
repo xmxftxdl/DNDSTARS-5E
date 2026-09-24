@@ -1,6 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { loadSharedResource } from '../composition/browserSharedRoomResources'
+vi.mock('../composition/browserSharedRoomResources', () => ({
+  loadSharedResource: vi.fn(),
+  saveSharedResourceWithResult: vi.fn().mockResolvedValue({ status: 'saved' }),
+}))
 import {
   createEmptyMapGeometry,
+  MAP_GEOMETRY_SCHEMA_VERSION,
   mapGeometryRelationshipIssues,
   normalizeMapGeometry,
   type MapGeometryWall,
@@ -21,6 +27,24 @@ const wall: MapGeometryWall = {
 }
 
 describe('map geometry editor history', () => {
+  it('preserves undo for server echoes and drops it for a competing edit', async () => {
+    const store = useMapGeometryStore.getState()
+    store.addEntity('map-1', wall)
+    const current = useMapGeometryStore.getState().maps[0]
+    const now = Date.now() + 1000
+    vi.mocked(loadSharedResource).mockResolvedValue({
+      schemaVersion: MAP_GEOMETRY_SCHEMA_VERSION, updatedAt: now,
+      maps: [{ ...current, updatedAt: now }],
+    })
+    await store.loadShared()
+    expect(useMapGeometryStore.getState().historyByMapId['map-1']).toHaveLength(1)
+    vi.mocked(loadSharedResource).mockResolvedValue({
+      schemaVersion: MAP_GEOMETRY_SCHEMA_VERSION, updatedAt: now + 1,
+      maps: [{ ...current, walls: [], updatedAt: now + 1 }],
+    })
+    await store.loadShared()
+    expect(useMapGeometryStore.getState().historyByMapId['map-1']).toBeUndefined()
+  })
   beforeEach(() => {
     useMapGeometryStore.setState({
       maps: [createEmptyMapGeometry('map-1', 1)],

@@ -2,6 +2,12 @@ import type { Character } from '../../types/character'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { dnd5eTokenIntersectsPersistentAreaAt } from './persistentAreaGeometry'
+import { tokenOccupiedCellsAt } from '../../lib/gridCombat'
+import type { Dnd5eCombatEvent } from './headlessCombatEngine'
+import { replaceDnd5eCombatantActiveEffects, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import type { Dnd5eSrdSpellDefinition } from './spells'
+import { mapGeometryRuntimeForMap, mapGeometryTerrainElevationAtPoint } from '../../lib/mapGeometry'
+import { tokenCenterForAnchorCell } from '../../lib/gridCombat'
 
 const WEB_BURN_TRIGGER_ID = 'web-burning-turn-start'
 
@@ -49,6 +55,8 @@ export function igniteDnd5eWebAreaCell(input: {
     !area.cells.some((cell) => cell.col === input.cell.col && cell.row === input.cell.row)
   ) return undefined
   const key = cellKey(input.cell)
+  // Repeated exposure must not restart the one-round burn timer.
+  if (area.webState?.burningCells?.some((cell) => cellKey(cell) === key)) return input.map
   const burningCells = [
     ...(area.webState?.burningCells ?? []).filter((cell) => cellKey(cell) !== key),
     {
@@ -69,7 +77,7 @@ export function igniteDnd5eWebAreaCell(input: {
       targetKinds: ['creature'] as const,
       damage: { count: 2, sides: 4, type: 'fire' as const },
       cells: burningCells.map(({ col, row }) => ({ col, row })),
-      dmAdjustable: true,
+      dmAdjustable: false,
     },
   ]
   return {
@@ -77,6 +85,104 @@ export function igniteDnd5eWebAreaCell(input: {
     dnd5ePluginAreas: input.map.dnd5ePluginAreas?.map((candidate) => candidate.id === area.id
       ? { ...candidate, webState: { ...candidate.webState, burningCells }, triggers }
       : candidate),
+  }
+}
+
+/** Explicit fire footprints include empty squares; damage events cover targeted attacks. */
+export function igniteDnd5eWebAreasFromFire(input: {
+  map: BattleMap
+  round: number
+  turnTokenId: string
+  events?: readonly Dnd5eCombatEvent[]
+  cells?: readonly { col: number; row: number }[]
+  minimumElevationFeet?: number
+  maximumElevationFeet?: number
+}): BattleMap {
+  let map = input.map
+  const exposures = new Set((input.cells ?? []).map(cellKey))
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (!isWebArea(area)) continue
+    const exposed = new Set(exposures)
+    const vertical = area.vertical
+    if (vertical?.mode === 'volume' && input.minimumElevationFeet != null &&
+      input.maximumElevationFeet != null &&
+      (vertical.baseElevationFeet >= input.maximumElevationFeet ||
+        vertical.baseElevationFeet + vertical.heightFeet <= input.minimumElevationFeet)) exposed.clear()
+    for (const fire of input.map.dnd5ePluginAreas ?? []) {
+      if (fire.coreSpellId === 'web' || !fire.triggers?.some((trigger) => trigger.damage?.type === 'fire')) continue
+      if (vertical?.mode === 'volume' && fire.vertical?.mode === 'volume' &&
+        (vertical.baseElevationFeet >= fire.vertical.baseElevationFeet + fire.vertical.heightFeet ||
+          fire.vertical.baseElevationFeet >= vertical.baseElevationFeet + vertical.heightFeet)) continue
+      for (const trigger of fire.triggers ?? []) {
+        if (trigger.damage?.type !== 'fire') continue
+        for (const cell of trigger.cells ?? fire.cells) exposed.add(cellKey(cell))
+      }
+    }
+    for (const event of input.events ?? []) {
+      if (event.type !== 'damage-applied' || !event.damageTypes?.includes('fire')) continue
+      if (input.events?.some((candidate) => candidate.type === 'persistent-area-triggered' &&
+        candidate.triggerId === WEB_BURN_TRIGGER_ID && candidate.targetId === event.targetId)) continue
+      const token = input.map.tokens.find((candidate) => candidate.id === event.targetId)
+      if (token && dnd5eTokenIntersectsPersistentAreaAt(token, input.map, area, token)) {
+        for (const cell of tokenOccupiedCellsAt(token, input.map, token)) exposed.add(cellKey(cell))
+      }
+    }
+    for (const cell of area.cells) {
+      if (!exposed.has(cellKey(cell))) continue
+      map = igniteDnd5eWebAreaCell({ map, areaId: area.id, cell,
+        round: input.round, turnTokenId: input.turnTokenId }) ?? map
+    }
+  }
+  return map
+}
+
+export function igniteDnd5eWebAreasFromSpell(input: {
+  map: BattleMap
+  spell: Dnd5eSrdSpellDefinition
+  /** The actual selected damage type, not a higher-slot allocation choice. */
+  damageType?: Dnd5eSrdSpellDefinition['damageType']
+  cells?: readonly { col: number; row: number }[]
+  elevationFeet?: number
+  round: number
+  turnTokenId: string
+}): BattleMap {
+  const hasFire = (input.damageType ?? input.spell.damageType) === 'fire' ||
+    input.spell.additionalDamageComponents?.some(component => component.damageType === 'fire')
+  if (!hasFire || !input.cells?.length) return igniteDnd5eWebAreasFromFire({
+    map: input.map, round: input.round, turnTokenId: input.turnTokenId,
+  })
+  const shape = input.spell.area
+  const center = tokenCenterForAnchorCell(input.cells[0], { size: 1 }, input.map)
+  const elevation = input.elevationFeet ?? mapGeometryTerrainElevationAtPoint(mapGeometryRuntimeForMap(input.map.id), center)
+  const radius = shape?.shape === 'circle' ? shape.radiusFeet : 0
+  const height = shape?.shape === 'cone' ? shape.lengthFeet : 5
+  return igniteDnd5eWebAreasFromFire({ ...input,
+    minimumElevationFeet: elevation - radius,
+    maximumElevationFeet: elevation + (radius || height),
+  })
+}
+
+/** Leaving a web ends only restraints belonging to that web's caster. */
+export function reconcileDnd5eWebRestraints(state: Dnd5eHeadlessCombatState, map: BattleMap,
+  events: Dnd5eCombatEvent[] = []): void {
+  for (const token of map.tokens) {
+    const target = state.combatants[token.id]
+    if (!target) continue
+    const effects = target.classState.activeEffects ?? []
+    const retained = effects.filter((effect) => {
+      if (effect.source.kind !== 'spell' || effect.source.rulesId !== 'web' ||
+        effect.standardCondition !== 'restrained' || effect.duration.type !== 'concentration') return true
+      // Entry is being settled before the movement transaction commits its stop point.
+      if (events.some((event) => (event.type === 'active-effect-applied' || event.type === 'active-effect-refreshed') &&
+        event.targetId === token.id && event.effectId === effect.id)) return true
+      const inside = map.dnd5ePluginAreas?.some((area) => isWebArea(area) &&
+        area.sourceTokenId === effect.source.actorId &&
+        dnd5eTokenIntersectsPersistentAreaAt({ ...token, elevationFeet: target.elevationFeet }, map, area, target.position))
+      if (!inside) events.push({ type: 'active-effect-removed', targetId: token.id, effectId: effect.id,
+        definitionId: effect.definitionId, reason: 'out-of-range' })
+      return inside
+    })
+    if (retained.length !== effects.length) replaceDnd5eCombatantActiveEffects(target, retained)
   }
 }
 
@@ -130,6 +236,27 @@ function removeWebEffects<T extends {
     ...('conditions' in subject ? { conditions: projectedConditions } : {}),
     dnd5eCombatState: nextState,
   } as T
+}
+
+export function reconcileDnd5eWebRestraintsOnMap(map: BattleMap, characters: readonly Character[]): {
+  map: BattleMap; characters: Character[]
+} {
+  const areas = (map.dnd5ePluginAreas ?? []).filter(isWebArea)
+  const clearOutside = <T extends { dnd5eCombatState?: Character['dnd5eCombatState'] }>(subject: T, token: Token): T => {
+    let next = subject
+    for (const area of areas) {
+      if (!areas.some((candidate) => candidate.sourceTokenId === area.sourceTokenId &&
+        dnd5eTokenIntersectsPersistentAreaAt(token, map, candidate, token))) {
+        next = removeWebEffects(next, area, false)
+      }
+    }
+    return next
+  }
+  const tokens = map.tokens.map((token) => clearOutside(token, token))
+  return { map: { ...map, tokens }, characters: characters.map((character) => {
+    const token = tokens.find((candidate) => candidate.characterId === character.id)
+    return token ? clearOutside(character, token) : character
+  }) }
 }
 
 /** Runs after turn-start Web damage settles so an ignited cube damages occupants before burning away. */

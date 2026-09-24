@@ -1,0 +1,69 @@
+[WebServer] (node:35220) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:3424) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 12 tests using 1 worker
+
+(node:35668) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 e2e\dice-pair.spec.ts:2:1 › slow iframe initialization still renders the dice and completes once (6.3s)
+  ok  2 e2e\dice-pair.spec.ts:19:13 › Pair advantage: pair, adopted die, immediate outcome and refresh (11.8s)
+  ok  3 e2e\dice-pair.spec.ts:19:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh (13.3s)
+  ok  4 e2e\dice-pair.spec.ts:19:13 › Pair save success: pair, adopted die, immediate outcome and refresh (13.1s)
+  ok  5 e2e\dice-pair.spec.ts:19:13 › Pair save failure: pair, adopted die, immediate outcome and refresh (12.1s)
+  ok  6 e2e\dice-pair.spec.ts:19:13 › Pair tie: pair, adopted die, immediate outcome and refresh (11.6s)
+  ok  7 e2e\dice-pair.spec.ts:47:1 › adopted aura respects reduced motion and clears on the next damage roll (10.8s)
+  ok  8 e2e\dm-dice-correction.spec.ts:2:1 › player presents the corrected public value before the next broadcast (9.6s)
+  x   9 e2e\large-dice.spec.ts:23:1 › 20d6 free roll renders every die and mirrors all 20 values to DM (15.7s)
+(node:16232) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 10 e2e\large-dice.spec.ts:55:1 › 20d6 owned damage preserves every physical face on player and DM (8.3s)
+  ok 11 e2e\large-dice.spec.ts:74:31 › DM free 26d6 retains every face after settlement (12.2s)
+  ok 12 e2e\large-dice.spec.ts:74:31 › DM free 40d6 retains every face after settlement (11.6s)
+
+
+  1) e2e\large-dice.spec.ts:23:1 › 20d6 free roll renders every die and mirrors all 20 values to DM 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('map-dice-roller-quick-actions')
+    Expected substring: "20d6"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByTestId('map-dice-roller-quick-actions')
+
+
+      33 |   await page.goto('http://127.0.0.1:6373/e2e/fixtures/large-dice.html')
+      34 |   for (let i = 0; i < 20; i++) await page.getByRole('button', { name: /^添加 d6，/ }).click()
+    > 35 |   await expect(page.getByTestId('map-dice-roller-quick-actions')).toContainText('20d6')
+         |                                                                   ^
+      36 |   await page.getByTestId('map-dice-roller-quick-roll').click()
+      37 |   const expected = Array.from({ length: 20 }, (_, index) => index % 6 + 1)
+      38 |   expect(await physicalResult(page, 20)).toEqual(expected)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice.spec.ts:35:67
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\large-dice.spec.ts:23:1 › 20d6 free roll renders every die and mirrors all 20 values to DM ─
+  11 passed (2.6m)

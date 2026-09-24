@@ -45,7 +45,7 @@ if (trackedFiles.error || trackedFiles.status !== 0) {
 
 const lintFiles = trackedFiles.stdout
   .split('\0')
-  .filter((file) => /\.tsx?$/.test(file))
+  .filter((file) => /\.tsx?$/.test(file) && !/^(?:\.codex-temp|\.codex-logs|artifacts|test-results|playwright-report|docs\/audits|docs\/verification|e2e\/test-results)\//.test(file))
   .sort()
 const regularFiles = lintFiles.filter((file) => !oversizedFileConfig.has(file))
 const shards = []
@@ -123,6 +123,11 @@ console.log(
   `mapsWorkspaceErrors=${oversizedErrorCount} (baseline ${oversizedMaxErrors}), warnings=${warningCount}`,
 )
 
+if (process.argv.includes('--strict') && standardErrorCount + oversizedErrorCount > 0) {
+  for (const file of filesWithErrors) console.error(`[eslint] ${file.filePath}: ${file.errorCount} errors (${file.rules.join(', ')})`)
+  console.error('[eslint] Strict check failed on lint findings; all bounded shards completed.')
+  process.exit(1)
+}
 if (standardErrorCount > maxErrors) {
   for (const file of filesWithErrors) {
     console.error(`[eslint-ratchet] ${file.filePath}: ${file.errorCount} errors (${file.rules.join(', ')})`)

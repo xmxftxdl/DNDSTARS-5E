@@ -1,0 +1,2 @@
+import { defineConfig, devices } from '@playwright/test'
+export default defineConfig({ testDir: '.', testMatch: 'player-roll-prompt.spec.ts', timeout: 30000, use: { ...devices['Desktop Chrome'] }, webServer: { cwd: process.cwd(), command: 'npx vite build --config e2e/player-roll-prompt.vite.ts && npx vite preview --config e2e/player-roll-prompt.vite.ts --host 127.0.0.1 --port 6386 --strictPort', url: 'http://127.0.0.1:6386/e2e/fixtures/player-roll-prompt.html', timeout: 60000 } })

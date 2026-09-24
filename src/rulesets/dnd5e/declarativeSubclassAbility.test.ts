@@ -993,14 +993,14 @@ describe('DeclarativeSubclassAbilityV1', () => {
       })
       expect(result.ok).toBe(true)
       expect(result.state.combatants.target.currentHp).toBe(19)
-      expect(result.events).toContainEqual({
+      expect(result.events).toContainEqual(expect.objectContaining({
         type: 'declarative-subclass-trigger-rejected',
         actorId: 'hero',
         abilityId: featureId,
         trigger: 'after-attack-hit',
         targetIds: ['target'],
         reason: 'class-resource-unavailable',
-      })
+      }))
       expect(result.events).not.toContainEqual(expect.objectContaining({
         type: 'declarative-subclass-ability-resolved', abilityId: featureId,
       }))

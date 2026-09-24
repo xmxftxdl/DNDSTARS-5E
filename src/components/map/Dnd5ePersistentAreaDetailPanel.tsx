@@ -1,8 +1,12 @@
+import { wallOverlapsCreature } from '../../rulesets/dnd5e/wallCreationDisplacement'
+import { wallArmorClass } from '../../rulesets/dnd5e/wallObjectRules'
+import { SYMBOL_LABELS } from '../../rulesets/dnd5e/symbolSpell'
 import { Crosshair, Flame, Sparkles, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { showAppConfirm } from '../../lib/appDialog'
 import { dnd5eSpellAreaAtSlot, getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e/spells'
-import type { Dnd5ePluginArea } from '../../store/maps'
+import { usePersistentAreaPanelAnchor } from './usePersistentAreaPanelAnchor'
+import type { BattleMap, Dnd5ePluginArea } from '../../store/maps'
 
 export interface Dnd5ePersistentAreaEntityAttackResult {
   outcome: 'miss' | 'hit' | 'destroyed'
@@ -136,27 +140,36 @@ function hallowProtectionPresentation(area: Dnd5ePluginArea): {
   }
 }
 
-export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, excludedTargetNames, feetPerCell, currentRound, onResolveEntityAttack, onSetWebUnsupported, onIgniteWebCell, onDelete, onClose }: {
+export default function Dnd5ePersistentAreaDetailPanel({ area, map, sourceName, excludedTargetNames, feetPerCell, currentRound, onStartWallAttack, onStoneEscape, onResolveEntityAttack, onSetWebUnsupported, onSelectWebIgnitionCell, onActivateSymbol, onSetHutIllumination, onDelete, onClose }: {
+  map?: BattleMap
   area?: Dnd5ePluginArea
   sourceName?: string
   /** DM-facing labels for Host-captured cast-time trigger exemptions. */
   excludedTargetNames?: readonly string[]
   feetPerCell?: number
   currentRound?: number
+  onStoneEscape?: (areaId: string, tokenId: string, push?: boolean) => void
+  onStartWallAttack?: () => void
   onResolveEntityAttack?: (input: {
     areaId: string
+    panelId?: string
     attackTotal: number
     damage: number
+    damageType?: string
   }) => Dnd5ePersistentAreaEntityAttackResult | undefined | Promise<Dnd5ePersistentAreaEntityAttackResult | undefined>
   onSetWebUnsupported?: (areaId: string, unsupported: boolean) => void | Promise<void>
-  onIgniteWebCell?: (areaId: string, cell: { col: number; row: number }) => void | Promise<void>
+  onSelectWebIgnitionCell?: (areaId: string) => void
+  onSetHutIllumination?: (areaId: string, illumination: 'dim' | 'darkness') => void | Promise<void>
+  onActivateSymbol?: (areaId: string) => void | Promise<void>
   onDelete: (areaId: string) => void | Promise<void>
   onClose: () => void
 }) {
+  const [stonePanelId, setStonePanelId] = useState<string>()
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string>()
   const [attackRollA, setAttackRollA] = useState(10)
   const [attackRollB, setAttackRollB] = useState(10)
+  const [wallDamageType, setWallDamageType] = useState('bludgeoning')
   const [attackBonus, setAttackBonus] = useState(0)
   const [damage, setDamage] = useState(1)
   const [settlingAttack, setSettlingAttack] = useState(false)
@@ -165,6 +178,7 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
   const [strengthResult, setStrengthResult] = useState<string>()
   const [settlingWeb, setSettlingWeb] = useState(false)
   const [webResult, setWebResult] = useState<string>()
+  const panelRef = usePersistentAreaPanelAnchor(area, map)
   if (!area) return null
   const columns = area.cells.map((cell) => cell.col)
   const rows = area.cells.map((cell) => cell.row)
@@ -216,7 +230,6 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
   const hallowProtection = hallowProtectionPresentation(area)
   const triggerNotification = area.triggers?.find((trigger) => trigger.notification)?.notification
   const triggerExemptionCount = new Set(area.triggers?.flatMap((trigger) => trigger.excludedTokenIds ?? [])).size
-  const burningWebCellKeys = new Set((area.webState?.burningCells ?? []).map((cell) => `${cell.col}:${cell.row}`))
   const remove = async () => {
     if (deleting || !await showAppConfirm({ title: '删除持续法术', message: `从地图上删除「${area.label}」及其关联实体吗？若它对应施法者当前的专注，该专注也会结束。`, confirmLabel: '确认删除', tone: 'danger' })) return
     setDeleting(true); setError(undefined)
@@ -244,7 +257,7 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
       setSettlingAttack(false)
     }
   }
-  return <div data-testid="dnd5e-persistent-area-detail-panel" className="glass absolute bottom-3 right-3 z-[90] w-[min(320px,calc(100%-1.5rem))] overflow-hidden rounded-2xl border border-orange-300/20 shadow-2xl">
+  return <div ref={panelRef} data-testid="dnd5e-persistent-area-detail-panel" className="glass absolute z-[90] w-[min(320px,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-orange-300/20 shadow-2xl">
     <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-violet-300/35 bg-violet-500/15 text-violet-200"><Sparkles className="h-5 w-5" /></span>
       <div className="min-w-0 flex-1"><h2 className="truncate text-base font-bold text-slate-100">{area.label}</h2><p className="mt-0.5 text-xs text-slate-400">{sourceName ? `施法者：${sourceName}` : '持续法术区域'}</p></div>
@@ -299,6 +312,16 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
           <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2"><dt className="text-slate-500">实体规则</dt><dd className="mt-0.5 font-semibold text-slate-200">力量 {area.entityProfile.strength}{area.entityProfile.dexterity != null ? ` · 敏捷 ${area.entityProfile.dexterity}` : ''} · {area.entityProfile.invisible ? '隐形' : '可见'} · {area.entityProfile.cannotAttack ? '不能独立攻击' : '可以攻击'}</dd></div>
         </> : null}
       </dl>
+      {area.symbol ? <div className="mt-3 rounded-xl border border-violet-300/20 bg-violet-500/10 p-3 text-xs text-violet-100">
+        <p>魔法徽记 · {SYMBOL_LABELS[area.symbol.mode]} · {area.symbol.activated ? '已激活：60 尺微光，持续 10 分钟' : '待触发：由 DM 判断施法时约定的触发条件'}</p>
+        {area.symbol.mode === 'fear' ? <p className="mt-2 text-slate-300">失败者恐慌并丢下持有物，每回合若能移动，应远离徽记至少 30 尺。</p> : area.symbol.mode === 'insanity' ? <p className="mt-2 text-slate-300">失败者无法采取动作、理解语言或正常交流；混乱移动由 DM 控制。</p> : null}
+        {!area.symbol.activated && onActivateSymbol ? <button type="button" disabled={settlingWeb}
+          className="mt-3 w-full rounded-lg bg-violet-500/30 px-3 py-2 disabled:opacity-50"
+          onClick={() => { if (settlingWeb) return; setSettlingWeb(true); setError(undefined)
+            void Promise.resolve(onActivateSymbol(area.id)).catch(cause => setError(cause instanceof Error ? cause.message : '激活失败'))
+              .finally(() => setSettlingWeb(false))
+          }}>{settlingWeb ? '正在激活…' : '激活魔法徽记'}</button> : null}
+      </div> : null}
       {isWeb ? <div className="mt-3 rounded-xl border border-orange-300/20 bg-orange-500/[0.07] p-3">
         <div className="flex items-center gap-2 text-xs font-semibold text-orange-100"><Flame className="h-4 w-4" />蛛网术环境规则</div>
         <p className="mt-2 text-[11px] leading-relaxed text-slate-300">困难地形 ×2 · 轻度遮蔽 · 平面厚 5 尺。无支撑蛛网在施法者下一回合开始时坍塌；被火焰触及的 5 尺立方燃烧 1 轮，进入其中的生物在回合开始时受到 2d4 火焰伤害。</p>
@@ -317,35 +340,23 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
           }}
           className="mt-3 w-full rounded-lg bg-orange-500/15 px-3 py-2 text-xs font-semibold text-orange-100 hover:bg-orange-500/25 disabled:cursor-wait disabled:opacity-50"
         >{area.webState?.unsupportedCollapseAtRound != null ? `恢复支撑（原定第 ${area.webState.unsupportedCollapseAtRound} 轮坍塌）` : '标记为无支撑'}</button> : null}
-        {onIgniteWebCell ? <div className="mt-3">
-          <div className="mb-1.5 text-[11px] text-slate-400">点燃一个 5 尺立方（X, Y）</div>
-          <div className="grid grid-cols-4 gap-1">
-            {[...area.cells].sort((left, right) => left.row - right.row || left.col - right.col).map((cell) => {
-              const key = `${cell.col}:${cell.row}`
-              const burning = burningWebCellKeys.has(key)
-              return <button
-                key={key}
-                type="button"
-                disabled={settlingWeb || burning}
-                aria-label={burning ? `蛛网格 X=${cell.col}, Y=${cell.row} 正在燃烧` : `点燃蛛网格 X=${cell.col}, Y=${cell.row}`}
-                onClick={() => {
-                  if (settlingWeb || burning) return
-                  setSettlingWeb(true); setError(undefined); setWebResult(undefined)
-                  void Promise.resolve(onIgniteWebCell(area.id, cell)).then(() => {
-                    setWebResult(`已点燃蛛网格 X=${cell.col}, Y=${cell.row}；将在当前生物下一回合开始结算 2d4 火焰伤害后燃尽。`)
-                  }).catch((cause) => setError(cause instanceof Error ? cause.message : '点燃蛛网失败。'))
-                    .finally(() => setSettlingWeb(false))
-                }}
-                className={`rounded-md border px-1 py-1 text-[10px] ${burning ? 'border-orange-300/50 bg-orange-500/30 text-orange-100' : 'border-white/10 bg-black/20 text-slate-300 hover:bg-orange-500/20'}`}
-              >{burning ? '🔥 ' : ''}{cell.col},{cell.row}</button>
-            })}
-          </div>
+        {onSelectWebIgnitionCell ? <div className="mt-3">
+          <button type="button" disabled={settlingWeb}
+            className="w-full rounded-lg border border-orange-300/40 bg-orange-500/20 px-3 py-2 text-orange-100 hover:bg-orange-500/30 disabled:opacity-50"
+            onClick={() => onSelectWebIgnitionCell(area.id)}>在地图上选择点燃位置</button>
+          <p className="mt-2 text-[11px] text-slate-400">移动鼠标预览要点燃的格子，点击点燃。每次选择一个 5 尺立方。</p>
         </div> : null}
         {webResult ? <p role="status" className="mt-2 text-xs text-orange-100">{webResult}</p> : null}
       </div> : null}
       {area.illuminationOverride ? <div className="mt-3 rounded-xl border border-violet-300/20 bg-violet-500/[0.07] p-3 text-xs">
         <span className="text-slate-500">内部光照</span>
         <strong className="ml-2 text-violet-100">{area.illuminationOverride === 'dim' ? '微光' : '黑暗'}</strong>
+        {area.coreSpellId === 'tiny-hut' && onSetHutIllumination && <button type="button"
+          className="ml-3 rounded border border-violet-300/40 px-2 py-1" disabled={settlingWeb}
+          onClick={() => { setSettlingWeb(true); void Promise.resolve(onSetHutIllumination(area.id, area.illuminationOverride === 'dim' ? 'darkness' : 'dim'))
+            .catch(cause => setError(String(cause))).finally(() => setSettlingWeb(false)) }}>
+          切换为{area.illuminationOverride === 'dim' ? '黑暗' : '微光'}
+        </button>}
       </div> : null}
       {area.minorIllusion ? <div className="mt-3 rounded-xl border border-violet-300/20 bg-violet-500/[0.07] p-3">
         <div className="text-xs font-semibold text-violet-100">次级幻影声明</div>
@@ -357,6 +368,45 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, sourceName, exclu
             <div><dt className="text-slate-500">方式</dt><dd className="mt-0.5 text-slate-200">{{ continuous: '连续', intermittent: '间歇', discrete: '若干离散声音' }[area.minorIllusion.soundPattern!]}</dd></div>
           </> : <div><dt className="text-slate-500">感官限制</dt><dd className="mt-0.5 text-slate-200">无声音、光、气味或其他感官效果；物理互动会直接揭示幻象。</dd></div>}
         </dl>
+      </div> : null}
+      {map && onStoneEscape && map.tokens.filter(token => wallOverlapsCreature(map, area, token)).map(token => <button
+        key={`wall-push-${token.id}`} type="button" className="mt-2 block rounded bg-cyan-500/20 px-3 py-2 text-sm"
+        onClick={() => onStoneEscape(area.id, token.id, true)}>{token.label}：选择推到墙的一侧（不消耗反应）</button>)}
+      {area.coreSpellId === 'wall-of-force' && <div className="mt-3 rounded-xl border border-violet-300/30 bg-violet-500/10 p-3 text-sm">
+        <strong>力场墙 · 免疫所有伤害</strong><p>普通攻击不能破坏它，解除魔法无效；解离术可以直接摧毁整面力场墙。</p>
+      </div>}
+      {area.stoneWall && onResolveEntityAttack ? <div className="mt-3 rounded-xl border border-amber-300/30 bg-amber-500/10 p-3 space-y-2">
+        <strong>{area.label}墙段 · AC {wallArmorClass(area)}</strong>
+        {onStartWallAttack && area.stoneWall.panels.some(p => p.hitPoints > 0) && <button type="button" className="block rounded bg-amber-500/20 px-3 py-2" onClick={onStartWallAttack}>用当前角色的武器攻击</button>}
+        {area.stoneWall.escapes?.filter(e => e.status === 'ready' && area.createdRound === currentRound).map(e => <button
+          key={e.tokenId} type="button" className="block rounded bg-cyan-500/20 px-2 py-1" onClick={() => onStoneEscape?.(area.id, e.tokenId)}>
+          {map?.tokens.find(t => t.id === e.tokenId)?.label ?? '生物'}：选择反应逃离位置
+        </button>)}
+        <select aria-label="选择石墙墙段" value={stonePanelId ?? area.stoneWall.panels.find(p => p.hitPoints > 0)?.id}
+          onChange={event => setStonePanelId(event.target.value)} className="w-full rounded bg-slate-900 p-2">
+          {area.stoneWall.panels.map((panel, index) => <option key={panel.id} value={panel.id} disabled={panel.hitPoints === 0}>
+            第 {index + 1} 段 · {panel.hitPoints}/{panel.maxHitPoints} HP{panel.hitPoints === 0 ? '（已击破）' : ''}
+          </option>)}
+        </select>
+        <p className="text-xs text-slate-300">选择角色的武器攻击后，可直接点击地图墙段进行攻击。</p>
+        <details><summary className="cursor-pointer text-sm text-slate-400">DM 手动调整</summary>
+        {area.coreSpellId === 'wall-of-ice' && <label className="block">伤害类型<select value={wallDamageType} onChange={e => setWallDamageType(e.target.value)} className="ml-2 bg-slate-900">
+          <option value="bludgeoning">普通伤害</option><option value="fire">火焰（易伤 ×2）</option><option value="cold">冷冻</option><option value="poison">毒素（免疫）</option><option value="psychic">心灵（免疫）</option>
+        </select></label>}
+        <label className="block">攻击总值<input aria-label="石墙攻击总值" type="number" value={attackBonus} onChange={e => setAttackBonus(Number(e.target.value))} className="ml-2 w-20 bg-black/30" /></label>
+        <label className="block">伤害<input aria-label="石墙伤害" type="number" min={1} value={damage} onChange={e => setDamage(Number(e.target.value))} className="ml-2 w-20 bg-black/30" /></label>
+        <button type="button" disabled={settlingAttack} className="rounded bg-amber-500/20 px-3 py-2" onClick={async () => {
+          const panel = area.stoneWall!.panels.find(p => p.id === stonePanelId && p.hitPoints > 0) ?? area.stoneWall!.panels.find(p => p.hitPoints > 0)
+          if (!panel) return
+          setSettlingAttack(true)
+          try {
+            const result = await onResolveEntityAttack({ areaId: area.id, panelId: panel.id, attackTotal: attackBonus, damage, damageType: wallDamageType })
+            setAttackResult(!result ? '结算失败，请检查输入。' : result.outcome === 'miss' ? `未命中（AC ${wallArmorClass(area)}）` : result.outcome === 'destroyed' ? area.coreSpellId === 'wall-of-ice' ? '该段已击破，缺口留下寒冷气幕。' : '该段已击破，缺口已开放。' : `该段剩余 ${result.hitPointsAfter} HP`)
+            if (result?.outcome === 'destroyed') setStonePanelId(undefined)
+          } catch { setAttackResult('结算失败，请重试。') } finally { setSettlingAttack(false) }
+        }}>结算墙段攻击</button>
+        {attackResult && <p>{attackResult}</p>}</details>
+        <p className="text-xs text-slate-400">{area.coreSpellId === 'wall-of-ice' ? '击破后可以穿过缺口；每回合首次穿过寒冷气幕需要体质豁免。气幕持续至本法术结束。' : '地图编号对应墙段；击破只移除该段，不会结束其他墙段的专注。'}</p>
       </div> : null}
       {area.entityProfile && onResolveEntityAttack ? <div className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-500/[0.06] p-3">
         <div className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Crosshair className="h-4 w-4" />对法术实体结算攻击</div>

@@ -1,0 +1,292 @@
+[
+  {
+    "file": "src/components/diceBoxFrameVisibility.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/components/DiceOverlayPortal.test.tsx",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/voice/voiceChanger.test.ts",
+    "status": "passed",
+    "tests": 6
+  },
+  {
+    "file": "src/voice/voiceFloatingDock.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/lib/diceEngineSettling.test.ts",
+    "status": "failed",
+    "tests": 4
+  },
+  {
+    "file": "src/lib/diceFrameLayout.test.ts",
+    "status": "passed",
+    "tests": 7
+  },
+  {
+    "file": "src/lib/diceFrameValues.test.ts",
+    "status": "passed",
+    "tests": 1
+  },
+  {
+    "file": "src/lib/diceNotation.test.ts",
+    "status": "passed",
+    "tests": 14
+  },
+  {
+    "file": "src/lib/diceOverlayShared.test.ts",
+    "status": "passed",
+    "tests": 7
+  },
+  {
+    "file": "src/lib/dicePhysicalReroll.test.ts",
+    "status": "failed",
+    "tests": 2
+  },
+  {
+    "file": "src/lib/diceThrowMotion.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/localVoiceConfigStore.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/pdfCampaignAnalysis.test.ts",
+    "status": "passed",
+    "tests": 22
+  },
+  {
+    "file": "src/lib/pdfCampaignAnalysisFinalizer.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/lib/pdfCampaignAnalysisMigration.test.ts",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/lib/pdfCampaignEventDeduplication.test.ts",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/lib/pdfCampaignTimeline.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/pdfDocumentChunker.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/pdfKnowledgeIdentity.test.ts",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/lib/pdfOcrPipeline.test.ts",
+    "status": "passed",
+    "tests": 5
+  },
+  {
+    "file": "src/lib/pdfPersonDeduplication.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/pdfReaderExperience.test.ts",
+    "status": "passed",
+    "tests": 5
+  },
+  {
+    "file": "src/lib/pdfSourceEvidence.test.ts",
+    "status": "passed",
+    "tests": 8
+  },
+  {
+    "file": "src/lib/pdfSourceRepository.test.ts",
+    "status": "passed",
+    "tests": 8
+  },
+  {
+    "file": "src/lib/pdfSplitViewController.test.ts",
+    "status": "passed",
+    "tests": 1
+  },
+  {
+    "file": "src/lib/serverStoragePorts.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/sharedDiceSync.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/lib/sharedServerCore.test.ts",
+    "status": "passed",
+    "tests": 169
+  },
+  {
+    "file": "src/lib/voiceAccessToken.test.ts",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/components/dm/PdfCampaignAnalysisEditor.test.tsx",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/components/dm/pdfCampaignAnalysisEditorModel.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/components/dm/PdfCampaignKnowledgeBase.test.tsx",
+    "status": "passed",
+    "tests": 11
+  },
+  {
+    "file": "src/components/dm/pdfCampaignKnowledgeBaseModel.test.ts",
+    "status": "passed",
+    "tests": 5
+  },
+  {
+    "file": "src/components/dm/PdfRelationshipGraph.test.ts",
+    "status": "passed",
+    "tests": 6
+  },
+  {
+    "file": "src/components/dm/pdfSourceBookmarkModel.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/components/dm/PdfSourceEvidenceDrawer.test.tsx",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/components/dm/PdfSplitViewPanel.test.tsx",
+    "status": "passed",
+    "tests": 6
+  },
+  {
+    "file": "src/components/map/MapDiceRoller.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/components/map/mapFreeDiceRoll.test.ts",
+    "status": "passed",
+    "tests": 9
+  },
+  {
+    "file": "src/components/map/SecretDiceOverrideOverlay.test.ts",
+    "status": "passed",
+    "tests": 1
+  },
+  {
+    "file": "src/pages/maps/diceOwnership.test.ts",
+    "status": "failed",
+    "tests": 2
+  },
+  {
+    "file": "src/pages/maps/dicePresentationGate.test.ts",
+    "status": "passed",
+    "tests": 5
+  },
+  {
+    "file": "src/pages/maps/playerDiceRoll.test.ts",
+    "status": "passed",
+    "tests": 13
+  },
+  {
+    "file": "src/pages/maps/playerDiceRollRecovery.test.ts",
+    "status": "passed",
+    "tests": 1
+  },
+  {
+    "file": "src/presentation/maps/ActiveDiceRollStatus.test.tsx",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/presentation/maps/diceCheckCueLedger.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/presentation/maps/diceCheckOutcome.test.ts",
+    "status": "passed",
+    "tests": 5
+  },
+  {
+    "file": "src/presentation/maps/diceCheckPresentation.test.ts",
+    "status": "passed",
+    "tests": 8
+  },
+  {
+    "file": "src/presentation/maps/dicePoolCheckpoint.test.ts",
+    "status": "passed",
+    "tests": 1
+  },
+  {
+    "file": "src/presentation/maps/DicePresentationDrawer.test.ts",
+    "status": "passed",
+    "tests": 13
+  },
+  {
+    "file": "src/presentation/maps/dicePreviewQueue.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/presentation/maps/diceResultFormula.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/presentation/maps/diceTrayHistory.test.tsx",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/presentation/maps/dmDiceConfirmationQueue.test.ts",
+    "status": "passed",
+    "tests": 3
+  },
+  {
+    "file": "src/presentation/maps/roomDiceDismissal.test.ts",
+    "status": "passed",
+    "tests": 2
+  },
+  {
+    "file": "src/presentation/maps/roomDiceFeed.test.ts",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/rulesets/dnd5e/combatScenarioRegression.test.ts",
+    "status": "passed",
+    "tests": 4
+  },
+  {
+    "file": "src/rulesets/dnd5e/pluginDice.test.ts",
+    "status": "passed",
+    "tests": 5
+  }
+]

@@ -11,6 +11,13 @@ import {
 } from './spellNarrativeResolution'
 
 describe('voice narrative object spell policy', () => {
+  it('keeps Arcane Lock on the door/password transaction', () => {
+    expect(dnd5eSpellUsesNarrativeResolution('arcane-lock', dnd5eSrdAuditedSpellActivityV1('arcane-lock'))).toBe(false)
+  })
+  it('keeps Sequester on the targeted effect and action settlement route', () => {
+    expect(dnd5eSpellUsesNarrativeResolution('sequester')).toBe(false)
+    expect(dnd5eSpellUsesNarrativeObjectResolution('sequester', dnd5eSrdAuditedSpellActivityV1('sequester'))).toBe(false)
+  })
   it('routes Prestidigitation directly as an action-only narrative cantrip', () => {
     expect(dnd5eSpellUsesActionOnlyNarrativeResolution('prestidigitation')).toBe(true)
     expect(dnd5eSpellUsesNarrativeResolution('prestidigitation')).toBe(true)
@@ -18,7 +25,6 @@ describe('voice narrative object spell policy', () => {
   })
 
   it.each([
-    'arcane-lock',
     'arcanists-magic-aura',
     'demiplane',
     'knock',
@@ -28,7 +34,6 @@ describe('voice narrative object spell policy', () => {
     'illusory-script',
     'magic-mouth',
     'passwall',
-    'sequester',
   ])('routes %s away from map and inventory object automation', (spellId) => {
     expect(dnd5eSpellUsesNarrativeObjectResolution(spellId)).toBe(true)
   })
@@ -97,8 +102,8 @@ describe('voice narrative object spell policy', () => {
     'commune',
     'commune-with-nature',
     'divination',
-    'speak-with-animals',
-    'speak-with-dead',
+    'scrying',
+  'sending',
   ])('routes %s through voice conversation without a DM approval interrupt', (spellId) => {
     expect(dnd5eSpellUsesNarrativeObjectResolution(spellId)).toBe(false)
     expect(dnd5eSpellUsesNarrativeConversationResolution(spellId)).toBe(true)

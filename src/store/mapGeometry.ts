@@ -75,7 +75,8 @@ function publish(state: Pick<MapGeometryStoreState, 'maps'>): void {
   }
   void saveSharedResourceWithResult(MAP_GEOMETRY_RESOURCE, payload)
     .then((result) => {
-      sharedWriteWatermark.settle(ticket, result.status === 'saved')
+      const settled = sharedWriteWatermark.settle(ticket, result.status === 'saved', result.status === 'saved' ? result.revision : undefined)
+      if (settled && result.status !== 'saved') void useMapGeometryStore.getState().loadShared()
     })
     .catch((error) => {
       sharedWriteWatermark.settle(ticket, false)
@@ -195,16 +196,31 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
       historyByMapId: {},
       futureByMapId: {},
       loadShared: async () => {
-        const shared = await loadSharedResource<SharedMapGeometryState>(MAP_GEOMETRY_RESOURCE)
+        const shared = await loadSharedResource<SharedMapGeometryState & { _sync?: { revision?: number } }>(MAP_GEOMETRY_RESOURCE)
         const normalized = normalizeSharedMapGeometry(shared)
         if (!normalized) {
           if (canWriteSharedState() && get().maps.length > 0) publish(get())
           return
         }
-        if (!sharedWriteWatermark.shouldApplyRemote(normalized.updatedAt)) return
-        sharedWriteWatermark.acceptRemote(normalized.updatedAt)
+        if (!sharedWriteWatermark.shouldApplyRemote(normalized.updatedAt, shared?._sync?.revision)) return
+        sharedWriteWatermark.acceptRemote(normalized.updatedAt, shared?._sync?.revision)
         setMapGeometryRuntime(normalized.maps)
-        set({ maps: normalized.maps, historyByMapId: {}, futureByMapId: {} })
+        set((state) => {
+          // A server echo only changes the envelope timestamp; keep undo/redo
+          // for those maps, but discard it when another writer changes content.
+          const unchangedIds = new Set(normalized.maps.filter(remote => {
+            const local = state.maps.find(map => map.mapId === remote.mapId)
+            if (!local) return false
+            const canonicalLocal = normalizeMapGeometry(local)
+            return canonicalLocal && JSON.stringify({ ...canonicalLocal, updatedAt: 0 }) ===
+              JSON.stringify({ ...remote, updatedAt: 0 })
+          }).map(map => map.mapId))
+          return {
+            maps: normalized.maps,
+            historyByMapId: Object.fromEntries(Object.entries(state.historyByMapId).filter(([mapId]) => unchangedIds.has(mapId))),
+            futureByMapId: Object.fromEntries(Object.entries(state.futureByMapId).filter(([mapId]) => unchangedIds.has(mapId))),
+          }
+        })
         if (canWriteSharedState() && shared?.schemaVersion !== MAP_GEOMETRY_SCHEMA_VERSION) publish(get())
       },
       selectEntity: (selectedEntityId) => set({ selectedEntityId }),

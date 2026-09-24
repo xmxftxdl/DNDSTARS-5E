@@ -35,8 +35,9 @@ export function buildPlayerActionAck(input: BuildPlayerActionAckInput): SharedPl
 
   return {
     id: `${input.action.id}:ack:${input.appliedAt}`,
-    mapId: input.mapId,
-    combatId: input.combatId,
+    // The authority host may be viewing another scene after a portal transfer.
+    mapId: input.action.mapId,
+    combatId: input.action.combatId,
     actionId: input.action.id,
     ...(input.action.roomMemberId ? { recipientMemberId: input.action.roomMemberId } : {}),
     status: input.status,

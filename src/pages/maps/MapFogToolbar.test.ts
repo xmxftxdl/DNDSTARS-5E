@@ -16,6 +16,7 @@ function render(overrides: Partial<Props> = {}) {
     previewAsPlayer: false,
     onEditModeChange: vi.fn(),
     onToolChange: vi.fn(),
+    onMagicalDarkness: vi.fn(),
     onFill: vi.fn(),
     onClear: vi.fn(),
     onUndo: vi.fn(),
@@ -28,6 +29,20 @@ function render(overrides: Partial<Props> = {}) {
 }
 
 describe('地图战争迷雾工具栏', () => {
+  it('切换魔法黑暗后仍显示勾选项、绘制和已有区域删除入口', () => {
+    const html = render({
+      editMode: true,
+      magicalDarkness: true,
+      darknessRegions: [{ id: 'darkness-1', label: '魔法黑暗' }],
+    })
+    expect(html).toContain('type="checkbox" checked=""')
+    expect(html).not.toContain('绘制矩形')
+    expect(html.match(/<option/g)).toHaveLength(9)
+    expect(html).toContain('删除魔法黑暗 1')
+    expect(html).toContain('全遮')
+    expect(html).toContain('清空全图迷雾')
+  })
+
   it('非编辑状态只显示入口，不暴露绘制和破坏性操作', () => {
     const html = render()
     expect(html).toContain('迷雾')

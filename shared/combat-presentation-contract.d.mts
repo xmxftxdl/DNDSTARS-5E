@@ -109,6 +109,7 @@ export type CombatPresentationAreaSpellId =
   | 'call-lightning-strike'
   | 'insect-plague'
   | 'stinking-cloud'
+  | 'reverse-gravity'
   | 'cloudkill'
   | 'fog-cloud'
   | 'silence'

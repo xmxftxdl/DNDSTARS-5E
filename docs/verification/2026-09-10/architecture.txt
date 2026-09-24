@@ -1,0 +1,2 @@
+Architecture audit failed:
+- MapsWorkspacePage.tsx line budget exceeded: 41394 > 41294

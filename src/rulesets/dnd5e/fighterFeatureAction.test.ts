@@ -1,3 +1,4 @@
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
@@ -55,6 +56,16 @@ describe('D&D 5e fighter feature authority', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.characters[0].classResources?.[FIGHTER_RESOURCE_KEYS.actionSurge]).toEqual({ current: 0, max: 1 })
     expect(prepareDnd5eFighterFeature({ ...input, characters: [input.actor], actionSurgeAlreadyUsed: true })).toEqual({ ok: false, reason: 'feature-already-used' })
+  })
+
+  it('rejects Second Wind before requesting dice when Slow has consumed the action choice', () => {
+    const input = fixture('second-wind')
+    input.map.tokens[0].dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({
+      definitionId: 'spell:slow', label: 'Slow', targetId: 'fighter-token', source: { kind: 'spell' }, modifiers: { actionOrBonusActionOnly: true },
+    })] }
+    const economy = spendDnd5eTurnResource(createDnd5eTurnEconomyCounts('turn'), 'action').economy
+    expect(prepareDnd5eFighterFeature({ ...input, characters: [input.actor], actionSurgeAlreadyUsed: false, turnEconomy: economy }))
+      .toEqual({ ok: false, reason: 'bonus-action-unavailable' })
   })
 
   it('rejects Second Wind after the bonus action is spent', () => {

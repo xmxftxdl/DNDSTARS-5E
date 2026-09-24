@@ -28,14 +28,14 @@ const WIZARD_PORTRAIT_PALETTE = {
 
 describe('map Token spell-portrait flow frame', () => {
   it('connects the Konva renderer to the shared frame contract', () => {
-    const source = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     expect(source).toContain('export default function MapCanvas')
     expect(source).toContain("from './tokenBorderFlow'")
   })
 
   it('moves the portrait, class ring and status overlays from one map-level clock', () => {
-    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
-    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8')
+    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const borderAnimation = canvasSource.slice(
       canvasSource.indexOf('useStatusAnimation('),
       canvasSource.indexOf('const effectTokenAreaOverlayNodesRef'),
@@ -104,8 +104,8 @@ describe('map Token spell-portrait flow frame', () => {
   })
 
   it('uses the complete LOG-style gradient without a separate dashed segment', () => {
-    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8')
-    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const ringComponent = tokenNodeSource.slice(
       tokenNodeSource.indexOf('export function TokenBorderFlowRing'),
       tokenNodeSource.indexOf('export function TokenMovementPathLine'),
@@ -126,8 +126,8 @@ describe('map Token spell-portrait flow frame', () => {
   })
 
   it('renders the full ring above portraits while keeping status and interactions above it', () => {
-    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
-    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8')
+    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    const tokenNodeSource = readFileSync(new URL('./MapTokenNode.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const backgroundLayer = canvasSource.indexOf('name="map-background-layer"')
     const tokenBodyLayer = canvasSource.indexOf('name="token-body-layer"')
     const borderFlowLayer = canvasSource.indexOf('name="token-border-flow-layer"')
@@ -141,7 +141,7 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenForegroundLayer).toBeGreaterThan(borderFlowLayer)
     expect(tokenStatusContent).toBeGreaterThan(tokenForegroundLayer)
     expect(interactionOverlayContent).toBeGreaterThan(tokenStatusContent)
-    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(6)
+    expect(canvasSource.match(/<Layer(?:\s|>)/g)).toHaveLength(7)
     expect(tokenNodeSource).toContain('const hasPresentationBorder = !!borderColor && !defeated')
     expect(tokenNodeSource).toContain('const bodyStrokeWidth = hasPresentationBorder ? 0 : baseStrokeW')
     expect(tokenNodeSource).toContain('const portraitClipInset = hasPresentationBorder ? 0')
@@ -152,8 +152,20 @@ describe('map Token spell-portrait flow frame', () => {
     expect(tokenNodeSource).not.toContain('<PoisonCloud')
   })
 
+  it('keeps drag paths and range previews off the retained background layer', () => {
+    const source = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const retainedBackground = source.slice(source.indexOf('const backgroundLayer = useMemo'), source.indexOf('const inv = 1 / view.scale'))
+    const groundOverlay = source.slice(source.indexOf('<Layer name="map-ground-overlay-layer"'), source.indexOf('<Layer name="token-body-layer"'))
+    expect(retainedBackground).toContain('<KonvaImage')
+    expect(retainedBackground).not.toContain('map.tokens')
+    expect(retainedBackground).not.toContain('dragPreviewPositions')
+    expect(groundOverlay).not.toContain('<KonvaImage')
+    expect(groundOverlay).toContain('<TokenMovementPathLine')
+    expect(groundOverlay).toContain('<AoeCellHighlights')
+  })
+
   it('isolates player fog compositing from world lighting', () => {
-    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8')
+    const canvasSource = readFileSync(new URL('./MapCanvas.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const worldOverlayLayer = canvasSource.indexOf('name="map-world-overlay-layer"')
     const visibilityMaskLayer = canvasSource.indexOf('name="map-visibility-mask-layer"')
     const worldOverlaySource = canvasSource.slice(worldOverlayLayer, visibilityMaskLayer)
@@ -169,7 +181,7 @@ describe('map Token spell-portrait flow frame', () => {
   })
 
   it('does not accidentally throttle a requested 60 fps animation to 30 fps', () => {
-    const source = readFileSync(new URL('./mapEffectHooks.ts', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('./mapEffectHooks.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     expect(source).toContain('fps > 0 && fps < 60 ? 1000 / fps : 0')
     expect(source).toContain('minDelta > 0 && time - lastRender < minDelta) return false')
   })

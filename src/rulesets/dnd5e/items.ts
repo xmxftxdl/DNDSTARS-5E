@@ -13,6 +13,8 @@ import type {
   Dnd5eInventoryResourceState,
 } from '../../types/inventory'
 import { DND5E_INVENTORY_SCHEMA_VERSION } from '../../types/inventory'
+import { healDnd5eInventoryTarget } from './inventoryHealing'
+import { dnd5eInventoryPassiveEffects } from './inventoryPassiveEffects'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import { equipmentSlotAcceptsItemSlot, isEquipmentSlot } from '../../lib/equipmentDefaults'
 import { dnd5eActiveCarryingCapacityMultiplier } from './activeEffects'
@@ -30,7 +32,7 @@ import {
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
 import { DND5E_SRD_CLASS_DEFINITIONS, dnd5eClassDefinition, dnd5eIgnoresMagicItemRequirements } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
-import { projectDnd5eActiveEffectState } from './activeEffects'
+import { projectDnd5eActiveEffectState, createDnd5eMechanicalEffect, createDnd5eConditionEffect, applyDnd5eActiveEffect, normalizeDnd5eActiveEffects, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 import { dnd5eRageFeatureCarryingCapacityMultiplier } from './rageFeature'
 import { DND5E_SRD_SPELL_MATERIAL_ITEM_TEMPLATES } from './spellMaterials'
 import type { Dnd5eActivityCapabilityProposal } from './activities/dnd5eActivityExecutor'
@@ -314,7 +316,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('prayer-wheel', '经轮', 'Prayer wheel', 'adventuring-gear', 'generic', 0, 0, 'cp', '侍僧背景使用的宗教器物。'),
   gear('coin-pouch-15gp', '钱袋（15 gp）', 'Pouch containing 15 gp', 'container', 'generic', 1, 15, 'gp', '侍僧背景携带的钱袋；其中金币由角色与 DM 共同记账。'),
   gear('healers-kit', '医疗包', "Healer's kit", 'tool', 'healers-kit', 3, 5, 'gp', '共有 10 次使用次数。可用一个动作消耗 1 次，在无需进行感知（医药）检定的情况下稳定一名 0 生命值生物。', {
-    economy: 'action', consumeQuantity: 0, chargesPerItem: 10, effect: { kind: 'dm-adjudication', adjudication: '选择 0 生命值生物并将其稳定；权威库存自动扣除医疗包的一次使用次数。' },
+    economy: 'action', consumeQuantity: 0, chargesPerItem: 10, targeting: { kind: 'creature', rangeFeet: 5, includeSelf: false }, effect: { kind: 'stabilize' },
   }),
   gear('ball-bearings-bag', '滚珠（袋装）', 'Ball bearings (bag of 1,000)', 'consumable', 'ball-bearings', 2, 1, 'gp', '用一个动作洒满相邻 10 尺见方区域。穿过区域的生物通常需通过 DC 10 敏捷豁免，否则倒地；以半速移动可免除该豁免。', {
     economy: 'action', consumeQuantity: 1,
@@ -341,7 +343,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
     economy: 'action', consumeQuantity: 1, targeting: { kind: 'creature', rangeFeet: 20 }, effect: { kind: 'dm-adjudication', adjudication: '选择泼洒或投掷目标；仅对邪魔或亡灵结算 2d6 光耀伤害。' },
   }, undefined, { tags: ['holy-water'], unitValueGp: 25 }),
   gear('antitoxin-vial', '抗毒剂（瓶）', 'Antitoxin (vial)', 'consumable', 'antitoxin', 0, 50, 'gp', '饮用后 1 小时内，对抗毒素的豁免检定具有优势；构装生物与亡灵无法获得该增益。', {
-    economy: 'action', consumeQuantity: 1, effect: { kind: 'dm-adjudication', adjudication: '为饮用者添加持续 1 小时的抗毒优势；构装生物与亡灵不生效。' },
+    economy: 'action', consumeQuantity: 1, effect: { kind: 'active-effect', durationRounds: 600, modifiers: { poisonSavingThrowAdvantage: true } },
   }),
   gear('basic-poison-vial', '基础毒药（瓶）', 'Poison, basic (vial)', 'consumable', 'poison', 0, 100, 'gp', '用一个动作涂在一件挥砍或穿刺武器、或至多三枚弹药上。1 分钟内首次命中时，目标进行 DC 10 体质豁免，失败额外受到 1d4 毒素伤害。', {
     economy: 'action', consumeQuantity: 1, effect: { kind: 'dm-adjudication', adjudication: '选择武器或至多三枚弹药，建立 1 分钟毒药效果，并在首次命中时处理 DC 10 体质豁免与 1d4 毒素伤害。' },
@@ -1819,14 +1821,9 @@ function applyDnd5eInventoryMutationInternal(
       return failed(characters, 'invalid-rolls')
     }
     healingRolled = rolls.reduce((sum, roll) => sum + roll, bonus)
-    healingApplied = Math.min(healingRolled, Math.max(0, target.maxHp - target.currentHp))
-    nextTarget = {
-      ...target,
-      currentHp: Math.min(target.maxHp, target.currentHp + healingRolled),
-      dnd5eCombatState: healingApplied > 0 && (target.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) > 0
-        ? { ...target.dnd5eCombatState, caltropsSpeedPenaltyFeet: undefined }
-        : target.dnd5eCombatState,
-    }
+    const healed = healDnd5eInventoryTarget(target, healingRolled)
+    healingApplied = healed.applied
+    nextTarget = healed.character
     if (targetIndex === sourceIndex) nextSource = nextTarget
   } else if (use.effect.kind === 'spell-slot-recovery') {
     if (targetIndex !== sourceIndex) return failed(characters, 'invalid-target')
@@ -1849,6 +1846,30 @@ function applyDnd5eInventoryMutationInternal(
         [resourceKey]: { ...resource, current: resource.current + spellSlotsRecovered },
       },
     }
+    nextTarget = nextSource
+  } else if (use.effect.kind === 'stabilize') {
+    if (target.currentHp !== 0 || (target.deathSaveFailures ?? 0) >= 3) return failed(characters, 'invalid-target')
+    nextTarget = { ...target, deathSaveSuccesses: 0, deathSaveFailures: 0, deathSaveStable: true }
+    if (targetIndex === sourceIndex) nextSource = nextTarget
+  } else if (use.effect.kind === 'active-effect') {
+    if (targetIndex !== sourceIndex || source.currentHp <= 0) return failed(characters, 'invalid-target')
+    const declaration = use.effect
+    const definitionId = `${entry.item.id}:use-effect`
+    const config = {
+      id: `${definitionId}:${source.id}`, definitionId, label: entry.item.name,
+      source: { kind: 'item' as const, actorId: source.id, label: entry.item.name, rulesId: entry.item.id, magical: !!entry.item.magicItem },
+      targetId: source.id, duration: { type: 'rounds' as const, remainingRounds: declaration.durationRounds, tickOn: 'target-turn-end' as const },
+      modifiers: declaration.modifiers, breakOn: declaration.breakOn,
+      stackingKey: definitionId, stackingPolicy: 'refresh-duration' as const,
+    }
+    const effect = declaration.condition
+      ? createDnd5eConditionEffect({ ...config, condition: declaration.condition })
+      : createDnd5eMechanicalEffect({ ...config, kind: 'buff' })
+    const applied = applyDnd5eActiveEffect({ effects: normalizeDnd5eActiveEffects(source.dnd5eCombatState?.activeEffects), incoming: effect })
+    const projection = projectDnd5eActiveEffectState(applied.effects)
+    nextSource = { ...source, conditions: [...new Set([...source.conditions ?? [], ...projection.conditions])], dnd5eCombatState: {
+      ...source.dnd5eCombatState, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: projection.activeEffects,
+    } }
     nextTarget = nextSource
   } else if (use.effect.kind === 'spell-cast') {
     // Item spells must use dnd5e-spell-cast so targeting, range, visibility,
@@ -2519,5 +2540,12 @@ function failed(characters: readonly Character[], reason: NonNullable<Dnd5eInven
 }
 
 function succeeded(characters: readonly Character[], message: string): Dnd5eInventoryMutationResult {
-  return { ok: true, characters: [...characters], message }
+  return { ok: true, characters: characters.map(character => {
+    const hasProjection = character.dnd5eCombatState?.activeEffects?.some(effect => effect.id.startsWith('inventory-equipped-passive:'))
+    const hasDeclaration = character.dnd5eInventory?.entries.some(entry => entry.item.headlessEffects?.some(effect => effect.kind === 'equipped-passive'))
+    if (!hasProjection && !hasDeclaration) return character
+    return { ...character, dnd5eCombatState: { ...character.dnd5eCombatState,
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: dnd5eInventoryPassiveEffects(character),
+    } }
+  }), message }
 }

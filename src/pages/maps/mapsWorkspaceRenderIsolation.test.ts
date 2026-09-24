@@ -23,6 +23,22 @@ const panelsLayerSource = readFileSync(
 )
 
 describe('MapsWorkspacePage render isolation', () => {
+  it('finishes Prismatic Spray animation before requesting Activity dice', () => {
+    const branch = workspaceSource.slice(
+      workspaceSource.indexOf('const pluginCast = preparedPluginSpell.prepared'),
+      workspaceSource.indexOf('const settledPluginSpell = pluginSettlement.settled'),
+    )
+    expect(branch).toContain("spellAnimationsEnabled && pluginCast.spell.id === 'prismatic-spray'")
+    expect(branch).toContain('areaAnchorCell: pluginCast.payload.areaTargetCell')
+    expect(branch).toContain('await publishAreaSpellPresentation(presentation)')
+    const publish = branch.indexOf('await publishAreaSpellPresentation')
+    const wait = branch.indexOf('schedule.completesAt - combatPresentationServerNow()', publish)
+    const roll = branch.indexOf('await executeDnd5ePluginDiceRolls')
+    expect(publish).toBeGreaterThan(branch.indexOf('activity-target-missing'))
+    expect(wait).toBeGreaterThan(publish)
+    expect(wait).toBeLessThan(roll)
+    expect(branch.match(/await publishAreaSpellPresentation/g)).toHaveLength(1)
+  })
   it('keeps countdown and tabletop clocks outside the workspace parent', () => {
     expect(workspaceSource).toContain('const mapTabletopState = useMapTabletopState()')
     expect(workspaceSource).not.toContain('sharedDodgeNow')
@@ -106,9 +122,10 @@ describe('MapsWorkspacePage render isolation', () => {
 
   it('opens character details from map and initiative portraits without routing initiative clicks through movement', () => {
     expect(workspaceSource).toContain('const openTokenDetails = (tokenId: string) =>')
+    expect(workspaceSource).not.toContain('setMapToolsOpen(false)')
     expect(workspaceSource).toContain('if (playerCombatLocked && !dnd5eSpellTargeting) {\n      openTokenDetails(tokenId)')
     expect(workspaceSource).toContain('onInitiativeSelect={openTokenDetails}')
-    expect(workspaceSource).toContain('onSelect={openTokenDetails}')
+    expect(workspaceSource).toContain('openTokenDetails(tokenId)')
     expect(workspaceSource).not.toContain('onInitiativeSelect={handleSelectToken}')
   })
 
@@ -121,7 +138,7 @@ describe('MapsWorkspacePage render isolation', () => {
       monsterAttackFlowStart,
     )
     const attackD20Roll = workspaceSource.indexOf(
-      'let d20 = tranquility.passed',
+      'let [d20, d20Second] = tranquility.passed',
       attackDecoyPrecheck,
     )
     const onHitRiderRolls = workspaceSource.indexOf(
@@ -209,9 +226,15 @@ describe('MapsWorkspacePage render isolation', () => {
   it('offers an accessible creature picker for persistent-area granted Activities', () => {
     expect(workspaceSource).toContain('data-testid="persistent-area-activity-target-picker"')
     expect(workspaceSource).toContain('dnd5ePersistentAreaActivityTargeting.label')
-    expect(workspaceSource).toContain('data-testid={`persistent-area-activity-target-${target.id}`}')
-    expect(workspaceSource).toContain('onClick={() => void handleSelectToken(target.id)}')
-    expect(workspaceSource).toContain('距离、目标合法性、行动资源与授予来源仍由 Host 权威校验。')
+    expect(workspaceSource).toContain('点击地图上的生物目标')
+    expect(workspaceSource).toContain('className="map-combat-action-bar border-emerald-300/30"')
+    expect(workspaceSource).toContain('onClick={() => setDnd5ePersistentAreaActivityTargeting(null)}')
+  })
+
+  it('uses the shared bottom action bar for manual monster target selection', () => {
+    expect(workspaceSource).toContain('data-testid="manual-monster-attack-targeting-bar"')
+    expect(workspaceSource).toContain('activeManualMonsterAttackTargeting.actionName} · 点击地图上的目标')
+    expect(workspaceSource).toContain('onClick={() => setDnd5eManualMonsterAttackTargeting(null)}')
   })
 
   it('keeps the remaining character dock panels available during post-combat exploration', () => {
@@ -369,7 +392,7 @@ describe('MapsWorkspacePage render isolation', () => {
   })
 
   it('opens the dedicated player quick sheet while preserving the DM character detail panel', () => {
-    expect(workspaceSource).toContain("const PlayerQuickCharacterSheet = lazy(() => import('../components/map/PlayerQuickCharacterSheet'))")
+    expect(readFileSync(new URL('../mapsWorkspaceComposition.tsx', import.meta.url), 'utf8')).toContain("const PlayerQuickCharacterSheet = lazy(() => import('../components/map/PlayerQuickCharacterSheet'))")
     expect(workspaceSource).toContain('isDM ? (')
     expect(workspaceSource).toContain('<MapWorkspaceCharacterDetailPanel')
     expect(workspaceSource).toContain('<PlayerQuickCharacterSheet')

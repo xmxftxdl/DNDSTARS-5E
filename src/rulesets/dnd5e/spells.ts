@@ -490,7 +490,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60,
     target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 600, maximumTargets: 100, areaIncludesSelf: true,
-    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, gridAligned: true },
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60, rotatable: true },
     description: '在射程内创造20尺立方蛛网区域，持续至多1小时并需要专注。区域轻度遮蔽且属于困难地形；进入或在其中开始回合的生物进行敏捷豁免，失败被束缚，并可用动作进行力量检定挣脱。蛛网支撑与燃烧由DM裁定。',
   },
   {
@@ -670,7 +670,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     dice: { count: 0, sides: 4, bonus: 0 },
     concentration: true, concentrationDurationRounds: 10,
     maximumTargets: 6, areaIncludesSelf: true,
-    area: { shape: 'rect', origin: 'point', widthFeet: 40, heightFeet: 40, placeRangeFeet: 120 },
+    area: { shape: 'rect', origin: 'point', widthFeet: 40, heightFeet: 40, placeRangeFeet: 120, rotatable: true },
     onFailedSaveEffect: 'slow',
     description: '选择射程内一处40尺立方区域中的至多六个生物。每个目标进行感知豁免；失败者的速度减半，AC与敏捷豁免承受−2减值，无法使用反应，且在其回合中只能使用一个动作或一个附赠动作。无论具有多少次攻击或能力，目标在其回合中都不能进行超过一次近战或远程攻击。目标在自己每个回合结束时重复豁免，成功则结束其身上的效果。需要专注，持续至多1分钟。',
   },

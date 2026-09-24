@@ -1,0 +1,57 @@
+[WebServer] (node:10736) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:18248) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:18372) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\large-dice.spec.ts:22:1 › 20d6 free roll renders every die and mirrors all 20 values to DM (38.1s)
+
+
+  1) e2e\large-dice.spec.ts:22:1 › 20d6 free roll renders every die and mirrors all 20 values to DM 
+
+    Error: expect(received).toMatchObject(expected)
+
+    - Expected  - 1
+    + Received  + 0
+
+      Object {
+    -   "fallback": false,
+        "values": Any<Array>,
+      }
+
+    Call Log:
+    - Timeout 30000ms exceeded while waiting on the predicate
+
+      14 | async function physicalResult(page: Page, count: number) {
+      15 |   await expect.poll(() => page.evaluate(() => (window as TestWindow).largeDiceMessages.at(-1)), { timeout: 30000 })
+    > 16 |     .toMatchObject({ values: expect.any(Array), fallback: false })
+         |      ^
+      17 |   const result = await page.evaluate(() => (window as TestWindow).largeDiceMessages.at(-1)!)
+      18 |   expect(result.values).toHaveLength(count)
+      19 |   return result.values!
+        at physicalResult (C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice.spec.ts:16:6)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice.spec.ts:37:16
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\large-dice-20d6-free-roll--8b6aa-mirrors-all-20-values-to-DM\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\large-dice.spec.ts:22:1 › 20d6 free roll renders every die and mirrors all 20 values to DM ─

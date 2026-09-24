@@ -5,10 +5,19 @@ import {
   normalizeTokenMovementAnimation,
   tokenMovementAnimationForObservation,
   tokenMovementAnimationPosition,
+  tokenMovementAnimationOwnsPosition,
   truncateTokenMovementPath,
 } from './tokenMovementAnimation'
 
 describe('token movement path animation', () => {
+  it('releases position ownership after completion or a newer destination', () => {
+    const animation = { id: 'first', points: [{ x: 0, y: 0 }, { x: 50, y: 0 }], issuedAt: 1000, durationMs: 500 }
+    expect(tokenMovementAnimationOwnsPosition(animation, { x: 50, y: 0 }, 900)).toBe(true)
+    expect(tokenMovementAnimationOwnsPosition(animation, { x: 50, y: 0 }, 1200)).toBe(true)
+    expect(tokenMovementAnimationOwnsPosition(animation, { x: 50, y: 0 }, 1500)).toBe(false)
+    expect(tokenMovementAnimationOwnsPosition(animation, { x: 100, y: 0 }, 1200)).toBe(false)
+    expect(tokenMovementAnimationOwnsPosition(undefined, { x: 50, y: 0 }, 1200)).toBe(false)
+  })
   it('interpolates across each path segment by traveled distance', () => {
     const animation = createTokenMovementAnimation({
       id: 'move',

@@ -1,3 +1,6 @@
+import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
+import { dnd5eClassDefinition } from '../classes'
+import { getDnd5eSrdMonster } from '../monsters'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../conditions'
 import { SKILLS } from '../../../lib/dnd'
 import { dnd5eCombatantCanHearSource } from '../audibility'
@@ -163,6 +166,7 @@ function actorSnapshot(
     // long-lived granted Activities.  Reconstruct the casting ability modifier
     // from DC = 8 + proficiency + ability modifier so formulas such as Arcane
     // Hand's push distance and squeeze damage remain available after the cast.
+    spellcastingAbility: (combatant.classId ? dnd5eClassDefinition(combatant.classId)?.spellcasting?.ability : undefined) ?? (combatant.statBlockId ? getDnd5eSrdMonster(combatant.statBlockId)?.spellcasting?.ability : undefined),
     spellcastingAbilityModifier: combatant.saveDc == null
       ? undefined
       : combatant.saveDc - 8 - combatant.proficiencyBonus,
@@ -345,7 +349,7 @@ export function compileDnd5eActivityHeadlessAction(
     perTargetRolls: targetChecks.flatMap((check) => check.kind === 'opposed-ability-check'
       ? [{
           id: check.rollId,
-          label: `${activity.name} · 发起方${check.sourceAbility.toUpperCase()}检定`,
+          label: `${activity.name} · 发起方${check.sourceAbility === 'spellcasting' ? '施法属性' : check.sourceAbility.toUpperCase()}检定`,
           count: check.sourceRollMode === 'advantage' || check.sourceRollMode === 'disadvantage' ||
             check.sourceRollMode === 'host-derived' || check.sourceRollModeByTargetSizeRank != null ? 2 : 1,
           sides: 20, modifier: 0, visibility: 'public' as const,
@@ -426,7 +430,7 @@ export function compileDnd5eActivityHeadlessAction(
                 return [
                   ...(check.sourceRollMode === 'host-derived'
                     ? [[`${check.id}:${target.id}:source`, dnd5eAbilityCheckRollMode(context.actor, {
-                        ability: check.sourceAbility,
+                        ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, actorSnapshot(context.actor, context.actor)),
                       })] as const]
                     : []),
                   ...(check.targetRollMode === 'host-derived'

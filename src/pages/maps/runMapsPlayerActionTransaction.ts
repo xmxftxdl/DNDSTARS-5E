@@ -23,6 +23,7 @@ export interface RunMapsPlayerActionTransactionInput {
  */
 export function mapsPlayerActionAuthorityFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : ''
+  if (message === 'combat-dice-cancelled') return 'combat-action-cancelled'
   const diagnostic = message.match(
     /(?:combat-command|state-transaction|shared-state-transaction|authoritative-resource-save-rejected)[a-z0-9:._-]*/i,
   )?.[0]

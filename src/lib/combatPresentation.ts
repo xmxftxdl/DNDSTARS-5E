@@ -1,3 +1,4 @@
+import { createCombatPresentationReplayFilter } from './combatBannerReplay'
 import {
   publishSharedEvent as publishSharedTransportEvent,
   sampleSharedServerClock,
@@ -54,6 +55,7 @@ export const SHATTER_ANIMATION_DURATION_MS = 1_100
 export const LIGHTNING_BOLT_ANIMATION_DURATION_MS = 1_150
 export const BLIGHT_ANIMATION_DURATION_MS = 1_200
 export const FLAME_STRIKE_ANIMATION_DURATION_MS = 1_300
+export const SUNBEAM_ANIMATION_DURATION_MS = 1_800
 export const SUNBURST_ANIMATION_DURATION_MS = 1_350
 export const CONE_OF_COLD_ANIMATION_DURATION_MS = 1_250
 export const CIRCLE_OF_DEATH_ANIMATION_DURATION_MS = 1_300
@@ -235,6 +237,7 @@ const COMBAT_PRESENTATION_ANIMATION_DURATION_BY_SPELL: Readonly<Record<string, n
   'power-word-stun': POWER_WORD_STUN_ANIMATION_DURATION_MS,
   'power-word-kill': POWER_WORD_KILL_ANIMATION_DURATION_MS,
   'flame-strike': FLAME_STRIKE_ANIMATION_DURATION_MS,
+  sunbeam: SUNBEAM_ANIMATION_DURATION_MS,
   sunburst: SUNBURST_ANIMATION_DURATION_MS,
   'cone-of-cold': CONE_OF_COLD_ANIMATION_DURATION_MS,
   'circle-of-death': CIRCLE_OF_DEATH_ANIMATION_DURATION_MS,
@@ -263,6 +266,7 @@ const COMBAT_PRESENTATION_ANIMATION_DURATION_BY_SPELL: Readonly<Record<string, n
   'stinking-cloud': STINKING_CLOUD_ANIMATION_DURATION_MS,
   'wall-of-fire': WALL_OF_FIRE_ANIMATION_DURATION_MS,
   'blade-barrier': BLADE_BARRIER_ANIMATION_DURATION_MS,
+  'reverse-gravity': 1800,
   cloudkill: CLOUDKILL_ANIMATION_DURATION_MS,
   'fog-cloud': FOG_CLOUD_ANIMATION_DURATION_MS,
   silence: SILENCE_ANIMATION_DURATION_MS,
@@ -327,6 +331,8 @@ const localCombatPresentationListeners = new Set<(event: unknown) => void>()
  * 发布端立即投影表现事件，随后再交给共享事件流同步至其他客户端。
  * 服务器 SSE 会把同一事件回送给发布端；表现 reducer 依靠稳定事件 ID 去重。
  */
+const acceptPublishedPresentation = createCombatPresentationReplayFilter(() => window.sessionStorage, 'published')
+
 async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
   if (channel === COMBAT_PRESENTATION_CHANNEL) {
     const type = data && typeof data === 'object' && 'type' in data
@@ -345,6 +351,7 @@ async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
     ) return
   }
   if (channel === COMBAT_PRESENTATION_CHANNEL) {
+    if (!acceptPublishedPresentation(data)) return
     for (const listener of [...localCombatPresentationListeners]) listener(data)
   }
   await publishSharedTransportEvent(channel, data)
@@ -640,6 +647,7 @@ export interface CombatPresentationMapProjectile {
     | 'shatter'
     | 'lightning-bolt'
     | 'flame-strike'
+    | 'sunbeam'
     | 'sunburst'
     | 'cone-of-cold'
     | 'circle-of-death'
@@ -715,6 +723,7 @@ export interface CombatPresentationMapProjectile {
     | 'minor-illusion'
     | 'thaumaturgy'
     | 'shillelagh'
+    | 'reverse-gravity'
     | 'cloudkill'
     | 'fog-cloud'
     | 'silence'
@@ -1043,7 +1052,7 @@ export function combatPresentationProjectilesForMap(
     // reaches the map. Ignore legacy/in-flight events from older clients too.
     if (
       event.type === 'spell-area-effect' &&
-      (event.spellId === 'grease' || event.spellId === 'fog-cloud')
+      (event.spellId === 'grease' || event.spellId === 'fog-cloud' || event.spellId === 'wall-of-force' || event.spellId === 'wall-of-stone' || event.spellId === 'wall-of-ice')
     ) return []
     const animationDuration = combatPresentationAnimationDuration(event.spellId)
     const animationStartsAt = event.type === 'spell-area-projectile'
@@ -2329,7 +2338,7 @@ export async function publishAreaSpellPresentation(input: {
   const createdAt = combatPresentationServerNow()
   // Fog Cloud begins directly in its mature persistent state. Publishing and
   // awaiting a separate cast-in atlas caused the same cloud to appear twice.
-  if (input.spellId === 'fog-cloud') return { completesAt: createdAt }
+  if (input.spellId === 'fog-cloud' || input.spellId === 'wall-of-force' || input.spellId === 'wall-of-stone' || input.spellId === 'wall-of-ice') return { completesAt: createdAt }
   const duration = combatPresentationAnimationDuration(input.spellId)
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
     schemaVersion: 1,

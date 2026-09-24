@@ -33,7 +33,7 @@ describe('PdfSplitViewPanel', () => {
     )
     expect(html).toContain('data-continuous-pages="true"')
     expect(html).toContain('data-zoom-percent="100"')
-    expect(html).toContain('cursor-grab')
+    expect(html).toContain('cursor-text')
     expect(html).toContain('overflow-auto')
     expect(html).toContain('overscroll-contain')
     expect(html).toContain('data-pdf-continuous-page="1"')

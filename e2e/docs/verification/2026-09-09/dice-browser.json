@@ -1,0 +1,134 @@
+{
+  "config": {
+    "argv": [
+      "D:\\study\\Nodejs\\node.exe",
+      "C:\\Users\\Doco\\Desktop\\DND\\DNDSTARS-5E\\node_modules\\.pnpm\\@playwright+test@1.61.1\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config",
+      "e2e/dice-verification.config.ts",
+      "reverse-gravity.spec.ts"
+    ],
+    "configFile": "C:\\Users\\Doco\\Desktop\\DND\\DNDSTARS-5E\\e2e\\dice-verification.config.ts",
+    "rootDir": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/e2e/test-results/dice-verification",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "C:/Users/Doco/Desktop/DND/DNDSTARS-5E/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "reverse-gravity.spec.ts",
+          "concurrent-checks.spec.ts",
+          "large-dice.spec.ts",
+          "dice-pair.spec.ts",
+          "dm-dice-correction.spec.ts",
+          "dice-tray-persistence.spec.ts",
+          "room-dice.spec.ts",
+          "player-roll-prompt.spec.ts"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "docs/verification/2026-09-09/dice-browser.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "cwd": "C:\\Users\\Doco\\Desktop\\DND\\DNDSTARS-5E",
+      "command": "npx vite preview --config e2e/dice-verification.vite.ts --host 127.0.0.1 --port 6373 --strictPort",
+      "url": "http://127.0.0.1:6373/e2e/fixtures/dice-queue.html",
+      "timeout": 90000
+    }
+  },
+  "suites": [
+    {
+      "title": "reverse-gravity.spec.ts",
+      "file": "reverse-gravity.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "reverse gravity draws a rising area and fades without renderer errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 28898,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-11T03:37:33.764Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0afe55b7ad325d52b273-a3c58f821470499aa955",
+          "file": "reverse-gravity.spec.ts",
+          "line": 3,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-11T03:37:31.188Z",
+    "duration": 62136.198000000004,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

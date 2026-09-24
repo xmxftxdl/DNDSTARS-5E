@@ -6,6 +6,18 @@ import type { PendingPlayerActionLock } from '../../lib/playerActionSync'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 
+export function playerSpellActionBlockedMessage(input: {
+  combatActive: boolean
+  combatFlowPaused: boolean
+  authorityReady: boolean
+  pendingAction: boolean
+}): string {
+  if (input.combatActive && input.combatFlowPaused) return '战斗已暂停，请等待 DM 继续战斗后再施法。'
+  if (input.combatActive && !input.authorityReady) return '正在等待 DM 同步战斗状态，请稍后再施法。'
+  if (input.pendingAction) return '上一项行动尚未处理完成，请等待结算或由 DM 取消后再施法。'
+  return input.combatActive ? '战斗中只有轮到该角色时才能开始施法。' : '当前角色或地图 Token 不可用于施法。'
+}
+
 export function resolvePlayerSpellActionSubmission(input: {
   activeMap?: BattleMap
   mode?: 'dm' | 'player' | null

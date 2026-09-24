@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles, Trash2, Eye, Dices, PackageOpen, ArrowUp } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -43,6 +43,7 @@ interface CharacterDetailPanelProps {
   }) => void | Promise<unknown>
   onAdjustHitPoints?: (operation: ManualSettlementOperation, amount: number) => void | Promise<unknown>
   isDM?: boolean
+  afterConditions?: ReactNode
   canManageConditions?: boolean
   /** Effective union from the linked character and its map token. */
   conditionActiveEffects?: readonly Dnd5eActiveEffectInstance[]
@@ -60,6 +61,8 @@ interface CharacterDetailPanelProps {
   onRepairSimulacrum?: (hitPoints: number) => void | Promise<unknown>
   onRemoveFromMap?: () => void | Promise<void>
   onClose: () => void
+  embedded?: boolean
+  view?: 'all' | 'data' | 'status'
 }
 
 export default function CharacterDetailPanel({
@@ -68,6 +71,7 @@ export default function CharacterDetailPanel({
   onSetHitPoints,
   onAdjustHitPoints,
   isDM = false,
+  afterConditions,
   canManageConditions = false,
   conditionActiveEffects,
   onConditionsChange,
@@ -77,6 +81,8 @@ export default function CharacterDetailPanel({
   onRepairSimulacrum,
   onRemoveFromMap,
   onClose,
+  embedded = false,
+  view = 'all',
 }: CharacterDetailPanelProps) {
   const portrait = resolveMapTokenPortrait(character, token)
   const tempHp = character.tempHp ?? 0
@@ -390,7 +396,9 @@ export default function CharacterDetailPanel({
     <div
       data-testid="character-detail-panel"
       data-defeated={defeated || undefined}
-      className="glass absolute bottom-3 left-3 z-[120] flex max-h-[min(820px,calc(100%-3rem))] w-[min(520px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl"
+      className={embedded
+        ? 'flex h-full w-full flex-col overflow-hidden bg-void-950/70'
+        : 'glass absolute bottom-3 left-3 z-[120] flex max-h-[min(820px,calc(100%-3rem))] w-[min(520px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl'}
     >
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
@@ -434,7 +442,7 @@ export default function CharacterDetailPanel({
             </div>
           ) : null}
         </div>
-        <button
+        {!embedded && <button
           type="button"
           data-testid="close-character-detail"
           aria-label="关闭角色详情"
@@ -453,10 +461,11 @@ export default function CharacterDetailPanel({
           title="关闭"
         >
           <X className="h-4 w-4" />
-        </button>
+        </button>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {view !== 'data' && <>
         <section className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-rose-200">
             <HeartPulse className="h-3.5 w-3.5" />
@@ -530,6 +539,7 @@ export default function CharacterDetailPanel({
           {simulacrum ? (
             <p className="mt-2 text-[10px] leading-4 text-violet-100/75">
               拟像不能通过治疗或休息恢复生命值；普通生命值编辑只能造成伤害。降至 0 HP 时会化为雪并离场。
+              法术位独立消耗且不能恢复，等级与法术能力固定为创造时的副本。轮到拟像时，使用底部行动栏操作；与施法者沿用同一先攻，各自消耗动作和资源。
             </p>
           ) : null}
         </section>
@@ -580,6 +590,8 @@ export default function CharacterDetailPanel({
           </section>
         ) : null}
 
+        </>}
+        {view !== 'status' && <>
         <div data-testid="character-detail-combat-summary" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
             <Shield className="h-4 w-4 text-sky-400" />
@@ -705,6 +717,8 @@ export default function CharacterDetailPanel({
           </div>
         </section>}
 
+        </>}
+        {view !== 'data' && <>
         {canManageConditions && onConditionsChange ? (
           <div className="mt-4">
             <Dnd5eConditionEditor
@@ -722,6 +736,7 @@ export default function CharacterDetailPanel({
             <Dnd5eConditionTags conditions={character.conditions} />
           </section>
         ) : null}
+        {afterConditions}
 
         {character.dnd5eCombatState?.resurrectionPenalty ? (
           <section className="mt-4 rounded-xl border border-amber-300/20 bg-amber-400/[0.06] p-3" data-testid="dnd5e-resurrection-penalty">
@@ -834,6 +849,7 @@ export default function CharacterDetailPanel({
             </button>
           </section>
         ) : null}
+        </>}
       </div>
     </div>
   )

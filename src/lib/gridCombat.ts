@@ -386,13 +386,16 @@ export function resolveFreeDropCell(
   snapY: number,
   movingTokenId: string,
   map: BattleMap,
+  occupiedAt?: (position: { x: number; y: number }) => Set<string>,
 ): { x: number; y: number } {
   const blocked = occupiedCells(map.tokens, map, movingTokenId)
   const movingToken = map.tokens.find((t) => t.id === movingTokenId) ?? ({ size: 1 } as Token)
   const target = tokenAnchorCellFromPixel(snapX, snapY, movingToken, map)
-  const canOccupy = (anchor: GridCell) =>
-    isFootprintInsideMap(movingToken, anchor, map) &&
-    tokenFootprintCellsForAnchor(movingToken, anchor).every((cell) => !blocked.has(cellKey(cell)))
+  const canOccupy = (anchor: GridCell) => {
+    const occupied = occupiedAt?.(tokenCenterForAnchorCell(anchor, movingToken, map)) ?? blocked
+    return isFootprintInsideMap(movingToken, anchor, map) &&
+      tokenFootprintCellsForAnchor(movingToken, anchor).every((cell) => !occupied.has(cellKey(cell)))
+  }
   if (canOccupy(target)) return tokenCenterForAnchorCell(target, movingToken, map)
   // 环形扩散搜索最近空格（切比雪夫距离逐环外扩）
   for (let ring = 1; ring <= 8; ring++) {

@@ -2,6 +2,31 @@ import { describe, expect, it } from 'vitest'
 import { createSharedWriteWatermark } from './sharedWriteWatermark'
 
 describe('shared write watermark', () => {
+  it('accepts restored content with an older timestamp and a newer server revision', () => {
+    const watermark = createSharedWriteWatermark()
+    watermark.acceptRemote(200, 10)
+    expect(watermark.shouldApplyRemote(100, 11)).toBe(true)
+    watermark.acceptRemote(100, 11)
+    expect(watermark.shouldApplyRemote(300, 10)).toBe(false)
+    expect(watermark.shouldApplyRemote(100, 11)).toBe(true)
+  })
+
+  it('waits for a pending save to settle before applying restored content', () => {
+    const watermark = createSharedWriteWatermark()
+    watermark.acceptRemote(200, 10)
+    const ticket = watermark.begin(300)
+    expect(watermark.shouldApplyRemote(100, 11)).toBe(false)
+    watermark.settle(ticket, false)
+    expect(watermark.shouldApplyRemote(100, 11)).toBe(true)
+  })
+
+  it('rejects snapshots older than an acknowledged local server revision', () => {
+    const watermark = createSharedWriteWatermark()
+    const ticket = watermark.begin(200)
+    watermark.settle(ticket, true, 12)
+    expect(watermark.shouldApplyRemote(300, 11)).toBe(false)
+    expect(watermark.shouldApplyRemote(100, 13)).toBe(true)
+  })
   it('blocks an older remote snapshot while a local write is pending', () => {
     const watermark = createSharedWriteWatermark(10)
     watermark.begin(20)

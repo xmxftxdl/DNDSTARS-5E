@@ -15,7 +15,7 @@ import {
 import { ServerObservability } from './server-observability.mjs'
 import { loadArtAssetPack, serveArtAsset } from './art-asset-server.mjs'
 import { createSharedServerContext } from './shared-server-context.mjs'
-import { createPlayerAiServiceFromPersistedConfig } from './player-ai-service.mjs'
+import { startOptionalPlayerAi } from './optional-player-ai.mjs'
 import { staticCacheControl } from './static-cache-policy.mjs'
 
 const args = new Map()
@@ -138,7 +138,7 @@ const securityConfig = validateProductionSecurityConfig()
 if (!securityConfig.ok) {
   throw new Error(`Unsafe production configuration:\n- ${securityConfig.errors.join('\n- ')}`)
 }
-const playerAi = await createPlayerAiServiceFromPersistedConfig()
+const playerAi = await startOptionalPlayerAi()
 // /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只保留静态回退。
 const apiCtx = createSharedServerContext({
   sharedRoot,

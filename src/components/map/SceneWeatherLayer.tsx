@@ -13,6 +13,7 @@ import {
 } from '../../lib/sceneWeatherAudio'
 
 interface SceneWeatherLayerProps {
+  shelteredCircles?: readonly { x: number; y: number; radius: number }[]
   sceneId: string
   weather: SceneWeatherConfig
   mapWidth: number
@@ -127,9 +128,16 @@ export default function SceneWeatherLayer({
   weather,
   mapWidth,
   mapHeight,
+  shelteredCircles,
 }: SceneWeatherLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioRef = useRef<SceneWeatherAudioHandle | null>(null)
+  const shelteredCirclesRef = useRef(shelteredCircles)
+  // Position snapshots recreate this array (including []). Updating shelter
+  // clipping must not clear the weather canvas or restart its particle phases.
+  useEffect(() => {
+    shelteredCirclesRef.current = shelteredCircles
+  }, [shelteredCircles])
 
   useEffect(() => {
     if (!weather.soundEnabled || !sceneWeatherHasAudio(weather.kind)) return
@@ -702,6 +710,22 @@ export default function SceneWeatherLayer({
       else if (weather.kind === 'sandstorm') drawSandstorm(deltaSeconds)
       else if (weather.kind === 'wind') drawWind(deltaSeconds)
       else if (weather.kind === 'embers') drawEmbers(deltaSeconds)
+      const currentShelters = shelteredCirclesRef.current
+      if (currentShelters?.length) {
+        const mapCanvas = container.parentElement?.querySelector<HTMLElement>('[data-testid="map-canvas"]')
+        const scale = Number(mapCanvas?.dataset.viewportScale ?? 1)
+        const offsetX = Number(mapCanvas?.dataset.viewportX ?? 0)
+        const offsetY = Number(mapCanvas?.dataset.viewportY ?? 0)
+        context.save()
+        context.globalCompositeOperation = 'destination-out'
+        context.globalAlpha = 1
+        for (const circle of currentShelters) {
+          context.beginPath()
+          context.arc(offsetX + circle.x * scale, offsetY + circle.y * scale, circle.radius * scale, 0, Math.PI * 2)
+          context.fill()
+        }
+        context.restore()
+      }
     }
 
     const handleVisibility = () => {

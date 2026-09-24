@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { createDnd5eCombatant, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { dnd5eSrdAuditedSpellActivityV1 } from './activities/dnd5eSrdAuditedSpellActivities'
 
 const abilities = { str: 14, dex: 14, con: 14, int: 10, wis: 12, cha: 10 } as const
 
@@ -14,6 +15,49 @@ function combatant(id: string, initiative: number, patch = {}) {
 }
 
 describe('ActiveEffectInstance Headless 生命周期', () => {
+  it.each([
+    ['caster', 'source', 'player', false, false, 0, true],
+    ['companion', 'attacker', 'player', false, false, 0, true],
+    ['unrelated enemy', 'attacker', 'dm', false, false, 0, false],
+    ['miss', 'source', 'player', true, false, 0, false],
+    ['immune target', 'source', 'player', false, true, 0, false],
+    ['temporary hit points', 'attacker', 'player', false, false, 10, true],
+  ] as const)('ends Suggestion only after damage from its caster or companions: %s',
+    (_label, attackerId, controller, miss, immune, temporaryHp, shouldEnd) => {
+      const definition = dnd5eSrdAuditedSpellActivityV1('suggestion')!.effects!.find((effect) => effect.id === 'suggestion')!
+      const effect = createDnd5eMechanicalEffect({
+        definitionId: 'activity:suggestion:suggestion', label: definition.name, targetId: 'target',
+        source: { kind: 'spell', actorId: 'source', rulesId: 'suggestion' },
+        duration: { type: 'concentration', sourceActorId: 'source', concentrationId: 'suggestion', remainingRounds: 4800 },
+        removal: { sourceLink: definition.sourceLink },
+      })
+      const source = combatant('source', attackerId === 'source' ? 30 : 10, {
+        concentrating: true,
+        classState: { concentrationSpellId: 'suggestion', concentrationTargetIds: ['target'], concentrationRoundsRemaining: 4800 },
+      })
+      const target = combatant('target', 5, {
+        controller: 'dm', position: { x: 5, y: 0 }, temporaryHp,
+        damageImmunities: immune ? ['fire'] : [],
+        classState: { activeEffects: [effect], concentrationEffectsBySource: { source: 'suggestion' } },
+      })
+      const state = startDnd5eHeadlessCombat('suggestion-damage', [source, target,
+        ...(attackerId === 'source' ? [] : [combatant(attackerId, 30, { controller })]),
+      ])
+      const result = resolveDnd5eHeadlessAction(state, {
+        type: 'attack', actorId: attackerId, targetId: 'target', attackModifier: 8, d20: miss ? 1 : 15,
+        damage: { count: 1, sides: 4, bonus: 0, rolls: [2], type: 'fire' },
+      })
+      expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+      if (!result.ok) return
+      expect(result.state.combatants.target.classState.activeEffects?.some((entry) => entry.id === effect.id) ?? false).toBe(!shouldEnd)
+      expect(result.state.combatants.source.concentrating).toBe(!shouldEnd)
+      expect(result.events.some((event) => event.type === 'active-effect-removed' && event.effectId === effect.id)).toBe(shouldEnd)
+      if (shouldEnd) {
+        expect(result.state.combatants.source.classState.concentrationSpellId).toBeUndefined()
+        expect(result.state.combatants.target.classState.concentrationEffectsBySource?.source).toBeUndefined()
+      }
+    })
+
   it('enforces charmed and frightened restrictions against their actual effect source', () => {
     const charmed = createDnd5eConditionEffect({
       condition: 'charmed', targetId: 'actor', source: { kind: 'spell', actorId: 'source', rulesId: 'charm-person' },

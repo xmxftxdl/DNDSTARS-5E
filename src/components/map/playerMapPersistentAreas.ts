@@ -16,24 +16,24 @@ import {
 import { DND5E_SRD_AUDITED_SPELL_PACKAGE_ID } from '../../rulesets/dnd5e/activities/dnd5eSrdAuditedSpellActivities'
 import {
   collectDnd5ePersistentAreaTriggers,
-  dnd5eFirstGreaseMovementCheckpoint,
-  type Dnd5eGreaseMovementCheckpoint,
+  dnd5eFirstAreaMovementCheckpoint,
+  type Dnd5eAreaMovementCheckpoint,
 } from '../../rulesets/dnd5e/pluginAreas'
 
 /**
- * Player movement is submitted to the Host, but an on-enter Grease save can
+ * Player movement is submitted to the Host, but a Grease or Web entry save can
  * take long enough to open a remote roll prompt before the final ACK snapshot
  * reaches the player. Detect that specific post-move trigger from the same
  * authoritative path so the player can project the movement animation first.
  */
-export function playerMovementFirstGreaseCheckpoint(input: {
+export function playerMovementFirstAreaCheckpoint(input: {
   map: BattleMap
   token: BattleMap['tokens'][number]
   to: { x: number; y: number }
   path: readonly { x: number; y: number }[]
   pathElevationsFeet?: readonly number[]
   round: number
-}): Dnd5eGreaseMovementCheckpoint | undefined {
+}): Dnd5eAreaMovementCheckpoint | undefined {
   const candidates = collectDnd5ePersistentAreaTriggers({
     map: input.map,
     timing: 'on-enter',
@@ -46,17 +46,17 @@ export function playerMovementFirstGreaseCheckpoint(input: {
       pathElevationsFeet: input.pathElevationsFeet,
     },
   })
-  return dnd5eFirstGreaseMovementCheckpoint({
+  return dnd5eFirstAreaMovementCheckpoint({
     map: input.map,
     token: input.token,
     candidates,
   })
 }
 
-export function playerMovementEntersGrease(
-  input: Parameters<typeof playerMovementFirstGreaseCheckpoint>[0],
+export function playerMovementEntersStoppingArea(
+  input: Parameters<typeof playerMovementFirstAreaCheckpoint>[0],
 ): boolean {
-  return playerMovementFirstGreaseCheckpoint(input) != null
+  return playerMovementFirstAreaCheckpoint(input) != null
 }
 
 export function playerMapMovablePersistentAreas(map: BattleMap, character: Character) {

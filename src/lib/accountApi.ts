@@ -45,6 +45,7 @@ export interface AccountProfile {
   contactChannel?: 'email' | 'phone'
   contactLabel?: string
   pluginAdmin?: boolean
+  storageAdmin?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -759,4 +760,12 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-request-failed': '账号操作失败，请稍后重试。',
   }
   return messages[code] ?? messages['account-request-failed']
+}
+
+export interface AccountStorageUsage { plan: 'basic' | 'upgraded'; limitBytes: number; usedBytes: number; assetCount: number }
+export function loadAccountStorage(): Promise<AccountStorageUsage> {
+  return accountRequest<AccountStorageUsage>('/accounts/me/storage', { method: 'GET' })
+}
+export function updateAccountStorage(accountId: string, input: { plan: 'basic' | 'upgraded'; quotaBytes: number | null }): Promise<{ plan: string; limitBytes: number }> {
+  return accountRequest(`/accounts/admin/storage/${encodeURIComponent(accountId)}`, { method: 'PUT', body: JSON.stringify(input) })
 }

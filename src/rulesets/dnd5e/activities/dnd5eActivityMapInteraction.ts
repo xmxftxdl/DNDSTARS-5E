@@ -1,4 +1,6 @@
+import { createTokenMovementAnimation } from '../../../lib/tokenMovementAnimation'
 import type { InitiativeEntry } from '../../../components/map/InitiativeTracker'
+import { resolveSpellAreaObstruction, spellAreaPointElevation } from '../spellAreaObstruction'
 import {
   cellDistance,
   cellKey,
@@ -15,6 +17,8 @@ import {
   mapGeometryDoorLockState,
   mapGeometryDoorOpenState,
   mapGeometryLineOfSightBlocked,
+  mapGeometryLineOfEffectBlocked,
+  mapGeometryTokenElevation,
   mapGeometryMovementBlocked,
   mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
@@ -219,10 +223,23 @@ export function resolveDnd5eActivityAreaMapSelectionV1(input: {
   const orientFrom = aoeOrientFromCell(template, actorCell, anchorCell, {
     rectRotation: input.rectRotation ?? 0,
   })
-  const cells = cellsForAoe(template, orientFrom, anchorCell)
-  const targetIds = tokensInCells(input.map, input.map.tokens, cells)
+  const rawCells = cellsForAoe(template, orientFrom, anchorCell)
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const aim = cellToPixel(anchorCell, input.map)
+  const elevation = target.origin === 'self' ? mapGeometryTokenElevation(geometry, input.actorToken) : spellAreaPointElevation(geometry, aim)
+  if (target.origin !== 'self' && target.requiresLineOfEffect !== false && mapGeometryLineOfEffectBlocked({ geometry, map: input.map, from: input.actorToken, to: aim, fromElevationFeet: mapGeometryTokenElevation(geometry, input.actorToken), toElevationFeet: elevation })) return undefined
+  if (target.requiresLineOfSight && mapGeometryLineOfSightBlocked({ geometry, map: input.map, from: input.actorToken, to: aim, fromElevationFeet: mapGeometryTokenElevation(geometry, input.actorToken), toElevationFeet: elevation })) return undefined
+  const obstruction = resolveSpellAreaObstruction({
+    spellId: input.activity.authorityBinding?.kind === 'core-spell-transaction' ? input.activity.authorityBinding.spellId : undefined,
+    map: input.map, geometry, cells: rawCells, area: template,
+    origin: template.origin === 'point' ? aim : input.actorToken, elevationFeet: elevation,
+    ignoresWalls: target.requiresLineOfEffect === false,
+  })
+  const cells = obstruction.cells
+  const targetIds = tokensInCells(input.map, input.map.tokens, rawCells)
     .filter((token) => {
       if (token.type === 'obstacle') return false
+      if (!obstruction.affectsToken(token)) return false
       if (token.id === input.actorToken.id && target.includeSelf !== true) return false
       const opposed = areOpposedCombatTokens(input.actorToken, token)
       if (target.relation === 'ally' && opposed) return false
@@ -260,8 +277,9 @@ function validMovementDestination(input: {
   actorToken: Token
   targetToken: Token
   destination: GridCell
-  mode: 'push' | 'pull' | 'teleport'
+  mode: 'push' | 'pull' | 'forced' | 'teleport'
   distanceFeet: number
+  maximumDistanceFromActorFeet?: number
   originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]
   destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]
   requiresLineOfSight?: boolean
@@ -295,6 +313,12 @@ function validMovementDestination(input: {
     .flatMap((token) => tokenOccupiedCellsAt(token, input.map, token))
     .map(cellKey))
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const actorElevation = input.actorToken.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, input.actorToken)
+  const targetElevation = input.targetToken.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, input.targetToken)
+  if (input.maximumDistanceFromActorFeet != null && Math.max(
+    afterActorDistance * Math.max(1, input.map.feetPerCell ?? 5),
+    Math.abs(targetElevation - actorElevation),
+  ) > input.maximumDistanceFromActorFeet) return undefined
   const originIllumination = mapGeometryIlluminationAtPoint({
     geometry, map: input.map, tokens: input.map.tokens,
     point: input.targetToken, elevationFeet: input.targetToken.elevationFeet,
@@ -481,6 +505,7 @@ function validSwapPositions(input: {
 /** Applies map-owned handoffs only after every requested placement is present and valid. */
 export function applyDnd5eActivityMapHandoffsV1(input: {
   map: BattleMap
+  characters?: readonly import('../../../types/character').Character[]
   activity: Dnd5eActivityDefinitionV1
   packageId: string
   actionId: string
@@ -1091,6 +1116,8 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
         hallucinatoryTerrain: proposal.hallucinatoryTerrain
           ? { ...proposal.hallucinatoryTerrain }
           : undefined,
+        symbol: proposal.symbolMode ? { mode: proposal.symbolMode, activated: false } : undefined,
+        hiddenFromPlayers: proposal.symbolMode ? true : undefined,
         programmedIllusion: proposal.programmedIllusion
           ? { ...proposal.programmedIllusion }
           : undefined,
@@ -1219,6 +1246,14 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       dnd5eCombatState: undefined,
       dnd5eSimulacrum: {
         schemaVersion: 1,
+        subjectProfile: (() => {
+          const original = input.characters?.find((character) => character.id === subject.characterId)
+          if (!original) return undefined
+          const { charClass, race, dnd5eRaceId, dnd5eClassChoices, dnd5eFeatIds,
+            dnd5eContentChoices, savingThrows, skills, background } = original
+          return structuredClone({ charClass, race, dnd5eRaceId, dnd5eClassChoices, dnd5eFeatIds,
+            dnd5eContentChoices, savingThrows, skills, background })
+        })(),
         sourceTokenId: actorToken.id,
         subjectTokenId: subject.id,
         sourceCharacterId: actorToken.characterId ?? input.actorId,
@@ -1234,7 +1269,13 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
         creatureType: proposal.creatureType,
         saveDc: proposal.saveDc,
         classLevels: proposal.classLevels ? { ...proposal.classLevels } : undefined,
-        classResources: Object.fromEntries(Object.entries(proposal.resources).map(([id, resource]) => [id, { ...resource }])),
+        classResources: Object.fromEntries(Object.entries(proposal.resources).map(([id, resource]) => {
+          // A self-copy is created after paying for this casting, not with the slot just consumed.
+          const settled = subject.id === actorToken.id
+            ? input.characters?.find((character) => character.id === subject.characterId)?.classResources?.[id]
+            : undefined
+          return [id, { ...resource, current: settled ? Math.min(resource.current, settled.current) : resource.current }]
+        })),
         cannotIncreaseLevel: true,
         cannotRegainSpellSlots: true,
         cannotRegainHitPoints: true,
@@ -1392,6 +1433,17 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       if (!Number.isFinite(toElevationFeet) || toElevationFeet === fromElevationFeet) {
         return { ok: false, reason: 'invalid-movement-placement' }
       }
+      if (proposal.maximumDistanceFromActorFeet != null) {
+        const actorCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, map)
+        const targetCell = tokenAnchorCellFromPixel(target.x, target.y, target, map)
+        const actorElevation = actorToken.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, actorToken)
+        if (Math.max(cellDistance(actorCell, targetCell) * Math.max(1, map.feetPerCell ?? 5),
+          Math.abs(toElevationFeet! - actorElevation)) > proposal.maximumDistanceFromActorFeet ||
+          mapGeometryMovementBlocked({ geometry, map, token: target, to: target,
+            fromElevationFeet, toElevationFeet }).blocked) {
+          return { ok: false, reason: 'invalid-movement-placement' }
+        }
+      }
       map.tokens = map.tokens.map((token) => token.id === target.id
         ? { ...token, elevationFeet: toElevationFeet }
         : token)
@@ -1427,6 +1479,7 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
     const movement = validMovementDestination({
       map, actorToken, targetToken: target, destination,
       mode: proposal.mode, distanceFeet: proposal.distanceFeet,
+      maximumDistanceFromActorFeet: proposal.maximumDistanceFromActorFeet,
       originIllumination: proposal.originIllumination,
       destinationIllumination: proposal.destinationIllumination,
       requiresLineOfSight: proposal.requiresLineOfSight,
@@ -1434,7 +1487,15 @@ export function applyDnd5eActivityMapHandoffsV1(input: {
       directionOriginCell: input.movementOriginCell,
     })
     if (!movement) return { ok: false, reason: 'invalid-movement-placement' }
-    map.tokens = map.tokens.map((token) => token.id === target.id ? { ...token, ...movement.position } : token)
+    const movementAnimation = proposal.mode === 'teleport' ? undefined : createTokenMovementAnimation({
+      id: `${input.actionId}:${proposal.operationId}:${target.id}`,
+      path: movement.path,
+      finalPosition: movement.position,
+      issuedAt: Date.now() + 100,
+    })
+    map.tokens = map.tokens.map((token) => token.id === target.id
+      ? { ...token, ...movement.position, movementAnimation }
+      : token)
     changedTokenIds.push(target.id)
     movementPaths.push({
       operationId: proposal.operationId,

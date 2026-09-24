@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 // FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
 import { DICE_TIMING, parseDiceBoxMessage, resolveFlyOffset } from '../lib/diceOverlayShared'
 import DiceOverlayPortal from './DiceOverlayPortal'
+import { onDiceDocumentHidden } from '../lib/diceVisibility'
 
 const MIN_VISIBLE_ROLL_MS = DICE_TIMING.D20_MIN_VISIBLE_MS
 
@@ -60,6 +61,8 @@ export default function DiceBoxD20Overlay({
     completedRef.current = false
     const startedAt = Date.now()
     let cancelled = false
+    let completionTimer: number | undefined
+    let deliverPending: (() => void) | undefined
     const log = (stage: string, details?: Record<string, unknown>) => {
       console.info('[dice-box-d20-overlay]', {
         requestId,
@@ -79,9 +82,13 @@ export default function DiceBoxD20Overlay({
         MIN_VISIBLE_ROLL_MS - (Date.now() - startedAt),
         Math.max(0, settledHoldMs),
       )
-      window.setTimeout(() => {
+      deliverPending = () => {
+        deliverPending = undefined
+        window.clearTimeout(completionTimer)
         if (!cancelled) onCompleteRef.current(finalValue)
-      }, delay)
+      }
+      if (document.hidden) deliverPending()
+      else completionTimer = window.setTimeout(() => deliverPending?.(), delay)
     }
     const sendRoll = () => {
       if (sentRequestRef.current === requestId) return
@@ -124,8 +131,14 @@ export default function DiceBoxD20Overlay({
       }
     }, 900)
 
+    const unsubscribeVisibility = onDiceDocumentHidden(() => {
+      if (deliverPending) deliverPending()
+      else if (value != null) finish(value)
+    })
     return () => {
       cancelled = true
+      unsubscribeVisibility()
+      window.clearTimeout(completionTimer)
       if (!completedRef.current && sentRequestRef.current === requestId) sentRequestRef.current = null
       window.clearTimeout(timeout)
       window.clearTimeout(retry)

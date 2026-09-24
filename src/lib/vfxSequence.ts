@@ -1,6 +1,7 @@
 import type { MapProjectile } from '../components/map/mapCanvasContracts'
 
 export type VfxRendererKey =
+  | 'sunbeam'
   | 'projectile-arrow'
   | 'fire-projectile'
   | 'ray-of-frost'
@@ -8,6 +9,7 @@ export type VfxRendererKey =
   | 'guidance'
   | 'resistance'
   | 'sanctuary'
+  | 'reverse-gravity'
   | 'new-spell'
   | 'status-spell'
   | 'sacred-flame'
@@ -192,6 +194,7 @@ register('eldritch-blast', ['eldritch-blast'], {
 register('guidance', ['guidance'])
 register('resistance', ['resistance'])
 register('sanctuary', ['sanctuary'])
+register('reverse-gravity', ['reverse-gravity'])
 register('new-spell', [
   'heal', 'mass-cure-wounds', 'mass-heal', 'mass-healing-word',
   'prayer-of-healing', 'dancing-lights', 'minor-illusion', 'thaumaturgy', 'shillelagh',
@@ -226,6 +229,7 @@ register('poison-spray', ['poison-spray'], {
 register('magic-missile', ['magic-missile'], {
   'magic-missile': 'projectile.magic-missile.v1',
 })
+register('sunbeam', ['sunbeam'])
 register('material-projectile', [
   'scorching-ray', 'guiding-bolt', 'acid-arrow', 'chain-lightning',
   'disintegrate', 'healing-word', 'inflict-wounds',

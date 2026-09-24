@@ -362,3 +362,5 @@ export function resolveCombatLogSubject(input: {
     resolution: 'neutral',
   }
 }
+
+export { spellOutcomeSummary } from '../../lib/spellOutcomeSummary'

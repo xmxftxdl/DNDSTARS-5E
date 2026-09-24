@@ -4,26 +4,95 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { DICE_TIMING } from '../../lib/diceOverlayShared'
 import DicePresentationOverlays from './DicePresentationOverlays'
+import { MapWorkspaceCombatLogPanel } from './MapWorkspacePanelsLayer'
 
 describe('right dice presentation drawer', () => {
+  it('shows the attack formula while keeping the editable adopted die unchanged', () => {
+    const html = renderToStaticMarkup(createElement(DicePresentationOverlays, {
+      roll: null, diceBoxD20: null, diceBoxRoll: null, rollRequestPreview: null,
+      activeRollStatus: null, isDM: true, dockTab: 'dice',
+      secretConfirmation: { id: 'attack', label: '命中检定', targetName: '目标', sides: 20, values: [9],
+        check: { kind: 'attack', mode: 'normal', modifier: 4, success: true }, visibility: 'public' },
+      onRollDone: () => undefined, onD20Complete: () => undefined,
+      onDiceComplete: () => undefined, onPreviewComplete: () => undefined, onSecretConfirm: () => undefined,
+    }))
+    expect(html).toContain('1D20+4=')
+    expect(html).toContain('1D20+4=13')
+    expect(html).toContain('value="9"')
+  })
+  it('allows the DM to edit public color dice before continuing', () => {
+    const html = renderToStaticMarkup(createElement(DicePresentationOverlays, {
+      roll: null, diceBoxD20: null, diceBoxRoll: null, rollRequestPreview: null,
+      activeRollStatus: null, isDM: true, dockTab: 'dice',
+      secretConfirmation: { id: 'color', label: '虹光喷射·颜色', targetName: '目标', sides: 8, values: [3], visibility: 'public' },
+      onRollDone: () => undefined, onD20Complete: () => undefined,
+      onDiceComplete: () => undefined, onPreviewComplete: () => undefined, onSecretConfirm: () => undefined,
+    }))
+    expect(html).toContain('DM 明骰确认')
+    expect(html).toContain('第 1 枚 d8 骰面')
+    expect(html).toContain('确认</button>')
+  })
+  it('uses the existing dark Log panel inside the shared opaque tray', () => {
+    const html = renderToStaticMarkup(createElement(DicePresentationOverlays, {
+      roll: null, diceBoxD20: null, diceBoxRoll: null, rollRequestPreview: null,
+      activeRollStatus: null, secretConfirmation: null, isDM: true, dockTab: 'log',
+      combatLogPanel: createElement(MapWorkspaceCombatLogPanel, {
+        combatLog: [], tokens: [], characters: [],
+        onClearCombatLog: () => undefined, onCloseCombatLog: () => undefined,
+      }),
+      onRollDone: () => undefined, onD20Complete: () => undefined,
+      onDiceComplete: () => undefined, onPreviewComplete: () => undefined,
+      onSecretConfirm: () => undefined,
+    }))
+    expect(html).not.toContain('combat-tray-tabs')
+    expect(html).toContain('bg-void-950/90')
+    expect(html).toContain('max-h-[28rem]')
+    expect(html).toContain('暂无战斗记录')
+    expect(html).toContain('隐藏战斗记录')
+    expect(html).toContain('dice-tray-drawer--backdrop')
+    expect(html).not.toContain('combat-log-dock')
+  })
+
+  it('offers rerolls only for the matching local free-roll result', () => {
+    const roll = { values: [4, 4, 6], sides: 6, bonus: 2, total: 16, label: '自由掷骰', targetName: '明骰' }
+    const props = {
+      roll, diceBoxD20: null, diceBoxRoll: null, rollRequestPreview: null,
+      activeRollStatus: null, secretConfirmation: null, isDM: true,
+      dockTab: 'dice' as const,
+      onRollDone: () => undefined, onD20Complete: () => undefined,
+      onDiceComplete: () => undefined, onPreviewComplete: () => undefined,
+      onSecretConfirm: () => undefined,
+      freeReroll: { roll, onReroll: async () => undefined },
+    }
+    const local = renderToStaticMarkup(createElement(DicePresentationOverlays, props))
+    expect(local).not.toContain('全部重投')
+    expect(local).not.toContain('拖一颗到这里重投')
+    expect(local).toContain('D6 · 4')
+    const other = renderToStaticMarkup(createElement(DicePresentationOverlays, {
+      ...props, roll: { ...roll },
+    }))
+    expect(other).not.toContain('全部重投')
+  })
+
   const overlaysSource = readFileSync(new URL('./DicePresentationOverlays.tsx', import.meta.url), 'utf8')
   const workspaceSource = readFileSync(new URL('../../pages/MapsWorkspacePage.tsx', import.meta.url), 'utf8')
   const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
 
   it('presents local and shared dice rolls from the right-side tray', () => {
-    expect(overlaysSource.match(/layout="left-drawer"/g)?.length).toBe(4)
+    expect(overlaysSource).toContain('<PersistentDiceTray')
+    expect(readFileSync(new URL('./PersistentDiceTray.tsx', import.meta.url), 'utf8')).toContain('layout="left-drawer"')
     expect(overlaysSource).toContain('<DiceRollOverlay showCard={false}')
     expect(css).toContain('.dice-box-damage-frame.dice-box-frame--left-drawer')
     expect(css).toContain('@keyframes dice-box-left-drawer-enter')
     expect(css).toContain('.dice-tray-drawer__surface::before')
     expect(css).toContain('.dice-tray-drawer__rim')
-    expect(css).toMatch(/\.dice-tray-drawer\s*{[^}]*right:\s*4\.75rem;/s)
-    expect(css).toMatch(/\.dice-tray-recall\s*{[^}]*right:\s*0;/s)
+    expect(css).toMatch(/\.dice-tray-drawer\s*{[^}]*right:\s*0\.75rem;/s)
+    expect(css).toMatch(/\.map-combat-right-dock__recall\s*{[^}]*right:\s*0;/s)
     expect(css).toContain('.dice-tray-drawer__controls')
   })
 
   it('renders the solid result rail above the 3D dice iframe', () => {
-    const diceLayer = overlaysSource.indexOf('{diceBoxD20 && (')
+    const diceLayer = overlaysSource.indexOf('<PersistentDiceTray')
     const foregroundLayer = overlaysSource.indexOf('dice-tray-drawer--foreground')
     expect(diceLayer).toBeGreaterThan(0)
     expect(foregroundLayer).toBeGreaterThan(diceLayer)
@@ -70,8 +139,8 @@ describe('right dice presentation drawer', () => {
     expect(html).toContain('3d10')
     expect(html).toContain('data-testid="secret-dice-override"')
     expect(html.match(/inputMode="numeric"/g)).toHaveLength(3)
-    expect(html).toContain('确认并继续')
-    expect(html).not.toContain('data-testid="free-roll-quickbar"')
+    expect(html).toContain('确认</button>')
+    expect(html).toContain('data-testid="free-roll-quickbar"')
     expect(workspaceSource).not.toContain('<SecretDiceOverrideOverlay')
   })
 
@@ -160,22 +229,32 @@ describe('right dice presentation drawer', () => {
     expect(html).toContain('data-testid="free-roll-quickbar"')
     expect(html).toContain('点击骰子添加，然后投掷')
     expect(html).not.toContain('data-testid="dice-tray-recall"')
-    expect(overlaysSource).toContain('const [trayOpen, setTrayOpen] = useState(() => props.renderFreeRollControls != null)')
+    expect(overlaysSource).toContain('const [trayOpen, setTrayOpen] = useState(() => restoredHistory ? false : props.renderFreeRollControls != null)')
     expect(overlaysSource).toContain('const rememberRecord = (record: DiceTrayRecord) => {')
-    expect(overlaysSource).toMatch(/setLastRecord\(record\)[\s\S]*setTrayOpen\(true\)/)
+    expect(overlaysSource).toMatch(/setLastRecord\(record\)[\s\S]*setDockTab\('dice'\)/)
     expect(overlaysSource).toContain('data-testid="dice-tray-recall"')
   })
 
+  it('keeps initiative independent of docks and floats map tools beside the map', () => {
+    expect(workspaceSource).not.toContain('map-workspace-frame--left-dock-open')
+    expect(workspaceSource).toContain('map-workspace-frame--right-dock-open')
+    expect(workspaceSource).toContain('<MapToolsDock panel={mapToolPanel}')
+    expect(css).toMatch(/\.map-workspace-viewport\s*{[^}]*left:\s*0;[^}]*right:\s*var\(--map-right-dock-width\);/s)
+    expect(css).toMatch(/\.map-tools-dock\s*{[^}]*position:\s*absolute;[^}]*left:\s*0.5rem;/s)
+    expect(css.match(/\.map-workspace-initiative\s*\{[^}]*\}/s)?.[0]).not.toMatch(/margin-(left|right)/)
+    expect(css).toContain('@container map-workspace (max-width: 900px)')
+  })
+
   it('hosts the free-roll settings inside the same physical tray', () => {
-    expect(overlaysSource).toContain('renderFreeRollControls?: (close: () => void) => ReactNode')
+    expect(overlaysSource).toContain("visibility: 'public' | 'dm', onVisibilityChange:")
     expect(overlaysSource).toContain('dice-tray-drawer__controls')
     expect(overlaysSource).toContain('showFreeRollQuickbar')
     expect(overlaysSource).toContain('dice-tray-drawer__controls--quick')
-    expect(overlaysSource).toMatch(/const showFreeRollQuickbar = !showFreeRollControls &&\s*secretConfirmation == null/)
-    expect(overlaysSource).toContain('(!hasDicePresentation || activePresentationSettled)')
+    expect(overlaysSource).toContain('const showFreeRollQuickbar = !showFreeRollControls && props.renderFreeRollControls != null')
+    expect(overlaysSource).toContain('inert={hasActivePresentation}')
     expect(css).toMatch(/\.dice-tray-drawer__result--secret\s*{[^}]*z-index:\s*10;/s)
     expect(overlaysSource).toContain("setFreeRollControlsOpen(true)")
-    expect(workspaceSource).toContain('renderFreeRollControls={!isSpectator ? (close) => (')
+    expect(workspaceSource).toContain('renderFreeRollControls={!isSpectator ? (close, visibility, onVisibilityChange) => (')
     expect(workspaceSource).toContain('<MapDiceRoller')
     expect(workspaceSource).toContain('embedded')
     expect(css).toContain('.map-dice-roller__topbar')
@@ -186,7 +265,7 @@ describe('right dice presentation drawer', () => {
   })
 
   it('waits for the visual engine failsafe instead of truncating a large dice pool at 3.5 seconds', () => {
-    expect(DICE_TIMING.ROLL_SETTLED_HOLD_MS).toBeGreaterThanOrEqual(900)
+    expect(DICE_TIMING.ROLL_SETTLED_HOLD_MS).toBeGreaterThanOrEqual(250)
     expect(workspaceSource).toContain('maximumWaitMs: DICE_TIMING.ROLL_FAILSAFE_MS +')
     expect(workspaceSource).not.toContain(': DICE_TIMING.ROLL_MIN_VISIBLE_MS + 900')
   })

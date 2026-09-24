@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,6 +15,7 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 type PdfJsRuntime = {
+  ratios: number[]
   pdf: PDFDocumentProxy
   TextLayer: typeof import('pdfjs-dist')['TextLayer']
 }
@@ -27,6 +29,7 @@ type PdfPageOffset = { top: number; height: number }
 
 const PDF_CANVAS_PIXEL_BUDGET = 3_200_000
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function pdfCanvasOutputScale(width: number, height: number, devicePixelRatio: number): number {
   const cssPixels = Math.max(1, width * height)
   const pixelBudgetScale = Math.sqrt(PDF_CANVAS_PIXEL_BUDGET / cssPixels)
@@ -34,6 +37,7 @@ export function pdfCanvasOutputScale(width: number, height: number, devicePixelR
 }
 
 /** Finds the reading page without forcing layout for every page on every scroll frame. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function pdfPageAtScrollOffset(
   totalPages: number,
   scrollOffset: number,
@@ -93,6 +97,8 @@ function createPdfPageRenderScheduler(): PdfPageRenderScheduler {
 
 export type PdfContinuousDocumentRendererHandle = {
   scrollToPage: (pageNumber: number, behavior?: ScrollBehavior) => void
+  getPdf: () => PDFDocumentProxy | null
+  fitToWidth: () => void
 }
 
 const PdfContinuousPage = memo(function PdfContinuousPage({ runtime, pageNumber, displayWidth, scrollRoot, renderScheduler }: {
@@ -106,7 +112,7 @@ const PdfContinuousPage = memo(function PdfContinuousPage({ runtime, pageNumber,
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
   const [nearViewport, setNearViewport] = useState(pageNumber === 1)
-  const [pageHeight, setPageHeight] = useState(Math.round(displayWidth * 1.414))
+  const pageHeight = Math.ceil(displayWidth * (runtime?.ratios[pageNumber - 1] ?? 1.414))
   const [renderedKey, setRenderedKey] = useState('')
   const [error, setError] = useState('')
   const renderKey = runtime ? `${pageNumber}:${Math.round(displayWidth)}` : ''
@@ -141,7 +147,6 @@ const PdfContinuousPage = memo(function PdfContinuousPage({ runtime, pageNumber,
         const canvas = canvasRef.current
         const context = canvas.getContext('2d', { alpha: false })
         if (!context) throw new Error('pdf-canvas-context-unavailable')
-        setPageHeight(Math.ceil(viewport.height))
         canvas.width = Math.max(1, Math.floor(viewport.width * outputScale))
         canvas.height = Math.max(1, Math.floor(viewport.height * outputScale))
         canvas.style.width = `${Math.floor(viewport.width)}px`
@@ -205,7 +210,7 @@ const PdfContinuousPage = memo(function PdfContinuousPage({ runtime, pageNumber,
       className="pdf-original-page pdf-continuous-page relative mx-auto shrink-0 overflow-hidden bg-white shadow-2xl shadow-black/45"
       style={{ width: `${displayWidth}px`, minHeight: `${pageHeight}px`, contentVisibility: 'auto', containIntrinsicSize: `${pageHeight}px` }}
       data-pdf-continuous-page={pageNumber}
-      data-rendered={renderedKey === renderKey ? 'true' : 'false'}
+      data-rendered={runtime && renderedKey === renderKey ? 'true' : 'false'}
       aria-label={`PDF 第 ${pageNumber} 页`}
     >
       {nearViewport && renderedKey !== renderKey && !error && (
@@ -226,9 +231,15 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
   pageCount: number
   pageNumber: number
   zoom?: number
+  onReady?: (ready: boolean) => void
   onPageChange?: (pageNumber: number) => void
-}>(function PdfContinuousDocumentRenderer({ file, pageCount, pageNumber, zoom = 1, onPageChange }, forwardedRef) {
+  initialPosition?: { page: number; fraction: number; left: number }
+  onPositionChange?: (position: { page: number; fraction: number; left: number }) => void
+}>(function PdfContinuousDocumentRenderer({ file, pageCount, pageNumber, zoom = 1, onReady, onPageChange, initialPosition, onPositionChange }, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const spaceRef = useRef(false)
+  const positionRef = useRef(initialPosition ?? { page: pageNumber, fraction: 0, left: 0 })
+  const restoringRef = useRef(false)
   const pageElementsRef = useRef(new Map<number, HTMLElement>())
   const panStateRef = useRef<{
     pointerId: number
@@ -238,14 +249,16 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
     scrollTop: number
   } | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
-  const [hostWidth, setHostWidth] = useState(0)
+  const [fitWidth, setFitWidth] = useState(0)
   const [isPanning, setIsPanning] = useState(false)
   const [documentState, setDocumentState] = useState<{ key: string; runtime: PdfJsRuntime | null; error: string }>({ key: '', runtime: null, error: '' })
   const fileKey = `${file.name}:${file.size}:${file.lastModified}`
+  // A new document owns a separate cancellable rendering queue.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const renderScheduler = useMemo(() => createPdfPageRenderScheduler(), [fileKey])
   const runtime = documentState.key === fileKey ? documentState.runtime : null
   const normalizedZoom = Math.max(0.5, Math.min(3, zoom))
-  const displayWidth = Math.max(280, hostWidth - 32) * normalizedZoom
+  const displayWidth = Math.max(280, fitWidth - 32) * normalizedZoom
   const totalPages = Math.max(1, runtime?.pdf.numPages ?? pageCount)
   const pages = useMemo(() => Array.from({ length: totalPages }, (_, index) => index + 1), [totalPages])
 
@@ -254,7 +267,10 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const update = () => setHostWidth(Math.max(320, host.clientWidth))
+    // Capture the initial fit once. Resizing the split changes the viewport only.
+    const update = () => {
+      if (host.clientWidth > 0) setFitWidth(previous => previous || Math.max(320, host.clientWidth))
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(host)
@@ -273,7 +289,14 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
       pdfJs.GlobalWorkerOptions.workerSrc = workerModule.default
       loadingTask = pdfJs.getDocument({ data: new Uint8Array(bytes) })
       const loadedPdf = await loadingTask.promise
-      if (!cancelled) setDocumentState({ key: fileKey, runtime: { pdf: loadedPdf, TextLayer: pdfJs.TextLayer }, error: '' })
+      const ratios: number[] = []
+      for (let n = 1; n <= loadedPdf.numPages; n++) {
+        if (cancelled) return
+        const page = await loadedPdf.getPage(n)
+        const viewport = page.getViewport({ scale: 1 })
+        ratios.push(viewport.height / viewport.width)
+      }
+      if (!cancelled) { setDocumentState({ key: fileKey, runtime: { pdf: loadedPdf, ratios, TextLayer: pdfJs.TextLayer }, error: '' }); onReady?.(true) }
     }).catch(() => {
       if (!cancelled) setDocumentState({ key: fileKey, runtime: null, error: 'PDF 无法打开，文件可能损坏或受密码保护。' })
     })
@@ -281,28 +304,51 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
       cancelled = true
       void loadingTask?.destroy()
     }
-  }, [file, fileKey])
+  }, [file, fileKey, onReady])
 
   const scrollToPage = useCallback((nextPage: number, behavior: ScrollBehavior = 'smooth') => {
     const host = hostRef.current
     const pageElement = pageElementsRef.current.get(Math.max(1, Math.min(totalPages, Math.round(nextPage))))
     if (!host || !pageElement) return
     const top = host.scrollTop + pageElement.getBoundingClientRect().top - host.getBoundingClientRect().top - 16
+    positionRef.current = { page: Math.max(1, Math.min(totalPages, Math.round(nextPage))), fraction: 0, left: positionRef.current.left }
     host.scrollTo({ top, behavior })
   }, [totalPages])
 
-  useImperativeHandle(forwardedRef, () => ({ scrollToPage }), [scrollToPage])
+  useImperativeHandle(forwardedRef, () => ({ scrollToPage, getPdf: () => runtime?.pdf ?? null, fitToWidth: () => {
+    if (hostRef.current?.clientWidth) setFitWidth(Math.max(320, hostRef.current.clientWidth))
+  } }), [scrollToPage, runtime])
+
+  useLayoutEffect(() => {
+    const host = hostRef.current
+    if (!host || !runtime) return
+    restoringRef.current = true
+    const saved = positionRef.current
+    const element = pageElementsRef.current.get(saved.page)
+    if (element) {
+      host.scrollTop = host.scrollTop + element.getBoundingClientRect().top - host.getBoundingClientRect().top - 16 + saved.fraction * element.offsetHeight
+      host.scrollLeft = saved.left * displayWidth
+    }
+    const frame = requestAnimationFrame(() => { restoringRef.current = false })
+    return () => { cancelAnimationFrame(frame); restoringRef.current = false }
+  }, [runtime, displayWidth])
 
   const reportCurrentPage = useCallback(() => {
     const host = hostRef.current
-    if (!host) return
-    const readingOffset = host.scrollTop + Math.min(220, host.clientHeight * 0.32)
+    if (!host || restoringRef.current) return
+    const readingOffset = host.scrollTop + 17
     const nearestPage = pdfPageAtScrollOffset(totalPages, readingOffset, (candidatePage) => {
       const element = pageElementsRef.current.get(candidatePage)
       return element ? { top: element.offsetTop, height: element.offsetHeight } : undefined
     }, pageNumber)
+    const anchor = pageElementsRef.current.get(nearestPage)
+    if (anchor) {
+      const fraction = Math.max(0, Math.min(1, (host.getBoundingClientRect().top + 16 - anchor.getBoundingClientRect().top) / anchor.offsetHeight))
+      positionRef.current = { page: nearestPage, fraction, left: host.scrollLeft / displayWidth }
+      onPositionChange?.(positionRef.current)
+    }
     if (nearestPage !== pageNumber) onPageChange?.(nearestPage)
-  }, [onPageChange, pageNumber, totalPages])
+  }, [onPageChange, onPositionChange, pageNumber, totalPages, displayWidth])
 
   const handleScroll = () => {
     if (scrollFrameRef.current !== null) return
@@ -317,8 +363,10 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
   }, [])
 
   const startPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return
+    event.currentTarget.focus({ preventScroll: true })
+    if (event.button !== 0 || !spaceRef.current) return
     const host = event.currentTarget
+    host.focus()
     panStateRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, scrollLeft: host.scrollLeft, scrollTop: host.scrollTop }
     host.setPointerCapture(event.pointerId)
     setIsPanning(true)
@@ -346,11 +394,15 @@ const PdfContinuousDocumentRenderer = forwardRef<PdfContinuousDocumentRendererHa
   return (
     <div
       ref={hostRef}
-      className={`relative h-full min-h-0 overflow-auto overscroll-contain bg-slate-900/70 p-4 [scrollbar-gutter:stable] ${isPanning ? 'cursor-grabbing select-none' : 'cursor-grab'} touch-none`}
+      className={`relative h-full min-h-0 overflow-auto overscroll-contain bg-slate-900/70 p-4 [scrollbar-gutter:stable] ${isPanning ? 'cursor-grabbing select-none' : 'cursor-text'}`}
       data-testid="pdf-continuous-document-renderer"
       data-continuous-pages="true"
       data-zoom-percent={Math.round(normalizedZoom * 100)}
-      aria-label="连续 PDF 文档；滚轮可连续翻页，按住可拖动"
+      aria-label="连续 PDF 文档；拖动选择文字，按住空格拖动页面"
+      tabIndex={0}
+      onKeyDown={event => { if (event.code === 'Space') { spaceRef.current = true; event.preventDefault() } }}
+      onKeyUp={event => { if (event.code === 'Space') spaceRef.current = false }}
+      onBlur={() => { spaceRef.current = false }}
       onScroll={handleScroll}
       onPointerDown={startPan}
       onPointerMove={movePan}

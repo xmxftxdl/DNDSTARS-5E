@@ -1,4 +1,5 @@
 export interface CombatEndCoordinatorOptions {
+  cancelPendingInteractions?: () => void
   publishInactiveCombat: () => Promise<void>
   openExperienceSettlement: () => void
   awaitPendingTransactions: () => Promise<void>
@@ -15,6 +16,7 @@ export interface CombatEndCoordinatorOptions {
 export async function coordinateCombatEnd(
   options: CombatEndCoordinatorOptions,
 ): Promise<void> {
+  options.cancelPendingInteractions?.()
   await options.awaitPendingTransactions()
   await options.clearMessageQueues()
   await options.publishInactiveCombat()

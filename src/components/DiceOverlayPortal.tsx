@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-/** Highest interoperable signed z-index used by browsers for authored layers. */
-export const DICE_OVERLAY_Z_INDEX = 2_147_483_647
+/** Keep dice above map panels while reserving higher layers for blocking confirmations. */
+export const DICE_OVERLAY_Z_INDEX = 2_147_483_637
 
 export type DiceOverlayLayer = 'backdrop' | 'dice' | 'foreground'
 

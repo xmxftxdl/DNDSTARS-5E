@@ -1,3 +1,5 @@
+import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
+import { activityLogPredicate } from './dnd5eActivityLogPredicates'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eStandardConditionId } from '../conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../damageTypes'
@@ -213,7 +215,7 @@ export type Dnd5eResolvedEffectDuration =
           }
     }
 
-export type Dnd5eActivityCapabilityProposal =
+export type Dnd5eActivityCapabilityProposal = (
   | { kind: 'deal-damage'; operationId: string; targetId: string; amount: number; damageType: Dnd5eDamageType; magical: boolean }
   | {
       kind: 'heal'
@@ -307,7 +309,7 @@ export type Dnd5eActivityCapabilityProposal =
   | { kind: 'recover-ability-score'; operationId: string; targetId: string; ability: AbilityKey; maximumCount?: number }
   | { kind: 'recover-hit-point-maximum'; operationId: string; targetId: string; maximumCount?: number }
   | { kind: 'spend-resource' | 'restore-resource'; operationId: string; subjectId: string; resourceId: string; amount: number }
-  | { kind: 'move'; operationId: string; targetId: string; mode: 'push' | 'pull' | 'teleport' | 'swap' | 'ascend' | 'descend'; distanceFeet: number; verticalDestination?: 'area-top' | 'ground'; placement?: 'host-automatic-maximum'; originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; requiresLineOfSight?: boolean; ignoresOpportunityAttacks?: boolean; usesActorMovement?: boolean; usesTargetReactionIfAvailable?: boolean; provokesOpportunityAttacks?: boolean }
+  | { kind: 'move'; operationId: string; targetId: string; mode: 'push' | 'pull' | 'forced' | 'teleport' | 'swap' | 'ascend' | 'descend'; distanceFeet: number; maximumDistanceFromActorFeet?: number; verticalDestination?: 'area-top' | 'ground'; placement?: 'host-automatic-maximum'; originIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; destinationIllumination?: readonly ('dim' | 'darkness' | 'magical-darkness')[]; requiresLineOfSight?: boolean; ignoresOpportunityAttacks?: boolean; usesActorMovement?: boolean; usesTargetReactionIfAvailable?: boolean; provokesOpportunityAttacks?: boolean }
   | { kind: 'set-directional-command'; operationId: string; actorId: string; commandKey: string; angleDegrees: number }
   | {
       kind: 'relocate-granting-area'
@@ -500,6 +502,7 @@ export type Dnd5eActivityCapabilityProposal =
       }
       hallow?: import('../persistentAreaTypes').Dnd5eHallowAreaState
       hallucinatoryTerrain?: import('../persistentAreaTypes').Dnd5eHallucinatoryTerrainAreaState
+      symbolMode?: import('../symbolSpell').SymbolMode
       programmedIllusion?: import('../persistentAreaTypes').Dnd5eProgrammedIllusionAreaState
       entityProfile?: {
         armorClass: number
@@ -578,6 +581,8 @@ export type Dnd5eActivityCapabilityProposal =
     }
   | { kind: 'invoke-activity'; operationId: string; activityId: string; actorId: string; targetId?: string; repeat: number }
   | { kind: 'request-dm-adjudication'; operationId: string; prompt: string; reason: string }
+
+) & { logTrigger?: { activityName: string; outcomeId: string; operationId: string; conditions: readonly string[] } }
 
 export type Dnd5eActivityExecutionResult =
   | {
@@ -850,10 +855,39 @@ function selectedSavingThrowAbility(
     savingThrowModifier(target, candidate) > savingThrowModifier(target, best) ? candidate : best, primary)
 }
 
+/** Resolve one submitted save before requesting damage, using the settlement rules. */
+export function previewDnd5eActivitySavingThrowV1(
+  input: Dnd5eActivityExecutionInput,
+  rollId: string,
+  rollerTokenId?: string,
+  resolvedRollMode?: Dnd5eActivityRollMode,
+): Dnd5eActivityCheckResult | undefined {
+  for (const check of input.activity.checks ?? []) {
+    if (check.kind !== 'saving-throw') continue
+    const target = input.targets.find(candidate => candidate.id === rollerTokenId)
+    if (!target || checkRollKey(check, target) !== rollId) continue
+    return resolveCheck(check, input, target, resolvedRollMode)
+  }
+}
+
+/** Preview an attack with the same rules as final settlement, without executing effects. */
+export function previewDnd5eActivityAttackV1(
+  input: Dnd5eActivityExecutionInput,
+  rollId: string,
+  resolvedRollMode?: Dnd5eActivityRollMode,
+): Dnd5eActivityCheckResult | undefined {
+  for (const check of input.activity.checks ?? []) {
+    if (check.kind !== 'attack-roll') continue
+    const target = input.targets.find(candidate => checkRollKey(check, candidate) === rollId)
+    if (target) return resolveCheck(check, input, target, resolvedRollMode)
+  }
+}
+
 function resolveCheck(
   check: Dnd5eActivityCheckV1,
   input: Dnd5eActivityExecutionInput,
   target?: Dnd5eActivityActorSnapshot,
+  resolvedRollMode?: Dnd5eActivityRollMode,
 ): Dnd5eActivityCheckResult {
   const key = checkKey(check, target)
   if (check.kind === 'random-roll') {
@@ -935,7 +969,7 @@ function resolveCheck(
     const total = d20 + sourceModifier
     const opposedTotal = opposedD20 + opposedModifier
     return {
-      key, kind: check.kind, checkId: check.id, targetId: target.id, ability: check.sourceAbility,
+      key, kind: check.kind, checkId: check.id, targetId: target.id, ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, input.actor),
       rollMode: sourceMode,
       d20, modifier: sourceModifier, total, success: total > opposedTotal,
       criticalSuccess: false, criticalFailure: false,
@@ -964,9 +998,9 @@ function resolveCheck(
   const modes = [baseMode, creatureTypeOverride, sizeRankOverride, opposedOverride].filter(
     (mode): mode is Dnd5eActivityRollMode => mode != null && mode !== 'normal',
   )
-  const mode: Dnd5eActivityRollMode = modes.includes('advantage') && modes.includes('disadvantage')
+  const mode: Dnd5eActivityRollMode = resolvedRollMode ?? (modes.includes('advantage') && modes.includes('disadvantage')
     ? 'normal'
-    : modes[0] ?? 'normal'
+    : modes[0] ?? 'normal')
   const roll = input.rolls[checkRollKey(check, target)]
   if (!roll) throw new Dnd5eFormulaEvaluationError(`missing d20 result: ${key}`)
   const d20 = selectedD20(roll.values, mode)
@@ -1388,6 +1422,8 @@ export function resolveDnd5eAppliedEffectDefinitionV1(
       }
     } else if (modifier.kind === 'darkvision') {
       base.darkvisionRangeFeet = Math.max(base.darkvisionRangeFeet ?? 0, modifier.rangeFeet)
+    } else if (modifier.kind === 'swim-speed') {
+      base.swimSpeedEqualsWalking = modifier.mode === 'walking-speed'
     } else if (modifier.kind === 'climb-speed') {
       base.climbSpeedEqualsWalking = modifier.mode === 'walking-speed'
     } else if (modifier.kind === 'truesight') {
@@ -2188,6 +2224,7 @@ function operationProposals(
       hallow,
       hallucinatoryTerrain,
       programmedIllusion,
+      symbolMode: operation.symbolMode,
       entityProfile: operation.entityProfile ? {
         ...operation.entityProfile,
         hitPoints: operation.entityProfile.hitPoints === 'actor-max-hit-points'
@@ -2399,6 +2436,7 @@ function operationProposals(
     if (operation.kind === 'move') return {
       kind: 'move', operationId: operation.id, targetId: target.id, mode: operation.mode,
       distanceFeet: evaluateAmount(operation.distanceFeet, input, target, false, false),
+      maximumDistanceFromActorFeet: operation.maximumDistanceFromActorFeet,
       verticalDestination: operation.verticalDestination,
       placement: operation.placement,
       originIllumination: operation.originIllumination,
@@ -2784,7 +2822,22 @@ export function resolveDnd5eActivity(input: Dnd5eActivityExecutionInput): Dnd5eA
             : 1 + Math.max(0, scaled.additionalProjectilesByOperationId.get(operation.id) ?? 0)
           for (let repeat = 0; repeat < repeats; repeat += 1) {
             operationProposals(operation, operationExecutionInput, target, criticalSuccess)
-              .forEach((proposal) => proposals.push(proposal))
+              .forEach((proposal) => proposals.push({ ...proposal, logTrigger: {
+                activityName: activity.name, outcomeId: outcome.id, operationId: operation.id,
+                conditions: (when.kind === 'always' ? [] : when.kind === 'all' ? when.conditions : [when]).map(condition => {
+                  if (condition.kind === 'choice') {
+                    const choice = activity.choices?.find(item => item.id === condition.choiceId)
+                    return `选择${choice?.label ?? '规则选项'}：${choice?.options.find(item => item.id === condition.optionId)?.label ?? '指定选项'}`
+                  }
+                  if (condition.kind === 'check') {
+                    const check = activity.checks?.find(item => item.id === condition.checkId)
+                    const label = check?.kind === 'saving-throw' ? '目标豁免' : check?.kind === 'attack-roll' ? '攻击检定' : '规则检定'
+                    return `${label}${{'success':'成功','failure':'失败','critical-success':'重击成功','critical-failure':'大失败'}[condition.result]}`
+                  }
+                  if (condition.kind === 'check-total') return '效果判定落入本分支的结果范围'
+                  return activityLogPredicate(condition.predicate)
+                }),
+              } }))
           }
           if (once) appliedOnce.add(onceKey)
         }

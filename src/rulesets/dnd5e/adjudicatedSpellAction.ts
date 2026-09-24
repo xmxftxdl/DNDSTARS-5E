@@ -1,3 +1,4 @@
+import { validateTelepathicBondTargets } from './telepathicBondMarkers'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type {
   Dnd5eAdjudicatedSpellPayload,
@@ -327,6 +328,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   action: SharedPlayerActionState
   spell: Dnd5eSpellbookEntry | undefined
   spellbookEntries?: readonly Dnd5eSpellbookEntry[]
+  maps?: readonly BattleMap[]
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
@@ -336,6 +338,11 @@ export function prepareDnd5eAdjudicatedSpell(input: {
 }): { ok: true; prepared: PreparedDnd5eAdjudicatedSpell } | { ok: false; reason: Dnd5eAdjudicatedSpellRejectReason } {
   const payload = input.action.dnd5eAdjudicatedSpell
   const narrativeOnly = payload?.narrativeOnly === true
+  if (payload?.telepathicBondTargets != null && (
+    payload.spellId !== 'telepathic-bond' || !narrativeOnly ||
+    !validateTelepathicBondTargets(payload.telepathicBondTargets, input.maps ?? [input.map])
+  )) return { ok: false, reason: 'invalid-action' }
+
   if (
     input.action.type !== 'dnd5e-adjudicated-spell' || !payload || !input.spell ||
     (dnd5eSpellbookEntryHasFullHeadlessAutomation(input.spell) && payload.ritual !== true &&
@@ -672,7 +679,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   const castingTime = ritual || castingVariant === 'plant-growth-8-hours'
     ? 'long'
     : declaredCastingTime === 'unsupported' ? 'long' : declaredCastingTime
-  const elapsedCastingMinutes = dnd5eAdjudicatedSpellElapsedCastingMinutes(
+  const elapsedCastingMinutes = narrativeOnly && input.spell.id === 'scrying' ? 0 : dnd5eAdjudicatedSpellElapsedCastingMinutes(
     input.spell,
     ritual,
     castingVariant,

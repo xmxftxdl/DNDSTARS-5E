@@ -39,7 +39,7 @@ import {
   type Dnd5ePluginRacialSavingThrowAdvantages,
   type Dnd5ePluginStaticCombatModifiers,
 } from './pluginApi'
-import { dnd5eCharacterBuildTagsV1 } from './buildChoices'
+import { dnd5eCharacterBuildSpellGrantsV1, dnd5eCharacterBuildTagsV1 } from './buildChoices'
 import { dnd5eCharacterClassLevel, dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels, type Dnd5eClassLevels } from './multiclass'
 import {
   dnd5eCoreRaceMechanics,
@@ -65,6 +65,7 @@ import {
   dnd5ePluginFeatResourceDefinitions,
 } from './plugins/pluginContentCatalog'
 import { dnd5eActiveHitPointMaximumBonus } from './activeEffects'
+import { dnd5eInventoryPassiveEffects } from './inventoryPassiveEffects'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -112,6 +113,7 @@ export interface Dnd5eCharacter {
   subclassIds: Partial<Record<Dnd5eClassId, string>>
   classSelections: Record<string, string[]>
   classSelectionsByClass: Partial<Record<Dnd5eClassId, Record<string, string[]>>>
+  grantedSpellIds: readonly string[]
   pluginFeatureIds: readonly string[]
   sizeRank: number
   darkvisionRangeFeet?: number
@@ -592,6 +594,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     subclassIds,
     classSelections,
     classSelectionsByClass,
+    grantedSpellIds: dnd5eCharacterBuildSpellGrantsV1(character).map((grant) => grant.spellId),
     pluginFeatureIds: selectedPluginFeatures.map((feature) => feature.id),
     sizeRank: dnd5eRaceSizeRank(
       character.race,
@@ -721,6 +724,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     },
     classState: {
       ...character.dnd5eCombatState,
+      activeEffects: dnd5eInventoryPassiveEffects(character),
       wardingBondMaterialEquipped: wearingWardingBondRing,
       wardingBondParticipantCharacterId: character.id,
     },
@@ -801,6 +805,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     subclassIds: character.subclassIds,
     classSelections: character.classSelections,
     classSelectionsByClass: character.classSelectionsByClass,
+    grantedSpellIds: character.grantedSpellIds,
     pluginFeatureIds: character.pluginFeatureIds,
     wearingArmor: character.wearingArmor,
     wearingUnproficientArmor: character.wearingUnproficientArmor,

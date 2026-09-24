@@ -47,6 +47,51 @@ function map(): BattleMap {
 describe('core spell persistent area declarations', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
+  it.each(['fog-cloud', 'sleet-storm'])('updates an existing %s field when a door opens and closes without replaying triggers', (spellId) => {
+    const scene = map()
+    const geometry = createEmptyMapGeometry(scene.id)
+    geometry.doors.push({
+      id: 'door', kind: 'door', label: 'door', points: [{ x: 100, y: 0 }, { x: 100, y: 500 }],
+      baseHeightFeet: 0, heightFeet: 100, blocksVision: true, blocksMovement: true,
+      blocksLineOfEffect: true, createdAt: 0, state: 'closed', openState: 'closed', secret: false,
+    })
+    setMapGeometryRuntime([geometry])
+    const area = createDnd5eCoreSpellArea({
+      declaration: getDnd5eCoreSpellAreaDeclaration(spellId)!, actionId: 'door-field',
+      sourceCharacterId: 'caster', sourceTokenId: 'caster-token', slotLevel: 3,
+      sourceSaveDc: 15, round: 1, cells: [{ col: 1, row: 2 }], anchorCell: { col: 1, row: 2 },
+      obstructionRadiusFeet: 20,
+    })
+    const closed = reconcileDnd5ePersistentAreaAnchors({ ...scene, dnd5ePluginAreas: [area] })
+    expect(closed.dnd5ePluginAreas![0].cells.some(cell => cell.col >= 2)).toBe(false)
+    expect(reconcileDnd5ePersistentAreaAnchors(closed)).toBe(closed)
+    geometry.doors[0].state = 'open'
+    geometry.doors[0].openState = 'open'
+    setMapGeometryRuntime([geometry])
+    const opened = reconcileDnd5ePersistentAreaAnchors(closed)
+    expect(opened.dnd5ePluginAreas![0].cells).toContainEqual({ col: 3, row: 2 })
+    expect(opened.dnd5ePluginAreas![0].triggers).toBe(area.triggers)
+    expect(opened.dnd5ePluginAreas![0].createdRound).toBe(1)
+    expect(opened.tokens).toEqual(scene.tokens)
+    expect(reconcileDnd5ePersistentAreaAnchors(opened)).toBe(opened)
+    geometry.doors[0].state = 'closed'
+    geometry.doors[0].openState = 'closed'
+    setMapGeometryRuntime([geometry])
+    expect(reconcileDnd5ePersistentAreaAnchors(opened).dnd5ePluginAreas![0].cells).toEqual(closed.dnd5ePluginAreas![0].cells)
+  })
+
+  it('does not restore destroyed web cells on geometry changes', () => {
+    const scene = map()
+    setMapGeometryRuntime([createEmptyMapGeometry(scene.id)])
+    const area = createDnd5eCoreSpellArea({
+      declaration: getDnd5eCoreSpellAreaDeclaration('web')!, actionId: 'burned-web',
+      sourceCharacterId: 'caster', sourceTokenId: 'caster-token', slotLevel: 2,
+      sourceSaveDc: 15, round: 1, cells: [{ col: 1, row: 2 }], anchorCell: { col: 1, row: 2 },
+    })
+    const current = { ...scene, dnd5ePluginAreas: [area] }
+    expect(reconcileDnd5ePersistentAreaAnchors(current)).toBe(current)
+  })
+
   it('declares ground hazards separately from bounded three-dimensional spell volumes', () => {
     for (const spellId of ['grease', 'entangle', 'black-tentacles', 'spike-growth', 'ice-storm']) {
       expect(getDnd5eCoreSpellAreaDeclaration(spellId)?.vertical).toEqual({ mode: 'ground' })
@@ -217,7 +262,7 @@ describe('core spell persistent area declarations', () => {
       },
     })
     expect(getDnd5eCoreSpellAreaDeclaration('web')).toMatchObject({
-      template: { shape: 'rect', widthFeet: 20, heightFeet: 20, gridAligned: true },
+      template: { shape: 'rect', widthFeet: 20, heightFeet: 20, rotatable: true },
       movementCostMultiplier: 2,
       obscuration: { kind: 'light' },
       triggers: expect.arrayContaining([

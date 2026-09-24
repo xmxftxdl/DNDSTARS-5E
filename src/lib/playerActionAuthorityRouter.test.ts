@@ -82,6 +82,27 @@ function makeContext(patch: Partial<Parameters<typeof preflightPlayerActionAutho
 }
 
 describe('player action authority router', () => {
+  it('assigns a copied character to the caster owner, not the copied subject owner', () => {
+    const duplicate = makeToken({ characterId: 'subject', hp: 10,
+      dnd5eSimulacrum: { sourceCharacterId: 'hero', maximumHitPoints: 10 } as NonNullable<Token['dnd5eSimulacrum']> })
+    const characters = [makeCharacter(), makeCharacter({ id: 'subject', roomMemberId: 'member-b', currentHp: 0 })]
+    const context = makeContext({ activeMap: makeMap([duplicate]), characters })
+    const action = makeAction({ characterId: 'subject' })
+    expect(preflightPlayerActionAuthority(action, context).status).toBe('accepted')
+    expect(preflightPlayerActionAuthority({ ...action, roomMemberId: 'member-b' }, context)).toMatchObject({
+      status: 'rejected', reason: 'character-owner-mismatch',
+    })
+    expect(canSubmitPlayerCombatAction({ activeMap: context.activeMap, mode: 'player', playerCombatLocked: false,
+      combatActive: true, combatActiveSnapshot: true, turnCharacter: characters[1], currentInitiativeToken: duplicate,
+      playerCharacter: characters[0], characters })).toBe(true)
+  })
+  it('allows an owned rope occupant to leave out of turn but rejects stale combat and foreign owners', () => {
+    const action = makeAction({ type: 'dnd5e-map-interaction', dnd5eMapInteraction: { operation: 'rope-trick', areaId: 'rope', transition: 'leave' } })
+    expect(preflightPlayerActionAuthority(action, makeContext({ currentTokenId: 'other' })).status).toBe('accepted')
+    expect(preflightPlayerActionAuthority({ ...action, combatId: 'old' }, makeContext()).status).toBe('rejected')
+    expect(preflightPlayerActionAuthority({ ...action, roomMemberId: 'other' }, makeContext()).status).toBe('rejected')
+  })
+
   it('accepts a pending player action for the live combat turn', () => {
     const result = preflightPlayerActionAuthority(makeAction(), makeContext())
 

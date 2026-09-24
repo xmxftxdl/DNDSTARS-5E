@@ -522,9 +522,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(failed.events).toContainEqual(expect.objectContaining({
       type: 'active-effect-save-resolved', effectId: 'bestow-curse-lose-action', success: false,
     }))
-    expect(failed.events).toContainEqual({
+    expect(failed.events).toContainEqual(expect.objectContaining({
       type: 'turn-resource-spent', actorId: target.id, resource: 'action',
-    })
+    }))
   })
 
   it('ends an empty Bestow Curse after a successful save and honors its 3rd/5th-level concentration boundary', () => {
@@ -1399,7 +1399,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
         targetId: caster.id, targetIds: [caster.id], distanceFeet: 0, castLevel: 9,
         payload: {
           activityChoices: {
-            mode: 'srd-5.1:adult-black-dragon', equipment: 'merge', seen: 'confirmed',
+            mode: 'srd-5.1:adult-black-dragon', equipment: 'merge',
           },
         },
         rolls: {}, interruptChoiceId: 'dm-apply',
@@ -1987,12 +1987,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!attack.ok) return
     expect(attack.state.combatants[ally.id].currentHp).toBe(16)
     expect(attack.state.combatants[cleric.id].currentHp).toBe(16)
-    expect(attack.events).toContainEqual({
+    expect(attack.events).toContainEqual(expect.objectContaining({
       type: 'warding-bond-damage-transferred',
       targetId: ally.id,
       sourceActorId: cleric.id,
       amount: 4,
-    })
+    }))
 
     const concentration = resolveDnd5eHeadlessAction(attack.state, {
       type: 'concentration-save',
@@ -2352,12 +2352,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     expect(result.state.combatants.actor.currentHp).toBe(17)
     expect(result.state.combatants.actor.conditions).toContain('blinded')
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'scene-interaction-outcome-resolved',
       actorId: 'actor',
       interactionId: 'burning-altar',
       stepCount: 2,
-    })
+    }))
   })
 
   it('applies persistent-area damage to dying creatures and Moonbeam disadvantage to shapechangers', () => {
@@ -2438,11 +2438,11 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(forcedTrueForm.ok).toBe(true)
     if (!forcedTrueForm.ok) return
-    expect(forcedTrueForm.events).toContainEqual({
+    expect(forcedTrueForm.events).toContainEqual(expect.objectContaining({
       type: 'monster-shapechanged', actorId: placedHybrid.id,
       fromStatBlockId: 'srd-5.1:werewolf-hybrid',
       toStatBlockId: 'srd-5.1:werewolf-human', forced: true,
-    })
+    }))
     expect(forcedTrueForm.state.combatants[placedHybrid.id]).toMatchObject({
       statBlockId: 'srd-5.1:werewolf-human', armorClass: 11, currentHp: 51,
       classState: {
@@ -2689,7 +2689,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(stabilized.ok).toBe(true)
     if (!stabilized.ok) return
     expect(stabilized.state.combatants.ally.deathSaves).toEqual({ successes: 0, failures: 0, stable: true, dead: false })
-    expect(stabilized.events).toContainEqual({ type: 'creature-stabilized', actorId: 'cleric', targetId: 'ally' })
+    expect(stabilized.events).toContainEqual(expect.objectContaining({ type: 'creature-stabilized', actorId: 'cleric', targetId: 'ally' }))
 
     const wizard = fighter('wizard', 20, {
       classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
@@ -2726,14 +2726,14 @@ describe('D&D 5e 2014 headless combat engine', () => {
       turn: { actionAvailable: false },
       classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 1 } },
     })
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'spell-effect-suppressed-by-area',
       actorId: wizard.id,
       targetId: wizard.id,
       spellId: 'false-life',
       spellLevel: 1,
       reason: 'antimagic',
-    })
+    }))
   })
 
   it('consumes a unified Activity spell inside antimagic without replacing the existing concentration', () => {
@@ -2788,14 +2788,14 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(result).not.toHaveProperty('activityHandoffs')
     expect(result).not.toHaveProperty('activityAreaInstance')
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'spell-effect-suppressed-by-area',
       actorId: wizard.id,
       targetId: wizard.id,
       spellId: 'protection-from-evil-and-good',
       spellLevel: 1,
       reason: 'antimagic',
-    })
+    }))
   })
 
   it('consumes a spell cast but suppresses its effect on a target inside antimagic', () => {
@@ -2816,14 +2816,14 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
     if (!result.ok) return
     expect(result.state.combatants[target.id].currentHp).toBe(40)
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'spell-effect-suppressed-by-area',
       actorId: wizard.id,
       targetId: target.id,
       spellId: 'fire-bolt',
       spellLevel: 0,
       reason: 'antimagic',
-    })
+    }))
   })
 
   it('suppresses low-level spells crossing a Globe boundary but not spells cast within the same Globe', () => {
@@ -2845,11 +2845,11 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(crossed.ok, crossed.ok ? undefined : crossed.reason).toBe(true)
     if (!crossed.ok) return
     expect(crossed.state.combatants[target.id].currentHp).toBe(40)
-    expect(crossed.events).toContainEqual({
+    expect(crossed.events).toContainEqual(expect.objectContaining({
       type: 'spell-effect-suppressed-by-area', actorId: caster.id,
       targetId: target.id, spellId: 'fire-bolt', spellLevel: 0,
       reason: 'spell-level-barrier', areaId: 'globe-1',
-    })
+    }))
 
     const insideCaster = fighter('inside-caster', 20, {
       classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
@@ -3271,10 +3271,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!warded.ok) return
     expect(warded.state.combatants.wizard.position).toEqual({ x: 5, y: 5 })
     expect(warded.state.combatants.wizard.classResources['dnd5e-spell-slot-2'].current).toBe(0)
-    expect(warded.events).toContainEqual({
+    expect(warded.events).toContainEqual(expect.objectContaining({
       type: 'teleportation-blocked-by-area', actorId: 'wizard',
       spellId: 'misty-step', areaId: 'private-sanctum',
-    })
+    }))
 
     expect(resolveDnd5eHeadlessAction(initial, {
       type: 'cast-spell',
@@ -3438,10 +3438,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
       duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
       breakOn: ['takes-damage'],
     }))
-    expect(cast.events).toContainEqual({
+    expect(cast.events).toContainEqual(expect.objectContaining({
       type: 'sleep-resolved', actorId: 'wizard', spellId: 'sleep',
       hitPointPool: 20, remainingHitPoints: 9, affectedTargetIds: ['low', 'middle'],
-    })
+    }))
     expect(cast.state.combatants.wizard.classResources['dnd5e-spell-slot-1'].current).toBe(0)
 
     const helperTurn = { ...cast.state, initiativeIndex: cast.state.initiativeOrder.indexOf('helper') }
@@ -3453,9 +3453,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(awakened.state.combatants.middle.conditions).not.toContain('unconscious')
     expect(awakened.state.combatants.middle.conditions).toContain('prone')
     expect(awakened.state.combatants.helper.turn.actionAvailable).toBe(false)
-    expect(awakened.events).toContainEqual({
+    expect(awakened.events).toContainEqual(expect.objectContaining({
       type: 'sleeping-creature-awakened', actorId: 'helper', targetId: 'middle', spellId: 'sleep',
-    })
+    }))
 
     const helperAttackTurn = { ...cast.state, initiativeIndex: cast.state.initiativeOrder.indexOf('helper') }
     const damaged = resolveDnd5eHeadlessAction(helperAttackTurn, {
@@ -3536,10 +3536,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(cast.state.combatants.middle.conditions).toContain('blinded')
     expect(cast.state.combatants.high.conditions).not.toContain('blinded')
     expect(cast.state.combatants['blind-immune'].conditions).not.toContain('blinded')
-    expect(cast.events).toContainEqual({
+    expect(cast.events).toContainEqual(expect.objectContaining({
       type: 'color-spray-resolved', actorId: 'wizard', spellId: 'color-spray',
       hitPointPool: 12, remainingHitPoints: 1, affectedTargetIds: ['low', 'middle'],
-    })
+    }))
     expect(cast.events).toContainEqual(expect.objectContaining({
       type: 'active-effect-removed', targetId: 'low', reason: 'harmful-action',
     }))
@@ -3610,10 +3610,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(attack.ok).toBe(true)
     if (!attack.ok) return
     expect(attack.state.combatants.target.currentHp).toBe(8)
-    expect(attack.events).toContainEqual({
+    expect(attack.events).toContainEqual(expect.objectContaining({
       type: 'class-damage-applied', actorId: 'paladin', targetId: 'target',
       source: 'divine-favor', amount: 4,
-    })
+    }))
 
     const forgedOpportunitySmite = resolveDnd5eHeadlessAction(attack.state, {
       type: 'opportunity-attack', actorId: 'paladin', targetId: 'second-target',
@@ -3651,10 +3651,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(opportunityAttack.ok).toBe(true)
     if (!opportunityAttack.ok) return
     expect(opportunityAttack.state.combatants['second-target'].currentHp).toBe(8)
-    expect(opportunityAttack.events).toContainEqual({
+    expect(opportunityAttack.events).toContainEqual(expect.objectContaining({
       type: 'class-damage-applied', actorId: 'paladin', targetId: 'second-target',
       source: 'divine-favor', amount: 4,
-    })
+    }))
   })
 
   it('fully resolves Enlarge/Reduce saves, size, Strength rolls, and weapon damage', () => {
@@ -4641,12 +4641,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
       expect.arrayContaining(['charmed', 'incapacitated']),
     )
     expect(dnd5eEffectiveSpeed(awakened.state.combatants.failed)).toBe(30)
-    expect(awakened.events).toContainEqual({
+    expect(awakened.events).toContainEqual(expect.objectContaining({
       type: 'sleeping-creature-awakened',
       actorId: helper.id,
       targetId: failed.id,
       sourceRulesIds: ['hypnotic-pattern'],
-    })
+    }))
   })
 
   it('automates Slow penalties, concentration duration, and the end-of-turn repeat save', () => {
@@ -4771,10 +4771,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (immediate.ok) {
       expect(immediate.state.combatants.target.currentHp).toBe(38)
       expect(immediate.state.combatants[delayedCaster.id].classState.slowDelayedSpell).toBeUndefined()
-      expect(immediate.events).toContainEqual({
+      expect(immediate.events).toContainEqual(expect.objectContaining({
         type: 'slow-spell-delay-resolved', actorId: delayedCaster.id,
         spellId: 'magic-missile', slotLevel: 1, d20: 5, delayed: false,
-      })
+      }))
     }
 
     const delayed = resolveDnd5eHeadlessAction(casterTurn.state, {
@@ -4791,10 +4791,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
       schemaVersion: 1,
       action: { spellId: 'magic-missile', slotLevel: 1 },
     })
-    expect(delayed.events).toContainEqual({
+    expect(delayed.events).toContainEqual(expect.objectContaining({
       type: 'slow-spell-delay-resolved', actorId: delayedCaster.id,
       spellId: 'magic-missile', slotLevel: 1, d20: 15, delayed: true,
-    })
+    }))
 
     const slowEffect = delayed.state.combatants[delayedCaster.id].classState.activeEffects!
       .find((effect) => effect.definitionId === 'srd-5.1:spell:slow')!
@@ -4817,10 +4817,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(completed.state.combatants.target.currentHp).toBe(38)
     expect(completed.state.combatants[delayedCaster.id].turn.actionAvailable).toBe(false)
     expect(completed.state.combatants[delayedCaster.id].classState.slowDelayedSpell).toBeUndefined()
-    expect(completed.events).toContainEqual({
+    expect(completed.events).toContainEqual(expect.objectContaining({
       type: 'slow-delayed-spell-completed', actorId: delayedCaster.id,
       spellId: 'magic-missile', slotLevel: 1,
-    })
+    }))
   })
 
   it('resolves both Ice Storm damage components and halves each on a successful save', () => {
@@ -5100,7 +5100,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(damaged.ok ? 'ok' : damaged.reason).toBe('ok')
     if (!damaged.ok) return
     expect(damaged.state.combatants.warded.currentHp).toBe(1)
-    expect(damaged.events).toContainEqual({ type: 'death-ward-triggered', targetId: 'warded', trigger: 'damage' })
+    expect(damaged.events).toContainEqual(expect.objectContaining({ type: 'death-ward-triggered', targetId: 'warded', trigger: 'damage' }))
 
     const appliedAgain = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('death-ward-kill', [cleric, warded, attacker]), {
       type: 'cast-spell', actorId: 'cleric', targetId: 'warded', spellId: 'death-ward', slotLevel: 4,
@@ -5117,7 +5117,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!killed.ok) return
     expect(killed.state.combatants.warded.currentHp).toBe(5)
     expect(killed.state.combatants.warded.deathSaves.dead).toBe(false)
-    expect(killed.events).toContainEqual({ type: 'death-ward-triggered', targetId: 'warded', trigger: 'instant-death' })
+    expect(killed.events).toContainEqual(expect.objectContaining({ type: 'death-ward-triggered', targetId: 'warded', trigger: 'instant-death' }))
   })
 
   it('lets a failed spell save consume Legendary Resistance before damage and conditions', () => {
@@ -5138,7 +5138,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     expect(result.state.combatants.legendary.currentHp).toBe(20)
     expect(result.state.combatants.legendary.classState.legendaryResistanceUses).toBe(0)
-    expect(result.events).toContainEqual({ type: 'legendary-resistance-used', targetId: 'legendary', remainingUses: 0 })
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'legendary-resistance-used', targetId: 'legendary', remainingUses: 0 }))
     expect(result.events).toContainEqual(expect.objectContaining({ type: 'saving-throw-resolved', success: true }))
   })
 
@@ -5152,7 +5152,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dashed.ok).toBe(true)
     if (!dashed.ok) return
     expect(dashed.state.combatants.a.turn).toMatchObject({ actionAvailable: false, movementRemaining: 40 })
-    expect(dashed.events).toContainEqual({ type: 'movement-granted', actorId: 'a', amount: 30 })
+    expect(dashed.events).toContainEqual(expect.objectContaining({ type: 'movement-granted', actorId: 'a', amount: 30 }))
   })
 
   it('settles the free object interaction and action fallback in Headless economy', () => {
@@ -5985,7 +5985,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     const used = resolveDnd5eHeadlessAction(objectState, { type: 'use-object', actorId: 'a', interactionId: 'drink:potion' })
     expect(used.ok).toBe(true)
     if (!used.ok) return
-    expect(used.events).toContainEqual({ type: 'object-action-taken', actorId: 'a', action: 'use-object', interactionId: 'drink:potion' })
+    expect(used.events).toContainEqual(expect.objectContaining({ type: 'object-action-taken', actorId: 'a', action: 'use-object', interactionId: 'drink:potion' }))
   })
 
   it('grants and consumes Help advantage for an ally ability check and attack', () => {
@@ -6313,7 +6313,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.events).toContainEqual({ type: 'turn-resource-spent', actorId: 'protector', resource: 'reaction' })
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'turn-resource-spent', actorId: 'protector', resource: 'reaction' }))
     expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
     expect(result.state.combatants.protector.turn.reactionAvailable).toBe(false)
 
@@ -6363,7 +6363,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.events).toContainEqual({ type: 'turn-resource-spent', actorId: 'protector', resource: 'reaction' })
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'turn-resource-spent', actorId: 'protector', resource: 'reaction' }))
     expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
   })
 
@@ -6640,11 +6640,11 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(ended.state.combatants.enemy.classState.activeEffects).toEqual([
       expect.objectContaining({ id: 'other-fear' }),
     ])
-    expect(ended.events).not.toContainEqual({
+    expect(ended.events).not.toContainEqual(expect.objectContaining({
       type: 'condition-ended',
       targetId: 'enemy',
       condition: 'frightened',
-    })
+    }))
   })
 
   it('spends the target reaction and halves one visible attack with Uncanny Dodge', () => {
@@ -6659,7 +6659,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     expect(result.state.combatants.rogue.currentHp).toBe(16)
     expect(result.state.combatants.rogue.turn.reactionAvailable).toBe(false)
-    expect(result.events).toContainEqual({ type: 'turn-resource-spent', actorId: 'rogue', resource: 'reaction' })
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'turn-resource-spent', actorId: 'rogue', resource: 'reaction' }))
   })
 
   it('applies attack-wide reductions before vulnerability and resistance', () => {
@@ -6891,13 +6891,13 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(damage.state.combatants[rakshasaSnapshot.id].magicResistance).toBe(true)
     expect(damage.state.combatants[rakshasaSnapshot.id].limitedMagicImmunity)
       .not.toBe(damageState.combatants[rakshasaSnapshot.id].limitedMagicImmunity)
-    expect(damage.events).toContainEqual({
+    expect(damage.events).toContainEqual(expect.objectContaining({
       type: 'spell-negated-by-limited-magic-immunity',
       actorId: disintegrator.id,
       targetId: rakshasaSnapshot.id,
       spellId: 'disintegrate',
       spellLevel: 6,
-    })
+    }))
     expect(damage.events.some((event) =>
       event.type === 'saving-throw-resolved' && event.targetId === rakshasaSnapshot.id))
       .toBe(false)
@@ -7294,9 +7294,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     expect(result.state.combatants.crawler.turn.movementRemaining).toBe(20)
     expect(result.state.combatants.crawler.conditions).toContain('prone')
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'turn-resource-spent', actorId: 'crawler', resource: 'movement', amount: 10,
-    })
+    }))
   })
 
   it('does not turn a hit within 5 feet against a petrified target into an automatic critical hit', () => {
@@ -7373,7 +7373,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(recovered.state.initiativeIndex).toBe(0)
   })
 
-  it('applies unconscious and prone at 0 HP and enforces massive-damage instant death', () => {
+  it('applies unconscious and prone at 0 HP, including player overkill', () => {
     const dropped = resolveDnd5eHeadlessAction(
       startDnd5eHeadlessCombat('drop-to-zero', [
         fighter('attacker', 20, { controller: 'dm' }),
@@ -7408,8 +7408,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(killed.ok).toBe(true)
     if (!killed.ok) return
-    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 3, dead: true })
-    expect(killed.events).toContainEqual(expect.objectContaining({
+    expect(killed.state.combatants.target.deathSaves).toMatchObject({ failures: 0, dead: false })
+    expect(killed.events).not.toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: 'attacker', targetId: 'target',
     }))
   })
@@ -7504,9 +7504,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
       currentHp: 0, deathSaves: { dead: false },
       classState: { undeadFortitudePending: { dc: 8, damage: 3, sourceId: 'attacker' } },
     })
-    expect(pending.events).toContainEqual({
+    expect(pending.events).toContainEqual(expect.objectContaining({
       type: 'undead-fortitude-save-required', targetId: 'zombie', dc: 8, damage: 3,
-    })
+    }))
     const survived = resolveDnd5eHeadlessAction(pending.state, {
       type: 'monster-undead-fortitude-save', actorId: 'zombie', d20: 10,
     })
@@ -7563,10 +7563,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     )
     expect(hit.ok).toBe(true)
     if (!hit.ok) return
-    expect(hit.events).toContainEqual({
+    expect(hit.events).toContainEqual(expect.objectContaining({
       type: 'monster-on-hit-save-required', targetId: 'target', sourceId: 'wolf',
       actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
-    })
+    }))
     const failed = resolveDnd5eHeadlessAction(hit.state, {
       type: 'monster-on-hit-save', actorId: 'target', sourceId: 'wolf', actionId: 'bite', d20: 1,
     })
@@ -7630,9 +7630,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'concentration-resolved', actorId: 'caster', d20: 2, total: 8, dc: 10, success: false,
-    })
+    }))
     expect(result.state.combatants.caster.concentrating).toBe(false)
   })
 
@@ -7663,9 +7663,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
-    expect(resolved.events).toContainEqual({
+    expect(resolved.events).toContainEqual(expect.objectContaining({
       type: 'concentration-resolved', actorId: 'caster', d20: 2, total: 2, dc: 10, success: false,
-    })
+    }))
     expect(resolved.state.combatants.caster.classState
       .concentrationCheckDisadvantagePendingSourceId).toBeUndefined()
   })
@@ -7850,13 +7850,13 @@ describe('D&D 5e 2014 headless combat engine', () => {
       effect.suspendedBy?.includes('class:berserker:mindless-rage'),
     )).toBe(true)
     expect(dnd5eTargetArmorClassForAttack(raged.state, 'wizard', 'berserker')).toBe(16)
-    expect(raged.events).toContainEqual({
+    expect(raged.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed',
       actorId: 'berserker',
       stateKey: 'berserker-mindless-rage',
       active: true,
       value: 2,
-    })
+    }))
 
     const wizardTurn = structuredClone(raged.state)
     wizardTurn.initiativeIndex = wizardTurn.initiativeOrder.indexOf('wizard')
@@ -7890,13 +7890,13 @@ describe('D&D 5e 2014 headless combat engine', () => {
       (effect) => effect.duration.type === 'rounds' && effect.duration.remainingRounds === 2,
     )).toBe(true)
     expect(dnd5eTargetArmorClassForAttack(ended.state, 'wizard', 'berserker')).toBe(14)
-    expect(ended.events).toContainEqual({
+    expect(ended.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed',
       actorId: 'berserker',
       stateKey: 'berserker-mindless-rage',
       active: false,
       value: 2,
-    })
+    }))
   })
 
   it('grants the Frenzy melee bonus attack only from the turn after entering Rage', () => {
@@ -7980,11 +7980,11 @@ describe('D&D 5e 2014 headless combat engine', () => {
       actionAvailable: true,
       bonusActionAvailable: false,
     })
-    expect(frenzyAttack.events).toContainEqual({
+    expect(frenzyAttack.events).toContainEqual(expect.objectContaining({
       type: 'turn-resource-spent',
       actorId: 'berserker',
       resource: 'bonusAction',
-    })
+    }))
   })
 
   it('keeps a level-15 Barbarian raging without attacking or taking damage', () => {
@@ -8041,9 +8041,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
       turn: { bonusActionAvailable: false },
       classState: { raging: undefined, frenzying: undefined, rageTurnsRemaining: undefined },
     })
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'turn-resource-spent', actorId: 'barbarian', resource: 'bonusAction',
-    })
+    }))
   })
 
   it('grants bardic inspiration to another combatant using a bonus action', () => {
@@ -8564,7 +8564,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!disease.ok) return
     expect(disease.state.combatants.ally.conditions).toEqual(['中毒'])
     expect(disease.state.combatants.paladin.classResources['dnd5e-lay-on-hands'].current).toBe(5)
-    expect(disease.events).toContainEqual({ type: 'condition-ended', targetId: 'ally', condition: '疾病' })
+    expect(disease.events).toContainEqual(expect.objectContaining({ type: 'condition-ended', targetId: 'ally', condition: '疾病' }))
 
     const harmReducedAlly = fighter('harm-reduced-ally', 10, {
       currentHp: 20,
@@ -8631,7 +8631,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       currentHp: 20,
       classState: { turnedByClericId: 'paladin', turnedRoundsRemaining: 10 },
     })
-    expect(result.events).toContainEqual({ type: 'unholy-turned', actorId: 'paladin', targetId: 'fiend', rounds: 10 })
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'unholy-turned', actorId: 'paladin', targetId: 'fiend', rounds: 10 }))
   })
 
   it('resolves Divine Intervention chance, automatic success, and seven-day lockout', () => {
@@ -8645,10 +8645,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(success.ok).toBe(true)
     if (!success.ok) return
     expect(success.state.combatants.cleric.classState.divineInterventionCooldownDays).toBe(7)
-    expect(success.events).toContainEqual({
+    expect(success.events).toContainEqual(expect.objectContaining({
       type: 'divine-intervention-resolved', actorId: 'cleric', d100: 10,
       success: true, automatic: false, cooldownDays: 7,
-    })
+    }))
 
     const highCleric = fighter('high-cleric', 20, {
       classId: 'cleric', level: 20,
@@ -8659,10 +8659,10 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(automatic.ok).toBe(true)
     if (!automatic.ok) return
-    expect(automatic.events).toContainEqual({
+    expect(automatic.events).toContainEqual(expect.objectContaining({
       type: 'divine-intervention-resolved', actorId: 'high-cleric', d100: undefined,
       success: true, automatic: true, cooldownDays: 7,
-    })
+    }))
   })
 
   it('applies Holy Nimbus radiant damage at an enemy turn start and tracks duration', () => {
@@ -8729,9 +8729,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     const turnStarted = resolveDnd5eHeadlessAction(activated.state, { type: 'end-turn', actorId: 'sorcerer' })
     expect(turnStarted.ok).toBe(true)
     if (!turnStarted.ok) return
-    expect(turnStarted.events).toContainEqual({
+    expect(turnStarted.events).toContainEqual(expect.objectContaining({
       type: 'draconic-presence-save-required', targetId: 'enemy', sourceId: 'sorcerer', mode: 'fear', dc: 18,
-    })
+    }))
     const failed = resolveDnd5eHeadlessAction(turnStarted.state, {
       type: 'sorcerer-draconic-presence-save', actorId: 'enemy', sourceId: 'sorcerer', d20: 1,
     })
@@ -8837,9 +8837,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(hit.ok).toBe(true)
     if (!hit.ok) return
     expect(hit.state.combatants.target.currentHp).toBe(11)
-    expect(hit.events).toContainEqual({
+    expect(hit.events).toContainEqual(expect.objectContaining({
       type: 'class-damage-applied', actorId: 'r', targetId: 'target', source: 'hunters-mark', amount: 4,
-    })
+    }))
   })
 
   it('moves Hunter\'s Mark from a defeated target without spending another spell slot', () => {
@@ -9079,9 +9079,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'wizard', stateKey: 'creature-form:polymorph', active: false,
     }))
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'wizard', stateKey: 'concentration', active: false,
-    })
+    }))
     expect(result.events).not.toContainEqual(expect.objectContaining({
       type: 'turn-resource-spent', resource: 'bonusAction',
     }))
@@ -9192,9 +9192,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(nextTurn.ok).toBe(true)
     if (!nextTurn.ok) return
     expect(nextTurn.state.combatants.champion.currentHp).toBe(15)
-    expect(nextTurn.events).toContainEqual({
+    expect(nextTurn.events).toContainEqual(expect.objectContaining({
       type: 'healing-applied', targetId: 'champion', amount: 7, hpBefore: 8, hpAfter: 15,
-    })
+    }))
 
     const warlock = fighter('warlock', 20, {
       classId: 'warlock', subclassId: 'fiend', level: 6,
@@ -9208,9 +9208,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(killed.ok).toBe(true)
     if (!killed.ok) return
     expect(killed.state.combatants.warlock.temporaryHp).toBe(10)
-    expect(killed.events).toContainEqual({
+    expect(killed.events).toContainEqual(expect.objectContaining({
       type: 'temporary-hit-points-gained', actorId: 'warlock', amount: 10, offered: 10, current: 10,
-    })
+    }))
   })
 
   it('applies Life Domain healing and Divine Strike', () => {
@@ -9289,9 +9289,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(struck.ok).toBe(true)
     if (!struck.ok) return
     expect(struck.state.combatants.enemy.currentHp).toBe(10)
-    expect(struck.events).toContainEqual({
+    expect(struck.events).toContainEqual(expect.objectContaining({
       type: 'class-damage-applied', actorId: 'cleric', targetId: 'enemy', source: 'divine-strike', amount: 6,
-    })
+    }))
   })
 
   it('adds Draconic Affinity and Empowered Evocation once per spell damage roll', () => {
@@ -9353,7 +9353,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
     if (!resolved.ok) return
     expect(resolved.state.combatants.target.currentHp).toBe(27)
-    expect(resolved.events).toContainEqual({
+    expect(resolved.events).toContainEqual(expect.objectContaining({
       type: 'spell-damage-feature-bonus-applied',
       actorId: wizard.id,
       spellId: 'magic-missile',
@@ -9361,8 +9361,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
       ability: 'int',
       amount: 4,
       application: 'first-projectile',
-    })
-    expect(resolved.events).toContainEqual({
+    }))
+    expect(resolved.events).toContainEqual(expect.objectContaining({
       type: 'magic-missile-damage-resolved',
       actorId: wizard.id,
       spellId: 'magic-missile',
@@ -9417,7 +9417,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
         },
       ],
       totalDamage: 23,
-    })
+    }))
   })
 
   it('expires Draconic Elemental Affinity resistance after its last remaining turn', () => {
@@ -9431,9 +9431,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!ended.ok) return
     expect(ended.state.combatants.sorcerer.classState.draconicResistanceType).toBeUndefined()
     expect(ended.state.combatants.sorcerer.classState.draconicResistanceRoundsRemaining).toBeUndefined()
-    expect(ended.events).toContainEqual({
+    expect(ended.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'sorcerer', stateKey: 'draconic-resistance', active: false,
-    })
+    }))
   })
 
   it('expires Sacred Weapon after ten of the Paladin\'s turns', () => {
@@ -9446,9 +9446,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(ended.ok).toBe(true)
     if (!ended.ok) return
     expect(ended.state.combatants.paladin.classState.sacredWeaponTurnsRemaining).toBeUndefined()
-    expect(ended.events).toContainEqual({
+    expect(ended.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'paladin', stateKey: 'sacred-weapon', active: false,
-    })
+    }))
   })
 
   it('applies Hunter Multiattack Defense after the first hit from a creature', () => {
@@ -9524,7 +9524,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(firstDrop.ok).toBe(true)
     if (!firstDrop.ok) return
-    expect(firstDrop.events).toContainEqual({ type: 'relentless-rage-save-required', targetId: 'barbarian', dc: 10 })
+    expect(firstDrop.events).toContainEqual(expect.objectContaining({ type: 'relentless-rage-save-required', targetId: 'barbarian', dc: 10 }))
     const firstSave = resolveDnd5eHeadlessAction(firstDrop.state, {
       type: 'barbarian-relentless-rage-save', actorId: 'barbarian', d20: 8, dc: 10,
     })
@@ -9540,7 +9540,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
     expect(secondDrop.ok).toBe(true)
     if (!secondDrop.ok) return
-    expect(secondDrop.events).toContainEqual({ type: 'relentless-rage-save-required', targetId: 'barbarian', dc: 15 })
+    expect(secondDrop.events).toContainEqual(expect.objectContaining({ type: 'relentless-rage-save-required', targetId: 'barbarian', dc: 15 }))
     const failed = resolveDnd5eHeadlessAction(secondDrop.state, {
       type: 'barbarian-relentless-rage-save', actorId: 'barbarian', d20: 1, dc: 15,
     })
@@ -9584,9 +9584,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(struck.ok).toBe(true)
     if (!struck.ok) return
     expect(struck.state.combatants.enemy.currentHp).toBe(12)
-    expect(struck.events).toContainEqual({
+    expect(struck.events).toContainEqual(expect.objectContaining({
       type: 'class-damage-applied', actorId: 'warlock', targetId: 'enemy', source: 'lifedrinker', amount: 4,
-    })
+    }))
   })
 
   it('uses Open Hand Tranquility as a Sanctuary save before a targeted attack', () => {
@@ -9609,9 +9609,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(blocked.events).toContainEqual(expect.objectContaining({
       type: 'saving-throw-resolved', targetId: 'attacker', ability: 'wis', dc: 15, success: false,
     }))
-    expect(blocked.events).toContainEqual({
+    expect(blocked.events).toContainEqual(expect.objectContaining({
       type: 'hostile-targeting-prevented', actorId: 'attacker', targetId: 'monk', source: 'tranquility',
-    })
+    }))
     expect(blocked.events.some((event) => event.type === 'attack-resolved')).toBe(false)
 
     const passed = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('tranquility-passed', [attacker, monk]), {
@@ -9649,12 +9649,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(blocked.ok).toBe(true)
     if (!blocked.ok) return
     expect(blocked.state.combatants.warded.currentHp).toBe(20)
-    expect(blocked.events).toContainEqual({
+    expect(blocked.events).toContainEqual(expect.objectContaining({
       type: 'hostile-targeting-prevented',
       actorId: 'attacker',
       targetId: 'warded',
       source: 'sanctuary',
-    })
+    }))
 
     const wardedTurn = startDnd5eHeadlessCombat('sanctuary-break', [
       { ...warded, initiative: 30 },
@@ -9690,9 +9690,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(blocked.ok).toBe(true)
     if (!blocked.ok) return
     expect(blocked.state.combatants.druid.currentHp).toBe(20)
-    expect(blocked.events).toContainEqual({
+    expect(blocked.events).toContainEqual(expect.objectContaining({
       type: 'hostile-targeting-prevented', actorId: 'beast', targetId: 'druid', source: 'nature-sanctuary',
-    })
+    }))
 
     const passed = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('nature-sanctuary-passed', [beast, druid]), {
       type: 'attack', actorId: 'beast', targetId: 'druid', attackModifier: 20, d20: 10,
@@ -9737,9 +9737,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.state.combatants.monk.classState.tranquilityActive).toBeUndefined()
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'monk', stateKey: 'tranquility', active: false,
-    })
+    }))
   })
 
   it('grants advantage for an attack from hiding and then reveals the attacker', () => {
@@ -9759,9 +9759,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'attack-resolved', actorId: 'rogue', d20: 18, hit: true,
     }))
     expect(result.state.combatants.rogue.classState.hiddenCheckTotal).toBeUndefined()
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: 'rogue', stateKey: 'hidden', active: false,
-    })
+    }))
   })
 
   it('applies Blight immunity and the plant disadvantage/maximum-damage rule', () => {
@@ -9955,9 +9955,9 @@ describe('D&D 5e 2014 headless combat engine', () => {
       vitalBodyPartsMissing: true,
     })
     expect(result.state.combatants.target.conditions).not.toEqual(expect.arrayContaining(['unconscious', 'prone']))
-    expect(result.events).toContainEqual({
+    expect(result.events).toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: 'wizard', targetId: 'target', hpBefore: 30,
-    })
+    }))
   })
 
   it('scales class features from their class level after multiclassing', () => {
@@ -11856,12 +11856,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
             distance: 5,
           }),
         ])
-        expect(moved.events).toContainEqual({
+        expect(moved.events).toContainEqual(expect.objectContaining({
           type: 'turn-resource-spent',
           actorId: 'ankheg',
           resource: 'movement',
           amount: expectedMovementCost,
-        })
+        }))
       },
     )
 

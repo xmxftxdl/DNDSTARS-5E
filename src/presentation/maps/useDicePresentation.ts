@@ -1,8 +1,15 @@
+import { createDiceCheckCueLedger, enqueueDiceCheckCue } from './diceCheckCueLedger'
+import { diceCheckAwaitsSettlement } from './diceCheckSettlement'
+import type { DiceCheckPresentation } from './diceCheckPresentation'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { enqueueDicePreview, finishDicePreview } from './dicePreviewQueue'
 import type { DiceRoll } from '../../components/DiceRollOverlay'
 import { DICE_TIMING } from '../../lib/diceOverlayShared'
+import type { DiceCheckOutcome } from './diceCheckOutcome'
 
 export interface DiceBoxD20Request {
+  checkRollId?: string
+  check?: DiceCheckPresentation
   id: number
   label: string
   targetName: string
@@ -14,6 +21,13 @@ export interface DiceBoxD20Request {
 }
 
 export interface DiceBoxRollRequest {
+  checkRollId?: string
+  appendFrom?: number
+  check?: DiceCheckPresentation
+  dieSides?: number[]
+  formula?: string
+  retainedValues?: number[]
+  rerollIndex?: number
   id: number
   /** Full authoritative pool; `count` may be capped for 3D rendering. */
   totalCount?: number
@@ -29,8 +43,15 @@ export interface DiceBoxRollRequest {
 }
 
 export interface SharedRollRequestPreview {
+  appendFrom?: number
+  check?: DiceCheckPresentation
+  settlement?: DiceRoll['settlement']
+  dieSides?: number[]
+  formula?: string
+  total?: number
   id: string
   kind: 'd20' | 'dice'
+  settled?: boolean
   count: number
   sides: number
   values: number[]
@@ -46,61 +67,129 @@ export function useDicePresentation(
   const afterRollRef = useRef<(() => void) | null>(null)
   const d20RequestCounterRef = useRef(0)
   const diceBoxRollRequestCounterRef = useRef(0)
-  const [diceBoxD20, setDiceBoxD20] = useState<DiceBoxD20Request | null>(null)
-  const [diceBoxRoll, setDiceBoxRoll] = useState<DiceBoxRollRequest | null>(null)
-  const [rollRequestPreview, setRollRequestPreview] = useState<SharedRollRequestPreview | null>(null)
+  type AuthorityRequest = { kind: 'd20'; request: DiceBoxD20Request } | { kind: 'dice'; request: DiceBoxRollRequest }
+  const [authorityPaused, setAuthorityPaused] = useState(false)
+  const [authorityQueue, setAuthorityQueue] = useState<AuthorityRequest[]>([])
+  const authorityQueueRef = useRef<AuthorityRequest[]>([])
+  const fallbackD20Ref = useRef(fallbackD20)
+  useEffect(() => { fallbackD20Ref.current = fallbackD20 }, [fallbackD20])
+  const publishAuthorityQueue = useCallback((queue: AuthorityRequest[]) => {
+    authorityQueueRef.current = queue
+    setAuthorityQueue(queue)
+  }, [])
+  const enqueueAuthority = useCallback((incoming: AuthorityRequest) => {
+    const queue = authorityQueueRef.current
+    if (queue.some(item => item.kind === incoming.kind && item.request.id === incoming.request.id)) return
+    publishAuthorityQueue(incoming.kind === 'dice' && incoming.request.appendFrom != null ? [incoming, ...queue] : [...queue, incoming])
+  }, [publishAuthorityQueue])
+  const clearAuthorityKind = useCallback((kind: AuthorityRequest['kind']) => {
+    const removed = authorityQueueRef.current.filter(item => item.kind === kind)
+    publishAuthorityQueue(authorityQueueRef.current.filter(item => item.kind !== kind))
+    // Ending combat must release waiting presentations as well as the visible one.
+    for (const item of removed) {
+      if (item.kind === 'd20') item.request.resolve(item.request.value ?? fallbackD20Ref.current(item.request))
+      else item.request.resolve(item.request.rerollIndex != null ? [] : item.request.values)
+    }
+  }, [publishAuthorityQueue])
+  const setDiceBoxD20 = useCallback((request: DiceBoxD20Request | null) => {
+    if (request) enqueueAuthority({ kind: 'd20', request })
+    else clearAuthorityKind('d20')
+  }, [enqueueAuthority, clearAuthorityKind])
+  const setDiceBoxRoll = useCallback((request: DiceBoxRollRequest | null) => {
+    if (request) enqueueAuthority({ kind: 'dice', request })
+    else clearAuthorityKind('dice')
+  }, [enqueueAuthority, clearAuthorityKind])
+  const diceBoxD20 = !authorityPaused && authorityQueue[0]?.kind === 'd20' ? authorityQueue[0].request : null
+  const diceBoxRoll = authorityQueue[0]?.kind === 'dice' && (!authorityPaused || authorityQueue[0].request.appendFrom != null) ? authorityQueue[0].request : null
+  const finishAuthority = useCallback((request: DiceBoxD20Request | DiceBoxRollRequest) => {
+    if (!authorityQueueRef.current.some(item => item.request === request)) return false
+    publishAuthorityQueue(authorityQueueRef.current.filter(item => item.request !== request))
+    return true
+  }, [publishAuthorityQueue])
+  const [previewQueue, setPreviewQueue] = useState<SharedRollRequestPreview[]>([])
+  const [previewPaused, setPreviewPaused] = useState(false)
+  const setDicePreviewPaused = useCallback((paused: boolean, pauseAuthority = false) => {
+    setPreviewPaused(paused)
+    setAuthorityPaused(pauseAuthority)
+  }, [])
+  const [checkResult, setCheckResult] = useState<DiceCheckOutcome | null>(null)
+  const [checkOutcomes, setCheckOutcomes] = useState<DiceCheckOutcome[]>([])
+  // A resolved check must not wait behind unrelated damage or room dice animations.
+  const pendingCheckRollIds = [
+    ...authorityQueue.map(item => item.request.checkRollId ?? item.request.requestKey),
+    ...previewQueue.filter(item => !item.settled).map(item => item.id),
+  ]
+  const checkOutcome = diceCheckAwaitsSettlement(checkOutcomes[0]?.rollId, pendingCheckRollIds)
+    ? null : checkOutcomes[0] ?? null
+  const cueLedgerRef = useRef<ReturnType<typeof createDiceCheckCueLedger> | null>(null)
+  if (cueLedgerRef.current === null) {
+    let storage: Storage | undefined
+    try { storage = window.sessionStorage } catch { /* Storage can be disabled. */ }
+    cueLedgerRef.current = createDiceCheckCueLedger(storage)
+  }
+  const enqueueCheckOutcome = useCallback((outcome: DiceCheckOutcome) => {
+    if (outcome.rollId) setCheckResult(outcome)
+    if (!cueLedgerRef.current!(outcome)) return
+    setCheckOutcomes(queue => enqueueDiceCheckCue(queue, outcome))
+  }, [])
+  const clearCheckOutcomes = useCallback(() => setCheckOutcomes([]), [])
+  useEffect(() => {
+    if (!checkOutcome) return
+    const timer = window.setTimeout(() => setCheckOutcomes(queue => queue.filter(item => item.id !== checkOutcome.id)), 2400)
+    return () => window.clearTimeout(timer)
+  }, [checkOutcome])
+  const rollRequestPreview = diceBoxD20 || diceBoxRoll || previewPaused ? null : previewQueue[0] ?? null
+  const setRollRequestPreview = useCallback((incoming: SharedRollRequestPreview | null) => {
+    setPreviewQueue(queue => enqueueDicePreview(queue, incoming))
+  }, [])
 
   useEffect(() => {
     if (!diceBoxD20) return
     const request = diceBoxD20
     const timer = window.setTimeout(() => {
-      setDiceBoxD20((current) => (current?.id === request.id ? null : current))
-      request.resolve(request.value ?? fallbackD20(request))
+      if (finishAuthority(request)) request.resolve(request.value ?? fallbackD20Ref.current(request))
     }, DICE_TIMING.D20_FAILSAFE_MS + (request.settledHoldMs ?? 0) + 1000)
     return () => window.clearTimeout(timer)
-  }, [diceBoxD20, fallbackD20])
+  }, [diceBoxD20, finishAuthority])
 
   useEffect(() => {
     if (!diceBoxRoll) return
     const request = diceBoxRoll
     const timer = window.setTimeout(() => {
-      setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
-      request.resolve(request.values)
+      if (finishAuthority(request)) request.resolve(request.rerollIndex != null ? [] : request.values)
     }, DICE_TIMING.ROLL_FAILSAFE_MS + (request.settledHoldMs ?? 0) + 1000)
     return () => window.clearTimeout(timer)
-  }, [diceBoxRoll])
+  }, [diceBoxRoll, finishAuthority])
 
   useEffect(() => {
     if (!rollRequestPreview) return
     const id = rollRequestPreview.id
-    const duration = rollRequestPreview.kind === 'd20' ? 4500 : 16000
+    const duration = DICE_TIMING.ROLL_FAILSAFE_MS + 1000
     const timer = window.setTimeout(() => {
-      setRollRequestPreview((current) => (current?.id === id ? null : current))
+      setPreviewQueue(queue => finishDicePreview(queue, id))
     }, duration)
     return () => window.clearTimeout(timer)
   }, [rollRequestPreview])
 
   const completeDiceBoxD20 = useCallback((request: DiceBoxD20Request, value: number) => {
-    request.resolve(value)
-    window.setTimeout(() => {
-      setDiceBoxD20((current) => (current?.id === request.id ? null : current))
-    }, 900)
-  }, [])
+    if (finishAuthority(request)) request.resolve(value)
+  }, [finishAuthority])
 
   const completeDiceBoxRoll = useCallback((request: DiceBoxRollRequest, values: number[]) => {
-    request.resolve(request.values.length > 0 ? request.values : values)
-    window.setTimeout(() => {
-      setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
-    }, 1200)
-  }, [])
+    if (finishAuthority(request)) request.resolve(request.rerollIndex != null ? values : request.values.length > 0 ? request.values : values)
+  }, [finishAuthority])
 
   const completeRollRequestPreview = useCallback((id: string, delayMs: number) => {
     window.setTimeout(() => {
-      setRollRequestPreview((current) => (current?.id === id ? null : current))
+      setPreviewQueue(queue => finishDicePreview(queue, id))
     }, delayMs)
   }, [])
 
   return {
+    checkOutcome,
+    checkResult: diceCheckAwaitsSettlement(checkResult?.rollId, pendingCheckRollIds) ? null : checkResult,
+    enqueueCheckOutcome,
+    clearCheckOutcomes,
     roll,
     setRoll,
     afterRollRef,
@@ -112,6 +201,7 @@ export function useDicePresentation(
     setDiceBoxRoll,
     rollRequestPreview,
     setRollRequestPreview,
+    setDicePreviewPaused,
     completeDiceBoxD20,
     completeDiceBoxRoll,
     completeRollRequestPreview,

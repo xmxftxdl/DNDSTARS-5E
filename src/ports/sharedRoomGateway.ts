@@ -31,6 +31,7 @@ export type SharedCombatInterruptMutation =
   | { operation: 'rollback'; mapId: string; id: string; response?: Record<string, unknown>; rollbackReason: 'timeout' | 'dm-disconnected' | 'cancelled' | 'stale-transaction' }
 
 export interface DmUndoTransactionSummary {
+  details?: string[]
   transactionId: string
   label: string
   status: 'applied' | 'undone'
@@ -40,6 +41,14 @@ export interface DmUndoTransactionSummary {
   undoneAt?: number
   combatRecoverable?: boolean
   combat?: {
+    beforeActorId?: string
+    beforeActorLabel?: string
+    beforeSlotId?: string
+    afterActorId?: string
+    afterActorLabel?: string
+    afterSlotId?: string
+    beforeActive?: boolean
+    afterActive?: boolean
     mapId?: string
     combatId?: string
     beforeRound?: number

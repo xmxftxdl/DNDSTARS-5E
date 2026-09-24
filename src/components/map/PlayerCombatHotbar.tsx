@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Backpack, ChevronLeft, ChevronRight, LockKeyhole, PackageOpen, Sparkles, Swords, X } from 'lucide-react'
 import type { Character } from '../../types/character'
@@ -69,7 +69,6 @@ import EquipmentTab from '../character/EquipmentTab'
 import {
   assignCombatItemQuickbarSlot,
   clearCombatItemQuickbarSlot,
-  COMBAT_ITEM_QUICK_SLOT_COUNT,
   reconcileCombatItemQuickbarPreference,
   type CombatItemQuickbarPreferenceV1,
 } from './combatItemQuickbar'
@@ -84,7 +83,6 @@ import {
 const STORAGE_PREFIX = 'dndstars5e:combat-hotbar:v1:'
 const ITEM_QUICKBAR_STORAGE_PREFIX = 'dndstars5e:combat-item-quickbar:v1:'
 const ITEM_BACKPACK_OPEN_PREFIX = 'dndstars5e:combat-backpack-open:v1:'
-const SPELL_PAGE_SIZE = 12
 const EMPTY_ARMED_SPELL_MODIFIERS = new Set<Dnd5eCombatSpellModifier>()
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -338,6 +336,7 @@ export default function PlayerCombatHotbar({
   onCommand,
   onUnavailable,
 }: PlayerCombatHotbarProps) {
+  const [activeCategory, setActiveCategory] = useState<'basics' | 'spells' | 'features' | 'items'>('basics')
   const exploration = mode === 'exploration'
   const actionRemaining = turnEconomy.action.current
   const bonusActionRemaining = turnEconomy.bonusAction.current
@@ -955,7 +954,7 @@ export default function PlayerCombatHotbar({
       bonusActionRemaining,
       movementRemaining,
       restrictedExtraActionKinds,
-      weaponLabel: character.equipment?.mainWeapon?.name,
+      weaponLabel: mainWeaponProfile?.weaponName ?? character.equipment?.mainWeapon?.name,
       grappleEscapes,
       spells: spellSources,
       features: featureSources,
@@ -1136,8 +1135,6 @@ export default function PlayerCombatHotbar({
     top: number
   } | null>(null)
   const suppressClickAfterDragRef = useRef(false)
-  const featureActionsRailRef = useRef<HTMLDivElement>(null)
-  const basicActionsRailRef = useRef<HTMLDivElement>(null)
   const preference = useMemo(
     () => reconcileDnd5eCombatHotbarPreference(storedPreference, descriptors),
     [descriptors, storedPreference],
@@ -1161,9 +1158,29 @@ export default function PlayerCombatHotbar({
     })
   }, [descriptors, preference.actionIds])
   const grouped = useMemo(() => groupDnd5eCombatHotbarDescriptors(orderedDescriptors), [orderedDescriptors])
-  const spellPageCount = Math.max(1, Math.ceil(grouped.spells.length / SPELL_PAGE_SIZE))
+  const spellRailRef = useRef<HTMLDivElement>(null)
+  const [spellPageSize, setSpellPageSize] = useState(1)
+  useLayoutEffect(() => {
+    const rail = spellRailRef.current
+    if (!rail) return
+    const measure = () => {
+      if (rail.clientWidth <= 0) return
+      const card = rail.firstElementChild as HTMLElement | null
+      const width = card?.offsetWidth ?? 72
+      const gap = Number.parseFloat(getComputedStyle(rail).columnGap) || 0
+      if (width <= 0) return
+      const capacity = Math.max(1, Math.floor((rail.clientWidth + gap) / (width + gap)))
+      setSpellPageSize(previous => previous === capacity ? previous : capacity)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(rail)
+    if (rail.firstElementChild) observer.observe(rail.firstElementChild)
+    measure()
+    return () => observer.disconnect()
+  }, [grouped.spells.length])
+  const spellPageCount = Math.max(1, Math.ceil(grouped.spells.length / spellPageSize))
   const activeSpellPage = Math.min(spellPageCount - 1, preference.activePage)
-  const visibleSpells = grouped.spells.slice(activeSpellPage * SPELL_PAGE_SIZE, (activeSpellPage + 1) * SPELL_PAGE_SIZE)
+  const visibleSpells = grouped.spells.slice(activeSpellPage * spellPageSize, (activeSpellPage + 1) * spellPageSize)
   const inventoryEntryById = useMemo(
     () => new Map(inventory.entries.map((entry) => [entry.instanceId, entry])),
     [inventory.entries],
@@ -1426,6 +1443,7 @@ export default function PlayerCombatHotbar({
       onFocus={(event) => showTooltip(entry, event.currentTarget)}
       onBlur={() => hideTooltip(entry.id)}
       aria-label={entry.label}
+      aria-pressed={entry.command.kind === 'toggle-spell-modifier' ? modifierActive : undefined}
       aria-disabled={!entry.enabled}
       title={entry.command.kind === 'cast-spell'
         ? entry.enabled ? [
@@ -1443,11 +1461,12 @@ export default function PlayerCombatHotbar({
         ? 'true'
         : undefined}
       aria-describedby={tooltip?.entry.id === entry.id ? 'combat-hotbar-action-tooltip' : undefined}
-      className={`group relative h-12 w-12 shrink-0 snap-start rounded-lg border p-px transition ${entry.id === 'system:end-turn' ? 'border-amber-300/35 bg-amber-400/10' : activeActionId === entry.id || modifierActive ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]' : entry.enabled ? 'border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-violet-300/50 hover:bg-violet-500/10' : 'cursor-not-allowed border-white/[0.045] bg-black/20'}`}
+      className={`combat-hotbar-labeled-action group relative flex h-20 w-[4.5rem] flex-col gap-1 shrink-0 snap-start items-center justify-center rounded-lg border p-1 transition ${entry.id === 'system:end-turn' ? 'border-amber-300/35 bg-amber-400/10' : activeActionId === entry.id || modifierActive ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]' : entry.enabled ? 'border-white/10 bg-white/[0.035] hover:border-violet-300/50 hover:bg-violet-500/10' : 'cursor-not-allowed border-white/[0.045] bg-black/20'}`}
     >
-      <Dnd5eActionIcon spec={entry.icon} level={spellLevel} active={activeActionId === entry.id || modifierActive} disabled={!entry.enabled} badge={resourceBadge} className="w-full" />
+      <Dnd5eActionIcon spec={entry.icon} level={spellLevel} active={activeActionId === entry.id || modifierActive} disabled={!entry.enabled} badge={resourceBadge} className="h-11 w-11" />
+      <span className={`w-full truncate text-center text-xs leading-4 ${entry.enabled ? 'text-slate-100' : 'text-slate-400'}`}>{entry.label.replace(/^攻击：/, '').replace('更多主动动作', '更多动作').replace('更多附赠动作', '附赠动作')}</span>
       {modifierActive ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-amber-100/70 bg-amber-400 px-1 text-[9px] font-black text-void-950">✓</span> : null}
-      {!entry.enabled ? <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20"><LockKeyhole className="h-4 w-4 text-slate-300/75 drop-shadow" /></span> : null}
+      {!entry.enabled ? <span className="pointer-events-none absolute right-1 top-1 rounded bg-black/60 p-0.5"><LockKeyhole className="h-3 w-3 text-slate-300/75" /></span> : null}
     </button>
   }
 
@@ -1502,7 +1521,7 @@ export default function PlayerCombatHotbar({
             if (draggedItemInstanceId) assignItemToQuickbar(draggedItemInstanceId, slotIndex)
             setDraggedItemInstanceId(null)
           }}
-          className="relative h-12 w-12 shrink-0 rounded-lg border border-dashed border-amber-200/[0.1] bg-black/10 hover:border-amber-200/25 hover:bg-amber-400/[0.06]"
+          className="relative h-16 w-16 shrink-0 rounded-lg border border-dashed border-amber-200/[0.1] bg-black/10 hover:border-amber-200/25 hover:bg-amber-400/[0.06]"
         >
           <span className="text-[9px] font-black text-amber-100/25">{slotIndex + 1}</span>
         </button>
@@ -1547,7 +1566,7 @@ export default function PlayerCombatHotbar({
           setBackpackVisible(true)
         }}
         className={[
-          'group relative h-12 w-12 shrink-0 rounded-lg border p-px transition',
+          'group relative h-16 w-16 shrink-0 rounded-lg border p-px transition',
           descriptor && activeActionId === descriptor.id
             ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]'
             : descriptor?.enabled
@@ -1617,12 +1636,8 @@ export default function PlayerCombatHotbar({
     usesByEffect: character.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
     turnKey: turnEconomy.turnKey,
   })
-  const scrollActionsRail = (rail: HTMLDivElement | null, direction: -1 | 1) => {
-    rail?.scrollBy({
-      left: direction * 156,
-      behavior: 'smooth',
-    })
-  }
+  const endTurnAction = grouped.basics.find((entry) => entry.command.kind === 'end-turn')
+  const shownCategory = activeCategory === 'spells' && grouped.spells.length === 0 ? 'basics' : activeCategory
 
   return (<>
     <section
@@ -1631,186 +1646,67 @@ export default function PlayerCombatHotbar({
       data-action-remaining={actionRemaining}
       data-bonus-action-remaining={bonusActionRemaining}
       data-movement-remaining={movementRemaining}
-      className="pointer-events-auto w-full max-w-[1320px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
+      style={{ zoom: 1.035 }}
+      className="pointer-events-auto flex max-h-[32vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-2 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
     >
-      <div className="grid min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_218px_218px] gap-1.5">
-        <aside className="flex flex-col items-center justify-between rounded-lg border border-amber-100/10 bg-black/25 p-1.5">
-          <button
-            type="button"
-            data-testid="combat-hotbar-character-portrait"
-            aria-label={`快速查看${character.name}的人物卡`}
-            title="快速查看人物卡"
-            onClick={() => setQuickCharacterOpen(true)}
-            className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)] transition hover:scale-105 hover:border-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-          >
-            {portrait
-              ? <img src={portrait} alt={`${character.name}的战斗头像`} className="h-full w-full object-cover" />
-              : <span className={`flex h-full w-full items-center justify-center bg-gradient-to-br text-2xl ${character.accent}`}>{character.avatar}</span>}
-          </button>
-          <div className="mt-1 w-full">
-            <div className="h-1.5 overflow-hidden rounded-full bg-black/70"><div className="h-full rounded-full bg-gradient-to-r from-rose-700 to-emerald-400" style={{ width: `${hpPercentage}%` }} /></div>
-            <div className="mt-0.5 text-center text-[9px] font-semibold tabular-nums text-slate-300">{hotbarCurrentHp}/{hotbarMaximumHp}</div>
-          </div>
-          {activeCreatureForm ? (
-            <div className="mt-1 w-full truncate rounded bg-emerald-400/10 px-1 py-0.5 text-center text-[8px] font-bold text-emerald-200" title={`${activeCreatureForm.name} · ${activeCreatureFormLabel}`}>{activeCreatureForm.name}</div>
-          ) : exploration ? (
-            <div className="mt-1 w-full rounded bg-violet-400/10 py-0.5 text-center text-[8px] font-bold text-violet-200">探索施法</div>
-          ) : (
-            <div className="mt-1 grid w-full grid-cols-3 gap-0.5 text-center text-[8px] font-bold">
-              <span title="动作" className={`rounded py-0.5 ${actionRemaining > 0 ? 'bg-emerald-400/20 text-emerald-200' : 'bg-white/5 text-slate-600'}`}>动 {actionRemaining}</span>
-              <span title="附赠动作" className={`rounded py-0.5 ${bonusActionRemaining > 0 ? 'bg-sky-400/20 text-sky-200' : 'bg-white/5 text-slate-600'}`}>附 {bonusActionRemaining}</span>
-              <span title="剩余移动力" className={`rounded py-0.5 ${movementRemaining > 0 ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-slate-600'}`}>{movementRemaining}</span>
-            </div>
-          )}
-          {!exploration && restrictedExtraActionKinds.length > 0 ? (
-            <div
-              data-testid="combat-hotbar-restricted-extra-action"
-              className="mt-1 w-full rounded bg-cyan-400/15 px-1 py-0.5 text-center text-[8px] font-bold text-cyan-200"
-              title="加速术：可再执行一次武器攻击、疾走、撤离或躲藏"
-            >加速动作 1</div>
-          ) : null}
-        </aside>
-
-        <div data-testid="combat-hotbar-spells" className="rounded-lg border border-violet-300/15 bg-violet-950/15 p-1.5">
-          {spellSlots.length > 0 ? (
-            <div
-              data-testid="combat-hotbar-spell-slots"
-              aria-label={`${character.name}剩余法术位：${spellSlotLabel}`}
-              className="mb-1 flex min-h-5 flex-wrap items-center gap-1 rounded-md border border-violet-300/15 bg-black/25 px-1.5 py-0.5"
-            >
-              <span className="mr-0.5 text-[9px] font-semibold text-violet-200/75">剩余法术位</span>
-              {spellSlots.map((slot) => (
-                <span
-                  key={slot.key}
-                  data-spell-slot-summary-level={slot.level}
-                  data-spell-slot-summary-current={slot.current}
-                  data-spell-slot-summary-max={slot.max}
-                  title={`${slot.isPact ? '契约法术位' : `${slot.level}环法术位`}：剩余 ${slot.current}，总计 ${slot.max}`}
-                  className={[
-                    'whitespace-nowrap rounded border px-1.5 py-px text-[9px] font-semibold tabular-nums',
-                    slot.current > 0
-                      ? 'border-violet-300/25 bg-violet-400/10 text-violet-100'
-                      : 'border-white/[0.06] bg-black/20 text-slate-600',
-                  ].join(' ')}
-                >
-                  {slot.label} <strong className="text-[10px]">{slot.current}</strong>/{slot.max}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-violet-200/80">
-            <Sparkles className="h-3 w-3" />法术
-            <span className="ml-auto font-normal tracking-normal text-slate-500">{grouped.spells.length} 项 · {activeSpellPage + 1}/{spellPageCount}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setSpellPage(activeSpellPage - 1)} disabled={activeSpellPage <= 0} aria-label="上一页法术" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronLeft className="h-3.5 w-3.5" /></button>
-            <div className="grid min-w-0 flex-1 grid-cols-6 gap-1">
-              {Array.from({ length: SPELL_PAGE_SIZE }, (_, index) => visibleSpells[index]
-                ? actionButton(visibleSpells[index])
-                : <div key={`empty-spell-${index}`} className="h-12 w-12 shrink-0 rounded-lg border border-dashed border-violet-200/[0.07] bg-black/10" />)}
-            </div>
-            <button type="button" onClick={() => setSpellPage(activeSpellPage + 1)} disabled={activeSpellPage >= spellPageCount - 1} aria-label="下一页法术" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronRight className="h-3.5 w-3.5" /></button>
-          </div>
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 pb-1">
+        <button type="button" data-testid="combat-hotbar-character-portrait" aria-label={`快速查看${character.name}的人物卡`} title="快速查看人物卡" onClick={() => setQuickCharacterOpen(true)} className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full border-2 border-amber-200/55">
+          {portrait ? <img src={portrait} alt={`${character.name}的战斗头像`} className="h-full w-full object-cover" /> : <span className={`flex h-full w-full items-center justify-center bg-gradient-to-br text-2xl ${character.accent}`}>{character.avatar}</span>}
+        </button>
+        <div className="w-24 shrink-0">
+          <div className="truncate text-xs font-semibold text-slate-100" title={activeCreatureForm ? `${activeCreatureForm.name} · ${activeCreatureFormLabel}` : character.name}>{activeCreatureForm?.name ?? character.name}</div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/70"><div className="h-full rounded-full bg-emerald-400" style={{ width: `${hpPercentage}%` }} /></div>
+          <div className="mt-0.5 text-xs tabular-nums text-slate-300">生命 <span>{hotbarCurrentHp}/{hotbarMaximumHp}</span></div>
         </div>
-
-        <div data-testid="combat-hotbar-features" className="rounded-lg border border-emerald-300/15 bg-emerald-950/10 p-1.5">
-          <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-emerald-100/80">
-            <Sparkles className="h-3 w-3" />职业特性
-            <span className="ml-auto font-normal tracking-normal text-slate-500">{grouped.features.length} 项 · 左右滑动</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => scrollActionsRail(featureActionsRailRef.current, -1)} aria-label="向左滚动职业特性" className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"><ChevronLeft className="h-3.5 w-3.5" /></button>
-            <div
-              ref={featureActionsRailRef}
-              data-testid="combat-hotbar-features-rail"
-              aria-label="职业特性两行横向滑栏"
-              tabIndex={0}
-              onWheel={(event) => {
-                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
-                event.preventDefault()
-                event.stopPropagation()
-                featureActionsRailRef.current?.scrollBy({ left: event.deltaY })
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-                event.preventDefault()
-                scrollActionsRail(featureActionsRailRef.current, event.key === 'ArrowLeft' ? -1 : 1)
-              }}
-              className="grid h-[6.25rem] min-w-0 flex-1 auto-cols-[3rem] grid-flow-col grid-rows-2 gap-1 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              {grouped.features.map(actionButton)}
-            </div>
-            <button type="button" onClick={() => scrollActionsRail(featureActionsRailRef.current, 1)} aria-label="向右滚动职业特性" className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"><ChevronRight className="h-3.5 w-3.5" /></button>
-          </div>
+        <div data-testid="combat-hotbar-turn-summary" role="status" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-xs">
+          {exploration ? <span className="rounded bg-violet-400/10 px-2 py-1 text-violet-200">探索中</span> : <>
+            <span className={`rounded px-2 py-1 ${actionRemaining > 0 ? 'bg-emerald-400/15 text-emerald-200' : 'bg-white/5 text-slate-300'}`}>{actionRemaining > 0 ? `动作 ${actionRemaining}` : '动作已用完'}</span>
+            <span className={`rounded px-2 py-1 ${bonusActionRemaining > 0 ? 'bg-sky-400/15 text-sky-200' : 'bg-white/5 text-slate-300'}`}>{bonusActionRemaining > 0 ? `附赠动作 ${bonusActionRemaining}` : '附赠动作已用完'}</span>
+            <span className="rounded bg-amber-400/15 px-2 py-1 text-amber-200">剩余移动 {movementRemaining} 尺</span>
+            {restrictedExtraActionKinds.length > 0 && <span data-testid="combat-hotbar-restricted-extra-action" className="rounded bg-cyan-400/15 px-2 py-1 text-cyan-200" title="可再执行一次武器攻击、疾走、撤离或躲藏">加速动作 1</span>}
+          </>}
+          {pending ? <span className="text-amber-200">正在结算上一项操作…</span> : !canAct && !exploration ? <span className="text-slate-300">等待自己的回合</span> : null}
         </div>
-
-        <div data-testid="combat-hotbar-items" className="rounded-lg border border-amber-300/15 bg-amber-950/10 p-1.5">
-          <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-amber-100/80">
-            <PackageOpen className="h-3 w-3" />道具
-            <span className="ml-auto font-normal tracking-normal text-slate-500">
-              快捷 {itemQuickbarPreference.slots.filter(Boolean).length}/{COMBAT_ITEM_QUICK_SLOT_COUNT} · 背包 {inventory.entries.length}
-            </span>
+        {endTurnAction && <button type="button" data-testid="combat-hotbar-end-turn" disabled={!endTurnAction.enabled} title={endTurnAction.disabledReason} onClick={() => activate(endTurnAction)} className="shrink-0 rounded-lg border border-amber-300/30 bg-amber-400/15 px-3 py-2 text-xs font-semibold text-amber-100 disabled:opacity-40">结束回合</button>}
+      </header>
+      <div className="min-h-0 overflow-y-auto overscroll-contain">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-white/10 pt-1">
+          <div role="tablist" aria-label="角色能力分类" className="flex shrink-0 gap-1">
+            {([
+              { id: 'basics', label: '基础动作', count: grouped.basics.filter((entry) => entry.command.kind !== 'end-turn').length, icon: Swords },
+              { id: 'spells', label: '法术', count: grouped.spells.length, icon: Sparkles },
+              { id: 'features', label: '职业特性', count: grouped.features.length, icon: Swords },
+              { id: 'items', label: '道具', count: inventory.entries.length, icon: PackageOpen },
+            ] as const).filter((category) => category.id !== 'spells' || category.count > 0).map((category) => <button key={category.id} type="button" role="tab" id={`hotbar-tab-${category.id}`} aria-controls={`hotbar-panel-${category.id}`} aria-selected={shownCategory === category.id} onClick={() => { setActiveCategory(category.id); setTooltip(null) }} className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold ${shownCategory === category.id ? 'bg-violet-400/20 text-violet-100' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}><category.icon className="h-3.5 w-3.5" />{category.label}<span className="opacity-60">{category.count}</span></button>)}
           </div>
-          <div data-testid="combat-item-quick-grid" className="grid grid-cols-4 gap-1">
-            {itemQuickbarPreference.slots.map(quickbarItemButton)}
-            <button
-              type="button"
-              data-testid="combat-item-backpack"
-              aria-label="打开完整背包"
-              title={`打开完整背包（${inventory.entries.length} 个物品栏位）`}
-              onClick={() => setBackpackVisible(true)}
-              className="group relative flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-amber-300/30 bg-gradient-to-br from-amber-400/15 to-orange-950/25 text-amber-100 transition hover:-translate-y-0.5 hover:border-amber-200/60 hover:bg-amber-400/25"
-            >
-              <Backpack className="h-6 w-6 drop-shadow" />
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-amber-100/40 bg-amber-500 px-1 text-[8px] font-black text-void-950">
-                {inventory.entries.length}
-              </span>
-            </button>
-          </div>
+              {spellSlots.length > 0 && <div data-testid="combat-hotbar-spell-slots" aria-label={`${character.name}剩余法术位：${spellSlotLabel}`} className="flex flex-wrap items-center gap-1 text-xs">
+                <span className="mr-1 text-slate-300">剩余法术位</span>
+            {spellSlots.map((slot) => <span key={slot.key} data-spell-slot-summary-level={slot.level} data-spell-slot-summary-current={slot.current} data-spell-slot-summary-max={slot.max} title={`${slot.isPact ? '契约法术位' : `${slot.level}环法术位`}：剩余 ${slot.current}，总计 ${slot.max}`} className={`rounded border px-1.5 py-0.5 tabular-nums ${slot.current > 0 ? 'border-violet-300/25 bg-violet-400/10 text-violet-100' : 'border-white/5 text-slate-500'}`}>{slot.label} <strong>{slot.current}</strong>/{slot.max}</span>)}
+          </div>}
         </div>
-
-        <div data-testid="combat-hotbar-basics" className="rounded-lg border border-slate-200/15 bg-slate-900/30 p-1.5">
-          <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-300">
-            <Swords className="h-3 w-3" />基础动作
-            <span className="ml-auto font-normal tracking-normal text-slate-600">左右滑动 · 拖拽排序</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label="向左滚动基础动作"
-              onClick={() => scrollActionsRail(basicActionsRailRef.current, -1)}
-              className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <div
-              ref={basicActionsRailRef}
-              data-testid="combat-hotbar-basics-rail"
-              aria-label="基础动作横向滑栏"
-              tabIndex={0}
-              onWheel={(event) => {
-                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
-                event.preventDefault()
-                event.stopPropagation()
-                basicActionsRailRef.current?.scrollBy({ left: event.deltaY })
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-                event.preventDefault()
-                scrollActionsRail(basicActionsRailRef.current, event.key === 'ArrowLeft' ? -1 : 1)
-              }}
-              className="grid h-[6.25rem] min-w-0 flex-1 auto-cols-[3rem] grid-flow-col grid-rows-2 gap-1 overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              {grouped.basics.map(actionButton)}
+        <div data-testid="combat-hotbar-category-content" className="h-[6.75rem] overflow-y-auto overscroll-contain pt-1">
+          <div role="tabpanel" id="hotbar-panel-basics" aria-labelledby="hotbar-tab-basics" hidden={shownCategory !== 'basics'} data-testid="combat-hotbar-basics">
+            <div data-testid="combat-hotbar-basics-rail" aria-label="基础动作，可拖拽排序" className="flex flex-wrap gap-1.5">
+              {grouped.basics.filter((entry) => entry.command.kind !== 'end-turn').map(actionButton)}
             </div>
-            <button
-              type="button"
-              aria-label="向右滚动基础动作"
-              onClick={() => scrollActionsRail(basicActionsRailRef.current, 1)}
-              className="flex h-[6.25rem] w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 hover:text-slate-200"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+          </div>
+          <div role="tabpanel" id="hotbar-panel-spells" aria-labelledby="hotbar-tab-spells" hidden={shownCategory !== 'spells'} data-testid="combat-hotbar-spells">
+            <div className="flex items-start gap-1.5">
+              <button type="button" onClick={() => setSpellPage(activeSpellPage - 1)} disabled={activeSpellPage <= 0} aria-label="上一页法术" className="flex h-20 w-6 shrink-0 items-center justify-center rounded border border-white/10 text-slate-300 disabled:opacity-20"><ChevronLeft className="h-4 w-4" /></button>
+              <div ref={spellRailRef} className="flex min-w-0 flex-1 flex-nowrap gap-1.5 overflow-hidden">{visibleSpells.map(actionButton)}</div>
+              <button type="button" onClick={() => setSpellPage(activeSpellPage + 1)} disabled={activeSpellPage >= spellPageCount - 1} aria-label="下一页法术" className="flex h-20 w-6 shrink-0 items-center justify-center rounded border border-white/10 text-slate-300 disabled:opacity-20"><ChevronRight className="h-4 w-4" /></button>
+            </div>
+            <p className="mt-1 text-right text-[11px] text-slate-400">{activeSpellPage + 1}/{spellPageCount} 页 · 拖拽排序 · 右键选择施法环位</p>
+          </div>
+          <div role="tabpanel" id="hotbar-panel-features" aria-labelledby="hotbar-tab-features" hidden={shownCategory !== 'features'} data-testid="combat-hotbar-features" className={shownCategory === 'features' ? 'flex flex-wrap gap-1.5' : 'hidden'}>
+            {grouped.features.map(actionButton)}
+            {grouped.features.length === 0 && <p className="py-3 text-xs text-slate-400">当前没有可主动使用的职业特性。</p>}
+          </div>
+          <div role="tabpanel" id="hotbar-panel-items" aria-labelledby="hotbar-tab-items" hidden={shownCategory !== 'items'} data-testid="combat-hotbar-items">
+            <div data-testid="combat-item-quick-grid" className="flex flex-wrap gap-2">
+              {itemQuickbarPreference.slots.map((instanceId, slotIndex) => <div key={slotIndex} className="flex w-[4.5rem] flex-col items-center gap-1">{quickbarItemButton(instanceId, slotIndex)}<span className="w-full truncate text-center text-[11px] text-slate-300" title={instanceId ? inventoryEntryById.get(instanceId)?.item.name : undefined}>{instanceId ? inventoryEntryById.get(instanceId)?.item.name : `快捷槽 ${slotIndex + 1}`}</span></div>)}
+              <button type="button" data-testid="combat-item-backpack" aria-label="打开完整背包" onClick={() => setBackpackVisible(true)} className="flex w-[4.5rem] flex-col items-center justify-center gap-1 rounded-lg border border-amber-300/30 bg-amber-400/10 p-2 text-amber-100"><Backpack className="h-7 w-7" /><span className="text-[11px]">背包 {inventory.entries.length}</span></button>
+            </div>
           </div>
         </div>
       </div>
@@ -1842,7 +1738,7 @@ export default function PlayerCombatHotbar({
             <div className="min-w-0 flex-1">
               <h3 id="combat-backpack-title" className="text-base font-bold text-white">角色物品栏</h3>
               <p className="mt-1 text-xs leading-5 text-slate-400">
-                背包包含角色的全部装备与道具。可直接使用已接入 Headless 的物品，也可选择物品后放入或交换 1–7 号快捷槽。
+                背包包含角色的全部装备与道具。可直接使用支持自动结算的物品，也可选择物品后放入或交换 1–7 号快捷槽。
               </p>
             </div>
             <button

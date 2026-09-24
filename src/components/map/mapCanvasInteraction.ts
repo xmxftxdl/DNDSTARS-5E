@@ -40,7 +40,9 @@ export function mapCanvasAoeGridCell(
 export function mapCanvasTokenClickAction(
   areaTargeting: boolean,
   movementTargeting = false,
+  modifierTargeting = false,
 ): 'consume-area-click' | 'select-movement-destination' | 'select-token' {
+  if (modifierTargeting) return 'select-token'
   if (movementTargeting) return 'select-movement-destination'
   return areaTargeting ? 'consume-area-click' : 'select-token'
 }

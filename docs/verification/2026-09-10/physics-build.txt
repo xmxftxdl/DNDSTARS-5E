@@ -1,0 +1,192 @@
+vite v8.1.5 building client environment for production...
+[2K
+transforming...✓ 2720 modules transformed.
+rendering chunks...
+computing gzip size...
+.codex-temp/large-dice-app/index.html                                                 2.50 kB │ gzip:   0.78 kB
+.codex-temp/large-dice-app/dice-box-frame.html                                        2.61 kB │ gzip:   1.27 kB
+.codex-temp/large-dice-app/assets/mapImageGeometryDetection.worker-nz-dK7TV.js        3.79 kB
+.codex-temp/large-dice-app/assets/pluginSandbox.worker-D71poAlg.js                    9.82 kB
+.codex-temp/large-dice-app/assets/starmark-logo-BZgv8OGz.png                        139.75 kB
+.codex-temp/large-dice-app/assets/pdf.worker.min-CHFwMXne.mjs                     1,262.39 kB
+.codex-temp/large-dice-app/assets/dnd5eCombatSimulation.worker-DT42Y8Mw.js        4,053.85 kB
+.codex-temp/large-dice-app/assets/main-mHZebY76.css                                 400.56 kB │ gzip:  55.24 kB
+.codex-temp/large-dice-app/assets/starmark-logo-CB_M4M1H.js                           0.05 kB │ gzip:   0.07 kB
+.codex-temp/large-dice-app/assets/pdf.worker.min-C8Ts8bNu.js                          0.06 kB │ gzip:   0.08 kB
+.codex-temp/large-dice-app/assets/PlayerQuickCharacterSheet-BNz0J1ZT.js               0.08 kB │ gzip:   0.09 kB
+.codex-temp/large-dice-app/assets/roomPluginSync-DSFnl7ww.js                          0.08 kB │ gzip:   0.09 kB
+.codex-temp/large-dice-app/assets/Dnd5eActiveEffectDetailsDialog-DIpOjgab.js          0.08 kB │ gzip:   0.10 kB
+.codex-temp/large-dice-app/assets/dnd5eShopAuthority-DFE1z-sG.js                      0.09 kB │ gzip:   0.09 kB
+.codex-temp/large-dice-app/assets/inventoryAuthority-90IQhZ6J.js                      0.09 kB │ gzip:   0.09 kB
+.codex-temp/large-dice-app/assets/sharedApi-1-MdT05S.js                               0.10 kB │ gzip:   0.11 kB
+.codex-temp/large-dice-app/assets/DmMonsterControlDock-B5X8BMur.js                    0.11 kB │ gzip:   0.11 kB
+.codex-temp/large-dice-app/assets/marketplace-publication-BN5puDtV.js                 0.23 kB │ gzip:   0.19 kB
+.codex-temp/large-dice-app/assets/Card-IgBJ15QX.js                                    0.24 kB │ gzip:   0.20 kB
+.codex-temp/large-dice-app/assets/useVoiceRoom-Cu5c3DIa.js                            0.26 kB │ gzip:   0.21 kB
+.codex-temp/large-dice-app/assets/pluginRequirementProjection-CVgtXX3-.js             0.26 kB │ gzip:   0.15 kB
+.codex-temp/large-dice-app/assets/generatedImage-B2ukvwWD.js                          0.27 kB │ gzip:   0.25 kB
+.codex-temp/large-dice-app/assets/pluginLoader-D06PsH4-.js                            0.29 kB │ gzip:   0.19 kB
+.codex-temp/large-dice-app/assets/sharedWriteWatermark-CiRLBso5.js                    0.35 kB │ gzip:   0.23 kB
+.codex-temp/large-dice-app/assets/portraitPresentation-Bc-acBxp.js                    0.36 kB │ gzip:   0.17 kB
+.codex-temp/large-dice-app/assets/srdContent-sWgd4g89.js                              0.42 kB │ gzip:   0.38 kB
+.codex-temp/large-dice-app/assets/PageHeader-B4hWJpUB.js                              0.48 kB │ gzip:   0.29 kB
+.codex-temp/large-dice-app/assets/campaignNavigation-xz4l1nqp.js                      0.49 kB │ gzip:   0.33 kB
+.codex-temp/large-dice-app/assets/combatInitiativeConfirmation-BhQ1dyIA.js            0.56 kB │ gzip:   0.30 kB
+.codex-temp/large-dice-app/assets/campaignTime-BWJf4U5v.js                            0.60 kB │ gzip:   0.35 kB
+.codex-temp/large-dice-app/assets/pdfSplitViewController-BasgoexV.js                  0.64 kB │ gzip:   0.41 kB
+.codex-temp/large-dice-app/assets/rolldown-runtime-QTnfLwEv.js                        0.69 kB │ gzip:   0.42 kB
+.codex-temp/large-dice-app/assets/modulepreload-polyfill-Dezn_h7o.js                  0.69 kB │ gzip:   0.39 kB
+.codex-temp/large-dice-app/assets/PdfLinkedText-CJoKBHjU.js                           0.74 kB │ gzip:   0.50 kB
+.codex-temp/large-dice-app/assets/encounterBuilder-C0pg8XO1.js                        0.79 kB │ gzip:   0.42 kB
+.codex-temp/large-dice-app/assets/dnd5eShopOfferIcon-BPVNzvh_.js                      0.87 kB │ gzip:   0.48 kB
+.codex-temp/large-dice-app/assets/appTheme-Ch7HX8nj.js                                0.92 kB │ gzip:   0.48 kB
+.codex-temp/large-dice-app/assets/ThemeToggle-Dd9jH9IB.js                             0.93 kB │ gzip:   0.60 kB
+.codex-temp/large-dice-app/assets/dnd5eCreatureFormEndControl-B6W01RyX.js             0.99 kB │ gzip:   0.56 kB
+.codex-temp/large-dice-app/assets/browserSharedRoomResources-DUqdAmfo.js              1.08 kB │ gzip:   0.60 kB
+.codex-temp/large-dice-app/assets/dnd5eMerchantInteraction-C_CDTAbM.js                1.10 kB │ gzip:   0.61 kB
+.codex-temp/large-dice-app/assets/preload-helper-Czpn1I53.js                          1.19 kB │ gzip:   0.67 kB
+.codex-temp/large-dice-app/assets/RoomHandoutNotification-C8Ohzs20.js                 1.23 kB │ gzip:   0.74 kB
+.codex-temp/large-dice-app/assets/browserRuntime-BUBNPLTS.js                          1.23 kB │ gzip:   0.66 kB
+.codex-temp/large-dice-app/assets/spellbook-BTQgBAUa.js                               1.26 kB │ gzip:   0.78 kB
+.codex-temp/large-dice-app/assets/accountCharacterVault-KMOC_sQP.js                   1.34 kB │ gzip:   0.78 kB
+.codex-temp/large-dice-app/assets/mapExploration-BrY8RYBN.js                          1.46 kB │ gzip:   0.75 kB
+.codex-temp/large-dice-app/assets/accountSession-SaXMwc33.js                          1.49 kB │ gzip:   0.62 kB
+.codex-temp/large-dice-app/assets/fog-DtVthXqW.js                                     1.68 kB │ gzip:   0.72 kB
+.codex-temp/large-dice-app/assets/PublicBlogPage-CmY3ECn9.js                          1.72 kB │ gzip:   0.94 kB
+.codex-temp/large-dice-app/assets/roomSharedStateSync-DD-HFQnW.js                     1.74 kB │ gzip:   0.87 kB
+.codex-temp/large-dice-app/assets/ai-model-policy-DIhJCtAq.js                         1.76 kB │ gzip:   0.76 kB
+.codex-temp/large-dice-app/assets/mapFreeDiceRoll-D5NcKYTY.js                         1.85 kB │ gzip:   0.91 kB
+.codex-temp/large-dice-app/assets/middleware-Pd0e8Igk.js                              1.91 kB │ gzip:   0.95 kB
+.codex-temp/large-dice-app/assets/roomPluginSync-W3Hz5Z2G.js                          1.98 kB │ gzip:   1.08 kB
+.codex-temp/large-dice-app/assets/browserSharedRoomService-CiXj96Jy.js                2.08 kB │ gzip:   0.67 kB
+.codex-temp/large-dice-app/assets/PublicCombatPage-P4i2N4Kw.js                        2.15 kB │ gzip:   1.28 kB
+.codex-temp/large-dice-app/assets/combatExperience-eAlWFjaK.js                        2.19 kB │ gzip:   1.11 kB
+.codex-temp/large-dice-app/assets/characters-wymdGXOD.js                              2.23 kB │ gzip:   0.68 kB
+.codex-temp/large-dice-app/assets/PublicPricingPage-Bd4QDuwI.js                       2.31 kB │ gzip:   1.24 kB
+.codex-temp/large-dice-app/assets/PluginPublisherPage-JbmwwULW.js                     2.72 kB │ gzip:   1.40 kB
+.codex-temp/large-dice-app/assets/pdfSourceEvidence-DP69MOZT.js                       2.73 kB │ gzip:   1.29 kB
+.codex-temp/large-dice-app/assets/customMonsters-C3sjsczL.js                          2.78 kB │ gzip:   1.35 kB
+.codex-temp/large-dice-app/assets/sceneAudio-BtP65cCK.js                              2.91 kB │ gzip:   1.55 kB
+.codex-temp/large-dice-app/assets/monsterManualSpell-Di8C_Odc.js                      2.99 kB │ gzip:   1.31 kB
+.codex-temp/large-dice-app/assets/dnd5eShops-CuRbWUuS.js                              3.10 kB │ gzip:   1.56 kB
+.codex-temp/large-dice-app/assets/combatTokens-DDCLsveB.js                            3.15 kB │ gzip:   1.28 kB
+.codex-temp/large-dice-app/assets/combatStatistics-Dp0EDJb9.js                        3.31 kB │ gzip:   1.30 kB
+.codex-temp/large-dice-app/assets/VoiceRoomSystem-B9kSQtbM.js                         3.33 kB │ gzip:   1.60 kB
+.codex-temp/large-dice-app/assets/campaignBackupApi-C42KR6og.js                       3.34 kB │ gzip:   1.86 kB
+.codex-temp/large-dice-app/assets/playerView-DqtVOeCQ.js                              3.40 kB │ gzip:   1.22 kB
+.codex-temp/large-dice-app/assets/appDialog-CQIqSIeJ.js                               3.60 kB │ gzip:   1.41 kB
+.codex-temp/large-dice-app/assets/SceneAudioPlaybackSystem-DKNSGuwy.js                3.71 kB │ gzip:   1.71 kB
+.codex-temp/large-dice-app/assets/MapReferencePanel-B2j1irVW.js                       3.78 kB │ gzip:   1.67 kB
+.codex-temp/large-dice-app/assets/aiProvider-BfoyVepo.js                              3.98 kB │ gzip:   1.64 kB
+.codex-temp/large-dice-app/assets/dnd5eShopAuthority-wHg8Hq_8.js                      4.12 kB │ gzip:   1.82 kB
+.codex-temp/large-dice-app/assets/PdfShareDialog-DPtKYCTf.js                          4.16 kB │ gzip:   2.10 kB
+.codex-temp/large-dice-app/assets/quickCharacterView-DCPH1drW.js                      4.33 kB │ gzip:   1.62 kB
+.codex-temp/large-dice-app/assets/PublicLegalPage-BX2mKEKd.js                         4.40 kB │ gzip:   2.53 kB
+.codex-temp/large-dice-app/assets/NpcMerchantPanel-_-xVU6Uv.js                        4.62 kB │ gzip:   1.89 kB
+.codex-temp/large-dice-app/assets/CharacterTokenCropDialog-D9mBnfj9.js                4.74 kB │ gzip:   2.16 kB
+.codex-temp/large-dice-app/assets/mapImageGeometryDetection-DLn4r-L9.js               5.36 kB │ gzip:   2.53 kB
+.codex-temp/large-dice-app/assets/roomCommunications-7AMyKXgM.js                      5.52 kB │ gzip:   1.87 kB
+.codex-temp/large-dice-app/assets/PublicWebsiteShell-BpPN4V8e.js                      5.62 kB │ gzip:   1.89 kB
+.codex-temp/large-dice-app/assets/useLatestCallback-CzF65lT4.js                       5.64 kB │ gzip:   2.57 kB
+.codex-temp/large-dice-app/assets/MapMerchantShopDialog-BGjBYud_.js                   5.72 kB │ gzip:   2.43 kB
+.codex-temp/large-dice-app/assets/PublicLandingPage-CVf1yjlz.js                       6.28 kB │ gzip:   2.58 kB
+.codex-temp/large-dice-app/assets/sceneOrchestration-CqDEvW90.js                      6.45 kB │ gzip:   2.31 kB
+.codex-temp/large-dice-app/assets/CombatInitiativeConfirmationDialog-XcQq3LpO.js      6.50 kB │ gzip:   2.51 kB
+.codex-temp/large-dice-app/assets/Dnd5eInventoryTile-DLQ-Qk7L.js                      6.51 kB │ gzip:   2.43 kB
+.codex-temp/large-dice-app/assets/PluginCatalogDetailPage-C1WLg5Vb.js                 6.55 kB │ gzip:   2.60 kB
+.codex-temp/large-dice-app/assets/ai-provider-CRkHizX6.js                             6.66 kB │ gzip:   2.25 kB
+.codex-temp/large-dice-app/assets/monsterManualControl-D_ZLUI1T.js                    6.68 kB │ gzip:   2.58 kB
+.codex-temp/large-dice-app/assets/inventoryAuthority-CjFiks31.js                      6.81 kB │ gzip:   3.02 kB
+.codex-temp/large-dice-app/assets/persistentAreaGeometry-B-b5ACvc.js                  6.83 kB │ gzip:   2.50 kB
+.codex-temp/large-dice-app/assets/campaignLongRest-eS9e9xfn.js                        6.99 kB │ gzip:   2.89 kB
+.codex-temp/large-dice-app/assets/CombatExperienceSettlementDialog-CQ_00FRV.js        7.48 kB │ gzip:   2.62 kB
+.codex-temp/large-dice-app/assets/map-visibility-layers-oHxXAy8z.js                   7.61 kB │ gzip:   2.17 kB
+.codex-temp/large-dice-app/assets/map-geometry-layers-B0a8tXzV.js                     8.21 kB │ gzip:   3.07 kB
+.codex-temp/large-dice-app/assets/dnd5e-plugin-sandbox-host-kaL0nluZ.js               8.29 kB │ gzip:   3.00 kB
+.codex-temp/large-dice-app/assets/localAiBridgeApi-CxVHF0tO.js                        8.35 kB │ gzip:   3.42 kB
+.codex-temp/large-dice-app/assets/mapGeometry-DhWuoNqR.js                             8.60 kB │ gzip:   2.75 kB
+.codex-temp/large-dice-app/assets/pluginCatalogApi-BLknBok2.js                        8.60 kB │ gzip:   2.71 kB
+.codex-temp/large-dice-app/assets/ActiveRulesExtensionsPage-CIto7-C3.js               8.66 kB │ gzip:   3.37 kB
+.codex-temp/large-dice-app/assets/Dnd5eLegendaryActionWindow-BnSL7xzV.js              9.61 kB │ gzip:   3.33 kB
+.codex-temp/large-dice-app/assets/AiImageGenerationButton-DXlcHHbx.js                 9.63 kB │ gzip:   4.25 kB
+.codex-temp/large-dice-app/assets/AccountAuthPanel-BaOt49UH.js                        9.78 kB │ gzip:   3.05 kB
+.codex-temp/large-dice-app/assets/Dnd5ePluginCombatPanel-4FmdRGEy.js                 10.05 kB │ gzip:   3.56 kB
+.codex-temp/large-dice-app/assets/D20RollConfirmationOverlay-kVsrsZK8.js             10.10 kB │ gzip:   3.83 kB
+.codex-temp/large-dice-app/assets/Dnd5eFighterCombatPanel-DpM9gZy7.js                10.24 kB │ gzip:   3.44 kB
+.codex-temp/large-dice-app/assets/AccountProfilePage-aykZmTzG.js                     10.28 kB │ gzip:   3.81 kB
+.codex-temp/large-dice-app/assets/pdfReaderExperience-Cv2QcYFf.js                    10.35 kB │ gzip:   3.50 kB
+.codex-temp/large-dice-app/assets/voiceChanger-BoA84IR7.js                           10.51 kB │ gzip:   4.00 kB
+.codex-temp/large-dice-app/assets/DmCombatRecoveryDialog-BDlWMUb9.js                 11.26 kB │ gzip:   4.45 kB
+.codex-temp/large-dice-app/assets/roomPluginActivation-Bu6neI-F.js                   11.67 kB │ gzip:   4.30 kB
+.codex-temp/large-dice-app/assets/Dnd5eActiveEffectDetailsDialog-zPy_Bqtb.js         12.42 kB │ gzip:   3.96 kB
+.codex-temp/large-dice-app/assets/mapsPageHelpers-CmZdSVZL.js                        13.00 kB │ gzip:   5.19 kB
+.codex-temp/large-dice-app/assets/roomApi-Dizk8pLx.js                                13.03 kB │ gzip:   4.33 kB
+.codex-temp/large-dice-app/assets/AccountCampaignsPage-DyPs462o.js                   13.16 kB │ gzip:   4.36 kB
+.codex-temp/large-dice-app/assets/MapDiceRoller-cYJykt2A.js                          13.96 kB │ gzip:   4.87 kB
+.codex-temp/large-dice-app/assets/rollConfirmation-DKJ7wb16.js                       14.55 kB │ gzip:   4.54 kB
+.codex-temp/large-dice-app/assets/Dnd5eMapObjectDetailPanel-B1TUp5YR.js              14.64 kB │ gzip:   4.28 kB
+.codex-temp/large-dice-app/assets/accountApi-CzjyQAtH.js                             15.24 kB │ gzip:   5.57 kB
+.codex-temp/large-dice-app/assets/Dnd5eBasicActionsPanel-D1pg1nZ3.js                 15.57 kB │ gzip:   4.54 kB
+.codex-temp/large-dice-app/assets/PlayerQuickCharacterSheet-D1a_TUzy.js              15.83 kB │ gzip:   5.10 kB
+.codex-temp/large-dice-app/assets/EnemyPoolPicker-CC-8RH3H.js                        16.04 kB │ gzip:   4.95 kB
+.codex-temp/large-dice-app/assets/SpellbookPage-wVuie112.js                          17.22 kB │ gzip:   6.60 kB
+.codex-temp/large-dice-app/assets/RoomLobbyPage-D5EpxM5w.js                          17.88 kB │ gzip:   5.50 kB
+.codex-temp/large-dice-app/assets/spellSettlementCoordinator-BCLoLTCo.js             18.56 kB │ gzip:   6.13 kB
+.codex-temp/large-dice-app/assets/ShopsPage-D5i6ZePb.js                              20.00 kB │ gzip:   6.37 kB
+.codex-temp/large-dice-app/assets/CampaignSettingsPage-BkfwdOBF.js                   20.25 kB │ gzip:   6.37 kB
+.codex-temp/large-dice-app/assets/CampaignTimeSystem-06vdMz0k.js                     20.75 kB │ gzip:   7.23 kB
+.codex-temp/large-dice-app/assets/PdfSplitViewPanel-CWMgvqZF.js                      20.83 kB │ gzip:   8.02 kB
+.codex-temp/large-dice-app/assets/pluginAreas-BDhQBqD_.js                            20.96 kB │ gzip:   6.54 kB
+.codex-temp/large-dice-app/assets/diceFrame-zQd5FOs_.js                              22.72 kB │ gzip:   8.45 kB
+.codex-temp/large-dice-app/assets/DmMonsterControlDock-C3Z4XkFB.js                   24.81 kB │ gzip:   7.51 kB
+.codex-temp/large-dice-app/assets/Sidebar-DPc_9pbB.js                                26.10 kB │ gzip:   7.17 kB
+.codex-temp/large-dice-app/assets/Dnd5ePersistentAreaDetailPanel-D83yNgs8.js         26.96 kB │ gzip:   7.71 kB
+.codex-temp/large-dice-app/assets/Dashboard-CqRwvMXR.js                              29.44 kB │ gzip:   9.18 kB
+.codex-temp/large-dice-app/assets/character-CcMfiLj_.js                              37.57 kB │ gzip:  11.75 kB
+.codex-temp/large-dice-app/assets/CombatSimulationPage-aR5BLkKf.js                   39.53 kB │ gzip:  11.38 kB
+.codex-temp/large-dice-app/assets/map-persistent-area-layers-BanPlPGM.js             40.54 kB │ gzip:  12.22 kB
+.codex-temp/large-dice-app/assets/chunk-BV7QT456-CMvXndvl.js                         42.44 kB │ gzip:  15.11 kB
+.codex-temp/large-dice-app/assets/Dnd5eClassCombatPanel-nKS71LPo.js                  45.29 kB │ gzip:  12.45 kB
+.codex-temp/large-dice-app/assets/characters-CKC-9zJJ.js                             46.16 kB │ gzip:  13.09 kB
+.codex-temp/large-dice-app/assets/CommunicationsPage-Ct4j2npK.js                     52.25 kB │ gzip:  14.41 kB
+.codex-temp/large-dice-app/assets/maps-DNK-MEzy.js                                   52.29 kB │ gzip:  14.95 kB
+.codex-temp/large-dice-app/assets/main-C53hPpmS.js                                   56.44 kB │ gzip:  17.74 kB
+.codex-temp/large-dice-app/assets/EquipmentTab-BuhtjXNT.js                           64.05 kB │ gzip:  19.33 kB
+.codex-temp/large-dice-app/assets/pluginLoader-BBVa8bkj.js                           64.18 kB │ gzip:  18.68 kB
+.codex-temp/large-dice-app/assets/icon-vendor-C5Do1iKA.js                            64.40 kB │ gzip:  20.44 kB
+.codex-temp/large-dice-app/assets/SceneOrchestrationSystem-DD7EexpP.js               66.52 kB │ gzip:  17.56 kB
+.codex-temp/large-dice-app/assets/dmWorkshopMonsterHandoff-DN3rorO1.js               72.75 kB │ gzip:  25.06 kB
+.codex-temp/large-dice-app/assets/monsterStatBlockPaste-CpvDWgvK.js                  73.09 kB │ gzip:  22.67 kB
+.codex-temp/large-dice-app/assets/PluginsPage-S19_WOV3.js                            77.15 kB │ gzip:  19.42 kB
+.codex-temp/large-dice-app/assets/MapViewportLayer-DX8_IM95.js                       90.60 kB │ gzip:  29.38 kB
+.codex-temp/large-dice-app/assets/MapWorkspacePanelsLayer-B_qG-o4m.js               111.39 kB │ gzip:  29.72 kB
+.codex-temp/large-dice-app/assets/monsterTurnPlanner-Cd4i1nAI.js                    119.62 kB │ gzip:  33.54 kB
+.codex-temp/large-dice-app/assets/react-vendor-BYq7BQhn.js                          174.88 kB │ gzip:  55.12 kB
+.codex-temp/large-dice-app/assets/Dnd5eMonsterWorkshopDialog-DFKKpnsd.js            186.24 kB │ gzip:  45.56 kB
+.codex-temp/large-dice-app/assets/map-combat-effects-CEB2jCNn.js                    196.66 kB │ gzip:  57.09 kB
+.codex-temp/large-dice-app/assets/CharactersPage-CfXkOVHk.js                        256.04 kB │ gzip:  69.71 kB
+.codex-temp/large-dice-app/assets/map-token-renderer-Dg-OzwH_.js                    278.39 kB │ gzip:  84.25 kB
+.codex-temp/large-dice-app/assets/DmPrepAssistantPage-C-XGlOK5.js                   301.25 kB │ gzip:  83.46 kB
+.codex-temp/large-dice-app/assets/dnd5e-DMwJiwjE.js                                 401.28 kB │ gzip: 111.64 kB
+.codex-temp/large-dice-app/assets/map-cantrip-effects-CGkHejS-.js                   401.92 kB │ gzip: 119.76 kB
+.codex-temp/large-dice-app/assets/DmWorkshopPage-CgmheVxx.js                        423.77 kB │ gzip:  98.27 kB
+.codex-temp/large-dice-app/assets/pdf-EQHMWEbX.js                                   427.54 kB │ gzip: 127.43 kB
+.codex-temp/large-dice-app/assets/livekit-client.esm-CgpJ_kbm.js                    493.42 kB │ gzip: 127.44 kB
+.codex-temp/large-dice-app/assets/dice-vendor-C2bKjqtR.js                           544.92 kB │ gzip: 141.72 kB
+.codex-temp/large-dice-app/assets/MapsPage-Bo_9H7q6.js                            1,336.55 kB │ gzip: 389.04 kB
+.codex-temp/large-dice-app/assets/dnd5e-plugin-compiler-ss7Ks30B.js               4,423.72 kB │ gzip: 971.23 kB
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugins. Here is a breakdown:
+  - vite:worker-import-meta-url (37%)
+  - vite:asset (19%)
+  - vite:css-post (12%)
+  - @tailwindcss/vite:generate:build (12%)
+  - vite:build-import-analysis (7%)
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 14.53s

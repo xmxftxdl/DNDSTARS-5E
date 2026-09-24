@@ -1,0 +1,2722 @@
+{
+  "total": 319,
+  "rows": [
+    {
+      "id": "acid-arrow",
+      "name": "强酸箭",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "acid-splash",
+      "name": "酸液飞溅",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "aid",
+      "name": "援助术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "alarm",
+      "name": "警报术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "alter-self",
+      "name": "变身术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "animal-friendship",
+      "name": "化兽为友",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "animal-messenger",
+      "name": "动物信使",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "animal-shapes",
+      "name": "动物形态",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "animate-dead",
+      "name": "操纵死尸",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "animate-objects",
+      "name": "活化物件",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "antilife-shell",
+      "name": "防活物护罩",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "antimagic-field",
+      "name": "反魔法力场",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "antipathy-sympathy",
+      "name": "嫌恶/关怀术",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "arcane-eye",
+      "name": "秘法眼",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "arcane-hand",
+      "name": "奥术之手",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "arcane-lock",
+      "name": "秘法锁",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "arcane-sword",
+      "name": "奥术之剑",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "arcanists-magic-aura",
+      "name": "奥法师魔法灵光",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "astral-projection",
+      "name": "星界投影",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "augury",
+      "name": "卜筮术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "awaken",
+      "name": "启蒙术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "bane",
+      "name": "灾祸术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "banishment",
+      "name": "放逐术",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "barkskin",
+      "name": "树肤术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "beacon-of-hope",
+      "name": "希望信标",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "bestow-curse",
+      "name": "降咒",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "black-tentacles",
+      "name": "黑触手",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "blade-barrier",
+      "name": "剑刃护壁",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "bless",
+      "name": "祝福术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "blight",
+      "name": "枯萎术",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "blindness-deafness",
+      "name": "目盲/耳聋术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "blink",
+      "name": "闪现术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "blur",
+      "name": "朦胧术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "branding-smite",
+      "name": "印记斩",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "burning-hands",
+      "name": "燃烧之手",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "call-lightning",
+      "name": "召雷术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "calm-emotions",
+      "name": "安定心神",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "chain-lightning",
+      "name": "连锁闪电",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "charm-person",
+      "name": "魅惑人类",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "chill-touch",
+      "name": "冻寒之触",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "circle-of-death",
+      "name": "死亡法阵",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "clairvoyance",
+      "name": "鹰眼术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "clone",
+      "name": "克隆术",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "cloudkill",
+      "name": "死云术",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "color-spray",
+      "name": "七彩喷射",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "command",
+      "name": "命令术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "commune",
+      "name": "通神术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "commune-with-nature",
+      "name": "问道自然",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "comprehend-languages",
+      "name": "通晓语言",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "compulsion",
+      "name": "强迫术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "cone-of-cold",
+      "name": "寒冰锥",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "confusion",
+      "name": "困惑术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "conjure-animals",
+      "name": "召唤动物",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "conjure-celestial",
+      "name": "召唤天界生物",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "conjure-elemental",
+      "name": "召唤元素生物",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "conjure-fey",
+      "name": "召唤精类生物",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "conjure-minor-elementals",
+      "name": "召唤次级元素生物",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "conjure-woodland-beings",
+      "name": "召唤林地之精",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "contact-other-plane",
+      "name": "异界探知",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "contagion",
+      "name": "疫病术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "contingency",
+      "name": "触发术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "continual-flame",
+      "name": "不灭明焰",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "control-water",
+      "name": "操控水体",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "control-weather",
+      "name": "操控天气",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "counterspell",
+      "name": "法术反制",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "create-food-and-water",
+      "name": "造粮术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "create-undead",
+      "name": "唤起死灵",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "create-or-destroy-water",
+      "name": "造水/枯水术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "creation",
+      "name": "造物术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "cure-wounds",
+      "name": "疗伤术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "dancing-lights",
+      "name": "舞光术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "darkness",
+      "name": "黑暗术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "darkvision",
+      "name": "黑暗视觉",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "daylight",
+      "name": "昼明术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "death-ward",
+      "name": "防死结界",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "delayed-blast-fireball",
+      "name": "延迟爆裂火球",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "demiplane",
+      "name": "创造半位面",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "detect-evil-and-good",
+      "name": "侦测善恶",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "detect-magic",
+      "name": "侦测魔法",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "detect-poison-and-disease",
+      "name": "侦测毒性和疾病",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "detect-thoughts",
+      "name": "侦测思想",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "dimension-door",
+      "name": "任意门",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "disguise-self",
+      "name": "易容术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "disintegrate",
+      "name": "解离术",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "dispel-evil-and-good",
+      "name": "反制善恶",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "dispel-magic",
+      "name": "解除魔法",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "divination",
+      "name": "预言术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "divine-favor",
+      "name": "神恩",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "divine-word",
+      "name": "圣言术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "dominate-beast",
+      "name": "支配野兽",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "dominate-monster",
+      "name": "支配怪物",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "dominate-person",
+      "name": "支配人类",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "dream",
+      "name": "托梦术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "druidcraft",
+      "name": "德鲁伊伎俩",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "earthquake",
+      "name": "地震术",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "eldritch-blast",
+      "name": "魔能爆",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "enhance-ability",
+      "name": "强化属性",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "enlarge-reduce",
+      "name": "变巨/缩小术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "entangle",
+      "name": "纠缠术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "enthrall",
+      "name": "注目术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "etherealness",
+      "name": "以太化",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "expeditious-retreat",
+      "name": "脚底抹油",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "eyebite",
+      "name": "摄心目光",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fabricate",
+      "name": "鬼斧神工",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "faerie-fire",
+      "name": "妖火",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "faithful-hound",
+      "name": "忠犬术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "false-life",
+      "name": "虚假生命",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fear",
+      "name": "恐惧术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "feather-fall",
+      "name": "羽落术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "feeblemind",
+      "name": "弱智术",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "find-familiar",
+      "name": "获得魔宠",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "find-steed",
+      "name": "召唤坐骑",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "find-traps",
+      "name": "寻找陷阱",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "find-the-path",
+      "name": "寻路术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "finger-of-death",
+      "name": "死亡一指",
+      "level": 7,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fire-bolt",
+      "name": "火焰箭",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fire-shield",
+      "name": "火焰护盾",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fire-storm",
+      "name": "火焰风暴",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fireball",
+      "name": "火球术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "flame-blade",
+      "name": "火焰刀",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "flame-strike",
+      "name": "焰击术",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "flaming-sphere",
+      "name": "炽焰法球",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "flesh-to-stone",
+      "name": "石化术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "floating-disk",
+      "name": "浮碟术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fly",
+      "name": "飞行术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "fog-cloud",
+      "name": "云雾术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "forbiddance",
+      "name": "禁制术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "forcecage",
+      "name": "魔力监牢",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "foresight",
+      "name": "预警术",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "freedom-of-movement",
+      "name": "行动自如",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "freezing-sphere",
+      "name": "冰封法球",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "gaseous-form",
+      "name": "气化形体",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "gate",
+      "name": "异界之门",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "geas",
+      "name": "指使术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "gentle-repose",
+      "name": "遗体防腐",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "giant-insect",
+      "name": "巨虫术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "glibness",
+      "name": "花言巧语",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "globe-of-invulnerability",
+      "name": "法术无效结界",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "glyph-of-warding",
+      "name": "守卫刻文",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "goodberry",
+      "name": "神莓术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "grease",
+      "name": "油腻术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "greater-invisibility",
+      "name": "高等隐形术",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "greater-restoration",
+      "name": "高等复原术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "guardian-of-faith",
+      "name": "信仰守卫",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "guards-and-wards",
+      "name": "铜墙铁壁",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "guidance",
+      "name": "神导术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "guiding-bolt",
+      "name": "曳光弹",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "gust-of-wind",
+      "name": "造风术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hallow",
+      "name": "圣居",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hallucinatory-terrain",
+      "name": "幻景",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "harm",
+      "name": "重伤术",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "haste",
+      "name": "加速术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "heal",
+      "name": "医疗术",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "healing-word",
+      "name": "治愈真言",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "heat-metal",
+      "name": "灼热金属",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hellish-rebuke",
+      "name": "炼狱叱喝",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "heroes-feast",
+      "name": "英雄宴",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "heroism",
+      "name": "英雄气概",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hideous-laughter",
+      "name": "狂笑术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hold-monster",
+      "name": "怪物定身术",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hold-person",
+      "name": "人类定身术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "holy-aura",
+      "name": "圣洁灵光",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hunters-mark",
+      "name": "猎人印记",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "hypnotic-pattern",
+      "name": "催眠图纹",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "ice-storm",
+      "name": "冰风暴",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "identify",
+      "name": "鉴定术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "illusory-script",
+      "name": "迷幻手稿",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "imprisonment",
+      "name": "禁锢术",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "incendiary-cloud",
+      "name": "焚云术",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "inflict-wounds",
+      "name": "致伤术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "insect-plague",
+      "name": "疫病虫群",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "instant-summons",
+      "name": "瞬间召唤",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "invisibility",
+      "name": "隐形术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "irresistible-dance",
+      "name": "迷舞术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "jump",
+      "name": "跳跃术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "knock",
+      "name": "敲击术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "legend-lore",
+      "name": "通晓传奇",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "lesser-restoration",
+      "name": "次级复原术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "levitate",
+      "name": "浮空术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "light",
+      "name": "光亮术",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "lightning-bolt",
+      "name": "闪电束",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "locate-animals-or-plants",
+      "name": "动植物定位术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "locate-creature",
+      "name": "生物定位术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "locate-object",
+      "name": "物件定位术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "longstrider",
+      "name": "大步奔行",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mage-armor",
+      "name": "法师护甲",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mage-hand",
+      "name": "法师之手",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "magic-circle",
+      "name": "防护法阵",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "magic-jar",
+      "name": "魔魂壶",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "magic-missile",
+      "name": "魔法飞弹",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "magic-mouth",
+      "name": "魔嘴术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "magic-weapon",
+      "name": "魔化武器",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "magnificent-mansion",
+      "name": "豪宅术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "major-image",
+      "name": "高等幻影",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "mass-cure-wounds",
+      "name": "群体疗伤术",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mass-heal",
+      "name": "群体医疗术",
+      "level": 9,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mass-healing-word",
+      "name": "群体治愈真言",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mass-suggestion",
+      "name": "群体暗示术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "maze",
+      "name": "迷宫术",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "meld-into-stone",
+      "name": "融身入石",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mending",
+      "name": "修复术",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "message",
+      "name": "传讯术",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "meteor-swarm",
+      "name": "流星爆",
+      "level": 9,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mind-blank",
+      "name": "心灵屏障",
+      "level": 8,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "minor-illusion",
+      "name": "次级幻影",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mirage-arcane",
+      "name": "海市蜃楼",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mirror-image",
+      "name": "镜影术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "mislead",
+      "name": "假象术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "misty-step",
+      "name": "迷踪步",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "modify-memory",
+      "name": "篡改记忆",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "moonbeam",
+      "name": "月华之光",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "move-earth",
+      "name": "地动术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "nondetection",
+      "name": "回避侦测",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "pass-without-trace",
+      "name": "行动无踪",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "passwall",
+      "name": "穿墙术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "phantasmal-killer",
+      "name": "魅影杀手",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "phantom-steed",
+      "name": "魅影驹",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "planar-ally",
+      "name": "异界盟誓",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "planar-binding",
+      "name": "异界誓缚",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "plane-shift",
+      "name": "异界传送",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "plant-growth",
+      "name": "植物滋长",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "poison-spray",
+      "name": "毒气喷溅",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "polymorph",
+      "name": "变形术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "power-word-kill",
+      "name": "律令死亡",
+      "level": 9,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "power-word-stun",
+      "name": "律令震慑",
+      "level": 8,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "prayer-of-healing",
+      "name": "治疗祷言",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "prestidigitation",
+      "name": "魔法伎俩",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "prismatic-spray",
+      "name": "虹光喷射",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "prismatic-wall",
+      "name": "虹光法墙",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "private-sanctum",
+      "name": "私人密室",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "produce-flame",
+      "name": "燃火术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "programmed-illusion",
+      "name": "预置幻影",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "project-image",
+      "name": "投影术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "protection-from-energy",
+      "name": "防护能量伤害",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "protection-from-evil-and-good",
+      "name": "防护善恶",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "protection-from-poison",
+      "name": "防护毒素",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "purify-food-and-drink",
+      "name": "净化食粮",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "raise-dead",
+      "name": "死者复活",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "ray-of-enfeeblement",
+      "name": "衰弱射线",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "ray-of-frost",
+      "name": "冷冻射线",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "regenerate",
+      "name": "再生术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "reincarnate",
+      "name": "转生术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "remove-curse",
+      "name": "移除诅咒",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "resilient-sphere",
+      "name": "弹力法球",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "resistance",
+      "name": "抗力术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "resurrection",
+      "name": "复生术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "reverse-gravity",
+      "name": "反重力",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "revivify",
+      "name": "回生术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "rope-trick",
+      "name": "魔绳术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "sacred-flame",
+      "name": "圣火术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "sanctuary",
+      "name": "庇护术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "scorching-ray",
+      "name": "灼热射线",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "scrying",
+      "name": "探知",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "secret-chest",
+      "name": "秘藏箱",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "see-invisibility",
+      "name": "识破隐形",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "seeming",
+      "name": "伪装术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "sending",
+      "name": "短讯术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "sequester",
+      "name": "隔离术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "shapechange",
+      "name": "形体变化",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "mechanic:core.rule-state:spell:shapechange:stat-transform",
+        "mechanic:core.rule-state:spell:shapechange:form-catalog",
+        "mechanic:core.rule-state:spell:shapechange:dm-equipment-fit",
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "shatter",
+      "name": "粉碎音波",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "shield",
+      "name": "护盾术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "shield-of-faith",
+      "name": "虔诚护盾",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "shillelagh",
+      "name": "橡棍术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "shocking-grasp",
+      "name": "电爪",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "silence",
+      "name": "沉默术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "silent-image",
+      "name": "无声幻影",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "simulacrum",
+      "name": "拟像术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "sleep",
+      "name": "睡眠术",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "sleet-storm",
+      "name": "雪雨暴",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "slow",
+      "name": "缓慢术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "spare-the-dying",
+      "name": "维生术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "speak-with-animals",
+      "name": "动物交谈术",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "speak-with-dead",
+      "name": "死者交谈",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "speak-with-plants",
+      "name": "植物交谈",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "spider-climb",
+      "name": "蛛行术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "spike-growth",
+      "name": "荆棘丛生",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "spirit-guardians",
+      "name": "灵体卫士",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "spiritual-weapon",
+      "name": "灵体武器",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "stinking-cloud",
+      "name": "臭云术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "stone-shape",
+      "name": "塑石术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "stoneskin",
+      "name": "石肤术",
+      "level": 4,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "storm-of-vengeance",
+      "name": "复仇风暴",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "suggestion",
+      "name": "暗示术",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "sunbeam",
+      "name": "阳炎射线",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "sunburst",
+      "name": "阳炎爆",
+      "level": 8,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "symbol",
+      "name": "魔法徽记",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "telekinesis",
+      "name": "心灵遥控",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "telepathic-bond",
+      "name": "心灵联结",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "teleport",
+      "name": "传送术",
+      "level": 7,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "teleportation-circle",
+      "name": "传送法阵",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "thaumaturgy",
+      "name": "奇术",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "thunderwave",
+      "name": "雷鸣波",
+      "level": 1,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "time-stop",
+      "name": "时间停止",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "tiny-hut",
+      "name": "小屋术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "tongues",
+      "name": "巧言术",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "transport-via-plants",
+      "name": "木遁术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "tree-stride",
+      "name": "树跃术",
+      "level": 5,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "true-polymorph",
+      "name": "完全变形术",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "true-resurrection",
+      "name": "完全复生术",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "true-seeing",
+      "name": "真知术",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "true-strike",
+      "name": "克敌机先",
+      "level": 0,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "unseen-servant",
+      "name": "隐形仆役",
+      "level": 1,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "vampiric-touch",
+      "name": "吸血鬼之触",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "vicious-mockery",
+      "name": "恶言相加",
+      "level": 0,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wall-of-fire",
+      "name": "火墙术",
+      "level": 4,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wall-of-force",
+      "name": "力场墙",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wall-of-ice",
+      "name": "冰墙术",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wall-of-stone",
+      "name": "石墙术",
+      "level": 5,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wall-of-thorns",
+      "name": "棘墙术",
+      "level": 6,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "warding-bond",
+      "name": "守护之链",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "water-breathing",
+      "name": "水下呼吸",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "water-walk",
+      "name": "水上行走",
+      "level": 3,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "web",
+      "name": "蛛网术",
+      "level": 2,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "weird",
+      "name": "怪影杀手",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wind-walk",
+      "name": "御风而行",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wind-wall",
+      "name": "风墙术",
+      "level": 3,
+      "executionPath": "native",
+      "automation": "full",
+      "missingComponents": []
+    },
+    {
+      "id": "wish",
+      "name": "祈愿术",
+      "level": 9,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "word-of-recall",
+      "name": "回返真言",
+      "level": 6,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    },
+    {
+      "id": "zone-of-truth",
+      "name": "诚实之域",
+      "level": 2,
+      "executionPath": "declarative",
+      "automation": "assisted",
+      "missingComponents": [
+        "operation:manual-adjudication"
+      ]
+    }
+  ]
+}

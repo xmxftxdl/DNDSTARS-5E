@@ -1,0 +1,1 @@
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\Doco\Desktop\DND\DNDSTARS-5E\.codex-temp\monster-verification-20260904\snapshot\src\pages\MapsWorkspacePage.tsx as it exceeds the max of 500KB.

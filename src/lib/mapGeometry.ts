@@ -1,4 +1,7 @@
+import { stoneWallIntersects } from './stoneWallGeometry'
+import { forceShellCrosses } from './forceShellGeometry'
 import type { BattleMap, Token } from '../store/maps'
+import { fogCoversPoint, normalizeMapFog, type MapFogState } from './fogOfWar'
 import { campaignLightIsActive, type CampaignLightSourceKind } from './campaignTime'
 import type {
   Dnd5eMapEnvironment,
@@ -189,6 +192,7 @@ export type MapGeometryTool =
   | 'door'
   | 'window'
   | 'obstacle'
+  | 'magical-darkness'
   | 'difficult-terrain'
   | 'elevation'
   | 'light'
@@ -243,6 +247,8 @@ export interface MapGeometryVisionSettings {
 }
 
 export interface MapGeometryState {
+  /** Scene magical darkness uses the same ordered cover/reveal strokes as fog. */
+  darknessFog?: MapFogState
   mapId: string
   walls: MapGeometryWall[]
   doors: MapGeometryDoor[]
@@ -285,6 +291,17 @@ export function mapGeometryRelationshipIssues(geometry: MapGeometryState) {
 
 export function mapGeometryDoorOpenState(door: MapGeometryDoor): MapGeometryDoorOpenState {
   return kernelDoorOpenState(door)
+}
+
+/** The physical leaf shown on the map, shared by rendering and interaction reach. */
+export function mapGeometryDoorLeafPoints(door: MapGeometryDoor): [MapGeometryPoint, MapGeometryPoint] {
+  const hingeIndex = door.hinge === 'end' ? 1 : 0
+  const hinge = door.points[hingeIndex]
+  const end = door.points[hingeIndex === 0 ? 1 : 0]
+  const sign = door.swing === 'counterclockwise' ? -1 : 1
+  return [hinge, mapGeometryDoorOpenState(door) === 'open'
+    ? { x: hinge.x - (end.y - hinge.y) * sign, y: hinge.y + (end.x - hinge.x) * sign }
+    : end]
 }
 
 export function mapGeometryDoorLockState(door: MapGeometryDoor): MapGeometryDoorLockState {
@@ -550,6 +567,7 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
 export function normalizeMapGeometry(value: unknown): MapGeometryState | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
+  if (raw.darknessFog != null && (!normalizeMapFog(raw.darknessFog) || (raw.darknessFog as MapFogState).mapId !== raw.mapId)) return undefined
   if (
     typeof raw.mapId !== 'string' || !raw.mapId || raw.mapId.length > 160 ||
     !Array.isArray(raw.walls) || !Array.isArray(raw.doors) || !Array.isArray(raw.obstacles) ||
@@ -596,6 +614,7 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
       ? raw.environment as Dnd5eMapEnvironment
       : 'normal',
     weather: raw.weather === 'storm' ? 'storm' : 'normal',
+    ...(raw.darknessFog != null ? { darknessFog: normalizeMapFog(raw.darknessFog) } : {}),
     overheadSpace: raw.overheadSpace === 'confined' ? 'confined' : 'open',
     updatedAt: raw.updatedAt,
   })
@@ -1316,6 +1335,11 @@ function persistentAreaBlocksTokenAt(input: {
   const creatureHeight = Math.max(5, Math.max(1, input.token.size) * 5)
   const occupied = tokenOccupiedCellsAt(input.token, input.map, input.at)
   for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (area.stoneWall || area.forceWall) {
+      if (stoneWallIntersects(area, input.map, input.at, input.at, input.elevationFeet, input.elevationFeet,
+        (input.map.feetPerCell ?? 5) * Math.max(1, input.token.size) * .42, creatureHeight)) return area.id
+      continue
+    }
     if (
       area.interposition?.mode === 'blocked' &&
       area.interposition.targetTokenId === input.token.id &&
@@ -1351,6 +1375,17 @@ function persistentAreaDirectionalMovementBlocker(input: {
   const distance = Math.hypot(input.to.x - input.from.x, input.to.y - input.from.y)
   const steps = Math.max(2, Math.ceil(distance / Math.max(1, gridSize / 4)))
   for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (area.stoneWall || area.forceWall) {
+      if (stoneWallIntersects(area, input.map, input.from, input.to, input.fromElevationFeet, input.toElevationFeet,
+        (input.map.feetPerCell ?? 5) * Math.max(1, input.token.size) * .42, creatureHeight)) return area.id
+      continue
+    }
+    if (area.forceShell) {
+      // Check feet, torso and head so changing altitude cannot pass through the roof.
+      if ([0, creatureHeight / 2, creatureHeight].some(height => forceShellCrosses(area, input.map,
+        input.from, input.to, input.fromElevationFeet + height, input.toElevationFeet + height))) return area.id
+      continue
+    }
     const blocking = persistentAreaEffectiveBlocking(area)
     const mode = blocking?.movementMode ?? 'occupancy'
     if (
@@ -1547,6 +1582,16 @@ function persistentAreaBlocksRay(input: {
           ? area.sourceKind === 'core-spell' && area.coreSpellId === 'wind-wall'
           : area.blocking?.lineOfEffect
     if (blocks !== true) continue
+    if (area.stoneWall || area.forceWall) {
+      if (stoneWallIntersects(area, input.map, input.from, input.to,
+        input.fromElevationFeet + input.fromEyeHeightFeet, input.toElevationFeet + input.toEyeHeightFeet)) return area.id
+      continue
+    }
+    if (area.forceShell) {
+      if (forceShellCrosses(area, input.map, input.from, input.to,
+        input.fromElevationFeet + input.fromEyeHeightFeet, input.toElevationFeet + input.toEyeHeightFeet)) return area.id
+      continue
+    }
     const cells = new Set(area.cells.map((cell) => `${cell.col}:${cell.row}`))
     const pointInside = (
       point: MapGeometryPoint,
@@ -2116,8 +2161,11 @@ export function mapGeometryLineOfSightBlocked(input: {
 function mapGeometryAmbientSightRangeFeet(
   map: Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'feetPerCell'>,
   geometry?: MapGeometryState,
+  forceEnabled = false,
 ): number {
-  if (geometry?.vision.enabled !== true) return 0
+  // Spell obstructions can require sight checks while dynamic vision is off.
+  // They must not also impose the dormant default range on illuminated terrain.
+  if (geometry?.vision.enabled !== true && !forceEnabled) return 0
   const gridSize = Math.max(1, map.gridSize)
   const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
   return Math.hypot(Math.max(1, map.width), Math.max(1, map.height)) / gridSize * feetPerCell
@@ -2193,7 +2241,8 @@ export function mapGeometryCanSeeToken(input: {
   targetHeightFeet?: number
 }): boolean {
   const geometry = input.geometry
-  if (!geometry?.vision.enabled && !input.forceEnabled) return true
+  if (!geometry?.vision.enabled && !input.forceEnabled &&
+    !(geometry?.darknessFog && fogCoversPoint(geometry.darknessFog, input.target.x, input.target.y))) return true
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const profile = compileDnd5eEffectiveVisionProfile({
     token: input.viewer,
@@ -2205,7 +2254,7 @@ export function mapGeometryCanSeeToken(input: {
     ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
   const rangeFeet = Math.max(
-    mapGeometryAmbientSightRangeFeet(input.map, geometry),
+    mapGeometryAmbientSightRangeFeet(input.map, geometry, input.forceEnabled),
     profile.normalRangeFeet,
     profile.darkvisionRangeFeet,
     profile.darknessSightRangeFeet,
@@ -2426,7 +2475,9 @@ export function mapGeometryMagicalDarknessObstacleIsSuppressed(input: {
   geometry?: MapGeometryState
   spellLighting?: readonly MapGeometrySpellLightingSource[]
 }): boolean {
-  const darknessLevel = input.obstacle.darknessSpellLevel ?? 2
+  // Manually painted scene darkness has no spell level and is removed by the DM.
+  if (input.obstacle.darknessSpellLevel == null) return false
+  const darknessLevel = input.obstacle.darknessSpellLevel
   const gridSize = Math.max(1, input.map.gridSize)
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   return (input.spellLighting ?? mapGeometrySpellLightingSources(input.map, input.geometry)).some((source) => {
@@ -2470,7 +2521,7 @@ export function mapGeometryIlluminationAtPoint(input: {
   const ambient = input.geometry?.vision.ambientLight ?? 'bright'
   const pointElevation = input.elevationFeet ?? mapGeometryTerrainElevationAtPoint(input.geometry, input.point)
   const spellLighting = mapGeometrySpellLightingSources(input.map, input.geometry)
-  if (input.geometry?.obstacles.some((obstacle) =>
+  if ((input.geometry?.darknessFog && fogCoversPoint(input.geometry.darknessFog, input.point.x, input.point.y)) || input.geometry?.obstacles.some((obstacle) =>
     obstacle.magicalDarkness === true && mapGeometryPointInPolygon(input.point, obstacle.points) &&
       mapGeometryObstacleAffectsElevation(obstacle, pointElevation) &&
       !mapGeometryMagicalDarknessObstacleIsSuppressed({
@@ -2582,14 +2633,19 @@ export function mapGeometryLightPolygon(input: {
   source: MapGeometryPoint
   radiusFeet: number
   elevationFeet?: number
+  purpose?: 'vision' | 'line-of-effect'
+  targetElevationFeet?: number
 }): MapGeometryPoint[] {
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const radius = Math.max(0, input.radiusFeet) / feetPerCell * Math.max(1, input.map.gridSize)
   if (radius <= 0) return []
   const elevation = input.elevationFeet ?? 0
-  const blockers = mapGeometrySegments(input.geometry).filter((segment) => segment.blocksVision)
+  const blockers = mapGeometrySegments(input.geometry)
+    .filter(segment => input.purpose === 'line-of-effect' ? segment.blocksLineOfEffect : segment.blocksVision)
+    .map(segment => input.purpose === 'line-of-effect' ? { ...segment, blocksVision: true } : segment)
   const angles = new Set<number>()
-  for (let index = 0; index < 96; index += 1) angles.add(index / 96 * Math.PI * 2)
+  const samples = input.purpose === 'line-of-effect' ? 256 : 96
+  for (let index = 0; index < samples; index += 1) angles.add(index / samples * Math.PI * 2)
   for (const segment of blockers) {
     for (const point of [segment.a, segment.b]) {
       if (Math.hypot(point.x - input.source.x, point.y - input.source.y) > radius + 1) continue
@@ -2599,7 +2655,9 @@ export function mapGeometryLightPolygon(input: {
       angles.add(angle + 1e-5)
     }
   }
-  return [...angles]
+  // atan2 returns negative angles, while circular samples use [0, 2π).
+  // Normalize before sorting so the boundary winds once without crossing itself.
+  return [...new Set([...angles].map(angle => (angle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)))]
     .sort((left, right) => left - right)
     .map((angle) => {
       const far = { x: input.source.x + Math.cos(angle) * radius, y: input.source.y + Math.sin(angle) * radius }
@@ -2609,7 +2667,7 @@ export function mapGeometryLightPolygon(input: {
         radius,
         blockers,
         elevation,
-        mapGeometryTerrainElevationAtPoint(input.geometry, far),
+        input.targetElevationFeet ?? mapGeometryTerrainElevationAtPoint(input.geometry, far),
       )
     })
     .map((point) => ({
@@ -2685,7 +2743,9 @@ export function mapGeometryVisibilityPolygon(input: {
       angles.add(angle + 1e-5)
     }
   }
-  return [...angles]
+  // atan2 returns negative angles, while circular samples use [0, 2π).
+  // Normalize before sorting so the boundary winds once without crossing itself.
+  return [...new Set([...angles].map(angle => (angle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)))]
     .sort((left, right) => left - right)
     .map((angle) => {
       const far = { x: origin.x + Math.cos(angle) * radius, y: origin.y + Math.sin(angle) * radius }

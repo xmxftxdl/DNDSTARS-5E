@@ -62,6 +62,8 @@ declare module '@3d-dice/dice-box-threejs' {
     init?(): Promise<void>
     initialize?(): Promise<void> // real async-init entrypoint in dist v0.0.12 (T-P2-395)
     roll(notation: string): Promise<DiceRollResults>
+    add(notation: string): Promise<DieRoll[]>
+    reroll(indices: number[]): Promise<DieRoll[]>
     updateConfig(config: DiceBoxThreeConfig): Promise<void>
     clearDice(): void
   }

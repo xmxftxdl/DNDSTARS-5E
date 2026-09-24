@@ -1,0 +1,51 @@
+
+Running 1 test using 1 worker
+
+(node:35024) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 (41.0s)
+
+
+  1) e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 ─────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByTestId('dm-combat-recovery-dialog').getByTestId('dm-combat-recovery-transaction-player-action:1789016440991')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByTestId('dm-combat-recovery-dialog').getByTestId('dm-combat-recovery-transaction-player-action:1789016440991')
+
+
+      303 |     const recoveryDialog = dm.getByTestId('dm-combat-recovery-dialog')
+      304 |     await expect(recoveryDialog).toBeVisible({ timeout: 20_000 })
+    > 305 |     await expect(recoveryDialog.getByTestId(`dm-combat-recovery-transaction-${actionId}`)).toBeVisible()
+          |                                                                                            ^
+      306 |     await recoveryDialog.getByTestId(`dm-combat-recovery-transaction-${actionId}`).click()
+      307 |     await recoveryDialog.getByTestId('dm-combat-recovery-confirm').click()
+      308 |     await expect(dm.getByTestId('app-dialog-confirm')).toBeVisible()
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\combat-authoritative-recovery.spec.ts:305:92
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\combat-verification\combat-authoritative-recov-c2a9d-归还法术位、位置、HP、状态和行动经济，并同步玩家重连\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\combat-authoritative-recovery.spec.ts:96:1 › DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济，并同步玩家重连 ──────────

@@ -1,0 +1,21 @@
+
+C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\fixtures\large-dice.tsx
+  16:5  error    Error: This value cannot be modified
+
+Modifying a value previously passed as an argument to a hook is not allowed. Consider moving the modification before calling the hook.
+
+C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\fixtures\large-dice.tsx:16:5
+  14 |   useEffect(() => {
+  15 |     if (!isDM) return
+> 16 |     channel.onmessage = ({ data }: MessageEvent<{ id: string; values: number[]; dieSides: number[] }>) => {
+     |     ^^^^^^^ `channel` cannot be modified
+  17 |       setResult(data.values)
+  18 |       dice.setRollRequestPreview({ id: data.id, kind: 'dice', count: data.values.length,
+  19 |         sides: 6, dieSides: data.dieSides, values: data.values,  react-hooks/immutability
+  23:6  warning  React Hook useEffect has a missing dependency: 'dice'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/exhaustive-deps
+
+C:\Users\Doco\Desktop\DND\DNDSTARS-5E\src\presentation\maps\DicePresentationOverlays.tsx
+  292:9  warning  The 'displayedRecord' conditional could make the dependencies of useEffect Hook (at line 337) change on every render. To fix this, wrap the initialization of 'displayedRecord' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+✖ 3 problems (1 error, 2 warnings)
+

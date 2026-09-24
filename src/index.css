@@ -966,13 +966,18 @@ html[data-theme="light"] .public-landing-title-accent {
  * the rim and result rail are rendered above it, so dice can never cover the
  * authoritative numeric result. Free-roll settings occupy this same tray when
  * no roll presentation is active. */
+:root {
+  --map-pdf-panel-width: clamp(24rem, 42vw, 48rem);
+  --map-unit-panel-width: clamp(20rem, 28vw, 24rem);
+}
+
 .dice-tray-drawer {
   position: fixed;
-  right: 4.75rem;
-  top: 50%;
-  width: min(25rem, calc(100vw - 5.5rem));
-  height: min(34rem, 82vh);
-  transform: translateY(-50%);
+  right: 0.75rem;
+  top: 4.25rem;
+  width: min(23rem, calc(100vw - 1.5rem));
+  height: calc(100vh - 5rem);
+  transform: none;
   pointer-events: none;
   animation: dice-tray-open 360ms cubic-bezier(0.2, 0.78, 0.18, 1) both;
 }
@@ -996,7 +1001,7 @@ html[data-theme="light"] .public-landing-title-accent {
   position: absolute;
   left: 1rem;
   right: 1rem;
-  top: 5.85rem;
+  top: 6.05rem;
   bottom: 5.65rem;
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 1.05rem;
@@ -1015,7 +1020,7 @@ html[data-theme="light"] .public-landing-title-accent {
   position: absolute;
   left: 1.45rem;
   right: 1.45rem;
-  top: 6.3rem;
+  top: 9.2rem;
   bottom: 6.1rem;
   border-radius: 0.8rem;
   box-shadow: inset 0 0 44px rgba(0, 0, 0, 0.34);
@@ -1024,7 +1029,7 @@ html[data-theme="light"] .public-landing-title-accent {
 .dice-tray-drawer__rim {
   position: absolute;
   z-index: 4;
-  inset: 0;
+  inset: 2.8rem 0 0;
   border: 0.9rem solid rgba(45, 27, 26, 0.95);
   border-radius: 1.7rem;
   box-shadow:
@@ -1038,7 +1043,7 @@ html[data-theme="light"] .public-landing-title-accent {
   z-index: 6;
   left: 1rem;
   right: 1rem;
-  top: 0.7rem;
+  top: 0.75rem;
   display: flex;
   min-height: 4.85rem;
   align-items: center;
@@ -1157,7 +1162,7 @@ html[data-theme="light"] .public-landing-title-accent {
   z-index: 7;
   left: 1rem;
   right: 1rem;
-  top: 5.8rem;
+  top: 5.9rem;
   bottom: 0.8rem;
   overflow: hidden;
   pointer-events: auto;
@@ -1323,6 +1328,11 @@ html[data-theme="light"] .public-landing-title-accent {
 
 .dice-tray-drawer__dice--editable {
   padding-block: 0.15rem;
+  scrollbar-width: none;
+}
+
+.dice-tray-drawer__dice--editable::-webkit-scrollbar {
+  display: none;
 }
 
 .dice-tray-drawer__secret--many .dice-tray-drawer__dice--editable,
@@ -1380,12 +1390,12 @@ html[data-theme="light"] .public-landing-title-accent {
 }
 
 .dice-tray-drawer__secret-confirm {
-  min-width: 6.8rem;
+  min-width: 3.25rem;
   flex: 0 0 auto;
   border: 1px solid rgba(216, 180, 254, 0.32);
   border-radius: 0.7rem;
   background: linear-gradient(145deg, #8b5cf6, #6d28d9);
-  padding: 0.68rem 0.8rem;
+  padding: 0.45rem 0.65rem;
   color: #fff;
   font-size: 0.76rem;
   font-weight: 850;
@@ -1424,6 +1434,38 @@ html[data-theme="light"] .public-landing-title-accent {
 .dice-tray-drawer__more {
   color: #c4b5fd;
 }
+
+.dice-tray-drawer__die.dice-result-value {
+  height: auto;
+  min-height: 2.65rem;
+  padding: 0.2rem 0.4rem;
+  gap: 0.05rem;
+  border-color: rgba(var(--die-result-color, 120, 145, 165), 0.65);
+  background: linear-gradient(145deg, rgba(var(--die-result-color, 120, 145, 165), 0.42), #111521);
+  flex-shrink: 0;
+}
+.dice-result-value[data-die-sides='4'] { --die-result-color: 234, 161, 60; }
+.dice-result-value[data-die-sides='6'] { --die-result-color: 55, 178, 127; }
+.dice-result-value[data-die-sides='8'] { --die-result-color: 52, 180, 214; }
+.dice-result-value[data-die-sides='10'] { --die-result-color: 92, 130, 232; }
+.dice-result-value[data-die-sides='12'] { --die-result-color: 183, 110, 232; }
+.dice-result-value[data-die-sides='20'] { --die-result-color: 229, 100, 141; }
+.dice-result-value[data-die-sides='100'] { --die-result-color: 180, 184, 199; }
+.dice-result-value__type { font-size: 0.58rem; line-height: 1; opacity: 0.85; }
+.dice-result-value strong { font-size: 0.88rem; line-height: 1.2; }
+.dice-adopted-corner.dice-adopted-corner {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  z-index: 1;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  color: #34d399;
+  background: none;
+  pointer-events: none;
+}
+.dice-tray-drawer__dice { overscroll-behavior: contain; pointer-events: auto; }
 
 .dice-tray-drawer__total {
   display: flex;
@@ -1562,29 +1604,29 @@ html[data-theme="light"] .public-landing-title-accent {
 
 .dice-box-d20-frame.dice-box-frame--left-drawer,
 .dice-box-damage-frame.dice-box-frame--left-drawer {
-  right: 5.75rem;
+  right: 1.75rem;
   left: auto;
-  top: calc(50% + 0.45rem);
-  width: min(23rem, calc(100vw - 7.5rem));
-  height: min(21rem, calc(82vh - 12rem));
-  transform: translateY(-50%);
+  top: 12.7rem;
+  width: min(21rem, calc(100vw - 3.5rem));
+  height: calc(100vh - 23rem);
+  transform: none;
   animation: dice-box-left-drawer-enter 520ms cubic-bezier(0.2, 0.78, 0.18, 1) both;
 }
 
 @keyframes dice-box-left-drawer-enter {
   from {
     opacity: 0;
-    transform: translate(calc(100% + 1.5rem), -50%) scale(0.97);
+    transform: translateX(calc(100% + 1.5rem)) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) scale(1);
+    transform: none;
   }
 }
 
 @keyframes dice-tray-open {
-  from { opacity: 0; transform: translate(calc(100% + 1rem), -50%) scale(0.98); }
-  to { opacity: 1; transform: translateY(-50%) scale(1); }
+  from { opacity: 0; transform: translateX(calc(100% + 1rem)) scale(0.98); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes dice-tray-waiting {
@@ -1596,18 +1638,460 @@ html[data-theme="light"] .public-landing-title-accent {
   .dice-tray-drawer,
   .dice-box-d20-frame.dice-box-frame--left-drawer,
   .dice-box-damage-frame.dice-box-frame--left-drawer {
-    right: 3.6rem;
+    right: 0.35rem;
     left: auto;
-    width: calc(100vw - 4rem);
+    width: calc(100vw - 0.7rem);
   }
 
   .dice-box-d20-frame.dice-box-frame--left-drawer,
   .dice-box-damage-frame.dice-box-frame--left-drawer {
-    right: 4.6rem;
+    right: 1.35rem;
     left: auto;
-    width: calc(100vw - 6rem);
+    width: calc(100vw - 2.7rem);
   }
 }
+
+.map-combat-right-dock__recall button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 0.55rem;
+  padding: 0.4rem 0.7rem;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.combat-tray-tabs { position: absolute; z-index: 14; top: 0.45rem; left: 1rem; right: 1rem; display: flex; gap: 0.4rem; padding: 0.3rem; border: 0; background: transparent; pointer-events: auto; }
+.combat-tray-tabs button { padding: 0.35rem 0.85rem; border-radius: 0.5rem; color: #94a3b8; font-size: 0.75rem; font-weight: 700; }
+.combat-tray-tabs button[aria-pressed='true'] { background: #312e53; color: #f8fafc; }
+.dice-tray-drawer[data-tab='log'] { top: auto; bottom: 0.75rem; width: min(36rem, calc(100vw - 1.5rem)); height: auto; max-height: calc(100vh - 1.5rem); overflow-x: hidden; overflow-y: auto; pointer-events: auto; }
+.dice-tray-drawer[data-tab='log'] .combat-tray-tabs { position: static; margin-bottom: 0.4rem; }
+.dice-tray-drawer[data-tab='log'] > div { max-width: 100%; }
+
+.map-combat-right-dock__recall button span {
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.22);
+  padding: 0.05rem 0.35rem;
+  color: #fde68a;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-combat-right-dock__recall {
+  position: fixed;
+  z-index: 20;
+  right: 0;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  transform: translateY(-50%);
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  border-right: 0;
+  border-radius: 0.8rem 0 0 0.8rem;
+  background: rgba(7, 10, 18, 0.94);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
+
+.map-combat-right-dock__recall button + button { border-top: 1px solid rgba(148, 163, 184, 0.12); }
+.map-combat-right-dock__recall button:hover { background: rgba(139, 92, 246, 0.16); color: #ede9fe; }
+
+.map-workspace-container {
+  container: map-workspace / inline-size;
+}
+
+.map-reference-panel {
+  position: relative;
+  z-index: 80;
+  display: flex;
+  flex: 0 0 var(--map-pdf-panel-width);
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: #020617;
+}
+
+.map-reference-panel[data-tab='unit'] { flex-basis: var(--map-unit-panel-width); }
+/* Preserve the hidden reader's line wrapping and scroll geometry while the unit tab is narrower. */
+.map-reference-panel__pdf { width: var(--map-pdf-panel-width); }
+
+.map-reference-panel__tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.map-reference-panel__tabs button {
+  padding: 0.4rem 1rem;
+  border-radius: 0.5rem;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.map-reference-panel__tabs button[aria-pressed='true'] { background: #1e293b; color: #f8fafc; }
+.map-reference-panel__tabs button:disabled { opacity: 0.35; }
+.map-reference-panel__content { position: relative; flex: 1; min-height: 0; }
+.map-reference-panel__surface { position: absolute; inset: 0; }
+.map-reference-panel__unit > .map-combat-unit-drawer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.map-workspace-frame {
+  --map-right-dock-width: 0px;
+}
+
+.map-workspace-frame--right-dock-open { --map-right-dock-width: 23.75rem; }
+
+.map-voice-panel {
+  position: absolute;
+  top: 4rem;
+  left: 0.75rem;
+  z-index: 116;
+  width: min(15rem, calc(100% - 1.5rem));
+  max-height: calc(100% - 5rem);
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  background: linear-gradient(145deg, rgba(43, 58, 64, 0.92), rgba(30, 43, 49, 0.88));
+  backdrop-filter: blur(14px) saturate(0.75);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+}
+.map-voice-panel__body { overflow-y: auto; min-height: 0; }
+html .map-voice-panel :is(p, span, button, a),
+html[data-theme] .map-voice-panel :is(p, span, button, a) { color: #e2e8f0 !important; }
+.map-voice-panel[data-below-initiative] { top: 15rem; max-height: calc(100% - 16rem); }
+
+.map-workspace-viewport {
+  left: 0;
+  right: var(--map-right-dock-width);
+  transition: left 180ms ease, right 180ms ease;
+}
+
+.map-tools-dock {
+  position: absolute;
+  top: 3.75rem;
+  left: 0.5rem;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  max-width: calc(100% - 1rem);
+  pointer-events: none;
+}
+
+.map-tools-rail, .map-tools-panel {
+  pointer-events: auto;
+  background: #101119;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.75rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.map-tools-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
+
+.map-tools-rail button {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: #a8b1c4;
+}
+
+.map-tools-rail button:nth-child(4), .map-tools-rail button:last-child {
+  margin-top: 0.375rem;
+}
+
+.map-tools-rail button:hover { background: rgb(255 255 255 / 7%); }
+.map-tools-rail button[aria-pressed='true'] {
+  color: #e4c274;
+  border-color: #786032;
+  background: #3a3020;
+}
+
+.map-tools-panel {
+  width: min(20rem, calc(100vw - 4.75rem));
+  min-width: 0;
+  max-height: calc(100dvh - 8rem);
+  overflow-y: auto;
+  padding: 0.75rem;
+  scrollbar-width: thin;
+}
+
+.map-tools-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: #e4c274;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.map-tools-panel > header button { padding: 0.25rem; border-radius: 0.25rem; }
+.map-tools-panel > header button:hover { background: rgb(255 255 255 / 10%); }
+.map-tools-panel-content { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.map-tools-panel-content > * { max-width: 100%; }
+.map-tools-panel-content select { min-width: 0; max-width: 100%; }
+.map-tools-panel [data-testid='map-fog-toolbar'] { flex-wrap: wrap; }
+.map-tools-panel[data-tool-panel='units'],
+.map-tools-panel[data-tool-panel='drawing'],
+.map-tools-panel[data-tool-panel='ruler'] { width: min(15rem, calc(100vw - 4.75rem)); }
+.map-tools-panel[data-tool-panel='units'] .map-tools-panel-content > button,
+.map-tools-panel[data-tool-panel='units'] .map-tools-panel-content > label,
+.map-tools-panel[data-tool-panel='map'] .map-tools-panel-content > button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.5rem;
+}
+.map-combat-more > summary::-webkit-details-marker { display: none; }
+
+html[data-theme='light'] .map-tools-rail,
+html[data-theme='light'] .map-tools-panel {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 18px rgb(15 23 42 / 16%);
+}
+html[data-theme='light'] .map-tools-rail button { color: #475569; }
+html[data-theme='light'] .map-tools-panel > header { color: #805d21; }
+html[data-theme='light'] .map-tools-rail button:hover { background: #e2e8f0; }
+html[data-theme='light'] .map-tools-rail button[aria-pressed='true'] {
+  color: #805d21;
+  background: #f2e8cf;
+  border-color: #c6a765;
+}
+
+@media (max-height: 500px) {
+  .map-tools-rail { max-height: calc(100dvh - 5rem); overflow-y: auto; }
+  .map-tools-rail button { flex-shrink: 0; }
+}
+
+.map-workspace-initiative {
+  position: fixed;
+  top: 26px;
+  left: 0;
+  right: 0;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0 0.75rem 0.75rem;
+  pointer-events: none;
+}
+
+.map-workspace-initiative > * {
+  pointer-events: none;
+  width: max-content;
+  margin-inline: auto;
+}
+
+.map-combat-unit-drawer {
+  position: absolute;
+  z-index: 115;
+  left: 0.75rem;
+  top: 4.25rem;
+  bottom: 0.75rem;
+  display: flex;
+  width: 22.25rem;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 1rem;
+  background: rgba(5, 8, 15, 0.95);
+  box-shadow: 0 22px 56px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.map-combat-unit-drawer__tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(8, 12, 22, 0.98);
+}
+
+.map-combat-unit-drawer__tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border-radius: 0.55rem;
+  padding: 0.42rem 0.65rem;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.map-combat-unit-drawer__tabs button[data-active='true'] {
+  background: rgba(244, 63, 94, 0.16);
+  color: #ffe4e6;
+}
+
+.map-combat-unit-drawer__tabs button:disabled { cursor: not-allowed; opacity: 0.3; }
+.map-combat-unit-drawer__tabs button:not(:disabled):hover { background: rgba(255, 255, 255, 0.06); color: #f8fafc; }
+
+.map-combat-unit-drawer__tabs .map-combat-unit-drawer__close {
+  width: 1.85rem;
+  margin-left: auto;
+  padding-inline: 0;
+}
+
+.map-combat-unit-drawer__body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.map-combat-unit-drawer__body > [data-testid='map-lazy-overlay-loading'] {
+  position: static;
+  margin: 1rem;
+  transform: none;
+}
+
+.map-combat-unit-status {
+  height: 100%;
+  overflow-y: auto;
+  background: rgba(5, 8, 15, 0.72);
+}
+
+.map-combat-unit-status > header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.map-combat-unit-status__avatar {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 0.8rem;
+  background: rgba(30, 41, 59, 0.72);
+  font-size: 1.45rem;
+  overflow: hidden;
+}
+
+.map-combat-unit-status__avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.map-combat-unit-status h3 { color: #f8fafc; font-size: 0.9rem; font-weight: 850; }
+.map-combat-unit-status header p { margin-top: 0.18rem; color: #94a3b8; font-size: 0.72rem; }
+.map-combat-unit-status__content { display: grid; gap: 0.65rem; padding: 0.85rem; }
+.map-combat-unit-status__content h4 { color: #94a3b8; font-size: 0.65rem; font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
+.map-combat-unit-status__content > p { border-radius: 0.65rem; background: rgba(255, 255, 255, 0.035); padding: 0.75rem; color: #64748b; font-size: 0.72rem; }
+.map-combat-unit-status__chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.map-combat-unit-status__chips span { border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 999px; background: rgba(245, 158, 11, 0.1); padding: 0.28rem 0.55rem; color: #fde68a; font-size: 0.68rem; }
+.map-combat-unit-status__effects { display: grid; gap: 0.4rem; }
+.map-combat-unit-status__effects article { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border: 1px solid rgba(139, 92, 246, 0.16); border-radius: 0.65rem; background: rgba(139, 92, 246, 0.08); padding: 0.6rem 0.7rem; }
+.map-combat-unit-status__effects strong { color: #ddd6fe; font-size: 0.72rem; }
+.map-combat-unit-status__effects span { color: #c4b5fd; font-size: 0.65rem; }
+
+.map-combat-action-bar {
+  position: absolute;
+  z-index: 110;
+  left: calc((100% - var(--map-right-dock-width)) / 2);
+  bottom: auto;
+  top: 3.5rem;
+  display: flex;
+  width: max-content;
+  max-width: min(58rem, calc(100% - var(--map-right-dock-width) - 1.5rem));
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 0.65rem;
+  overflow-x: auto;
+  border: 1px solid rgba(103, 232, 249, 0.22);
+  border-radius: 0.8rem;
+  background: rgba(5, 8, 15, 0.93);
+  padding: 0.5rem 0.75rem;
+  color: #e2e8f0;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.map-combat-action-bar.map-sculpt-confirmation-inline {
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.map-combat-action-bar.map-spell-targeting-standalone {
+  top: 3.5rem;
+  bottom: auto;
+  flex-wrap: wrap;
+}
+
+.map-combat-action-bar.map-sculpt-confirmation-compact {
+  gap: 0.375rem;
+  max-width: min(42rem, calc(100% - 1rem));
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.65rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.map-sculpt-confirmation-compact > button,
+.map-sculpt-confirmation-compact > span.shrink-0 {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+@container map-workspace (max-width: 900px) {
+  .map-workspace-frame--right-dock-open {
+    --map-right-dock-width: 0px;
+  }
+
+  .map-combat-unit-drawer {
+    inset: 3.75rem 0.35rem 0.35rem;
+    width: auto;
+  }
+
+}
+
+/* The dice surface is portaled outside the map query container. */
+@media (max-width: 900px) {
+  .dice-tray-drawer {
+    inset: 3.75rem 0.35rem 0.35rem auto;
+    width: calc(100vw - 0.7rem);
+    height: auto;
+  }
+}
+
+.dice-tray-drawer__result:has(.dice-tray-reroll) { height: auto; min-height: 6rem; pointer-events: auto; }
+.dice-tray-reroll { min-width: 0; flex: 1; }
+.dice-tray-reroll .dice-tray-drawer__die { cursor: grab; touch-action: manipulation; }
+.dice-tray-reroll .dice-tray-drawer__die[aria-pressed='true'] { background: #164e63; outline: 2px solid #67e8f9; }
+.dice-tray-reroll__actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.dice-tray-reroll__actions button { display: flex; align-items: center; justify-content: center; gap: 0.3rem; border: 1px solid #475569; border-radius: 0.5rem; background: #1e293b; color: #e2e8f0; padding: 0.45rem 0.6rem; font-size: 0.7rem; }
+.dice-tray-reroll__actions button:hover { background: #334155; }
+.dice-tray-reroll__actions .dice-tray-reroll__drop { border-style: dashed; }
+.dice-tray-reroll button:disabled { opacity: 0.5; cursor: wait; }
+.dice-tray-reroll p { margin-top: 0.4rem; color: #fda4af; font-size: 0.7rem; }
 
 @keyframes dice-box-roll-flight {
   0% {
@@ -3626,4 +4110,182 @@ html[data-theme="light"] :is([class~="fixed"][class~="inset-0"], [class~="fixed"
   .kill-streak-banner__title::after {
     animation: none;
   }
+}
+
+/* The Log tab shares the tray's opaque felt, including its tab strip. */
+.dice-tray-drawer--foreground[data-tab='log'] { background: linear-gradient(145deg, #583622, #23141c 52%, #120d1b); border-radius: 1.7rem; padding: 0.6rem; }
+
+/* Independent room results beside the personal dice tray. */
+.room-dice-panel { position: absolute; pointer-events: auto; right: 1rem; bottom: 1rem; width: 16rem; max-width: calc(100vw - 2rem); border: 1px solid rgba(148,163,184,.24); border-radius: 14px; background: rgba(23,34,42,.86); backdrop-filter: blur(14px); color: #e2e8f0; box-shadow: 0 8px 32px #0005; overflow: hidden; }
+.room-dice-panel--beside { right: calc(23.75rem + 1.5rem); }
+.room-dice-panel__header { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .7rem .8rem; font-size: 12px; font-weight: 700; }
+.room-dice-panel__header small { margin-left: auto; color: #94a3b8; }
+.room-dice-panel__list { max-height: min(46vh, 26rem); overflow-y: auto; padding: 0 .5rem .5rem; }
+.room-dice-panel__card { border-top: 1px solid #94a3b826; }
+.room-dice-panel__card summary { display: flex; align-items: center; gap: .6rem; padding: .6rem .25rem; cursor: pointer; list-style: none; }
+.room-dice-panel__card summary::-webkit-details-marker { display: none; }
+.room-dice-panel__face { position: relative; display: grid; place-items: center; min-width: 36px; height: 36px; border-radius: 10px; background: #a78bfa18; color: #ddd6fe; }
+.room-dice-panel__face svg { opacity: .15; position: absolute; }
+.room-dice-panel__face b { font-size: 17px; }
+.room-dice-panel__identity { display: grid; gap: 2px; min-width: 0; flex: 1; font-size: 11px; }
+.room-dice-panel__identity strong { font-size: 12px; }
+.room-dice-panel__identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cbd5e1; }
+.room-dice-panel__identity small, .room-dice-panel__formula { color: #94a3b8; font-size: 10px; }
+.room-dice-panel__detail { padding: 0 .4rem .6rem; font-size: 11px; color: #cbd5e1; }
+.room-dice-panel__detail > div { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0; }
+.room-dice-panel__detail span { border: 1px solid #94a3b830; border-radius: 5px; padding: .2rem .35rem; }
+@media (max-width: 760px) { .room-dice-panel--beside { right: .75rem; bottom: auto; top: .75rem; width: 13rem; } .room-dice-panel__list { max-height: 24vh; } }
+.room-dice-panel__confirmation > div { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0; }
+.room-dice-panel__confirmation input { width: 3.5rem; padding: .3rem; border-radius: 5px; background: #0f172a; border: 1px solid #94a3b84d; color: #fff; }
+.room-dice-panel__confirmation button { border-radius: 6px; padding: .4rem .6rem; background: #065f46; color: #d1fae5; font-weight: 600; }
+.room-dice-panel__confirmation button:disabled { opacity: .45; }
+.room-dice-panel__heading { display: flex; align-items: center; }
+.room-dice-panel__heading .room-dice-panel__header { flex: 1; min-width: 0; }
+.room-dice-panel__close { display: grid; place-items: center; width: 2rem; height: 2rem; margin-right: .35rem; border-radius: 6px; color: #94a3b8; }
+.room-dice-panel__close:hover { background: #ffffff12; color: white; }
+.room-dice-panel.room-dice-panel--inline { position: static; width: 100%; max-width: none; margin-top: .4rem; box-shadow: none; }
+.room-dice-panel--inline .room-dice-panel__list { max-height: 12rem; }
+.combat-bar-dice-controls { display: flex; align-items: center; gap: .4rem; }
+.combat-bar-dice-controls button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: .3rem; min-width: 2rem; height: 1.8rem; padding: 0 .45rem; border: 1px solid #ffffff15; border-radius: .5rem; background: #ffffff08; color: #cbd5e1; }
+.combat-bar-dice-controls button:hover, .combat-bar-dice-controls button[aria-pressed='true'] { background: #8b5cf62b; color: #ede9fe; border-color: #a78bfa50; }
+.combat-bar-dice-controls button span { min-width: 1rem; padding: 0 .2rem; border-radius: .5rem; background: #a77b192b; color: #fde68a; font-size: .625rem; line-height: 1rem; }
+
+/* Keep dice selection beside the tray, outside the physics viewport. */
+.dice-tray-drawer[data-tab='dice'] { height: min(40rem, calc(100dvh - 5rem)); width: min(23rem, calc(100vw - 4.5rem)); }
+.dice-box-d20-frame.dice-box-frame--left-drawer,
+.dice-box-damage-frame.dice-box-frame--left-drawer { width: min(21rem, calc(100vw - 6.5rem)); }
+.dice-tray-drawer__controls { overflow: visible; }
+.map-dice-roller--embedded .map-dice-roller__die-picker { position: absolute; top: 0; left: -3.2rem; width: 2.65rem; display: flex; flex-direction: column; gap: .3rem; padding: .3rem; border: 1px solid #67e8f929; border-radius: .8rem; background: #091c1aed; box-shadow: 0 8px 24px #0005; }
+.map-dice-roller--embedded .map-dice-roller__die-picker button { width: 2rem; height: 2.2rem; padding: .1rem; border: 0; }
+.map-dice-roller__die-icon { width: 100%; height: 100%; }
+.dice-tray-drawer__controls--expanded .map-dice-roller__topbar { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.map-dice-roller--embedded .map-dice-roller__quick-actions { margin-top: 0; }
+.map-dice-roller--embedded .map-dice-roller__combat-visibility strong + span { display: none; }
+@media (max-height: 540px) {
+  .map-dice-roller--embedded .map-dice-roller__die-picker { max-height: calc(100dvh - 15rem); overflow-y: auto; }
+  .map-dice-roller--embedded .map-dice-roller__die-picker button { flex-shrink: 0; }
+}
+
+.pdf-reader button { padding: .35rem .45rem; border-radius: .375rem; }
+.pdf-reader button:hover { background: rgb(255 255 255 / .08); }
+.pdf-reader button:disabled { opacity: .4; }
+
+/* One connected tray and selector, with room results below the dice world. */
+.dice-tray-drawer--backdrop[data-tab='dice']::before { content: ''; position: absolute; top: 0; bottom: 0; left: -2.65rem; width: 3rem; border: 1px solid #bfa68a40; border-right: 0; border-radius: 1rem 0 0 1rem; background: linear-gradient(100deg, #49423feF, #292525f5); box-shadow: -8px 8px 24px #0004; }
+.dice-tray-drawer[data-tab='dice'] .dice-tray-drawer__surface { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.map-dice-roller--embedded .map-dice-roller__die-picker { top: -5.15rem; left: -3.65rem; width: 2.65rem; align-items: center; padding: 0 .3rem; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker button { color: #d6d3d1; background: #ffffff06; }
+.map-dice-roller--embedded .map-dice-roller__die-picker button[data-active='true'] { color: #a5f3fc; background: #22d3ee24; }
+.dice-tray-drawer[data-tab='dice'][data-room-rolls='true'] { height: min(34rem, calc(100dvh - 18rem)); }
+.dice-tray-drawer__room-results { position: absolute; top: calc(100% + .4rem); left: -2.65rem; right: 0; pointer-events: auto; }
+.dice-tray-drawer__room-results .room-dice-panel--inline { margin: 0; border-radius: .8rem; background: #272525eb; }
+.dice-tray-drawer__room-results .room-dice-panel__list { min-height: min(16vh, 8rem); max-height: min(26vh, 13rem); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+@media (max-height: 640px) {
+  .dice-tray-drawer[data-tab='dice'][data-room-rolls='true'] { height: calc(100dvh - 13rem); }
+  .dice-tray-drawer__room-results .room-dice-panel__list { min-height: 5rem; max-height: 22vh; }
+}
+
+/* Fit tray + measured room results to the viewport, keeping a small bottom gap. */
+.dice-tray-drawer[data-tab='dice'],
+.dice-tray-drawer[data-tab='dice'][data-room-rolls='true'] { right: 3.4rem; height: calc(100dvh - 5.15rem - var(--room-results-height, 0px)); }
+.dice-tray-drawer--backdrop[data-tab='dice']::before { left: auto; right: -2.65rem; border: 1px solid #bfa68a40; border-left: 0; border-radius: 0 1rem 1rem 0; }
+.dice-tray-drawer[data-tab='dice'] .dice-tray-drawer__surface { border-radius: 1.7rem 0 0 1.7rem; }
+.map-dice-roller--embedded .map-dice-roller__die-picker { left: auto; right: -3.65rem; max-height: calc(100dvh - 6.65rem - var(--room-results-height, 0px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker::-webkit-scrollbar { display: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker > button > span.absolute { right: 0; top: 0; }
+.map-dice-roller--embedded .map-dice-roller__die-picker > button { flex-shrink: 0; }
+.map-dice-roller__visibility-shortcuts { display: flex; flex-direction: column; gap: .3rem; margin-top: .4rem; padding-top: .4rem; border-top: 1px solid #ffffff26; }
+.map-dice-roller__visibility-shortcuts button { display: grid; place-items: center; }
+.map-dice-roller__visibility-shortcuts button[aria-pressed='true'] { color: #a5f3fc; background: #22d3ee30; }
+.map-dice-roller__visibility-shortcuts button:disabled { opacity: .3; cursor: not-allowed; }
+.dice-box-d20-frame.dice-box-frame--left-drawer,
+.dice-box-damage-frame.dice-box-frame--left-drawer { right: 4.4rem; }
+.dice-tray-drawer__room-results { left: 0; right: -2.65rem; }
+
+
+/* Companion dice log: compact rows, with all roll validation in the tray. */
+.room-dice-panel__card summary { padding: .4rem .55rem; gap: .5rem; }
+.room-dice-panel__face { width: 2rem; min-width: 2rem; height: 2rem; border: 0; background: transparent; }
+.room-dice-panel__identity strong { font-size: .72rem; }
+.room-dice-panel__detail { font-size: .7rem; }
+
+.dice-tray-drawer__result--settlement {
+  height: auto;
+  flex-wrap: wrap;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.dice-check-outcome {
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+  right: 2.5rem;
+  top: 38%;
+  width: 18rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  text-align: center;
+  animation: dice-check-flash 2.4s ease-out both;
+}
+.dice-check-outcome span { display: block; font-size: .75rem; }
+.dice-check-outcome strong { display: block; margin-top: .3rem; font-size: 1.65rem; }
+.dice-check-outcome--success {
+  color: #fff1b5;
+  background: radial-gradient(ellipse, #b8862477, #b8862400 75%);
+  text-shadow: 0 0 12px #ffc655;
+}
+.dice-check-outcome--failure {
+  color: #c7cbd6;
+  background: radial-gradient(ellipse, #050711dd, #05071100 75%);
+  text-shadow: 0 2px 12px #000;
+}
+@keyframes dice-check-flash {
+  0% { opacity: 0; transform: translateY(5px); }
+  15%, 75% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dice-check-outcome { animation: none; }
+}
+
+.dice-tray-drawer__header { flex-wrap: wrap; }
+.dice-check-mode { flex-basis: 100%; color: #fde68a; font-size: .78rem; font-weight: 700; }
+.dice-tray-drawer__die--adopted { border-color: #fbbf24 !important; background: #854d0e !important; color: #fff7c2 !important; box-shadow: 0 0 10px #fbbf2450; }
+.dice-tray-drawer__die--adopted small { display: block; font-size: .55rem; }
+.dice-check-inline { margin-left: auto; display: flex; gap: .65rem; align-items: center; color: #fde68a; font-size: .75rem; }
+.dice-tray-drawer__result:has(.dice-check-inline) { flex-wrap: wrap; height: auto; min-height: 4.35rem; }
+.dice-tray-drawer__secret--check,
+.dice-tray-drawer__secret--mode { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+.dice-tray-drawer__secret--check .dice-tray-drawer__total--secret { grid-column: 1; grid-row: 1; min-width: 0; padding-right: 0; border-right: 0; }
+.dice-tray-drawer__secret--check .dice-tray-drawer__secret-confirm { grid-column: 3; grid-row: 1; white-space: nowrap; }
+.dice-tray-drawer__secret--check .dice-tray-drawer__dice--editable { grid-column: 2; grid-row: 1; }
+.dice-tray-drawer__secret--mode .dice-tray-drawer__total--secret,
+.dice-tray-drawer__secret--mode .dice-tray-drawer__secret-confirm,
+.dice-tray-drawer__secret--mode .dice-tray-drawer__dice--editable { grid-row: 2; }
+.dice-tray-drawer__secret--mode > [role='alert'] { grid-column: 1 / -1; grid-row: 3; }
+.dice-tray-drawer__modes { grid-column: 1 / -1; display: flex; gap: 6px; }
+.dice-tray-drawer__modes button { flex: 1; padding: 6px 8px; border: 1px solid #63533b; border-radius: 7px; background: #17191f; color: #d7dbe3; font-size: 12px; cursor: pointer; }
+.dice-tray-drawer__modes button[aria-pressed="true"] { background: #534023; border-color: #bd964b; color: #ffe6ab; }
+.dice-tray-drawer__modes button:disabled { opacity: .5; cursor: wait; }
+
+/* The selector owns the roll action; the dice world has no floating action bar. */
+.map-dice-roller--embedded .map-dice-roller__topbar { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+.map-dice-roller--embedded .map-dice-roller__die-picker .map-dice-roller__rail-roll { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; height: 2.2rem; margin-top: .35rem; border: 1px solid #67e8f94d; background: #0e746b80; color: #cffafe; font-size: .6rem; }
+.map-dice-roller--embedded .map-dice-roller__rail-roll:hover:not(:disabled) { background: #0e9488; }
+.map-dice-roller--embedded .map-dice-roller__rail-roll:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Keep the combat controls inside the space left by the visible right drawer.
+   :has also covers automatic dice presentation before the dock tab state catches up. */
+@media (min-width: 901px) {
+  .map-player-combat-hotbar { transition: right 180ms ease; }
+  body:has(.dice-tray-drawer[data-tab='dice']) .map-player-combat-hotbar {
+    right: calc(min(23rem, 100vw - 4.5rem) + 4.15rem);
+  }
+  body:has(.dice-tray-drawer[data-tab='log']) .map-player-combat-hotbar {
+    right: calc(min(36rem, 100vw - 1.5rem) + 1.5rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-player-combat-hotbar { transition: none; }
 }

@@ -1,0 +1,499 @@
+[WebServer] (node:29608) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] ʹ�á�3�����������á�Unprotect��ʱ�����쳣:�����������ָ��״̬��ʹ�á�
+[WebServer] ��
+[WebServer] ����λ�� ��:1 �ַ�: 131
+[WebServer] + ... g($encoded);$bytes=[Security.Cryptography.ProtectedData]::Unprotect($ ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : CryptographicException
+[WebServer]  
+[WebServer] ʹ�á�1�����������á�GetString��ʱ�����쳣:�����鲻��Ϊ�ա�
+[WebServer] ������: bytes��
+[WebServer] ����λ�� ��:1 �ַ�: 262
+[WebServer] + ... urrentUser);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($byt ...
+[WebServer] +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[WebServer]     + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+[WebServer]     + FullyQualifiedErrorId : ArgumentNullException
+[WebServer]  
+[WebServer] Player AI disabled: saved configuration could not be loaded. Run npm run local-ai:configure to repair it.
+[WebServer] {"timestamp":"2026-09-11T01:54:07.794Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"player_ai_status","status":"disabled","config":"unavailable","usageAudit":"unavailable"}
+
+Running 1 test using 1 worker
+
+(node:4500) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] {"timestamp":"2026-09-11T01:54:11.929Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"90e31c05-8324-4eb5-b493-5242ea6dad09","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":18.36}
+[WebServer] {"timestamp":"2026-09-11T01:54:11.934Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3a979bfd-20f9-4178-adea-30647d34becd","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":17.11}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:11.942Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6b2df518-eff3-4422-8d70-51c7663cf011","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":13.66}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:11.955Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5ff63a33-498c-4eb7-a77c-cb1a7e925e7c","method":"GET","route":"/api/state/custom-monsters","status":404,"durationMs":27.69}
+[WebServer] {"timestamp":"2026-09-11T01:54:11.958Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f5082b5a-1971-4bb7-86e6-f022dbec9f1d","method":"GET","route":"/api/state/combat-statistics","status":404,"durationMs":22}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:11.967Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"24583b13-4951-4916-b6c4-c7df283f4960","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":11.42}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:11.973Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"196d4076-97d0-4162-9132-b4e8da60a9ff","method":"GET","route":"/api/state/room-journal","status":404,"durationMs":10.65}
+[WebServer] {"timestamp":"2026-09-11T01:54:11.974Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e2ae525b-fa56-4eb9-b4f2-cd2cb390d4db","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":10.47}
+[WebServer] {"timestamp":"2026-09-11T01:54:11.975Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ec437643-fe1c-4e46-9ced-5b9410b8dc94","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":3.65}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.001Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3ad14625-6fba-43cb-b1dc-3d760eb0d39b","method":"GET","route":"/api/state/scene-audio-library","status":404,"durationMs":13.23}
+[WebServer] {"timestamp":"2026-09-11T01:54:12.003Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5784da58-a8e9-46e0-a727-1b508fa79a77","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":13.89}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.030Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"95052f72-fd28-4be9-9e95-ee940509526e","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":26.66}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.151Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5395dca2-9a1f-42c5-9c59-3fafd8f263bb","method":"GET","route":"/api/state/combat","status":404,"durationMs":10.27}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.157Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3878360c-b3ca-4b0b-bcae-8a86c99d997d","method":"GET","route":"/api/state/combat-log","status":404,"durationMs":5.77}
+[WebServer] {"timestamp":"2026-09-11T01:54:12.158Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9a3d111d-1e27-49cc-be69-0abab6caa205","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":4.32}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.172Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"59935c5e-61a5-4f34-94f2-9ada9e696885","method":"GET","route":"/api/state/dice-events","status":404,"durationMs":15.34}
+[WebServer] {"timestamp":"2026-09-11T01:54:12.176Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"0e20e395-a97e-495b-a811-8877d0f0f819","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":17.1}
+[WebServer] {"timestamp":"2026-09-11T01:54:12.188Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f63813aa-a0ba-4a7f-b164-66668da0b658","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":3.76}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.395Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3e8ef0f5-e3e5-4bf8-b74d-23b84f19d11e","method":"GET","route":"/api/state/dice","status":404,"durationMs":37.87}
+[WebServer] {"timestamp":"2026-09-11T01:54:12.404Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"426e70d7-7cf7-4400-ba3a-81e590f66a6b","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":33.5}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:12.441Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9df6828a-cc89-496a-8f97-d7a8575a700d","method":"GET","route":"/api/state/player-action","status":404,"durationMs":25.76}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:13.206Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d489de87-486d-477d-804a-e460ea6d1d6b","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":82.4}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:14.105Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d19b9d72-245e-4c86-9953-5947a967bdaa","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":104.36}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:14.257Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3d8ac43f-2f0f-4f45-acca-bd295f96e253","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":103.69}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:14.772Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6205ac8c-3e65-4c15-b71b-081de14de1b9","method":"GET","route":"/api/state/player-action","status":404,"durationMs":222.56}
+[WebServer] {"timestamp":"2026-09-11T01:54:14.944Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5dcb1e78-30ed-4fc1-bd46-002a980d7a2c","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":133.98}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:15.330Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f282b77e-5fd2-411b-a196-7ce16c640fcd","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":248.62}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:16.098Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"fa1d110b-ef59-4927-a08c-ce8ebe5c8732","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":145.69}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:16.889Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"047fb8dc-384d-4d84-bd4e-98d252c56f92","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":84}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:17.029Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"22d16036-efac-43c6-8a6d-82e0281995d7","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":75.31}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.071Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"262a8e8a-08a2-4516-88d6-9e0fed9ca5c0","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":70.96}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.089Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"0c77c8f2-f605-42ad-9b32-2e30e806f4a7","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":72.21}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.105Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"687b732b-838f-4038-8bf8-a2fd18368ef2","method":"GET","route":"/api/state/player-action","status":404,"durationMs":77.55}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:17.121Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"bbafe4ed-7ef1-4b35-bb23-11264801dbf0","method":"GET","route":"/api/state/combat-statistics","status":404,"durationMs":80.81}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.122Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9c9e6908-5062-4cdc-b9fb-680c98342e10","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":81.08}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.157Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"1f3d0a5e-d26a-4ac6-97a2-a65963fced61","method":"GET","route":"/api/state/room-journal","status":404,"durationMs":81.06}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.180Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"04b7d73b-6d33-4b71-bc86-072bd95dba7c","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":57.86}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.186Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7c906d8d-896b-45b2-a6e8-5647ec8247ec","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":56.49}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.190Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"0c95e0b2-2843-4fd8-9280-dc437c9157d8","method":"GET","route":"/api/state/scene-audio-library","status":404,"durationMs":60.6}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.218Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"13e8a00f-f9d7-453d-ba37-b2b80ff03eb7","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":52.93}
+[WebServer] {"timestamp":"2026-09-11T01:54:17.253Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"85d04647-b0a6-477f-9b94-76440974a3c4","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":58.91}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:18.186Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"aebac3c3-2a78-4cf8-aa6c-deaf475afabb","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":135.32}
+[WebServer] {"timestamp":"2026-09-11T01:54:18.194Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"1b87c077-9c6a-4856-b34f-b0825b6b064e","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":126.53}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:18.280Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f29e1578-39a3-400a-b37d-93e6fa0256bd","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":83.58}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:18.288Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4c8c0746-62e3-465b-a534-3dc39d578ce1","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":83.87}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:18.451Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"baeda877-d549-4e7b-a4c0-d411e4a16070","method":"GET","route":"/api/state/player-action","status":404,"durationMs":102.3}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:19.920Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"aa1fcfed-375f-4e14-8948-d74ae30f214b","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":2.32}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:19.929Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"20bd5113-d77b-4a7a-a9b7-e91e05dab5d4","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":4.97}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:19.936Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4d9f9184-9a17-42c9-a25e-c2f98b5fb671","method":"GET","route":"/api/state/player-action","status":404,"durationMs":1.93}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:20.959Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6a6a247e-9972-44b8-844b-0d9bd2514e7d","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":1.7}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:21.641Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"dc9dcaa9-cc47-4f19-829d-d1974fd0e2ad","method":"GET","route":"/api/state/combat","status":404,"durationMs":7.49}
+[WebServer] {"timestamp":"2026-09-11T01:54:21.642Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"a000f977-95dc-49ec-bda4-aeda176e6666","method":"GET","route":"/api/state/dice-events","status":404,"durationMs":7.37}
+[WebServer] {"timestamp":"2026-09-11T01:54:21.643Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9982fe0b-eafa-4aee-8eda-8524ee74af35","method":"GET","route":"/api/state/combat-log","status":404,"durationMs":7.28}
+[WebServer] {"timestamp":"2026-09-11T01:54:21.647Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"85ed2561-6e88-4d0f-bac1-4e3efbbda71d","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":7.68}
+[WebServer] {"timestamp":"2026-09-11T01:54:21.697Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"de7e6544-c8e8-4248-bcab-407946965aba","method":"GET","route":"/api/state/player-action-ack","status":404,"durationMs":9.54}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:21.721Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f7c04cc6-4315-4d41-828c-272f88423943","method":"GET","route":"/api/state/dice","status":404,"durationMs":11.94}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:21.923Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"c1896d6b-ec74-4112-9260-b7882dd2ee22","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":2.81}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:21.939Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7d61df79-b833-419f-8e42-b02f6df8ad2d","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":8.01}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:21.949Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6d7510f1-be33-491f-9fb0-3fb4c5985622","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":5.46}
+[WebServer] {"timestamp":"2026-09-11T01:54:21.950Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"15731162-6f99-42ec-9388-eae6b6d9b985","method":"GET","route":"/api/state/player-action","status":404,"durationMs":6.8}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:22.930Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"cad2022a-b524-4319-aae5-e45a8a06f217","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":71.33}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:24.074Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"2a1630af-569a-4346-9efb-51257e710534","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":120.74}
+[WebServer] {"timestamp":"2026-09-11T01:54:24.085Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"62709798-1290-4144-bf74-7735c017b5cc","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":109.79}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:24.208Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"626dd501-776e-4dc7-be40-417b4d821a45","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":108.42}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:24.369Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"561c785f-61e2-4598-b49d-92ceb9781e76","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":114.82}
+[WebServer] {"timestamp":"2026-09-11T01:54:24.382Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"27999563-252e-448f-9920-476c236707bd","method":"GET","route":"/api/state/player-action","status":404,"durationMs":86.55}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:24.690Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"b1bbe231-8747-4051-8610-5eb28965087d","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":98.45}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:24.781Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"807a3d25-2bfe-48b8-a9eb-298b5353b09c","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":79.7}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:25.993Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"2d5a5fa1-264a-4dcc-b5c5-d945337884d2","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":60.57}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:26.061Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4c832908-c3d4-4ffa-8654-509effbf7431","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":52.05}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:26.139Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"113341b5-542d-4112-bc68-6eee39c86c45","method":"GET","route":"/api/state/player-action","status":404,"durationMs":59.03}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:26.685Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"a91deb9e-1ff5-497e-b2bb-83aa03c1dd37","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":30.63}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.687Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"fb045655-6919-4ebc-a065-7a5bd9211a98","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":32.26}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.693Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f409600f-f268-44ea-aa5c-8f57597e6813","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":37.2}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.693Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"b54b99af-53d5-433c-af5a-26ed7db92ff4","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":37.28}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.704Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ee880151-7b0d-45e8-81a8-bb0b27108c5e","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":16.22}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.706Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3ef34a6d-5675-4999-988f-23d97e569c1c","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":20.53}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.721Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"0effe2c7-17a9-4c1c-83c6-5ad028fc3862","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":31.89}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.721Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5225f730-3808-4ca7-9cb2-72a0d9c14151","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":27.41}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:26.911Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"134cc7f7-d31a-4cb1-b1ed-b36fe9a713e8","method":"GET","route":"/api/state/combat","status":404,"durationMs":2.5}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.912Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"96e40f37-89f2-47e3-ae64-dd03443e6cc1","method":"GET","route":"/api/state/combat-log","status":404,"durationMs":1.91}
+[WebServer] {"timestamp":"2026-09-11T01:54:26.912Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3044d122-1807-4161-aebe-0c3cb1cd6e3d","method":"GET","route":"/api/state/dice-events","status":404,"durationMs":2.54}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:26.923Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d43b56a1-1c42-41a9-b901-cff2c9fd0192","method":"GET","route":"/api/state/dice","status":404,"durationMs":4.09}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:26.959Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"415802bc-44ba-4c58-874f-362c17a1e746","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":2.82}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:27.672Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"479270c7-c84c-4fbb-9616-40080aa5b5d9","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":22.34}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:27.704Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"cea9358c-cd7b-428c-b02c-76ad8ad8c1b6","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":8.66}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:30.639Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"34043f1e-d43c-4dc6-876f-653c49f3fb16","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":2.77}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:31.657Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"dedb54c0-5fdd-4886-a10e-9aabf3c1fb5f","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":7.75}
+[WebServer] {"timestamp":"2026-09-11T01:54:31.658Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d93a7ad0-75ec-45f0-ae05-973ebdcb0d51","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":7.7}
+[WebServer] {"timestamp":"2026-09-11T01:54:31.658Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"83afbaa2-8081-46dc-bc6a-b1bc7fed700c","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":7.51}
+[WebServer] {"timestamp":"2026-09-11T01:54:31.668Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d7138e49-a65b-4f53-a8c4-a843b8ab639f","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":8.61}
+[WebServer] {"timestamp":"2026-09-11T01:54:31.669Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"18c462b1-80dc-4d00-bc92-afeea9aa2639","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":8.15}
+[WebServer] {"timestamp":"2026-09-11T01:54:31.670Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6470c0cb-269b-4bb8-9b51-b8bbb1d08964","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":8.53}
+[WebServer] {"timestamp":"2026-09-11T01:54:31.670Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ea84cecc-e044-4972-8e35-c989a986693e","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":8.35}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:31.678Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4cd85df5-2fc0-4c84-aad7-2246296bfc82","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":5.27}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:33.605Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d524672c-eca2-4932-9a29-b1e81841fb6b","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":8.52}
+[WebServer] {"timestamp":"2026-09-11T01:54:33.620Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ae493160-2a0d-4a8a-b079-de69be0e330b","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":19.52}
+[WebServer] {"timestamp":"2026-09-11T01:54:33.660Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"a510ae3f-211b-4324-a167-ce051b594515","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":12.12}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:33.734Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"567e044a-ef5a-4c42-9157-fbfecbde05b2","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":2.28}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:36.112Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3e9b7998-1777-4a6c-bd08-e644dfac966e","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":8.14}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.141Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"97ee417d-c7c7-486c-a688-ff328648078a","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":2.59}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.143Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"547e09b1-030c-43bd-97ee-deba58594a60","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":4.26}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:36.150Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"48600d2d-5156-494d-ad29-c09785a9a95f","method":"GET","route":"/api/state/player-action","status":404,"durationMs":7.98}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:36.161Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"1b2ac617-5545-41a9-bf37-d1dceeeb221c","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":3.34}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:36.177Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"b04ab141-767b-470e-9cbe-f483ee84f5cb","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":2.31}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.219Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"62ccdc3b-03f0-43aa-9f08-701153ebbf4c","method":"GET","route":"/api/state/player-action","status":404,"durationMs":11.77}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:36.645Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"345f4c1b-1c86-4687-86b1-c2a7652dfce7","method":"GET","route":"/api/state/combat","status":404,"durationMs":4.78}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.645Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7c3ef108-7333-4e29-8e75-d3aadc9df12d","method":"GET","route":"/api/state/dice-events","status":404,"durationMs":4.54}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.646Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"1cb8a297-9adf-434b-b1d1-4e1e4a382469","method":"GET","route":"/api/state/combat-log","status":404,"durationMs":4.52}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.646Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"40eaf84d-c23f-4ca9-aab6-6597a709e5da","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":4.55}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.646Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ec904855-a7bc-4f6d-a372-cac6cc96b662","method":"GET","route":"/api/state/player-action-ack","status":404,"durationMs":4.55}
+[WebServer] {"timestamp":"2026-09-11T01:54:36.658Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e244f090-c991-49e0-a2de-31557eeef592","method":"GET","route":"/api/state/dice","status":404,"durationMs":3.45}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:38.010Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"c72514fa-8901-44e7-87bd-ee1e098a11ba","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":2.27}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:38.015Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"2363ab41-cc59-411a-8299-521e8ed14ec5","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":1.93}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:38.024Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"1480d7ef-3d57-4ab9-9763-bf0c24a139ad","method":"GET","route":"/api/state/player-action","status":404,"durationMs":4.2}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:38.991Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ee968e9a-dd24-4b1a-bf82-6b8f7e5c5be5","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":30.25}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:39.940Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"54eb0b21-1c4a-425d-aec0-8f5d5c205a60","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":20.81}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:39.977Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9c43c278-4a91-497b-99a6-3d0dcfc02aeb","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":30.61}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:39.986Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9c464ae4-5744-4f63-ba58-b6caea7130b8","method":"GET","route":"/api/state/player-action","status":404,"durationMs":4.22}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:40.689Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5704e09f-2b64-4136-9cac-6923b3397dc0","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":2.05}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:41.668Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3f63812e-a2f9-4408-b2dd-f0fea06da4ec","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":7.28}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.668Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6fe8fc40-6c00-41d2-9a04-2d9a4174dd5c","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":7.26}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.671Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"bce7e0f6-e51a-4ff9-ae8d-b7b1a3128d59","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":6.13}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.673Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"79395f23-e862-4526-9058-6207a56338af","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":4.47}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.674Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f36ce6c2-c5b0-4e3b-a204-dd50892ef92a","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":4.13}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.674Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"84f594cb-4cb1-4598-ab0a-ff0f6dc94edd","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":4.08}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.674Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"42ac5f9f-63fc-46d1-9cf6-c96da8b9751a","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":4.2}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.675Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d03d2a9e-4340-4b1a-9262-1d0217c5f181","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":3.88}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:41.921Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5b1ce705-dca4-47c5-93ab-8437ef5a62bc","method":"GET","route":"/api/state/combat","status":404,"durationMs":6.21}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:41.926Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e7e4bcf9-a489-4f11-b6f1-01f7ba94e649","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":7.08}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.943Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"77ab3cc6-8e70-42e7-ad1a-0296107e128c","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":3.72}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:41.956Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"1cc34dbf-2392-4410-8f6d-d6ebeaf8fd55","method":"GET","route":"/api/state/player-action","status":404,"durationMs":5.79}
+[WebServer] {"timestamp":"2026-09-11T01:54:41.956Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"571f8204-a444-4ed6-afe5-7e611341b23d","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":4.5}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:42.667Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"b9b3f318-2789-47af-92f4-18ffa18a5af0","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":13.36}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:43.754Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e74a4c37-8e7a-4ee6-921e-3d29b3e647d1","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":6.4}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:43.924Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"c354cba9-c6e1-408e-b2ac-abc6d5bf9a08","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":2.64}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:43.937Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"0f33a10e-6d16-4820-ac07-9f8e49706b2f","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":9.81}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:43.942Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"14158899-dbc2-4676-ab75-177fbc510f74","method":"GET","route":"/api/state/player-action","status":404,"durationMs":2.31}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:44.971Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f08dfd01-82b4-4634-a4b2-037088a4a0b3","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":19.83}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:45.640Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"120c5b95-4984-42d0-933d-7e6cc24271a0","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":2.7}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:45.927Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"38eddb6b-7b2a-4d5e-9ec1-d7223e29c648","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":1.99}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:45.934Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"778de292-6005-414e-bda4-630470642bae","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":3.52}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:45.938Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5523f271-b2e8-4e87-9b82-1b9174dfc854","method":"GET","route":"/api/state/player-action","status":404,"durationMs":2.46}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:46.154Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"02429fcb-dd87-4306-a0d6-0a03a6e7624f","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":2.62}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:46.656Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"15c9f69e-a5b9-4f94-a90e-38d358770024","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":4.68}
+[WebServer] {"timestamp":"2026-09-11T01:54:46.657Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"82454c78-ff2b-4144-9d08-9cf2647a8225","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":4.83}
+[WebServer] {"timestamp":"2026-09-11T01:54:46.658Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5ebfc556-618f-4bae-9e0f-41a0d548c444","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":5.49}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:46.668Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e5194210-fac1-4ae6-b83b-e8d304c06582","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":10.29}
+[WebServer] {"timestamp":"2026-09-11T01:54:46.672Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"69a1a987-5a67-4c80-8fe7-2404d8e099e4","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":13.38}
+[WebServer] {"timestamp":"2026-09-11T01:54:46.672Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"93cc2b26-b04c-4beb-9fd6-8bc97c302985","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":13.52}
+[WebServer] {"timestamp":"2026-09-11T01:54:46.673Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d34dbf35-f244-4c9a-8f84-0655c55b4e42","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":13.87}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:46.676Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7c46fd55-826f-4360-a4d0-f39e38df44bb","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":4.57}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:47.942Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e6228cab-41e4-4f40-a89a-3a56f2844d3f","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":3.42}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:47.950Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"45fdd2f1-1eef-433b-bba8-f06fc30c3920","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":2.44}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:47.958Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ba982aeb-3ea6-4f63-acab-59048e35b4db","method":"GET","route":"/api/state/player-action","status":404,"durationMs":2.3}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:47.959Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e3ed08f1-5d1f-4b7e-a53a-ec8cdaeff4cd","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":2.01}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:48.667Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9a6ac2c2-4253-4a45-b2c2-57f84c082a30","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":9.96}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:49.928Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"09b9d1a4-f2ca-4231-b9d3-b429c9f13f14","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":5.01}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:49.935Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"aca1246c-4592-4205-a201-c809078ff4ac","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":1.9}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:49.942Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5be724d0-a10c-4a78-9a3f-8de4deaa40ee","method":"GET","route":"/api/state/player-action","status":404,"durationMs":3.29}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:50.959Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"317d9a8e-9415-47ed-a598-7717352b7d3f","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":1.89}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:51.638Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"97fee08d-39f1-4f05-9339-c293b421935a","method":"GET","route":"/api/state/combat","status":404,"durationMs":4.59}
+[WebServer] {"timestamp":"2026-09-11T01:54:51.639Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"c22cd2e6-69ee-40ba-b580-a2028dbd9012","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":3.35}
+[WebServer] {"timestamp":"2026-09-11T01:54:51.639Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"36443545-17a9-4b52-b857-b68c13ddc314","method":"GET","route":"/api/state/player-action-ack","status":404,"durationMs":3.44}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:51.937Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7a9f1e15-73eb-4b83-8124-5aba21ef8a45","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":12.91}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:51.956Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7e314e24-070b-4851-ae14-72b852498469","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":1.73}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:51.967Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"bd35fd83-142d-4a99-b042-4786ef859818","method":"GET","route":"/api/state/player-action","status":404,"durationMs":6.81}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:53.782Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e18ecc6c-4f25-4a79-8f53-f157591d57ff","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":9.55}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:53.960Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5c91567b-1ce2-48d2-b9e8-c281bfdf84e6","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":27.68}
+[WebServer] {"timestamp":"2026-09-11T01:54:53.966Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d73ce788-e850-4ad6-906e-fa06e98d8f29","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":9.7}
+[WebServer] {"timestamp":"2026-09-11T01:54:53.975Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6893e65a-e8ec-48ee-9b35-57e473c41111","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":7.08}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:53.989Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"579e5ebd-69bd-405d-b633-5fcbe743e8b3","method":"GET","route":"/api/state/player-action","status":404,"durationMs":3.12}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:54.651Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"87f0e47c-0431-47cb-acbc-12a54996e176","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":4.38}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:55.930Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"2ce1435c-e1ac-40c8-ade2-0b1d23aeb40a","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":5.74}
+[WebServer] {"timestamp":"2026-09-11T01:54:55.936Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"5c995d00-a8f5-4cbd-a5ba-30d680adb5d3","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":1.79}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:55.942Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"77ebb710-c4e1-4345-ae7b-0893a801f2f9","method":"GET","route":"/api/state/player-action","status":404,"durationMs":2.26}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:56.174Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"b33fd2a5-a544-425d-ae76-74d07121d0af","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":1.81}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:56.670Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"fda3ac5b-ef83-43e1-9581-f949ba889805","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":14.65}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.674Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e927fc8f-b6e7-440a-9567-f8842a346376","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":17.9}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.676Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"37ea57c5-7eec-478f-9dcf-941cef38c209","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":20.77}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.683Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"63bc427c-28ae-482a-af8e-ef3fecc00a65","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":26.6}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.684Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"cae042d9-9631-4489-9c48-834759905519","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":26.85}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.685Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6c9e5ec6-0719-4527-951f-7254b586fc4f","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":14.41}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.686Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"905ac5cc-55ae-4388-a2f0-12430490c4f8","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":10.97}
+[WebServer] {"timestamp":"2026-09-11T01:54:56.698Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"6f963d7c-c9c0-447e-8936-f9656e4ad40b","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":21.55}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:56.912Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"05e09590-d2c8-4ca2-8f9c-afdb36a6ed59","method":"GET","route":"/api/state/combat","status":404,"durationMs":3.83}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:56.955Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3e21cdd8-490e-4c6c-8af9-63be7e871039","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":1.63}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:57.669Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"ab69b262-342f-4c0c-b1da-b64903c62e1c","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":19.36}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:57.928Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9bea94ca-5a9c-4d1c-b1e3-4569dec1706f","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":2.4}
+[WebServer] {"timestamp":"2026-09-11T01:54:57.936Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"a58d5c4a-2710-4410-9094-6a562b87711d","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":1.63}
+[WebServer] {"timestamp":"2026-09-11T01:54:57.940Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"dd7d84c4-42c3-4e4f-b228-74191f29b5b4","method":"GET","route":"/api/state/player-action","status":404,"durationMs":1.82}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:59.931Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4e30fe84-1bfb-4baa-94bf-1fe085d82b9c","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":6.69}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:59.939Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"c8760573-e806-49b9-94d9-d803a169a184","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":2.69}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:54:59.948Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"85d494d2-b238-439a-8a56-a8c89d0bb145","method":"GET","route":"/api/state/player-action","status":404,"durationMs":6.83}
+[WebServer] {"timestamp":"2026-09-11T01:54:59.955Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"b1331783-1641-4979-bb41-783e63115f32","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":1.88}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:00.654Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"9dce0d7e-2d0f-4c1e-b316-c8b0c2b90a6f","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":9.5}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:01.654Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"c81cb38c-d3b3-49dd-9c7a-9f8c3611e8a9","method":"GET","route":"/api/state/map-fog","status":404,"durationMs":5.51}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.656Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"81936565-2ee6-40d6-b86b-a8f97be4086c","method":"GET","route":"/api/state/map-geometry","status":404,"durationMs":5.23}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.656Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"3e486180-00ce-44d1-ab21-86fae2178ef5","method":"GET","route":"/api/state/map-exploration","status":404,"durationMs":3.97}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.659Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"d91fa52c-56fc-4f87-b2db-6d43260f7df1","method":"GET","route":"/api/state/room-chat","status":404,"durationMs":4.52}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.660Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4ea97d53-0660-468a-b2aa-93e51c57d783","method":"GET","route":"/api/state/campaign-time","status":404,"durationMs":4.5}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.661Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7c4d5451-8c4c-47fb-943c-d3498218447b","method":"GET","route":"/api/state/scene-orchestration","status":404,"durationMs":4.13}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.661Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f25c7101-b755-4de4-87b7-e7f294340829","method":"GET","route":"/api/state/scene-audio-playback","status":404,"durationMs":4.26}
+[WebServer] {"timestamp":"2026-09-11T01:55:01.666Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"a1ecff78-c8e9-45a6-b0b3-55797caece72","method":"GET","route":"/api/state/dnd5e-shops","status":404,"durationMs":7.66}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:01.934Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"f7a3c6f3-1861-4582-b7b0-a440205a593b","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":7.17}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:01.948Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"95e0f832-cf24-4901-b141-82788f7aef62","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":9.95}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:01.954Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"90a533c8-e0cd-4bd1-83ce-51b3256a5297","method":"GET","route":"/api/state/player-action","status":404,"durationMs":2.01}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:02.963Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"e3e51096-a350-4850-a41c-f75bba0b7434","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":5.02}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:03.660Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"7c26c4d6-08e0-42fd-a4d1-78b590e2e597","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":17}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:03.803Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"09d0ca40-49ab-4934-af99-c998814a68c4","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":3.36}
+player Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:03.927Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"74d55487-382e-4d39-a2fc-12ac95daa5ae","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":2.91}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:03.939Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"05feb7b3-e4c1-484e-8592-6b72a51b00a5","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":5.88}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:03.950Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"607a1d4c-7a45-4712-9480-acf518ed8b09","method":"GET","route":"/api/state/player-action","status":404,"durationMs":8.06}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:05.933Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"04b2ec77-a588-4ac2-8435-f4397df58cca","method":"GET","route":"/api/state/player-action-processed","status":404,"durationMs":3.72}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:05.938Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"4c02a6df-4de3-4d7f-96ec-05dc34d7ef2f","method":"GET","route":"/api/state/player-action-requests","status":404,"durationMs":1.81}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:05.949Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"025a2998-0398-4005-aeb9-c32ba208d887","method":"GET","route":"/api/state/player-action","status":404,"durationMs":8.73}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:05.954Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"66ad8b72-2ae1-4e56-a4e7-72ed8f65b7b2","method":"GET","route":"/api/state/combat-interrupts","status":404,"durationMs":2.3}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+[WebServer] {"timestamp":"2026-09-11T01:55:06.203Z","level":"warn","service":"dndstars-5e-shared","buildId":"static-development","event":"http_request","requestId":"8abeac8f-0f1e-437b-9ced-43025e07d7e9","method":"GET","route":"/api/images/large-dice-map","status":404,"durationMs":1.96}
+DM Failed to load resource: the server responded with a status of 404 (Not Found)
+  x  1 e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool (58.1s)
+
+
+  1) e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 
+
+    Error: expect(received).not.toBe(expected) // Object.is equality
+
+    Expected: not true
+
+      55 |     const values = await dm.evaluate(() => (window as ObservedWindow).poolResults.at(-1)!)
+      56 |     const mirrored = await player.evaluate(() => (window as ObservedWindow).poolResults.at(-1)!)
+    > 57 |     expect(values.fallback).not.toBe(true); expect(mirrored.fallback).not.toBe(true)
+         |                                 ^
+      58 |     expect(mirrored.values).toEqual(values.values)
+      59 |     expect(physicalErrors).toEqual([])
+      60 |     const sum = values.values.reduce((a, b) => a + b, 0)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\large-dice-room.spec.ts:57:33
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\large-dice-room\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\large-dice-room\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\test-failed-2.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\large-dice-room\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\error-context.md
+
+    attachment #4: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\large-dice-room\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\large-dice-room\large-dice-room-real-room--7ea4e-ves-the-identical-full-pool\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\large-dice-room.spec.ts:5:1 › real room DM rolls 20d6 and player receives the identical full pool 

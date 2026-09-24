@@ -74,6 +74,7 @@ export function playerActionCombatBannerName(
   if (action.type === 'dnd5e-racial-action') return '龙裔吐息'
   if (action.type === 'dnd5e-plugin-action') {
     const featureId = action.dnd5ePluginAction?.featureId
+    if (featureId === 'srd-5.1:effect-control.spell:telekinesis:control') return '心灵遥控'
     const registeredName = featureId ? options?.pluginFeatureName?.(featureId)?.trim() : undefined
     return registeredName || readableContentId(featureId, '自定义特性')
   }

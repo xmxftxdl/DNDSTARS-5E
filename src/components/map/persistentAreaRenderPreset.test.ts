@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { dnd5ePersistentAreaRenderPreset } from './persistentAreaRenderPreset'
 
 describe('dnd5ePersistentAreaRenderPreset', () => {
-  it('将新旧防护法阵区域都路由到专用动画', () => {
+  it.each(['magic-circle', 'alarm'])('将新旧 %s 区域都路由到专用动画', (spellId) => {
     expect(dnd5ePersistentAreaRenderPreset({
       sourceKind: 'core-spell',
-      coreSpellId: 'magic-circle',
+      coreSpellId: spellId,
       visual: { preset: 'arcane', intensity: 'normal' },
-    })).toBe('magic-circle')
+    })).toBe(spellId)
     expect(dnd5ePersistentAreaRenderPreset({
       sourceKind: 'core-spell',
-      coreSpellId: 'magic-circle',
-    })).toBe('magic-circle')
+      coreSpellId: spellId,
+    })).toBe(spellId)
   })
 
   it('保留其他区域的既有表现预设', () => {

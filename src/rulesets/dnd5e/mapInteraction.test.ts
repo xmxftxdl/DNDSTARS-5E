@@ -43,6 +43,33 @@ const bookshelf: SceneInteractionPoint = {
 }
 
 describe('D&D 5e map interaction transaction', () => {
+  it('can close the imported open door from the reported position beside its swung leaf', () => {
+    const scene = { ...map, width: 3600, height: 3150, gridSize: 150 }
+    const door = { ...geometry.doors[0], secret: false, state: 'open' as const,
+      points: [{ x: 3049.50285, y: 1340.0013 }, { x: 2893.502715, y: 1340.0013 }] as [{ x: number; y: number }, { x: number; y: number }] }
+    const result = prepareDnd5eMapInteraction({ map: scene,
+      geometry: { ...geometry, doors: [door] }, actor: { ...actor, x: 2981.93, y: 1103.48 },
+      payload: { doorId: door.id, operation: 'close', method: 'interact' },
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.prepared.automaticSuccess).toBe(true)
+  })
+
+  it.each([
+    ['start', 'clockwise', 200, 550],
+    ['start', 'counterclockwise', 200, 50],
+    ['end', 'clockwise', 400, 50],
+    ['end', 'counterclockwise', 400, 550],
+  ] as const)('uses the open leaf for %s hinge and %s swing', (hinge, swing, x, y) => {
+    const door = { ...geometry.doors[0], secret: false, state: 'open' as const, hinge, swing,
+      points: [{ x: 200, y: 300 }, { x: 400, y: 300 }] as [{ x: number; y: number }, { x: number; y: number }] }
+    const input = { map: { ...map, height: 600 }, geometry: { ...geometry, doors: [door] },
+      actor: { ...actor, x, y }, payload: { doorId: door.id, operation: 'close' as const, method: 'interact' as const } }
+    expect(prepareDnd5eMapInteraction(input).ok).toBe(true)
+    expect(prepareDnd5eMapInteraction({ ...input, actor: { ...actor, x: 0, y: 0 } }))
+      .toEqual({ ok: false, reason: 'door-out-of-reach' })
+  })
+
   it('rejects picking a lock without thieves tools and rebuilds the configured DC', () => {
     expect(prepareDnd5eMapInteraction({
       map, geometry, actor, payload: { doorId: 'door', operation: 'unlock', method: 'thieves-tools' },

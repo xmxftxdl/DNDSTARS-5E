@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Token } from '../../store/maps'
 import { getDnd5eSrdMonster } from './monsters'
+import { dnd5eMonsterToEnemyTemplate } from '../../lib/enemyPool'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 import {
   createDnd5eMonsterInstanceOverride,
@@ -8,9 +9,50 @@ import {
   dnd5eMonsterOverrideSaveMatchesEditRequest,
   dnd5eMonsterOverrideTargets,
   isDnd5eMonsterInstanceOverride,
+  updateDnd5eMonsterInstanceAbility,
 } from './monsterInstanceOverride'
 
 describe('DM monster instance overrides', () => {
+  it('preserves Drow art and variants when an existing attribute override is loaded', () => {
+    const original = getDnd5eSrdMonster('srd-5.1:drow')!
+    const edited = updateDnd5eMonsterInstanceAbility(original, 'drow-a', 'str', 18)
+    const before = dnd5eMonsterToEnemyTemplate(original)
+    const after = dnd5eMonsterToEnemyTemplate(edited)
+    expect(before.tokenPortrait).toBeTruthy()
+    expect(after.tokenPortrait).toBe(before.tokenPortrait)
+    expect(after.initiativePortrait).toBe(before.initiativePortrait)
+    expect(after.visualVariants).toEqual(before.visualVariants)
+    expect(after.emoji).toBe(before.emoji)
+  })
+  it('isolates inline ability edits and preserves the remaining monster mechanics', () => {
+    const original = getDnd5eSrdMonster('srd-5.1:minotaur')!
+    const shared = createDnd5eMonsterInstanceOverride({ monster: original, tokenId: 'herd', scope: 'same-template' })
+    const edited = updateDnd5eMonsterInstanceAbility(shared, 'minotaur-a', 'str', 22)
+    const other = updateDnd5eMonsterInstanceAbility(shared, 'minotaur-b', 'str', 12)
+    expect(edited.id).not.toBe(other.id)
+    expect(edited.abilities.str).toBe(22)
+    expect(shared.abilities).toEqual(original.abilities)
+    expect(edited.actions[0]!.attack).toMatchObject({ toHit: 8, damage: [{ bonus: 6, average: 19 }] })
+    expect(edited.actions[0]!.description).toContain('19 (2d12 + 6)')
+    expect(edited.actions[1]!.attack).toMatchObject({ toHit: 8, damage: [{ bonus: 6, average: 15 }] })
+    expect(updateDnd5eMonsterInstanceAbility(edited, 'minotaur-a', 'str', 22).actions).toEqual(edited.actions)
+    expect(edited.hitPoints).toEqual(original.hitPoints)
+    expect(parseDnd5eMonsterStatBlock(edited)).toMatchObject({ ok: true })
+    expect(() => updateDnd5eMonsterInstanceAbility(shared, 'a', 'str', 31)).toThrow()
+  })
+
+  it('repairs old overrides and does not apply Strength changes to Dexterity attacks', () => {
+    const minotaur = getDnd5eSrdMonster('srd-5.1:minotaur')!
+    const stale = createDnd5eMonsterInstanceOverride({ monster: minotaur, tokenId: 'a', scope: 'instance' })
+    stale.abilities.str = 22
+    expect(updateDnd5eMonsterInstanceAbility(stale, 'a', 'str', 22).actions[0]!.attack?.toHit).toBe(8)
+    const drow = getDnd5eSrdMonster('srd-5.1:drow')!
+    const edited = updateDnd5eMonsterInstanceAbility(drow, 'd', 'str', 22)
+    for (const [index, action] of drow.actions.entries()) {
+      expect(edited.actions[index]!.attack?.toHit).toBe(action.attack?.toHit)
+      expect(edited.actions[index]!.attack?.damage).toEqual(action.attack?.damage)
+    }
+  })
   it('only applies the stat block that the token editor originally opened', () => {
     expect(dnd5eMonsterOverrideSaveMatchesEditRequest({
       requestedMonsterId: 'room-monster:dm-override-token-dragon',

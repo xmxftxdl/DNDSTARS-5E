@@ -1,3 +1,5 @@
+import { stoneWallIntersects } from '../shared/stone-wall-geometry.mjs'
+import { handleAccountStorageRequest, withAccountAssetBudget } from './account-storage-quota.mjs'
 // DM 与玩家服务端共用的权威协议、鉴权和原子持久化核心。
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
@@ -106,6 +108,7 @@ import {
   applyDmAuthoritativeCombatRecovery as recoverDmCombat,
   dmUndoAfterMetadata,
   dmUndoPublicTransaction,
+  dmUndoPublicHistory,
 } from './dm-combat-recovery.mjs'
 import {
   applyCors,
@@ -165,6 +168,8 @@ const EVENT_CHANNEL_POLICIES = Object.freeze({
   'player-action-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'dice-roll-request-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dice-roll-request-dm-to-player': { publish: ['dm'], subscribe: ['player', 'spectator'] },
+  'activity-placement-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
+  'activity-placement-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dnd5e-inventory-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'dnd5e-inventory-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
   'dnd5e-shop-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
@@ -2645,41 +2650,8 @@ export function stateResourceWriteAllowedForRole(resourceName, role) {
   return true
 }
 
-// ── AC4：图片配额 GC ────────────────────────────────────────────────────────
-/**
- * 图片配额触发器（DOCUMENTED）：每次 PUT 写入新图片成功后触发一次 GC（write-trigger）。
- * 列出 imageRoot 下所有非 .json 主文件，按 mtime 升序，删除超过 IMAGE_COUNT_LIMIT 的最旧者
- * （连带其 .json meta）。这把「写时增长」即时收口，无需后台定时器，也不依赖客户端 load。
- */
-export async function enforceImageQuota(imageRoot) {
-  let entries
-  try {
-    entries = await readdir(imageRoot)
-  } catch {
-    return []
-  }
-  const mains = entries.filter((name) => !name.endsWith('.json'))
-  if (mains.length <= IMAGE_COUNT_LIMIT) return []
-  const withMtime = []
-  for (const name of mains) {
-    try {
-      const info = await stat(path.join(imageRoot, name))
-      withMtime.push({ name, mtime: info.mtimeMs })
-    } catch {
-      // 文件并发消失，跳过。
-    }
-  }
-  withMtime.sort((a, b) => a.mtime - b.mtime)
-  const removeCount = withMtime.length - IMAGE_COUNT_LIMIT
-  const removed = []
-  for (let i = 0; i < removeCount; i += 1) {
-    const { name } = withMtime[i]
-    await rm(path.join(imageRoot, name), { force: true }).catch(() => {})
-    await rm(path.join(imageRoot, `${name}.json`), { force: true }).catch(() => {})
-    removed.push(name)
-  }
-  return removed
-}
+// Compatibility hook: quota checks run before writes; existing images are never evicted.
+export async function enforceImageQuota() { return [] }
 
 // ── AC3：backlog 回放上限 ───────────────────────────────────────────────────
 /** 新订阅者只取 backlog 末尾 EVENT_REPLAY_LIMIT 条。 */
@@ -3601,7 +3573,7 @@ function campaignScopedContext(ctx, roomId, campaignId, ownerAccountId) {
     ? `campaign-${normalizedOwnerAccountId}-${normalizedCampaignId}`
     : `campaign-${normalizedCampaignId}`
   const storage = scopedContext(ctx, storageKey)
-  return { ...storage, roomId, campaignId }
+  return { ...storage, roomId, campaignId, campaignOwnerAccountId: normalizedOwnerAccountId }
 }
 
 /** 观战者不占玩家槽位，但仍是可恢复、可被 DM 移除的房间成员。 */
@@ -5966,7 +5938,7 @@ function magicalDarknessObstacleSuppressed(obstacle, map, spellLighting) {
 
 function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked) {
   const spellLighting = mapSpellLightingSources(map, geometry)
-  const magicalDarkness = (geometry?.obstacles ?? []).some((obstacle) =>
+  const magicalDarkness = fogPointState(geometry?.darknessFog, point.x, point.y) === 'covered' || (geometry?.obstacles ?? []).some((obstacle) =>
     obstacle?.magicalDarkness === true &&
     Array.isArray(obstacle.points) &&
     geometryPointInPolygon(point, obstacle.points) &&
@@ -6083,6 +6055,11 @@ function persistentAreaBlocksVisionRay(
     const blocksByObscuration = area?.obscuration?.kind === 'heavy' &&
       !(area.obscuration.sourceCanSeeThrough === true && area.sourceTokenId === viewerId)
     if (area?.blocking?.vision !== true && !blocksByObscuration) continue
+    if (area.stoneWall || area.forceWall) {
+      if (stoneWallIntersects(area, map, from, to, fromEyeElevationFeet, toEyeElevationFeet)) return true
+      continue
+    }
+
     const cells = new Set((Array.isArray(area.cells) ? area.cells : []).flatMap((cell) =>
       Number.isFinite(cell?.col) && Number.isFinite(cell?.row)
         ? [`${Math.floor(cell.col)}:${Math.floor(cell.row)}`]
@@ -6131,7 +6108,10 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
   // Darkness filters unlit targets below; it does not cap the ray distance to
   // a distant illuminated target. Dynamic line of sight therefore reaches the
   // map boundary in every ambient-light mode.
-  const ambientSightRangeFeet = !lightingEnabled || geometry?.vision?.enabled !== true
+  // Spell obstructions (such as Tiny Hut) also require lighting/line-of-sight
+  // checks with dynamic vision disabled. Do not apply the dormant default
+  // sight range in that case; match the client's forced visibility check.
+  const ambientSightRangeFeet = !lightingEnabled
     ? 0
     : Math.hypot(
         Math.max(1, Number(map.width) || 1),
@@ -6398,8 +6378,12 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
     : requestedCharacter && ownsCharacter(requestedCharacter)
       ? requestedCharacter.id
     : [...characterById.values()].find(ownsCharacter)?.id ?? null
+  // A portal changes only its traveler's scene, never the room-wide DM scene.
+  const arrivalMap = resolvedActiveCharacterId && value.maps.find(map =>
+    map.tokens?.some(token => token.characterId === resolvedActiveCharacterId && token.teleportationArrivalMapId === map.id))
   return {
     ...value,
+    ...(arrivalMap ? { selectedId: arrivalMap.id } : {}),
     maps: value.maps.map((map) => {
       if (!plainObject(map) || !Array.isArray(map.tokens)) return map
       const effectiveMap = {
@@ -6461,6 +6445,8 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const viewers = [...(!partyVisionShared
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players), ...sourceVisionEffects]
+      const hasSpellObstruction = (effectiveMap.dnd5ePluginAreas ?? []).some(area =>
+        area?.obscuration?.kind === 'heavy' || area?.blocking?.vision || area?.lighting?.kind === 'magical-darkness')
       const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
         if (token.type === 'player') {
@@ -6469,14 +6455,16 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             token.characterId === resolvedActiveCharacterId
           const requiresPlanarPerception = token.characterId !== resolvedActiveCharacterId &&
             tokenPlanarPlane(token, characterById) === 'ethereal'
-          const observingViewers = requiresPlanarPerception
+          const requiresSight = !viewerControlled && (requiresPlanarPerception || hasSpellObstruction || dynamicVision ||
+            fogPointState(fog, token.x, token.y) === 'covered' || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered')
+          const observingViewers = requiresSight
             ? viewers.filter((viewer) => playerCanSeeToken(
                 effectiveMap,
                 geometry,
                 viewer,
                 token,
                 dynamicVision ? null : manualFallbackRangeFeet,
-                dynamicVision,
+                dynamicVision || hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered',
                 characterById,
               ))
             : viewers
@@ -6517,7 +6505,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         // reveal 的区域即使开着动态视野也直接放行；两者都不命中时，动态视野
         // 决定是否仍要视野判定（探索过≠正在看见）。
         const fogState = manualFogActive ? fogPointState(fog, token.x, token.y) : 'neutral'
-        const needVision = fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
+        const needVision = hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered' || fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
         const observingViewers = viewers.filter((viewer) =>
           !needVision ||
           playerCanSeeToken(
@@ -6526,7 +6514,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             viewer,
             token,
             dynamicVision ? null : manualFallbackRangeFeet,
-            dynamicVision,
+            dynamicVision || hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered',
             characterById,
           ),
         )
@@ -6560,7 +6548,13 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         tokens,
         dnd5ePluginAreas: Array.isArray(map.dnd5ePluginAreas)
           ? map.dnd5ePluginAreas.filter((area) =>
-              (!area?.sourceTokenId || visibleIds.has(area.sourceTokenId)) &&
+              // A fixed portal survives its caster moving to the destination.
+              // Both rings are rendered from this source-map area, so filtering
+              // it by caster visibility also erases the player's exit ring.
+              (!area?.sourceTokenId || visibleIds.has(area.sourceTokenId) ||
+                (area?.coreSpellId === 'wall-of-stone' && area?.anchorMode === 'fixed') ||
+                (area?.coreSpellId === 'teleportation-circle' && area?.anchorMode === 'fixed' &&
+                  plainObject(area.teleportationExit))) &&
               (area?.anchorMode !== 'effect-token' || visibleIds.has(area?.anchorTokenId)) &&
               (area?.hiddenFromPlayers !== true || area?.sourceCharacterId === resolvedActiveCharacterId),
             )
@@ -7059,7 +7053,7 @@ async function appendDmUndoChange(ctx, input) {
       // Recovery only needs the full pre-transaction snapshot. Retain a tiny
       // post-combat projection for UI labels instead of duplicating entire
       // character/map payloads in the bounded journal.
-      after: dmUndoAfterMetadata(input.resource, input.after),
+      after: dmUndoAfterMetadata(input.resource, input.after, existingChangeIndex >= 0 ? transaction.changes[existingChangeIndex].before : input.before),
       beforeRevision: input.beforeRevision,
       afterRevision: input.afterRevision,
     }
@@ -7532,7 +7526,7 @@ function validateCampaignBundle(value) {
     errors.push('invalid-plugin-runtime-state')
   }
   if (plainObject(value?.states) && Object.keys(value.states).length > 128) errors.push('too-many-states')
-  if (Array.isArray(value?.images) && value.images.length > IMAGE_COUNT_LIMIT) errors.push('too-many-images')
+  if (Array.isArray(value?.images) && value.images.length > 10000) errors.push('too-many-images')
   if (Array.isArray(value?.plugins) && value.plugins.length > 64) errors.push('too-many-plugins')
   if (plainObject(value?.states)) {
     for (const [name, state] of Object.entries(value.states)) {
@@ -7588,6 +7582,17 @@ function validateCampaignBundle(value) {
 }
 
 async function restoreCampaignBundle(ctx, bundle, options = {}) {
+  const validation = validateCampaignBundle(bundle)
+  if (!validation.ok) throw new RoomProtocolError(422, 'campaign-preflight-failed')
+  return withAccountAssetBudget({
+    sharedRoot: ctx.sharedRoot, accountId: ctx.campaignOwnerAccountId,
+    account: ctx.campaignOwnerAccountId ? await readAccount(ctx, ctx.campaignOwnerAccountId) : null,
+    imageRoot: ctx.imageRoot,
+    writes: bundle.images.map(image => ({ id: safeName(image.id), bytes: Buffer.from(image.data, 'base64').length })),
+  }, () => restoreCampaignBundleWithinBudget(ctx, bundle, options))
+}
+
+async function restoreCampaignBundleWithinBudget(ctx, bundle, options = {}) {
   const validation = validateCampaignBundle(bundle)
   if (!validation.ok) {
     const error = new RoomProtocolError(422, 'campaign-preflight-failed')
@@ -9236,6 +9241,7 @@ function accountPublicProfile(account) {
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
     pluginAdmin: pluginRegistryAdministrator(account),
+    storageAdmin: String(process.env.STARS_ACCOUNT_ADMIN_ACCOUNT_IDS ?? '').split(',').map(value => value.trim()).includes(account.accountId),
   }
 }
 
@@ -11048,6 +11054,8 @@ async function handleAccountApi(req, res, parsed, ctx) {
     writeJson(res, 200, { session: accountSessionResponse(next, token) })
     return true
   }
+
+  if (await handleAccountStorageRequest(req, res, parsed, ctx, { authenticateAccount, writeJson, readJsonRequest, mutateAccount, RoomProtocolError })) return true
 
   if (parsed.pathname === '/api/accounts/me' && req.method === 'GET') {
     const account = await authenticateAccount(req, ctx)
@@ -13617,12 +13625,15 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
       if (req.method === 'GET') {
         const journal = await readDmUndoJournal(ctx)
+        const currentSnapshots = await Promise.all(['combat', 'characters', 'maps', 'combat-log'].map(async resource => ({
+          resource,
+          value: await readFile(path.join(ctx.stateRoot, `${resource}.json`), 'utf8')
+            .then(value => JSON.parse(value)).catch(() => null),
+        })))
+        const currentCombat = currentSnapshots.find(snapshot => snapshot.resource === 'combat')?.value
         writeJson(res, 200, {
           schemaVersion: DM_UNDO_SCHEMA_VERSION,
-          transactions: journal.transactions
-            .slice(-DM_UNDO_HISTORY_LIMIT)
-            .reverse()
-            .map(dmUndoPublicTransaction),
+          transactions: dmUndoPublicHistory(journal.transactions.slice(-DM_UNDO_HISTORY_LIMIT), currentCombat, currentSnapshots),
         })
         return true
       }
@@ -14950,7 +14961,11 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         const metaBody = JSON.stringify({ type: contentType, purpose })
         // blob+meta 在同一把锁内原子落盘。
-        await atomicWriteImageLocked(filePath, metaPath, body, metaBody)
+        await withAccountAssetBudget({
+          sharedRoot: ctx.sharedRoot, accountId: ctx.campaignOwnerAccountId,
+          account: ctx.campaignOwnerAccountId ? await readAccount(ctx, ctx.campaignOwnerAccountId) : null,
+          imageRoot: ctx.imageRoot, writes: [{ id, bytes: body.length }],
+        }, () => atomicWriteImageLocked(filePath, metaPath, body, metaBody))
         // 写后即触发配额 GC（write-trigger，按 mtime 最旧优先淘汰）。
         await enforceImageQuota(ctx.imageRoot)
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -14985,4 +15000,3 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 }
-

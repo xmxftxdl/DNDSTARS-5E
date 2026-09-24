@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Backpack, Footprints, PackageOpen, Shield, X } from 'lucide-react'
+import { Dices, Backpack, Footprints, PackageOpen, Shield, X } from 'lucide-react'
+import type { Dnd5eAbilityCheckPayload } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import type { Dnd5eInventoryEntry } from '../../types/inventory'
 import { getEffectiveAc } from '../../lib/combatStats'
@@ -34,10 +35,14 @@ import { dnd5eTruePolymorphObjectFormFromEffects } from '../../rulesets/dnd5e/tr
 
 export interface PlayerQuickCharacterSheetProps {
   character: Character
+  onQuickCheck?: (check: Pick<Dnd5eAbilityCheckPayload, 'ability' | 'skill'>) => void
+  quickCheckDisabled?: boolean
   onClose: () => void
+  embedded?: boolean
+  view?: 'all' | 'data' | 'status'
 }
 
-export default function PlayerQuickCharacterSheet({ character, onClose }: PlayerQuickCharacterSheetProps) {
+export default function PlayerQuickCharacterSheet({ character, onClose, onQuickCheck, quickCheckDisabled = false, embedded = false, view = 'all' }: PlayerQuickCharacterSheetProps) {
   const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null)
   const portrait = resolveMapTokenPortrait(character)
   const inventory = useMemo(() => normalizeDnd5eInventory(character), [character])
@@ -86,16 +91,16 @@ export default function PlayerQuickCharacterSheet({ character, onClose }: Player
       : creatureFormMode === 'shapechange'
         ? '形体变化'
         : '荒野形态'
-  const abilities = useMemo(() => activeObjectForm
+  const abilities = activeObjectForm
     ? []
     : activeCreatureForm
     ? quickCreatureFormAbilityRows(character, activeCreatureForm, character.dnd5eCombatState)
-    : quickCharacterAbilityRows(character), [activeCreatureForm, activeObjectForm, character])
-  const skills = useMemo(() => activeObjectForm
+    : quickCharacterAbilityRows(character)
+  const skills = activeObjectForm
     ? []
     : activeCreatureForm
     ? quickCreatureFormSkillRows(character, activeCreatureForm, character.dnd5eCombatState)
-    : quickCharacterSkillRows(character), [activeCreatureForm, activeObjectForm, character])
+    : quickCharacterSkillRows(character)
   const speed = activeObjectForm ? 0 : activeCreatureForm?.speed.walk ?? dnd5eEffectiveWalkingSpeed(character)
   const flySpeed = activeObjectForm
     ? undefined
@@ -130,19 +135,37 @@ export default function PlayerQuickCharacterSheet({ character, onClose }: Player
     ? quickCreatureFormPassivePerception(character.passivePerception, activeCreatureForm, character.dnd5eCombatState)
     : character.passivePerception
 
+  const statusContent = (
+                <section className="quick-character-sheet__section rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                  <h3 className="mb-2 text-xs font-black text-slate-300">当前状态</h3>
+                  <div className="flex min-h-6 flex-wrap items-center gap-1.5">
+                    {standaloneConditions.map((condition) => <span key={condition} className="rounded-full border border-rose-300/20 bg-rose-400/10 px-2 py-1 text-[10px] text-rose-100">{dnd5eConditionLabel(condition)}</span>)}
+                    {activeObjectForm
+                      ? <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[10px] text-amber-100">完全变形术：{activeObjectForm.profile.label} · 物体生命 {currentHp}/{maximumHp}{activeObjectForm.permanent ? ' · 永久' : ''}</span>
+                      : activeCreatureForm ? <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-100">{creatureFormLabel}：{activeCreatureForm.name} · 形态生命 {currentHp}/{maximumHp}{character.dnd5eCombatState?.wildShapePermanent === true ? ' · 永久' : ''}</span> : null}
+                    {character.concentrating ? <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2 py-1 text-[10px] text-violet-100">专注中{concentrationLabel ? `：${concentrationLabel}` : '：未记录来源'}{concentrationRounds != null ? ` · 剩余 ${concentrationRounds} 轮` : ''}</span> : null}
+                    {activeEffects.map((effect) => <span key={effect.id} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-100">{effect.label} · {dnd5eActiveEffectRemainingLabel(effect)}</span>)}
+                    {standaloneConditions.length === 0 && !character.concentrating && activeEffects.length === 0 ? <span className="text-xs text-slate-600">无状态效果</span> : null}
+                  </div>
+                </section>
+  )
   return (
     <div
-      className="quick-character-sheet-backdrop fixed inset-0 z-[1560] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-5"
+      className={embedded
+        ? 'flex h-full w-full min-h-0'
+        : 'quick-character-sheet-backdrop fixed inset-0 z-[1560] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-5'}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
     >
       <section
         role="dialog"
-        aria-modal="true"
+        aria-modal={embedded ? undefined : 'true'}
         aria-labelledby="quick-character-sheet-title"
         data-testid="quick-character-sheet"
-        className="quick-character-sheet flex max-h-[92vh] w-[min(94vw,980px)] flex-col overflow-hidden rounded-2xl border border-violet-300/20 bg-[#0a0b13]/[0.99] shadow-[0_32px_120px_rgba(0,0,0,0.85)]"
+        className={embedded
+          ? 'quick-character-sheet flex h-full w-full flex-col overflow-hidden bg-[#0a0b13]/[0.99]'
+          : 'quick-character-sheet flex max-h-[92vh] w-[min(94vw,980px)] flex-col overflow-hidden rounded-2xl border border-violet-300/20 bg-[#0a0b13]/[0.99] shadow-[0_32px_120px_rgba(0,0,0,0.85)]'}
       >
         <header className="quick-character-sheet__header flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full border-2 border-violet-300/50 bg-violet-950">
@@ -158,12 +181,13 @@ export default function PlayerQuickCharacterSheet({ character, onClose }: Player
               ? <p className="mt-1 truncate text-[11px] font-bold text-amber-200">当前形态：{activeObjectForm.profile.label}（完全变形术{activeObjectForm.permanent ? ' · 永久' : ''}）</p>
               : activeCreatureForm ? <p className="mt-1 truncate text-[11px] font-bold text-emerald-200">当前形态：{activeCreatureForm.name}（{creatureFormLabel}{character.dnd5eCombatState?.wildShapePermanent === true ? ' · 永久' : ''}）</p> : null}
           </div>
-          <button type="button" aria-label="关闭快捷人物卡" onClick={onClose} className="rounded-xl border border-white/10 p-2.5 text-slate-400 transition hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
+          {!embedded && <button type="button" aria-label="关闭快捷人物卡" onClick={onClose} className="rounded-xl border border-white/10 p-2.5 text-slate-400 transition hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>}
         </header>
 
         <div className="quick-character-sheet__body min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+          {view === 'status' ? <div className="space-y-4" data-testid="quick-character-status"><Summary label="生命值" value={`${currentHp}/${maximumHp}`} detail={`临时生命值 ${character.tempHp}`} />{statusContent}</div> : <>
           <div data-testid="quick-character-overview" className="space-y-4">
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+              <div className={embedded ? "grid grid-cols-3 gap-2" : "grid grid-cols-3 gap-2 sm:grid-cols-6"}>
                 <Summary label={activeObjectForm ? '物体生命值' : activeCreatureForm ? '形态生命值' : '生命值'} value={`${currentHp}/${maximumHp}`} detail={activeCreatureForm ? `本体 ${character.currentHp}/${character.maxHp}` : character.tempHp > 0 ? `临时 ${character.tempHp}` : undefined} />
                 <Summary icon={<Shield className="h-3.5 w-3.5" />} label="护甲等级" value={`${armorClass}`} />
                 <Summary
@@ -179,10 +203,10 @@ export default function PlayerQuickCharacterSheet({ character, onClose }: Player
 
               <section>
                 <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-violet-200">属性与豁免</h3>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                <div className={embedded ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"}>
                   {activeObjectForm ? <p className="col-span-full rounded-xl border border-amber-300/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">物体没有生物属性或豁免；本体数据在法术结束前封存。</p> : abilities.map((entry) => (
                     <div key={entry.key} className="quick-character-sheet__ability rounded-xl border border-violet-300/15 bg-violet-400/[0.06] p-3 text-center">
-                      <div className="text-xs font-bold text-slate-300">{entry.label}</div>
+                      <div className="flex items-center justify-center gap-1 text-xs font-bold text-slate-300">{entry.label}{onQuickCheck && <QuickCheckButton label={entry.label} disabled={quickCheckDisabled} onClick={() => onQuickCheck({ ability: entry.key })} />}</div>
                       <div className="mt-1 text-xl font-black text-white">{entry.score}</div>
                       <div className="text-sm font-bold text-violet-200">{quickFormatModifier(entry.modifier)}</div>
                       <div className={`mt-1 text-[9px] ${entry.saveProficient ? 'text-emerald-300' : 'text-slate-600'}`}>豁免 {quickFormatModifier(entry.savingThrowModifier)}{entry.saveProficient ? ' · 熟练' : ''}</div>
@@ -193,30 +217,20 @@ export default function PlayerQuickCharacterSheet({ character, onClose }: Player
 
               <section>
                 <h3 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-sky-200">技能</h3>
-                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
+                <div className={embedded ? "grid grid-cols-2 gap-1.5" : "grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6"}>
                   {activeObjectForm ? <p className="col-span-full rounded-xl border border-amber-300/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">物体不能进行生物技能检定，也不能行动、说话或施法。</p> : skills.map((entry) => (
                     <div key={entry.key} className="quick-character-sheet__skill flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-2">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${entry.expertise ? 'bg-amber-300' : entry.proficient ? 'bg-sky-300' : 'border border-slate-700'}`} />
                       <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{entry.label}</span>
                       <strong className="text-xs tabular-nums text-white">{quickFormatModifier(entry.modifier)}</strong>
+                      {onQuickCheck && <QuickCheckButton label={entry.label} disabled={quickCheckDisabled} onClick={() => onQuickCheck({ ability: entry.ability, skill: entry.key })} />}
                     </div>
                   ))}
                 </div>
               </section>
 
-              <div className="grid items-start gap-3 lg:grid-cols-[minmax(220px,0.55fr)_minmax(0,1.45fr)]">
-                <section className="quick-character-sheet__section rounded-xl border border-white/10 bg-white/[0.025] p-3">
-                  <h3 className="mb-2 text-xs font-black text-slate-300">当前状态</h3>
-                  <div className="flex min-h-6 flex-wrap items-center gap-1.5">
-                    {standaloneConditions.map((condition) => <span key={condition} className="rounded-full border border-rose-300/20 bg-rose-400/10 px-2 py-1 text-[10px] text-rose-100">{dnd5eConditionLabel(condition)}</span>)}
-                    {activeObjectForm
-                      ? <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[10px] text-amber-100">完全变形术：{activeObjectForm.profile.label} · 物体生命 {currentHp}/{maximumHp}{activeObjectForm.permanent ? ' · 永久' : ''}</span>
-                      : activeCreatureForm ? <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-100">{creatureFormLabel}：{activeCreatureForm.name} · 形态生命 {currentHp}/{maximumHp}{character.dnd5eCombatState?.wildShapePermanent === true ? ' · 永久' : ''}</span> : null}
-                    {character.concentrating ? <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2 py-1 text-[10px] text-violet-100">专注中{concentrationLabel ? `：${concentrationLabel}` : '：未记录来源'}{concentrationRounds != null ? ` · 剩余 ${concentrationRounds} 轮` : ''}</span> : null}
-                    {activeEffects.map((effect) => <span key={effect.id} className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-100">{effect.label} · {dnd5eActiveEffectRemainingLabel(effect)}</span>)}
-                    {standaloneConditions.length === 0 && !character.concentrating && activeEffects.length === 0 ? <span className="text-xs text-slate-600">无状态效果</span> : null}
-                  </div>
-                </section>
+              <div className={`grid items-start gap-3 ${view === 'all' ? 'lg:grid-cols-[minmax(220px,0.55fr)_minmax(0,1.45fr)]' : ''}`}>
+{view === 'all' ? statusContent : null}
 
                 <section className="quick-character-sheet__section rounded-xl border border-white/10 bg-white/[0.025] p-3">
                   <h3 className="mb-2 text-xs font-black text-slate-300">法术位与职业资源</h3>
@@ -280,9 +294,10 @@ export default function PlayerQuickCharacterSheet({ character, onClose }: Player
                     </div>
                   ) : <div className="rounded-xl border border-dashed border-white/10 py-5 text-center text-xs text-slate-600">背包为空</div>}
                 </div>
-                <p className="mt-3 border-t border-white/[0.06] pt-3 text-[10px] leading-4 text-slate-600">快捷人物卡为只读视图；装备、使用或转交物品请前往完整角色卡。</p>
+                <p className="mt-3 border-t border-white/[0.06] pt-3 text-[10px] leading-4 text-slate-600">装备、使用或转交物品请前往完整角色卡。</p>
               </section>}
           </div>
+          </>}
         </div>
       </section>
     </div>
@@ -317,4 +332,8 @@ function QuickEquipmentSlot({
 
 function Summary({ icon, label, value, detail }: { icon?: ReactNode; label: string; value: string; detail?: string }) {
   return <div className="quick-character-sheet__summary rounded-xl border border-white/[0.08] bg-white/[0.035] p-2.5"><div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">{icon}{label}</div><strong className="mt-1 block text-sm text-white">{value}</strong>{detail ? <span className="text-[9px] text-cyan-300">{detail}</span> : null}</div>
+}
+
+function QuickCheckButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
+  return <button type="button" aria-label={`投掷${label}鉴定`} title={`${label}鉴定`} disabled={disabled} onClick={onClick} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-violet-300 transition-colors hover:bg-violet-400/20 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-300 disabled:cursor-not-allowed disabled:opacity-35"><Dices className="h-3.5 w-3.5" aria-hidden="true" /></button>
 }

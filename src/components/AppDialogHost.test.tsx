@@ -5,6 +5,7 @@ import {
   resetAppDialogsForTests,
   settleAppDialog,
   showAppActionChoice,
+  showAppMultiChoice,
   showAppChoiceGroups,
   showAppConfirm,
   showAppDirectionStepper,
@@ -15,6 +16,18 @@ import AppDialogHost from './AppDialogHost'
 afterEach(() => resetAppDialogsForTests())
 
 describe('AppDialogHost', () => {
+  it('renders creature exemptions as checkboxes with no search or number input', async () => {
+    const pending = showAppMultiChoice({ title: '警报术·豁免生物', message: '勾选不会触发警报的生物',
+      options: [{ id: 'a', label: '牛头人' }, { id: 'b', label: '新冒险者（施法者）' }], selectedIds: ['b'] })
+    const html = renderToStaticMarkup(<AppDialogHost />)
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2)
+    expect(html).toContain('checked=""')
+    expect(html).toContain('清空选择')
+    expect(html).not.toContain('type="search"')
+    expect(html).not.toContain('app-dialog-input')
+    settleAppDialog(getAppDialogSnapshot().active!.id, [])
+    await expect(pending).resolves.toEqual([])
+  })
   it('renders an accessible in-app confirmation above application overlays', async () => {
     const pending = showAppConfirm({
       title: '删除地图',
@@ -26,7 +39,7 @@ describe('AppDialogHost', () => {
 
     expect(html).toContain('role="dialog"')
     expect(html).toContain('aria-modal="true"')
-    expect(html).toContain('z-[200000]')
+    expect(html).toContain('z-[2147483647]')
     expect(html).toContain('删除地图')
     expect(html).toContain('此操作无法撤销。')
     expect(html).toContain('data-testid="app-dialog-cancel"')

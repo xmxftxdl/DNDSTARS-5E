@@ -1,3 +1,4 @@
+import { endDnd5eActivityExtraTurnGroup } from '../headlessCombatEngine'
 import { afterEach, describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import { validateAndMigrateSharedResource } from '../../../lib/sharedResourceValidation'
@@ -143,7 +144,7 @@ describe('Activity Headless authority commit bridge', () => {
 
     expect(committed.ok).toBe(true)
     if (!committed.ok) return
-    expect(committed.events).toContainEqual({
+    expect(committed.events).toContainEqual(expect.objectContaining({
       type: 'opposed-ability-check-resolved',
       actorId: caster.id,
       targetId: target.id,
@@ -159,7 +160,7 @@ describe('Activity Headless authority commit bridge', () => {
       targetModifier: 7,
       targetTotal: 25,
       success: false,
-    })
+    }))
   })
 
   it('distinguishes foreign-planar dismissal from a local native banishment', () => {
@@ -415,13 +416,13 @@ describe('Activity Headless authority commit bridge', () => {
     })
     expect(committed.state.combatants.target.statBlockId).toBeUndefined()
     expect(committed.state.combatants.target.classState.wildShapeFormId).toBeUndefined()
-    expect(committed.events).toContainEqual({
+    expect(committed.events).toContainEqual(expect.objectContaining({
       type: 'creature-transformation-unaffected',
       actorId: caster.id,
       targetId: target.id,
       sourceActivityId: activity.id,
       reason,
-    })
+    }))
   })
 
   it('rejects True Resurrection after the 200-year boundary', () => {
@@ -536,7 +537,7 @@ describe('Activity Headless authority commit bridge', () => {
     const castResolution = resolveDnd5eActivity({
       activity: castActivity, actor: actorSnapshot, targets: [actorSnapshot], castLevel: 9,
       choices: {
-        mode: 'srd-5.1:adult-black-dragon', equipment: 'merge', seen: 'confirmed',
+        mode: 'srd-5.1:adult-black-dragon', equipment: 'merge',
       },
       rolls: {},
     })
@@ -584,14 +585,14 @@ describe('Activity Headless authority commit bridge', () => {
       .find((definition) => definition.id === 'shapechange')?.activities as readonly Dnd5eActivityDefinitionV1[] | undefined)
       ?.find((activity) => activity.id === 'spell:shapechange:change-form')!
     expect(dnd5eActivityManualAdjudicationOperationsV1(controlActivity, {
-      mode: 'srd-5.1:planetar', equipment: 'merge', seen: 'confirmed',
+      mode: 'srd-5.1:planetar', equipment: 'merge',
     })).toHaveLength(0)
     expect(dnd5eActivityManualAdjudicationOperationsV1(controlActivity, {
-      mode: 'srd-5.1:planetar', equipment: 'wear', seen: 'confirmed',
+      mode: 'srd-5.1:planetar', equipment: 'wear',
     })).toHaveLength(1)
     const controlResolution = resolveDnd5eActivity({
       activity: controlActivity, actor: actorSnapshot, targets: [actorSnapshot],
-      choices: { mode: 'srd-5.1:planetar', equipment: 'wear', seen: 'confirmed' }, rolls: {},
+      choices: { mode: 'srd-5.1:planetar', equipment: 'wear' }, rolls: {},
     })
     expect(controlResolution.ok, controlResolution.ok ? undefined : controlResolution.details.join('; ')).toBe(true)
     if (!controlResolution.ok) return
@@ -1125,9 +1126,9 @@ describe('Activity Headless authority commit bridge', () => {
     ]))
     expect(committed.state.combatants.actor.classResources['dnd5e-spell-slot-7']?.current).toBe(0)
     expect(committed.state.combatants.actor.turn.bonusActionAvailable).toBe(false)
-    expect(committed.events).toContainEqual({
+    expect(committed.events).toContainEqual(expect.objectContaining({
       type: 'instant-death', sourceId: actor.id, targetId: 'hp15', hpBefore: 15,
-    })
+    }))
   })
 
   it('revives only an eligible authoritative corpse and records body/penalty state', () => {
@@ -1476,10 +1477,10 @@ describe('Activity Headless authority commit bridge', () => {
     if (!removed.ok) return
     expect(removed.state.combatants.actor.concentrating).toBe(false)
     expect(removed.state.combatants.actor.classState.concentrationSpellId).toBeUndefined()
-    expect(removed.events).toContainEqual({
+    expect(removed.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: actor.id,
       stateKey: 'concentration', active: false,
-    })
+    }))
   })
 
   it('stores extension behaviour and modifiers as one save-ends effect', () => {
@@ -1670,9 +1671,9 @@ describe('Activity Headless authority commit bridge', () => {
     expect(cured.state.combatants.target.currentHp).toBe(20)
     expect(cured.state.combatants.target.classState.abilityScoreReductionLedger).toBeUndefined()
     expect(cured.state.combatants.target.classState.hitPointMaximumReductionLedger).toBeUndefined()
-    expect(cured.events).toContainEqual({
+    expect(cured.events).toContainEqual(expect.objectContaining({
       type: 'exhaustion-adjusted', actorId: 'target', before: 2, after: 1, amount: -1,
-    })
+    }))
   })
 
   it('does not partially mutate the source when a cost is unavailable', () => {
@@ -2439,4 +2440,26 @@ describe('Activity Headless authority commit bridge', () => {
       disposePlugin()
     }
   })
+})
+
+it('DM ending Time Stop clears controller, suspension and future extra turns together', () => {
+  const state = startDnd5eHeadlessCombat('dm-end-time-stop', [combatant('actor', 'player', 20), combatant('target', 'dm', 10)])
+  const result = commitDnd5eActivityExecution(state, {
+    actorId: 'actor', activityId: 'spell:time-stop', targetIds: ['actor'],
+    source: { kind: 'spell', id: 'time-stop' },
+    resolution: { ok: true, status: 'resolved', checks: [], consumptions: [], proposals: [{
+      kind: 'grant-extra-turns', operationId: 'time-stop-extra-turns', actorId: 'actor',
+      turns: 3, freezeOtherCreatures: true, endOnAffectOther: true,
+    }] },
+  })
+  expect(result.ok).toBe(true)
+  if (!result.ok) return
+  const group = result.state.combatants.actor.classState.activityExtraTurnGroup!
+  expect(result.state.combatants.actor.classState.activeEffects?.some(e => e.source.rulesId === 'time-stop')).toBe(true)
+  endDnd5eActivityExtraTurnGroup(result.state, group.groupId, [])
+  expect(result.state.initiativeOrder).toEqual(['actor', 'target'])
+  expect(result.state.combatants.actor.classState.activityExtraTurnGroup).toBeUndefined()
+  expect(result.state.combatants.target.classState.activityExtraTurnSuspension).toBeUndefined()
+  expect(result.state.combatants.target.turn.reactionAvailable).toBe(true)
+  expect(result.state.combatants.actor.classState.activeEffects?.some(e => e.source.rulesId === 'time-stop') ?? false).toBe(false)
 })

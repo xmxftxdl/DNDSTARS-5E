@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { resolvePlayerMapSpellHotbarCharacter } from './playerMapSpellHotbarCharacter'
+import { resolvePlayerMapSpellHotbarCharacter, simulacrumHotbarTurnEconomy } from './playerMapSpellHotbarCharacter'
+import { createDnd5eTurnEconomyCounts } from '../../rulesets/dnd5e/turnEconomy'
+import type { Token } from '../../store/maps'
 import { playerMapMovablePersistentAreas, playerMapSustainedAreaControls } from './playerMapPersistentAreas'
 
 const character = {
@@ -11,6 +13,21 @@ const character = {
 } as Character
 
 describe('playerMapMovablePersistentAreas', () => {
+  it('keeps a self-copy action and character separate from its spent caster, including after reload', () => {
+    const duplicate = { id: 'sim', characterId: character.id,
+      dnd5eSimulacrum: { sourceCharacterId: character.id } } as Token
+    const projected = { ...character, name: '拟像', currentHp: 30, maxHp: 35 }
+    expect(resolvePlayerMapSpellHotbarCharacter({ playerCharacter: character, activeCharacter: character,
+      combatActive: true, currentInitiativeToken: duplicate, turnCharacter: projected })).toBe(projected)
+    const caster = createDnd5eTurnEconomyCounts('caster-turn', 30)
+    caster.action.current = 0
+    const copy = createDnd5eTurnEconomyCounts('sim-turn', 30)
+    const state = JSON.parse(JSON.stringify({ caster, sim: copy }))
+    expect(simulacrumHotbarTurnEconomy(duplicate, state, 30).action.current).toBe(1)
+    expect(simulacrumHotbarTurnEconomy(duplicate, { caster }, 30).action.current).toBe(1)
+    state.sim.action.current = 0
+    expect(simulacrumHotbarTurnEconomy(duplicate, state, 30).action.current).toBe(0)
+  })
   it('keeps the assigned player character as the spell-bar actor during an enemy turn', () => {
     const wizard = { ...character, id: 'assigned-wizard' }
     const archmage = { ...character, id: 'enemy-archmage' }

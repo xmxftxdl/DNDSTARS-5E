@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><div id="root"></div><script type="module">
+import React,{useState} from 'react';import{createRoot}from'react-dom/client';
+import Overlays from '/src/presentation/maps/DicePresentationOverlays.tsx';
+import {useDicePresentation} from '/src/presentation/maps/useDicePresentation.ts';import '/src/index.css';
+function App(){const dice=useDicePresentation(()=>8);const [text,setText]=useState('');
+const roll=async count=>{const id=Date.now();const values=count===1?[8]:[6,8];setText('权威骰值：'+values);await new Promise(resolve=>dice.setDiceBoxRoll({id,count,sides:20,values,label:'预设敏捷豁免',targetName:'卓尔',resolve:result=>{setText('结算：'+result);resolve(result)}}))};
+return React.createElement(React.Fragment,null,React.createElement('div',{style:{position:'fixed',top:10,right:10,zIndex:9999,background:'white',color:'black'}},React.createElement('button',{onClick:()=>roll(1)},'预设 D20 为 8'),React.createElement('button',{onClick:()=>roll(2)},'预设双骰为 6、8'),React.createElement('button',{onClick:async()=>{for(let i=0;i<10;i++)await roll(i%2+1)}},'连续验证 10 次'),React.createElement('output',null,text)),React.createElement(Overlays,{...dice,isDM:true,dockTab:'dice',secretConfirmation:null,activeRollStatus:null,onRollDone:()=>{},onSecretConfirm:()=>{},onD20Complete:dice.completeDiceBoxD20,onDiceComplete:dice.completeDiceBoxRoll,onPreviewComplete:dice.completeRollRequestPreview}));}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

@@ -9,6 +9,7 @@ import {
 import type { Character } from '../../types/character'
 import { dnd5eMovementPathCells } from '../../rulesets/dnd5e/itemAreas'
 import { createDnd5eMapCombatSnapshot } from '../../rulesets/dnd5e/mapBridge'
+import { reconcileDnd5eWebRestraintsOnMap } from '../../rulesets/dnd5e/webAreaRules'
 import {
   collectDnd5ePersistentAreaTriggers,
   type Dnd5ePersistentAreaTriggerCandidate,
@@ -96,10 +97,11 @@ export async function coordinateForcedMovementPersistentAreas(input: {
       movement,
     }),
   ].sort((left, right) => (left.pathIndex ?? 0) - (right.pathIndex ?? 0))
-  return input.settleCandidates({
+  const settled = await input.settleCandidates({
     candidates,
     map: input.afterMap,
     characters: input.characters,
     round: input.round,
   })
+  return { ...settled, ...reconcileDnd5eWebRestraintsOnMap(settled.map, settled.characters) }
 }

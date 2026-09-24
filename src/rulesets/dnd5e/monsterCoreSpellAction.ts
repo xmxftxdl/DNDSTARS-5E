@@ -1,3 +1,6 @@
+import { iceWallFromCells } from './wallObjectRules'
+import { settleSunburstSpellDarknessDispels } from './sunburstDarknessDispel'
+import { igniteDnd5eWebAreasFromSpell } from './webAreaRules'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   DND_FEET_PER_CELL,
@@ -322,8 +325,8 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     !Number.isInteger(input.slotLevel) ||
     input.slotLevel < listedSpell.level ||
     input.slotLevel > 9 ||
-    !dnd5eAvailableMonsterSpellSlotLevels({ monster, token: actorToken, spell: listedSpell })
-      .includes(input.slotLevel)
+    (!(actorToken.dnd5eCombatState?.slowDelayedMonsterSpell?.intent.spellId === input.spellId && actorToken.dnd5eCombatState.slowDelayedMonsterSpell.intent.slotLevel === input.slotLevel) && !dnd5eAvailableMonsterSpellSlotLevels({ monster, token: actorToken, spell: listedSpell })
+      .includes(input.slotLevel))
   ) return { ok: false, reason: 'resource-unavailable' }
 
   let targetIds = [...new Set(input.targetTokenIds)]
@@ -568,7 +571,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     applyTurnEconomy(snapshot.state, tokenId, economy)
   }
   applyTurnEconomy(snapshot.state, actorToken.id, input.turnEconomy)
-  if (!monsterSpellResourceAvailable(snapshot.state, actorToken.id, listedSpell, input.slotLevel)) {
+  if (!actorToken.dnd5eCombatState?.slowDelayedMonsterSpell && !monsterSpellResourceAvailable(snapshot.state, actorToken.id, listedSpell, input.slotLevel)) {
     return { ok: false, reason: 'resource-unavailable' }
   }
   if (!spell.area && targetTokens.some((target) =>
@@ -722,7 +725,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
     prepared.spell.effect === 'persistent-area' &&
     prepared.areaCells &&
     prepared.areaTargetCell &&
-    !counterspelled
+    !counterspelled && !result.events.some(event => event.type === 'slow-spell-delay-resolved' && event.delayed)
   ) {
     const sourceSaveDc = prepared.monster.spellcasting?.saveDc
     if (!Number.isInteger(sourceSaveDc)) {
@@ -791,6 +794,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
           .map((candidate) => candidate.id)
         : undefined,
     })
+    if (prepared.spell.id === 'wall-of-ice') area.stoneWall = iceWallFromCells(area.cells, prepared.map.feetPerCell ?? 5, sourceSaveDc!)
     application.map = {
       ...application.map,
       dnd5ePluginAreas: [
@@ -800,6 +804,28 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
       ],
     }
     createdAreaId = area.id
+  }
+  if (!counterspelled && !result.events.some(event => event.type === 'slow-spell-delay-resolved' && event.delayed)) {
+    application.map = igniteDnd5eWebAreasFromSpell({
+      map: application.map, spell: prepared.spell, cells: prepared.areaCells,
+      elevationFeet: prepared.areaBaseElevationFeet, round: result.state.round,
+      turnTokenId: result.state.initiativeOrder[result.state.initiativeIndex] ?? prepared.actorToken.id,
+    })
+  }
+  if (prepared.spell.id === 'sunburst' && prepared.areaTargetCell &&
+    !counterspelled && !result.events.some(event => event.type === 'slow-spell-delay-resolved' && event.delayed)) {
+    const dispel = settleSunburstSpellDarknessDispels({
+      map: application.map, characters: application.characters,
+      state: result.state,
+      anchorCell: prepared.areaTargetCell, radiusFeet: 60,
+      elevationFeet: prepared.areaBaseElevationFeet,
+    })
+    result.events = [...result.events, ...dispel.events]
+    application.geometry = dispel.geometry
+    application.map = dispel.map
+    application.characters = dispel.characters
+    application.changedCharacterIds = [...new Set([...application.changedCharacterIds, ...dispel.changedCharacterIds])]
+    application.changedTokenIds = [...new Set([...application.changedTokenIds, ...dispel.changedTokenIds])]
   }
   return {
     result,

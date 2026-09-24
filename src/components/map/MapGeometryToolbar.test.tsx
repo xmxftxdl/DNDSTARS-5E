@@ -30,8 +30,7 @@ describe('MapGeometryToolbar', () => {
 
     expect(html).toContain('<option value="select" selected="">选择／编辑</option>')
     expect(html).toContain('<option value="wall">墙</option>')
-    expect(html).toContain('aria-label="全图天气规则"')
-    expect(html).toContain('<option value="storm">暴风雨</option>')
+    expect(html).not.toContain('aria-label="全图天气规则"')
     expect(html).toContain('aria-label="高空空间规则"')
     expect(html).toContain('<option value="confined">受限／无法容纳</option>')
   })

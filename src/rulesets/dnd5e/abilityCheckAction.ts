@@ -50,6 +50,7 @@ export function prepareDnd5eAbilityCheck(input: {
   const skill = payload.skill ? SKILLS.find((candidate) => candidate.key === payload.skill) : undefined
   if (
     !Number.isInteger(payload.dc) || payload.dc < 0 || payload.dc > 100 ||
+    (payload.totalOnly && (payload.dc !== 0 || payload.spendAction === true)) ||
     (payload.skill && (!skill || skill.ability !== payload.ability)) ||
     (payload.perceivedTargetId != null && payload.skill !== 'perception') ||
     (payload.context != null &&
@@ -61,6 +62,8 @@ export function prepareDnd5eAbilityCheck(input: {
       !(
         payload.context === 'interact-with-dragons' &&
         payload.ability === 'cha'
+      ) && !(
+        payload.context === 'climbing' && payload.ability === 'str' && payload.skill === 'athletics'
       ))
   ) return { ok: false, reason: 'invalid-action' }
   const actor = input.characters.find((character) => character.id === action.characterId)
@@ -120,6 +123,7 @@ export function prepareDnd5eAbilityCheck(input: {
           ability: payload.ability,
           skill: payload.skill,
           perceivedTargetId: payload.perceivedTargetId,
+          context: payload.context,
           requestedMode: payload.mode ?? 'normal',
         }),
         advantage: [

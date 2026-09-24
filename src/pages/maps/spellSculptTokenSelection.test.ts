@@ -22,17 +22,17 @@ describe('committed area Sculpt Spells Token selection', () => {
   })
 
   it('keeps protection selection on map Tokens instead of duplicating names in the action bar', () => {
-    expect(workspaceSource).toContain('点击地图上的蓝框角色；金边表示已保护')
+    expect(workspaceSource.includes('点击蓝框角色或先攻头像，金边表示已保护。')).toBe(true)
     expect(workspaceSource).not.toContain('或直接点击下方名字')
     expect(workspaceSource).not.toContain('aria-label="法术塑型保护目标"')
   })
 
-  it('shows the protection picker only when Sculpt Spells was armed for this cast', () => {
-    expect(workspaceSource).toContain(
+  it('shows the protection picker only when Sculpt Spells was armed', () => {
+    expect(workspaceSource.includes(
       'dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.autoSculpt === true ? <button',
-    )
-    expect(workspaceSource).not.toContain(
-      'dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.canSculpt ? <button',
-    )
+    )).toBe(true)
+    expect(workspaceSource.includes(
+      'dnd5eSpellTargeting.areaTargetSelected && dnd5eSpellTargeting.canSculpt === true ? <button',
+    )).toBe(false)
   })
 })

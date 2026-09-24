@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React from 'react';import{createRoot}from'react-dom/client';import MapCanvas from '/src/components/map/MapCanvas.tsx';import '/src/index.css';
+const map={id:'area-click-regression',name:'范围选点测试',width:600,height:400,gridSize:50,gridOffsetX:0,gridOffsetY:0,feetPerCell:5,tokens:[{id:'monster',label:'测试怪物',type:'enemy',x:275,y:225,size:1,color:'#a855f7',emoji:'🐂'}]};
+function App(){const[aim,A]=React.useState(true),[placements,P]=React.useState(0),[cards,C]=React.useState(0);return React.createElement(React.Fragment,null,
+React.createElement('button',{onClick:()=>A(true)},'选择范围'),React.createElement('p',{style:{color:'white'}},`范围确认 ${placements}，怪物卡 ${cards}`),
+React.createElement('div',{style:{width:600,height:400}},React.createElement(MapCanvas,{map,selectedTokenId:null,isDM:false,combatActive:true,onSelectToken:id=>{if(id)C(n=>n+1)},aoeSelectMode:aim,onAoeConfirm:()=>{P(n=>n+1);A(false)},hpByToken:{monster:{hp:20,max:20}},onMoveToken:()=>{},onUpdateToken:()=>{}})))}createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

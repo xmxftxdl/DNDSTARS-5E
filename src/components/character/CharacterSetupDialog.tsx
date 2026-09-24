@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -80,6 +80,8 @@ import {
   dnd5eSpellAdvancementSelectionsComplete,
 } from '../../rulesets/dnd5e/spellAdvancement'
 import Dnd5eSpellAdvancementPicker from './Dnd5eSpellAdvancementPicker'
+import { characterCreationDraftKey } from '../../lib/characterCreationDraft'
+import { useCharacterCreationDraft } from './useCharacterCreationDraft'
 
 type SetupStage =
   | 'class'
@@ -121,6 +123,8 @@ export interface CharacterSetupResult extends SetupIdentity {
 }
 
 interface CharacterSetupDialogProps {
+  draftKey?: string
+  clearOnComplete?: boolean
   onCancel(): void
   onComplete(result: CharacterSetupResult): void
 }
@@ -381,7 +385,7 @@ function StartingEquipmentFields({
   )
 }
 
-export default function CharacterSetupDialog({ onCancel, onComplete }: CharacterSetupDialogProps) {
+export default function CharacterSetupDialog({ onCancel, onComplete, draftKey = characterCreationDraftKey(), clearOnComplete = true }: CharacterSetupDialogProps) {
   useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
     dnd5eRulesPluginRegistrySnapshot,
@@ -415,36 +419,52 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     })),
   ]
 
-  const [stage, setStage] = useState<SetupStage>('class')
-  const [name, setName] = useState('新冒险者')
-  const [identity, setIdentity] = useState<SetupIdentity>({
-    charClass: '战士',
-    race: '人类',
-    alignment: '中立善良',
-    background: '自定义背景',
-  })
-  const [targetLevel, setTargetLevel] = useState(1)
-  const [method, setMethod] = useState<Exclude<Dnd5eAbilityGenerationMethod, 'beginner-recommended'>>('standard-array')
-  const [baseAbilities, setBaseAbilities] = useState<Abilities>(() =>
-    recommendedDnd5eBaseAbilitiesFromArray('战士', DND5E_STANDARD_ARRAY),
-  )
-  const [rolledScores, setRolledScores] = useState<Dnd5eAbilityRoll[]>([])
-  const [rollAssignments, setRollAssignments] = useState<Partial<Record<AbilityKey, number>>>({})
-  const [racialBonusChoices, setRacialBonusChoices] = useState<AbilityKey[]>([])
-  const [racialSkillProficiencies, setRacialSkillProficiencies] = useState<string[]>([])
-  const [racialFeatIds, setRacialFeatIds] = useState<string[]>([])
-  const [dragonbornAncestry, setDragonbornAncestry] = useState<Dnd5eDragonbornAncestryId>('black')
-  const [classSkillProficiencies, setClassSkillProficiencies] = useState<string[]>([])
-  const [fighterStyles, setFighterStyles] = useState<FighterFightingStyleId[]>([])
-  const [subclassId, setSubclassId] = useState('')
-  const [initialSelections, setInitialSelections] = useState<Record<string, string[]>>({})
-  const [initialSpellSelections, setInitialSpellSelections] = useState<Dnd5eAdvancementSpellSelectionsV1>()
-  const [backgroundToolSelections, setBackgroundToolSelections] = useState<Record<string, string[]>>({})
-  const [backgroundLanguages, setBackgroundLanguages] = useState<string[]>([])
-  const [backgroundVariantId, setBackgroundVariantId] = useState('')
-  const [startingEquipment, setStartingEquipment] = useState<Dnd5eStartingEquipmentSelection>(() =>
-    defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan('战士', '自定义背景')),
-  )
+  const creationDraft = useCharacterCreationDraft(draftKey, () => ({
+    stage: 'class' as SetupStage,
+    name: '新冒险者',
+    identity: { charClass: '战士', race: '人类', alignment: '中立善良', background: '自定义背景' } as SetupIdentity,
+    targetLevel: 1,
+    method: 'standard-array' as Exclude<Dnd5eAbilityGenerationMethod, 'beginner-recommended'>,
+    baseAbilities: recommendedDnd5eBaseAbilitiesFromArray('战士', DND5E_STANDARD_ARRAY),
+    allocatedMethod: '',
+    rolledScores: [] as Dnd5eAbilityRoll[],
+    rollAssignments: {} as Partial<Record<AbilityKey, number>>,
+    racialBonusChoices: [] as AbilityKey[],
+    racialSkillProficiencies: [] as string[],
+    racialFeatIds: [] as string[],
+    dragonbornAncestry: 'black' as Dnd5eDragonbornAncestryId,
+    classSkillProficiencies: [] as string[],
+    fighterStyles: [] as FighterFightingStyleId[],
+    subclassId: '',
+    initialSelections: {} as Record<string, string[]>,
+    initialSpellSelections: undefined as Dnd5eAdvancementSpellSelectionsV1 | undefined,
+    backgroundToolSelections: {} as Record<string, string[]>,
+    backgroundLanguages: [] as string[],
+    backgroundVariantId: '',
+    startingEquipment: defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan('战士', '自定义背景')),
+  }))
+  const [stage, setStage] = creationDraft.field('stage')
+  const [name, setName] = creationDraft.field('name')
+  const [identity, setIdentity] = creationDraft.field('identity')
+  const [targetLevel, setTargetLevel] = creationDraft.field('targetLevel')
+  const [method, setMethod] = creationDraft.field('method')
+  const [baseAbilities, setBaseAbilities] = creationDraft.field('baseAbilities')
+  const [allocatedMethod, setAllocatedMethod] = creationDraft.field('allocatedMethod')
+  const [rolledScores, setRolledScores] = creationDraft.field('rolledScores')
+  const [rollAssignments, setRollAssignments] = creationDraft.field('rollAssignments')
+  const [racialBonusChoices, setRacialBonusChoices] = creationDraft.field('racialBonusChoices')
+  const [racialSkillProficiencies, setRacialSkillProficiencies] = creationDraft.field('racialSkillProficiencies')
+  const [racialFeatIds, setRacialFeatIds] = creationDraft.field('racialFeatIds')
+  const [dragonbornAncestry, setDragonbornAncestry] = creationDraft.field('dragonbornAncestry')
+  const [classSkillProficiencies, setClassSkillProficiencies] = creationDraft.field('classSkillProficiencies')
+  const [fighterStyles, setFighterStyles] = creationDraft.field('fighterStyles')
+  const [subclassId, setSubclassId] = creationDraft.field('subclassId')
+  const [initialSelections, setInitialSelections] = creationDraft.field('initialSelections')
+  const [initialSpellSelections, setInitialSpellSelections] = creationDraft.field('initialSpellSelections')
+  const [backgroundToolSelections, setBackgroundToolSelections] = creationDraft.field('backgroundToolSelections')
+  const [backgroundLanguages, setBackgroundLanguages] = creationDraft.field('backgroundLanguages')
+  const [backgroundVariantId, setBackgroundVariantId] = creationDraft.field('backgroundVariantId')
+  const [startingEquipment, setStartingEquipment] = creationDraft.field('startingEquipment')
 
   const selectedPluginAbilityMethod = dnd5ePluginAbilityGenerationMethod(method)
   const methodKind = selectedPluginAbilityMethod?.kind ?? (
@@ -464,23 +484,14 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const selectedPluginRace = dnd5ePluginRaceDefinition(identity.race)
   const selectedCoreRace = dnd5eCoreRaceMechanics(identity.race)
   const pluginBackground = dnd5ePluginBackgroundDefinition(identity.background)
-  const equipmentPlan = useMemo(
-    () => dnd5eStartingEquipmentPlan(identity.charClass, identity.background),
-    [identity.background, identity.charClass],
-  )
+  const equipmentPlan = dnd5eStartingEquipmentPlan(identity.charClass, identity.background)
   const flexibleRacialBonus = dnd5eFlexibleRacialAbilityBonus(identity.race)
   const racialSkillChoiceCount =
     selectedPluginRace?.skillProficiencyChoiceCount ?? selectedCoreRace?.skillProficiencyChoiceCount ?? 0
   const racialFeatChoiceCount = selectedPluginRace?.featChoiceCount ?? 0
   const requiresDragonbornAncestry = selectedCoreRace?.id === 'dragonborn'
-  const racialBonuses = useMemo(
-    () => dnd5eRacialAbilityBonuses(identity.race, racialBonusChoices),
-    [identity.race, racialBonusChoices],
-  )
-  const finalAbilities = useMemo(
-    () => applyDnd5eRacialAbilityBonuses(baseAbilities, racialBonuses),
-    [baseAbilities, racialBonuses],
-  )
+  const racialBonuses = dnd5eRacialAbilityBonuses(identity.race, racialBonusChoices)
+  const finalAbilities = applyDnd5eRacialAbilityBonuses(baseAbilities, racialBonuses)
   const racialFeatOptions = pluginFeats.filter((feat) => {
     const prerequisite = feat.prerequisite
     if ((prerequisite?.minimumLevel ?? 1) > 1) return false
@@ -661,6 +672,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   }
 
   const startAbilityMethod = () => {
+    if (allocatedMethod === method) { setStage('abilities'); return }
+    setAllocatedMethod(method)
     if (methodKind === 'standard-array') {
       setBaseAbilities(recommendedDnd5eBaseAbilitiesFromArray(identity.charClass, standardArray))
     } else if (methodKind === 'point-buy') {
@@ -730,7 +743,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
 
   const complete = () => {
     if (!definition || !name.trim() || !classChoicesComplete || !racialChoicesComplete ||
-      !racialBonusChoicesComplete || !backgroundChoicesComplete) return
+      !racialBonusChoicesComplete || !backgroundChoicesComplete || !abilityAllocationComplete) return
     const resolvedRace = dnd5ePluginRaceDefinition(identity.race)
     const resolvedBackground = dnd5ePluginBackgroundDefinition(identity.background)
     const initialClassChoices: Character['dnd5eClassChoices'] = definition.id === 'fighter'
@@ -794,6 +807,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       startingEquipment: normalizeDnd5eStartingEquipmentSelection(equipmentPlan, startingEquipment),
       ...(rolls.length ? { rolls } : {}),
     })
+    if (clearOnComplete) creationDraft.clear()
   }
 
   const stageTitle: Record<SetupStage, string> = {
@@ -815,8 +829,9 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
               <Sparkles className="h-4 w-4" /> D&D 5e 2014 角色创建
             </div>
             <h2 className="mt-1 text-xl font-bold text-slate-50">{stageTitle[stage]}</h2>
+            <p role="status" className={`mt-1 text-xs ${creationDraft.saveError ? 'text-amber-200' : 'text-slate-400'}`}>{creationDraft.saveError ? '草稿未能保存，请保持此窗口打开并重试输入。' : '草稿自动保存在当前浏览器，可关闭后继续；完成前可返回修改。'}</p>
           </div>
-          <button type="button" onClick={onCancel} aria-label="关闭角色创建" className="rounded-xl p-2 text-slate-500 hover:bg-white/5 hover:text-slate-200">
+          <button type="button" onClick={onCancel} aria-label="关闭角色创建" title="保存草稿并关闭" disabled={creationDraft.saveError} className="rounded-xl p-2 text-slate-500 hover:bg-white/5 hover:text-slate-200">
             <X className="h-5 w-5" />
           </button>
         </header>
@@ -1364,7 +1379,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                   <p className="mt-2 text-xs text-slate-500">目标等级：{targetLevel} 级</p>
                   {targetLevel > 1 && (
                     <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-500/5 px-3 py-2 text-xs leading-5 text-amber-100">
-                      创建后将连续打开 {targetLevel - 1} 次单级升级结算；每次只处理一级。
+                      接下来逐级选择到 {targetLevel} 级，可随时保存并关闭；最后统一检查并完成建卡。
                     </p>
                   )}
                 </section>
@@ -1399,9 +1414,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
           <button
             type="button"
             onClick={stage === 'class' ? onCancel : goBack}
+            disabled={stage === 'class' && creationDraft.saveError}
             className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-400 hover:bg-white/5 hover:text-slate-200"
           >
-            <ArrowLeft className="h-4 w-4" /> {stage === 'class' ? '取消' : '返回'}
+            <ArrowLeft className="h-4 w-4" /> {stage === 'class' ? '保存并关闭' : '返回'}
           </button>
           {stage === 'class' && (
             <button type="button" disabled={!name.trim()} onClick={() => setStage('ability-method')} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">

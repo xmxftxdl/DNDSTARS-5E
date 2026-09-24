@@ -1,4 +1,4 @@
-import { CloudFog, Eye, Hand, Redo2, Undo2 } from 'lucide-react'
+import { CloudFog, Eye, Hand, Redo2, Trash2, Undo2 } from 'lucide-react'
 import type { FogTool, MapFogState } from '../../lib/fogOfWar'
 import { showAppConfirm } from '../../lib/appDialog'
 
@@ -6,11 +6,16 @@ interface MapFogToolbarProps {
   mapId: string
   fog?: MapFogState
   redoCount: number
+  canUndo?: boolean
   editMode: boolean
   tool: FogTool
   previewAsPlayer: boolean
   onEditModeChange: (enabled: boolean) => void
   onToolChange: (tool: FogTool) => void
+  magicalDarkness?: boolean
+  onMagicalDarkness: (enabled: boolean) => void
+  darknessRegions?: { id: string; label: string }[]
+  onRemoveDarkness?: (id: string) => void
   onFill: (mapId: string) => void
   onClear: (mapId: string) => void
   onUndo: (mapId: string) => void
@@ -23,11 +28,16 @@ export default function MapFogToolbar({
   mapId,
   fog,
   redoCount,
+  canUndo,
   editMode,
   tool,
   previewAsPlayer,
   onEditModeChange,
   onToolChange,
+  onMagicalDarkness,
+  magicalDarkness = false,
+  darknessRegions = [],
+  onRemoveDarkness,
   onFill,
   onClear,
   onUndo,
@@ -54,6 +64,11 @@ export default function MapFogToolbar({
       </button>
       {editMode && (
         <>
+          <label className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-violet-200">
+            <input type="checkbox" checked={magicalDarkness}
+              onChange={(event) => onMagicalDarkness(event.target.checked)} />
+            魔法黑暗
+          </label>
           <select
             value={tool}
             onChange={(event) => onToolChange(event.target.value as FogTool)}
@@ -102,7 +117,7 @@ export default function MapFogToolbar({
           </button>
           <button
             type="button"
-            disabled={shapeCount === 0}
+            disabled={!(canUndo ?? (shapeCount > 0))}
             onClick={() => onUndo(mapId)}
             className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
             title="撤销最后一笔"
@@ -146,6 +161,16 @@ export default function MapFogToolbar({
             title="DM 预览迷雾浓度（玩家端始终完全遮蔽）"
             aria-label="迷雾浓度"
           />
+          {magicalDarkness && darknessRegions.map((region, index) => (
+            <div key={region.id} className="flex w-full items-center justify-between gap-2 text-xs text-slate-300">
+              <span>{region.label} {index + 1}</span>
+              <button type="button" onClick={() => onRemoveDarkness?.(region.id)}
+                aria-label={`删除魔法黑暗 ${index + 1}`} className="rounded p-1 text-rose-300 hover:bg-rose-500/15">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+
         </>
       )}
     </div>

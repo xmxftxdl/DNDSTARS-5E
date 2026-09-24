@@ -161,12 +161,14 @@ test('DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济
     inspiration: 0,
     conditions: spent ? ['poisoned'] : [],
     classResources: { 'dnd5e-spell-slot-2': { current: spent ? 1 : 2, max: 2 } },
-    ...(spent ? {
-      dnd5eCombatState: {
+    dnd5eCombatState: {
+      // This snapshot represents the middle of an already-started turn.
+      turnStartResolvedTurnKey: turnKey,
+      ...(spent ? {
         concentrationSpellId: 'flaming-sphere',
         concentrationSpellLevel: 2,
-      },
-    } : {}),
+      } : {}),
+    },
     notes: '',
     dmNotes: '',
     visibleToPlayers: true,
@@ -241,15 +243,15 @@ test('DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济
   const setupId = `setup:${nonce}`
   await putUndoState(request, dmRoom, 'characters', {
     characters: [character(false, nonce)], selectedId: characterId, updatedAt: nonce,
-  }, 0, setupId, '建立战斗检查点')
-  await putUndoState(request, dmRoom, 'maps', mapState(false, nonce), 0, setupId, '建立战斗检查点')
-  await putUndoState(request, dmRoom, 'combat', combatState(false, nonce), 0, setupId, '建立战斗检查点')
+  }, 0, setupId, '开始战斗')
+  await putUndoState(request, dmRoom, 'maps', mapState(false, nonce), 0, setupId, '开始战斗')
+  await putUndoState(request, dmRoom, 'combat', combatState(false, nonce), 0, setupId, '开始战斗')
   await putUndoState(request, dmRoom, 'combat-interrupts', {
     mapId, combatId, interrupts: [], updatedAt: nonce,
-  }, 0, setupId, '建立战斗检查点')
+  }, 0, setupId, '开始战斗')
   await putUndoState(request, dmRoom, 'combat-log', {
     mapId, combatId, entries: [], updatedAt: nonce,
-  }, 0, setupId, '建立战斗检查点')
+  }, 0, setupId, '开始战斗')
 
   const actionId = `player-action:${nonce}`
   await putUndoState(request, dmRoom, 'characters', {
@@ -275,9 +277,9 @@ test('DM 战斗恢复原子归还法术位、位置、HP、状态和行动经济
     // Let the DM cold compile finish before opening the player client. Two
     // parallel transforms of the very large map workspace can starve one
     // browser long enough to make readiness checks flaky on slower machines.
-    await dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' })
+    await dm.goto(`${DM}/campaign/${dmRoom.roomId}/maps`, { waitUntil: 'domcontentloaded' })
     await expect(dm.getByTestId('map-canvas')).toBeVisible({ timeout: 40_000 })
-    await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+    await player.goto(`${PLAYER}/campaign/${dmRoom.roomId}/maps`, { waitUntil: 'domcontentloaded' })
     const playerHotbar = player.getByTestId('player-combat-hotbar')
     await expect(playerHotbar).toBeVisible({ timeout: 20_000 })
     await expect(playerHotbar).toHaveAttribute('data-action-remaining', '0')

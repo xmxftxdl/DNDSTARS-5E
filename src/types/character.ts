@@ -271,6 +271,8 @@ export interface Character {
   dnd5eCombatState?: {
     activityExtraTurnGroup?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['activityExtraTurnGroup']
     activityExtraTurnSuspension?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['activityExtraTurnSuspension']
+    slowSpellGate?: import('../rulesets/dnd5e/slowSpellGate').Dnd5eSlowSpellGate
+    slowDelayedMonsterSpell?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['slowDelayedMonsterSpell']
     slowDelayedSpell?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['slowDelayedSpell']
     /** Host-projected Warding Bond material state; refreshed from inventory on every combat snapshot. */
     wardingBondMaterialEquipped?: boolean

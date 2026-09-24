@@ -269,7 +269,7 @@ export type Dnd5eActivityCheckV1 =
       kind: 'opposed-ability-check'
       rollId: string
       opposedRollId: string
-      sourceAbility: AbilityKey
+      sourceAbility: AbilityKey | 'spellcasting'
       sourceModifier: Dnd5eFormulaV1
       sourceRollMode?: 'normal' | 'advantage' | 'disadvantage' | 'host-derived'
       sourceRollModeByTargetSizeRank?: {
@@ -493,8 +493,9 @@ export type Dnd5eActivityOperationV1 =
       id: string
       kind: 'move'
       target: Dnd5eActivityOperationTargetV1
-      mode: 'push' | 'pull' | 'teleport' | 'swap' | 'ascend' | 'descend'
+      mode: 'push' | 'pull' | 'forced' | 'teleport' | 'swap' | 'ascend' | 'descend'
       distanceFeet: Dnd5eFormulaV1
+      maximumDistanceFromActorFeet?: number
       /** Host-derived vertical endpoint. `area-top` uses the validated Activity area volume; `ground` uses terrain elevation. */
       verticalDestination?: 'area-top' | 'ground'
       /** Host chooses the farthest legal destination in the declared direction. */
@@ -868,6 +869,7 @@ export type Dnd5eActivityOperationV1 =
         appearanceChoiceId: string
       }
       /** Host resolves the closed portions of a Programmed Illusion declaration. */
+      symbolMode?: import('../symbolSpell').SymbolMode
       programmedIllusion?: {
         formChoiceId: string
         triggerSenseChoiceId: string

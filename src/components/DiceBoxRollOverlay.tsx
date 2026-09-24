@@ -1,13 +1,25 @@
+import { MAX_DICE_POOL_COUNT } from '../lib/dicePoolLimits'
+import { adoptedD20Index, type DiceCheckPresentation } from '../presentation/maps/diceCheckPresentation'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 // FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
 import { DICE_TIMING, parseDiceBoxMessage, resolveFlyOffset } from '../lib/diceOverlayShared'
 import DiceOverlayPortal from './DiceOverlayPortal'
+import { onDiceDocumentHidden } from '../lib/diceVisibility'
 
 const MIN_VISIBLE_ROLL_MS = DICE_TIMING.ROLL_MIN_VISIBLE_MS
 
 interface DiceBoxRollOverlayProps {
+  appendFrom?: number
+  check?: DiceCheckPresentation
+  staging?: boolean
+  retainedValues?: number[]
+  rerollIndex?: number
+  visible?: boolean
+  frameBounds?: { top: number; height: number }
+  onGrabReroll?: (index: number) => Promise<void>
   count: number
+  dieSides?: number[]
   sides: number
   label: string
   targetName: string
@@ -26,7 +38,16 @@ function fallbackValues(count: number, sides: number) {
 }
 
 export default function DiceBoxRollOverlay({
+  appendFrom,
+  staging = false,
+  check,
+  retainedValues,
+  rerollIndex,
+  visible = true,
+  frameBounds,
+  onGrabReroll,
   count,
+  dieSides,
   sides,
   label,
   targetName,
@@ -53,16 +74,57 @@ export default function DiceBoxRollOverlay({
   const completedRef = useRef(false)
   const sentRequestRef = useRef<string | null>(null)
   const onCompleteRef = useRef(onComplete)
+  const checkRef = useRef(check)
+  checkRef.current = check
+  const settledFacesRef = useRef<{ requestId: string; values: number[] } | null>(null)
+
+  const syncAdoptedDie = (values: readonly number[]) => {
+    iframeRef.current?.contentWindow?.postMessage({
+      type: 'dice-box-highlight', requestId,
+      adoptedIndex: adoptedD20Index(values, checkRef.current),
+    }, window.location.origin)
+  }
+  useEffect(() => {
+    const settled = settledFacesRef.current
+    if (settled?.requestId === requestId) syncAdoptedDie(settled.values)
+  // Highlight metadata never restarts the physical roll or its completion timer.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [check?.mode, requestId])
   const [flyX, flyY] = useMemo(() => resolveFlyOffset(requestId, flyIndex), [flyIndex, requestId])
-  const safeCountForFrame = Math.max(1, Math.min(12, Math.round(count)))
+  const safeCountForFrame = Math.max(1, Math.min(MAX_DICE_POOL_COUNT, retainedValues?.length ?? Math.round(count)))
+  const initialFrameCount = useRef(safeCountForFrame).current
+
+  useEffect(() => {
+    const setInteractive = (enabled: boolean) => iframeRef.current?.contentWindow?.postMessage(
+      { type: 'dice-box-interactive', requestId, enabled }, window.location.origin,
+    )
+    setInteractive(visible && !!onGrabReroll)
+    const handleGrab = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return
+      const data = parseDiceBoxMessage(event)
+      if (data?.type === 'dice-box-roll-result' && data.requestId === requestId) {
+        setInteractive(visible && !!onGrabReroll)
+        return
+      }
+      if (data?.type !== 'dice-box-reroll-die' || data.requestId !== requestId || !visible || !onGrabReroll) return
+      if (!Number.isInteger(data.index) || data.index! < 0 || data.index! >= safeCountForFrame) return
+      void onGrabReroll(data.index!).catch(() => setInteractive(true))
+    }
+    window.addEventListener('message', handleGrab)
+    return () => { setInteractive(false); window.removeEventListener('message', handleGrab) }
+  }, [onGrabReroll, requestId, safeCountForFrame, visible])
 
   useEffect(() => {
     onCompleteRef.current = onComplete
   }, [onComplete])
 
   useEffect(() => {
+    completedRef.current = false
+    let cancelled = false
+    let completionTimer: number | undefined
+    let deliverPending: (() => void) | undefined
     const startedAt = Date.now()
-    const safeCount = Math.max(1, Math.min(12, Math.round(count)))
+    const safeCount = Math.max(1, Math.min(MAX_DICE_POOL_COUNT, Math.round(count)))
     const safeSides = Math.max(2, Math.min(100, Math.round(sides)))
     const log = (stage: string, details?: Record<string, unknown>) => {
       console.info('[dice-box-roll-overlay]', {
@@ -76,13 +138,19 @@ export default function DiceBoxRollOverlay({
       })
     }
     const finish = (values: unknown) => {
-      if (completedRef.current) return
+      if (cancelled || completedRef.current) return
       completedRef.current = true
       const rolled = Array.isArray(values)
         ? values.map((value) => Math.max(1, Math.min(safeSides, Math.round(Number(value)))))
         : []
+      const physicalValues = Array.isArray(values) && values.every((value) =>
+        Number.isInteger(value) && value >= 1 && value <= safeSides,
+      ) ? values as number[] : []
       const finalValues =
-        forcedValues && forcedValues.length > 0
+        retainedValues && rerollIndex != null
+          ? (physicalValues.length === retainedValues.length && Number.isInteger(physicalValues[rerollIndex])
+              ? [physicalValues[rerollIndex]] : [])
+          : forcedValues && forcedValues.length > 0
           ? forcedValues.slice(0, safeCount).map((value) => Math.max(1, Math.min(safeSides, Math.round(Number(value)))))
           : rolled.length > 0 ? rolled.slice(0, safeCount) : fallbackValues(safeCount, safeSides)
       log('finish', { finalValues })
@@ -95,9 +163,13 @@ export default function DiceBoxRollOverlay({
         DICE_TIMING.ROLL_SETTLED_HOLD_MS,
         Math.max(0, settledHoldMs),
       )
-      window.setTimeout(() => {
-        onCompleteRef.current(finalValues)
-      }, delay)
+      deliverPending = () => {
+        deliverPending = undefined
+        window.clearTimeout(completionTimer)
+        if (!cancelled) onCompleteRef.current(finalValues)
+      }
+      if (document.hidden) deliverPending()
+      else completionTimer = window.setTimeout(() => deliverPending?.(), delay)
     }
     const sendRoll = () => {
       if (sentRequestRef.current === requestId) return
@@ -105,11 +177,15 @@ export default function DiceBoxRollOverlay({
       log('send-roll')
       iframeRef.current?.contentWindow?.postMessage(
         {
-          type: 'roll-dice',
+          type: staging ? 'stage-dice' : 'roll-dice',
           requestId,
-          qty: safeCount,
+          qty: retainedValues?.length ?? safeCount,
           sides: safeSides,
-          values: forcedValues,
+          dieSides,
+          adoptedIndex: adoptedD20Index(forcedValues ?? [], checkRef.current),
+          values: retainedValues && rerollIndex != null ? [] : forcedValues,
+          rerollIndex,
+          appendFrom,
         },
         window.location.origin,
       )
@@ -121,16 +197,25 @@ export default function DiceBoxRollOverlay({
       if (data?.type === 'dice-box-ready' && !readyRef.current) {
         readyRef.current = true
         setFrameReady(true)
+        // A pre-ready retry can be lost before the iframe installs its listener.
+        // The iframe deduplicates request IDs, so resending after ready is safe.
+        sentRequestRef.current = null
         log('iframe-ready')
         sendRoll()
         return
       }
       if (data?.type === 'dice-box-roll-result' && data.requestId === requestId) {
         log('result-message', { values: data.values })
+        if (Array.isArray(data.values) && data.values.every(value => Number.isInteger(value) && value >= 1 && value <= safeSides)) {
+          const values = data.values.map(Number)
+          settledFacesRef.current = { requestId, values }
+          syncAdoptedDie(values)
+        }
         finish(data.values)
       }
     }
     window.addEventListener('message', handleMessage)
+    if (readyRef.current) sendRoll()
     const retry = window.setTimeout(() => {
       if (!readyRef.current) {
         log('ready-retry-send')
@@ -138,23 +223,32 @@ export default function DiceBoxRollOverlay({
       }
     }, 900)
     const fallback = window.setTimeout(() => finish(forcedValues), DICE_TIMING.ROLL_FAILSAFE_MS)
+    const unsubscribeVisibility = onDiceDocumentHidden(() => {
+      if (staging) return
+      if (deliverPending) deliverPending()
+      // Physical rerolls have no predetermined value; never invent one here.
+      else if (forcedValues?.length && rerollIndex == null) finish(forcedValues)
+    })
     return () => {
+      cancelled = true
+      unsubscribeVisibility()
+      window.clearTimeout(completionTimer)
       if (!completedRef.current && sentRequestRef.current === requestId) sentRequestRef.current = null
       window.clearTimeout(retry)
       window.clearTimeout(fallback)
       window.removeEventListener('message', handleMessage)
     }
-  }, [count, forcedValues, requestId, settledHoldMs, sides])
+  }, [appendFrom, count, dieSides, forcedValues, requestId, retainedValues, rerollIndex, settledHoldMs, sides, staging])
 
   return (
     <DiceOverlayPortal layer={layout === 'left-drawer' ? 'dice' : 'foreground'}>
-      <div className="absolute inset-0">
+      <div className="absolute inset-0" style={{ display: visible ? undefined : 'none' }}>
         <iframe
           ref={iframeRef}
           title={`${sides}-sided dice roller`}
-          src={`/dice-box-frame.html?badge=0&sides=${iframeSides}&qty=${safeCountForFrame}`}
+          src={`/dice-box-frame.html?badge=0&ui=2&sides=${iframeSides}&qty=${initialFrameCount}`}
           className={`dice-box-damage-frame ${layout === 'left-drawer' ? 'dice-box-frame--left-drawer' : 'dice-box-roll-flight'} ${frameReady ? 'dice-box-frame--ready' : 'dice-box-frame--pending'}`}
-          style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY } as CSSProperties}
+          style={{ '--dice-fly-x': flyX, '--dice-fly-y': flyY, ...(layout === 'left-drawer' ? frameBounds : undefined), pointerEvents: onGrabReroll ? 'auto' : 'none' } as CSSProperties}
           sandbox="allow-scripts allow-same-origin"
         />
       </div>

@@ -3,6 +3,7 @@ import Konva from 'konva'
 import type { BattleMap } from '../../store/maps'
 import {
   mapGeometryDoorLockState,
+  mapGeometryDoorLeafPoints,
   mapGeometryDoorOpenState,
   mapGeometryDoorPhysicalState,
   mapGeometryWallRenderSegments,
@@ -252,16 +253,7 @@ export function MapGeometryLayer({
           )
         }
         if (entity.kind === 'door') {
-          const hingeIndex = entity.hinge === 'end' ? 1 : 0
-          const hinge = entity.points[hingeIndex]
-          const closedEnd = entity.points[hingeIndex === 0 ? 1 : 0]
-          const swingSign = entity.swing === 'counterclockwise' ? -1 : 1
-          const leafEnd = mapGeometryDoorOpenState(entity) === 'open'
-            ? {
-                x: hinge.x - (closedEnd.y - hinge.y) * swingSign,
-                y: hinge.y + (closedEnd.x - hinge.x) * swingSign,
-              }
-            : closedEnd
+          const [hinge, leafEnd] = mapGeometryDoorLeafPoints(entity)
           const leafPoints = [hinge.x, hinge.y, leafEnd.x, leafEnd.y]
           return (
             <Group
@@ -379,7 +371,7 @@ export function MapGeometryLayer({
           opacity: isDraft ? 0.68 : 0.92,
           hitStrokeWidth: 14 * inv,
           listening: (entityEditListening || (editMode && (
-            tool === 'obstacle' || tool === 'difficult-terrain'
+            tool === 'obstacle' || tool === 'difficult-terrain' || tool === 'magical-darkness'
           ))) && !isDraft,
           onMouseDown: selectEntity,
         }

@@ -1,0 +1,15 @@
+[WebServer] (node:35464) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:33648) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 4 tests using 1 worker
+
+(node:36624) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 e2e\large-dice.spec.ts:23:1 › 20d6 free roll renders every die and mirrors all 20 values to DM (15.7s)
+  ok 2 e2e\large-dice.spec.ts:55:1 › 20d6 owned damage preserves every physical face on player and DM (7.4s)
+  ok 3 e2e\large-dice.spec.ts:69:31 › DM free 26d6 retains every face after settlement (10.3s)
+  ok 4 e2e\large-dice.spec.ts:69:31 › DM free 40d6 retains every face after settlement (13.1s)
+
+  4 passed (2.7m)

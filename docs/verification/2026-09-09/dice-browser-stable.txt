@@ -1,0 +1,103 @@
+[WebServer] (node:35080) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:35384) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 9 tests using 1 worker
+
+(node:33424) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\dice-pair.spec.ts:8:13 › Pair advantage: pair, adopted die, immediate outcome and refresh (1.4m)
+(node:29804) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 2 e2e\dice-pair.spec.ts:8:13 › Pair disadvantage: pair, adopted die, immediate outcome and refresh (43.3s)
+  ok 3 e2e\dice-pair.spec.ts:8:13 › Pair save success: pair, adopted die, immediate outcome and refresh (19.8s)
+  ok 4 e2e\dice-pair.spec.ts:8:13 › Pair save failure: pair, adopted die, immediate outcome and refresh (15.0s)
+  ok 5 e2e\dice-pair.spec.ts:8:13 › Pair tie: pair, adopted die, immediate outcome and refresh (14.0s)
+  ok 6 e2e\dice-pair.spec.ts:36:1 › adopted aura respects reduced motion and clears on the next damage roll (9.1s)
+  x  7 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (8.2s)
+(node:26496) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 8 e2e\dm-dice-correction.spec.ts:2:1 › player presents the corrected public value before the next broadcast (8.7s)
+  ok 9 e2e\room-dice.spec.ts:3:1 › room results and DM confirmation do not replace personal dice, including refresh (6.6s)
+
+
+  1) e2e\dice-pair.spec.ts:8:13 › Pair advantage: pair, adopted die, immediate outcome and refresh ─
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator:  locator('iframe').contentFrame().locator('[data-dice-adopted-marker]')
+    Expected: visible
+    Received: hidden
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for locator('iframe').contentFrame().locator('[data-dice-adopted-marker]')
+        14 × locator resolved to <div aria-hidden="true" class="dice-adopted-aura" data-dice-adopted-marker="true">…</div>
+           - unexpected value "hidden"
+
+
+      17 |  await expect(page.getByTestId('dice-check-outcome')).toContainText(result,{timeout:20000})
+      18 |  await expect(page.getByTestId('dice-check-outcome')).toHaveCount(0,{timeout:6000})
+    > 19 |  await expect(page.frameLocator('iframe').locator('[data-dice-adopted-marker]')).toBeVisible()
+         |                                                                                  ^
+      20 |  await expect(page.locator('.dice-tray-drawer__total')).toHaveCount(0)
+      21 |  await expect(page.getByTestId('dice-check-inline')).not.toContainText('采用第')
+      22 |  await page.screenshot({path:`.codex-logs/dice-pair-screenshots/${button.replaceAll(' ','-')}.png`})
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-pair.spec.ts:19:82
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-pair-Pair-advantage-p-f3ce1-mediate-outcome-and-refresh\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ───────
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 1
+
+      Array [
+    -   4,
+    +   1,
+        6,
+      ]
+
+      30 |   const physicalPool = JSON.parse((await page.locator('body').getAttribute('data-pool'))!) as number[]
+      31 |   expect(physicalPool).toHaveLength(3)
+    > 32 |   expect(physicalPool.slice(1)).toEqual([4, 6])
+         |                                 ^
+      33 |   expect(physicalPool[0]).toBeGreaterThanOrEqual(1)
+      34 |   expect(physicalPool[0]).toBeLessThanOrEqual(6)
+      35 |   expect(await completed()).toEqual([[2, 4, 6], [physicalPool[0]]])
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:32:33
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2 failed
+    e2e\dice-pair.spec.ts:8:13 › Pair advantage: pair, adopted die, immediate outcome and refresh ──
+    e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ────────
+  7 passed (20.2m)

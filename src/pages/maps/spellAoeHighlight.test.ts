@@ -21,6 +21,23 @@ const map: BattleMap = {
 }
 
 describe('spellAoeHighlight', () => {
+  it.each([5, 15, 20, 30])('aligns a %s-foot grid rectangle outline with its affected cells regardless of caster direction', (widthFeet) => {
+    const polygons = [{ col: 0, row: 0 }, { col: 8, row: 3 }, { col: 3, row: 9 }].map((casterCell) => {
+      const preview = buildSpellOrSkillAoeHighlight({
+        targeting: { shape: 'rect', origin: 'point', widthFeet, heightFeet: 20, gridAligned: true, placeRangeFeet: 120 },
+        previewCell: { col: 4, row: 4 }, casterCell, map, rectRotation: 3, spellTargeting: null,
+      })!
+      const left = map.gridOffsetX + Math.min(...preview.cells.map((cell) => cell.col)) * map.gridSize
+      const top = map.gridOffsetY + Math.min(...preview.cells.map((cell) => cell.row)) * map.gridSize
+      const right = map.gridOffsetX + (Math.max(...preview.cells.map((cell) => cell.col)) + 1) * map.gridSize
+      const bottom = map.gridOffsetY + (Math.max(...preview.cells.map((cell) => cell.row)) + 1) * map.gridSize
+      expect(preview.areaPolygon).toEqual([left, top, right, top, right, bottom, left, bottom])
+      return preview.areaPolygon
+    })
+    expect(polygons[1]).toEqual(polygons[0])
+    expect(polygons[2]).toEqual(polygons[0])
+  })
+
   it('allows Sanctuary and Dispel Magic to select the caster in guessed-cell mode', () => {
     const candidate = {
       actorTokenId: 'cleric-token',

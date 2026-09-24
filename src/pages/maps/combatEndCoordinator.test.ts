@@ -1,7 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
 import { coordinateCombatEnd } from './combatEndCoordinator'
+import { createDmDiceConfirmationQueue } from '../../presentation/maps/dmDiceConfirmationQueue'
+import { RoomAuthorityScheduler } from '../../lib/roomAuthorityScheduler'
 
 describe('coordinateCombatEnd', () => {
+  it('releases an action waiting for dice before draining the authority lane', async () => {
+    const scheduler = new RoomAuthorityScheduler()
+    const confirm = createDmDiceConfirmationQueue(() => new Promise<number[]>(() => {}))
+    const commitDamage = vi.fn()
+    const action = scheduler.run('spell', async () => {
+      await confirm({ id: 'damage', label: 'damage', targetName: 'target', sides: 6, values: [4], visibility: 'public' })
+      commitDamage()
+    }).catch(() => {})
+    await Promise.resolve()
+    const publishInactiveCombat = vi.fn(async () => {})
+    await coordinateCombatEnd({
+      cancelPendingInteractions: () => confirm.cancelAll(),
+      awaitPendingTransactions: () => scheduler.run('end-barrier', async () => {}),
+      clearMessageQueues: async () => {},
+      publishInactiveCombat,
+      openExperienceSettlement: () => {},
+    })
+    await action
+    expect(commitDamage).not.toHaveBeenCalled()
+    expect(publishInactiveCombat).toHaveBeenCalledOnce()
+  })
+
   it('clears the ending combat queue before publishing inactive and opening XP', async () => {
     const events: string[] = []
     let finishPending = () => {}

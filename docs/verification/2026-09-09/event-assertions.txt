@@ -1,0 +1,317 @@
+
+ RUN  v4.1.10 C:/Users/Doco/Desktop/DND/DNDSTARS-5E
+
+ ❯ src/rulesets/dnd5e/spellAction.test.ts (177 tests | 1 failed) 760ms
+     × uses Empowered Spell after the damage roll and can combine it with another Metamagic option 15ms
+ ❯ src/rulesets/dnd5e/sustainedSpellControls.test.ts (9 tests | 1 failed) 215ms
+     × restarts the full Sunbeam concentration when the same spell is recast through an empty line 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/rulesets/dnd5e/spellAction.test.ts > SRD 5.1 Headless spell authority bridge > uses Empowered Spell after the damage roll and can combine it with another Metamagic option
+AssertionError: expected [ { …(3) }, { …(5) }, { …(5) }, …(7) ] to deep equally contain { type: 'metamagic-applied', …(3) }
+
+- Expected:
+{
+  "actorId": "sorcerer-token",
+  "kind": "empowered",
+  "spellId": "fireball",
+  "type": "metamagic-applied",
+}
+
++ Received:
+[
+  {
+    "actorId": "sorcerer-token",
+    "resource": "bonusAction",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "sorcerer-token",
+    "current": 0,
+    "max": 2,
+    "resourceKey": "dnd5e-spell-slot-3",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "sorcerer-token",
+    "current": 1,
+    "max": 5,
+    "resourceKey": "dnd5e-sorcery-points",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "sorcerer-token",
+    "kind": "quickened",
+    "logContext": {
+      "names": {
+        "fireball": "火球术",
+      },
+    },
+    "spellId": "fireball",
+    "type": "metamagic-applied",
+  },
+  {
+    "actorId": "sorcerer-token",
+    "current": 0,
+    "max": 5,
+    "resourceKey": "dnd5e-sorcery-points",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "sorcerer-token",
+    "kind": "empowered",
+    "logContext": {
+      "names": {
+        "fireball": "火球术",
+      },
+    },
+    "spellId": "fireball",
+    "type": "metamagic-applied",
+  },
+  {
+    "actorId": "sorcerer-token",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "fireball": "火球术",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 3,
+    "spellId": "fireball",
+    "targetId": "enemy",
+    "type": "spell-cast",
+  },
+  {
+    "ability": "dex",
+    "d20": 1,
+    "dc": 14,
+    "modifier": 0,
+    "success": false,
+    "targetId": "enemy",
+    "total": 1,
+    "type": "saving-throw-resolved",
+  },
+  {
+    "ability": "dex",
+    "actorId": "sorcerer-token",
+    "components": [
+      {
+        "damageAfterSavingThrow": 20,
+        "damageBeforeSavingThrow": 20,
+        "damageType": "fire",
+        "defenses": [],
+        "finalDamage": 20,
+        "roll": {
+          "bonus": 0,
+          "rolls": [
+            4,
+            5,
+            6,
+            1,
+            1,
+            1,
+            1,
+            1,
+          ],
+          "sides": 6,
+          "total": 20,
+        },
+      },
+    ],
+    "damageAfterSavingThrow": 20,
+    "damageBeforeSavingThrow": 20,
+    "finalDamage": 20,
+    "logContext": {
+      "names": {
+        "fireball": "火球术",
+      },
+    },
+    "saveSucceeded": false,
+    "spellId": "fireball",
+    "successfulSave": "half",
+    "targetId": "enemy",
+    "type": "spell-saving-throw-damage-resolved",
+  },
+  {
+    "amount": 20,
+    "damageTypes": [
+      "fire",
+    ],
+    "hpAfter": 10,
+    "hpBefore": 30,
+    "sourceId": "sorcerer-token",
+    "targetId": "enemy",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/spellAction.test.ts:5249:36
+    5247|       type: 'metamagic-applied', actorId: 'sorcerer-token', spellId: '…
+    5248|     }))
+    5249|     expect(resolved.result.events).toContainEqual({
+       |                                    ^
+    5250|       type: 'metamagic-applied', actorId: 'sorcerer-token', spellId: '…
+    5251|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/rulesets/dnd5e/sustainedSpellControls.test.ts > shared sustained spell controls > restarts the full Sunbeam concentration when the same spell is recast through an empty line
+AssertionError: expected [ { …(3) }, { …(5) }, { …(10) }, …(4) ] to deep equally contain { type: 'class-state-changed', …(3) }
+
+- Expected:
+{
+  "active": true,
+  "actorId": "wizard",
+  "stateKey": "concentration",
+  "type": "class-state-changed",
+}
+
++ Received:
+[
+  {
+    "actorId": "wizard",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-6",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "sunbeam": "阳炎射线",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 6,
+    "spellId": "sunbeam",
+    "targetId": "wizard",
+    "type": "spell-cast",
+  },
+  {
+    "definitionId": "srd-5.1:spell:sunbeam",
+    "effectId": "srd-5.1_3Aspell_3Asunbeam:wizard:wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "concentrationId": "sunbeam",
+          "remainingRounds": 10,
+          "sourceActorId": "wizard",
+          "type": "concentration",
+        },
+        "label": "阳炎射线：可使用后续动作",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "characterId": undefined,
+          "kind": "spell",
+          "magical": undefined,
+          "pluginId": undefined,
+          "rulesId": "sunbeam",
+          "spellLevel": 6,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": undefined,
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "阳炎射线",
+    },
+    "reason": "concentration-ended",
+    "targetId": "wizard",
+    "type": "active-effect-removed",
+  },
+  {
+    "active": false,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "阳炎射线",
+    },
+    "stateKey": "concentration",
+    "type": "class-state-changed",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "阳炎射线",
+    },
+    "stateKey": "concentration",
+    "type": "class-state-changed",
+  },
+  {
+    "definitionId": "srd-5.1:spell:sunbeam",
+    "effectId": "srd-5.1_3Aspell_3Asunbeam:wizard:wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "concentrationId": "sunbeam",
+          "remainingRounds": 10,
+          "sourceActorId": "wizard",
+          "type": "concentration",
+        },
+        "label": "阳炎射线：可使用后续动作",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "characterId": undefined,
+          "kind": "spell",
+          "magical": undefined,
+          "pluginId": undefined,
+          "rulesId": "sunbeam",
+          "spellLevel": 6,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": undefined,
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "阳炎射线",
+    },
+    "targetId": "wizard",
+    "type": "active-effect-applied",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/sustainedSpellControls.test.ts:279:27
+    277|       stateKey: 'concentration', active: false,
+    278|     }))
+    279|     expect(recast.events).toContainEqual({
+       |                           ^
+    280|       type: 'class-state-changed', actorId: actor.id,
+    281|       stateKey: 'concentration', active: true,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 4 passed (6)
+      Tests  2 failed | 328 passed (330)
+   Start at  23:21:20
+   Duration  8.50s (transform 7.97s, setup 0ms, import 12.15s, tests 2.99s, environment 1ms)
+

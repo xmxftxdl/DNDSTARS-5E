@@ -85,13 +85,13 @@ describe('D&D 5e Activity choice pager', () => {
     expect(selected).toMatchObject({ id: 'up-15', label: '上升15尺' })
   })
 
-  it('shows unrelated activity choices as direct searchable rows', async () => {
+  it('shows two Alarm modes directly without a search field', async () => {
     let stepperOpened = false
     let actionOptions: Parameters<Parameters<typeof promptDnd5eActivityChoice>[0]['actionChoice']>[0] | undefined
     const selected = await promptDnd5eActivityChoice({
-      ownerLabel: '其他法术',
-      choiceLabel: '效果',
-      options: [{ id: 'a', label: '选项 A' }],
+      ownerLabel: '警报术',
+      choiceLabel: '警报术效果',
+      options: [{ id: 'mental', label: '心灵警报' }, { id: 'audible', label: '声音警报' }],
       prompt: async () => {
         throw new Error('通用选项不应回退到编号文本输入')
       },
@@ -102,13 +102,13 @@ describe('D&D 5e Activity choice pager', () => {
       choiceGroups: async () => null,
       actionChoice: async (input) => {
         actionOptions = input
-        return 'a'
+        return 'mental'
       },
       notifyInvalid: () => undefined,
     })
-    expect(selected?.id).toBe('a')
+    expect(selected?.id).toBe('mental')
     expect(stepperOpened).toBe(false)
-    expect(actionOptions).toMatchObject({ layout: 'list', searchable: true })
+    expect(actionOptions).toMatchObject({ layout: 'list', searchable: false })
   })
 
   it('composes Magic Circle creature and boundary cards into the existing option id', async () => {

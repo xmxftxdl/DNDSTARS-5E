@@ -61,8 +61,10 @@ describe('repeated spell projectile targeting', () => {
 
   it('keeps the projectile-allocation prompt above the initiative toolbar and below banners', () => {
     const source = readFileSync(new URL('../MapsWorkspacePage.tsx', import.meta.url), 'utf8')
-    const promptLayer = source.match(
-      /data-testid="dnd5e-spell-targeting-overlay"[\s\S]{0,320}?z-\[(\d+)\]/,
+    expect(source).toContain('map-combat-action-bar')
+    const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8')
+    const promptLayer = css.match(
+      /\.map-combat-action-bar\s*{[^}]*z-index:\s*(\d+);/,
     )
     const toolbarLayer = source.match(
       /pointer-events-none absolute inset-x-2 top-2 z-\[(\d+)\] flex flex-col items-center/,

@@ -397,6 +397,8 @@ export interface Dnd5eActiveEffectModifiers {
   darkvisionRangeFeet?: number
   /** Uses the final walking speed as the climbing speed. */
   climbSpeedEqualsWalking?: boolean
+  climbingCheckAdvantage?: true
+  poisonSavingThrowAdvantage?: true
   /** Uses the final walking speed as the swimming speed. */
   swimSpeedEqualsWalking?: boolean
   /** Grants true sight to at least this range. */
@@ -2193,6 +2195,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           climbSpeedEqualsWalking: typeof rawModifiers.climbSpeedEqualsWalking === 'boolean'
             ? rawModifiers.climbSpeedEqualsWalking
             : undefined,
+          climbingCheckAdvantage: rawModifiers.climbingCheckAdvantage === true ? true as const : undefined,
+          poisonSavingThrowAdvantage: rawModifiers.poisonSavingThrowAdvantage === true ? true as const : undefined,
           swimSpeedEqualsWalking: typeof rawModifiers.swimSpeedEqualsWalking === 'boolean'
             ? rawModifiers.swimSpeedEqualsWalking
             : undefined,
@@ -2978,6 +2982,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.actionSpellDelay != null ||
         modifiers.darkvisionRangeFeet != null ||
         modifiers.climbSpeedEqualsWalking != null ||
+        modifiers.climbingCheckAdvantage != null ||
+        modifiers.poisonSavingThrowAdvantage != null ||
         modifiers.swimSpeedEqualsWalking != null ||
         modifiers.truesightRangeFeet != null ||
         modifiers.spellTargetingImmunitySchools != null ||
@@ -3219,6 +3225,11 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
         }
         if (raw.modifiers.preventActions != null && raw.modifiers.preventActions !== true) {
           issues.push(`activeEffects[${index}].modifiers.preventActions 无效`)
+        }
+        for (const key of ['climbingCheckAdvantage', 'poisonSavingThrowAdvantage'] as const) {
+          if (raw.modifiers[key] != null && raw.modifiers[key] !== true) {
+            issues.push(`activeEffects[${index}].modifiers.${key} is invalid`)
+          }
         }
         if (raw.modifiers.actionRestriction != null && effect.modifiers?.actionRestriction == null) {
           issues.push(`activeEffects[${index}].modifiers.actionRestriction is invalid`)
@@ -4561,6 +4572,7 @@ export function dnd5eActiveTargetLinkedAttackRollFlags(
   targetEffects: readonly Dnd5eActiveEffectInstance[] | undefined,
   attackerId: string,
   attackerCreatureType?: string,
+  turn?: { combatId: string; round: number; initiativeIndex: number; initiativeOrder: readonly string[]; initiativeSlotIds?: readonly string[]; turnSlotId?: string },
 ): {
   advantage: boolean
   disadvantage: boolean
@@ -4570,7 +4582,9 @@ export function dnd5eActiveTargetLinkedAttackRollFlags(
   const active = effectiveDnd5eActiveEffects(targetEffects)
   const trueStrikeEffects = active.filter((effect) =>
     effect.source.actorId === attackerId &&
-    effect.legacyCondition === 'rule-state:spell:true-strike:target-linked-effect')
+    effect.legacyCondition === 'rule-state:spell:true-strike:target-linked-effect' &&
+    !!turn && turn.initiativeOrder[turn.initiativeIndex] === attackerId &&
+    effect.appliedTurnKey !== `${turn.combatId}:${turn.round}:${turn.initiativeSlotIds?.[turn.initiativeIndex] ?? turn.turnSlotId ?? attackerId}`)
   const protectedCreatureTypes = new Set([
     'aberration', 'celestial', 'elemental', 'fey', 'fiend', 'undead',
     '异怪', '天界生物', '元素生物', '精类', '邪魔', '不死生物',

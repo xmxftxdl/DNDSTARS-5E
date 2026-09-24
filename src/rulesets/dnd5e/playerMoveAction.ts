@@ -1,3 +1,4 @@
+import { createMapTokenOccupancy } from '../../lib/mapTokenOccupancy'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { isMovementLocked } from '../../lib/combatStatus'
 import {
@@ -53,6 +54,7 @@ import {
   dnd5eActiveMovementBoundarySaves,
   dnd5eActiveMovementRepeatSaves,
   dnd5eActiveRequiresFlightMovement,
+  dnd5eActiveMagicallyHeldAloft,
   dnd5eActiveSafeFallFeet,
   dnd5eSwallowedCorpseEscapePlan,
   effectiveDnd5eActiveEffects,
@@ -249,6 +251,11 @@ export function prepareDnd5eExplorationMove(input: {
     },
   }
 
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
+  const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
+  const heightAboveGround = Math.max(0, fromElevationFeet - fromTerrainElevationFeet)
+  const occupancy = createMapTokenOccupancy(input.map, geometry, actorToken)
   const resolvedDrop = resolveTokenDropPosition(
     action.targetPosition.x,
     action.targetPosition.y,
@@ -259,16 +266,52 @@ export function prepareDnd5eExplorationMove(input: {
   const to = snapsToGrid
     ? ignoresMaterialCollision
       ? snapTokenToGridCenter(resolvedDrop.x, resolvedDrop.y, actorToken, input.map)
-      : resolveFreeDropCell(resolvedDrop.x, resolvedDrop.y, actorToken.id, input.map)
+      : resolveFreeDropCell(resolvedDrop.x, resolvedDrop.y, actorToken.id, input.map,
+          at => occupancy(mapGeometryTerrainElevationAtPoint(geometry, at) + heightAboveGround))
     : resolvedDrop
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
-  const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
-  const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
-  const heightAboveGround = Math.max(0, fromElevationFeet - fromTerrainElevationFeet)
   const targetTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, to)
   const toElevationFeet = ignoresMaterialCollision
     ? fromElevationFeet
     : targetTerrainElevationFeet + heightAboveGround
+  // Free placement must not first travel to a grid centre: imported doorways
+  // and corridors need not align with that grid. Validate the actual segment
+  // before asking grid A* to find a detour. Sight is not movement permission.
+  if (!snapsToGrid && !ignoresMaterialCollision) {
+    const distance = Math.hypot(to.x - actorToken.x, to.y - actorToken.y)
+    const steps = Math.max(1, Math.ceil(distance / Math.max(1, input.map.gridSize / 4)))
+    if (steps < 4096) {
+      const points = Array.from({ length: steps + 1 }, (_, index) => ({
+        x: actorToken.x + (to.x - actorToken.x) * index / steps,
+        y: actorToken.y + (to.y - actorToken.y) * index / steps,
+      }))
+      const elevations = points.map(point => mapGeometryTerrainElevationAtPoint(geometry, point) + heightAboveGround)
+      const otherTokens = input.map.tokens.filter(token => token.id !== actorToken.id && !token.dnd5eSpellEffect)
+      const clear = points.every((point, index) => {
+        if (index === 0) return true
+        const previous = points[index - 1]
+        const elevation = elevations[index]
+        if (Math.abs(elevation - elevations[index - 1]) > 10.001) return false
+        const overlaps = otherTokens.some(other => {
+          const extent = input.map.gridSize * (Math.max(1, actorToken.size) + Math.max(1, other.size)) / 2
+          const otherBase = mapGeometryTokenElevation(geometry, other)
+          return elevation < otherBase + Math.max(5, other.size * 5) &&
+            elevation + Math.max(5, actorToken.size * 5) > otherBase &&
+            Math.abs(point.x - other.x) < extent - .001 && Math.abs(point.y - other.y) < extent - .001
+        })
+        return !overlaps && !mapGeometryPlacementBlocked({
+          geometry, map: input.map, token: actorGeometryToken, at: point, elevationFeet: elevation,
+          minimumPassageGapInches: environmentalCapabilities.minimumPassageGapInches,
+        }).blocked && !mapGeometryMovementBlocked({
+          geometry, map: input.map, token: { ...actorGeometryToken, ...previous }, to: point,
+          fromElevationFeet: elevations[index - 1], toElevationFeet: elevation,
+          minimumPassageGapInches: environmentalCapabilities.minimumPassageGapInches,
+        }).blocked
+      })
+      if (clear) return { ok: true, prepared: {
+        actor, actorToken, to, toElevationFeet, path: points, pathElevationsFeet: elevations,
+      } }
+    }
+  }
   const path = findMapGeometryPath({
     map: {
       ...input.map,
@@ -474,7 +517,9 @@ export function prepareDnd5ePlayerMove(input: {
   const traversalMode = action.dnd5eTraversalMode ?? 'walk'
   const usesLongJump = traversalMode === 'long-jump-running' || traversalMode === 'long-jump-standing'
   if (
-    dnd5eActiveRequiresFlightMovement(actorCombatant.classState.activeEffects) &&
+    (dnd5eActiveRequiresFlightMovement(actorCombatant.classState.activeEffects) ||
+      (dnd5eActiveMagicallyHeldAloft(actorCombatant.classState.activeEffects) &&
+        (actorCombatant.elevationFeet ?? 0) > (actorCombatant.groundElevationFeet ?? 0) && traversalMode !== 'climb')) &&
     traversalMode !== 'fly'
   ) return { ok: false, reason: 'movement-blocked' }
   const environmentalCapabilities = dnd5eActiveEnvironmentalCapabilities(
@@ -491,9 +536,10 @@ export function prepareDnd5ePlayerMove(input: {
     ? fromElevationFeet
     : traversalMode === 'walk' || traversalMode === 'swim'
     ? toGroundElevationFeet
-    : requestedElevationFeet
+    : traversalMode === 'climb' ? Math.max(toGroundElevationFeet, Number.isFinite(action.targetElevationFeet) ? requestedElevationFeet : toGroundElevationFeet) : requestedElevationFeet
   const path = findMapGeometryPath({
     geometry, map: pathfindingMap, token: actorGeometryToken, to,
+    climbVerticalSurfaces: traversalMode === 'climb',
     canClimb: traversalMode === 'climb' || traversalMode === 'fly',
     canSwim: traversalMode === 'swim' || environmentalCapabilities.treatsLiquidSurfacesAsSolidGround,
     canFly: traversalMode === 'fly' || ignoresMaterialCollision,
@@ -559,7 +605,8 @@ export function prepareDnd5ePlayerMove(input: {
           map: dragMap,
           token: draggedToken,
           to: expectedTo,
-          canClimb: traversalMode === 'climb' || traversalMode === 'fly',
+          climbVerticalSurfaces: traversalMode === 'climb',
+    canClimb: traversalMode === 'climb' || traversalMode === 'fly',
           canSwim: traversalMode === 'swim',
           canFly: traversalMode === 'fly',
           targetElevationFeet: expectedElevation,
@@ -626,7 +673,7 @@ export function prepareDnd5ePlayerMove(input: {
     distanceFeet: jumpDistanceFeet,
     baseMovementCostFeet: path.movementCostFeet,
     // Flight pays for absolute vertical change; walk/climb only charge ascent.
-    elevationGainFeet: traversalMode === 'fly'
+    elevationGainFeet: traversalMode === 'climb' ? 0 : traversalMode === 'fly'
       ? Math.abs(toElevationFeet - fromElevationFeet)
       : Math.max(0, toElevationFeet - fromElevationFeet),
     mode: traversalMode,
@@ -782,6 +829,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     to: prepared.to,
     distance: prepared.distanceFeet,
     jumpDistance: prepared.jumpDistanceFeet,
+    climbDistanceIncludesElevation: prepared.action.dnd5eTraversalMode === 'climb' ? true : undefined,
     straightLine: prepared.straightLine,
     movementCost: prepared.movementCostFeet,
     movementCostIncludesDrag: true,

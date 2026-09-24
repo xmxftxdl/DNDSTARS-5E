@@ -654,6 +654,22 @@ describe('combat presentation events', () => {
     })
   })
 
+  it('keeps Sunbeam connected to its caster across the full 60-foot line', () => {
+    const event = {
+      schemaVersion: 1 as const, type: 'spell-area-effect' as const,
+      id: 'sunbeam-area', transactionId: 'sunbeam-cast', mapId: map.id,
+      spellId: 'sunbeam' as const, sourceTokenId: 'wizard',
+      targetCell: { col: 5, row: 2 }, shape: 'line' as const,
+      lengthFeet: 60, widthFeet: 5, createdAt: 1000, expiresAt: 4000,
+    }
+    const state = reduceCombatPresentationState(EMPTY_COMBAT_PRESENTATION_STATE, event, 1100)
+    const [beam] = combatPresentationProjectilesForMap(state, map, 2400)
+    expect(beam).toMatchObject({ kind: 'sunbeam', durationMs: 1800, areaWidthPx: 50,
+      from: { x: map.tokens[0].x, y: map.tokens[0].y } })
+    expect(Math.hypot(beam.to.x - beam.from.x, beam.to.y - beam.from.y)).toBeCloseTo(600)
+    expect(combatPresentationProjectilesForMap(state, map, 2800)).toEqual([])
+  })
+
   it('projects Flame Strike and Sunburst at their authoritative area radii', () => {
     const base = {
       schemaVersion: 1 as const,
@@ -1170,6 +1186,19 @@ describe('combat presentation events', () => {
     })
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(20_500 + SPELL_BANNER_TOTAL_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it.each(['wall-of-force', 'wall-of-stone', 'wall-of-ice'] as const)('places %s without publishing or waiting for an entrance animation', async (spellId) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(20_500)
+    await refreshCombatPresentationClock(true)
+    vi.mocked(publishSharedEvent).mockClear()
+    const schedule = await publishAreaSpellPresentation({ id: 'force', mapId: 'map-a',
+      transactionId: 'force', sourceTokenId: 'wizard', spellId,
+      targetCell: { col: 3, row: 2 }, shape: 'rect', widthFeet: 100, heightFeet: 5 })
+    expect(publishSharedEvent).not.toHaveBeenCalled()
+    expect(schedule.completesAt).toBe(21_000)
     vi.useRealTimers()
   })
 
@@ -2058,4 +2087,15 @@ describe('combat presentation events', () => {
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     vi.useRealTimers()
   })
+})
+
+
+it('does not republish the same resumed Fire Bolt banner with a fresh timestamp', async () => {
+  vi.mocked(publishSharedEvent).mockClear()
+  const banner = { id: 'resume-fire-bolt:banner', mapId: 'replay-map', transactionId: 'resume-fire-bolt', sourceTokenId: 'wizard', spellId: 'fire-bolt', casterName: '法师', spellName: '火焰箭', castingClassId: 'wizard' }
+  await publishSpellBannerPresentation(banner)
+  await publishSpellBannerPresentation(banner)
+  expect(vi.mocked(publishSharedEvent).mock.calls.filter(([channel]) => channel === COMBAT_PRESENTATION_CHANNEL)).toHaveLength(1)
+  await publishSpellBannerPresentation({ ...banner, id: 'next-fire-bolt:banner', transactionId: 'next-fire-bolt' })
+  expect(vi.mocked(publishSharedEvent).mock.calls.filter(([channel]) => channel === COMBAT_PRESENTATION_CHANNEL)).toHaveLength(2)
 })

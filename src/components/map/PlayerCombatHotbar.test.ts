@@ -14,6 +14,8 @@ import { resolveDnd5eHotbarSpellCommand } from './playerCombatHotbarSpellCommand
 import { DND5E_QUARTERSTAFF, getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e'
 import { dnd5ePluginSpellActivity } from '../../rulesets/dnd5e/pluginSpellTransaction'
 import { dnd5ePluginSpellDefinition } from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
+import { createDnd5eMechanicalEffect } from '../../rulesets/dnd5e/activeEffects'
+import { dnd5eWeaponAttackProfile } from '../../rulesets/dnd5e/equipment'
 
 function character(): Character {
   return {
@@ -27,6 +29,30 @@ function character(): Character {
 }
 
 describe('PlayerCombatHotbar', () => {
+  it('shows the active natural weapon instead of the equipped focus and uses Strength plus proficiency plus one', () => {
+    const wizard: Character = {
+      ...character(), level: 17, abilities: { ...character().abilities, str: 12 },
+      equipment: { mainWeapon: { id: 'dnd5e-arcane-focus', name: '奥术法器', slot: 'mainWeapon' } },
+      dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({
+        definitionId: 'activity:alter-self:natural-weapon', label: '变身术·天生武器·钝击',
+        targetId: 'hero', source: { kind: 'spell', actorId: 'hero', rulesId: 'alter-self', magical: true },
+        duration: { type: 'concentration', sourceActorId: 'hero', remainingRounds: 600 },
+        tags: ['alter-self', 'alter-self-natural-weapon', 'alter-self-natural-weapon:bludgeoning'],
+      })] },
+    }
+    expect(dnd5eWeaponAttackProfile(wizard)).toMatchObject({
+      attackModifier: 8, damage: { count: 1, sides: 6, bonus: 2, type: 'bludgeoning' },
+    })
+    const render = () => renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: wizard, canAct: true, pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+    expect(render()).toContain('攻击：变身术·天生武器')
+    expect(render()).not.toContain('攻击：奥术法器')
+    wizard.dnd5eCombatState = { activeEffects: [] }
+    expect(render()).not.toContain('攻击：变身术·天生武器')
+  })
   it('describes Conjure Celestial as an actual map-position cast', () => {
     expect(dnd5eHotbarSpellTargeting(
       undefined,
@@ -191,7 +217,7 @@ describe('PlayerCombatHotbar', () => {
     expect(grouped.spells[0]?.ritualAvailable).toBe(true)
     expect(grouped.items.map((entry) => entry.id)).toEqual(['item:potion'])
     expect(grouped.features.map((entry) => entry.id)).toEqual(['feature:class-actions'])
-    expect(grouped.basics).toHaveLength(8)
+    expect(grouped.basics).toHaveLength(9)
     expect(grouped.basics.every((entry) => !['spell', 'item', 'feature'].includes(entry.sourceKind))).toBe(true)
   })
 
@@ -231,13 +257,11 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('8/12')
     expect(html).toContain('基础动作')
     expect(html).toContain('data-testid="combat-hotbar-basics-rail"')
-    expect(html).toContain('aria-label="基础动作横向滑栏"')
-    expect(html).toContain('aria-label="向左滚动基础动作"')
-    expect(html).toContain('aria-label="向右滚动基础动作"')
-    expect(html).toContain('左右滑动 · 拖拽排序')
-    expect(html).toContain('data-testid="combat-hotbar-features-rail"')
-    expect(html).toContain('aria-label="职业特性两行横向滑栏"')
-    expect(html.match(/grid-rows-2/g)?.length).toBeGreaterThanOrEqual(2)
+    expect(html).toContain('aria-label="基础动作，可拖拽排序"')
+    expect(html).toContain('剩余移动 30 尺')
+    expect(html).not.toContain('min-w-[1100px]')
+    expect(html).toContain('id="hotbar-panel-features"')
+    expect(html).toContain('combat-hotbar-labeled-action')
     expect(html).toContain('职业特性')
   })
 
@@ -265,7 +289,7 @@ describe('PlayerCombatHotbar', () => {
       onCommand: () => undefined,
     }))
 
-    expect(html).toContain('3 项 · 左右滑动')
+    expect(html).toContain('id="hotbar-tab-features"')
     expect(html).toContain('aria-label="回气"')
     expect(html).toContain('aria-label="动作如潮"')
     expect(html).toContain('/assets/icons/fighter-second-wind-feature-action.png')
@@ -619,10 +643,10 @@ describe('PlayerCombatHotbar', () => {
     }))
 
     expect(html).toContain('data-testid="combat-hotbar-spell-slots"')
-    expect(html.indexOf('combat-hotbar-spell-slots')).toBeLessThan(html.indexOf('>法术<'))
+    expect(html.indexOf('combat-hotbar-spell-slots')).toBeLessThan(html.indexOf('aria-label="上一页法术"'))
     expect(html).toContain('1环')
-    expect(html).toContain('<strong class="text-[10px]">2</strong>/4')
-    expect(html).toContain('<strong class="text-[10px]">0</strong>/3')
+    expect(html).toContain('<strong>2</strong>/4')
+    expect(html).toContain('<strong>0</strong>/3')
   })
 
   it('渲染由 MapsPage 共享的固定环位，并按该环位显示法术伤害', () => {
@@ -729,8 +753,8 @@ describe('PlayerCombatHotbar', () => {
     }))
     expect(html).toContain('aria-label="谨慎法术"')
     expect(html).toContain('aria-label="强效法术"')
-    expect(html).toContain('5 项 · 左右滑动')
-    expect(html).toContain('aria-label="职业特性两行横向滑栏"')
+    expect(html).toContain('id="hotbar-tab-features"')
+    expect(html).toContain('id="hotbar-panel-features"')
   })
 
   it('道具栏固定显示七个快捷槽，并将第八格保留为完整背包入口', () => {
@@ -769,8 +793,8 @@ describe('PlayerCombatHotbar', () => {
     expect(html.match(/data-testid="combat-item-quick-slot-/g)).toHaveLength(7)
     expect(html).toContain('data-testid="combat-item-backpack"')
     expect(html).toContain('data-testid="combat-item-quick-grid"')
-    expect(html).toContain('class="grid grid-cols-4 gap-1"')
-    expect(html).toContain('快捷 7/7 · 背包 9')
+    expect(html).toContain('class="flex flex-wrap gap-2"')
+    expect(html).toContain('背包 9')
     expect(html).toContain('>查看</span>')
     expect(html).toContain('aria-label="道具-7（打开背包查看）"')
     expect(html).not.toContain('aria-label="道具-8（打开背包查看）"')

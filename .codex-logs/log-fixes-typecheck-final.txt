@@ -1,0 +1,6 @@
+
+> dndstars-5e@0.1.0-beta.1 typecheck
+> tsc -b --pretty false
+
+src/lib/combatLogFourFixes.test.ts(42,195): error TS2353: Object literal may only specify known properties, and 'modifier' does not exist in type 'Dnd5eFormulaRollResult'.
+src/lib/combatLogFourFixes.test.ts(42,254): error TS2353: Object literal may only specify known properties, and 'modifier' does not exist in type 'Dnd5eFormulaRollResult'.

@@ -30,9 +30,74 @@ function boundedText(value, maximum) {
   return typeof value === 'string' ? value.trim().slice(0, maximum) : ''
 }
 
-export function dmUndoAfterMetadata(resource, value) {
-  if (resource !== 'combat' || !plainObject(value)) return null
+function turnActor(value) {
+  const entry = value?.initiativeOrder?.[value?.initiativeIndex]
+  return entry ? { actorId: entry.tokenId, actorLabel: entry.label, slotId: entry.slotId } : {}
+}
+
+function recoveryChangeDetails(resource, before, after) {
+  const details = []
+  if (resource === 'combat-log') {
+    const previousIds = new Set((before?.entries ?? []).map(entry => entry.id))
+    return (after?.entries ?? []).filter(entry => !previousIds.has(entry.id)).map(entry => boundedText(entry.text, 500)).filter(Boolean).slice(0, 80)
+  }
+  const entities = value => resource === 'characters' ? value?.characters ?? []
+    : resource === 'maps' ? (value?.maps ?? []).flatMap(map => map.tokens ?? []) : []
+  const oldEntities = new Map(entities(before).map(entry => [entry.id, entry]))
+  for (const entry of entities(after)) {
+    const old = oldEntities.get(entry.id)
+    if (!old) continue
+    const name = boundedText(entry.name ?? entry.label ?? entry.id, 100)
+    for (const [key, label] of [['currentHp', 'HP'], ['hp', 'HP'], ['temporaryHp', '临时 HP'], ['x', '横坐标'], ['y', '纵坐标']]) {
+      if (Number.isFinite(old[key]) && Number.isFinite(entry[key]) && old[key] !== entry[key]) details.push(`${name}：${label} ${old[key]} → ${entry[key]}（恢复为 ${old[key]}）`)
+    }
+    for (const key of new Set([...Object.keys(old.classResources ?? {}), ...Object.keys(entry.classResources ?? {})])) {
+      const previous = old.classResources?.[key]?.current ?? 0
+      const current = entry.classResources?.[key]?.current ?? 0
+      if (previous !== current) details.push(`${name}：资源 ${key} ${previous} → ${current}（恢复为 ${previous}）`)
+    }
+    for (const [key, label] of [['spellSlots', '法术位'], ['conditions', '状态'], ['activeEffects', '持续效果'], ['concentrating', '专注'], ['dnd5eCombatState', '战斗状态与持续效果']]) {
+      if (JSON.stringify(old[key]) !== JSON.stringify(entry[key])) details.push(`${name}：撤回${label}变更`)
+    }
+  }
+  return details.slice(0, 80)
+}
+
+/** Recover readable changes in older journals from the next revision's before image. */
+export function dmUndoPublicHistory(transactions, currentCombat, currentSnapshots = []) {
+  const nextBefore = new Map(currentSnapshots.map(({ resource, value }) =>
+    [resource, { revision: value?._sync?.revision, value }]))
+  let combatContext = currentCombat
+  return [...transactions].reverse().map(transaction => {
+    const summary = dmUndoPublicTransaction(transaction)
+    if (transaction.status !== 'applied') return summary
+    const inferredDetails = transaction.changes.flatMap(change => {
+      const next = nextBefore.get(change.resource)
+      return next?.revision === change.afterRevision
+        ? recoveryChangeDetails(change.resource, change.before, next.value) : []
+    })
+    const combatChange = transaction.changes.find(change => change.resource === 'combat')
+    if (!summary.combat && combatContext) {
+      const actor = turnActor(combatContext)
+      summary.combat = {
+        mapId: combatContext.mapId, combatId: combatContext.combatId,
+        beforeRound: combatContext.round, beforeInitiativeIndex: combatContext.initiativeIndex,
+        beforeActorId: actor.actorId, beforeActorLabel: actor.actorLabel, beforeSlotId: actor.slotId,
+        beforeActive: combatContext.active,
+      }
+    }
+    if (combatChange) combatContext = combatChange.before
+    for (const change of transaction.changes) nextBefore.set(change.resource, { revision: change.beforeRevision, value: change.before })
+    return { ...summary, details: [...new Set([...summary.details, ...inferredDetails])] }
+  })
+}
+
+export function dmUndoAfterMetadata(resource, value, before) {
+  if (!plainObject(value)) return null
+  const details = recoveryChangeDetails(resource, before, value)
+  if (resource !== 'combat') return details.length ? { details } : null
   return {
+    ...turnActor(value), active: value.active,
     mapId: boundedText(value.mapId, 160),
     combatId: boundedText(value.combatId, 200),
     ...(Number.isInteger(value.round) ? { round: value.round } : {}),
@@ -55,8 +120,17 @@ export function dmUndoPublicTransaction(transaction) {
     updatedAt: transaction.updatedAt,
     combatRecoverable: transaction.changes.some((change) =>
       COMBAT_RECOVERY_RESOURCES.has(change.resource)),
+    details: [...new Set(transaction.changes.flatMap(change => change.after?.details ?? []))],
     ...(beforeCombat || afterCombat ? {
       combat: {
+        beforeActorId: turnActor(beforeCombat).actorId,
+        beforeActorLabel: turnActor(beforeCombat).actorLabel,
+        beforeSlotId: turnActor(beforeCombat).slotId,
+        afterActorId: afterCombat?.actorId ?? turnActor(afterCombat).actorId,
+        afterActorLabel: afterCombat?.actorLabel ?? turnActor(afterCombat).actorLabel,
+        afterSlotId: afterCombat?.slotId ?? turnActor(afterCombat).slotId,
+        beforeActive: beforeCombat?.active,
+        afterActive: afterCombat?.active,
         mapId: boundedText(afterCombat?.mapId ?? beforeCombat?.mapId, 160),
         combatId: boundedText(afterCombat?.combatId ?? beforeCombat?.combatId, 200),
         beforeRound: Number.isInteger(beforeCombat?.round) ? beforeCombat.round : undefined,

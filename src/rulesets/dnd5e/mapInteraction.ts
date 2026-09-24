@@ -1,6 +1,7 @@
 import type { BattleMap, Token } from '../../store/maps'
 import {
   mapGeometryDoorLockState,
+  mapGeometryDoorLeafPoints,
   mapGeometryDoorOpenState,
   mapGeometryDoorPhysicalState,
   type MapGeometryDoor,
@@ -35,6 +36,8 @@ export type Dnd5eMapInteractionMethod =
   | 'scene-point'
 
 export type Dnd5eMapInteractionPayload =
+  | { operation: 'teleportation-circle'; areaId: string }
+  | { operation: 'rope-trick'; areaId: string; transition: 'enter' | 'leave' }
   | {
       doorId: string
       operation: Exclude<Dnd5eMapInteractionOperation, 'search' | 'interact-point'>
@@ -111,11 +114,18 @@ function doorMidpoint(door: MapGeometryDoor) {
 }
 
 function withinInteractionReach(map: BattleMap, actor: Token, door: MapGeometryDoor): boolean {
-  const midpoint = doorMidpoint(door)
   const gridSize = Math.max(1, map.gridSize)
   const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
   const reachPx = (5 / feetPerCell) * gridSize + gridSize * Math.max(1, actor.size) * 0.5
-  return Math.hypot(actor.x - midpoint.x, actor.y - midpoint.y) <= reachPx
+  return [door.points, mapGeometryDoorLeafPoints(door)].some(([start, end]) => {
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const lengthSquared = dx * dx + dy * dy
+    const t = lengthSquared > 0
+      ? Math.max(0, Math.min(1, ((actor.x - start.x) * dx + (actor.y - start.y) * dy) / lengthSquared))
+      : 0
+    return Math.hypot(actor.x - start.x - t * dx, actor.y - start.y - t * dy) <= reachPx
+  })
 }
 
 function finiteMapPoint(map: BattleMap, point: { x: number; y: number }): boolean {
@@ -236,6 +246,7 @@ export function prepareDnd5eMapInteraction(input: {
   round?: number
 }): PrepareDnd5eMapInteractionResult {
   const payload = input.payload
+  if (payload.operation === 'rope-trick' || payload.operation === 'teleportation-circle') return { ok: false, reason: 'portal-requires-authority' }
   if (payload.operation === 'interact-point') {
     return prepareSceneInteractionPoint({
       map: input.map,

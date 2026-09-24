@@ -161,7 +161,7 @@ export function dnd5eActivityRollLogDetails(
 
 export interface Dnd5eActivityMovementLogDetail {
   targetId: string
-  mode: 'push' | 'pull' | 'teleport' | 'swap' | 'ascend' | 'descend'
+  mode: 'push' | 'pull' | 'forced' | 'teleport' | 'swap' | 'ascend' | 'descend'
   distanceFeet: number
 }
 
@@ -223,4 +223,68 @@ export function dnd5eActivityHandoffLogDetails(input: {
     return [`地图垂直位移：${label}｜${movement.mode === 'ascend' ? '上升' : '下降'} ${distanceFeet} 尺${elevationDetail}`]
   })
   return [...lockDetails, ...verticalMovementDetails]
+}
+
+/** Structured ownership accompanies display text; arbitrary text never grants visibility. */
+export interface ActivityRollLogEvidence {
+  kind: 'activity-roll'
+  rollId: string
+  rollerId?: string
+  targetId?: string
+  values: readonly number[]
+  modifier: number
+  total: number
+  text: string
+  adoptedValue?: number
+  dc?: number
+}
+
+export function dnd5eActivityRollLogEvidence(
+  activity: Dnd5eActivityDefinitionV1 | undefined,
+  rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>> | undefined,
+  events: readonly Dnd5eCombatEvent[],
+  casterId: string,
+): ActivityRollLogEvidence[] {
+  const entries: ActivityRollLogEvidence[] = Object.entries(rolls ?? {}).map(([rollId, roll]) => {
+    const check = activity?.checks?.find(candidate =>
+      rollId === candidate.rollId || rollId.startsWith(`${candidate.rollId}:`) ||
+      candidate.kind === 'opposed-ability-check' && (rollId === candidate.opposedRollId || rollId.startsWith(`${candidate.opposedRollId}:`)))
+    const opposedTarget = check?.kind === 'opposed-ability-check' && (rollId === check.opposedRollId || rollId.startsWith(`${check.opposedRollId}:`))
+    const baseId = opposedTarget && check?.kind === 'opposed-ability-check' ? check.opposedRollId : check?.rollId
+    const targetId = baseId && rollId.startsWith(`${baseId}:`) ? rollId.slice(baseId.length + 1) : undefined
+    let rollerId: string | undefined = casterId
+    if (check?.kind === 'saving-throw') {
+      const saves = events.filter(event => event.type === 'saving-throw-resolved' && (!targetId || event.targetId === targetId))
+      rollerId = targetId ?? (saves.length === 1 && saves[0].type === 'saving-throw-resolved' ? saves[0].targetId : undefined)
+    } else if (opposedTarget) {
+      rollerId = targetId
+    }
+    // Do not include the opponent's total in this side's public evidence.
+    const text = check?.kind === 'opposed-ability-check'
+      ? `Activity 对抗骰据：${rollId}｜候选 ${roll.values.join(' / ')}｜最终采用值见对抗结算`
+      : dnd5eActivityRollLogDetails(activity, { [rollId]: roll }, events)[0]
+    const settled = events.find(event =>
+      check?.kind === 'saving-throw' && event.type === 'saving-throw-resolved' && event.targetId === rollerId ||
+      check?.kind === 'attack-roll' && event.type === 'attack-resolved' && event.actorId === casterId && (!targetId || event.targetId === targetId) ||
+      (check?.kind === 'ability-check' || check?.kind === 'skill-check' || check?.kind === 'concentration-check') && event.type === 'ability-check-resolved' && event.actorId === casterId && (!targetId || event.perceivedTargetId === targetId) ||
+      check?.kind === 'opposed-ability-check' && event.type === 'opposed-ability-check-resolved' && event.activityId === activity?.id && event.checkId === check.id && event.targetId === targetId)
+    let modifier = roll.modifier
+    let total = roll.total
+    let adoptedValue: number | undefined
+    let dc: number | undefined
+    if (settled?.type === 'opposed-ability-check-resolved') {
+      adoptedValue = opposedTarget ? settled.targetD20 : settled.sourceD20
+      modifier = opposedTarget ? settled.targetModifier : settled.sourceModifier
+      total = opposedTarget ? settled.targetTotal : settled.sourceTotal
+    } else if (settled && 'd20' in settled && 'total' in settled) {
+      adoptedValue = settled.d20
+      total = settled.total
+      modifier = total - adoptedValue
+      dc = 'dc' in settled ? settled.dc : undefined
+    }
+    return {kind: 'activity-roll', rollId, rollerId, targetId, values: [...roll.values], modifier, total, adoptedValue, dc, text}
+  })
+  const turns = dnd5eActivityExtraTurnRollResult(activity, rolls)
+  if (turns) entries.push({kind:'activity-roll',rollId:'extra-turn-result',rollerId:casterId,values:[],modifier:0,total:turns.turns,text:`额外回合：${turns.formula} = ${turns.turns} 回合`})
+  return entries
 }

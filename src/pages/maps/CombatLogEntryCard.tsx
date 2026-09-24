@@ -1,4 +1,7 @@
+import PdfLinkedText from '../../components/PdfLinkedText'
+import { legacyPlayerSpellSummary } from '../../lib/spellOutcomeSummary'
 import { useEffect, useState, type CSSProperties } from 'react'
+import { combatLogChinese } from './combatLogChinese'
 import { getImage } from '../../lib/imageStore'
 import type { CombatLogEntry } from '../../lib/sharedCombatTypes'
 import type { Token } from '../../store/maps'
@@ -50,7 +53,7 @@ function CombatLogSubjectToken({
       className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-950/90 text-lg shadow-lg"
       style={{ borderColor: subject.borderColor }}
       role="img"
-      aria-label={`${subject.label} Token`}
+      aria-label={`${subject.label} 棋子`}
       title={subject.label}
     >
       {src
@@ -79,6 +82,7 @@ export default function CombatLogEntryCard({
     characters,
     currentTurnTokenId,
   })
+  const localize = (text: string) => combatLogChinese(text, id => tokens.find(token => token.id === id)?.label ?? characters.find(character => character.id === id)?.name)
   const isRoundBoundary = combatLogEntryIsRoundBoundary(entry)
   const isInitiativeResult = combatLogEntryIsInitiativeResult(entry)
   const tone =
@@ -103,7 +107,7 @@ export default function CombatLogEntryCard({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="mb-0.5 flex items-center gap-2 text-[10px] font-semibold text-slate-400">
-            <span className="tabular-nums">R{entry.round}</span>
+            <span className="tabular-nums">第 {entry.round} 回合</span>
             <span className="tabular-nums">{entry.time}</span>
             <span className="rounded bg-black/20 px-1.5 py-0.5 text-[9px] uppercase tracking-wide">
               {entry.kind === 'damage'
@@ -118,14 +122,14 @@ export default function CombatLogEntryCard({
             </span>
           </div>
           <p className="text-xs font-semibold leading-snug">
-            {migrateLegacyApCombatLogText(entry.text)}
+            <PdfLinkedText text={localize(migrateLegacyApCombatLogText(legacyPlayerSpellSummary(entry.text)))} />
           </p>
           {entry.details && entry.details.length > 0 && (
             <details className="group mt-2 border-t border-white/10 pt-1.5 text-[11px] leading-relaxed text-slate-300">
               <summary className="cursor-pointer select-none font-semibold text-slate-400 marker:text-slate-500 hover:text-slate-200">
                 {isInitiativeResult
                   ? `查看先攻顺序（${entry.details.length}）`
-                  : `查看 Headless 结算依据（${entry.details.length}）`}
+                  : `查看规则结算依据（${entry.details.length}）`}
               </summary>
               <div className="mt-1.5 space-y-1.5 border-l border-white/10 pl-2">
                 {entry.details.map((detail, index) => (
@@ -134,7 +138,7 @@ export default function CombatLogEntryCard({
                       aria-hidden="true"
                       className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-current opacity-55"
                     />
-                    <span>{detail}</span>
+                    <span><PdfLinkedText text={localize(detail)} /></span>
                   </div>
                 ))}
               </div>

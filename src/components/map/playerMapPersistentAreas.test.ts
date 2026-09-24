@@ -6,8 +6,8 @@ import { ensureDnd5eCoreSpellActivitiesRegisteredV1 } from '../../rulesets/dnd5e
 import {
   mapTokenGrantedActivityControls,
   playerMapGrantedActivityControls,
-  playerMovementFirstGreaseCheckpoint,
-  playerMovementEntersGrease,
+  playerMovementFirstAreaCheckpoint,
+  playerMovementEntersStoppingArea,
 } from './playerMapPersistentAreas'
 
 const emptyMap: BattleMap = { id: 'empty', name: 'Empty', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [], dnd5ePluginAreas: [] }
@@ -197,7 +197,7 @@ describe('playerMapGrantedActivityControls', () => {
   })
 })
 
-describe('playerMovementEntersGrease', () => {
+describe('playerMovementEntersStoppingArea', () => {
   const token: Token = {
     id: 'hero-token', label: 'Hero', x: 25, y: 25, color: '#fff', emoji: 'H',
     size: 1, type: 'player', characterId: 'hero',
@@ -209,7 +209,7 @@ describe('playerMovementEntersGrease', () => {
   } as BattleMap
 
   it('detects a path entering Grease before the Host asks for the Dexterity save', () => {
-    expect(playerMovementEntersGrease({
+    expect(playerMovementEntersStoppingArea({
       map,
       token,
       to: { x: 75, y: 25 },
@@ -219,7 +219,7 @@ describe('playerMovementEntersGrease', () => {
   })
 
   it('returns the first Grease entry cell instead of the requested destination', () => {
-    expect(playerMovementFirstGreaseCheckpoint({
+    expect(playerMovementFirstAreaCheckpoint({
       map,
       token,
       to: { x: 175, y: 25 },
@@ -238,14 +238,14 @@ describe('playerMovementEntersGrease', () => {
   })
 
   it('does not pre-present movement that stays outside or starts inside Grease', () => {
-    expect(playerMovementEntersGrease({
+    expect(playerMovementEntersStoppingArea({
       map,
       token,
       to: { x: 25, y: 25 },
       path: [{ x: 25, y: 25 }],
       round: 1,
     })).toBe(false)
-    expect(playerMovementEntersGrease({
+    expect(playerMovementEntersStoppingArea({
       map,
       token: { ...token, x: 75, y: 25 },
       to: { x: 75, y: 25 },

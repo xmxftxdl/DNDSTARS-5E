@@ -1,3 +1,4 @@
+import { tokenScale, tokenLineWidth, tokenDash } from './tokenStrokeGeometry'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import Konva from 'konva'
@@ -9,7 +10,7 @@ import {
   TOKEN_MOVE_DURATION_S,
   type GridCell,
 } from '../../lib/gridCombat'
-import { tokenMovementAnimationPosition, type TokenMovementAnimation } from '../../lib/tokenMovementAnimation'
+import { tokenMovementAnimationOwnsPosition, tokenMovementAnimationPosition, type TokenMovementAnimation } from '../../lib/tokenMovementAnimation'
 import Dnd5eConcentrationTokenBadge, { DND5E_CONCENTRATION_TOKEN_IMAGE_SRC, type ConcentrationTokenMark } from './Dnd5eConcentrationTokenBadge'
 import { TOKEN_BORDER_FLOW_BASE_OPACITY, type TokenBorderFlowPalette, tokenBorderFlowGradientColorStops, tokenBorderFlowRotationDegrees, tokenBorderFlowWorldMetrics } from './tokenBorderFlow'
 import {
@@ -125,19 +126,6 @@ function showTokenStatusTooltip(
     clientX: event.evt.clientX,
     clientY: event.evt.clientY,
   })
-}
-
-function tokenScale(radius: number): number {
-  return Math.max(0.35, Math.min(1, radius / 24))
-}
-
-function tokenLineWidth(radius: number, px: number): number {
-  return Math.max(0.5, px * tokenScale(radius))
-}
-
-function tokenDash(radius: number, dash: number[]): number[] {
-  const scale = tokenScale(radius)
-  return dash.map((value) => Math.max(1, value * scale))
 }
 
 function rightBadgeSize(radius: number): number {
@@ -259,7 +247,7 @@ function Dnd5eStandardConditionBadge({
       <Circle
         radius={size / 2}
         fill={mark?.backgroundColor ?? style?.fill ?? '#312e81'}
-        stroke={mark?.borderColor ?? style?.stroke ?? '#c4b5fd'}
+        stroke={mark?.borderColor ?? '#ffffff'}
         strokeWidth={tokenLineWidth(radius, 1.5)}
         shadowBlur={4 * tokenScale(radius)}
         shadowColor={mark?.glowColor ?? style?.stroke ?? '#a78bfa'}
@@ -334,7 +322,7 @@ function Dnd5eTokenStatusMarkerBadge({
       <Circle
         radius={size / 2}
         fill={marker.backgroundColor ?? style.fill}
-        stroke={marker.borderColor ?? style.stroke}
+        stroke={marker.borderColor ?? '#ffffff'}
         strokeWidth={tokenLineWidth(radius, 1.5)}
         shadowBlur={4 * tokenScale(radius)}
         shadowColor={marker.glowColor ?? marker.borderColor ?? style.stroke}
@@ -753,7 +741,7 @@ export function TokenBorderFlowRing({
   useLayoutEffect(() => {
     const group = groupRef.current
     if (!group || positionLockedRef.current) return
-    const movementPosition = token.movementAnimation
+    const movementPosition = tokenMovementAnimationOwnsPosition(token.movementAnimation, token, Date.now())
       ? tokenMovementAnimationPosition(
           token.movementAnimation,
           Date.now() - token.movementAnimation.issuedAt,
@@ -925,6 +913,7 @@ export function TokenNode({
   ]
   const movementAnimation = token.movementAnimation
   const latestPositionRef = useRef({ x: token.x, y: token.y })
+  const positionInitializedRef = useRef(false)
   const draggingRef = useRef(false)
   const externalPositionLockedRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
@@ -1056,13 +1045,14 @@ export function TokenNode({
   useLayoutEffect(() => {
     const node = groupRef.current
     if (!node) return
-    const animated = movementAnimation
+    const animated = tokenMovementAnimationOwnsPosition(movementAnimation, latestPositionRef.current, Date.now())
       ? tokenMovementAnimationPosition(
           movementAnimation,
           Date.now() - movementAnimation.issuedAt,
         )
       : undefined
-    node.position(animated ?? latestPositionRef.current)
+    if (animated || !positionInitializedRef.current) node.position(animated ?? latestPositionRef.current)
+    positionInitializedRef.current = true
   }, [movementAnimation])
 
   useLayoutEffect(() => {
@@ -1076,6 +1066,13 @@ export function TokenNode({
   useEffect(() => {
     const node = groupRef.current
     if (!node) return
+
+    // Detached map layers are positioned together by MapCanvas, including
+    // ordinary coordinate updates without a durable movement animation.
+    if (registerPositionNode) {
+      cancelPositionAnimation()
+      return
+    }
 
     if (prevGridSizeRef.current !== gridSize) {
       prevGridSizeRef.current = gridSize
@@ -1091,8 +1088,7 @@ export function TokenNode({
     }
 
     if (
-      movementAnimation &&
-      Date.now() < movementAnimation.issuedAt + movementAnimation.durationMs
+      tokenMovementAnimationOwnsPosition(movementAnimation, token, Date.now())
     ) {
       reconcileTweenRef.current?.destroy()
       reconcileTweenRef.current = null
@@ -1121,13 +1117,13 @@ export function TokenNode({
     })
     reconcileTweenRef.current = tween
     tween.play()
-  }, [cancelPositionAnimation, token.x, token.y, gridSize, instantPosition, movementAnimation])
+  }, [cancelPositionAnimation, token.x, token.y, gridSize, instantPosition, movementAnimation, registerPositionNode])
 
   useEffect(() => {
     const node = groupRef.current
     if (
       !node ||
-      !movementAnimation ||
+      !tokenMovementAnimationOwnsPosition(movementAnimation, token, Date.now()) ||
       instantPosition ||
       externalPositionLockedRef.current ||
       registerPositionNode
@@ -1187,6 +1183,10 @@ export function TokenNode({
   ) : null
 
   const handleStatusTokenClick = (instance: MapTokenStatusInstance) => {
+    if (targetSelectable) {
+      onSelect()
+      return
+    }
     if (onStatusTokenClick) {
       onStatusTokenClick(instance)
       return
@@ -1390,6 +1390,8 @@ export function TokenNode({
 
   const handleTokenSelect = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true
+    // A right-click cancels targeting; Konva also emits click for that mouse-up.
+    if ('button' in e.evt && e.evt.button !== 0) return
     if (draggingRef.current || Date.now() < suppressClickUntilRef.current) return
     suppressClickUntilRef.current = Date.now() + 300
     onSelect()

@@ -884,7 +884,7 @@ function validateEffect(effect: Dnd5eEffectDefinitionV1, label: string, errors: 
         !finiteInteger(modifier.minimumPassageGapInches, 1, 120)) ||
       Object.values(modifier).filter((value) => value != null).length <= 1
     )) errors.push(`${modifierLabel} environmental capability is invalid`)
-    if (modifier.kind === 'climb-speed' && modifier.mode !== 'walking-speed') {
+    if ((modifier.kind === 'climb-speed' || modifier.kind === 'swim-speed') && modifier.mode !== 'walking-speed') {
       errors.push(`${modifierLabel}.mode is invalid`)
     }
     if (modifier.kind === 'truesight' && !finiteInteger(modifier.rangeFeet, 1, 10_000)) {
@@ -1271,10 +1271,11 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
     return
   }
   if (operation.kind === 'move') {
-    if (!['push', 'pull', 'teleport', 'swap', 'ascend', 'descend'].includes(operation.mode)) errors.push(`${label}.mode is invalid`)
+    if (!['push', 'pull', 'forced', 'teleport', 'swap', 'ascend', 'descend'].includes(operation.mode)) errors.push(`${label}.mode is invalid`)
     if (operation.placement != null && operation.placement !== 'host-automatic-maximum') {
       errors.push(`${label}.placement is invalid`)
     }
+    if (operation.maximumDistanceFromActorFeet != null && (!Number.isFinite(operation.maximumDistanceFromActorFeet) || operation.maximumDistanceFromActorFeet < 0)) errors.push(`${label}.maximumDistanceFromActorFeet is invalid`)
     if (operation.placement === 'host-automatic-maximum' && !['push', 'pull'].includes(operation.mode)) {
       errors.push(`${label}.placement requires push or pull`)
     }
@@ -1750,6 +1751,7 @@ function validateOperation(operation: Dnd5eActivityOperationV1, label: string, e
       operation.concentration !== false ||
       !validId(operation.hallucinatoryTerrain.appearanceChoiceId)
     )) errors.push(`${label}.hallucinatoryTerrain is invalid`)
+    if (operation.symbolMode != null && (!['death', 'discord', 'fear', 'hopelessness', 'insanity', 'pain', 'sleep', 'stunning'].includes(operation.symbolMode) || operation.permanent !== true || operation.concentration !== false)) errors.push(`${label}.symbolMode is invalid`)
     if (operation.programmedIllusion != null && (
       operation.permanent !== true ||
       operation.concentration !== false ||
@@ -1978,7 +1980,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
       if (!validId(check.opposedRollId) || check.opposedRollId === check.rollId) {
         errors.push(`${label}.opposedRollId is invalid`)
       }
-      if (!ABILITIES.has(check.sourceAbility)) errors.push(`${label}.sourceAbility is invalid`)
+      if (check.sourceAbility !== 'spellcasting' && !ABILITIES.has(check.sourceAbility)) errors.push(`${label}.sourceAbility is invalid`)
       appendFormulaErrors(errors, check.sourceModifier, `${label}.sourceModifier`)
       if (!Array.isArray(check.targetOptions) || check.targetOptions.length < 1 ||
         check.targetOptions.length > 6 || check.targetOptions.some((option) =>
@@ -2209,7 +2211,7 @@ export function validateDnd5eActivityDefinitionV1(activity: Dnd5eActivityDefinit
             modifier.kind === 'forced-flee-from-source' ||
             modifier.kind === 'maximum-attacks-per-turn' ||
             modifier.kind === 'restricted-extra-action' ||
-            modifier.kind === 'darkvision' || modifier.kind === 'climb-speed' ||
+            modifier.kind === 'darkvision' || modifier.kind === 'climb-speed' || modifier.kind === 'swim-speed' ||
             modifier.kind === 'truesight' || modifier.kind === 'spell-targeting-immunity' || modifier.kind === 'see-invisible' ||
             modifier.kind === 'emitted-light' ||
             modifier.kind === 'language-capability' ||

@@ -57,7 +57,7 @@ describe('MapDiceRoller', () => {
     expect(html).toContain('data-testid="map-dice-roller-topbar"')
     expect(html.indexOf('data-testid="map-dice-roller-topbar"'))
       .toBeLessThan(html.indexOf('数量'))
-    expect(html).toContain('data-testid="map-dice-roller-quick-actions"')
+    expect(html).not.toContain('data-testid="map-dice-roller-quick-actions"')
     expect(html).toContain('data-testid="map-dice-roller-quick-roll"')
     expect(html).toContain('尚未添加骰子')
     expect(html).toContain('点击添加 d20；右键移除')

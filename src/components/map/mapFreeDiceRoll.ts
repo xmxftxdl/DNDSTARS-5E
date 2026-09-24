@@ -1,11 +1,36 @@
+import { MAX_DICE_POOL_COUNT } from '../../lib/dicePoolLimits'
+export { MAX_DICE_POOL_COUNT } from '../../lib/dicePoolLimits'
 export interface MapFreeDiceResolution {
   keep?: 'highest' | 'lowest'
   dc?: number
 }
 
+/** Replace by position so equal-valued dice remain independently selectable. */
+export function replaceMapFreeDie(values: readonly number[], index: number, value: number): number[] {
+  if (!Number.isInteger(index) || index < 0 || index >= values.length) {
+    throw new Error('Invalid die index')
+  }
+  return values.map((previous, position) => position === index ? value : previous)
+}
+
 export interface MapFreeDiceSelection {
   count: number
   sides: number
+}
+
+export function mixedDiceFormula(groups: readonly MapFreeDiceSelection[]): string {
+  return groups.filter(group => group.count > 0).map(group => `${group.count}d${group.sides}`).join(' + ')
+}
+export function mixedDiceSides(groups: readonly MapFreeDiceSelection[]): number[] {
+  return groups.flatMap(group => Array.from({ length: group.count }, () => group.sides))
+}
+export function updateMixedDice(groups: readonly MapFreeDiceSelection[], sides: number, count: number): MapFreeDiceSelection[] {
+  const otherCount = groups.filter(group => group.sides !== sides).reduce((sum, group) => sum + group.count, 0)
+  const nextCount = Math.max(0, Math.min(MAX_DICE_POOL_COUNT - otherCount, Math.floor(count)))
+  const result = groups.some(group => group.sides === sides)
+    ? groups.map(group => group.sides === sides ? { sides, count: nextCount } : group)
+    : [...groups, { sides, count: nextCount }]
+  return result.filter(group => group.count > 0)
 }
 
 export function addMapFreeDie(
@@ -14,7 +39,7 @@ export function addMapFreeDie(
 ): MapFreeDiceSelection {
   const safeSides = Math.max(2, Math.min(100, Math.round(sides)))
   return selection.sides === safeSides && selection.count > 0
-    ? { sides: safeSides, count: Math.min(12, selection.count + 1) }
+    ? { sides: safeSides, count: Math.min(MAX_DICE_POOL_COUNT, selection.count + 1) }
     : { sides: safeSides, count: 1 }
 }
 
@@ -60,6 +85,7 @@ export function mapFreeDiceKeepSuffix(keep?: MapFreeDiceResolution['keep']): str
 }
 
 export function buildMapFreeDiceRollPresentation(input: {
+  groups?: MapFreeDiceSelection[]
   rollerName: string
   values: readonly number[]
   count: number
@@ -75,7 +101,7 @@ export function buildMapFreeDiceRollPresentation(input: {
   logDetails: string[]
 } {
   const resolved = resolveMapFreeDiceRoll(input.values, input.bonus, input.resolution)
-  const formula = `${input.count}d${input.sides}${mapFreeDiceKeepSuffix(input.resolution?.keep)}${input.bonus === 0 ? '' : input.bonus > 0 ? ` + ${input.bonus}` : ` - ${Math.abs(input.bonus)}`}`
+  const formula = `${input.groups?.length ? mixedDiceFormula(input.groups) : `${input.count}d${input.sides}`}${mapFreeDiceKeepSuffix(input.resolution?.keep)}${input.bonus === 0 ? '' : input.bonus > 0 ? ` + ${input.bonus}` : ` - ${Math.abs(input.bonus)}`}`
   const outcome = resolved.outcome === 'success' ? '通过' : resolved.outcome === 'failure' ? '未通过' : undefined
   const keptDetail = input.resolution?.keep && resolved.keptValue != null
     ? `，${input.resolution.keep === 'highest' ? '取高' : '取低'} ${resolved.keptValue}`

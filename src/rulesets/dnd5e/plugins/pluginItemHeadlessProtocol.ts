@@ -7,6 +7,7 @@ import type {
 import { DND5E_DAMAGE_TYPES } from '../damageTypes'
 import { getDnd5eSrdCombatSpell } from '../spells'
 import { validateDnd5eWorkshopDamageFormulaV1 } from '../workshopDamageFormula'
+import { createDnd5eMechanicalEffect, createDnd5eConditionEffect, validateDnd5eActiveEffectsStrict } from '../activeEffects'
 
 type ItemHeadlessDeclaration = Pick<
   Dnd5eInventoryItemTemplate,
@@ -89,12 +90,22 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
         !finiteInteger(use.effect.amount, 1, 9) ||
         use.effect.selection !== 'selected-expended-slot'
       ) throw new Error(`Invalid plugin spell-slot recovery item: ${itemId}`)
+    } else if (use.effect.kind === 'stabilize') {
+      if (use.targeting?.kind !== 'creature') throw new Error(`Stabilization requires a creature target: ${itemId}`)
+    } else if (use.effect.kind === 'active-effect') {
+      if (!finiteInteger(use.effect.durationRounds, 1, 14400) || use.targeting) throw new Error(`Invalid item effect duration or target: ${itemId}`)
+      const config = { definitionId: itemId, label: itemId, source: { kind: 'item' as const }, targetId: 'validation',
+        modifiers: use.effect.modifiers, breakOn: use.effect.breakOn }
+      const effect = use.effect.condition
+        ? createDnd5eConditionEffect({ ...config, condition: use.effect.condition })
+        : createDnd5eMechanicalEffect(config)
+      if (!validateDnd5eActiveEffectsStrict([effect]).ok) throw new Error(`Invalid item active effect: ${itemId}`)
     } else if (use.effect.kind === 'spell-cast') {
       const spell = typeof use.effect.spellId === 'string'
         ? getDnd5eSrdCombatSpell(use.effect.spellId)
         : undefined
       const requiresSpellAttackBonus = spell?.effect === 'spell-attack'
-      const requiresSpellSaveDc = spell?.saveAbility != null || spell?.unwillingSaveAbility != null
+      const requiresSpellSaveDc = use.effect.targeting !== 'self-only' && (spell?.saveAbility != null || spell?.unwillingSaveAbility != null)
       if (
         use.effect.schemaVersion !== 1 ||
         !validId(use.effect.spellId) || !spell || spell.castingTime === 'reaction' ||
@@ -155,7 +166,11 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
       (effect.resourceId != null && !resourceIds.has(effect.resourceId)) ||
       (effect.resourceCost != null && !finiteInteger(effect.resourceCost, 1, 1_000_000))
     ) throw new Error(`Invalid plugin item Headless resource: ${itemId}`)
-    if (effect.kind === 'attack-roll-reroll') {
+    if (effect.kind === 'equipped-passive') {
+      if (effect.resourceId || effect.resourceCost || !validateDnd5eActiveEffectsStrict([createDnd5eMechanicalEffect({
+        definitionId: itemId, label: itemId, targetId: 'validation', source: { kind: 'item' }, modifiers: effect.modifiers,
+      })]).ok) throw new Error(`Invalid equipped passive effect: ${itemId}`)
+    } else if (effect.kind === 'attack-roll-reroll') {
       if (!resourceIds.has(effect.resourceId) || effect.maximumDice !== 1 || effect.trigger !== 'after-attack-roll' ||
         !['attacks-with-this-weapon', 'weapon-attacks'].includes(effect.appliesTo)) {
         throw new Error(`Invalid plugin item Headless effect: ${itemId}`)

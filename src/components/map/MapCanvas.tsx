@@ -1,3 +1,10 @@
+import { IceWallVisual } from './IceWallVisual'
+import { ForceWallPanelsVisual } from './ForceWallPanelsVisual'
+import { StoneWallAttackTargets } from './StoneWallAttackTargets'
+import { StoneWallVisual } from './StoneWallVisual'
+import { playerVisibleCanvasTokens } from './playerTokenVisibility'
+import { GridAreaOutline } from './GridAreaOutline'
+import { measurePointsEqual, tabletopLinePoints, tabletopStrokeIntersectsBox, type Point } from './mapCanvasGeometry'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow } from 'react-konva'
 import Konva from 'konva'
@@ -11,8 +18,10 @@ import {
   snapToCellCenter,
   type GridCell,
 } from '../../lib/gridCombat'
-import { tokenMovementAnimationPosition } from '../../lib/tokenMovementAnimation'
+import { tokenMovementAnimationOwnsPosition, tokenMovementAnimationPosition } from '../../lib/tokenMovementAnimation'
 import {
+  authoritativeVisibleTokens,
+  directMoveSnapshotHasArrived,
   canDragMapToken,
   resolveOptimisticTokenMovePreview,
   shouldValidateMapTokenMoveLocally,
@@ -216,6 +225,7 @@ interface MapCanvasProps {
   standardConditionTokenMarks?: StandardConditionTokenMark[]
   onDnd5eStatusTokenClick?: (instance: MapTokenStatusInstance) => void
   onDnd5ePluginAreaVisibilityToggle?: (areaId: string) => void
+  onStoneWallAttackSelect?: (areaId: string, panelId: string) => void
   onDnd5ePluginAreaClick?: (areaId: string) => void
   tokenHoverLabels?: Record<string, string>
   projectiles?: MapProjectile[]
@@ -347,23 +357,11 @@ interface MapCanvasProps {
     points?: MapTabletopPoint[],
   ) => void
   onTabletopAnnotationDelete?: (annotationId: string) => void
+  onTabletopToolCancel?: () => void
   /** DM 视角：始终显示敌人血量条；玩家视角受 token.showHpOnToken 控制 */
   isDM?: boolean
   /** Current player character used for source-only spell-entity presentation. */
   viewerCharacterId?: string
-}
-
-interface Point {
-  x: number
-  y: number
-}
-
-function measurePointsEqual(a: Point, b: Point): boolean {
-  return Math.hypot(b.x - a.x, b.y - a.y) < 1.5
-}
-
-function tabletopLinePoints(points: readonly MapTabletopPoint[]): number[] {
-  return points.flatMap((point) => [point.x, point.y])
 }
 
 export default function MapCanvas({
@@ -402,6 +400,7 @@ export default function MapCanvas({
   onDnd5eStatusTokenClick,
   onDnd5ePluginAreaVisibilityToggle,
   onDnd5ePluginAreaClick,
+  onStoneWallAttackSelect,
   tokenHoverLabels = {},
   projectiles = [],
   attackTargetEffects = [],
@@ -482,6 +481,7 @@ export default function MapCanvas({
   onTabletopPoint,
   onTabletopAnnotation,
   onTabletopAnnotationDelete,
+  onTabletopToolCancel,
   isDM = false,
   viewerCharacterId,
 }: MapCanvasProps) {
@@ -511,7 +511,19 @@ export default function MapCanvas({
     left: number
     top: number
   } | null>(null)
-  const suppressTokenSelectUntilRef = useRef(0)
+  const areaPlacementPointerRef = useRef(false)
+  const selectCanvasToken = (token: Token) => {
+    if (deleteSelectMode || (!isDM && !renderedTokens.some(candidate => candidate.id === token.id))) return
+    const areaClick = aoeSelectMode || areaPlacementPointerRef.current
+    const action = mapCanvasTokenClickAction(areaClick, moveSelectMode && !!moveCircle,
+      !areaClick && targetSelectableTokenIds.includes(token.id))
+    if (action === 'consume-area-click') return
+    if (action === 'select-movement-destination') {
+      onMoveSelect?.({ x: token.x, y: token.y })
+      return
+    }
+    onSelectToken(token.id)
+  }
   const [tokenDragVisualState, setTokenDragVisualState] = useState<{
     previews: Record<string, Point>
     suppressedMovementAnimationIds: Record<string, string>
@@ -524,8 +536,7 @@ export default function MapCanvas({
   // whole canvas on every frame. Keep its latest coordinate outside React so
   // an async commit cannot release detached layers using a stale render.
   const tokenDragVisualPositionsRef = useRef<Record<string, Point>>({})
-  const pendingTokenVisionPreviewRef = useRef<Record<string, Point>>({})
-  const tokenVisionPreviewFrameRef = useRef<number | null>(null)
+  const acceptedDirectMoveSnapshotsRef = useRef<Record<string, { origin: Point; destination: Point }>>({})
   const tokenVisualNodesRef = useRef(new Map<string, Set<TokenVisualNodeLike>>())
   const tokenBorderFlowLayerRef = useRef<Konva.Layer>(null)
   const tokenBorderFlowAnimationEntriesRef = useRef(
@@ -602,6 +613,9 @@ export default function MapCanvas({
   })
   const [geometryViewportPanActive, setGeometryViewportPanActive] = useState(false)
   const tabletopDragStartRef = useRef<MapTabletopPoint | null>(null)
+  const tabletopEraseRef = useRef<{ pointerId: number; clientX: number; clientY: number; from: Point; to: Point; dragged: boolean } | null>(null)
+  const suppressTabletopContextRef = useRef(false)
+  const [tabletopEraseBox, setTabletopEraseBox] = useState<{ from: Point; to: Point } | null>(null)
   const [tabletopDraft, setTabletopDraft] = useState<{
     shape: MapTabletopAnnotationShape
     from: MapTabletopPoint
@@ -611,12 +625,6 @@ export default function MapCanvas({
   const [tabletopNow, setTabletopNow] = useState(() => Date.now())
   const appliedFocusIdRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
-
-  useEffect(() => () => {
-    if (tokenVisionPreviewFrameRef.current != null) {
-      window.cancelAnimationFrame(tokenVisionPreviewFrameRef.current)
-    }
-  }, [])
 
   const handleTokenStatusTooltipChange = useCallback<TokenStatusTooltipChange>((tooltip) => {
     if (!tooltip) {
@@ -847,13 +855,14 @@ export default function MapCanvas({
     }
     return token
   }
-  const visibilityMap = Object.keys(dragPreviewPositions).length > 0
-    ? { ...map, tokens: map.tokens.map(displayToken) }
-    : map
+  // A drag is a placement preview, not an accepted move. Keep wall clipping,
+  // illumination and target visibility at the authoritative position until
+  // the move is accepted; otherwise every pointer step opens/closes fog edges.
+  const visibilityMap = map
   const etherealTokenIdSet = new Set(etherealTokenIds)
-  const renderedTokens = isDM
+  const visibilityTokens = isDM
     ? map.tokens
-    : map.tokens.filter((token) =>
+    : playerVisibleCanvasTokens({ map: visibilityMap, geometry, fog, visionSourceTokenIds, viewerCharacterId, worldMinute }).filter((token) =>
         (
           !etherealTokenIdSet.has(token.id) ||
           token.characterId === viewerCharacterId
@@ -862,15 +871,34 @@ export default function MapCanvas({
           token.dnd5eSpellEffect.sourceCharacterId === viewerCharacterId
         ))
 
+  const renderedTokens = authoritativeVisibleTokens(map.tokens, visibilityTokens)
+  const visibleTokenIdsKey = renderedTokens.map(token => token.id).join(',')
+  useEffect(() => {
+    const visibleIds = new Set(visibleTokenIdsKey.split(','))
+    setHoveredTokenId(id => id && !visibleIds.has(id) ? null : id)
+    setTokenStatusTooltip(null)
+  }, [visibleTokenIdsKey])
+
   const movementFrameTokens = renderedTokens.map(displayToken)
 
-  useEffect(() => {
-    if (!movementFrameTokens.some((token) => token.movementAnimation)) return
+  useLayoutEffect(() => {
+    // Finish the React commit with one position for body, ring and status.
+    // Coordinate-only moves must not leave the body running a private tween
+    // while the ring has already jumped to its authoritative destination.
+    for (const token of movementFrameTokens) {
+      if (activeDraggingTokenIdsRef.current.has(token.id)) continue
+      if (tokenMovementAnimationOwnsPosition(token.movementAnimation, token, Date.now())) continue
+      const nodes = tokenVisualNodesRef.current.get(token.id)
+      if (nodes?.size) syncTokenVisualNodes(nodes, { x: token.x, y: token.y })
+    }
+    const activeMovementTokens = movementFrameTokens.filter(token =>
+      tokenMovementAnimationOwnsPosition(token.movementAnimation, token, Date.now()))
+    if (activeMovementTokens.length === 0) return
 
     // Map Tokens are rendered as detached body, perimeter, label and status
     // groups to preserve their z-order. Cancel each group's private tween once;
     // the map-level clock below writes one coordinate to every group per frame.
-    for (const token of movementFrameTokens) {
+    for (const token of activeMovementTokens) {
       if (!token.movementAnimation) continue
       for (const node of tokenVisualNodesRef.current.get(token.id) ?? []) {
         node.cancelPositionAnimation?.()
@@ -883,7 +911,7 @@ export default function MapCanvas({
       if (disposed) return
       const now = Date.now()
       let movementStillActive = false
-      const entries = movementFrameTokens.flatMap((token) => {
+      const entries = activeMovementTokens.flatMap((token) => {
         const animation = token.movementAnimation
         if (!animation || activeDraggingTokenIdsRef.current.has(token.id)) return []
         const animated = tokenMovementAnimationPosition(
@@ -910,7 +938,7 @@ export default function MapCanvas({
   }, [movementFrameTokens])
 
   const canDragToken = (token: Token): boolean =>
-    canDragMapToken({
+    targetSelectableTokenIds.length === 0 && canDragMapToken({
       isDm: isDM,
       combatActive,
       token,
@@ -940,6 +968,7 @@ export default function MapCanvas({
   }
 
   const beginTokenDrag = (token: Token, x: number, y: number) => {
+    delete acceptedDirectMoveSnapshotsRef.current[token.id]
     activeDraggingTokenIdsRef.current.add(token.id)
     setTokenVisualPositionLocked(token.id, true)
     previewTokenDrag(token, x, y)
@@ -956,24 +985,6 @@ export default function MapCanvas({
       // every pointer event.
       effectTokenDragPositionsRef.current[token.id] = { x, y }
       syncEffectTokenAreaOverlayPosition(token.id, x, y)
-    }
-    if (visionSourceTokenIds.includes(token.id)) {
-      pendingTokenVisionPreviewRef.current[token.id] = { x, y }
-      if (tokenVisionPreviewFrameRef.current == null) {
-        tokenVisionPreviewFrameRef.current = window.requestAnimationFrame(() => {
-          tokenVisionPreviewFrameRef.current = null
-          const previews = pendingTokenVisionPreviewRef.current
-          pendingTokenVisionPreviewRef.current = {}
-          if (Object.keys(previews).length === 0) return
-          setTokenDragVisualState((current) => ({
-            ...current,
-            previews: {
-              ...current.previews,
-              ...previews,
-            },
-          }))
-        })
-      }
     }
   }
 
@@ -992,14 +1003,7 @@ export default function MapCanvas({
       setTokenVisualPositionLocked(tokenId, false)
     }
     delete tokenDragVisualPositionsRef.current[tokenId]
-    delete pendingTokenVisionPreviewRef.current[tokenId]
-    if (
-      tokenVisionPreviewFrameRef.current != null &&
-      Object.keys(pendingTokenVisionPreviewRef.current).length === 0
-    ) {
-      window.cancelAnimationFrame(tokenVisionPreviewFrameRef.current)
-      tokenVisionPreviewFrameRef.current = null
-    }
+    delete acceptedDirectMoveSnapshotsRef.current[tokenId]
     delete effectTokenDragPositionsRef.current[tokenId]
     setTokenDragVisualState((current) => {
       if (!current.previews[tokenId]) return current
@@ -1034,6 +1038,8 @@ export default function MapCanvas({
       }> = []
       for (const [tokenId, preview] of Object.entries(dragPreviewPositions)) {
         const authoritative = map.tokens.find((token) => token.id === tokenId)
+        const accepted = acceptedDirectMoveSnapshotsRef.current[tokenId]
+        if (accepted && !directMoveSnapshotHasArrived({ ...accepted, authoritative })) continue
         const resolution = resolveOptimisticTokenMovePreview({
           // Parent renders and map invalidations can arrive while the pointer
           // is still down. They must not release the preview before submit.
@@ -1099,11 +1105,16 @@ export default function MapCanvas({
     tokenId: string,
     generation: number,
     completion: Promise<void>,
+    origin: Point,
+    destination: Point,
   ) => {
     void completion.then(
       () => {
         if (directMovePreviewTracker.complete(tokenId, generation)) {
-          releaseTokenDragPreview(tokenId)
+          // A resolved save is not a committed React map snapshot. Retain the
+          // token preview until the render receives the accepted position.
+          acceptedDirectMoveSnapshotsRef.current[tokenId] = { origin, destination }
+          setTokenDragVisualState(current => ({ ...current, previews: { ...current.previews } }))
         }
       },
       (error) => {
@@ -1151,7 +1162,7 @@ export default function MapCanvas({
       } else if (requestResult instanceof Promise) {
         const generation = directMovePreviewTracker.begin(token.id)
         previewTokenDrag(token, position.x, position.y)
-        monitorDirectTokenMove(token.id, generation, requestResult)
+        monitorDirectTokenMove(token.id, generation, requestResult, token, position)
       } else {
         rollbackTokenDragPreview(token.id)
       }
@@ -1177,7 +1188,7 @@ export default function MapCanvas({
       })
       return
     }
-    monitorDirectTokenMove(token.id, generation, completion)
+    monitorDirectTokenMove(token.id, generation, completion, token, position)
   }
 
   // Clear measurement lines when leaving measurement mode.
@@ -1343,10 +1354,11 @@ export default function MapCanvas({
     if (!movingToken) return undefined
     return findMapGeometryPath({
       map, geometry, token: movingToken, to: cursor, maximumVisited: 5_000,
+      climbVerticalSurfaces: moveTraversalMode === 'climb',
       canClimb: moveTraversalMode === 'climb' || moveTraversalMode === 'fly',
       canSwim: moveTraversalMode === 'swim' || moveTreatsLiquidSurfacesAsSolidGround,
       canFly: moveTraversalMode === 'fly' || moveIgnoreMaterialCollision,
-      targetElevationFeet: moveTraversalMode === 'fly' || moveIgnoreMaterialCollision
+      targetElevationFeet: moveTraversalMode === 'climb' || moveTraversalMode === 'fly' || moveIgnoreMaterialCollision
         ? moveTargetElevationFeet ?? mapGeometryTokenElevation(geometry, movingToken)
         : undefined,
       maximumTerrainStepFeet: moveTraversalMode === 'fall' ? 10_000 : 10,
@@ -1549,8 +1561,14 @@ export default function MapCanvas({
     return {
       ...common,
       kind: 'obstacle',
-      cover: 'half',
-      terrainElevationFeet: 0,
+      cover: geometryTool === 'magical-darkness' ? 'none' : 'half',
+      ...(geometryTool === 'magical-darkness' ? {
+        label: '魔法黑暗',
+        magicalDarkness: true,
+        blocksVision: false,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+      } : { terrainElevationFeet: 0 }),
       points: [
         { x: rect.x, y: rect.y },
         { x: rect.x + rect.width, y: rect.y },
@@ -1908,6 +1926,9 @@ export default function MapCanvas({
     : gridSizePreview
       ? gridStrokeRgba(gridHex, Math.min(0.85, gridAlpha + 0.22))
       : gridStrokeRgba(gridHex, gridAlpha)
+  // Keep the static raster/grid on a retained layer. Token previews must not
+  // invalidate its grid point arrays or repaint the entire map image.
+  const backgroundLayer = useMemo(() => {
   const gridLines: React.ReactNode[] = []
   const coordinateLabels: React.ReactNode[] = []
   if (showGridOverlay) {
@@ -1999,6 +2020,15 @@ export default function MapCanvas({
       )
     }
   }
+
+  return <Layer name="map-background-layer">
+    <Rect x={0} y={0} width={map.width} height={map.height} fill={canvasMatteColor} listening={false} />
+    {image && <KonvaImage image={image} width={map.width} height={map.height} />}
+    {gridLines}
+    {coordinateLabels}
+  </Layer>
+  }, [image, canvasMatteColor, map.width, map.height, map.gridSize,
+    map.gridOffsetX, map.gridOffsetY, map.showCoordinates, showGridOverlay, gridStroke, gridAdjustMode])
 
   const inv = 1 / view.scale // Keep strokes/text size stable while zooming.
 
@@ -2163,10 +2193,10 @@ export default function MapCanvas({
     geometrySearchMode,
     sceneEditMode: sceneEditMode || scenePointPlacementMode,
   })
-  const stageCanPan = !geometryDragActive && !geometryViewportPanActive && stagePanAllowedByTools
+  const stageCanPan = targetSelectableTokenIds.length === 0 && !geometryDragActive && !geometryViewportPanActive && stagePanAllowedByTools
   const aoeHighlightVisible = aoeSelectMode || aoeHighlight != null
   const savingThrowToken = savingThrowTokenId
-    ? map.tokens.find((candidate) => candidate.id === savingThrowTokenId)
+    ? renderedTokens.find((candidate) => candidate.id === savingThrowTokenId)
     : undefined
   const savingThrowMarkerDiameter = savingThrowToken
     ? mapSavingThrowMarkerDiameter({
@@ -2235,6 +2265,21 @@ export default function MapCanvas({
     <div
       ref={containerRef}
       onPointerDownCapture={(event) => {
+        suppressTabletopContextRef.current = false
+        if (tabletopTool === 'freehand' && event.button === 2) {
+          event.preventDefault()
+          event.stopPropagation()
+          const rect = event.currentTarget.getBoundingClientRect()
+          const from = { x: (event.clientX - rect.left - view.x) / view.scale, y: (event.clientY - rect.top - view.y) / view.scale }
+          tabletopEraseRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, from, to: from, dragged: false }
+          suppressTabletopContextRef.current = true
+          tabletopDragStartRef.current = null
+          setTabletopDraft(null)
+          stageRef.current?.stopDrag()
+          stageRef.current?.draggable(false)
+          event.currentTarget.setPointerCapture(event.pointerId)
+          return
+        }
         if (mapCanvasGeometryRightButtonPanShouldStart({
           button: event.button,
           geometryEditMode,
@@ -2290,6 +2335,16 @@ export default function MapCanvas({
         event.currentTarget.setPointerCapture(event.pointerId)
       }}
       onPointerMoveCapture={(event) => {
+        const erase = tabletopEraseRef.current
+        if (erase && erase.pointerId === event.pointerId) {
+          event.preventDefault()
+          event.stopPropagation()
+          const rect = event.currentTarget.getBoundingClientRect()
+          erase.to = { x: (event.clientX - rect.left - view.x) / view.scale, y: (event.clientY - rect.top - view.y) / view.scale }
+          erase.dragged ||= Math.hypot(event.clientX - erase.clientX, event.clientY - erase.clientY) >= 5
+          if (erase.dragged) setTabletopEraseBox({ from: erase.from, to: erase.to })
+          return
+        }
         const start = geometryViewportPanStartRef.current
         if (!start) return
         event.preventDefault()
@@ -2313,6 +2368,21 @@ export default function MapCanvas({
         }
       }}
       onPointerUpCapture={(event) => {
+        const erase = tabletopEraseRef.current
+        if (erase && erase.pointerId === event.pointerId) {
+          event.preventDefault()
+          event.stopPropagation()
+          tabletopEraseRef.current = null
+          setTabletopEraseBox(null)
+          if (erase.dragged) {
+            for (const annotation of tabletopAnnotations) {
+              if (annotation.shape === 'freehand' && tabletopStrokeIntersectsBox(annotation.points ?? [annotation.from, annotation.to], erase.from, erase.to)) onTabletopAnnotationDelete?.(annotation.id)
+            }
+          } else onTabletopToolCancel?.()
+          stageRef.current?.draggable(stagePanAllowedByTools)
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+          return
+        }
         const start = geometryViewportPanStartRef.current
         if (!start || start.pointerId !== event.pointerId) return
         if (start.button === 2) {
@@ -2331,6 +2401,11 @@ export default function MapCanvas({
         }
       }}
       onPointerCancelCapture={(event) => {
+        if (tabletopEraseRef.current?.pointerId === event.pointerId) {
+          tabletopEraseRef.current = null
+          setTabletopEraseBox(null)
+          stageRef.current?.draggable(stagePanAllowedByTools)
+        }
         const start = geometryViewportPanStartRef.current
         if (!start || start.pointerId !== event.pointerId) return
         geometryViewportPanStartRef.current = null
@@ -2342,6 +2417,11 @@ export default function MapCanvas({
         }
       }}
       onContextMenuCapture={(event) => {
+        if (suppressTabletopContextRef.current || tabletopTool === 'freehand') {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         if (geometryEditMode) event.preventDefault()
       }}
       data-testid="map-canvas"
@@ -2498,6 +2578,14 @@ export default function MapCanvas({
         }}
         onMouseDown={(e) => {
           const stage = e.target.getStage()
+          // A new gesture releases the previous placement. The matching click
+          // stays consumed even if placement closes targeting before mouse-up.
+          if (e.evt.button === 0) areaPlacementPointerRef.current = false
+          if (!aoeSelectMode && targetSelectableTokenIds.length > 0 && e.evt.button === 0) {
+            // A fresh click belongs to the committed template's protection
+            // picker, not the preceding placement click or a movement tool.
+            return
+          }
           if (scenePointPlacementMode && e.evt.button === 0) {
             e.cancelBubble = true
             const point = relativePoint(stage)
@@ -2558,7 +2646,7 @@ export default function MapCanvas({
             e.cancelBubble = true
             // pointer-down 确认范围后，React 可能在随后的 click 前关闭选点模式；
             // 保留一个短暂抑制窗口，避免同一次点击继续选中 Token。
-            suppressTokenSelectUntilRef.current = Date.now() + 500
+            areaPlacementPointerRef.current = true
             const p = relativePoint(stage)
             if (p) {
               onAoeConfirm?.(gridPoint(p), mapTokenIdFromNode(e.target))
@@ -2721,20 +2809,9 @@ export default function MapCanvas({
           onMapPing?.(point)
         }}
       >
-        <Layer name="map-background-layer">
-          <Rect
-            x={0}
-            y={0}
-            width={map.width}
-            height={map.height}
-            fill={canvasMatteColor}
-            listening={false}
-          />
-          {image && <KonvaImage image={image} width={map.width} height={map.height} />}
-          {gridLines}
-          {coordinateLabels}
-          <TerrainElevationContours geometry={geometry} inv={inv} />
-          <DifficultTerrainCellOverlays map={map} cells={difficultTerrainCells} />
+        {backgroundLayer}
+        <Layer name="map-ground-overlay-layer">
+          {(geometryEditMode || moveSelectMode) && <DifficultTerrainCellOverlays map={map} cells={difficultTerrainCells} showLabels={geometryEditMode} />}
           {isDM && sceneTriggerZones.map((zone) =>
             sceneRegionNode(
               zone.region,
@@ -2877,6 +2954,14 @@ export default function MapCanvas({
               variant="attack"
             />
           )}
+          {aoeHighlightVisible && aoeHighlight && !!aoeHighlight.hazardCells?.length && <>
+            <GridAreaOutline map={map} cells={[...aoeHighlight.cells, ...aoeHighlight.hazardCells]} color={aoeHighlight.valid ? '#fbbf24' : '#fb7185'} dashed />
+            <GridAreaOutline map={map} cells={aoeHighlight.cells} color="#fff7d6" />
+          </>}
+          {aoeHighlightVisible && aoeHighlight?.stoneWallPanels && (aoeHighlight.forceWallPreview
+            ? <ForceWallPanelsVisual map={map} panels={aoeHighlight.stoneWallPanels} draftPanelId={aoeHighlight.stoneWallDraftPanelId} />
+            : aoeHighlight.iceWallPreview ? <IceWallVisual map={map} area={{stoneWall:{mode:'ice',saveDc:10,panels:aoeHighlight.stoneWallPanels}}} draftPanelId={aoeHighlight.stoneWallDraftPanelId} />
+            : <StoneWallVisual map={map} panels={aoeHighlight.stoneWallPanels} preview draftPanelId={aoeHighlight.stoneWallDraftPanelId} />)}
           {!aoeHighlightVisible && rangedRangeCells.length > 0 && (
             <AoeCellHighlights
               map={map}
@@ -2928,6 +3013,9 @@ export default function MapCanvas({
             registerEffectTokenAreaOverlay={registerEffectTokenAreaOverlay}
             onPersistentVisualReady={markPersistentVisualReady}
           />
+          {onStoneWallAttackSelect && <StoneWallAttackTargets map={map} isDM={isDM} onSelect={onStoneWallAttackSelect} />}
+          {/* Keep height boundaries above area fills and targeting grids, below Tokens. */}
+          <TerrainElevationContours geometry={geometry} inv={inv} />
           {renderedTokens.map((t) => {
             const hp = hpByToken?.[t.id]
             const defeated = hp != null ? hp.hp <= 0 : defeatedTokenIds.includes(t.id)
@@ -2958,21 +3046,7 @@ export default function MapCanvas({
                 // Use functional updates to avoid hover flicker races.
                 setHoveredTokenId((id) => (hovered ? t.id : id === t.id ? null : id))
               }
-              onSelect={() => {
-                if (deleteSelectMode) return
-                // Stage 的 pointer-down 已经按实际指针格确认范围；这里仅消费后续
-                // token click，避免同一点击重复提交并打开怪物详情。
-                const clickAction = mapCanvasTokenClickAction(
-                  aoeSelectMode || Date.now() < suppressTokenSelectUntilRef.current,
-                  moveSelectMode && !!moveCircle,
-                )
-                if (clickAction === 'consume-area-click') return
-                if (clickAction === 'select-movement-destination') {
-                  onMoveSelect?.({ x: t.x, y: t.y })
-                  return
-                }
-                onSelectToken(t.id)
-              }}
+              onSelect={() => selectCanvasToken(t)}
               instantPosition={mapCanvasTokenUsesInstantPosition({
                 gridAdjustMode,
                 gridSizePreview,
@@ -3018,7 +3092,7 @@ export default function MapCanvas({
         <Layer name="token-foreground-layer">
 
           {chillTouchTokenIds.flatMap((tokenId) => {
-            const token = map.tokens.find((candidate) => candidate.id === tokenId)
+            const token = renderedTokens.find((candidate) => candidate.id === tokenId)
             if (!token) return []
             return [(
               <ChillTouchPersistentMark
@@ -3090,6 +3164,7 @@ export default function MapCanvas({
               />
             )
           })}
+          {tabletopEraseBox && <Rect x={Math.min(tabletopEraseBox.from.x, tabletopEraseBox.to.x)} y={Math.min(tabletopEraseBox.from.y, tabletopEraseBox.to.y)} width={Math.abs(tabletopEraseBox.to.x - tabletopEraseBox.from.x)} height={Math.abs(tabletopEraseBox.to.y - tabletopEraseBox.from.y)} stroke="#fb7185" strokeWidth={inv} dash={[5 * inv, 4 * inv]} fill="rgba(251,113,133,0.12)" listening={false} />}
           {tabletopDraft && (tabletopDraft.shape === 'arrow' ? (
             <Arrow
               points={[tabletopDraft.from.x, tabletopDraft.from.y, tabletopDraft.to.x, tabletopDraft.to.y]}
@@ -3172,10 +3247,7 @@ export default function MapCanvas({
                 showName={hoveredTokenId === t.id && !compactSavingThrowTarget}
                 concentrationMark={concentrationTokenMarks.find((mark) => mark.tokenId === t.id)}
                 onHoverChange={() => undefined}
-                onSelect={() => {
-                  if (deleteSelectMode) return
-                  onSelectToken(t.id)
-                }}
+                onSelect={() => selectCanvasToken(t)}
                 instantPosition={mapCanvasTokenUsesInstantPosition({
                   gridAdjustMode,
                   gridSizePreview,
@@ -3229,10 +3301,7 @@ export default function MapCanvas({
                 hoverLabel={hoveredTokenId === t.id && !compactSavingThrowTarget ? tokenHoverLabels[t.id] : undefined}
                 showName={hoveredTokenId === t.id && !compactSavingThrowTarget}
                 onHoverChange={() => undefined}
-                onSelect={() => {
-                  if (deleteSelectMode) return
-                  onSelectToken(t.id)
-                }}
+                onSelect={() => selectCanvasToken(t)}
                 instantPosition={mapCanvasTokenUsesInstantPosition({
                   gridAdjustMode,
                   gridSizePreview,
@@ -3282,6 +3351,7 @@ export default function MapCanvas({
             />
           )}
           {moveSelectMode && movePreviewPath && (
+            <>
             <Line
               points={movePreviewPath.points.flatMap((point) => [point.x, point.y])}
               stroke={movePreviewPath.movementCostFeet <= (moveCircle?.radiusPx ?? 0) / Math.max(1, map.gridSize) * Math.max(1, map.feetPerCell ?? 5)
@@ -3293,6 +3363,15 @@ export default function MapCanvas({
               dash={[10 / Math.max(view.scale, 0.01), 6 / Math.max(view.scale, 0.01)]}
               listening={false}
             />
+            {movePreviewPath.movementCostFeet > 0 && <Text
+              x={movePreviewPath.points[movePreviewPath.points.length - 1].x + 12 * inv}
+              y={movePreviewPath.points[movePreviewPath.points.length - 1].y - 24 * inv}
+              text={`移动消耗 ${movePreviewPath.movementCostFeet} 尺`}
+              fontSize={13 * inv} fontStyle="bold" fill="#f8fafc"
+              stroke="#020617" strokeWidth={3 * inv} fillAfterStrokeEnabled
+              listening={false}
+            />}
+            </>
           )}
           </Group>
           {isDM && sceneInteractionPointNodes}

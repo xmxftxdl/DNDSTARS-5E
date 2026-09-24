@@ -16,6 +16,9 @@ export interface D20AttackRoll {
 }
 
 export interface DiceRoll {
+  sourceRollIds?: string[]
+  settlement?: { label: string; details: string[] }
+  dieSides?: number[]
   values: number[]
   sides: number
   bonus: number

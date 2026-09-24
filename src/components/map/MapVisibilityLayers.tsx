@@ -225,9 +225,11 @@ export function LightingLayer({
     ),
   )
   const ambientLight = geometry?.vision.ambientLight ?? 'bright'
+  const darknessFog = geometry?.darknessFog
+  const hasDarknessFog = !!darknessFog && (darknessFog.filled || darknessFog.shapes.length > 0)
   if (!mapLightingShouldRender(
     ambientLight,
-    magicalDarkness.length > 0 || spellDarkness.length > 0,
+    magicalDarkness.length > 0 || spellDarkness.length > 0 || hasDarknessFog,
   )) return null
   const opacity = mapLightingAmbientOpacity(ambientLight, isDM)
   const viewerProfiles = viewers.map((viewer) => ({
@@ -377,7 +379,12 @@ export function LightingLayer({
           /> : null,
         ])}
       </Group>
-      {(magicalDarkness.length > 0 || spellDarkness.length > 0) && <Group listening={false}>
+      {(magicalDarkness.length > 0 || spellDarkness.length > 0 || hasDarknessFog) && <Group listening={false}>
+        {hasDarknessFog && <Group listening={false} opacity={isDM ? Math.max(0.15, Math.min(0.8, darknessFog.opacity * 0.55)) : 0.97}
+          ref={(node) => { node?.cache({ x: 0, y: 0, width: map.width, height: map.height, pixelRatio: 1 }) }}>
+          {darknessFog.filled && <Rect width={map.width} height={map.height} fill={darknessFog.color} listening={false} />}
+          {darknessFog.shapes.map((shape) => fogShapeNode(shape, darknessFog.color, 1))}
+        </Group>}
         {magicalDarkness.map((zone) => (
           <Line
             key={`magical-darkness-top:${zone.id}`}

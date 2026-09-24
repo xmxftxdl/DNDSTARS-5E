@@ -14,6 +14,10 @@ const GROUND_AREA_SPELLS = new Set([
   'spike-growth',
 ])
 
+export function dnd5eAreaRequiresGround(spellId: string): boolean {
+  return GROUND_AREA_SPELLS.has(spellId)
+}
+
 const COLUMN_HEIGHT_BY_SPELL: Readonly<Record<string, number>> = {
   'faerie-fire': 20,
   'hypnotic-pattern': 30,

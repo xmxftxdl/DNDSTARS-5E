@@ -1,0 +1,2475 @@
+
+ RUN  v4.1.10 C:/Users/Doco/Desktop/DND/DNDSTARS-5E
+
+ ❯ src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts (45 tests | 3 failed) 438ms
+     × casts Polymorph but leaves a 'shapechanger' target unaffected 16ms
+     × casts Polymorph but leaves a 'zero hit points' target unaffected 3ms
+     × settles Divine Word HP bands, instant death, and planar return through one Activity transaction 14ms
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts (287 tests | 16 failed) 1614ms
+     × consumes the action and slot but suppresses a spell cast from inside antimagic 31ms
+     × consumes a unified Activity spell inside antimagic without replacing the existing concentration 3ms
+     × consumes a spell cast but suppresses its effect on a target inside antimagic 2ms
+     × suppresses low-level spells crossing a Globe boundary but not spells cast within the same Globe 2ms
+     × resolves Misty Step as a 30-foot bonus-action teleport without spending movement 2ms
+     × resolves Sleep by current HP, excludes immune creatures, and supports both wake conditions 9ms
+     × resolves Color Spray by current HP and expires blindness at the caster next turn end 6ms
+     × pays and postpones a Slow-delayed action spell, then completes it with the next-turn action 8ms
+     × negates low-level player spell damage and control from the combatant snapshot after spending slots 2ms
+     × suspends and resumes charm effects through Berserker Mindless Rage 3ms
+     × lets a spellcaster end their own Polymorph concentration without spending a bonus action 1ms
+     × emits Magic Missile dice, per-projectile damage, total damage, and Empowered Evocation source 3ms
+     × expires Draconic Elemental Affinity resistance after its last remaining turn 2ms
+     × expires Sacred Weapon after ten of the Paladin's turns 1ms
+     × ends the Open Hand Tranquility ward when the monk makes an attack 1ms
+     × grants advantage for an attack from hiding and then reveals the attacker 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 19 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > consumes the action and slot but suppresses a spell cast from inside antimagic
+AssertionError: expected [ { …(3) }, { …(5) }, { …(10) }, …(1) ] to deep equally contain { …(6) }
+
+- Expected:
+{
+  "actorId": "antimagic-wizard",
+  "reason": "antimagic",
+  "spellId": "false-life",
+  "spellLevel": 1,
+  "targetId": "antimagic-wizard",
+  "type": "spell-effect-suppressed-by-area",
+}
+
++ Received:
+[
+  {
+    "actorId": "antimagic-wizard",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "antimagic-wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-1",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "antimagic-wizard",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "false-life": "虚假生命",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 1,
+    "spellId": "false-life",
+    "targetId": "antimagic-wizard",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "antimagic-wizard",
+    "logContext": {
+      "names": {
+        "false-life": "虚假生命",
+      },
+    },
+    "reason": "antimagic",
+    "spellId": "false-life",
+    "spellLevel": 1,
+    "targetId": "antimagic-wizard",
+    "type": "spell-effect-suppressed-by-area",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:2729:27
+    2727|       classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 1 } },
+    2728|     })
+    2729|     expect(result.events).toContainEqual({
+       |                           ^
+    2730|       type: 'spell-effect-suppressed-by-area',
+    2731|       actorId: wizard.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > consumes a unified Activity spell inside antimagic without replacing the existing concentration
+AssertionError: expected [ { …(3) }, { …(5) }, { …(7) }, …(2) ] to deep equally contain { …(6) }
+
+- Expected:
+{
+  "actorId": "antimagic-activity-wizard",
+  "reason": "antimagic",
+  "spellId": "protection-from-evil-and-good",
+  "spellLevel": 1,
+  "targetId": "antimagic-activity-wizard",
+  "type": "spell-effect-suppressed-by-area",
+}
+
++ Received:
+[
+  {
+    "actorId": "antimagic-activity-wizard",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "antimagic-activity-wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-1",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "antimagic-activity-wizard",
+    "logContext": {
+      "names": {
+        "protection-from-evil-and-good": "防护善恶",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 1,
+    "spellId": "protection-from-evil-and-good",
+    "targetId": "antimagic-activity-wizard",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "antimagic-activity-wizard",
+    "effectCount": 0,
+    "logContext": {
+      "names": {
+        "protection-from-evil-and-good": "防护善恶",
+      },
+    },
+    "slotLevel": 1,
+    "spellId": "protection-from-evil-and-good",
+    "spellName": "防护善恶",
+    "type": "adjudicated-spell-resolved",
+  },
+  {
+    "actorId": "antimagic-activity-wizard",
+    "logContext": {
+      "names": {
+        "protection-from-evil-and-good": "防护善恶",
+      },
+    },
+    "reason": "antimagic",
+    "spellId": "protection-from-evil-and-good",
+    "spellLevel": 1,
+    "targetId": "antimagic-activity-wizard",
+    "type": "spell-effect-suppressed-by-area",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:2791:27
+    2789|     expect(result).not.toHaveProperty('activityHandoffs')
+    2790|     expect(result).not.toHaveProperty('activityAreaInstance')
+    2791|     expect(result.events).toContainEqual({
+       |                           ^
+    2792|       type: 'spell-effect-suppressed-by-area',
+    2793|       actorId: wizard.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > consumes a spell cast but suppresses its effect on a target inside antimagic
+AssertionError: expected [ { …(3) }, …(2) ] to deep equally contain { …(6) }
+
+- Expected:
+{
+  "actorId": "antimagic-caster",
+  "reason": "antimagic",
+  "spellId": "fire-bolt",
+  "spellLevel": 0,
+  "targetId": "antimagic-target",
+  "type": "spell-effect-suppressed-by-area",
+}
+
++ Received:
+[
+  {
+    "actorId": "antimagic-caster",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "antimagic-caster",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "fire-bolt": "火焰箭",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 0,
+    "spellId": "fire-bolt",
+    "targetId": "antimagic-target",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "antimagic-caster",
+    "logContext": {
+      "names": {
+        "fire-bolt": "火焰箭",
+      },
+    },
+    "reason": "antimagic",
+    "spellId": "fire-bolt",
+    "spellLevel": 0,
+    "targetId": "antimagic-target",
+    "type": "spell-effect-suppressed-by-area",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:2819:27
+    2817|     if (!result.ok) return
+    2818|     expect(result.state.combatants[target.id].currentHp).toBe(40)
+    2819|     expect(result.events).toContainEqual({
+       |                           ^
+    2820|       type: 'spell-effect-suppressed-by-area',
+    2821|       actorId: wizard.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > suppresses low-level spells crossing a Globe boundary but not spells cast within the same Globe
+AssertionError: expected [ { …(3) }, …(2) ] to deep equally contain { …(7) }
+
+- Expected:
+{
+  "actorId": "globe-caster",
+  "areaId": "globe-1",
+  "reason": "spell-level-barrier",
+  "spellId": "fire-bolt",
+  "spellLevel": 0,
+  "targetId": "globe-target",
+  "type": "spell-effect-suppressed-by-area",
+}
+
++ Received:
+[
+  {
+    "actorId": "globe-caster",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "globe-caster",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "fire-bolt": "火焰箭",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 0,
+    "spellId": "fire-bolt",
+    "targetId": "globe-target",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "globe-caster",
+    "areaId": "globe-1",
+    "logContext": {
+      "names": {
+        "fire-bolt": "火焰箭",
+      },
+    },
+    "reason": "spell-level-barrier",
+    "spellId": "fire-bolt",
+    "spellLevel": 0,
+    "targetId": "globe-target",
+    "type": "spell-effect-suppressed-by-area",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:2848:28
+    2846|     if (!crossed.ok) return
+    2847|     expect(crossed.state.combatants[target.id].currentHp).toBe(40)
+    2848|     expect(crossed.events).toContainEqual({
+       |                            ^
+    2849|       type: 'spell-effect-suppressed-by-area', actorId: caster.id,
+    2850|       targetId: target.id, spellId: 'fire-bolt', spellLevel: 0,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > resolves Misty Step as a 30-foot bonus-action teleport without spending movement
+AssertionError: expected [ { …(3) }, { …(5) }, { …(10) }, …(1) ] to deep equally contain { …(4) }
+
+- Expected:
+{
+  "actorId": "wizard",
+  "areaId": "private-sanctum",
+  "spellId": "misty-step",
+  "type": "teleportation-blocked-by-area",
+}
+
++ Received:
+[
+  {
+    "actorId": "wizard",
+    "resource": "bonusAction",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-2",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "misty-step": "迷踪步",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 2,
+    "spellId": "misty-step",
+    "targetId": "wizard",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "wizard",
+    "areaId": "private-sanctum",
+    "logContext": {
+      "names": {
+        "misty-step": "迷踪步",
+      },
+    },
+    "spellId": "misty-step",
+    "type": "teleportation-blocked-by-area",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:3274:27
+    3272|     expect(warded.state.combatants.wizard.position).toEqual({ x: 5, y:…
+    3273|     expect(warded.state.combatants.wizard.classResources['dnd5e-spell-…
+    3274|     expect(warded.events).toContainEqual({
+       |                           ^
+    3275|       type: 'teleportation-blocked-by-area', actorId: 'wizard',
+    3276|       spellId: 'misty-step', areaId: 'private-sanctum',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > resolves Sleep by current HP, excludes immune creatures, and supports both wake conditions
+AssertionError: expected [ Array(20) ] to deep equally contain { type: 'sleep-resolved', …(5) }
+
+- Expected:
+{
+  "actorId": "wizard",
+  "affectedTargetIds": [
+    "low",
+    "middle",
+  ],
+  "hitPointPool": 20,
+  "remainingHitPoints": 9,
+  "spellId": "sleep",
+  "type": "sleep-resolved",
+}
+
++ Received:
+[
+  {
+    "actorId": "wizard",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-1",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "sleep": "睡眠术",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 1,
+    "spellId": "sleep",
+    "targetId": "low",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "unconscious",
+    "prevented": false,
+    "targetId": "low",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "unconscious",
+    "targetId": "low",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "srd-5.1:spell:sleep:unconscious",
+    "effectId": "srd-5.1_3Aspell_3Asleep_3Aunconscious:wizard:low",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "remainingRounds": 10,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "昏迷",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "sleep",
+          "spellLevel": 1,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "unconscious",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "睡眠术",
+    },
+    "targetId": "low",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {
+        "sleep": "睡眠术",
+      },
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "睡眠术",
+    },
+    "stateKey": "sleep",
+    "targetId": "low",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "prone",
+    "prevented": false,
+    "targetId": "low",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "prone",
+    "targetId": "low",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "srd-5.1:spell:sleep:fall-prone",
+    "effectId": "srd-5.1_3Aspell_3Asleep_3Afall-prone:wizard:low",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "type": "permanent",
+        },
+        "label": "倒地",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "sleep-fall-prone",
+          "spellLevel": 1,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "prone",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": undefined,
+    },
+    "targetId": "low",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "睡眠术",
+    },
+    "stateKey": "sleep-fall-prone",
+    "targetId": "low",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "unconscious",
+    "prevented": false,
+    "targetId": "middle",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "unconscious",
+    "targetId": "middle",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "srd-5.1:spell:sleep:unconscious",
+    "effectId": "srd-5.1_3Aspell_3Asleep_3Aunconscious:wizard:middle",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "remainingRounds": 10,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "昏迷",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "sleep",
+          "spellLevel": 1,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "unconscious",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "睡眠术",
+    },
+    "targetId": "middle",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {
+        "sleep": "睡眠术",
+      },
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "睡眠术",
+    },
+    "stateKey": "sleep",
+    "targetId": "middle",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "prone",
+    "prevented": false,
+    "targetId": "middle",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "prone",
+    "targetId": "middle",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "srd-5.1:spell:sleep:fall-prone",
+    "effectId": "srd-5.1_3Aspell_3Asleep_3Afall-prone:wizard:middle",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "type": "permanent",
+        },
+        "label": "倒地",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "sleep-fall-prone",
+          "spellLevel": 1,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "prone",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": undefined,
+    },
+    "targetId": "middle",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "睡眠术",
+    },
+    "stateKey": "sleep-fall-prone",
+    "targetId": "middle",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "wizard",
+    "affectedTargetIds": [
+      "low",
+      "middle",
+    ],
+    "hitPointPool": 20,
+    "logContext": {
+      "names": {
+        "sleep": "睡眠术",
+      },
+    },
+    "remainingHitPoints": 9,
+    "spellId": "sleep",
+    "type": "sleep-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:3441:25
+    3439|       breakOn: ['takes-damage'],
+    3440|     }))
+    3441|     expect(cast.events).toContainEqual({
+       |                         ^
+    3442|       type: 'sleep-resolved', actorId: 'wizard', spellId: 'sleep',
+    3443|       hitPointPool: 20, remainingHitPoints: 9, affectedTargetIds: ['lo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > resolves Color Spray by current HP and expires blindness at the caster next turn end
+AssertionError: expected [ Array(14) ] to deep equally contain { type: 'color-spray-resolved', …(5) }
+
+- Expected:
+{
+  "actorId": "wizard",
+  "affectedTargetIds": [
+    "low",
+    "middle",
+  ],
+  "hitPointPool": 12,
+  "remainingHitPoints": 1,
+  "spellId": "color-spray",
+  "type": "color-spray-resolved",
+}
+
++ Received:
+[
+  {
+    "actorId": "wizard",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-1",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "color-spray": "七彩喷射",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 1,
+    "spellId": "color-spray",
+    "targetId": "low",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "blinded",
+    "prevented": false,
+    "targetId": "low",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "blinded",
+    "targetId": "low",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "srd-5.1:spell:color-spray:blinded",
+    "effectId": "srd-5.1_3Aspell_3Acolor-spray_3Ablinded:wizard:low",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "appliedTurnKey": "color-spray:1:wizard",
+          "boundary": "source-turn-end",
+          "type": "until-turn-boundary",
+        },
+        "label": "目盲",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "color-spray",
+          "spellLevel": 1,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "blinded",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "七彩喷射",
+    },
+    "targetId": "low",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {
+        "color-spray": "七彩喷射",
+      },
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "七彩喷射",
+    },
+    "stateKey": "color-spray",
+    "targetId": "low",
+    "type": "class-state-changed",
+  },
+  {
+    "definitionId": "condition:charmed",
+    "effectId": "color-spray:charm-person",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "lastTickTurnKey": undefined,
+          "remainingRounds": 600,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "魅惑",
+        "source": {
+          "actorId": "wizard",
+          "kind": "spell",
+          "rulesId": "charm-person",
+        },
+        "standardCondition": "charmed",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "魅惑人类",
+    },
+    "reason": "harmful-action",
+    "targetId": "low",
+    "type": "active-effect-removed",
+  },
+  {
+    "condition": "charmed",
+    "targetId": "low",
+    "type": "condition-ended",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "blinded",
+    "prevented": false,
+    "targetId": "middle",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "wizard",
+    "condition": "blinded",
+    "targetId": "middle",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "srd-5.1:spell:color-spray:blinded",
+    "effectId": "srd-5.1_3Aspell_3Acolor-spray_3Ablinded:wizard:middle",
+    "logContext": {
+      "actionType": "cast-spell",
+      "effect": {
+        "duration": {
+          "appliedTurnKey": "color-spray:1:wizard",
+          "boundary": "source-turn-end",
+          "type": "until-turn-boundary",
+        },
+        "label": "目盲",
+        "source": {
+          "actorId": "wizard",
+          "actorName": "wizard",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "color-spray",
+          "spellLevel": 1,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "blinded",
+      },
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "七彩喷射",
+    },
+    "targetId": "middle",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "cast-spell",
+      "names": {
+        "color-spray": "七彩喷射",
+      },
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": "七彩喷射",
+    },
+    "stateKey": "color-spray",
+    "targetId": "middle",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "wizard",
+    "affectedTargetIds": [
+      "low",
+      "middle",
+    ],
+    "hitPointPool": 12,
+    "logContext": {
+      "names": {
+        "color-spray": "七彩喷射",
+      },
+    },
+    "remainingHitPoints": 1,
+    "spellId": "color-spray",
+    "type": "color-spray-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:3539:25
+    3537|     expect(cast.state.combatants.high.conditions).not.toContain('blind…
+    3538|     expect(cast.state.combatants['blind-immune'].conditions).not.toCon…
+    3539|     expect(cast.events).toContainEqual({
+       |                         ^
+    3540|       type: 'color-spray-resolved', actorId: 'wizard', spellId: 'color…
+    3541|       hitPointPool: 12, remainingHitPoints: 1, affectedTargetIds: ['lo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > pays and postpones a Slow-delayed action spell, then completes it with the next-turn action
+AssertionError: expected [ { …(3) }, { …(5) }, { …(10) }, …(5) ] to deep equally contain { …(6) }
+
+- Expected:
+{
+  "actorId": "delayed-caster",
+  "d20": 5,
+  "delayed": false,
+  "slotLevel": 1,
+  "spellId": "magic-missile",
+  "type": "slow-spell-delay-resolved",
+}
+
++ Received:
+[
+  {
+    "actorId": "delayed-caster",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "delayed-caster",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-1",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "delayed-caster",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "magic-missile": "魔法飞弹",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 1,
+    "spellId": "magic-missile",
+    "targetId": "target",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "delayed-caster",
+    "d20": 5,
+    "delayed": false,
+    "logContext": {
+      "names": {
+        "magic-missile": "魔法飞弹",
+      },
+    },
+    "slotLevel": 1,
+    "spellId": "magic-missile",
+    "type": "slow-spell-delay-resolved",
+  },
+  {
+    "amount": 5,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 45,
+    "hpBefore": 50,
+    "sourceId": "delayed-caster",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "amount": 4,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 41,
+    "hpBefore": 45,
+    "sourceId": "delayed-caster",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "amount": 3,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 38,
+    "hpBefore": 41,
+    "sourceId": "delayed-caster",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "actorId": "delayed-caster",
+    "baseBonusPerProjectile": 1,
+    "dieSides": 4,
+    "logContext": {
+      "names": {
+        "magic-missile": "魔法飞弹",
+      },
+    },
+    "projectiles": [
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 5,
+        "dieRoll": 4,
+        "featureBonus": 0,
+        "finalDamage": 5,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 4,
+        "dieRoll": 3,
+        "featureBonus": 0,
+        "finalDamage": 4,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 3,
+        "dieRoll": 2,
+        "featureBonus": 0,
+        "finalDamage": 3,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+    ],
+    "slotLevel": 1,
+    "spellId": "magic-missile",
+    "totalDamage": 12,
+    "type": "magic-missile-damage-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:4774:32
+    4772|       expect(immediate.state.combatants.target.currentHp).toBe(38)
+    4773|       expect(immediate.state.combatants[delayedCaster.id].classState.s…
+    4774|       expect(immediate.events).toContainEqual({
+       |                                ^
+    4775|         type: 'slow-spell-delay-resolved', actorId: delayedCaster.id,
+    4776|         spellId: 'magic-missile', slotLevel: 1, d20: 5, delayed: false,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > negates low-level player spell damage and control from the combatant snapshot after spending slots
+AssertionError: expected [ { …(3) }, { …(5) }, { …(10) }, …(1) ] to deep equally contain { …(5) }
+
+- Expected:
+{
+  "actorId": "disintegrator",
+  "spellId": "disintegrate",
+  "spellLevel": 6,
+  "targetId": "rakshasa-snapshot",
+  "type": "spell-negated-by-limited-magic-immunity",
+}
+
++ Received:
+[
+  {
+    "actorId": "disintegrator",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "disintegrator",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-6",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "disintegrator",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "disintegrate": "解离术",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 6,
+    "spellId": "disintegrate",
+    "targetId": "rakshasa-snapshot",
+    "type": "spell-cast",
+  },
+  {
+    "actorId": "disintegrator",
+    "logContext": {
+      "names": {
+        "disintegrate": "解离术",
+      },
+    },
+    "spellId": "disintegrate",
+    "spellLevel": 6,
+    "targetId": "rakshasa-snapshot",
+    "type": "spell-negated-by-limited-magic-immunity",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:6894:27
+    6892|     expect(damage.state.combatants[rakshasaSnapshot.id].limitedMagicIm…
+    6893|       .not.toBe(damageState.combatants[rakshasaSnapshot.id].limitedMag…
+    6894|     expect(damage.events).toContainEqual({
+       |                           ^
+    6895|       type: 'spell-negated-by-limited-magic-immunity',
+    6896|       actorId: disintegrator.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > suspends and resumes charm effects through Berserker Mindless Rage
+AssertionError: expected [ { …(3) }, { …(5) }, { …(6) }, …(1) ] to deep equally contain { type: 'class-state-changed', …(4) }
+
+- Expected:
+{
+  "active": true,
+  "actorId": "berserker",
+  "stateKey": "berserker-mindless-rage",
+  "type": "class-state-changed",
+  "value": 2,
+}
+
++ Received:
+[
+  {
+    "actorId": "berserker",
+    "resource": "bonusAction",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "berserker",
+    "current": 1,
+    "max": 2,
+    "resourceKey": "dnd5e-rage",
+    "type": "class-resource-spent",
+  },
+  {
+    "active": true,
+    "actorId": "berserker",
+    "logContext": {
+      "actionType": "barbarian-rage",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "berserker",
+      "sourceName": undefined,
+    },
+    "stateKey": "berserker-mindless-rage",
+    "type": "class-state-changed",
+    "value": 2,
+  },
+  {
+    "active": true,
+    "actorId": "berserker",
+    "logContext": {
+      "actionType": "barbarian-rage",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "berserker",
+      "sourceName": undefined,
+    },
+    "stateKey": "rage",
+    "type": "class-state-changed",
+    "value": 10,
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:7853:26
+    7851|     )).toBe(true)
+    7852|     expect(dnd5eTargetArmorClassForAttack(raged.state, 'wizard', 'bers…
+    7853|     expect(raged.events).toContainEqual({
+       |                          ^
+    7854|       type: 'class-state-changed',
+    7855|       actorId: 'berserker',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > lets a spellcaster end their own Polymorph concentration without spending a bonus action
+AssertionError: expected [ { …(5) }, { …(5) } ] to deep equally contain { type: 'class-state-changed', …(3) }
+
+- Expected:
+{
+  "active": false,
+  "actorId": "wizard",
+  "stateKey": "concentration",
+  "type": "class-state-changed",
+}
+
++ Received:
+[
+  {
+    "active": false,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "druid-end-wild-shape",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": undefined,
+    },
+    "stateKey": "creature-form:polymorph",
+    "type": "class-state-changed",
+  },
+  {
+    "active": false,
+    "actorId": "wizard",
+    "logContext": {
+      "actionType": "druid-end-wild-shape",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "wizard",
+      "sourceName": undefined,
+    },
+    "stateKey": "concentration",
+    "type": "class-state-changed",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:9082:27
+    9080|       type: 'class-state-changed', actorId: 'wizard', stateKey: 'creat…
+    9081|     }))
+    9082|     expect(result.events).toContainEqual({
+       |                           ^
+    9083|       type: 'class-state-changed', actorId: 'wizard', stateKey: 'conce…
+    9084|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > emits Magic Missile dice, per-projectile damage, total damage, and Empowered Evocation source
+AssertionError: expected [ { …(3) }, { …(5) }, { …(10) }, …(7) ] to deep equally contain { …(7) }
+
+- Expected:
+{
+  "ability": "int",
+  "actorId": "wizard",
+  "amount": 4,
+  "application": "first-projectile",
+  "featureId": "evocation-empowered",
+  "spellId": "magic-missile",
+  "type": "spell-damage-feature-bonus-applied",
+}
+
++ Received:
+[
+  {
+    "actorId": "wizard",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-3",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "wizard",
+    "itemInstanceId": undefined,
+    "itemName": undefined,
+    "itemUseActionId": undefined,
+    "logContext": {
+      "names": {
+        "magic-missile": "魔法飞弹",
+      },
+    },
+    "slotConsumed": undefined,
+    "slotLevel": 3,
+    "spellId": "magic-missile",
+    "targetId": "target",
+    "type": "spell-cast",
+  },
+  {
+    "ability": "int",
+    "actorId": "wizard",
+    "amount": 4,
+    "application": "first-projectile",
+    "featureId": "evocation-empowered",
+    "logContext": {
+      "names": {
+        "magic-missile": "魔法飞弹",
+      },
+    },
+    "spellId": "magic-missile",
+    "type": "spell-damage-feature-bonus-applied",
+  },
+  {
+    "amount": 9,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 41,
+    "hpBefore": 50,
+    "sourceId": "wizard",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "amount": 4,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 37,
+    "hpBefore": 41,
+    "sourceId": "wizard",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "amount": 3,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 34,
+    "hpBefore": 37,
+    "sourceId": "wizard",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "amount": 2,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 32,
+    "hpBefore": 34,
+    "sourceId": "wizard",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "amount": 5,
+    "damageTypes": [
+      "force",
+    ],
+    "hpAfter": 27,
+    "hpBefore": 32,
+    "sourceId": "wizard",
+    "targetId": "target",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+  {
+    "actorId": "wizard",
+    "baseBonusPerProjectile": 1,
+    "dieSides": 4,
+    "logContext": {
+      "names": {
+        "magic-missile": "魔法飞弹",
+      },
+    },
+    "projectiles": [
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 9,
+        "dieRoll": 4,
+        "featureBonus": 4,
+        "finalDamage": 9,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 4,
+        "dieRoll": 3,
+        "featureBonus": 0,
+        "finalDamage": 4,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 3,
+        "dieRoll": 2,
+        "featureBonus": 0,
+        "finalDamage": 3,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 2,
+        "dieRoll": 1,
+        "featureBonus": 0,
+        "finalDamage": 2,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+      {
+        "cuttingWordsReduction": 0,
+        "damageBeforeDefenses": 5,
+        "dieRoll": 4,
+        "featureBonus": 0,
+        "finalDamage": 5,
+        "outcome": "damage",
+        "targetId": "target",
+      },
+    ],
+    "slotLevel": 3,
+    "spellId": "magic-missile",
+    "totalDamage": 23,
+    "type": "magic-missile-damage-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:9356:29
+    9354|     if (!resolved.ok) return
+    9355|     expect(resolved.state.combatants.target.currentHp).toBe(27)
+    9356|     expect(resolved.events).toContainEqual({
+       |                             ^
+    9357|       type: 'spell-damage-feature-bonus-applied',
+    9358|       actorId: wizard.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > expires Draconic Elemental Affinity resistance after its last remaining turn
+AssertionError: expected [ { …(5) }, …(1) ] to deep equally contain { type: 'class-state-changed', …(3) }
+
+- Expected:
+{
+  "active": false,
+  "actorId": "sorcerer",
+  "stateKey": "draconic-resistance",
+  "type": "class-state-changed",
+}
+
++ Received:
+[
+  {
+    "active": false,
+    "actorId": "sorcerer",
+    "logContext": {
+      "actionType": "end-turn",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "sorcerer",
+      "sourceName": undefined,
+    },
+    "stateKey": "draconic-resistance",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "enemy",
+    "round": 1,
+    "type": "turn-started",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:9434:26
+    9432|     expect(ended.state.combatants.sorcerer.classState.draconicResistan…
+    9433|     expect(ended.state.combatants.sorcerer.classState.draconicResistan…
+    9434|     expect(ended.events).toContainEqual({
+       |                          ^
+    9435|       type: 'class-state-changed', actorId: 'sorcerer', stateKey: 'dra…
+    9436|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > expires Sacred Weapon after ten of the Paladin's turns
+AssertionError: expected [ { …(5) }, …(1) ] to deep equally contain { type: 'class-state-changed', …(3) }
+
+- Expected:
+{
+  "active": false,
+  "actorId": "paladin",
+  "stateKey": "sacred-weapon",
+  "type": "class-state-changed",
+}
+
++ Received:
+[
+  {
+    "active": false,
+    "actorId": "paladin",
+    "logContext": {
+      "actionType": "end-turn",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "paladin",
+      "sourceName": undefined,
+    },
+    "stateKey": "sacred-weapon",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "enemy",
+    "round": 1,
+    "type": "turn-started",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:9449:26
+    9447|     if (!ended.ok) return
+    9448|     expect(ended.state.combatants.paladin.classState.sacredWeaponTurns…
+    9449|     expect(ended.events).toContainEqual({
+       |                          ^
+    9450|       type: 'class-state-changed', actorId: 'paladin', stateKey: 'sacr…
+    9451|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > ends the Open Hand Tranquility ward when the monk makes an attack
+AssertionError: expected [ { …(3) }, { …(5) }, { …(12) } ] to deep equally contain { type: 'class-state-changed', …(3) }
+
+- Expected:
+{
+  "active": false,
+  "actorId": "monk",
+  "stateKey": "tranquility",
+  "type": "class-state-changed",
+}
+
++ Received:
+[
+  {
+    "actorId": "monk",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "active": false,
+    "actorId": "monk",
+    "logContext": {
+      "actionType": "attack",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "monk",
+      "sourceName": undefined,
+    },
+    "stateKey": "tranquility",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "monk",
+    "armorClass": 16,
+    "attackMode": "unarmed",
+    "attackOrigin": "attack-action",
+    "critical": false,
+    "d20": 1,
+    "d20Rolls": [
+      1,
+    ],
+    "hit": false,
+    "rollMode": "normal",
+    "targetId": "enemy",
+    "total": 6,
+    "type": "attack-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:9740:27
+    9738|     if (!result.ok) return
+    9739|     expect(result.state.combatants.monk.classState.tranquilityActive).…
+    9740|     expect(result.events).toContainEqual({
+       |                           ^
+    9741|       type: 'class-state-changed', actorId: 'monk', stateKey: 'tranqui…
+    9742|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/19]⎯
+
+ FAIL  src/rulesets/dnd5e/headlessCombatEngine.test.ts > D&D 5e 2014 headless combat engine > grants advantage for an attack from hiding and then reveals the attacker
+AssertionError: expected [ { …(3) }, …(3) ] to deep equally contain { type: 'class-state-changed', …(3) }
+
+- Expected:
+{
+  "active": false,
+  "actorId": "rogue",
+  "stateKey": "hidden",
+  "type": "class-state-changed",
+}
+
++ Received:
+[
+  {
+    "actorId": "rogue",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "rogue",
+    "armorClass": 16,
+    "attackMode": "unarmed",
+    "attackOrigin": "attack-action",
+    "critical": false,
+    "d20": 18,
+    "d20Rolls": [
+      2,
+      18,
+    ],
+    "hit": true,
+    "rollMode": "advantage",
+    "targetId": "enemy",
+    "total": 23,
+    "type": "attack-resolved",
+  },
+  {
+    "active": false,
+    "actorId": "rogue",
+    "logContext": {
+      "actionType": "attack",
+      "names": {},
+      "precedingOutcomes": [],
+      "sourceActorId": "rogue",
+      "sourceName": undefined,
+    },
+    "stateKey": "hidden",
+    "type": "class-state-changed",
+  },
+  {
+    "amount": 7,
+    "hpAfter": 13,
+    "hpBefore": 20,
+    "sourceId": "rogue",
+    "targetId": "enemy",
+    "temporaryHpAfter": 0,
+    "temporaryHpBefore": 0,
+    "type": "damage-applied",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/headlessCombatEngine.test.ts:9762:27
+    9760|     }))
+    9761|     expect(result.state.combatants.rogue.classState.hiddenCheckTotal).…
+    9762|     expect(result.events).toContainEqual({
+       |                           ^
+    9763|       type: 'class-state-changed', actorId: 'rogue', stateKey: 'hidden…
+    9764|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/19]⎯
+
+ FAIL  src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts > Activity Headless authority commit bridge > casts Polymorph but leaves a 'shapechanger' target unaffected
+AssertionError: expected [ { …(5) }, { …(3) }, { …(6) }, …(1) ] to deep equally contain { …(5) }
+
+- Expected:
+{
+  "actorId": "caster",
+  "reason": "shapechanger",
+  "sourceActivityId": "spell:polymorph",
+  "targetId": "target",
+  "type": "creature-transformation-unaffected",
+}
+
++ Received:
+[
+  {
+    "actorId": "caster",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-4",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "caster",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "caster",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "变形术",
+        "conditions": [
+          "目标豁免失败",
+          "选择变形术效果：狼（CR 1/4）",
+        ],
+        "operationId": "polymorph-transform-srd-5.1:wolf",
+        "outcomeId": "mode-srd-5.1:wolf",
+      },
+    },
+    "reason": "shapechanger",
+    "sourceActivityId": "spell:polymorph",
+    "targetId": "target",
+    "type": "creature-transformation-unaffected",
+  },
+  {
+    "activityId": "spell:polymorph",
+    "actorId": "caster",
+    "castLevel": 4,
+    "sourceId": "polymorph",
+    "sourceKind": "spell",
+    "targetIds": [
+      "target",
+    ],
+    "type": "activity-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts:418:30
+    416|     expect(committed.state.combatants.target.statBlockId).toBeUndefine…
+    417|     expect(committed.state.combatants.target.classState.wildShapeFormI…
+    418|     expect(committed.events).toContainEqual({
+       |                              ^
+    419|       type: 'creature-transformation-unaffected',
+    420|       actorId: caster.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/19]⎯
+
+ FAIL  src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts > Activity Headless authority commit bridge > casts Polymorph but leaves a 'zero hit points' target unaffected
+AssertionError: expected [ { …(5) }, { …(3) }, { …(6) }, …(1) ] to deep equally contain { …(5) }
+
+- Expected:
+{
+  "actorId": "caster",
+  "reason": "zero-hit-points",
+  "sourceActivityId": "spell:polymorph",
+  "targetId": "target",
+  "type": "creature-transformation-unaffected",
+}
+
++ Received:
+[
+  {
+    "actorId": "caster",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-4",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "caster",
+    "resource": "action",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "caster",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "变形术",
+        "conditions": [
+          "目标豁免失败",
+          "选择变形术效果：狼（CR 1/4）",
+        ],
+        "operationId": "polymorph-transform-srd-5.1:wolf",
+        "outcomeId": "mode-srd-5.1:wolf",
+      },
+    },
+    "reason": "zero-hit-points",
+    "sourceActivityId": "spell:polymorph",
+    "targetId": "target",
+    "type": "creature-transformation-unaffected",
+  },
+  {
+    "activityId": "spell:polymorph",
+    "actorId": "caster",
+    "castLevel": 4,
+    "sourceId": "polymorph",
+    "sourceKind": "spell",
+    "targetIds": [
+      "target",
+    ],
+    "type": "activity-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts:418:30
+    416|     expect(committed.state.combatants.target.statBlockId).toBeUndefine…
+    417|     expect(committed.state.combatants.target.classState.wildShapeFormI…
+    418|     expect(committed.events).toContainEqual({
+       |                              ^
+    419|       type: 'creature-transformation-unaffected',
+    420|       actorId: caster.id,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/19]⎯
+
+ FAIL  src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts > Activity Headless authority commit bridge > settles Divine Word HP bands, instant death, and planar return through one Activity transaction
+AssertionError: expected [ { …(5) }, { …(3) }, { …(6) }, …(26) ] to deep equally contain { type: 'instant-death', …(3) }
+
+- Expected:
+{
+  "hpBefore": 15,
+  "sourceId": "actor",
+  "targetId": "hp15",
+  "type": "instant-death",
+}
+
++ Received:
+[
+  {
+    "actorId": "actor",
+    "current": 0,
+    "max": 1,
+    "resourceKey": "dnd5e-spell-slot-7",
+    "type": "class-resource-spent",
+  },
+  {
+    "actorId": "actor",
+    "resource": "bonusAction",
+    "type": "turn-resource-spent",
+  },
+  {
+    "actorId": "actor",
+    "condition": "deafened",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened",
+        "outcomeId": "hp-50-or-less",
+      },
+    },
+    "prevented": false,
+    "targetId": "hp45",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "actor",
+    "condition": "deafened",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened",
+        "outcomeId": "hp-50-or-less",
+      },
+    },
+    "targetId": "hp45",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-deafened",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-deafened:actor:hp45:condition-0",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened",
+        "outcomeId": "hp-50-or-less",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 10,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "耳聋",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "deafened",
+      },
+    },
+    "targetId": "hp45",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "actor",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened",
+        "outcomeId": "hp-50-or-less",
+      },
+    },
+    "stateKey": "spell:divine-word",
+    "targetId": "hp45",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "actor",
+    "condition": "deafened",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+    },
+    "prevented": false,
+    "targetId": "hp35",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "actor",
+    "condition": "deafened",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+    },
+    "targetId": "hp35",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-deafened-blinded",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-deafened-blinded:actor:hp35:condition-0",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 100,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "耳聋",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "deafened",
+      },
+    },
+    "targetId": "hp35",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "actor",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+    },
+    "stateKey": "spell:divine-word",
+    "targetId": "hp35",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "actor",
+    "condition": "blinded",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+    },
+    "prevented": false,
+    "targetId": "hp35",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "actor",
+    "condition": "blinded",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+    },
+    "targetId": "hp35",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-deafened-blinded",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-deafened-blinded:actor:hp35:condition-1",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 100,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "目盲",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "blinded",
+      },
+    },
+    "targetId": "hp35",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "actor",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded",
+        "outcomeId": "hp-40-or-less",
+      },
+    },
+    "stateKey": "spell:divine-word",
+    "targetId": "hp35",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "actor",
+    "condition": "deafened",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "prevented": false,
+    "targetId": "hp25",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "actor",
+    "condition": "deafened",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "targetId": "hp25",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-deafened-blinded-stunned",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-deafened-blinded-stunned:actor:hp25:condition-0",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 600,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "耳聋",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "deafened",
+      },
+    },
+    "targetId": "hp25",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "actor",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "stateKey": "spell:divine-word",
+    "targetId": "hp25",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "actor",
+    "condition": "blinded",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "prevented": false,
+    "targetId": "hp25",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "actor",
+    "condition": "blinded",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "targetId": "hp25",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-deafened-blinded-stunned",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-deafened-blinded-stunned:actor:hp25:condition-1",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 600,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "目盲",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "blinded",
+      },
+    },
+    "targetId": "hp25",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "actor",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "stateKey": "spell:divine-word",
+    "targetId": "hp25",
+    "type": "class-state-changed",
+  },
+  {
+    "actorId": "actor",
+    "condition": "stunned",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "prevented": false,
+    "targetId": "hp25",
+    "type": "condition-attempted",
+  },
+  {
+    "actorId": "actor",
+    "condition": "stunned",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "targetId": "hp25",
+    "type": "condition-applied",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-deafened-blinded-stunned",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-deafened-blinded-stunned:actor:hp25:condition-2",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 600,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "震慑",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": "stunned",
+      },
+    },
+    "targetId": "hp25",
+    "type": "active-effect-applied",
+  },
+  {
+    "active": true,
+    "actorId": "actor",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-deafened-blinded-stunned",
+        "outcomeId": "hp-30-or-less",
+      },
+    },
+    "stateKey": "spell:divine-word",
+    "targetId": "hp25",
+    "type": "class-state-changed",
+  },
+  {
+    "hpBefore": 15,
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "divine-word-instant-death",
+        "outcomeId": "hp-20-or-less",
+      },
+    },
+    "sourceId": "actor",
+    "targetId": "hp15",
+    "type": "instant-death",
+  },
+  {
+    "definitionId": "activity:spell:divine-word:divine-word-planar-return:extension",
+    "effectId": "activity_3Aspell_3Adivine-word_3Adivine-word-planar-return_3Aextension:actor:fiend:extension-banished",
+    "logContext": {
+      "activityTrigger": {
+        "activityName": "圣言术",
+        "conditions": [
+          "目标豁免失败",
+          "本分支规则前提已满足",
+          "本分支规则前提已满足",
+        ],
+        "operationId": "apply-divine-word-planar-return",
+        "outcomeId": "planar-return",
+      },
+      "effect": {
+        "duration": {
+          "remainingRounds": 14400,
+          "tickOn": "target-turn-end",
+          "type": "rounds",
+        },
+        "label": "圣言术·位面遣返",
+        "source": {
+          "actorId": "actor",
+          "actorName": "actor",
+          "characterId": undefined,
+          "kind": "spell",
+          "magical": true,
+          "pluginId": undefined,
+          "rulesId": "spell:divine-word",
+          "spellLevel": 7,
+          "spellSaveDc": undefined,
+        },
+        "standardCondition": undefined,
+      },
+    },
+    "targetId": "fiend",
+    "type": "active-effect-applied",
+  },
+  {
+    "activityId": "spell:divine-word",
+    "actorId": "actor",
+    "castLevel": 7,
+    "sourceId": "divine-word",
+    "sourceKind": "spell",
+    "targetIds": [
+      "hp45",
+      "hp35",
+      "hp25",
+      "hp15",
+      "fiend",
+    ],
+    "type": "activity-resolved",
+  },
+]
+
+ ❯ src/rulesets/dnd5e/activities/dnd5eActivityHeadlessAuthorityBridge.test.ts:1128:30
+    1126|     expect(committed.state.combatants.actor.classResources['dnd5e-spel…
+    1127|     expect(committed.state.combatants.actor.turn.bonusActionAvailable)…
+    1128|     expect(committed.events).toContainEqual({
+       |                              ^
+    1129|       type: 'instant-death', sourceId: actor.id, targetId: 'hp15', hpB…
+    1130|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/19]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  19 failed | 346 passed (365)
+   Start at  18:13:57
+   Duration  6.27s (transform 12.31s, setup 0ms, import 15.51s, tests 2.43s, environment 0ms)
+

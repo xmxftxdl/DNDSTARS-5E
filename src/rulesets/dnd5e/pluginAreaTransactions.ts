@@ -1,3 +1,4 @@
+import { tokenCenterForAnchorCell } from '../../lib/gridCombat'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -22,6 +23,7 @@ import { normalizeDnd5eActiveEffects } from './activeEffects'
 
 export interface Dnd5ePersistentAreaDamageRollRequest {
   areaId: string
+  rollerTokenId: string
   triggerId: string
   timing: Dnd5ePersistentAreaTriggerCandidate['trigger']['timing']
   count: number
@@ -49,16 +51,17 @@ export function createDnd5ePersistentAreaDamageRollCoordinator(
     sides: number,
     label: string,
     targetName: string,
+    ownership: { rollerTokenId: string },
   ) => Promise<readonly number[]>,
 ) {
   const rollsByWave = new Map<string, Promise<readonly number[]>>()
   return (input: Dnd5ePersistentAreaDamageRollRequest): Promise<readonly number[]> => {
     if (input.count === 0) return Promise.resolve([])
     const waveKey = dnd5ePersistentAreaDamageWaveKey(input)
-    if (!waveKey) return rollDice(input.count, input.sides, input.label, input.targetName)
+    if (!waveKey) return rollDice(input.count, input.sides, input.label, input.targetName, { rollerTokenId: input.rollerTokenId })
     const existing = rollsByWave.get(waveKey)
     if (existing) return existing
-    const pending = rollDice(input.count, input.sides, input.label, input.targetName)
+    const pending = rollDice(input.count, input.sides, input.label, input.targetName, { rollerTokenId: input.rollerTokenId })
     rollsByWave.set(waveKey, pending)
     return pending
   }
@@ -240,6 +243,8 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
   const { prepared } = input
   const result = resolveDnd5ePersistentAreaTrigger(prepared.state, {
     areaId: prepared.candidate.area.id,
+    areaOrigin: prepared.candidate.area.anchorCell
+      ? tokenCenterForAnchorCell(prepared.candidate.area.anchorCell, { size: 1 }, prepared.map) : undefined,
     areaSourceKind: prepared.candidate.area.sourceKind,
     coreSpellId: prepared.candidate.area.coreSpellId,
     castingClassId: prepared.candidate.area.castingClassId,

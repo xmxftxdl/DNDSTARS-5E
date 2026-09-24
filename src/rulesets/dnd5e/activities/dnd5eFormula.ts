@@ -12,6 +12,7 @@ export interface Dnd5eFormulaActorSnapshot {
   resources?: Readonly<Record<string, { current: number; maximum: number }>>
   spellAttackBonus?: number
   spellSaveDc?: number
+  spellcastingAbility?: AbilityKey
   spellcastingAbilityModifier?: number
   /** Host-captured source save DCs for effects currently carried by this actor. */
   activeEffectSourceSpellSaveDcs?: readonly { definitionId: string; sourceSpellSaveDc: number }[]
@@ -368,4 +369,10 @@ export function collectDnd5eFormulaRollDeclarations(
   }
   formulas.forEach(visit)
   return [...declarations.values()]
+}
+
+export function dnd5eOpposedCheckSourceAbility(ability: AbilityKey | 'spellcasting', actor: Pick<Dnd5eFormulaActorSnapshot, 'spellcastingAbility'>): AbilityKey {
+  if (ability !== 'spellcasting') return ability
+  if (!actor.spellcastingAbility) throw new Dnd5eFormulaEvaluationError('missing spellcasting ability')
+  return actor.spellcastingAbility
 }

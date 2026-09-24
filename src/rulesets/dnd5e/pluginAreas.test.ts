@@ -9,8 +9,8 @@ import {
   advanceDnd5ePluginAreasAtTurnBoundary,
   dnd5ePersistentAreaAffectsTokenVerticallyAt,
   dnd5ePersistentAreaDifficultTerrainMultiplierAt,
-  dnd5eFailedGreaseMovementCheckpoint,
-  dnd5eFirstGreaseMovementCheckpoint,
+  dnd5eFailedAreaMovementCheckpoint,
+  dnd5eFirstAreaMovementCheckpoint,
   dnd5ePersistentAreaTriggerTimingIsSimultaneousWave,
   expireDnd5ePluginAreasAtTurnBoundary,
   expireDnd5ePluginAreasAtWorldMinute,
@@ -47,6 +47,72 @@ const character = (patch: Partial<Character> = {}): Character => ({
 })
 
 describe('D&D 5e plugin persistent areas', () => {
+  it.each([true, false])('only clears the ended spell from character and monster targets (explicit id: %s)', (explicitId) => {
+    const linkedEffect = (spellId: string, sourceActorId = 'caster-token') => createDnd5eMechanicalEffect({
+      id: `${spellId}:${sourceActorId}`, definitionId: `spell:${spellId}`, label: spellId, targetId: 'target',
+      source: { kind: 'spell', actorId: sourceActorId, rulesId: `srd-5.1:spell:${spellId}` },
+      duration: {
+        type: 'concentration', sourceActorId,
+        ...(explicitId ? { concentrationId: spellId } : {}), remainingRounds: 600,
+      },
+    })
+    const oldEffect = linkedEffect('stinking-cloud')
+    const newEffect = linkedEffect('stoneskin')
+    const otherCasterEffect = linkedEffect('stinking-cloud', 'other-caster')
+    const state = {
+      activeEffects: [oldEffect, newEffect, otherCasterEffect],
+      concentrationEffectsBySource: { 'caster-token': 'stoneskin', 'other-caster': 'stinking-cloud' },
+    }
+    const caster = character({ concentrating: true, dnd5eCombatState: { concentrationSpellId: 'stoneskin' } })
+    const target = character({ id: 'target', dnd5eCombatState: state })
+    const map: BattleMap = {
+      id: 'replacement', name: 'replacement', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [
+        { id: 'caster-token', characterId: caster.id, type: 'player', label: 'caster', x: 25, y: 25, size: 1, color: '', emoji: '' },
+        { id: 'monster', type: 'enemy', label: 'monster', x: 75, y: 25, size: 1, color: '', emoji: '', dnd5eCombatState: state },
+      ],
+      dnd5ePluginAreas: [area({ concentrationId: 'stinking-cloud' })],
+    }
+    const result = reconcileDnd5ePluginAreasAndConcentrationOnMap(map, [caster, target], 1)
+    expect(result.map.dnd5ePluginAreas).toHaveLength(0)
+    expect(result.endedConcentrationCharacterIds).toEqual([])
+    expect(result.characters[0].concentrating).toBe(true)
+    for (const retained of [result.characters[1].dnd5eCombatState, result.map.tokens[1].dnd5eCombatState]) {
+      expect(retained?.activeEffects?.map((effect) => effect.id)).toEqual([newEffect.id, otherCasterEffect.id])
+      expect(retained?.concentrationEffectsBySource).toEqual(state.concentrationEffectsBySource)
+    }
+  })
+
+  it.each([
+    ['medium inside', 'stinking-cloud', 1, 75, 0, 1],
+    ['large clips edge', 'stinking-cloud', 2, 50, 0, 0],
+    ['large entirely inside', 'stinking-cloud', 2, 100, 0, 1],
+    ['large above ceiling', 'stinking-cloud', 2, 100, 15, 0],
+    ['large touches ceiling', 'stinking-cloud', 2, 100, 10, 1],
+    ['large below base', 'stinking-cloud', 2, 100, -5, 0],
+    ['other cloud still accepts overlap', 'cloudkill', 2, 50, 0, 1],
+  ] as const)('requires full containment for Stinking Cloud: %s', (_label, spellId, size, position, elevationFeet, expected) => {
+    const target: Token = {
+      id: 'target', label: 'target', x: position, y: position,
+      size, elevationFeet: elevationFeet + 20, color: '#fff', emoji: 'T', type: 'enemy',
+    }
+    const map: BattleMap = {
+      id: 'stinking-containment-map', name: 'map', width: 500, height: 500,
+      gridSize: 50, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0,
+      showGrid: true, tokens: [target],
+      dnd5ePluginAreas: [area({
+        sourceKind: 'core-spell', coreSpellId: spellId,
+        cells: [{ col: 1, row: 1 }, { col: 1, row: 2 }, { col: 2, row: 1 }, { col: 2, row: 2 }],
+        vertical: { mode: 'volume', baseElevationFeet: 20, heightFeet: 20 },
+        triggers: [{ id: 'start', label: 'start', timing: 'turn-start', oncePerTurn: true }],
+      })],
+    }
+    expect(collectDnd5ePersistentAreaTriggers({
+      map, timing: 'turn-start', round: 2, turnKey: '2:target', targetTokenId: target.id,
+    })).toHaveLength(expected)
+  })
+
   it('结束战斗时把跨战斗持续区域重基到第 1 轮并保留真实剩余时长', () => {
     const map: BattleMap = {
       id: 'map-1', name: 'map', width: 100, height: 100, gridSize: 20, feetPerCell: 5,
@@ -98,12 +164,13 @@ describe('D&D 5e plugin persistent areas', () => {
 
   it('reuses one damage roll for every target in a simultaneous area wave', async () => {
     let rollCount = 0
-    const coordinate = createDnd5ePersistentAreaDamageRollCoordinator(async (count, sides) => {
+    const coordinate = createDnd5ePersistentAreaDamageRollCoordinator(async (count, sides, _label, _targetName, owner) => {
+      expect(owner).toEqual({ rollerTokenId: 'caster' })
       rollCount += 1
       return Array.from({ length: count }, () => Math.min(sides, rollCount + 1))
     })
     const creation = {
-      areaId: 'wall-of-fire', triggerId: 'wall-of-fire-create', timing: 'on-create' as const,
+      rollerTokenId: 'caster', areaId: 'wall-of-fire', triggerId: 'wall-of-fire-create', timing: 'on-create' as const,
       count: 5, sides: 8, label: '火墙术·火墙出现', targetName: 'first target',
     }
     const first = await coordinate(creation)
@@ -127,7 +194,7 @@ describe('D&D 5e plugin persistent areas', () => {
     })
 
     await expect(coordinate({
-      areaId: 'guardian-of-faith', triggerId: 'guardian-strike', timing: 'on-enter',
+      rollerTokenId: 'caster', areaId: 'guardian-of-faith', triggerId: 'guardian-strike', timing: 'on-enter',
       count: 0, sides: 6, label: '信仰守卫·守卫打击', targetName: 'hostile creature',
     })).resolves.toEqual([])
     expect(rollCount).toBe(0)
@@ -175,7 +242,7 @@ describe('D&D 5e plugin persistent areas', () => {
     for (const candidate of candidates) {
       expect(saves.get(candidate.transactionId)).toBe(candidate.targetToken.id)
       await coordinateDamage({
-        areaId: candidate.area.id,
+        rollerTokenId: candidate.area.sourceTokenId, areaId: candidate.area.id,
         triggerId: candidate.trigger.id,
         timing: candidate.trigger.timing,
         count: 10,
@@ -551,9 +618,9 @@ describe('D&D 5e plugin persistent areas', () => {
       },
     })
 
-    expect(dnd5eFirstGreaseMovementCheckpoint({ map, token: moving, candidates }))
+    expect(dnd5eFirstAreaMovementCheckpoint({ map, token: moving, candidates }))
       .toMatchObject({ position: { x: 75, y: 25 }, pathIndex: 1 })
-    expect(dnd5eFailedGreaseMovementCheckpoint({
+    expect(dnd5eFailedAreaMovementCheckpoint({
       map,
       token: moving,
       candidates,
@@ -562,7 +629,7 @@ describe('D&D 5e plugin persistent areas', () => {
         targetId: moving.id, saveSuccess: false,
       }],
     })).toMatchObject({ position: { x: 75, y: 25 }, pathIndex: 1 })
-    expect(dnd5eFailedGreaseMovementCheckpoint({
+    expect(dnd5eFailedAreaMovementCheckpoint({
       map,
       token: moving,
       candidates,

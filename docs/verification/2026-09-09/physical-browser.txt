@@ -1,0 +1,47 @@
+[WebServer] (node:14652) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:29320) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:33420) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die (17.7s)
+
+
+  1) e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ───────
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+    Call Log:
+    - Timeout 15000ms exceeded while waiting on the predicate
+
+      27 |   await page.mouse.move(820, 355, { steps: 12 })
+      28 |   await page.mouse.up()
+    > 29 |   await expect.poll(async () => (await completed()).length, { timeout: 15000 }).toBe(2)
+         |                                                                                 ^
+      30 |   const physicalPool = JSON.parse((await page.locator('body').getAttribute('data-pool'))!) as number[]
+      31 |   console.log('physical reroll', { physicalPool, grabs: await page.evaluate(() => (window as unknown as { grabs: number[] }).grabs) })
+      32 |   expect(physicalPool).toHaveLength(3)
+        at C:\Users\Doco\Desktop\DND\DNDSTARS-5E\e2e\dice-tray-persistence.spec.ts:29:81
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+    Usage:
+
+        npx playwright show-trace e2e\test-results\dice-verification\dice-tray-persistence-keep-3477d-nd-rethrows-one-grabbed-die\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    e2e\dice-tray-persistence.spec.ts:3:1 › keeps the 3D world and rethrows one grabbed die ────────

@@ -1,3 +1,5 @@
+import { dnd5eActivityActorSnapshotFromCombatantV1 } from './dnd5eActivityCombatAuthority'
+import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
 import type { Character } from '../../../types/character'
 import {
   dnd5eAbilityCheckRollMode,
@@ -37,6 +39,7 @@ export interface Dnd5eActivityTriggerConfirmationV1 {
 }
 
 export interface Dnd5eActivityTriggerRollRequestV1 {
+  rollerTokenId: string
   id: string
   label: string
   count: number
@@ -210,6 +213,7 @@ async function authoritativeRolls(input: {
         ...declaration,
         label: `${input.available.activity.name} · ${declaration.id}`,
         actorId: input.actorId,
+        rollerTokenId: input.actorId,
         targetName: actorName,
         kind: 'formula',
       })],
@@ -231,6 +235,7 @@ async function authoritativeRolls(input: {
             count: check.count,
             sides: check.sides,
             actorId: input.actorId,
+            rollerTokenId: input.actorId,
             targetId,
             targetName: target.name,
             kind: 'random-roll',
@@ -255,7 +260,7 @@ async function authoritativeRolls(input: {
           targetModifier(candidate) > targetModifier(best) ? candidate : best,
         check.targetOptions[0]!)
         const sourceDeclared = check.sourceRollMode === 'host-derived'
-          ? dnd5eAbilityCheckRollMode(actor, { ability: check.sourceAbility })
+          ? dnd5eAbilityCheckRollMode(actor, { ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, dnd5eActivityActorSnapshotFromCombatantV1(actor)) })
           : check.sourceRollMode ?? 'normal'
         const sizeMode = check.sourceRollModeByTargetSizeRank &&
           (check.sourceRollModeByTargetSizeRank.minimum == null || target.sizeRank >= check.sourceRollModeByTargetSizeRank.minimum) &&
@@ -274,10 +279,11 @@ async function authoritativeRolls(input: {
         rolls[rollKey] = {
           values: [...await input.roll({
             id: rollKey,
-            label: `${input.available.activity.name} · ${check.sourceAbility.toUpperCase()} 对抗检定`,
+            label: `${input.available.activity.name} · ${check.sourceAbility === 'spellcasting' ? '施法属性' : check.sourceAbility.toUpperCase()} 对抗检定`,
             count: sourceMode === 'normal' ? 1 : 2,
             sides: 20,
             actorId: input.actorId,
+            rollerTokenId: input.actorId,
             targetId,
             targetName: target.name,
             kind: 'ability-check',
@@ -291,6 +297,7 @@ async function authoritativeRolls(input: {
             count: targetMode === 'normal' ? 1 : 2,
             sides: 20,
             actorId: input.actorId,
+            rollerTokenId: targetId,
             targetId,
             targetName: target.name,
             kind: 'ability-check',
@@ -336,6 +343,7 @@ async function authoritativeRolls(input: {
           count: mode === 'normal' ? 1 : 2,
           sides: 20,
           actorId: input.actorId,
+          rollerTokenId: check.kind === 'saving-throw' ? targetId : input.actorId,
           targetId,
           targetName: target.name,
           kind: check.kind === 'saving-throw'

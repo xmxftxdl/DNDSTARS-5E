@@ -122,6 +122,7 @@ export function resolveSharedCombatStateApply(input: {
   mapId: string
   validTokenIds: Iterable<string>
   currentCombatId: string
+  pendingStartCombatId?: string
   currentDnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   lastAppliedCombatId: string
   lastAppliedRevision?: number
@@ -134,6 +135,9 @@ export function resolveSharedCombatStateApply(input: {
   const state = input.state
   if (!state) return { status: 'ignored', reason: 'missing-state' }
   if (state.mapId !== input.mapId) return { status: 'ignored', reason: 'wrong-map' }
+  if (input.isDm && input.pendingStartCombatId && state.combatId !== input.pendingStartCombatId) {
+    return { status: 'ignored', reason: 'stale' }
+  }
 
   const visibleTokenIds = new Set(input.validTokenIds)
   if (input.isDm && state.active && (state.initiativeOrder?.length ?? 0) > 0 && visibleTokenIds.size === 0) {

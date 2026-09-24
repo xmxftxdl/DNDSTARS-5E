@@ -11,6 +11,12 @@ import {
 } from './combatLogDetails'
 
 describe('formatDnd5eCombatLogDetails', () => {
+  it('explains immunity without inventing a saving throw result', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'spell-save-skipped-damage-immunity', actorId: 'wizard', targetId: 'minotaur',
+      spellId: 'shatter', damageType: 'thunder',
+    }], { resolveName: () => '牛头人' })).toEqual(['牛头人｜粉碎音波｜雷鸣伤害免疫，跳过豁免，最终伤害 0'])
+  })
   const resolveName = (id: string) => ({
     hero: '艾莉雅',
     wizard: '新冒险者',
@@ -359,6 +365,25 @@ describe('formatDnd5eCombatLogDetails', () => {
     expect(details).toContain('冷冻射线寒冷伤害骰 4d8+5：6 + 2 + 7 + 5 +5 = 25')
   })
 
+  it('区分同一目标的连续射线并保留每颗骰值和加值', () => {
+    const details = formatDnd5eCombatLogDetails([
+      [4, 6], [5, 5], [2, 3],
+    ].map((rolls, attackIndex) => ({
+      type: 'spell-attack-damage-resolved' as const,
+      actorId: 'wizard', targetId: 'target', spellId: 'scorching-ray',
+      slotLevel: 2, critical: false, damageType: 'fire' as const, attackIndex,
+      roll: { sides: 6, rolls, bonus: attackIndex === 0 ? 5 : 0,
+        total: rolls[0] + rolls[1] + (attackIndex === 0 ? 5 : 0) },
+      damageAfterAttackAdjustments: attackIndex === 0 ? 15 : attackIndex === 1 ? 10 : 5,
+      finalDamage: attackIndex === 0 ? 15 : attackIndex === 1 ? 10 : 5,
+    })), { resolveName: () => '牛头人' })
+    expect(details).toEqual([
+      '第 1 次攻击 → 牛头人｜灼热射线火焰伤害骰 2d6+5：4 + 6 +5 = 15',
+      '第 2 次攻击 → 牛头人｜灼热射线火焰伤害骰 2d6：5 + 5 = 10',
+      '第 3 次攻击 → 牛头人｜灼热射线火焰伤害骰 2d6：2 + 3 = 5',
+    ])
+  })
+
   it('解释普通武器伤害被血肉魔像免疫而归零', () => {
     const details = formatDnd5eCombatLogDetails([
       {
@@ -680,7 +705,7 @@ describe('formatDnd5eCombatLogDetails', () => {
     })
 
     expect(details).toContain('艾莉雅｜移动 10 尺｜格（X=7, Y=7） → 格（X=6, Y=6）')
-    expect(details).toContain('艾莉雅｜misty-step传送 30 尺｜格（X=6, Y=6） → 格（X=3, Y=4）')
+    expect(details).toContain('艾莉雅｜迷踪步传送 30 尺｜格（X=6, Y=6） → 格（X=3, Y=4）')
   })
 
   it('records condition, resource, contest, and falling outcomes in one audit trail', () => {
@@ -794,8 +819,8 @@ describe('formatDnd5eCombatLogDetails', () => {
 
     expect(details).toContain('艾莉雅｜施法后随机表待判定｜掷 d20，1 时触发')
     expect(details).toContain('艾莉雅｜施法后随机表已触发｜触发骰 1')
-    expect(details).toContain('艾莉雅 → 艾莉雅｜施放 fireball｜按 3 环结算，不消耗法术位')
-    expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜自动结算 fireball')
+    expect(details).toContain('艾莉雅 → 艾莉雅｜施放 火球术｜按 3 环结算，不消耗法术位')
+    expect(details).toContain('艾莉雅｜随机表结果 42（synthetic-centered-spell）｜自动结算 火球术')
     expect(details).toContain('艾莉雅｜随机表结果 50 未接入自动结算｜战斗结算已暂停，等待 DM 裁定')
     expect(details).toContain('艾莉雅｜随机表结果 50 的 DM 裁定已完成｜已跳过该结果｜备注：无需额外效果')
   })
@@ -847,7 +872,7 @@ describe('formatDnd5eCombatLogDetails', () => {
       spellId: 'produce-flame', slotLevel: 0,
     }], { resolveName })
 
-    expect(details).toContain('艾莉雅 → 恐狼｜施放 produce-flame｜使用戏法（不消耗法术位）')
+    expect(details).toContain('艾莉雅 → 恐狼｜施放 燃火术｜使用戏法（不消耗法术位）')
     expect(details.some((line) => line.includes('0 环法术位'))).toBe(false)
   })
 
@@ -882,7 +907,7 @@ describe('formatDnd5eCombatLogDetails', () => {
     }], { resolveName })
 
     expect(details).toEqual([
-      '艾莉雅 → 恐狼｜fire-bolt效果被反魔法力场压制｜未产生法术效果',
+      '艾莉雅 → 恐狼｜火焰箭效果被反魔法力场压制｜未产生法术效果',
     ])
   })
 
@@ -914,7 +939,7 @@ describe('formatDnd5eCombatLogDetails', () => {
       }],
     }], { resolveName })
 
-    expect(details).toContain('艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 detect-magic、longstrider）')
+    expect(details).toContain('艾莉雅｜侦测魔法更新｜新冒险者（15 尺；魔法；预言学派、变化学派；来源 侦测魔法、longstrider）')
     expect(formatDnd5eCombatLogDetails([{
       type: 'spell-detection-updated',
       actorId: 'hero',
@@ -943,4 +968,16 @@ describe('formatDnd5eCombatLogDetails', () => {
       }],
     }], { resolveName })).toContain('艾莉雅｜侦测毒性和疾病更新｜新冒险者（15 尺；带毒生物）')
   })
+})
+
+it('shows the Slow delay die to the DM while keeping secret dice out of the player result', () => {
+  const event: Dnd5eCombatEvent = { type: 'slow-spell-delay-resolved', actorId: 'drow', spellId: 'faerie-fire', slotLevel: 1, d20: 10, delayed: false }
+  const full = formatDnd5eCombatLogDetails([event], { resolveName: () => '卓尔' }).join(' ')
+  expect(full).toContain('d20 10')
+  expect(full).toContain('11–20')
+  expect(full).toContain('妖火 正常施放')
+  const shared = formatDnd5eSecretCombatOutcomeDetails([event], { resolveName: () => '卓尔' }).join(' ')
+  expect(shared).toContain('检定已完成')
+  expect(shared).toContain('妖火 正常施放')
+  expect(shared).not.toContain('d20')
 })

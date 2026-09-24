@@ -13,7 +13,6 @@ import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContra
 const DND5E_NARRATIVE_OBJECT_SPELL_IDS = new Set([
   'animate-dead',
   'animate-objects',
-  'arcane-lock',
   'arcanists-magic-aura',
   'clone',
   'continual-flame',
@@ -39,7 +38,6 @@ const DND5E_NARRATIVE_OBJECT_SPELL_IDS = new Set([
   'purify-food-and-drink',
   'remove-curse',
   'secret-chest',
-  'sequester',
   'shillelagh',
   'stone-shape',
 ])
@@ -51,6 +49,7 @@ const DND5E_NARRATIVE_OBJECT_SPELL_IDS = new Set([
  * policy and settles only the selected slot/material cost.
  */
 const DND5E_NARRATIVE_OBJECT_ALTERNATIVE_SPELL_IDS = new Set([
+  'arcane-lock',
   'disintegrate',
 ])
 
@@ -73,12 +72,13 @@ const DND5E_NARRATIVE_ENVIRONMENT_SPELL_IDS = new Set([
  * second form.
  */
 const DND5E_NARRATIVE_CONVERSATION_SPELL_IDS = new Set([
+  'telepathic-bond',
   'augury',
   'commune',
   'commune-with-nature',
   'divination',
-  'speak-with-animals',
-  'speak-with-dead',
+  'scrying',
+  'sending',
 ])
 
 /**
@@ -87,7 +87,11 @@ const DND5E_NARRATIVE_CONVERSATION_SPELL_IDS = new Set([
  * while still spending their printed action economy in combat.
  */
 const DND5E_ACTION_ONLY_NARRATIVE_SPELL_IDS = new Set([
+  'teleport',
+  'telepathic-bond',
   'prestidigitation',
+  'sending',
+  'stone-shape',
 ])
 
 function dnd5eActivityOperationInteractsWithObject(
@@ -119,6 +123,8 @@ export function dnd5eSpellUsesNarrativeObjectResolution(
   spellId: string | undefined,
   activity?: Dnd5eActivityDefinitionV1,
 ): boolean {
+  // Arcane Lock has a concrete door/password transaction exposed by the map UI.
+  if (spellId === 'arcane-lock') return false
   return (!!spellId && DND5E_NARRATIVE_OBJECT_SPELL_IDS.has(spellId)) ||
     activity?.outcomes.some((outcome) =>
       outcome.operations.some(dnd5eActivityOperationInteractsWithObject),

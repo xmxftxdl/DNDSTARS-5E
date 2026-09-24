@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {SecretDiceTrayControls} from '/src/presentation/maps/DicePresentationOverlays.tsx';
+import {createDmDiceModeSelection, dmAdoptedDie, dmConfirmedFaces} from '/src/presentation/maps/dmDiceMode.ts';
+import '/src/index.css';
+function App() {
+  const [count,setCount]=React.useState(0);
+  const [selection]=React.useState(()=>createDmDiceModeSelection([6],'normal',async()=>{setCount(n=>n+1);return 18}));
+  const [result,setResult]=React.useState({mode:'normal',values:[6]});
+  const [settled,setSettled]=React.useState(false);
+  return React.createElement('main',{style:{padding:24,width:350,background:'#12141c',color:'white'}},
+    React.createElement('h1',null,'DM 确认交互回归'),
+    React.createElement('p',null,`补骰次数：${count}`),
+    React.createElement('p',null,`D20 ${dmAdoptedDie(result.values,result.mode)} + 4 = ${dmAdoptedDie(result.values,result.mode)+4} · ${dmAdoptedDie(result.values,result.mode)+4>=15?'命中':'未命中'}`),
+    React.createElement(SecretDiceTrayControls,{confirmation:{id:'test',label:'命中',targetName:'AC 15',sides:20,values:result.values,check:{mode:result.mode,kind:'attack'},
+      onModeChange:async(mode,values)=>setResult(await selection.change(mode,values))},onConfirm:values=>setSettled(dmConfirmedFaces(values,result.mode,'normal',1)[0])}),
+    React.createElement('p',null,settled===false?'等待 DM 确认':`已确认 D20：${settled}`));
+}
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script></body></html>

@@ -1,3 +1,4 @@
+import { dnd5eActiveActionOrBonusActionOnly, type Dnd5eActiveEffectInstance } from './activeEffects'
 import type {
   Dnd5eTurnEconomyByToken,
   Dnd5eTurnEconomyCounts,
@@ -183,6 +184,17 @@ export function projectDnd5eHeadlessTurnEconomy(
   }
 }
 
+/** A deferred begin-turn still holds the previous slot's spent resources. */
+export function projectDnd5eStartingTurnEconomy(
+  fresh: Dnd5eTurnEconomyCounts,
+  turn: Parameters<typeof projectDnd5eHeadlessTurnEconomy>[1] | undefined,
+  resolvedTurnKey: string | undefined,
+): Dnd5eTurnEconomyCounts {
+  return turn && resolvedTurnKey === fresh.turnKey
+    ? projectDnd5eHeadlessTurnEconomy(fresh, turn)
+    : fresh
+}
+
 export function spendDnd5eMovement(
   economy: Dnd5eTurnEconomyCounts,
   feet: number,
@@ -218,4 +230,11 @@ export function grantDnd5eActionSurge(economy: Dnd5eTurnEconomyCounts): Dnd5eTur
       max: economy.action.max + 1,
     },
   }
+}
+
+export function constrainDnd5eTurnEconomyForEffects(economy: Dnd5eTurnEconomyCounts, effects: readonly Dnd5eActiveEffectInstance[] | undefined): Dnd5eTurnEconomyCounts {
+  if (!dnd5eActiveActionOrBonusActionOnly(effects)) return economy
+  const spent = economy.action.current < economy.action.max || economy.bonusAction.current < economy.bonusAction.max
+  if (!spent || (economy.action.current === 0 && economy.bonusAction.current === 0)) return economy
+  return { ...economy, action: { ...economy.action, current: 0 }, bonusAction: { ...economy.bonusAction, current: 0 } }
 }

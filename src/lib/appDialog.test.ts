@@ -5,6 +5,7 @@ import {
   resetAppDialogsForTests,
   settleAppDialog,
   showAppActionChoice,
+  showAppMultiChoice,
   showAppAlert,
   showAppChoiceGroups,
   showAppConfirm,
@@ -16,6 +17,19 @@ import {
 afterEach(() => resetAppDialogsForTests())
 
 describe('app dialog queue', () => {
+  it('preserves selected creature IDs and distinguishes clearing from cancelling', async () => {
+    const options = [{ id: 'a', label: '角色' }, { id: 'b', label: '牛头人' }]
+    const pending = showAppMultiChoice({ message: '豁免生物', options, selectedIds: ['b', 'missing', 'b'] })
+    expect(getAppDialogSnapshot().active?.selectedIds).toEqual(['b'])
+    settleAppDialog(getAppDialogSnapshot().active!.id, ['a', 'b'])
+    await expect(pending).resolves.toEqual(['a', 'b'])
+    const cleared = showAppMultiChoice({ message: '豁免生物', options, selectedIds: ['b'] })
+    settleAppDialog(getAppDialogSnapshot().active!.id, [])
+    await expect(cleared).resolves.toEqual([])
+    const cancelled = showAppMultiChoice({ message: '豁免生物', options })
+    settleAppDialog(getAppDialogSnapshot().active!.id, null)
+    await expect(cancelled).resolves.toBeNull()
+  })
   it('queues dialogs and resolves them in display order', async () => {
     const updates: number[] = []
     const unsubscribe = subscribeToAppDialogs(() => {

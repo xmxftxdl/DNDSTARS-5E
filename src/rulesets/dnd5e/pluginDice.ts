@@ -50,7 +50,32 @@ export function validateDnd5ePluginDiceRolls(
 export async function executeDnd5ePluginDiceRolls(
   definition: Pick<Dnd5ePluginHeadlessActionDefinition, 'rolls'>,
   roll: Dnd5ePluginDiceRoller,
+  concurrentOwner?: (declaration: Dnd5ePluginDiceRollDeclaration) => string | undefined,
 ): Promise<Record<string, Dnd5ePluginDiceRollResult>> {
+  if (concurrentOwner) {
+    const declarations = definition.rolls ?? []
+    const combined: Record<string, Dnd5ePluginDiceRollResult> = {}
+    for (let index = 0; index < declarations.length;) {
+      const batch = [declarations[index++]!]
+      const owner = concurrentOwner(batch[0]!)
+      const owners = new Set(owner ? [owner] : [])
+      while (owner && index < declarations.length) {
+        const nextOwner = concurrentOwner(declarations[index]!)
+        if (!nextOwner || owners.has(nextOwner)) break
+        owners.add(nextOwner)
+        batch.push(declarations[index++]!)
+      }
+      // Different player saves can roll together. Damage, dependent rolls and
+      // a second roll by the same owner remain barriers in declaration order.
+      const outcomes = await Promise.allSettled(batch.map(declaration =>
+        executeDnd5ePluginDiceRolls({ rolls: [declaration] }, roll)))
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') throw outcome.reason
+        Object.assign(combined, outcome.value)
+      }
+    }
+    return combined
+  }
   const results: Record<string, Dnd5ePluginDiceRollResult> = {}
   for (const declaration of definition.rolls ?? []) {
     const rerollValues = new Set(declaration.rerollValues ?? [])

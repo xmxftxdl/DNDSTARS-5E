@@ -34,6 +34,18 @@ function character(): Character {
 }
 
 describe('PlayerQuickCharacterSheet', () => {
+  it('separates status and concentration from the data sheet', () => {
+    const hero = { ...character(), concentrating: true }
+    const status = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { character: hero, onClose: () => {}, view: 'status' }))
+    const data = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { character: hero, onClose: () => {}, view: 'data' }))
+    expect(status).toContain('25/32')
+    expect(status).toContain('临时生命值 4')
+    expect(status).toContain('专注中')
+    expect(status).not.toContain('属性与豁免')
+    expect(data).toContain('属性与豁免')
+    expect(data).not.toContain('当前状态')
+    expect(data).not.toContain('专注中')
+  })
   it('displays Aid current HP against the effective maximum instead of the base maximum', () => {
     const aid = createDnd5eMechanicalEffect({
       definitionId: 'activity:aid:aid:modifiers:0', label: '援助术', targetId: 'quick-hero',
@@ -274,5 +286,19 @@ describe('PlayerQuickCharacterSheet', () => {
     expect(html).toContain('装备与携带物已融入物体形态')
     expect(html).not.toContain('长棍')
     expect(html).not.toContain('奥秘')
+  })
+})
+
+
+describe('quick ability and skill checks', () => {
+  it('exposes all six abilities and eighteen skills only for an authorized sheet', () => {
+    const props = { character: character(), onClose: () => {} }
+    const readOnly = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, props))
+    expect(readOnly).not.toContain('aria-label="投掷力量鉴定"')
+    const enabled = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { ...props, onQuickCheck: () => {} }))
+    expect(enabled.match(/aria-label="投掷[^"]+鉴定"/g)).toHaveLength(24)
+    expect(enabled).toContain('aria-label="投掷奥秘鉴定"')
+    const busy = renderToStaticMarkup(createElement(PlayerQuickCharacterSheet, { ...props, onQuickCheck: () => {}, quickCheckDisabled: true }))
+    expect(busy.match(/aria-label="投掷[^"]+鉴定"[^>]*disabled=""/g)).toHaveLength(24)
   })
 })

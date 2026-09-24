@@ -16,7 +16,7 @@ import {
   dnd5eConditionsFromActiveEffects,
 } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
-import { setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { createDnd5eMapCombatSnapshot } from './mapBridge'
 
@@ -1116,6 +1116,29 @@ describe('D&D 5e player map movement', () => {
       .toMatchObject({ x: 25, y: 5, elevationFeet: 40 })
   })
 
+  it('authoritatively places a flyer above a ground enemy and rejects landing into it', () => {
+    const hero = character()
+    hero.dnd5eMovementSpeeds = { fly: 60 }
+    const testMap = { ...map, tokens: [map.tokens[0], { ...map.tokens[1], x: 25 }] }
+    const input = { map: testMap, characters: [hero],
+      initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    }
+    const prepared = prepareDnd5ePlayerMove({ ...input,
+      action: { ...action, dnd5eTraversalMode: 'fly', targetElevationFeet: 10 } })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5ePlayerMove({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find(token => token.id === 'hero-token'))
+      .toMatchObject({ x: 25, y: 5, elevationFeet: 10 })
+    expect(prepareDnd5ePlayerMove({ ...input,
+      action: { ...action, dnd5eTraversalMode: 'fly', targetElevationFeet: 0 } }).ok).toBe(false)
+    expect(prepareDnd5ePlayerMove({ ...input, characters: [character()],
+      action: { ...action, dnd5eTraversalMode: 'fly', targetElevationFeet: 10 } }).ok).toBe(false)
+  })
+
   it('half-speed careful movement consumes twice the traversed distance in Headless', () => {
     const prepared = prepareDnd5ePlayerMove({
       action: { ...action, dnd5eCarefulMovement: true },
@@ -1397,7 +1420,7 @@ describe('D&D 5e player map movement', () => {
     }
   })
 
-  it('uses a Spider Climb effect as a climbing speed equal to walking speed', () => {
+  it.each(['flat', 'wall', 'cliff'] as const)('uses a Spider Climb effect as a climbing speed equal to walking speed: %s', (surface) => {
     const hero = character()
     hero.dnd5eCombatState = {
       schemaVersion: 2,
@@ -1411,10 +1434,25 @@ describe('D&D 5e player map movement', () => {
       })],
     }
 
+    const geometry = createEmptyMapGeometry(map.id, 1)
+    if (surface === 'wall') geometry.walls.push({
+      id: 'wall', kind: 'wall', label: 'Wall', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+      blocksMovement: true, blocksVision: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 60, createdAt: 1,
+    })
+    if (surface === 'cliff') geometry.obstacles.push({
+      id: 'cliff', kind: 'obstacle', label: 'Cliff', points: [{ x: 10, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 60 }, { x: 10, y: 60 }],
+      blocksMovement: false, blocksVision: false, blocksLineOfEffect: false,
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 20, cover: 'none', createdAt: 1,
+    })
+    setMapGeometryRuntime([geometry])
+    const destination = surface === 'wall' ? { x: 5, y: 5 } : surface === 'cliff' ? { x: 15, y: 5 } : { x: 45, y: 5 }
+    const expectedDistance = surface === 'cliff' ? 25 : 20
     const climbed = prepareDnd5ePlayerMove({
       action: {
         ...action,
-        targetPosition: { x: 45, y: 5 },
+        targetPosition: destination,
+        targetElevationFeet: surface === 'wall' ? 20 : undefined,
         dnd5eTraversalMode: 'climb',
       },
       map,
@@ -1427,7 +1465,12 @@ describe('D&D 5e player map movement', () => {
     })
 
     expect(climbed.ok).toBe(true)
-    if (climbed.ok) expect(climbed.prepared).toMatchObject({ distanceFeet: 20, movementCostFeet: 20 })
+    if (!climbed.ok) return
+    expect(climbed.prepared).toMatchObject({ distanceFeet: expectedDistance, movementCostFeet: expectedDistance })
+    const resolved = resolvePreparedDnd5ePlayerMove({ prepared: climbed.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.state.combatants['hero-token'].turn.movementRemaining).toBe(30 - expectedDistance)
+    expect(resolved.result.state.combatants['hero-token'].elevationFeet).toBe(surface === 'flat' ? 0 : 20)
   })
 
   it('lets a prone player crawl without automatically standing', () => {
@@ -1579,5 +1622,61 @@ describe('D&D 5e player map movement', () => {
     if (!resolved.ok) return
     expect(resolved.result.state.combatants['hero-token'].classState.restrictedExtraActionUsesByEffect)
       .toEqual({ 'haste-effect': 'combat:1:hero-token' })
+  })
+})
+
+describe('reverse gravity movement ownership', () => {
+  function scenario(flying = false, conditions: string[] = []) {
+    const hero = character()
+    hero.conditions = conditions
+    if (flying) hero.dnd5eMovementSpeeds = { fly: 60 }
+    const area = { id: 'gravity', pluginId: 'srd', featureId: 'reverse-gravity', sourceKind: 'core-spell' as const,
+      coreSpellId: 'reverse-gravity', includeSelf: true, label: '反重力', color: '#fff', sourceCharacterId: 'hero', sourceTokenId: 'hero-token',
+      vertical: { mode: 'volume' as const, baseElevationFeet: 0, heightFeet: 100 },
+      cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }], createdRound: 0, expiresAfterRound: 10,
+      occupantModifiers: { magicallyHeldAloft: true } }
+    return { hero, board: { ...map, tokens: [{ ...map.tokens[0], elevationFeet: 100 }], dnd5ePluginAreas: [area] } }
+  }
+  it.each(['walk', 'fly', 'fall'] as const)('does not grant unsupported voluntary %s movement', mode => {
+    const { hero, board } = scenario()
+    const result = prepareDnd5ePlayerMove({ action: { ...action, dnd5eTraversalMode: mode, targetPosition: { x: 15, y: 5 }, targetElevationFeet: 100 },
+      map: board, characters: [hero], initiativeOrder: [{ tokenId: 'hero-token', label: 'hero', emoji: '', color: '', roll: 20 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30) })
+    expect(result.ok).toBe(false)
+  })
+
+  it('walks through an unlit off-grid corridor and open door but still stops at a closed door', () => {
+    const corridor = createEmptyMapGeometry(map.id)
+    corridor.vision = { ...corridor.vision, enabled: true, ambientLight: 'darkness' }
+    corridor.walls = [1, 13].map((y, index) => ({
+      id: `corridor-${index}`, kind: 'wall', label: 'Wall',
+      points: [{ x: 0, y }, { x: 300, y }],
+      blocksMovement: true, blocksVision: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }))
+    corridor.doors = [{
+      id: 'door', kind: 'door', label: 'Door', points: [{ x: 30, y: 1 }, { x: 30, y: 13 }],
+      state: 'open', secret: false, blocksMovement: true, blocksVision: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }]
+    const freeMap: BattleMap = { ...map, snapMonstersToGrid: false, tokens: [{ ...map.tokens[0], x: 10, y: 7 }] }
+    const input = { map: freeMap, characters: [character()],
+      action: { ...action, combatId: undefined, targetPosition: { x: 75, y: 7 } } }
+    setMapGeometryRuntime([corridor])
+    const open = prepareDnd5eExplorationMove(input)
+    expect(open.ok).toBe(true)
+    if (open.ok) {
+      expect(open.prepared.path[0]).toEqual({ x: 10, y: 7 })
+      expect(open.prepared.path.at(-1)).toEqual({ x: 75, y: 7 })
+      expect(open.prepared.path.every(point => point.y === 7)).toBe(true)
+    }
+    setMapGeometryRuntime([{ ...corridor, doors: [{ ...corridor.doors[0], state: 'closed' }] }])
+    expect(prepareDnd5eExplorationMove(input)).toEqual({ ok: false, reason: 'movement-blocked' })
+  })
+  it('allows a creature with flight to fly through the area', () => {
+    const { hero, board } = scenario(true)
+    expect(prepareDnd5ePlayerMove({ action: { ...action, dnd5eTraversalMode: 'fly', targetPosition: { x: 15, y: 5 }, targetElevationFeet: 100 },
+      map: board, characters: [hero], initiativeOrder: [{ tokenId: 'hero-token', label: 'hero', emoji: '', color: '', roll: 20 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60) })).toMatchObject({ ok: true })
   })
 })

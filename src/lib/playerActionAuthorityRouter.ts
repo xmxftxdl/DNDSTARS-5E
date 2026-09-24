@@ -14,6 +14,7 @@ export type PlayerActionAuthorityRejectReason =
   | 'duplicate-action'
 
 export interface PlayerActionAuthorityAction {
+  dnd5eMapInteraction?: import('../rulesets/dnd5e/mapInteraction').Dnd5eMapInteractionPayload
   id: string
   mapId: string
   combatId?: string
@@ -78,7 +79,8 @@ export function preflightPlayerActionAuthority(
     (actorToken.type !== 'player' && !controllingToken)
   ) return { status: 'rejected', reason: 'stale-turn' }
 
-  const actorCharacter = context.characters.find((character) => character.id === action.characterId)
+  const ownerCharacterId = actorToken.dnd5eSimulacrum?.sourceCharacterId ?? action.characterId
+  const actorCharacter = context.characters.find((character) => character.id === ownerCharacterId)
   if (!actorCharacter) return { status: 'rejected', reason: 'stale-turn' }
   // 玩家行动必须携带可核验的房间身份；旧角色缺少归属信息时不能退化成
   // “任何房间成员都可操作”，而应交给 DM 的归属修复流程。
@@ -115,7 +117,12 @@ export function preflightPlayerActionAuthority(
     if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
       return { status: 'ignored' }
     }
-    if (context.combatActive && actorToken.id !== context.currentTokenId) {
+    const leavingRope = action.dnd5eMapInteraction?.operation === 'rope-trick' &&
+      action.dnd5eMapInteraction.transition === 'leave'
+    if (leavingRope && (context.combatActive ? action.combatId !== context.combatId : !!action.combatId)) {
+      return { status: 'rejected', reason: 'stale-combat' }
+    }
+    if (context.combatActive && actorToken.id !== context.currentTokenId && !leavingRope) {
       return { status: 'rejected', reason: 'stale-turn' }
     }
     return { status: 'accepted', currentToken: actorToken }
@@ -204,7 +211,7 @@ export function canSubmitPlayerCombatAction(input: {
   if (input.pendingAction) return false
   if (input.currentInitiativeToken.type !== 'player') return false
   if (input.currentInitiativeToken.characterId !== input.turnCharacter.id) return false
-  if (input.turnCharacter.id !== input.playerCharacter?.id) return false
+  if ((input.currentInitiativeToken.dnd5eSimulacrum?.sourceCharacterId ?? input.turnCharacter.id) !== input.playerCharacter?.id) return false
   return isTokenAlive(input.currentInitiativeToken, input.characters)
 }
 

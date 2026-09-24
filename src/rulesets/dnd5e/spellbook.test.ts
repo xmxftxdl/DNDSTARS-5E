@@ -40,6 +40,12 @@ function bundle(value = spell()) {
 }
 
 describe('D&D 5e room spellbook import', () => {
+  it('routes Alter Self through its mode Activity rather than DM adjudication', () => {
+    const entry = dnd5eSpellbookEntries([]).find(spell => spell.id === 'alter-self')
+    expect(entry).toMatchObject({ automationLevel: 'partial' })
+    expect(dnd5eSpellbookEntryCanUseStructuredCastRoute(entry)).toBe(true)
+    expect(dnd5eSpellbookEntryUsesLegacyCoreStructuredCastRoute(entry)).toBe(false)
+  })
   it('allows an empty shared room spell collection', () => {
     expect(parseDnd5eSharedSpellCollection([])).toEqual([])
     expect(() => parseDnd5eSpellImport({

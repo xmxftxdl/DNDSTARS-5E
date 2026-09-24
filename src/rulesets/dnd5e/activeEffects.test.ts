@@ -1328,3 +1328,19 @@ describe('D&D 5e ActiveEffectInstance', () => {
     expect(second).toEqual(migrated)
   })
 })
+
+it('True Strike waits for a later caster turn, including a different extra-turn slot', () => {
+  const effect = createDnd5eMechanicalEffect({
+    definitionId: 'rule-state:spell:true-strike:target-linked-effect',
+    label: '克敌机先', source: { kind: 'spell', actorId: 'wizard', rulesId: 'true-strike' },
+    targetId: 'enemy', legacyCondition: 'rule-state:spell:true-strike:target-linked-effect',
+    duration: { type: 'permanent' }, appliedTurnKey: 'fight:1:wizard:normal',
+  })
+  const state = { combatId: 'fight', round: 1, initiativeIndex: 0,
+    initiativeOrder: ['wizard', 'enemy', 'wizard'],
+    initiativeSlotIds: ['wizard:normal', 'enemy:normal', 'wizard:extra'] }
+  expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, state).advantage).toBe(false)
+  expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, { ...state, initiativeIndex: 1 }).advantage).toBe(false)
+  expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, { ...state, initiativeIndex: 2 }).advantage).toBe(true)
+  expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, { ...state, round: 2 }).advantage).toBe(true)
+})

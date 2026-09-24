@@ -1,8 +1,11 @@
 import type { GridCell } from '../../lib/gridCombat'
+import { mapGeometryLineOfEffectBlocked, mapGeometryRuntimeForMap, mapGeometryTokenElevation } from '../../lib/mapGeometry'
+import { resolveSpellAreaObstruction, spellAreaPointElevation } from '../../rulesets/dnd5e/spellAreaObstruction'
 import {
   aoeOrientFromCell,
   canPlaceAoe,
   cellsForAoe,
+  gridAlignedRectBounds,
   lineAoeGeometry,
   type SkillAoeTargeting,
 } from '../../lib/skillTargeting'
@@ -77,16 +80,28 @@ export function buildSpellOrSkillAoeHighlight(input: {
   const gridSize = map?.gridSize ?? 1
   const gridOffsetX = map?.gridOffsetX ?? 0
   const gridOffsetY = map?.gridOffsetY ?? 0
-  const valid = canPlaceAoe(targeting, casterCell, previewCell)
+  let valid = canPlaceAoe(targeting, casterCell, previewCell)
   const orientFrom = aoeOrientFromCell(targeting, casterCell, previewCell, {
     rectRotation,
     ...(targeting.shape === 'rect' && targeting.rotatable && spellTargeting?.spellId !== 'wall-of-fire'
       ? { rectAngleDegrees: spellTargeting?.areaTargetAngleDegrees ?? 0 }
       : {}),
   })
-  const cells = shouldUseVectorOnlyAoePreview(targeting)
+  let cells = shouldUseVectorOnlyAoePreview(targeting)
     ? []
     : cellsForAoe(targeting, orientFrom, previewCell)
+  if (map && spellTargeting) {
+    const geometry = mapGeometryRuntimeForMap(map.id)
+    const source = map.tokens.find(token => token.characterId === spellTargeting.characterId)
+    const aim = { x: gridOffsetX + (previewCell.col + 0.5) * gridSize, y: gridOffsetY + (previewCell.row + 0.5) * gridSize }
+    const origin = targeting.origin === 'point' ? aim : source
+    if (source && targeting.origin === 'point' && mapGeometryLineOfEffectBlocked({ map, geometry, from: source, to: aim,
+      fromElevationFeet: mapGeometryTokenElevation(geometry, source), toElevationFeet: spellAreaPointElevation(geometry, aim, spellTargeting.targetElevationFeet),
+    })) valid = false
+    if (origin) cells = resolveSpellAreaObstruction({ spellId: spellTargeting.spellId, map, geometry, cells, area: targeting, origin,
+      elevationFeet: targeting.origin === 'point' ? spellAreaPointElevation(geometry, aim, spellTargeting.targetElevationFeet) : mapGeometryTokenElevation(geometry, source!),
+    }).cells
+  }
   const isSelfCircle = targeting.shape === 'circle' && targeting.origin === 'self'
   const mapDiagonalFeet = map
     ? Math.hypot(
@@ -133,6 +148,14 @@ export function buildSpellOrSkillAoeHighlight(input: {
     : undefined
   const areaPolygon = (() => {
     if (targeting.shape === 'circle') return undefined
+    if (targeting.shape === 'rect' && targeting.gridAligned) {
+      const bounds = gridAlignedRectBounds(previewCell, targeting.widthFeet, targeting.heightFeet)
+      const left = gridOffsetX + bounds.firstCol * gridSize
+      const top = gridOffsetY + bounds.firstRow * gridSize
+      const right = left + bounds.widthCells * gridSize
+      const bottom = top + bounds.heightCells * gridSize
+      return [left, top, right, top, right, bottom, left, bottom]
+    }
     if (targeting.shape === 'cone') {
       const origin = cellCenterToPixel(casterCell)
       const aim = cellCenterToPixel(previewCell)

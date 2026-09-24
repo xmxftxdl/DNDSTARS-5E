@@ -3,6 +3,7 @@ import { ArrowDown, ArrowLeftRight, ArrowUp, Dices, Play, X } from 'lucide-react
 import type { InitiativeEntry } from './InitiativeTracker'
 import {
   combatInitiativeEntryKey,
+  originalInitiativeTotal,
   moveInitiativeConfirmationEntry,
   swapInitiativeConfirmationEntries,
 } from './combatInitiativeConfirmation'
@@ -26,10 +27,13 @@ interface CombatInitiativeConfirmationDialogProps {
 function initiativeBreakdown(entry: InitiativeEntry): string {
   const calculation = entry.initiativeCalculation
   if (!calculation) return `先攻 ${entry.roll}`
+  const originalTotal = originalInitiativeTotal(entry)
+  const adjustment = originalTotal === entry.roll ? '' : `｜DM 调整先攻为 ${entry.roll}`
+  const extraTurn = entry.turnKind === 'thief-reflexes' ? ' - 盗贼反射 10' : ''
   const modifier = calculation.modifier >= 0 ? `+${calculation.modifier}` : String(calculation.modifier)
-  if (calculation.mode === 'normal') return `d20 ${calculation.d20} ${modifier} = ${entry.roll}`
+  if (calculation.mode === 'normal') return `d20 ${calculation.d20} ${modifier}${extraTurn} = ${originalTotal}${adjustment}`
   const mode = calculation.mode === 'advantage' ? '优势取高' : '劣势取低'
-  return `d20（${calculation.rolls.join('、')}，${mode} ${calculation.d20}）${modifier} = ${entry.roll}`
+  return `d20（${calculation.rolls.join('、')}，${mode} ${calculation.d20}）${modifier}${extraTurn} = ${originalTotal}${adjustment}`
 }
 
 function extraTurnLabel(entry: InitiativeEntry): string | undefined {
@@ -44,7 +48,7 @@ export default function CombatInitiativeConfirmationDialog({
   surprisedCount,
   submitting,
   title = '确认先攻顺序',
-  description = '先攻已经掷出，但战斗尚未开始。DM 调整顺序时会同步交换先攻骰值，也可以选择两个单位直接互换；确认后才会启动第一回合。',
+  description = '先攻已经掷出，但战斗尚未开始。DM 可调整顺序或选择两个单位互换；原始骰值、加值及优势／劣势保留，调整后的先攻另行标注；确认后才会启动第一回合。',
   footerHint = '确认前不会发布战斗状态，也不会触发首个单位的回合开始效果。',
   confirmLabel = '确认并开始第一回合',
   submittingLabel = '正在开始…',

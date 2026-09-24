@@ -54,7 +54,7 @@ export default function Dnd5eTokenStatusMarkerEditor({
         </span>
       </div>
       <p className="mb-2 text-[10px] leading-4 text-slate-500">
-        仅用于地图显示，不会赋予中毒、倒地等 Headless 规则。需要实际规则效果时，请使用下方“触发状态”。
+        仅用于地图显示。要应用中毒、倒地等实际效果，请使用“D&D 5e 状态效果”。
       </p>
 
       {markers.length > 0 ? (

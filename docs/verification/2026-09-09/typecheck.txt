@@ -1,0 +1,7 @@
+
+> dndstars-5e@0.1.0-beta.1 typecheck
+> tsc -b --pretty false
+
+src/pages/maps/DmCombatRecoveryDialog.tsx(13,3): error TS6133: 'isCombatRecoveryInternalTransaction' is declared but its value is never read.
+src/pages/MapsWorkspacePage.tsx(191,1): error TS6133: 'browserCombatController' is declared but its value is never read.
+src/pages/MapsWorkspacePage.tsx(192,1): error TS6133: 'browserRuntime' is declared but its value is never read.

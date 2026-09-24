@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', '.codex-temp/**', '.codex-logs/**', 'artifacts/**', 'test-results/**', 'e2e/test-results/**', 'playwright-report/**', 'docs/audits/**', 'docs/verification/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -44,5 +44,10 @@ export default defineConfig([
       // The refs are projections, not React-owned mutable props.
       'react-hooks/immutability': 'off',
     },
+  },
+  {
+    // Standalone browser test entry points mount roots; they do not export a reusable component module.
+    files: ['e2e/fixtures/**/*.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
   },
 ])

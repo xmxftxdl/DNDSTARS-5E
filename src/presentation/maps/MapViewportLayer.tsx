@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react'
 import type { SpellStatusTokenMark, StandardConditionTokenMark } from '../../components/map/MapCanvas'
 import { spellStatusTokenTooltip, standardConditionTokenTooltip } from '../../components/map/tokenStatusTooltip'
 import { useBrowserSceneWorldMinute } from '../../composition/browserSceneClock'
-import { realignTokensToGrid } from '../../lib/gridCombat'
+import { realignTokensToGrid, cellToPixel } from '../../lib/gridCombat'
 import { isDnd5eTokenBanished, tokenPresentationHitPoints } from '../../lib/combatTokens'
 import { dnd5eCharacterPresentationColors } from '../dnd5e/characterPresentation'
 import {
@@ -157,6 +157,12 @@ export function buildMapViewportPresentation(
   gridCalibrationDraft?: MapViewportGridCalibrationDraft | null,
 ): MapViewportPresentation {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
+  const statusBorderColor = (sourceActorId?: string) => {
+    const sourceToken = sourceActorId ? map.tokens.find(token => token.id === sourceActorId) : undefined
+    const source = sourceActorId ? charactersById.get(sourceToken?.characterId ?? sourceActorId) : undefined
+    const colors = dnd5eCharacterPresentationColors(source)
+    return colors.classId ? colors.accentColor : '#ffffff'
+  }
   const projectedTokens = projectCharacterTokenPresentations(map.tokens, characters)
   const displayMap = projectedTokens === map.tokens ? map : { ...map, tokens: projectedTokens }
   const canvasMap = gridCalibrationDraft?.mapId === displayMap.id
@@ -247,6 +253,19 @@ export function buildMapViewportPresentation(
         glowColor: colors.glowColor,
       }
     })
+    for (const area of map.dnd5ePluginAreas ?? []) {
+      if (!['tiny-hut', 'teleportation-circle'].includes(area.coreSpellId ?? '') ||
+        !dnd5eTokenIntersectsPersistentAreaAt(token, map, area, token)) continue
+      statusMarkers.push({
+        schemaVersion: 1, id: `area-status:${area.id}:${token.id}`,
+        statusId: area.coreSpellId as 'tiny-hut' | 'teleportation-circle',
+        source: 'headless', mechanical: true, sourceActorId: area.sourceTokenId,
+        label: area.label,
+        detailDescription: area.coreSpellId === 'tiny-hut'
+          ? '小屋术范围内：穹顶阻挡外来生物与跨边界法术。施法者离开后结束。'
+          : '传送法阵入口：移动进入法阵后传送到 DM 指定的出口。',
+      })
+    }
     if (statusMarkers.length > 0) dnd5eTokenStatusMarkersByToken[token.id] = statusMarkers
     const shillelaghEffect = effects.find((effect) =>
       effect.definitionId === 'srd-5.1:spell:shillelagh' && effect.source.rulesId === 'shillelagh')
@@ -340,6 +359,16 @@ export function buildMapViewportPresentation(
     ...spellEffectStatusTokenMarks,
     ...buildDnd5eMonsterStatusTokenMarks(map.tokens, [...characters]),
   ]
+  // Status borders describe the source, never the affected unit or status type.
+  const concentrationTokenMarks = buildDnd5eConcentrationTokenMarks(map.tokens, [...characters])
+  for (const mark of [...standardConditionTokenMarks, ...spellStatusTokenMarks, ...concentrationTokenMarks]) {
+    mark.borderColor = statusBorderColor(mark.instance.sourceActorId)
+  }
+  for (const [tokenId, markers] of Object.entries(dnd5eTokenStatusMarkersByToken)) {
+    dnd5eTokenStatusMarkersByToken[tokenId] = markers.map(marker => ({
+      ...marker, borderColor: statusBorderColor(marker.sourceActorId),
+    }))
+  }
   return {
     map: Object.keys(emittedLightByTokenId).length > 0
       ? {
@@ -361,7 +390,7 @@ export function buildMapViewportPresentation(
       .filter((mark) => mark.statusId === 'sanctuary')
       .map((mark) => mark.tokenId),
     spellStatusTokenMarks,
-    concentrationTokenMarks: buildDnd5eConcentrationTokenMarks(map.tokens, [...characters]),
+    concentrationTokenMarks,
     defeatedTokenIds: map.tokens.flatMap((token) => {
       const hitPoints = hpByToken[token.id]
       return hitPoints && hitPoints.hp <= 0 ? [token.id] : []
@@ -384,6 +413,11 @@ function MapViewportLayerComponent({
     () => buildMapViewportPresentation(map, characters, gridCalibrationDraft),
     [characters, gridCalibrationDraft, map],
   )
+
+  const shelteredCircles = useMemo(() => (presentation.map.dnd5ePluginAreas ?? []).flatMap(area =>
+    area.coreSpellId === 'tiny-hut' && area.anchorCell
+      ? [{ ...cellToPixel(area.anchorCell, presentation.map), radius: 10 * presentation.map.gridSize / (presentation.map.feetPerCell ?? 5) }]
+      : []), [presentation.map])
 
   return (
     <div
@@ -411,6 +445,7 @@ function MapViewportLayerComponent({
       />
       {orchestratedScene ? (
         <SceneWeatherLayer
+          shelteredCircles={shelteredCircles}
           sceneId={orchestratedScene.id}
           weather={orchestratedScene.weather}
           mapWidth={presentation.map.width}

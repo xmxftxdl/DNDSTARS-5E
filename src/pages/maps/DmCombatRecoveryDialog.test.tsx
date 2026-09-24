@@ -5,6 +5,7 @@ import { DmCombatRecoveryImpactDetails } from './DmCombatRecoveryDialog'
 import {
   combatRecoveryAffectedTransactions,
   combatRecoveryOperationTransactions,
+  combatRecoveryTurnCheckpoints,
 } from './dmCombatRecoveryImpact'
 
 function transaction(input: Partial<DmUndoTransactionSummary> & Pick<DmUndoTransactionSummary, 'transactionId' | 'label' | 'createdAt'>): DmUndoTransactionSummary {
@@ -18,6 +19,67 @@ function transaction(input: Partial<DmUndoTransactionSummary> & Pick<DmUndoTrans
 }
 
 describe('DM combat recovery impact details', () => {
+  it('shows only initial and final HP for continuous edits and retains every rollback snapshot', () => {
+    const rows = [[52, 59], [46, 52], [40, 46], [30, 40], [23, 30], [15, 23]].map(([before, after], index) => transaction({
+      transactionId: `hp-${index}`, label: '更新 maps', createdAt: 10000 - index * 400,
+      details: [`牛头人：HP ${before} → ${after}（恢复为 ${before}）`],
+    }))
+    const html = renderToStaticMarkup(<DmCombatRecoveryImpactDetails transactions={rows} />)
+    expect(html).toContain('将撤回 1 个实际操作')
+    expect(html).toContain('牛头人：HP 59 → 15（撤回后）')
+    expect(html).not.toContain('HP 52 → 59')
+    expect(html).not.toContain('同时撤回的关联结算')
+    expect(combatRecoveryAffectedTransactions(rows, 'hp-5')).toHaveLength(6)
+    expect(rows[0].details?.[0]).toContain('HP 52 → 59')
+    const separated = [rows[0], { ...rows[1], createdAt: 1000 }]
+    expect(renderToStaticMarkup(<DmCombatRecoveryImpactDetails transactions={separated} />)).toContain('将撤回 2 个实际操作')
+  })
+  it('collapses empty authority flushes while retaining real changes and rollback boundaries', () => {
+    const empty = transaction({ transactionId: 'empty', label: '提交战斗结算', createdAt: 2 })
+    const changed = transaction({ transactionId: 'damage', label: '提交战斗结算', createdAt: 1,
+      details: ['牛头人：HP 61 → 51'] })
+    expect(combatRecoveryOperationTransactions([empty, changed])).toEqual([changed])
+    expect(combatRecoveryAffectedTransactions([empty, changed], 'damage')).toEqual([empty, changed])
+    expect(combatRecoveryTurnCheckpoints([empty])).toHaveLength(1)
+    const html = renderToStaticMarkup(<DmCombatRecoveryImpactDetails transactions={[empty, changed]} />)
+    expect(html).toContain('将撤回 1 个实际操作')
+    expect(html).toContain('另有 1 条关联状态同步')
+    expect(html).toContain('牛头人：HP 61 → 51')
+  })
+  it('groups a whole player turn including saves and its ending transition, then separates monster and next round', () => {
+    const turn = (id: string, actor: string, round: number, slot: number, label = '结算玩家行动') => transaction({
+      transactionId: id, label, createdAt: 100,
+      combat: { mapId: 'map', combatId: 'fight', beforeRound: round, afterRound: round,
+        beforeInitiativeIndex: slot, beforeActorLabel: actor },
+    })
+    const history = [
+      turn('next-round', '玩家', 2, 0), turn('monster-save', '怪物', 1, 1),
+      turn('monster-start', '怪物', 1, 1, '更新 combat'),
+      { ...turn('end', '玩家', 1, 0), combat: { ...turn('end', '玩家', 1, 0).combat!, afterInitiativeIndex: 1 } },
+      turn('save-2', '玩家', 1, 0, '豁免'), turn('save-1', '玩家', 1, 0, '豁免'),
+      turn('attack', '玩家', 1, 0), turn('start', '玩家', 1, 0, '更新 combat'),
+      transaction({ transactionId: 'setup', label: '开始战斗', createdAt: 1 }),
+    ]
+    const checkpoints = combatRecoveryTurnCheckpoints(history)
+    expect(checkpoints.map(row => row.transactionId)).toEqual(['next-round', 'monster-start', 'start', 'setup'])
+    expect(checkpoints[1]?.label).toBe('怪物 · 回合开始')
+    expect(combatRecoveryAffectedTransactions(history, 'start')).toHaveLength(8)
+  })
+
+  it('keeps unrelated or unknown turn boundaries separate', () => {
+    const history = ['a', 'b'].map(id => transaction({ transactionId: id, label: '旧行动', createdAt: 1 }))
+    expect(combatRecoveryTurnCheckpoints(history)).toHaveLength(2)
+  })
+
+  it('expands actual spell, damage and movement details', () => {
+    const html = renderToStaticMarkup(<DmCombatRecoveryImpactDetails expanded transactions={[
+      transaction({ transactionId: 'spell', label: '结算玩家行动', createdAt: 1,
+        details: ['法师施放火焰箭，对巨人造成 24 点伤害。', '巨人：HP 51 → 27（恢复为 51）'] }),
+    ]} />)
+    expect(html).toContain('open=""')
+    expect(html).toContain('火焰箭')
+    expect(html).toContain('HP 27 → 51（撤回后）')
+  })
   it('lists every server-cascade transaction from newest through the selected checkpoint', () => {
     const history = [
       transaction({ transactionId: 'latest', label: '结算玩家行动', createdAt: 300 }),
@@ -55,7 +117,7 @@ describe('DM combat recovery impact details', () => {
 
     expect(html).toContain('<details')
     expect(html).toContain('将撤回 1 个实际操作')
-    expect(html).toContain('结算玩家行动')
+    expect(html).toContain('行动记录（明细缺失）')
     expect(html).toContain('角色与怪物（HP、资源、状态）')
     expect(html).toContain('墙体、门窗与地图几何')
   })
@@ -70,10 +132,11 @@ describe('DM combat recovery impact details', () => {
 
     expect(html).toContain('将撤回 1 个实际操作')
     expect(html).toContain('另有 3 条关联状态同步')
-    expect(html).toContain('结算玩家行动')
+    expect(html).toContain('行动记录（明细缺失）')
     expect(html).not.toContain('更新 combat</span>')
     expect(html).not.toContain('更新 combat-statistics</span>')
     expect(html).not.toContain('处理战斗中断</span>')
     expect(html).toContain('同步恢复：')
   })
 })
+

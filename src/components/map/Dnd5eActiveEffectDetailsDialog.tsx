@@ -1,4 +1,6 @@
+import { activeEffectDisplayName } from './activeEffectDisplayName'
 import { Clock3, Link2, ShieldAlert, Trash2, X } from 'lucide-react'
+import type { ReactNode } from 'react'
 import {
   dnd5eActiveEffectRemainingLabel,
   type Dnd5eActiveEffectInstance,
@@ -68,12 +70,14 @@ export default function Dnd5eActiveEffectDetailsDialog({
   targetName,
   effects,
   instance,
+  flightControls,
   onRemove,
   onClose,
 }: {
   targetName: string
   effects: readonly Dnd5eActiveEffectInstance[]
   instance?: MapTokenStatusInstance
+  flightControls?: ReactNode
   onRemove?: () => void
   onClose: () => void
 }) {
@@ -109,7 +113,7 @@ export default function Dnd5eActiveEffectDetailsDialog({
                 <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">{INSTANCE_KIND_LABELS[instance.kind]}</span>
                 <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">{INSTANCE_AUTHORITY_LABELS[instance.authority]}</span>
               </div>
-              <p className="mt-3 text-sm leading-6 text-slate-200">{instance.description}</p>
+              {instance.kind === 'flight' && flightControls ? flightControls : <p className="mt-3 text-sm leading-6 text-slate-200">{instance.description}</p>}
               <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
                 <div><dt className="text-slate-500">来源</dt><dd className="mt-0.5 text-slate-200">{instance.sourceLabel ?? '未注明'}</dd></div>
                 <div><dt className="text-slate-500">实例 ID</dt><dd className="mt-0.5 break-all font-mono text-[11px] text-slate-300">{instance.id}</dd></div>
@@ -123,7 +127,7 @@ export default function Dnd5eActiveEffectDetailsDialog({
           ) : effects.length === 0 ? <p className="rounded-xl border border-dashed border-white/10 p-5 text-center text-sm text-slate-500">当前没有可显示的状态实例。</p> : effects.map((effect) => (
             <article key={effect.id} className="rounded-xl border border-white/10 bg-void-950/45 p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-semibold text-violet-100">{effect.label}</h3>
+                <h3 className="font-semibold text-violet-100">{activeEffectDisplayName(effect.label)}</h3>
                 <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">{effect.definitionId}</span>
                 {effect.visibility === 'dm-only' ? <span className="rounded bg-rose-500/10 px-2 py-0.5 text-[10px] text-rose-200">仅 DM</span> : null}
                 <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">独立实例</span>

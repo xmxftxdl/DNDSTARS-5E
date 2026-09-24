@@ -1,0 +1,193 @@
+vite v8.1.5 building client environment for production...
+[2K
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `vite:resolve-builtin:get-environment`. See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+
+transforming...✓ 2696 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                 2.41 kB │ gzip:   0.76 kB
+dist/dice-box-frame.html                                        2.61 kB │ gzip:   1.27 kB
+dist/assets/mapImageGeometryDetection.worker-nz-dK7TV.js        3.79 kB
+dist/assets/pluginSandbox.worker-D71poAlg.js                    9.82 kB
+dist/assets/starmark-logo-BZgv8OGz.png                        139.75 kB
+dist/assets/pdf.worker.min-CHFwMXne.mjs                     1,262.39 kB
+dist/assets/dnd5eCombatSimulation.worker-BVZgb9wW.js        4,053.96 kB
+dist/assets/main-r3k4PkpI.css                                 390.01 kB │ gzip:  52.75 kB
+dist/assets/starmark-logo-CB_M4M1H.js                           0.05 kB │ gzip:   0.07 kB
+dist/assets/pdf.worker.min-C8Ts8bNu.js                          0.06 kB │ gzip:   0.08 kB
+dist/assets/PlayerQuickCharacterSheet-BfjqHa4r.js               0.08 kB │ gzip:   0.09 kB
+dist/assets/roomPluginSync-Cg9jqOOP.js                          0.08 kB │ gzip:   0.09 kB
+dist/assets/Dnd5eActiveEffectDetailsDialog-Bmdn3OYh.js          0.08 kB │ gzip:   0.10 kB
+dist/assets/dnd5eShopAuthority-D7MKEhim.js                      0.09 kB │ gzip:   0.09 kB
+dist/assets/inventoryAuthority-7bpgAbxQ.js                      0.09 kB │ gzip:   0.09 kB
+dist/assets/sharedApi-DR-q_wHM.js                               0.10 kB │ gzip:   0.11 kB
+dist/assets/DmMonsterControlDock-DJo_HXa8.js                    0.11 kB │ gzip:   0.11 kB
+dist/assets/pdfSplitViewController-BID7kGof.js                  0.20 kB │ gzip:   0.16 kB
+dist/assets/marketplace-publication-BN5puDtV.js                 0.23 kB │ gzip:   0.19 kB
+dist/assets/Card-DFsczO1E.js                                    0.24 kB │ gzip:   0.20 kB
+dist/assets/useVoiceRoom-J8cbDAqr.js                            0.26 kB │ gzip:   0.21 kB
+dist/assets/pluginRequirementProjection-CvBA8ein.js             0.26 kB │ gzip:   0.15 kB
+dist/assets/generatedImage-B2ukvwWD.js                          0.27 kB │ gzip:   0.25 kB
+dist/assets/pluginLoader-BiE17V2F.js                            0.29 kB │ gzip:   0.19 kB
+dist/assets/sharedWriteWatermark-CiRLBso5.js                    0.35 kB │ gzip:   0.23 kB
+dist/assets/portraitPresentation-Bc-acBxp.js                    0.36 kB │ gzip:   0.17 kB
+dist/assets/srdContent-sWgd4g89.js                              0.42 kB │ gzip:   0.38 kB
+dist/assets/PageHeader-fnuJJgEp.js                              0.48 kB │ gzip:   0.29 kB
+dist/assets/campaignNavigation-xz4l1nqp.js                      0.49 kB │ gzip:   0.33 kB
+dist/assets/campaignTime-DKPIfAEf.js                            0.60 kB │ gzip:   0.36 kB
+dist/assets/rolldown-runtime-QTnfLwEv.js                        0.69 kB │ gzip:   0.42 kB
+dist/assets/modulepreload-polyfill-Dezn_h7o.js                  0.69 kB │ gzip:   0.39 kB
+dist/assets/encounterBuilder-C0pg8XO1.js                        0.79 kB │ gzip:   0.42 kB
+dist/assets/dnd5eShopOfferIcon-tjsJ9lxP.js                      0.87 kB │ gzip:   0.48 kB
+dist/assets/appTheme-Ch7HX8nj.js                                0.92 kB │ gzip:   0.48 kB
+dist/assets/ThemeToggle-Cqx7N-xl.js                             0.93 kB │ gzip:   0.60 kB
+dist/assets/dnd5eCreatureFormEndControl-B6W01RyX.js             0.99 kB │ gzip:   0.56 kB
+dist/assets/browserSharedRoomResources-DjMo-1Vx.js              1.08 kB │ gzip:   0.59 kB
+dist/assets/dnd5eMerchantInteraction-CI2Ezup6.js                1.10 kB │ gzip:   0.61 kB
+dist/assets/preload-helper-Czpn1I53.js                          1.19 kB │ gzip:   0.67 kB
+dist/assets/RoomHandoutNotification-BOZg0IOM.js                 1.23 kB │ gzip:   0.75 kB
+dist/assets/browserRuntime-DNg4UnDB.js                          1.23 kB │ gzip:   0.66 kB
+dist/assets/spellbook-D77YthLO.js                               1.26 kB │ gzip:   0.79 kB
+dist/assets/accountCharacterVault-B76fGj3H.js                   1.34 kB │ gzip:   0.77 kB
+dist/assets/mapExploration-Ct7WY4NI.js                          1.46 kB │ gzip:   0.74 kB
+dist/assets/accountSession-SaXMwc33.js                          1.49 kB │ gzip:   0.62 kB
+dist/assets/fog-CjH34HK7.js                                     1.68 kB │ gzip:   0.71 kB
+dist/assets/mapFreeDiceRoll-DsWKmUah.js                         1.71 kB │ gzip:   0.87 kB
+dist/assets/PublicBlogPage-CX3rGHs7.js                          1.72 kB │ gzip:   0.94 kB
+dist/assets/roomSharedStateSync-CAuDVqT-.js                     1.74 kB │ gzip:   0.86 kB
+dist/assets/ai-model-policy-DIhJCtAq.js                         1.76 kB │ gzip:   0.76 kB
+dist/assets/MapReferencePanel-C9QUDqDX.js                       1.83 kB │ gzip:   0.87 kB
+dist/assets/middleware-Pd0e8Igk.js                              1.91 kB │ gzip:   0.95 kB
+dist/assets/roomPluginSync-gfGvvW6a.js                          1.98 kB │ gzip:   1.08 kB
+dist/assets/playerDiceRoll-DN3XR9GF.js                          2.05 kB │ gzip:   1.07 kB
+dist/assets/browserSharedRoomService-Pnvbn8Cv.js                2.08 kB │ gzip:   0.67 kB
+dist/assets/PublicCombatPage-BM5t2jIi.js                        2.15 kB │ gzip:   1.28 kB
+dist/assets/combatExperience-Cn3akGtX.js                        2.19 kB │ gzip:   1.11 kB
+dist/assets/characters-D5qwFcm6.js                              2.23 kB │ gzip:   0.68 kB
+dist/assets/PublicPricingPage-DJFK2ToH.js                       2.31 kB │ gzip:   1.24 kB
+dist/assets/CampaignCombatBackgroundSystem-BigMBZMr.js          2.63 kB │ gzip:   1.22 kB
+dist/assets/PluginPublisherPage-BGgpA9Eu.js                     2.72 kB │ gzip:   1.40 kB
+dist/assets/pdfSourceEvidence-DP69MOZT.js                       2.73 kB │ gzip:   1.29 kB
+dist/assets/customMonsters-nV2ZuoEK.js                          2.78 kB │ gzip:   1.35 kB
+dist/assets/sceneAudio-BP-zLwul.js                              2.91 kB │ gzip:   1.54 kB
+dist/assets/monsterManualSpell-Dds5bUZM.js                      2.99 kB │ gzip:   1.31 kB
+dist/assets/dnd5eShops-D2V8rhTL.js                              3.10 kB │ gzip:   1.57 kB
+dist/assets/combatTokens-BF8XcGvi.js                            3.15 kB │ gzip:   1.30 kB
+dist/assets/combatStatistics-CRUY34Mu.js                        3.31 kB │ gzip:   1.30 kB
+dist/assets/VoiceRoomSystem-qLqELAO6.js                         3.33 kB │ gzip:   1.60 kB
+dist/assets/campaignBackupApi-C68Bipnz.js                       3.34 kB │ gzip:   1.86 kB
+dist/assets/playerView-CdGKKJia.js                              3.40 kB │ gzip:   1.22 kB
+dist/assets/appDialog-CQIqSIeJ.js                               3.60 kB │ gzip:   1.41 kB
+dist/assets/SceneAudioPlaybackSystem-BBhv-Mpm.js                3.71 kB │ gzip:   1.71 kB
+dist/assets/aiProvider-BfoyVepo.js                              3.98 kB │ gzip:   1.64 kB
+dist/assets/dnd5eShopAuthority-BkE_bsWd.js                      4.12 kB │ gzip:   1.82 kB
+dist/assets/quickCharacterView-DCPH1drW.js                      4.33 kB │ gzip:   1.62 kB
+dist/assets/PublicLegalPage-BqNZ7MS6.js                         4.40 kB │ gzip:   2.53 kB
+dist/assets/NpcMerchantPanel-DSJ_cGye.js                        4.62 kB │ gzip:   1.89 kB
+dist/assets/CharacterTokenCropDialog-CwXMIoaa.js                4.74 kB │ gzip:   2.16 kB
+dist/assets/mapImageGeometryDetection-C54XVgZ6.js               5.36 kB │ gzip:   2.53 kB
+dist/assets/roomCommunications-GqrF2nrH.js                      5.52 kB │ gzip:   1.87 kB
+dist/assets/PublicWebsiteShell-B1O5GrO0.js                      5.62 kB │ gzip:   1.89 kB
+dist/assets/useLatestCallback-7t3ql8Ql.js                       5.64 kB │ gzip:   2.58 kB
+dist/assets/MapMerchantShopDialog-B5Xmpc3a.js                   5.72 kB │ gzip:   2.43 kB
+dist/assets/PublicLandingPage-CFwsn1-q.js                       6.28 kB │ gzip:   2.58 kB
+dist/assets/sceneOrchestration-npcmrh5e.js                      6.45 kB │ gzip:   2.31 kB
+dist/assets/Dnd5eInventoryTile-BKzUKf1u.js                      6.51 kB │ gzip:   2.43 kB
+dist/assets/PluginCatalogDetailPage-B36e-pVP.js                 6.55 kB │ gzip:   2.60 kB
+dist/assets/ai-provider-CRkHizX6.js                             6.66 kB │ gzip:   2.25 kB
+dist/assets/monsterManualControl-fB8u4mHY.js                    6.68 kB │ gzip:   2.61 kB
+dist/assets/CombatInitiativeConfirmationDialog-Be67Tcyf.js      6.77 kB │ gzip:   2.58 kB
+dist/assets/inventoryAuthority-E5WruxPw.js                      6.81 kB │ gzip:   3.02 kB
+dist/assets/persistentAreaGeometry-BNxAIxNn.js                  6.83 kB │ gzip:   2.50 kB
+dist/assets/campaignLongRest-CWZBh5UE.js                        6.99 kB │ gzip:   2.89 kB
+dist/assets/AccountProfilePage-BdEzb4P9.js                      7.31 kB │ gzip:   2.81 kB
+dist/assets/pdfSourceRepository-Bpughkgq.js                     7.46 kB │ gzip:   2.22 kB
+dist/assets/CombatExperienceSettlementDialog-DTHwVpkR.js        7.48 kB │ gzip:   2.62 kB
+dist/assets/map-visibility-layers-JP-6yzse.js                   7.61 kB │ gzip:   2.18 kB
+dist/assets/map-geometry-layers-CIhOEzj1.js                     8.21 kB │ gzip:   3.07 kB
+dist/assets/dnd5e-plugin-sandbox-host-kaL0nluZ.js               8.29 kB │ gzip:   3.00 kB
+dist/assets/localAiBridgeApi-CxVHF0tO.js                        8.35 kB │ gzip:   3.42 kB
+dist/assets/mapGeometry-D9LQtlMM.js                             8.60 kB │ gzip:   2.76 kB
+dist/assets/pluginCatalogApi-DhH0K8aV.js                        8.60 kB │ gzip:   2.71 kB
+dist/assets/ActiveRulesExtensionsPage-BF_F_kTU.js               8.66 kB │ gzip:   3.38 kB
+dist/assets/DmCombatRecoveryDialog-oPU2zfa1.js                  9.53 kB │ gzip:   3.87 kB
+dist/assets/Dnd5eLegendaryActionWindow-CZmo8rPJ.js              9.61 kB │ gzip:   3.33 kB
+dist/assets/AiImageGenerationButton-ABdDPNJi.js                 9.63 kB │ gzip:   4.25 kB
+dist/assets/AccountAuthPanel-c0ziNemV.js                        9.78 kB │ gzip:   3.05 kB
+dist/assets/Dnd5ePluginCombatPanel-Cse0kKiS.js                 10.05 kB │ gzip:   3.56 kB
+dist/assets/D20RollConfirmationOverlay-Bapi4xsd.js             10.10 kB │ gzip:   3.83 kB
+dist/assets/Dnd5eFighterCombatPanel-DgT_Nlyu.js                10.24 kB │ gzip:   3.44 kB
+dist/assets/voiceChanger-BoA84IR7.js                           10.51 kB │ gzip:   4.00 kB
+dist/assets/roomPluginActivation-CLMRV-x6.js                   11.66 kB │ gzip:   4.29 kB
+dist/assets/Dnd5eActiveEffectDetailsDialog-Bkyro4xl.js         12.42 kB │ gzip:   3.96 kB
+dist/assets/MapDiceRoller-CJOBijJr.js                          12.79 kB │ gzip:   4.41 kB
+dist/assets/mapsPageHelpers-DeVfwmfU.js                        12.88 kB │ gzip:   5.13 kB
+dist/assets/roomApi-Cq3aaVSu.js                                13.03 kB │ gzip:   4.34 kB
+dist/assets/AccountCampaignsPage-n4JPnE5e.js                   13.16 kB │ gzip:   4.36 kB
+dist/assets/rollConfirmation-QIw8WhZd.js                       14.55 kB │ gzip:   4.54 kB
+dist/assets/Dnd5eMapObjectDetailPanel-BU1XQiTE.js              14.64 kB │ gzip:   4.29 kB
+dist/assets/PlayerQuickCharacterSheet-CTDWdgWj.js              15.01 kB │ gzip:   4.88 kB
+dist/assets/accountApi-D3CJtX3L.js                             15.05 kB │ gzip:   5.52 kB
+dist/assets/Dnd5eBasicActionsPanel-_jVy_-Rh.js                 15.57 kB │ gzip:   4.54 kB
+dist/assets/PdfSplitViewPanel-PGswYO81.js                      15.75 kB │ gzip:   6.02 kB
+dist/assets/EnemyPoolPicker-CBHbNDgz.js                        16.04 kB │ gzip:   4.95 kB
+dist/assets/SpellbookPage-DhLWvH-Y.js                          17.16 kB │ gzip:   6.58 kB
+dist/assets/diceFrame-DTEOV4Jr.js                              17.43 kB │ gzip:   6.55 kB
+dist/assets/RoomLobbyPage-Dc6ucAKV.js                          17.88 kB │ gzip:   5.50 kB
+dist/assets/spellSettlementCoordinator-D7oHZsVs.js             18.56 kB │ gzip:   6.14 kB
+dist/assets/ShopsPage-yP-_Xoy7.js                              20.00 kB │ gzip:   6.38 kB
+dist/assets/CampaignSettingsPage-DuOKmRzZ.js                   20.25 kB │ gzip:   6.38 kB
+dist/assets/CampaignTimeSystem-CcSnBZs_.js                     20.75 kB │ gzip:   7.24 kB
+dist/assets/pluginAreas-CiQuARIF.js                            20.96 kB │ gzip:   6.52 kB
+dist/assets/Sidebar-BiQRaGGZ.js                                23.25 kB │ gzip:   6.68 kB
+dist/assets/DmMonsterControlDock-CllgNjwn.js                   24.81 kB │ gzip:   7.51 kB
+dist/assets/Dnd5ePersistentAreaDetailPanel-DOKS25RW.js         26.96 kB │ gzip:   7.71 kB
+dist/assets/Dashboard-B6wAgmx4.js                              29.35 kB │ gzip:   9.13 kB
+dist/assets/character-C7pjQ1q4.js                              37.58 kB │ gzip:  11.75 kB
+dist/assets/CombatSimulationPage-D6osXd13.js                   39.53 kB │ gzip:  11.38 kB
+dist/assets/map-persistent-area-layers-BN0gkKZR.js             40.54 kB │ gzip:  12.23 kB
+dist/assets/chunk-BV7QT456-DtaJSOdJ.js                         42.44 kB │ gzip:  15.10 kB
+dist/assets/Dnd5eClassCombatPanel-B_blcy41.js                  45.29 kB │ gzip:  12.44 kB
+dist/assets/characters-DKwUfIoT.js                             46.16 kB │ gzip:  13.09 kB
+dist/assets/CommunicationsPage-DcHTy5PX.js                     52.16 kB │ gzip:  14.36 kB
+dist/assets/maps-D_5CwVSQ.js                                   52.29 kB │ gzip:  14.93 kB
+dist/assets/main-qLo1ym0L.js                                   56.68 kB │ gzip:  17.77 kB
+dist/assets/EquipmentTab-B1Wo3Ayk.js                           64.05 kB │ gzip:  19.33 kB
+dist/assets/icon-vendor-DAiccE3F.js                            64.12 kB │ gzip:  20.38 kB
+dist/assets/pluginLoader-Cp0OuXAx.js                           64.17 kB │ gzip:  18.69 kB
+dist/assets/SceneOrchestrationSystem-BpXQHx6d.js               66.53 kB │ gzip:  17.56 kB
+dist/assets/dmWorkshopMonsterHandoff-BIH2TcYC.js               72.75 kB │ gzip:  25.06 kB
+dist/assets/monsterStatBlockPaste-ClSyDbTb.js                  73.09 kB │ gzip:  22.74 kB
+dist/assets/PluginsPage-BKKOArSI.js                            77.15 kB │ gzip:  19.41 kB
+dist/assets/MapViewportLayer-z1c3GyVh.js                       90.31 kB │ gzip:  29.28 kB
+dist/assets/MapWorkspacePanelsLayer-Bbi4QjWF.js               111.29 kB │ gzip:  29.69 kB
+dist/assets/monsterTurnPlanner-CskJiwt2.js                    119.52 kB │ gzip:  33.55 kB
+dist/assets/react-vendor-BKkgq8Ct.js                          174.88 kB │ gzip:  55.12 kB
+dist/assets/Dnd5eMonsterWorkshopDialog-CdRfKvyN.js            186.23 kB │ gzip:  45.56 kB
+dist/assets/map-combat-effects-BFySZga8.js                    195.42 kB │ gzip:  56.64 kB
+dist/assets/CharactersPage-DRWXT7vW.js                        255.98 kB │ gzip:  69.66 kB
+dist/assets/map-token-renderer-DW5FyuyQ.js                    277.87 kB │ gzip:  83.95 kB
+dist/assets/DmPrepAssistantPage-sHGKESUs.js                   301.26 kB │ gzip:  83.51 kB
+dist/assets/dnd5e-FdrGK4YZ.js                                 400.95 kB │ gzip: 111.73 kB
+dist/assets/map-cantrip-effects-Z-wZfORr.js                   401.92 kB │ gzip: 119.76 kB
+dist/assets/DmWorkshopPage-DwBUw5dc.js                        423.76 kB │ gzip:  98.27 kB
+dist/assets/pdf-EQHMWEbX.js                                   427.54 kB │ gzip: 127.43 kB
+dist/assets/livekit-client.esm-CgpJ_kbm.js                    493.42 kB │ gzip: 127.44 kB
+dist/assets/dice-vendor-C2bKjqtR.js                           544.92 kB │ gzip: 141.72 kB
+dist/assets/MapsPage-CExH9IO3.js                            1,296.37 kB │ gzip: 377.91 kB
+dist/assets/dnd5e-plugin-compiler-iq-KgTV7.js               4,423.19 kB │ gzip: 970.84 kB
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugins. Here is a breakdown:
+  - vite:worker-import-meta-url (34%)
+  - vite:css-post (19%)
+  - @tailwindcss/vite:generate:build (11%)
+  - vite:build-import-analysis (10%)
+  - vite:asset (10%)
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 12.57s

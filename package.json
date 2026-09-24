@@ -31,8 +31,8 @@
     "typecheck": "tsc -b --pretty false",
     "build": "node scripts/audit-architecture.mjs && tsc -b && vite build && node scripts/audit-local-content-boundary.mjs --dist dist",
     "build:check": "npm run build && node scripts/check-bundle-budget.mjs",
-    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/.eslintcache --cache-strategy content",
-    "lint:full": "eslint .",
+    "lint": "node scripts/eslint-ratchet.mjs --strict",
+    "lint:full": "node scripts/eslint-ratchet.mjs --strict",
     "lint:ratchet": "node scripts/eslint-ratchet.mjs",
     "check:fast": "npm run typecheck && npm run lint",
     "audit:production": "node scripts/audit-production.mjs",
@@ -96,7 +96,7 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "build": {
     "appId": "com.astraltrace.desktop",

@@ -12,7 +12,7 @@ describe('dice engine settled presentation', () => {
 
   it('levels the currently upper face for every non-d4 polyhedron', () => {
     expect(source).toContain('function uprightTopFaceQuaternion')
-    expect(source).toContain('return uprightTopFaceQuaternion(die)')
+    expect(source).toContain('return uprightTopFaceQuaternion(die, targetValue)')
     expect(source).not.toContain("if (die.shape !== 'd6') return current")
   })
 
