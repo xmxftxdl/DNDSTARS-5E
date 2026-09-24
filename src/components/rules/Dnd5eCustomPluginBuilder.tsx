@@ -1,3 +1,5 @@
+import { exportLegacyDnd5eStarMod } from '../../rulesets/dnd5e/starModAdapter'
+import { parseDnd5eContentPackageV2 as parsePortableContent } from '../../rulesets/dnd5e/contentPackageV2'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BadgeDollarSign, ChevronDown, Download, FolderOpen, Plus, Save, Trash2, Upload, X } from 'lucide-react'
@@ -4184,9 +4186,15 @@ export default function Dnd5eCustomPluginBuilder({
     return new File([source], dnd5eCustomRulesPluginFileName(draft.manifest.id), { type: 'application/json' })
   }
 
-  const download = () => {
-    const file = buildFile()
-    if (!file) return
+  const download = async () => {
+    const sourceFile = buildFile()
+    if (!sourceFile) return
+    let file: File
+    try {
+      const value = parsePortableContent(await sourceFile.arrayBuffer())
+      if (!value) throw new Error('内容包无效')
+      file = new File([await exportLegacyDnd5eStarMod(value)], `${value.manifest.id}.starmod`, {type:'application/zip'})
+    } catch (error) { setLocalError(error instanceof Error ? error.message : String(error)); return }
     const url = URL.createObjectURL(file)
     const link = document.createElement('a')
     link.href = url
@@ -5147,7 +5155,7 @@ export default function Dnd5eCustomPluginBuilder({
             <button type="button" disabled={busy} onClick={() => void deleteDraft()} className="mr-auto inline-flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/5 px-4 py-2.5 text-sm font-semibold text-rose-200 disabled:opacity-50"><Trash2 className="h-4 w-4" /> 删除当前房间草稿</button>
             <button type="button" disabled={busy} onClick={loadDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><FolderOpen className="h-4 w-4" /> 载入本地草稿</button>
             <button type="button" disabled={busy} onClick={saveDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Save className="h-4 w-4" /> 保存本地草稿</button>
-            <button type="button" disabled={busy} onClick={download} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Download className="h-4 w-4" /> 下载插件文件</button>
+            <button type="button" disabled={busy} onClick={download} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Download className="h-4 w-4" /> 导出 .starmod</button>
             {onPublish && <button type="button" disabled={busy} onClick={() => void publish()} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-2.5 text-sm font-semibold text-emerald-100 disabled:opacity-50"><BadgeDollarSign className="h-4 w-4" /> {busy ? '正在处理…' : publishLabel}</button>}
             <button type="button" disabled={busy} onClick={() => void install()} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? '正在保存…' : installLabel}</button>
           </div>

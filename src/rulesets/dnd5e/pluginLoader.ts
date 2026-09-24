@@ -43,6 +43,12 @@ import {
   type Dnd5ePluginTrustProfile,
 } from '../../domain/plugins/pluginKind'
 
+import { communityPackageRegistry } from '../../domain/packages/packageRegistry'
+import { compendiumImporters } from '../../domain/packages/importerRegistry'
+import { isStarModArchive, type StarModPackage } from '../../domain/packages/starmodArchive'
+import type { StarScarPackageManifest } from '../../domain/packages/packageManifest'
+import { readDnd5eStarMod, assertStarModDependencies, exportDnd5eStarMod, exportLegacyDnd5eStarMod, readLegacyDnd5eStarMod, projectDnd5eStarModRuntime } from './starModAdapter'
+
 const STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v2'
 const LEGACY_STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v1'
 const DATABASE_NAME = 'dndstars-rules-plugins'
@@ -107,6 +113,7 @@ export interface Dnd5eRulesPluginHost {
     contentSummary?: Dnd5eContentPackageSummaryV2
     automationCoverage?: Dnd5eContentAutomationCoverageReportV2
     provenance?: Dnd5eContentPackageProvenanceV2
+    starModManifest?: StarScarPackageManifest
   }>
   migrateState(input: {
     bytes: ArrayBuffer
@@ -114,6 +121,8 @@ export interface Dnd5eRulesPluginHost {
     state: JsonValue
   }): Promise<{ state: JsonValue; fromVersion: number; toVersion: number }>
   readBytes(pluginId: string): Promise<ArrayBuffer>
+  exportStarMod(pluginId: string): Promise<ArrayBuffer>
+  setEnabled(pluginId: string, enabled: boolean): Promise<void>
   remove(pluginId: string): Promise<void>
   clearEphemeral(): Promise<void>
   listInstalled(): readonly InstalledDnd5eRulesPlugin[]
@@ -151,7 +160,8 @@ declare global {
           integrity: string
           bytes: ArrayBuffer | null
         } | null>
-        remove(pluginId: string): Promise<void>
+        setEnabled(pluginId: string, enabled: boolean): Promise<void>
+  remove(pluginId: string): Promise<void>
         list(): Promise<readonly unknown[]>
       }
     }
@@ -335,8 +345,13 @@ export async function sha256Integrity(bytes: ArrayBuffer): Promise<string> {
   return `sha256-${window.btoa(binary)}`
 }
 
-async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string) {
+async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string): ReturnType<Dnd5eRulesPluginHost['inspectFile']> {
   if (bytes.byteLength < 1) throw new Error('插件文件为空')
+  if (getRoomSession() && isStarModArchive(bytes)) {
+    const original = await loadPluginArtifact(bytes)
+    const projected = await inspectPluginBytes(await projectDnd5eStarModRuntime(bytes), fileName.replace(/\.starmod$/i, '.runtime.json'))
+    return { ...projected, ...('starModManifest' in original ? {starModManifest:original.starModManifest} : {}) }
+  }
   const integrity = await sha256Integrity(bytes)
   const artifact = await loadPluginArtifact(bytes)
   try {
@@ -346,6 +361,7 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string) {
       fileName,
       integrity,
       bytes,
+      ...('starModManifest' in artifact ? { starModManifest: artifact.starModManifest } : {}),
       ...(artifact.kind === 'content-v2' ? {
         contentSummary: dnd5eContentPackageSummaryV2(artifact.package),
         automationCoverage: dnd5eContentPackageAutomationCoverageV2(artifact.package, integrity),
@@ -395,6 +411,7 @@ type LoadedDnd5ePluginArtifact =
     }
   | {
       kind: 'content-v2'
+      starModManifest?: StarScarPackageManifest
       adapterKind: 'content-v2-adapter'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
@@ -403,6 +420,7 @@ type LoadedDnd5ePluginArtifact =
     }
   | {
       kind: 'unified-v1'
+      starModManifest?: StarScarPackageManifest
       adapterKind: 'unified-native'
       manifest: Dnd5eRulesPluginManifest
       trust: Dnd5ePluginTrustProfile
@@ -441,7 +459,26 @@ export function normalizeDnd5eDeclarativePackageAtLoadBoundary(
   return normalized
 }
 
+function withNeutralRegistry(plugin: Dnd5eRulesPlugin, neutral: StarModPackage): Dnd5eRulesPlugin {
+ return {...plugin, setup(api) {
+  const remove = communityPackageRegistry.register(neutral)
+  try {
+   const cleanup = plugin.setup(api)
+   return () => { try { if (typeof cleanup === 'function') cleanup() } finally { remove() } }
+  } catch(error) { remove(); throw error }
+ }}
+}
+
 async function loadPluginArtifact(bytes: ArrayBuffer): Promise<LoadedDnd5ePluginArtifact> {
+  if (isStarModArchive(bytes)) {
+    const neutral = await compendiumImporters.preview('starmod',{fileName:'module.starmod',bytes})
+    const legacy = await readLegacyDnd5eStarMod(bytes)
+    if (legacy) return {kind:'content-v2',adapterKind:'content-v2-adapter',manifest:legacy.package.manifest,starModManifest:legacy.manifest,package:legacy.package,plugin:withNeutralRegistry(dnd5eRulesPluginFromContentPackageV2(legacy.package), neutral),trust:dnd5ePluginTrustProfile('content-package','content-v2')}
+    const { bundle, manifest } = await readDnd5eStarMod(bytes)
+    return { kind: 'unified-v1', adapterKind: 'unified-native', manifest: bundle.manifest,
+      starModManifest: manifest, package: bundle, plugin: withNeutralRegistry(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle), neutral),
+      trust: dnd5ePluginTrustProfile('content-package', 'unified-v1') }
+  }
   const unified = parseDnd5eUnifiedContentBundleV1(bytes)
   if (unified) {
     const plugin = dnd5eRulesPluginFromUnifiedContentBundleV1(unified)
@@ -490,6 +527,9 @@ async function importPinnedPlugin(descriptor: InstalledDnd5eRulesPlugin): Promis
 }
 
 function activatePlugin(artifact: LoadedDnd5ePluginArtifact, integrity: string): void {
+  if ('starModManifest' in artifact && artifact.starModManifest) {
+    assertStarModDependencies(artifact.starModManifest, registeredDnd5eRulesPlugins())
+  }
   if (artifact.manifest.distributionPolicy === 'local-only' && getRoomSession()) {
     terminatePluginArtifact(artifact)
     throw new Error('local-only 内容包只能在未连接联网房间时运行；离开房间并重新加载后可恢复本地使用')
@@ -567,7 +607,8 @@ async function installFileBytes(input: {
     try {
       if (previousDescriptor && previousBytes) {
         const previousArtifact = await loadPluginArtifact(previousBytes)
-        activatePlugin(previousArtifact, previousDescriptor.integrity)
+        if (previousDescriptor.enabled) activatePlugin(previousArtifact, previousDescriptor.integrity)
+        else terminatePluginArtifact(previousArtifact)
         if (previousDescriptor.source === 'file') {
           await storeModuleBytes(previousDescriptor.id, previousBytes, {
             version: previousArtifact.manifest.version,
@@ -650,15 +691,24 @@ async function clearEphemeralPlugins(): Promise<void> {
 
 export async function loadInstalledDnd5eRulesPlugins(): Promise<Dnd5eRulesPluginLoadFailure[]> {
   const failures: Dnd5eRulesPluginLoadFailure[] = []
-  for (const descriptor of installedDnd5eRulesPlugins()) {
-    if (!descriptor.enabled || registeredDnd5eRulesPlugins().some((plugin) => plugin.id === descriptor.id)) continue
-    try {
-      activatePlugin(await importPinnedPlugin(descriptor), descriptor.integrity)
-    } catch (error) {
-      failures.push({ id: descriptor.id, error: error instanceof Error ? error.message : String(error) })
+  let pending = installedDnd5eRulesPlugins().filter(d => d.enabled && !registeredDnd5eRulesPlugins().some(p => p.id === d.id))
+  const errors = new Map<string,string>()
+  while(pending.length) {
+    const retry: typeof pending = []
+    let progress = false
+    for(const descriptor of pending) {
+      try { activatePlugin(await importPinnedPlugin(descriptor),descriptor.integrity); progress=true }
+      catch(error) {errors.set(descriptor.id,error instanceof Error ? error.message : String(error));retry.push(descriptor)}
     }
+    if (!progress) { failures.push(...retry.map(d => ({id:d.id,error:errors.get(d.id)!}))); break }
+    pending=retry
   }
   return failures
+}
+
+function assertNoActiveDependents(pluginId: string): void {
+ const dependents = registeredDnd5eRulesPlugins().filter(p => p.id !== pluginId && p.dependencies?.some(d => d.id === pluginId && !d.optional))
+ if(dependents.length) throw new Error(`请先停用依赖此模块的内容：${dependents.map(p=>p.name).join('、')}`)
 }
 
 export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
@@ -720,7 +770,33 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
       if (!descriptor) throw new Error(`本机未安装插件：${pluginId}`)
       return descriptorBytes(descriptor)
     },
+    async exportStarMod(pluginId) {
+      const descriptor = ephemeralDescriptors.get(pluginId) ?? installedDnd5eRulesPlugins().find(item => item.id === pluginId)
+      if (!descriptor) throw new Error(`本机未安装插件：${pluginId}`)
+      const bytes = await descriptorBytes(descriptor)
+      if (isStarModArchive(bytes)) return bytes
+      const artifact = await loadPluginArtifact(bytes)
+      try {
+        if (artifact.kind === 'content-v2') return exportLegacyDnd5eStarMod(artifact.package)
+        if (artifact.kind === 'declarative-v1') return exportLegacyDnd5eStarMod(artifact.normalizedPackage)
+        if (artifact.kind !== 'unified-v1') throw new Error('此包包含可执行插件代码，请使用原文件导出；.starmod 当前只接受声明式内容。')
+        return exportDnd5eStarMod(artifact.package)
+      } finally { terminatePluginArtifact(artifact) }
+    },
+    async setEnabled(pluginId, enabled) {
+      if (getRoomSession()) throw new Error('联网房间的模块状态由房间规则统一管理')
+      const installed = installedDnd5eRulesPlugins()
+      const descriptor = installed.find(d => d.id === pluginId)
+      if (!descriptor) throw new Error('package-not-installed')
+      if (enabled) activatePlugin(await importPinnedPlugin(descriptor),descriptor.integrity)
+      else {
+        assertNoActiveDependents(pluginId)
+        unregisterDnd5eRulesPlugin(pluginId); terminateDnd5ePluginSandbox(pluginId)
+      }
+      persistInstalled(installed.map(d => d.id === pluginId && d.source !== 'ephemeral' ? {...d,enabled} : d))
+    },
     async remove(pluginId) {
+      assertNoActiveDependents(pluginId)
       unregisterDnd5eRulesPlugin(pluginId)
       terminateDnd5ePluginSandbox(pluginId)
       if (ephemeralDescriptors.has(pluginId)) {
