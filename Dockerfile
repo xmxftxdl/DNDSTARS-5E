@@ -15,7 +15,13 @@ COPY src ./src
 # the clean build stage. They are not copied into the runtime image.
 COPY examples/community-sdk ./examples/community-sdk
 
-RUN npm run build
+# Small builders otherwise let Node choose a ~2 GiB heap. Only this build stage
+# uses the larger ceiling; keep dependency installation cached when it changes.
+ARG STARS_BUILD_HEAP_MB=4096
+ENV NODE_OPTIONS="--max-old-space-size=${STARS_BUILD_HEAP_MB}"
+
+RUN node -e "console.log('Build Node heap limit: ' + Math.round(require('node:v8').getHeapStatistics().heap_size_limit / 1024 / 1024) + ' MiB')" \
+    && npm run build
 
 FROM node:22-alpine AS production-dependencies
 WORKDIR /app
