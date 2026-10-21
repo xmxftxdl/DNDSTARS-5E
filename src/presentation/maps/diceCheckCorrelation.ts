@@ -1,5 +1,5 @@
 import type { DiceCheckOutcome } from './diceCheckOutcome'
-import type { Dnd5eCombatEvent } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 
 /** Presentation-only correlation. Never participates in rule settlement. */
 export function createDiceCheckCorrelation(storage?: Pick<Storage, 'getItem' | 'setItem'>) {

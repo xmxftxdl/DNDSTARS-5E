@@ -4,7 +4,7 @@ import {dnd5ePreparedLongCastingBinding,invalidateDnd5ePreparedLongCasting,type 
 import {dmPlayerActionAuthorityLockName} from './useMapsPlayerActionTransport'
 import type {BrowserLongCastingOwnerClient} from '../../../shared/long-casting-owner-client.mjs'
 import {continueDnd5eLongCastingOutsideCombat,continueDnd5eLongCastingInsideCombat} from '../../rulesets/dnd5e/longCastingContinuity'
-import type {Dnd5eHeadlessCombatState} from '../../rulesets/dnd5e/headlessCombatEngine'
+import type {Dnd5eHeadlessCombatState} from '../../application/combat/dnd5eCombatRules'
 
 export interface CombatCastingLeaseManager {
   request(name:string,options:{mode:'exclusive'},run:(lock:unknown)=>Promise<void>):Promise<unknown>

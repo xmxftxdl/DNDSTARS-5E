@@ -1,28 +1,112 @@
 {
   "schemaVersion": 1,
-  "baseline": "origin/main@065c1debcbce677cfba2180698b19967c74568dd",
-  "description": "Maximum is the checked-in no-growth ceiling. Target preserves the intended post-refactor budget and must not be raised to hide new debt.",
+  "baseline": "38a4aae7587d0ccf1b2fd792dd3705d02e677cae",
+  "description": "User-authorized release rebaseline on 2026-10-21 after repairing forbidden dependency edges. Maximum remains a no-growth ceiling; original refactor targets are unchanged.",
   "budgets": {
-    "mapsPageLines": { "maximum": 24, "target": 24 },
-    "mapsWorkspacePageLines": { "maximum": 41294, "target": 28557 },
-    "mapsPageRulesetImports": { "maximum": 3, "target": 3 },
-    "mapsPageStoreImports": { "maximum": 10, "target": 10 },
-    "mapsPageLibImports": { "maximum": 72, "target": 70 },
-    "sharedServerCoreLines": { "maximum": 14989, "target": 12951 },
-    "mapCanvasLines": { "maximum": 3418, "target": 2867 },
-    "mapCombatEffectsLines": { "maximum": 413, "target": 413 },
-    "mapEffectPrimitivesLines": { "maximum": 647, "target": 647 },
-    "mapCantripEffectsLines": { "maximum": 2187, "target": 2073 },
-    "mapLeveledSpellEffectsLines": { "maximum": 1997, "target": 1646 },
-    "mapTokenNodeLines": { "maximum": 1761, "target": 1438 },
-    "mapCanvasContractsLines": { "maximum": 85, "target": 85 },
-    "mapVisibilityLayersLines": { "maximum": 431, "target": 431 },
-    "mapGeometryLayersLines": { "maximum": 500, "target": 500 },
-    "mapCanvasGeometryUtilsLines": { "maximum": 42, "target": 33 },
-    "mapPersistentAreaLayersLines": { "maximum": 1803, "target": 991 },
-    "mapInteractionActionProcessorLines": { "maximum": 563, "target": 532 },
-    "pluginApiLines": { "maximum": 3227, "target": 2844 },
-    "monsterTurnPlannerLines": { "maximum": 4205, "target": 4146 },
-    "mapCanvasLayerCount": { "maximum": 6, "target": 5 }
+    "mapsPageLines": {
+      "maximum": 24,
+      "target": 24
+    },
+    "mapsWorkspacePageLines": {
+      "maximum": 52757,
+      "target": 28557
+    },
+    "mapsPageRulesetImports": {
+      "maximum": 176,
+      "target": 3
+    },
+    "mapsPageStoreImports": {
+      "maximum": 10,
+      "target": 10
+    },
+    "mapsPageLibImports": {
+      "maximum": 87,
+      "target": 70
+    },
+    "sharedServerCoreLines": {
+      "maximum": 16223,
+      "target": 12951
+    },
+    "mapCanvasLines": {
+      "maximum": 3577,
+      "target": 2867
+    },
+    "mapCombatEffectsLines": {
+      "maximum": 413,
+      "target": 413
+    },
+    "mapEffectPrimitivesLines": {
+      "maximum": 647,
+      "target": 647
+    },
+    "mapCantripEffectsLines": {
+      "maximum": 2187,
+      "target": 2073
+    },
+    "mapLeveledSpellEffectsLines": {
+      "maximum": 1997,
+      "target": 1646
+    },
+    "mapTokenNodeLines": {
+      "maximum": 1789,
+      "target": 1438
+    },
+    "mapCanvasContractsLines": {
+      "maximum": 91,
+      "target": 85
+    },
+    "mapVisibilityLayersLines": {
+      "maximum": 519,
+      "target": 431
+    },
+    "mapGeometryLayersLines": {
+      "maximum": 501,
+      "target": 500
+    },
+    "mapCanvasGeometryUtilsLines": {
+      "maximum": 42,
+      "target": 33
+    },
+    "mapPersistentAreaLayersLines": {
+      "maximum": 2030,
+      "target": 991
+    },
+    "mapInteractionActionProcessorLines": {
+      "maximum": 582,
+      "target": 532
+    },
+    "pluginApiLines": {
+      "maximum": 3491,
+      "target": 2844
+    },
+    "monsterTurnPlannerLines": {
+      "maximum": 4371,
+      "target": 4146
+    },
+    "mapCanvasLayerCount": {
+      "maximum": 9,
+      "target": 5
+    }
+  },
+  "previousBaseline": "origin/main@065c1debcbce677cfba2180698b19967c74568dd",
+  "rebaseline": {
+    "date": "2026-10-21",
+    "reason": "Restore production builds for the current feature set; retain layer checks and all original refactor targets.",
+    "previousCeilings": {
+      "mapsWorkspacePageLines": 41294,
+      "mapsPageRulesetImports": 3,
+      "mapsPageLibImports": 72,
+      "sharedServerCoreLines": 14989,
+      "mapCanvasLines": 3418,
+      "mapTokenNodeLines": 1761,
+      "mapCanvasContractsLines": 85,
+      "mapVisibilityLayersLines": 431,
+      "mapGeometryLayersLines": 500,
+      "mapPersistentAreaLayersLines": 1803,
+      "mapInteractionActionProcessorLines": 563,
+      "pluginApiLines": 3227,
+      "monsterTurnPlannerLines": 4205,
+      "mapCanvasLayerCount": 6
+    }
   }
 }

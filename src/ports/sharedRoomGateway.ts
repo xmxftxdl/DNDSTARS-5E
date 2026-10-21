@@ -75,6 +75,10 @@ export interface SharedServerClockSample {
 }
 
 export interface SharedRoomGatewayPort {
+  /** Optional transport capability for authoritative long-casting ownership leases. */
+  sendLongCastingOwnerCommand?(
+    roomId: string, memberId: string, command: unknown, signal: AbortSignal,
+  ): Promise<{ status: number; body: Record<string, unknown> }>
   getRevisionWatermark(name: string): number
   loadResource<T>(name: string): Promise<T | null>
   saveResource<T>(name: string, data: T, options?: SharedResourceWriteOptions): Promise<void>

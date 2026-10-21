@@ -8,6 +8,11 @@ behavior-preserving extractions with a stable regression gate.
 
 The checked-in ceilings live in `scripts/architecture-ratchet.json`.
 
+On 2026-10-21 the user explicitly authorized a release rebaseline for the current feature set.
+The ratchet records that exception, the prior baseline and prior ceilings. Forbidden dependency
+edges were repaired rather than exempted. All original targets remain unchanged; the new maxima
+are measured no-growth ceilings, not permission for further increases during ordinary development.
+
 - `maximum` records the current no-growth ceiling. A change that increases it fails the architecture audit.
 - `target` preserves the intended post-refactor budget. It must not be raised to make a failing change pass.
 - When an extraction lowers a measured value, lower `maximum` in the same pull request. Never increase it.

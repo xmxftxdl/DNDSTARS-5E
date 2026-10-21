@@ -1,4 +1,4 @@
-import type { Dnd5eCombatant } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eCombatant } from '../../application/combat/dnd5eCombatRules'
 
 export function dmTokenElevationPermission(combatant?: Dnd5eCombatant): { allowed: boolean; reason: string } {
   void combatant

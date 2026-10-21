@@ -1122,7 +1122,7 @@ export interface Token {
     activityExtraTurnGroup?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnGroup']
     activityExtraTurnSuspension?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnSuspension']
     slowSpellGate?: import('../rulesets/dnd5e/slowSpellGate').Dnd5eSlowSpellGate
-    slowDelayedMonsterSpell?: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eCombatant['classState']['slowDelayedMonsterSpell']
+    slowDelayedMonsterSpell?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['slowDelayedMonsterSpell']
     slowDelayedSpell?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['slowDelayedSpell']
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
     /**

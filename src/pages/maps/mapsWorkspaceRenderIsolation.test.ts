@@ -25,7 +25,7 @@ const panelsLayerSource = readFileSync(
 describe('MapsWorkspacePage render isolation', () => {
   it('finishes Prismatic Spray animation before requesting Activity dice', () => {
     const branch = workspaceSource.slice(
-      workspaceSource.indexOf('const pluginCast = preparedPluginSpell.prepared'),
+      workspaceSource.indexOf('let pluginCast = preparedPluginSpell.prepared'),
       workspaceSource.indexOf('const settledPluginSpell = pluginSettlement.settled'),
     )
     expect(branch).toContain("spellAnimationsEnabled && (pluginCast.spell.id === 'prismatic-spray'")
@@ -33,7 +33,9 @@ describe('MapsWorkspacePage render isolation', () => {
     expect(branch).toContain('await publishAreaSpellPresentation(presentation)')
     const publish = branch.indexOf('await publishAreaSpellPresentation')
     const wait = branch.indexOf('schedule.completesAt - combatPresentationServerNow()', publish)
-    const roll = branch.indexOf('await executeDnd5ePluginDiceRolls')
+    const roll = branch.indexOf('await collectSpellActivityRolls')
+    expect(roll).toBeGreaterThan(-1)
+    expect(branch).toContain('executeDnd5ePluginDiceRolls(refreshed, roller)')
     expect(publish).toBeGreaterThan(branch.indexOf('activity-target-missing'))
     expect(wait).toBeGreaterThan(publish)
     expect(wait).toBeLessThan(roll)
@@ -375,12 +377,16 @@ describe('MapsWorkspacePage render isolation', () => {
   it('collects every save in a simultaneous persistent-area wave before rolling shared damage', () => {
     const collectWaveIndex = workspaceSource.indexOf('const primedSavingThrows = await collectDnd5ePersistentAreaSavingThrowWaveResults')
     const perTargetIndex = workspaceSource.indexOf('for (const candidate of input.candidates)', collectWaveIndex)
-    const sharedDamageIndex = workspaceSource.indexOf('const damageRolls = candidate.trigger.damage')
+    const collectRollsIndex = workspaceSource.indexOf('await collectDnd5ePersistentAreaRolls({', perTargetIndex)
+    const collectorStart = workspaceSource.indexOf('const collectDnd5ePersistentAreaRolls =')
+    const collector = workspaceSource.slice(collectorStart, workspaceSource.indexOf('const settleDnd5ePersistentAreaCandidates =', collectorStart))
     expect(collectWaveIndex).toBeGreaterThan(-1)
     expect(perTargetIndex).toBeGreaterThan(collectWaveIndex)
-    expect(sharedDamageIndex).toBeGreaterThan(perTargetIndex)
+    expect(collectRollsIndex).toBeGreaterThan(perTargetIndex)
+    expect(collectorStart).toBeGreaterThan(-1)
+    expect(collector.indexOf('const damageRolls = candidate.trigger.damage')).toBeGreaterThan(collector.indexOf('const interrupted ='))
     expect(workspaceSource).toContain('resolve: async (waveCandidate) =>')
-    expect(workspaceSource).toContain('const primedSavingThrow = primedSavingThrows.get(candidate.transactionId)')
+    expect(workspaceSource).toContain('primedSavingThrow: primedSavingThrows.get(candidate.transactionId)')
     expect(workspaceSource).toContain('if (save && savingThrowPresentationId && !primedSavingThrow)')
   })
 

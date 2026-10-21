@@ -1,5 +1,5 @@
 import { planDnd5eDisadvantageNegation, type DisadvantageNegationRoll } from '../../rulesets/dnd5e/disadvantageNegation'
-import { dnd5eSpellcastingSaveRequirements, previewDnd5eSpellcastingSaves, type Dnd5eSpellcastingSavingThrowRoll } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eSpellcastingSaveRequirements, previewDnd5eSpellcastingSaves, type Dnd5eSpellcastingSavingThrowRoll } from '../../application/combat/dnd5eCombatRules'
 import type {
   BardicInspirationRollType,
   DmAdjudicationInterruptResponse,

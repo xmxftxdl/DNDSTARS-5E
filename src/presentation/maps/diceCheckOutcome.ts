@@ -1,4 +1,4 @@
-import type { Dnd5eCombatEvent } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 
 export interface DiceCheckOutcome {
   modifier?: number

@@ -1,6 +1,6 @@
 import { advanceCampaignTimeSnapshot, validateSharedCampaignTime, type SharedCampaignTimeState } from '../../lib/campaignTime'
 import { dnd5eCampaignInteractionIssue } from '../../rulesets/dnd5e/campaignInteractionAuthority'
-import { settleDnd5eCampaignPreparationCompletion, type Dnd5eHeadlessCombatState } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { settleDnd5eCampaignPreparationCompletion, type Dnd5eHeadlessCombatState } from '../../application/combat/dnd5eCombatRules'
 import { planDnd5eMapResultApplication } from '../../rulesets/dnd5e/mapBridge'
 import { compensateDnd5eCompletedLongCastApplication } from './commitDnd5eCombatResult'
 

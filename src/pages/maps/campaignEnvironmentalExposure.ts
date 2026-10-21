@@ -1,7 +1,7 @@
 import { appendCampaignEnvironmentalExposure, type CampaignEnvironmentalExposure } from '../../../shared/campaign-environmental-exposures.mjs'
 import { validateSharedCampaignTime, type SharedCampaignTimeState } from '../../lib/campaignTime'
 import { automationCapabilityFromLegacyStatus } from '../../domain/automation/automationCapability'
-import { commitDnd5eActivityExecution, dnd5eEffectiveMovementPoolSpeed } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { commitDnd5eActivityExecution, dnd5eEffectiveMovementPoolSpeed } from '../../application/combat/dnd5eCombatRules'
 import type { SharedCombatState } from '../../lib/sharedCombatTypes'
 import { planDnd5eMapResultApplication } from '../../rulesets/dnd5e/mapBridge'
 import { dnd5eActivityActorSnapshotFromCombatantV1 } from '../../rulesets/dnd5e/activities/dnd5eActivityCombatAuthority'

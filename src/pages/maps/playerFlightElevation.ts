@@ -1,4 +1,4 @@
-import { dnd5eEffectiveFlySpeed, type Dnd5eCombatant } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eEffectiveFlySpeed, type Dnd5eCombatant } from '../../application/combat/dnd5eCombatRules'
 import { isMovementLocked } from '../../lib/combatStatus'
 import { dnd5eActiveConditionSpeedReductionApplies, dnd5eActivePlanarPhase } from '../../rulesets/dnd5e/activeEffects'
 

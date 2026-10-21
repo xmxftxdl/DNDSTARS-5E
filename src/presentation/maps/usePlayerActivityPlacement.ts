@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type { GridCell } from '../../lib/gridCombat'
-import { publishSharedEvent, subscribeSharedEvent } from '../../lib/sharedApi'
+import { browserSharedRoomService } from '../../composition/browserSharedRoomService'
 import type { useDnd5eActivityMapTargeting } from './useDnd5eActivityMapTargeting'
+
+const { publishSharedEvent, subscribeSharedEvent } = browserSharedRoomService
 
 type CellRequest = Parameters<ReturnType<typeof useDnd5eActivityMapTargeting>['beginCells']>[0]
 interface Request { mapId: string; characterId: string; input: CellRequest }
@@ -22,10 +24,11 @@ export function usePlayerActivityPlacement(config: {
   beforePlayerPlacement: () => void
 }) {
   const latest = useRef(config)
-  latest.current = config
+  useLayoutEffect(() => { latest.current = config })
   const pending = useRef(new Map<string, { request: Request; finish: (cells?: readonly GridCell[]) => void }>())
   const received = useRef(new Map<string, Promise<readonly GridCell[] | undefined>>())
   useEffect(() => {
+    const pendingRequests = pending.current
     const stopRequests = subscribeSharedEvent<Request>(requestChannel, request => {
       const current = latest.current
       if (current.mode !== 'player' || !playerOwnsActivityPlacement(request, current.mapId, new Set(current.controlledCharacterIds))) return
@@ -48,7 +51,7 @@ export function usePlayerActivityPlacement(config: {
         reply.cells.every(cell => Number.isInteger(cell.col) && Number.isInteger(cell.row)))
       if (valid) entry.finish(reply.cells)
     })
-    return () => { stopRequests(); stopReplies(); for (const entry of pending.current.values()) entry.finish() }
+    return () => { stopRequests(); stopReplies(); for (const entry of pendingRequests.values()) entry.finish() }
   }, [config.mapId, config.mode])
   return useCallback((input: CellRequest, characterId?: string) => {
     const current = latest.current

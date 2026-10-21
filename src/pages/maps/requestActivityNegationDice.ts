@@ -1,6 +1,6 @@
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
-import type { Dnd5eHeadlessCombatState } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eHeadlessCombatState } from '../../application/combat/dnd5eCombatRules'
 import type { Dnd5ePluginDiceRollDeclaration } from '../../rulesets/dnd5e/plugins/pluginHeadlessContracts'
 import type { Dnd5ePluginDiceRoller } from '../../rulesets/dnd5e/pluginDice'
 import { collectDnd5eActivityNegationDice } from '../../rulesets/dnd5e/activities/dnd5eActivityNegationDice'

@@ -3,7 +3,7 @@ import { dnd5eCombatantClassLevel } from '../../rulesets/dnd5e/headlessCombatPri
 import { dnd5eOptionalBonusDieSourceEligible } from '../../rulesets/dnd5e/optionalBonusDieEligibility'
 import { dnd5eActivityCheckTargetForRollV1, previewDnd5eActivitySavingThrowV1, type Dnd5eActivityExecutionInput } from '../../rulesets/dnd5e/activities/dnd5eActivityExecutor'
 import type { Dnd5eActivityRetainedSaveDice } from '../../rulesets/dnd5e/activities/dnd5eActivityRetainedSaveDice'
-import type { Dnd5eHeadlessCombatState, Dnd5eOptionalBonusDieUse } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eHeadlessCombatState, Dnd5eOptionalBonusDieUse } from '../../application/combat/dnd5eCombatRules'
 import type { Dnd5ePluginDiceRollDeclaration } from '../../rulesets/dnd5e/pluginApi'
 import type { Dnd5eOptionalBonusDieInterruptRequest } from './dnd5eRollInterruptPipeline'
 import type { Character } from '../../types/character'

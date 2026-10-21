@@ -1,5 +1,5 @@
-import type { Dnd5eHeadlessCombatState } from '../../rulesets/dnd5e/headlessCombatEngine'
-import { dnd5eCombatantCanSee } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eHeadlessCombatState } from '../../application/combat/dnd5eCombatRules'
+import { dnd5eCombatantCanSee } from '../../application/combat/dnd5eCombatRules'
 import { dnd5eCreatureSeenRecently } from '../../rulesets/dnd5e/recentCreatureSightings'
 
 /** UI preview only. The Host repeats qualification at commit. No coordinates are returned. */

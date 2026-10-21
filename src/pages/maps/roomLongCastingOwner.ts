@@ -1,7 +1,9 @@
 import {createLongCastingOwnerClient} from '../../../shared/long-casting-owner-client.mjs'
 import {getRoomSession} from '../../lib/roomSession'
-import {sendLongCastingOwnerCommand} from '../../lib/sharedApi'
+import {browserSharedRoomService} from '../../composition/browserSharedRoomService'
 import type {Dnd5eLongCastingBinding} from '../../rulesets/dnd5e/longCastingIdentity'
+
+const {sendLongCastingOwnerCommand} = browserSharedRoomService
 
 export function createRoomLongCastingOwner(binding:Dnd5eLongCastingBinding,onLost:(error:unknown)=>void|Promise<void>){
   const session=getRoomSession()

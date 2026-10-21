@@ -14,7 +14,7 @@ import { prepareAttackTeleportSourceAreas } from '../rulesets/dnd5e/attackTelepo
 import { dnd5eCharacterAttackTeleportRange } from '../rulesets/dnd5e/characterWeaponAttackSlot'
 import { dnd5eMissedWeaponAttackRerollFeatures, previewDnd5eMonsterParryReaction,
   dnd5eSourceActionInterruptionOptions, previewDnd5eSourceActionInterruptionResolution,
-  type Dnd5eSourceActionInterruptionReaction, type Dnd5eActivityTeleportInterruptionUse } from '../rulesets/dnd5e/headlessCombatEngine'
+  type Dnd5eSourceActionInterruptionReaction, type Dnd5eActivityTeleportInterruptionUse } from '../application/combat/dnd5eCombatRules'
 import { requestMapActivityNegation, createMapActivityNegationDice } from './maps/requestActivityNegationDice'
 import { requestBasicContestNegation } from './maps/requestBasicContestNegation'
 import { planDnd5eDisadvantageNegation, dnd5ePendingNegationReservations } from '../rulesets/dnd5e/disadvantageNegation'
@@ -23,9 +23,9 @@ import { dnd5eMovementAuthorityStamp } from '../rulesets/dnd5e/movementAuthority
 import {removeDnd5ePendingMovementCompletion,withDnd5ePendingMovementCompletion} from '../rulesets/dnd5e/pendingMovementCompletion'
 import { recordDnd5eAcceptedMovementSightings } from '../rulesets/dnd5e/mapMovementSightings'
 import { settleDnd5eMountedBalanceCheckpoint, dnd5eBasicActionAreaMovementTargets } from '../rulesets/dnd5e/mountedBalanceCheckpoint'
-import { previewDnd5eMountedBalance } from '../rulesets/dnd5e/headlessCombatEngine'
+import { previewDnd5eMountedBalance } from '../application/combat/dnd5eCombatRules'
 import { dnd5ePreparedSpellAttackModeResolution } from '../rulesets/dnd5e/spellAction'
-import { dnd5eAreaAttackAdvantageCandidates } from '../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eAreaAttackAdvantageCandidates } from '../application/combat/dnd5eCombatRules'
 import { pendingDnd5eAwakeningActivities, settleDnd5eRoomAwakening } from '../rulesets/dnd5e/awakeningRoomSettlement'
 import { normalizeDnd5eDreamContact } from '../rulesets/dnd5e/dreamContact'
 import { prepareDnd5eDreamNightmare, previewDnd5eDreamNightmare, settleDnd5eDreamNightmare } from '../rulesets/dnd5e/dreamNightmareAuthority'
@@ -40,7 +40,7 @@ import { dnd5eSpellWithRangeForCharacter, dnd5eOptionalSpellBonusActionForCharac
 import { prepareCombatQueueReset } from '../application/combat/prepareCombatQueueReset'
 import { dnd5eWeaponHitPushCells, dnd5eWeaponHitFollowCells } from '../rulesets/dnd5e/weaponHitMovement'
 import { collectDnd5eHitFollowContinuation } from '../rulesets/dnd5e/weaponHitFollowCollector'
-import { dnd5eEffectiveWalkSpeed } from '../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eEffectiveWalkSpeed } from '../application/combat/dnd5eCombatRules'
 import { dnd5eActiveMovementRepeatSaves, effectiveDnd5eActiveEffects } from '../rulesets/dnd5e/activeEffects'
 import { prepareDnd5eHitFollowSegmentSavingThrows } from '../rulesets/dnd5e/weaponHitFollowSavingThrows'
 import { dnd5eMonsterMultiattackOccurrenceConstraint } from '../rulesets/dnd5e/monsterMultiattackConstraints'
@@ -49,7 +49,7 @@ import { readActivityMovementCell, readActivityMovementChoice, type ActivityMove
 import { readActivityAreaAim, readActivityAreaChoice, type ActivityAreaAim, type ActivityAreaChoice } from '../lib/activityAreaChoice'
 import { dnd5eActivityMakesAttackAttempt } from '../rulesets/dnd5e/attackAttemptWard'
 import { dnd5eInterruptedFeatureSpellActivity, dnd5eInterruptedFeatureSpellRollIds } from '../rulesets/dnd5e/activities/dnd5eInterruptedFeatureSpell'
-import { previewDnd5eFeatureSpellInvocation } from '../rulesets/dnd5e/headlessCombatEngine'
+import { previewDnd5eFeatureSpellInvocation } from '../application/combat/dnd5eCombatRules'
 import { createCombatantFromDnd5eCharacter } from '../rulesets/dnd5e/character'
 import { dnd5eActivityMappedRockOrigin } from '../rulesets/dnd5e/persistentAreaObjectOrigin'
 import { dnd5eAuguryRandomChance, dnd5eAugurySecretResult } from '../rulesets/dnd5e/auguryReliability'
@@ -71,7 +71,7 @@ import {resolveControlledWaterInput} from '../rulesets/dnd5e/controlledWaterInpu
 import {requestControlledWaterSelection,type ControlledWaterSelection} from '../rulesets/dnd5e/controlledWaterSelection'
 import {prepareDnd5eMonsterCoreSpell,projectResolvedDnd5eMonsterCoreSpell,type PreparedDnd5eMonsterCoreSpell} from '../rulesets/dnd5e/monsterCoreSpellAction'
 import {dnd5eManualMonsterSpellOptions} from '../lib/monsterManualSpell'
-import { previewDnd5eSpellcastingSaves, dnd5eSpellcastingSaveRequirements, type Dnd5eSpellcastingSavingThrowRoll } from '../rulesets/dnd5e/headlessCombatEngine'
+import { previewDnd5eSpellcastingSaves, dnd5eSpellcastingSaveRequirements, type Dnd5eSpellcastingSavingThrowRoll } from '../application/combat/dnd5eCombatRules'
 import {transferDroppedObjectSurfaceAreas,transferNewlyDroppedSurfaceAreas} from '../rulesets/dnd5e/surfaceAreaTransfer'
 import {scheduleTurnSkip} from '../lib/scheduledTurnSkip'
 import {FortressFurnishingDialog,type FortressFurnishingPreview} from '../components/map/FortressFurnishingDialog'
@@ -86,7 +86,7 @@ import IllusionInvestigationPanel from '../components/map/IllusionInvestigationP
 import { ammunitionContainerSnapshots } from '../rulesets/dnd5e/ammunitionBindings'
 import { prepareDnd5eRandomTargetBasicAction } from '../rulesets/dnd5e/randomBasicActionTargets'
 import { createDnd5eMapHostilityView } from '../rulesets/dnd5e/mapPerceivedHostility'
-import { dnd5eCombatantPerceivesHostile } from '../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eCombatantPerceivesHostile } from '../application/combat/dnd5eCombatRules'
 import { prepareDnd5eRandomTargetMonsterSpecial } from '../rulesets/dnd5e/randomMonsterSpecialTargets'
 import { prepareDnd5eRandomTargetMonsterSpell, dnd5eMonsterSpellIntentWithPreparedTargets } from '../rulesets/dnd5e/randomMonsterSpellTargets'
 import { prepareDnd5eRandomTargetMonsterAttack } from '../rulesets/dnd5e/randomMonsterAttackTargets'
@@ -169,7 +169,7 @@ import { createTeleportationCircle, teleportationCircleContains, travelThroughTe
 import { useTeleportationCircleTravel } from './maps/useTeleportationCircleTravel'
 import { applyApprovedPortalTravelReceipts, portalTravelReceipt, portalSettlementSourceMap, type PortalTravelReceipt } from './maps/portalTravelReceipt'
 import { portalResultPlans } from './maps/portalResultPlans'
-import { endDnd5eActivityExtraTurnGroup, endDnd5eSourceLinkedEffectsForCommittedHarm } from '../rulesets/dnd5e/headlessCombatEngine'
+import { endDnd5eActivityExtraTurnGroup, endDnd5eSourceLinkedEffectsForCommittedHarm } from '../application/combat/dnd5eCombatRules'
 import { activateSymbolArea } from '../rulesets/dnd5e/symbolSpell'
 import { usePlayerActivityPlacement } from '../presentation/maps/usePlayerActivityPlacement'
 import { requestInventoryExchangeRitual } from '../components/map/inventoryExchangeChoices'
@@ -211,20 +211,20 @@ import { activitySavingThrowPreview } from '../presentation/maps/activitySavingT
 import { activityEffectDiceRecipes } from '../presentation/maps/activityEffectDice'
 import { preparedDnd5eAbilityCheckEffectDice } from '../rulesets/dnd5e/abilityCheckAction'
 import {resolvePreparedDnd5eEquipmentAttackLanding, preparedDnd5eEquipmentAttackEffectContext, dnd5eVisibleEquipmentAttackTargets, buildPreparedDnd5eEquipmentAttackAction} from '../rulesets/dnd5e/equipmentAttackAction'
-import { dnd5eSavingThrowCounterattackOptions, previewDnd5eSavingThrowCounterattack } from '../rulesets/dnd5e/headlessCombatEngine'
+import { dnd5eSavingThrowCounterattackOptions, previewDnd5eSavingThrowCounterattack } from '../application/combat/dnd5eCombatRules'
 import { dnd5eActiveRandomizesVisibleCreatureTargets } from '../rulesets/dnd5e/activeEffects'
 import { selectRandomCreatureTarget } from '../presentation/maps/randomCreatureTargetCheckpoint'
 import { prepareDnd5eRandomTargetPluginSpellCast } from '../rulesets/dnd5e/randomPluginSpellTargets'
 import { prepareDnd5eRandomTargetCoreSpellCast } from '../rulesets/dnd5e/randomCoreSpellTargets'
 import { prepareDnd5eRandomTargetFeatureAction } from '../rulesets/dnd5e/randomFeatureTargets'
 import {dnd5eRollDiceRecipes,resolveDnd5eRollDiceModifiers} from '../rulesets/dnd5e/rollDiceModifiers'
-import {dnd5eCombatantHasConcentrationCheckAdvantage} from '../rulesets/dnd5e/headlessCombatEngine'
+import {dnd5eCombatantHasConcentrationCheckAdvantage} from '../application/combat/dnd5eCombatRules'
 import {resolveDnd5eRollMode} from '../rulesets/dnd5e/rollMode'
 import {collectDnd5eForcedMovementConsequences} from '../rulesets/dnd5e/weaponHitPushConsequences'
 import {dnd5eRollDiceOccurrenceId} from '../rulesets/dnd5e/rollDiceTransaction'
 import {preparedDnd5eMonsterAttackEffectContext} from '../rulesets/dnd5e/monsterAttackAction'
 import {projectDnd5eMonsterAttackPreparation,refreshDnd5eMonsterAttackOccurrence} from '../rulesets/dnd5e/monsterAttackAction'
-import {previewDnd5eMonsterCompositePrefix} from '../rulesets/dnd5e/headlessCombatEngine'
+import {previewDnd5eMonsterCompositePrefix} from '../application/combat/dnd5eCombatRules'
 import { diceResultFormula } from '../presentation/maps/diceResultFormula'
 import { assertDiceOwnership, isDiceCharacterOwnedByCurrentDm } from './maps/diceOwnership'
 import { publicActivityRollDetails } from './maps/combatRollVisibility'
@@ -3658,7 +3658,7 @@ export default function MapsWorkspacePage() {
 
   async function settleDnd5eMapMountedBalance(prepared: {
     state: Dnd5eHeadlessCombatState; map: BattleMap; characters: readonly Character[]; characterIdByCombatantId: Record<string,string>
-  }, result: import('../rulesets/dnd5e/headlessCombatEngine').Dnd5eActionResult) {
+  }, result: import('../application/combat/dnd5eCombatRules').Dnd5eActionResult) {
     const snapshot = () => JSON.stringify({
       map: useMapStore.getState().maps.find(map => map.id === prepared.map.id),
       characters: useCharacterStore.getState().characters,
@@ -10843,7 +10843,7 @@ export default function MapsWorkspacePage() {
       if(!roll||stamp!==movementHazardAuthorityStamp(mapId))return false
       rolls.push({effectId:repeat.effectId,...roll})
     }
-    const {resolveDnd5eDeferredMovementRepeatSaves}=await import('../rulesets/dnd5e/headlessCombatEngine')
+    const {resolveDnd5eDeferredMovementRepeatSaves}=await import('../application/combat/dnd5eCombatRules')
     const {prepareDnd5eMovementEffectDice}=await import('../rulesets/dnd5e/movementEffectDice')
     const transactionId=pending.id
     const resolve=(effectRollDice:Readonly<Record<string,readonly number[]>>)=>resolveDnd5eDeferredMovementRepeatSaves(snapshot.state,actorId,true,rolls,{transactionId,effectRollDice})
@@ -27266,7 +27266,7 @@ export default function MapsWorkspacePage() {
         fallingDamageDice: dnd5eFallingDamageDice(fall.fallDistanceFeet),
       }], authorityMap, `${settlementId}:forced-fall:${pushedToken.id}`, '强制位移·坠落伤害') : undefined
       if (reaction) { shoveState = reaction.state; shoveEvents.push(...reaction.events) }
-      const { resolveDnd5eForcedMovementLanding } = await import('../rulesets/dnd5e/headlessCombatEngine')
+      const { resolveDnd5eForcedMovementLanding } = await import('../application/combat/dnd5eCombatRules')
       const landed = resolveDnd5eForcedMovementLanding({ state: shoveState, targetId: pushedToken.id,
         toElevationFeet: fall.toElevationFeet, toGroundElevationFeet: fall.landingGroundElevationFeet,
         fallingDamageRolls: reaction?.fallingDamageRollsByCombatantId[pushedToken.id] })

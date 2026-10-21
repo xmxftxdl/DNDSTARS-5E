@@ -11,6 +11,9 @@ COPY public ./public
 COPY shared ./shared
 COPY scripts ./scripts
 COPY src ./src
+# TypeScript checks source tests too; their public SDK fixtures must exist in
+# the clean build stage. They are not copied into the runtime image.
+COPY examples/community-sdk ./examples/community-sdk
 
 RUN npm run build
 

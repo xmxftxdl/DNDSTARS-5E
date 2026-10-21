@@ -6,9 +6,11 @@ import {
   normalizeDnd5eInventory,
 } from '../../rulesets/dnd5e/items'
 import type { Character } from '../../types/character'
-import type { Token } from '../../store/maps'
+import type { createDnd5eMapCombatSnapshot } from '../../rulesets/dnd5e/mapBridge'
 import { dnd5eInventoryEntryUseAction } from '../../rulesets/dnd5e/items'
 import type { Dnd5eInventoryMutationFailure } from '../../types/inventory'
+
+type Token = Parameters<typeof createDnd5eMapCombatSnapshot>[0]['map']['tokens'][number]
 
 export type Dnd5eAuthoritativeItemUseResult =
   | {

@@ -13,6 +13,7 @@ import {
   putSharedImage,
   recoverDmCombatToTransaction,
   sampleSharedServerClock,
+  sendLongCastingOwnerCommand,
   saveSharedResource,
   saveSharedResourcesAtomically,
   saveSharedResourceWithResult,
@@ -25,6 +26,7 @@ import type { SharedRoomGatewayPort } from '../../ports/sharedRoomGateway'
 
 /** Browser HTTP/SSE adapter. Transport details stay outside Presentation. */
 export const sharedApiRoomGateway: SharedRoomGatewayPort = {
+  sendLongCastingOwnerCommand,
   getRevisionWatermark: getSharedResourceRevisionWatermark,
   loadResource: loadSharedResource,
   saveResource: saveSharedResource,

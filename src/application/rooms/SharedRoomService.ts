@@ -13,6 +13,13 @@ export class SharedRoomService {
     this.gateway = gateway
   }
 
+  readonly sendLongCastingOwnerCommand = (
+    roomId: string, memberId: string, command: unknown, signal: AbortSignal,
+  ) => {
+    if (!this.gateway.sendLongCastingOwnerCommand) throw new Error('casting-owner-transport-unavailable')
+    return this.gateway.sendLongCastingOwnerCommand(roomId, memberId, command, signal)
+  }
+
   readonly getSharedResourceRevisionWatermark = (name: string) => this.gateway.getRevisionWatermark(name)
   readonly loadSharedResource = <T>(name: string) => this.gateway.loadResource<T>(name)
   readonly saveSharedResource = <T>(name: string, data: T, options?: SharedResourceWriteOptions) =>

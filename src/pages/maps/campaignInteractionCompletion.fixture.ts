@@ -2,7 +2,7 @@ import { normalizeCharacter } from '../../store/characters'
 import type { BattleMap } from '../../store/maps'
 import { normalizeSharedCampaignTime } from '../../lib/campaignTime'
 import { mutateCampaignTimeState } from '../../../scripts/shared-server-core.mjs'
-import { createDnd5eCombatant, startDnd5eHeadlessCombat } from '../../rulesets/dnd5e/headlessCombatEngine'
+import { createDnd5eCombatant, startDnd5eHeadlessCombat } from '../../application/combat/dnd5eCombatRules'
 import { createDnd5eMechanicalEffect } from '../../rulesets/dnd5e/activeEffects'
 
 export function campaignInteractionFixture(characterSource = true, rounds = 10, availableRounds = 10) {

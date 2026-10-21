@@ -1,5 +1,5 @@
 import type { BattleMap } from '../../store/maps'
-import type { Dnd5eCombatEvent } from '../../rulesets/dnd5e/headlessCombatEngine'
+import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 import { mapGeometryRuntimeForMap, mapGeometryTokenElevation } from '../../lib/mapGeometry'
 
 /** Retains Host-approved geometry before the source token is removed. */

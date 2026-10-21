@@ -1,8 +1,9 @@
-import type {BattleMap} from '../../store/maps'
 import type {Character} from '../../types/character'
 import {createDnd5eMapCombatSnapshot} from '../../rulesets/dnd5e/mapBridge'
 import {dnd5eActiveArmorClassBonus} from '../../rulesets/dnd5e/activeEffects'
 import {dnd5eCombatantPairKey} from '../../rulesets/dnd5e/headlessCombatPrimitives'
+
+type BattleMap = Parameters<typeof createDnd5eMapCombatSnapshot>[0]['map']
 
 /** Display only the spatial cohort component; ordinary AC remains in its existing projection. */
 export function projectDnd5eMapCohortArmorClassBonus(input:{map:BattleMap;characters:readonly Character[];tokenId:string}):number {
