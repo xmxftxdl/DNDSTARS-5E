@@ -11,6 +11,7 @@ import type {
 
 /** Browser targeting draft. It contains no authoritative combat result. */
 export interface Dnd5eSpellTargetingSession {
+  bonusActionCasting?: boolean
   characterId: string
   spellOriginAreaId?: string
   focusItemInstanceId?: string
@@ -24,6 +25,12 @@ export interface Dnd5eSpellTargetingSession {
   ritual?: true
   /** Closed Activity choices already validated against the registered schema. */
   activityChoices?: Record<string, string>
+  /** Selected inventory identity is retained while choosing its owner/area. */
+  activityInventoryInstanceId?: Dnd5eSpellCastPayload['activityInventoryInstanceId']
+  activityInventorySelections?: Dnd5eSpellCastPayload['activityInventorySelections']
+  activityGroundInventorySelections?: Dnd5eSpellCastPayload['activityGroundInventorySelections']
+  activityInventoryCharacterId?: Dnd5eSpellCastPayload['activityInventoryCharacterId']
+  expectedActivityInventoryRevision?: Dnd5eSpellCastPayload['expectedActivityInventoryRevision']
   secretPhrase?: Dnd5eSpellCastPayload['secretPhrase']
   magicMouth?: Dnd5eSpellCastPayload['magicMouth']
   communicationText?: string
@@ -59,14 +66,22 @@ export interface Dnd5eSpellTargetingSession {
   areaTargetCell?: GridCell
   /** Absolute elevation of the area origin or the aimed point, in feet. */
   targetElevationFeet?: number
+  surfaceTargetMode?: 'horizontal' | 'vertical'
+  verticalSurface?: Dnd5eSpellCastPayload['verticalSurface']
+  verticalSurfacePreviewCells?: GridCell[]
   areaTargetCells?: GridCell[]
   dancingLightsForm?: Dnd5eSpellCastPayload['dancingLightsForm']
   areaTargetCount?: number
   minimumAreaTargetCount?: number
   /** Free-angle orientation for a generic rotatable rectangular template. */
   areaTargetAngleDegrees?: number
+  areaTargetPitchDegrees?: number
+  areaTargetRollDegrees?: number
+  objectLaunchPitchDegrees?: number
   areaTargetRadiusFeet?: number
   areaTargetWidthFeet?: number
+  /** Selected vertical extent; areaTargetHeightFeet is planar length. */
+  areaTargetVolumeHeightFeet?: number
   areaTargetHeightFeet?: number
   areaTargetLengthFeet?: number
   stoneWall?: import('../../../rulesets/dnd5e/stoneWall').StoneWallLayout

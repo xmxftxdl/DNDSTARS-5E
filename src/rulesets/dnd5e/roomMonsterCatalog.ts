@@ -11,6 +11,11 @@ export function getDnd5eRoomMonster(id: string): Dnd5eMonsterStatBlock | undefin
   return roomMonstersById.get(id) ?? pluginMonstersById.get(id)
 }
 
+/** Same precedence as lookup; removed plugin entries disappear immediately. */
+export function listDnd5eRoomMonsters(): readonly Dnd5eMonsterStatBlock[] {
+  return [...new Map([...pluginMonstersById, ...roomMonstersById]).values()]
+}
+
 export function registerDnd5ePluginMonsterCatalogEntry(monster: Dnd5eMonsterStatBlock): () => void {
   if (pluginMonstersById.has(monster.id)) throw new Error(`Plugin monster already registered: ${monster.id}`)
   pluginMonstersById.set(monster.id, monster)

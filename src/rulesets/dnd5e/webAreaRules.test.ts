@@ -1,3 +1,4 @@
+import { resolveDnd5ePersistentAreaTriggerSourceDc } from './persistentAreaTypes'
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -10,6 +11,7 @@ import {
 import {
   expireDnd5eWebAreaAtTurnBoundary,
   igniteDnd5eWebAreaCell,
+  extinguishDnd5eWebAreaCells,
   igniteDnd5eWebAreasFromFire,
   igniteDnd5eWebAreasFromSpell,
   reconcileDnd5eWebRestraints,
@@ -75,6 +77,26 @@ function fixture(): { map: BattleMap; characters: Character[] } {
 }
 
 describe('Web persistent-area lifecycle', () => {
+  it('extinguishes selected cells without removing web, restraints, receipts or remaining burn timers', () => {
+    const {map}=fixture()
+    const first=igniteDnd5eWebAreaCell({map,areaId:'web-area',cell:{col:0,row:0},round:1,turnTokenId:'caster'})!
+    const burning=igniteDnd5eWebAreaCell({map:first,areaId:'web-area',cell:{col:1,row:0},round:1,turnTokenId:'caster'})!
+    burning.dnd5ePluginAreas![0].webState!.unsupportedCollapseAtRound=8
+    const before=structuredClone(burning)
+    const result=extinguishDnd5eWebAreaCells({map:burning,areaId:'web-area',cells:[{col:0,row:0}]})
+    const area=result.dnd5ePluginAreas![0]
+    expect(area.cells).toEqual(before.dnd5ePluginAreas![0].cells)
+    expect(area.webState?.burningCells).toEqual([before.dnd5ePluginAreas![0].webState!.burningCells![1]])
+    expect(area.webState?.unsupportedCollapseAtRound).toBe(8)
+    expect(area.triggers?.find(t=>t.id==='web-burning-turn-start')?.cells).toEqual([{col:1,row:0}])
+    expect(result.tokens).toEqual(before.tokens)
+    expect(burning).toEqual(before)
+    expect(extinguishDnd5eWebAreaCells({map:result,areaId:'web-area',cells:[{col:0,row:0}]})).toBe(result)
+    const all=extinguishDnd5eWebAreaCells({map:result,areaId:'web-area',cells:[{col:1,row:0}]})
+    expect(all.dnd5ePluginAreas![0].triggers?.some(t=>t.id==='web-burning-turn-start')).toBe(false)
+    expect(all.dnd5ePluginAreas![0].webState).toEqual({unsupportedCollapseAtRound:8,burningCells:undefined})
+    expect(all.dnd5ePluginAreas![0].cells).toHaveLength(4)
+  })
   it.each(DND5E_SRD_COMBAT_SPELLS.filter(spell => spell.area &&
     (spell.damageType === 'fire' || spell.additionalDamageComponents?.some(component => component.damageType === 'fire')))
     .map(spell => [spell.id, spell] as const))('ignites empty web cells for %s', (_id, spell) => {
@@ -111,12 +133,12 @@ describe('Web persistent-area lifecycle', () => {
     const { map } = fixture()
     const token = { ...map.tokens[1], x: 175, y: 25, dnd5eCombatState: undefined }
     map.tokens = [map.tokens[0], token]
-    map.dnd5ePluginAreas![0].triggers = getDnd5eCoreSpellAreaDeclaration('web')!.triggers.map((trigger) => ({
-      ...trigger, savingThrow: trigger.savingThrow ? { ...trigger.savingThrow, dc: 14 } : undefined,
+    map.dnd5ePluginAreas![0].triggers = getDnd5eCoreSpellAreaDeclaration('web')!.triggers.map(trigger => resolveDnd5ePersistentAreaTriggerSourceDc({
+      ...trigger, savingThrow: trigger.savingThrow ? { ...trigger.savingThrow, dc: 'source-save-dc' } : undefined,
       condition: trigger.condition ? { ...trigger.condition,
-        escapeCheck: trigger.condition.escapeCheck ? { ...trigger.condition.escapeCheck, dc: 14 } : undefined,
+        escapeCheck: trigger.condition.escapeCheck ? { ...trigger.condition.escapeCheck, dc: 'source-save-dc' } : undefined,
       } : undefined,
-    }))
+    }, 14)!)
     const candidates = collectDnd5ePersistentAreaTriggers({ map, timing: 'on-enter', round: 1,
       turnKey: 'turn-1', movement: { token, to: { x: -25, y: 25 } } })
     expect(candidates).toHaveLength(1)
@@ -135,12 +157,12 @@ describe('Web persistent-area lifecycle', () => {
     const { map } = fixture()
     const spider = { ...map.tokens[1], poolId: getDnd5eSrdMonsterBySlug('giant-spider')!.id }
     map.tokens = [map.tokens[0], spider]
-    map.dnd5ePluginAreas![0].triggers = getDnd5eCoreSpellAreaDeclaration('web')!.triggers.map((trigger) => ({
-      ...trigger, savingThrow: trigger.savingThrow ? { ...trigger.savingThrow, dc: 14 } : undefined,
+    map.dnd5ePluginAreas![0].triggers = getDnd5eCoreSpellAreaDeclaration('web')!.triggers.map(trigger => resolveDnd5ePersistentAreaTriggerSourceDc({
+      ...trigger, savingThrow: trigger.savingThrow ? { ...trigger.savingThrow, dc: 'source-save-dc' } : undefined,
       condition: trigger.condition ? { ...trigger.condition,
-        escapeCheck: trigger.condition.escapeCheck ? { ...trigger.condition.escapeCheck, dc: 14 } : undefined,
+        escapeCheck: trigger.condition.escapeCheck ? { ...trigger.condition.escapeCheck, dc: 'source-save-dc' } : undefined,
       } : undefined,
-    }))
+    }, 14)!)
     const burning = igniteDnd5eWebAreaCell({ map, areaId: 'web-area', cell: { col: 0, row: 0 },
       round: 1, turnTokenId: 'caster' })!
     expect(dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: burning, token: spider, position: spider })).toBe(1)
@@ -198,6 +220,32 @@ describe('Web persistent-area lifecycle', () => {
     const state = startDnd5eHeadlessCombat('web-test', [target])
     reconcileDnd5eWebRestraints(state, map)
     expect(state.combatants.target.classState.activeEffects?.map((effect) => effect.id)).toEqual(['other-restraint'])
+    expect(state.combatants.target.conditions).toContain('restrained')
+  })
+
+  it('clears only the departed instance even when two webs have the same caster', () => {
+    const { map, characters } = fixture()
+    const second = { ...map.dnd5ePluginAreas![0], id: 'second-web', cells: [{ col: 4, row: 4 }] }
+    map.dnd5ePluginAreas = [...map.dnd5ePluginAreas!, second]
+    const effects = [
+      { ...webEffect('target'), id: 'first-restraint', tags: ['persistent-area:web-area'] },
+      { ...webEffect('target'), id: 'second-restraint', tags: ['persistent-area:second-web'] },
+      { ...webEffect('target'), id: 'legacy-restraint' },
+    ]
+    map.tokens[1].dnd5eCombatState!.activeEffects = effects
+    const before = structuredClone(map)
+    const updated = reconcileDnd5eWebRestraintsOnMap(map, characters)
+    expect(updated.map.tokens[1].dnd5eCombatState?.activeEffects?.map(effect => effect.id))
+      .toEqual(['first-restraint', 'legacy-restraint'])
+    expect(map).toEqual(before)
+    const target = createDnd5eCombatant({ id: 'target', name: 'target', initiative: 1,
+      controller: 'dm', abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      proficiencyBonus: 2, armorClass: 10, currentHp: 20, maxHp: 20, temporaryHp: 0, speed: 30,
+      concentrating: false, classState: { activeEffects: effects }, position: { x: 25, y: 25 } })
+    const state = startDnd5eHeadlessCombat('web-instances', [target])
+    reconcileDnd5eWebRestraints(state, map)
+    expect(state.combatants.target.classState.activeEffects?.map(effect => effect.id))
+      .toEqual(['first-restraint', 'legacy-restraint'])
     expect(state.combatants.target.conditions).toContain('restrained')
   })
 

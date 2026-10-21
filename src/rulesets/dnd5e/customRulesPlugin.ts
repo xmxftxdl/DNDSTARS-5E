@@ -1,4 +1,6 @@
+import { validateResourceRestRecovery, validateCombatStartResourceRecovery } from '../../lib/resourceRestRecovery'
 import {
+  cloneStaticCombatModifiers,
   normalizeDnd5ePluginPersistentAreaVerticalDeclaration,
   type Dnd5ePluginAbilityGenerationDefinition,
   type Dnd5ePluginBackgroundDefinition,
@@ -9,6 +11,11 @@ import {
   type Dnd5ePluginSpellDefinition,
   type Dnd5eRulesPluginManifest,
 } from './pluginApi'
+import { cloneDnd5eIndependentSpellGrants, cloneDnd5eFeatureClassRequirements } from './independentSpellGrants'
+import { cloneDnd5eFeatureChoiceRequirements } from './featureChoiceRequirements'
+import { cloneDnd5eKnownSpellRequirements } from './featureSpellRequirements'
+import { cloneDnd5eFeatureEligibility } from './featureEligibility'
+import { cloneDnd5eFeatureRuleCapabilities } from './featureRuleCapabilities'
 import {
   DND5E_DECLARATIVE_PACKAGE_FORMAT,
   DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION,
@@ -28,6 +35,7 @@ import {
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
 import type { Dnd5eMonsterStatBlock } from './monsters'
+import { parseDnd5eSpellImport, DND5E_SPELL_IMPORT_FORMAT, DND5E_SPELL_IMPORT_SCHEMA_VERSION } from './spellbook'
 import { validateDnd5eMonsterCatalog } from './monsterSchema'
 import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
@@ -38,6 +46,7 @@ import {
 } from './persistentAreaTypes'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 import { validateDnd5eActivityDefinitionV1 } from './activities/dnd5eActivityValidation'
+import { dnd5eActivityHeadlessCompatibility } from './activities/dnd5eActivityHeadlessCompiler'
 import {
   validateDnd5eAdvancementCollectionV1,
   validateDnd5eAdvancementDefinitionV1,
@@ -104,6 +113,26 @@ export interface Dnd5eCustomRulesPluginDraft {
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
+
+function invalidOwnedResources(resources: unknown): boolean {
+  if (resources === undefined) return false
+  if (!Array.isArray(resources) || resources.length < 1 || resources.length > 16) return true
+  const ids = new Set<string>()
+  return resources.some(resource => {
+    if (!resource || typeof resource !== 'object') return true
+    try { validateResourceRestRecovery(resource.restRecovery); validateCombatStartResourceRecovery(resource.combatStartRecovery) } catch { return true }
+    const invalid = typeof resource.id !== 'string' || !ID_PATTERN.test(resource.id) || ids.has(resource.id) ||
+      typeof resource.label !== 'string' || !resource.label.trim() ||
+      (resource.shortLabel != null && (typeof resource.shortLabel !== 'string' || !resource.shortLabel.trim())) ||
+      !Number.isInteger(resource.maximum) || resource.maximum < 1 || resource.maximum > 1_000_000 ||
+      !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn) ||
+      (resource.initialCurrent != null && (!Number.isSafeInteger(resource.initialCurrent) || resource.initialCurrent < 0 || resource.initialCurrent > 1_000_000)) ||
+      (resource.restoreOnCombatStart != null && typeof resource.restoreOnCombatStart !== 'boolean') ||
+      (resource.stacking != null && !['maximum', 'additive'].includes(resource.stacking))
+    ids.add(resource.id)
+    return invalid
+  })
+}
 
 function invalidFeaturePassiveEffects(feature: Dnd5ePluginFeatureDefinition): boolean {
   const effects = feature.passiveEffects
@@ -251,17 +280,25 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (background.skillProficiencies.length > 2) errors.push(`背景 ${background.name || background.id} 最多提供两项技能熟练。`)
   }
   for (const feature of draft.features) {
+    try { cloneDnd5eIndependentSpellGrants(feature.spellGrants, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureClassRequirements(feature.classRequirements, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureChoiceRequirements(feature.classChoiceRequirements, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eKnownSpellRequirements(feature.requiredKnownSpellIds, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureEligibility(feature.eligibility, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureRuleCapabilities(feature.ruleCapabilities, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
     claimId(feature.id, '特性')
+    try { cloneStaticCombatModifiers(feature.staticModifiers, feature.name || feature.id) } catch (error) { errors.push(String(error)) }
     if (!feature.name.trim() || !feature.summary.trim() || !feature.description.trim()) {
       errors.push(`特性 ${feature.id || '未命名'} 缺少名称、摘要或正文。`)
     }
     if (
       feature.automation !== 'manual' && !feature.action && !feature.staticModifiers &&
-      !feature.passiveEffects?.length && !feature.declarativeAbility &&
+      !feature.passiveEffects?.length && !feature.spellGrants?.length && !feature.declarativeAbility && !feature.resources?.length &&
       !activityBoundSources.has(`feature:${feature.id}`)
     ) {
       errors.push(`自动化特性 ${feature.name || feature.id} 缺少战斗行动。`)
     }
+    if (invalidOwnedResources(feature.resources)) errors.push(`特性 ${feature.name || feature.id} 的资源声明无效。`)
     if (feature.declarativeAbility) {
       try {
         validateDeclarativeSubclassAbilityV1(feature.declarativeAbility, `特性 ${feature.name || feature.id}`)
@@ -318,13 +355,20 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     )) errors.push(`特性 ${feature.name || feature.id} 的召唤声明无效。`)
   }
   for (const feat of draft.feats ?? []) {
+    try { cloneDnd5eIndependentSpellGrants(feat.spellGrants, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureClassRequirements(feat.classRequirements, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureChoiceRequirements(feat.classChoiceRequirements, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eKnownSpellRequirements(feat.requiredKnownSpellIds, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureEligibility(feat.eligibility, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
+    try { cloneDnd5eFeatureRuleCapabilities(feat.ruleCapabilities, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
     claimId(feat.id, '专长')
+    try { cloneStaticCombatModifiers(feat.staticModifiers, feat.name || feat.id) } catch (error) { errors.push(String(error)) }
     if (!feat.name.trim() || !feat.summary.trim() || !feat.description.trim()) {
       errors.push(`专长 ${feat.id || '未命名'} 缺少名称、摘要或正文。`)
     }
     if (
       feat.automation !== 'manual' && !feat.action && !feat.staticModifiers &&
-      !feat.passiveEffects?.length && !feat.declarativeAbility && !feat.advancements?.length &&
+      !feat.passiveEffects?.length && !feat.spellGrants?.length && !feat.declarativeAbility && !feat.advancements?.length && !feat.resources?.length &&
       !activityBoundSources.has(`feat:${feat.id}`)
     ) {
       errors.push(`自动化专长 ${feat.name || feat.id} 缺少战斗行动或固定效果。`)
@@ -336,21 +380,11 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
         errors.push(error instanceof Error ? error.message : String(error))
       }
     }
-    const featResourceIds = new Set<string>()
-    if (feat.resources && (
-      feat.resources.length < 1 || feat.resources.length > 16 || feat.resources.some((resource) => {
-        const invalid = !ID_PATTERN.test(resource.id) || featResourceIds.has(resource.id) ||
-          !resource.label.trim() || (resource.shortLabel != null && !resource.shortLabel.trim()) ||
-          !Number.isInteger(resource.maximum) || resource.maximum < 1 || resource.maximum > 1_000_000 ||
-          !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn) ||
-          (resource.stacking != null && !['maximum', 'additive'].includes(resource.stacking))
-        featResourceIds.add(resource.id)
-        return invalid
-      })
-    )) errors.push(`专长 ${feat.name || feat.id} 的资源声明无效。`)
+    const featResourceIds = new Set((feat.resources ?? []).map(resource => resource.id))
+    if (invalidOwnedResources(feat.resources)) errors.push(`专长 ${feat.name || feat.id} 的资源声明无效。`)
     if (feat.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll') {
       const costs = feat.declarativeAbility.cost?.resources ?? []
-      if (costs.length < 1 || costs.some((cost) =>
+      if (costs.some((cost) =>
         cost.scope === 'core' || !featResourceIds.has(cost.resourceId))) {
         errors.push(`专长 ${feat.name || feat.id} 的选择重掷必须消耗该专长声明的资源。`)
       }
@@ -392,6 +426,11 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     )) errors.push(`专长 ${feat.name || feat.id} 的护甲熟练前提无效。`)
     if (feat.prerequisite?.spellcasting != null && typeof feat.prerequisite.spellcasting !== 'boolean') {
       errors.push(`专长 ${feat.name || feat.id} 的施法能力前提无效。`)
+    }
+    if (feat.prerequisite?.raceSizes != null && (!Array.isArray(feat.prerequisite.raceSizes) ||
+      !feat.prerequisite.raceSizes.length || feat.prerequisite.raceSizes.length > 2 ||
+      feat.prerequisite.raceSizes.some(size => size !== 'small' && size !== 'medium'))) {
+      errors.push(`专长 ${feat.name || feat.id} 的种族体型前提无效。`)
     }
   }
   const headlessActionIds = new Set<string>()
@@ -462,17 +501,30 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (spell.automation?.mode === 'headless-action') referencedHeadlessActions.add(spell.automation.actionId)
   }
   for (const actionId of referencedHeadlessActions) {
-    if (!headlessActionIds.has(actionId)) errors.push(`自动化行动 ${actionId} 缺少 Headless 效果配方。`)
+    const activity = draft.activities?.find(candidate => candidate.id === actionId)
+    const compiledActivity = activity && dnd5eActivityHeadlessCompatibility(activity).supported
+    if (!headlessActionIds.has(actionId) && !compiledActivity) errors.push(`自动化行动 ${actionId} 缺少 Headless 效果配方。`)
   }
   for (const action of draft.headlessActions ?? []) {
     if (!referencedHeadlessActions.has(action.id)) errors.push(`Headless 效果配方 ${action.id} 没有关联特性或法术。`)
   }
   for (const spell of draft.spells) {
     claimId(spell.id, '法术')
+    // Use the same schema as the recipient before projecting/exporting raw AI data.
+    try {
+      parseDnd5eSpellImport({
+        format: DND5E_SPELL_IMPORT_FORMAT, schemaVersion: DND5E_SPELL_IMPORT_SCHEMA_VERSION,
+        spells: [{ ...spell, id: `${manifest.id}:${spell.id}`,
+          source: { title: manifest.name, publisher: manifest.publisher, license: manifest.license },
+          automation: { mode: 'reference-only' },
+        }],
+      })
+    } catch (error) { errors.push(`法术 ${spell.name || spell.id}：${error instanceof Error ? error.message : String(error)}`) }
     if (!spell.name.trim() || !spell.description.trim() || !Number.isInteger(spell.level) || spell.level < 0 || spell.level > 9) {
       errors.push(`法术 ${spell.name || spell.id || '未命名'} 的名称、正文或环级无效。`)
     }
-    if (spell.classes.length === 0) errors.push(`法术 ${spell.name || spell.id} 至少需要一个施法职业。`)
+    // Empty class lists are explicit-grant spells; the Host requires a valid
+    // racial or alternate-resource grant instead of prepared/known selections.
     if (spell.castingTime.unit === 'reaction' && !spell.castingTime.reactionTrigger?.trim()) {
       errors.push(`反应法术 ${spell.name || spell.id} 必须填写触发条件。`)
     }

@@ -13,6 +13,7 @@ import { applyRoomCharacterAssignment, getAssignedPlayerCharacterId, getPlayerCh
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 import { isMapWorkspacePath, nextCampaignRoomPath } from './lib/campaignNavigation'
 import { showAppConfirm } from './lib/appDialog'
+import {registerTempleExpiryInteractionActivation} from './composition/templeExpiryInteraction'
 import {
   closePdfSplitView,
   subscribePdfSplitView,
@@ -46,6 +47,7 @@ const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
 const ShopsPage = lazy(() => import('./pages/ShopsPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
+const CampaignExpiryReactionNavigation = lazy(() => import('./components/CampaignExpiryReactionNavigation'))
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
 const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
 const VoiceRoomSystem = lazy(() => import('./components/VoiceRoomSystem'))
@@ -69,6 +71,8 @@ function lazyPage(scope: string, content: ReactNode) {
 export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
   const [collapsed, setCollapsed] = useState(() => isMapWorkspacePath(location.pathname))
   const [previousMapActive, setPreviousMapActive] = useState(() => isMapWorkspacePath(location.pathname))
@@ -104,6 +108,10 @@ export default function App() {
     legacyWorkspacePaths.has(location.pathname) ||
     (bypassRoomLobby && location.pathname === '/')
   const mapWorkspaceActive = isMapWorkspacePath(location.pathname)
+  useEffect(() => {
+    if (!roomReady || endpointMode !== 'dm' || !workspaceRequested) return
+    return registerTempleExpiryInteractionActivation(() => navigateRef.current(`${campaignBasePath}/maps`))
+  }, [roomReady, endpointMode, workspaceRequested, campaignBasePath])
   // Entering the map compacts navigation; leaving it preserves the user's state.
   if (previousMapActive !== mapWorkspaceActive) {
     setPreviousMapActive(mapWorkspaceActive)
@@ -428,6 +436,7 @@ export default function App() {
       <SharedSyncRecoveryBanner />
       <Suspense fallback={null}>
         {!isSpectator && <RoomHandoutNotification />}
+        <CampaignExpiryReactionNavigation key={roomSession?.roomId ?? 'local'} active={!mapWorkspaceActive && endpointMode === 'player' && !isSpectator} mapsPath={`${campaignBasePath}/maps`} />
         <CampaignTimeSystem
           key={`campaign-time:${roomSession?.roomId ?? 'local'}:${roomSession?.memberId ?? endpointMode}`}
           isDm={endpointMode !== 'player'}

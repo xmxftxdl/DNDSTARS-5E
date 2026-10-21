@@ -23,6 +23,40 @@ const imprisonment = {
 } as Dnd5eActivityDefinitionV1
 
 describe('Activity per-target authoritative roll recipes', () => {
+  it.each([false, true])('omits only the exact Host-confirmed counter save (projectile=%s)', perProjectile => {
+    const activity = structuredClone(imprisonment)
+    const check = activity.checks![0]
+    if (check.kind !== 'saving-throw') throw Error('fixture')
+    if (perProjectile) check.perProjectile = true
+    const result = dnd5eActivityPerTargetRollDeclarationsV1({
+      activity, actor: { id: 'caster' }, targets: [{ id: 'target' }, { id: 'other' }],
+      declarations: [{ id: 'spell-save-d20', label: 'Save', count: 1, sides: 20 },
+        { id: 'damage', label: 'Damage', count: 1, sides: 6 }],
+      projectileTargetIds: perProjectile ? ['target', 'target', 'other'] : undefined,
+      weaponCounterattackSuccessCheckKeys: new Set([perProjectile ? 'spell-save:projectile:0:target' : 'spell-save:target']),
+      hostSavingThrowMode: () => 'disadvantage', hostAttackRollMode: () => 'normal',
+    })
+    expect(result.filter(roll => roll.id.startsWith('spell-save-d20')).map(roll => roll.id)).toEqual(
+      perProjectile ? ['spell-save-d20:projectile:1:target', 'spell-save-d20:projectile:2:other'] : ['spell-save-d20:other'])
+    expect(result.filter(roll => roll.id.startsWith('damage:'))).toHaveLength(2)
+  })
+  it('omits only the type-excluded save while retaining shared damage requests', () => {
+    const activity=structuredClone(imprisonment)
+    const save=activity.checks![0]
+    if(save.kind!=='saving-throw')throw Error('fixture')
+    save.excludedCreatureTypes=['undead']
+    const result=dnd5eActivityPerTargetRollDeclarationsV1({activity,
+      declarations:[{id:'spell-save-d20',label:'Save',count:1,sides:20},{id:'damage',label:'Damage',count:5,sides:12}],
+      actor:{id:'caster'},targets:[{id:'living',creatureType:'humanoid'},{id:'undead',creatureType:'不死生物'}],
+      hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})
+    expect(result.some(roll=>roll.id==='spell-save-d20:living')).toBe(true)
+    expect(result.some(roll=>roll.id==='spell-save-d20:undead')).toBe(false)
+    expect(result.filter(roll=>roll.id.startsWith('damage:'))).toHaveLength(2)
+    expect(()=>dnd5eActivityPerTargetRollDeclarationsV1({activity,
+      declarations:[{id:'spell-save-d20',label:'Save',count:1,sides:20}],actor:{id:'caster'},targets:[{id:'unknown'}],
+      hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})).toThrow('activity-save-creature-type-missing')
+  })
+
   it('keeps damage with its caster while player and monster targets own their saves', () => {
     for (const mode of ['normal', 'advantage', 'disadvantage'] as const) {
       const declarations = dnd5eActivityPerTargetRollDeclarationsV1({

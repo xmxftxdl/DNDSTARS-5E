@@ -1,6 +1,7 @@
 import {
   dnd5eActiveSpeedBonus,
   dnd5eActiveSpeedMultiplier,
+  dnd5eActiveSpeedMaximum,
   dnd5eActiveSpeedPenalty,
   type Dnd5eActiveEffectInstance,
 } from '../../rulesets/dnd5e/activeEffects'
@@ -24,5 +25,6 @@ export function dnd5eMonsterTokenEffectiveSpeed(
       Math.max(0, token.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) +
       dnd5eActiveSpeedBonus(effects),
   )
-  return Math.max(0, Math.floor(adjusted * dnd5eActiveSpeedMultiplier(effects)))
+  return Math.min(dnd5eActiveSpeedMaximum(effects) ?? Infinity,
+    Math.max(0, Math.floor(adjusted * dnd5eActiveSpeedMultiplier(effects))))
 }

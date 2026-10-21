@@ -163,11 +163,35 @@ describe('generic post-d20 adjustment protocol', () => {
       },
       setup(api) {
         api.registerDeclarativeSubclass(definition)
+        api.registerFeature({id:'zero-defer',name:'Defer',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{
+          schemaVersion:1,id:'zero-defer',name:'Defer',description:'Synthetic',level:1,trigger:{kind:'passive'},cost:{economy:'none'},targeting:{kind:'self'},effects:[],mechanic:{kind:'rage-death-deferral'},automation:'full',
+        }})
       },
     })
   })
 
   afterAll(() => dispose?.())
+
+  it.each(['active','not-raging','unowned','dead'] as const)('validates a zero-HP conscious reaction source: %s', mode => {
+    const owner=source()
+    owner.currentHp=0
+    owner.classState.raging=mode!=='not-raging'
+    owner.classState.rageTurnsRemaining=5
+    owner.deathSaves.dead=mode==='dead'
+    if(mode!=='unowned')owner.pluginFeatureIds=[...owner.pluginFeatureIds,`${PLUGIN_ID}:zero-defer`]
+    const attacker=combatant('attacker','dm',20)
+    const result=resolveDnd5eHeadlessAction(state([attacker,owner],attacker.id),{
+      type:'attack',actorId:attacker.id,targetId:owner.id,attackModifier:5,d20:10,spendAction:false,
+      postD20Adjustment:adjustment('subtract',2),damage:{count:1,sides:6,bonus:0,rolls:[6]},
+    })
+    expect(result.ok,result.ok?'ok':result.reason).toBe(mode==='active')
+    if(result.ok){
+      expect(result.state.combatants.source.currentHp).toBe(0)
+      expect(result.state.combatants.source.turn.reactionAvailable).toBe(false)
+      expect(result.state.combatants.source.classResources[RESOURCE_ID].current).toBe(0)
+      expect(result.events).toContainEqual(expect.objectContaining({type:'attack-resolved',hit:false}))
+    }else expect(result.state.combatants.source.classResources[RESOURCE_ID].current).toBe(1)
+  })
 
   it('turns a normal attack hit into a miss and atomically spends reaction and resource', () => {
     const attacker = combatant('attacker', 'dm', 20)

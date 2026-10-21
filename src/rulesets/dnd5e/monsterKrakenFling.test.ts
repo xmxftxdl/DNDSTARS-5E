@@ -1,3 +1,4 @@
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eCombatant,
@@ -102,6 +103,39 @@ function sourceTentacleRelations(state: Dnd5eHeadlessCombatState) {
 }
 
 describe('Kraken Fling structured sub-rule in an isolated fixture', () => {
+  it.each(['own', 'foreign', 'suspended', 'resistant', 'no-collision', 'invalid', 'negative'] as const)(
+    'collision dice use the thrower source and preserve linked movement rollback: %s', mode => {
+      const linked = resolveDnd5eHeadlessAction(encounter(), { type: 'monster-action', actorId: 'kraken', actionId: 'tentacle', rolls: [tentacleRoll()] })
+      expect(linked.ok, JSON.stringify(linked)).toBe(true)
+      const state = JSON.parse(JSON.stringify(linked.state)) as Dnd5eHeadlessCombatState
+      state.combatants.kraken.turn.actionAvailable = true
+      const mark = createDnd5eMechanicalEffect({ definitionId: 'mark', label: 'Mark', targetId: 'hero',
+        source: { kind: 'feature', actorId: mode === 'foreign' ? 'other' : 'kraken' },
+        modifiers: { damageRollsBySourceBonus: mode === 'negative' ? -20 : 3 } })
+      if (mode === 'suspended') mark.suspendedBy = ['antimagic']
+      state.combatants.hero.classState.activeEffects!.push(mark)
+      if (mode === 'resistant') state.combatants.hero.damageResistances = ['bludgeoning']
+      const before = structuredClone(state)
+      const action = { type: 'monster-special-action' as const, actorId: 'kraken', actionId: 'fling', targetId: 'hero',
+        forcedMovements: [{ targetId: 'hero', to: { x: 35, y: 0 }, distanceFeet: 30 }],
+        damageRolls: mode === 'no-collision' ? [] : [1, 2, mode === 'invalid' ? 7 : 3] }
+      const result = resolveDnd5eHeadlessAction(state, action)
+      expect(result.ok, JSON.stringify(result)).toBe(mode !== 'invalid')
+      const amount = { own: 9, foreign: 6, suspended: 6, resistant: 4, 'no-collision': 0, invalid: 0, negative: 0 }[mode]
+      expect(result.state.combatants.hero.currentHp).toBe(before.combatants.hero.currentHp - amount)
+      if (!result.ok) { expect(result.reason).toBe('invalid-dice'); expect(result.state).toEqual(before) }
+      else {
+        expect(result.state.combatants.hero.position).toEqual({ x: 35, y: 0 })
+        expect(sourceTentacleRelations(result.state)).toEqual([])
+        expect(result.state.combatants.hero.conditions).toContain('prone')
+        expect(result.events.filter(event => event.type === 'damage-roll-bonus-applied')).toHaveLength(['own', 'resistant', 'negative'].includes(mode) ? 1 : 0)
+        const repeated = resolveDnd5eHeadlessAction(result.state, action)
+        expect(repeated.ok).toBe(false)
+        expect(repeated.state).toEqual(result.state)
+      }
+      expect(state).toEqual(before)
+    })
+
   it('publishes reviewed +17 attacks and a strict throw rule', () => {
     expect(KRAKEN.actions.find((action) => action.id === 'bite')?.attack?.toHit)
       .toBe(17)

@@ -4,6 +4,8 @@ import {
 } from '../../rulesets/dnd5e/conditions'
 import { getDnd5eSrdSpellCatalogEntry } from '../../rulesets/dnd5e/spellCatalog'
 import { getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e/spells'
+import { dnd5eLongCastingSpellId } from '../../rulesets/dnd5e/longCastingIdentity'
+import { dnd5ePluginSpellDefinition } from '../../rulesets/dnd5e/pluginApi'
 
 export const MAP_SPELL_STATUS_IDS = [
   'guidance',
@@ -118,6 +120,12 @@ export function spellStatusTokenTooltip(statusId: MapSpellStatusId): TokenStatus
 }
 
 export function concentrationTokenTooltip(spellId: string): TokenStatusTooltipContent {
+  const castingSpellId = dnd5eLongCastingSpellId(spellId)
+  if (castingSpellId) {
+    const name = dnd5ePluginSpellDefinition(castingSpellId)?.name ?? getDnd5eSrdCombatSpell(castingSpellId)?.name
+      ?? getDnd5eSrdSpellCatalogEntry(castingSpellId)?.name ?? '法术'
+    return { title: `施法中：${name}`, description: '正在进行长时施法并维持专注；受伤需进行体质豁免，专注中断则本次施法失败，不消耗法术位。' }
+  }
   const spell = getDnd5eSrdCombatSpell(spellId)
   const catalog = getDnd5eSrdSpellCatalogEntry(spellId)
   const name = spell?.name ?? catalog?.name ?? spellId

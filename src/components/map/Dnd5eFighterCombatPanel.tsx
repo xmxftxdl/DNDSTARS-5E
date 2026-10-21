@@ -15,6 +15,7 @@ import type { Dnd5eFighterFeatureId } from '../../rulesets/dnd5e'
 import type { Dnd5eClassFeaturePayload, Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import Dnd5eBasicActionsPanel, { type Dnd5eBasicActionTarget } from './Dnd5eBasicActionsPanel'
+import { dnd5eCharacterAttackTeleportRange } from '../../rulesets/dnd5e/characterWeaponAttackSlot'
 import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 
 export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, extraActionTeleportTargeting, pending, turnEconomy, basicActionTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature, onClassFeature, onExtraActionTeleport }: {
@@ -114,6 +115,8 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
           <Crosshair className="h-4 w-4" />
           {pending ? '等待 DM 结算…' : targeting ? '请点击地图上的目标' : '选择目标并攻击'}
         </button>
+        {profile?.rangeFeet && profile.properties.some(property => property === 'thrown' || property.includes('投掷')) ? <button type="button" onClick={() => onAttack({thrownAttack:true})} disabled={!canAct || pending || !weaponAttackAvailable} className="mt-2 w-full rounded-xl bg-arcane-500/20 px-4 py-2 text-sm disabled:opacity-40">投掷武器</button> : null}
+        {profile?.slingRangeFeet ? <button type="button" onClick={() => onAttack({useSling:true})} disabled={!canAct || pending || !weaponAttackAvailable} className="mt-2 w-full rounded-xl bg-arcane-500/20 px-4 py-2 text-sm disabled:opacity-40">用投石索发射（需副手持有投石索）</button> : null}
         {offHandProfile ? <button
           type="button"
           onClick={() => onAttack({ offHandAttack: true })}
@@ -186,6 +189,7 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
       <Dnd5eBasicActionsPanel
+        attackTeleportRangeFeet={dnd5eCharacterAttackTeleportRange(character)}
         canAct={canAct}
         actionAvailable={turnEconomy.action.current > 0 || canContinueAttackAction}
         bonusActionAvailable={turnEconomy.bonusAction.current > 0}
@@ -198,8 +202,8 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
           dc: grapple.dc,
         }))}
         dismissibleEffects={(character.dnd5eCombatState?.activeEffects ?? []).flatMap((effect) =>
-          effect.removal?.action?.economy === 'action' && effect.removal.action.maxDistanceFeet >= 0
-            ? [{ effectId: effect.id, label: effect.label, actionLabel: effect.removal.action.label }]
+          (effect.removal?.action?.economy === 'action' || effect.removal?.action?.economy === 'free') && effect.removal.action.maxDistanceFeet >= 0
+            ? [{ effectId: effect.id, label: effect.label, actionLabel: effect.removal.action.label, economy: effect.removal.action.economy }]
             : [])}
         onAction={onBasicAction}
       />

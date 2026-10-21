@@ -13,6 +13,7 @@ interface CampaignLongRestTransaction {
   currentClock: SharedCampaignTimeState
   reason: string
   restKind?: 'short-rest' | 'long-rest'
+  restSessionId?: string
   beneficiaryCharacterIds?: readonly string[]
   ignoreLongRestCooldown?: boolean
   createRecoveryReports?: () => CampaignRestRecoveryReport[]
@@ -30,15 +31,20 @@ interface CampaignLongRestTransaction {
 export async function runDnd5eCampaignLongRestTransaction(
   transaction: CampaignLongRestTransaction,
 ): Promise<SharedCampaignTimeState> {
+  const session=transaction.restSessionId ? transaction.currentClock.restSessions?.find(row=>row.id===transaction.restSessionId) : undefined
+  if(transaction.restSessionId && (!session || session.status==='interrupted'))throw Error('rest-session-not-active')
+  if(session && ((transaction.restKind && transaction.restKind!==session.kind) ||
+    (transaction.beneficiaryCharacterIds && JSON.stringify([...transaction.beneficiaryCharacterIds].sort())!==JSON.stringify([...session.characterIds].sort()))))throw Error('rest-session-participant-mismatch')
+  const restKind=session?.kind??transaction.restKind??'long-rest'
   await transaction.reconcileCharacters(transaction.currentClock)
   const restRecoveryReports = transaction.createRecoveryReports?.()
-  const restFeatureD20Rolls = transaction.restKind === 'long-rest'
+  const restFeatureD20Rolls = restKind === 'long-rest'
     ? transaction.createRestFeatureD20Rolls?.()
     : undefined
   const nextClock = await transaction.mutate({
-    operation: transaction.restKind ?? 'long-rest',
+    ...(session ? {operation:'complete-rest-session' as const,id:session.id,expectedWorldMinute:transaction.currentClock.worldMinute} : {operation:restKind}),
     reason: transaction.reason,
-    ...(transaction.beneficiaryCharacterIds
+    ...(!session && transaction.beneficiaryCharacterIds
       ? { beneficiaryCharacterIds: [...transaction.beneficiaryCharacterIds] }
       : {}),
     ...(transaction.ignoreLongRestCooldown === true
@@ -80,12 +86,14 @@ function completeDnd5eCampaignRest(
   reason: string,
   beneficiaryCharacterIds?: readonly string[],
   ignoreLongRestCooldown: boolean = false,
+  restSessionId?: string,
 ): Promise<SharedCampaignTimeState> {
   const campaignTime = useCampaignTimeStore.getState()
   return runDnd5eCampaignLongRestTransaction({
     currentClock: campaignTime.state,
     reason,
     restKind,
+    restSessionId,
     beneficiaryCharacterIds,
     ignoreLongRestCooldown,
     createRecoveryReports: () => buildDnd5eRestRecoveryReports({
@@ -101,6 +109,12 @@ function completeDnd5eCampaignRest(
     reconcileCharacters: (clock) =>
       useCharacterStore.getState().reconcileCampaignTimeAndSave(clock),
   })
+}
+
+export function completeDnd5eCampaignRestSession(id:string):Promise<SharedCampaignTimeState>{
+  const session=useCampaignTimeStore.getState().state.restSessions?.find(row=>row.id===id)
+  if(!session)return Promise.reject(Error('rest-session-not-found'))
+  return completeDnd5eCampaignRest(session.kind,'完成休息会话',session.characterIds,false,id)
 }
 
 export function completeDnd5eCampaignLongRest(

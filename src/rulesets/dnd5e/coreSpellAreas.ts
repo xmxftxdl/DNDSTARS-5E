@@ -1,3 +1,8 @@
+import { dnd5eActivityPointVisible } from './activityPointVisibility'
+import {dnd5eTempleWardCrossed} from './templeWardGeometry'
+import {dnd5ePluginSpellDefinition} from './plugins/pluginContentCatalog'
+import {applyDnd5eSurfaceCloudAfterMove} from './persistentAreaSurfaceCloud'
+import {planDnd5eAreaGroundDescent} from './persistentAreaDescent'
 import {
   DND_FEET_PER_CELL,
   cellToPixel,
@@ -9,7 +14,9 @@ import {
   type GridCell,
 } from '../../lib/gridCombat'
 import {
+  mapGeometryVolumeMovementBlocked,
   mapGeometryMovementBlocked,
+  mapGeometryTerrainRayImpact,
   mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
@@ -952,6 +959,8 @@ function resolvedTrigger(
       : undefined,
     skipSaveWhenSourceConditionActive: declaration.skipSaveWhenSourceConditionActive,
     consumeActionOnFailedSave: declaration.consumeActionOnFailedSave === true,
+    exhaustionOnFailedSave: declaration.exhaustionOnFailedSave ? { ...declaration.exhaustionOnFailedSave } : undefined,
+    visibilityOnFailedSave: declaration.visibilityOnFailedSave ? { ...declaration.visibilityOnFailedSave } : undefined,
     endTargetConcentrationOnFailedSave: declaration.endTargetConcentrationOnFailedSave === true,
     damage: declaration.damage
       ? {
@@ -964,6 +973,13 @@ function resolvedTrigger(
     condition: declaration.condition
       ? {
           ...declaration.condition,
+          removalAction: declaration.condition.removalAction ? { ...declaration.condition.removalAction,
+            abilityCheck: declaration.condition.removalAction.abilityCheck ? { ...declaration.condition.removalAction.abilityCheck,
+              dc: declaration.condition.removalAction.abilityCheck.dc === 'source-save-dc'
+                ? input.sourceSaveDc : declaration.condition.removalAction.abilityCheck.dc } : undefined } : undefined,
+          duration: { ...declaration.condition.duration,
+            saveDc: declaration.condition.duration.saveDc === 'source-save-dc'
+              ? input.sourceSaveDc : declaration.condition.duration.saveDc },
           escapeCheck: declaration.condition.escapeCheck
             ? { ...declaration.condition.escapeCheck, dc: input.sourceSaveDc }
             : undefined,
@@ -1194,7 +1210,7 @@ export function resolveDnd5eCoreSpellLightingConflicts(
   incoming: Dnd5ePluginArea,
 ): Dnd5eCoreSpellLightingConflictResult {
   const incomingLighting = incoming.lighting
-  if (!incomingLighting) return { areas: [...existingAreas, incoming], applied: true, removedAreas: [] }
+  if (!incomingLighting || incomingLighting.kind === 'reduce-light') return { areas: [...existingAreas, incoming], applied: true, removedAreas: [] }
   const overlapping = existingAreas.filter((area) =>
     !!area.lighting && area.lighting.kind !== incomingLighting.kind && persistentAreasOverlap(area, incoming),
   )
@@ -1202,6 +1218,7 @@ export function resolveDnd5eCoreSpellLightingConflicts(
     const lighting = area.lighting!
     return incomingLighting.kind === 'light'
       ? lighting.kind === 'magical-darkness' &&
+          lighting.lightSuppressionScope !== 'within-area' &&
           (lighting.suppressesMagicalLightThroughLevel ?? -1) >= incomingLighting.spellLevel
       : lighting.kind === 'light' &&
           (lighting.suppressesMagicalDarknessThroughLevel ?? -1) >= incomingLighting.spellLevel
@@ -1213,6 +1230,7 @@ export function resolveDnd5eCoreSpellLightingConflicts(
       ? lighting.kind === 'magical-darkness' &&
           (incomingLighting.suppressesMagicalDarknessThroughLevel ?? -1) >= lighting.spellLevel
       : lighting.kind === 'light' &&
+          incomingLighting.lightSuppressionScope !== 'within-area' &&
           (incomingLighting.suppressesMagicalLightThroughLevel ?? -1) >= lighting.spellLevel
   })
   const removedIds = new Set(removedAreas.map((area) => area.id))
@@ -1283,10 +1301,14 @@ function movementPathCrossesUnsupportedGap(input: {
 }
 
 export function moveDnd5eCoreSpellArea(input: {
+  characters?: readonly import('../../types/character').Character[]
+  worldMinute?: number
+  round?: number
   map: BattleMap
   geometry?: MapGeometryState
   areaId: string
   sourceTokenId: string
+  targetElevationFeet?: number
   targetCell: GridCell
   targetCells?: readonly GridCell[]
 }): {
@@ -1295,6 +1317,7 @@ export function moveDnd5eCoreSpellArea(input: {
   area: Dnd5ePluginArea
   distanceFeet: number
   impactTargetId?: string
+  areaPath?: readonly {x:number;y:number;elevationFeet:number}[]
 } | { ok: false; reason: string } {
   const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === input.areaId)
   const declaredMovement = area?.coreSpellId
@@ -1305,7 +1328,78 @@ export function moveDnd5eCoreSpellArea(input: {
     : declaredMovement
   if (!area || !movement) return { ok: false, reason: 'area-not-movable' }
   if (area.sourceTokenId !== input.sourceTokenId) return { ok: false, reason: 'invalid-source' }
+  const verticalMove = movement.allowVertical === true
+  const previousElevation = area.vertical?.mode === 'volume' ? area.vertical.baseElevationFeet : 0
+  if (input.targetElevationFeet != null && ((!verticalMove && input.targetElevationFeet !== previousElevation) || !Number.isFinite(input.targetElevationFeet) ||
+    input.targetElevationFeet < -1_000 || input.targetElevationFeet > 10_000)) return {ok:false,reason:'invalid-target'}
+  const independentEffectAnchor = area.anchorMode === 'effect-token' && input.map.tokens.some(token =>
+    token.id === area.anchorTokenId && token.dnd5eSpellEffect?.sourceTokenId === area.sourceTokenId)
+  if (verticalMove && (area.vertical?.mode !== 'volume' || (area.anchorMode !== 'fixed' && !independentEffectAnchor) || area.vertical.columns?.length)) {
+    return {ok:false,reason:'invalid-target'}
+  }
+  let destinationElevation = verticalMove ? input.targetElevationFeet ?? previousElevation : previousElevation
+  const verticalDistance = verticalMove ? Math.abs(destinationElevation-previousElevation) : 0
+  if (movement.requiresVisibleDestination) {
+    const source = input.map.tokens.find(token => token.id === input.sourceTokenId)
+    const point = tokenCenterForAnchorCell(input.targetCell, { size: 1 }, input.map)
+    const elevationFeet = area.vertical?.mode === 'volume'
+      ? destinationElevation + (area.vertical.shape === 'sphere' ? area.vertical.heightFeet / 2 : 0)
+      : mapGeometryTerrainElevationAtPoint(input.geometry ?? mapGeometryRuntimeForMap(input.map.id), point)
+    if (!source || !dnd5eActivityPointVisible({ map: input.map, viewer: source, characters: input.characters,
+      worldMinute: input.worldMinute, geometry: input.geometry, point: { ...point, elevationFeet } })) {
+      return { ok: false, reason: 'destination-not-visible' }
+    }
+  }
+
+
   const previous = area.anchorCell ?? area.cells[0]
+  let areaPath:Array<{x:number;y:number;elevationFeet:number}>|undefined
+  if (verticalMove) {
+    const geometry = input.geometry ?? mapGeometryRuntimeForMap(input.map.id)
+    const from = tokenCenterForAnchorCell(previous, {size:1}, input.map)
+    const to = tokenCenterForAnchorCell(input.targetCell, {size:1}, input.map)
+    if(movement.descendOverLowerGround && input.targetElevationFeet==null){
+      if(movement.maximumBottomHeightAboveGroundFeet===undefined)return {ok:false,reason:'invalid-movement'}
+      const descent=planDnd5eAreaGroundDescent({geometry,from,to,bottomFeet:previousElevation,maximumClearanceFeet:movement.maximumBottomHeightAboveGroundFeet})
+      if(!descent.ok)return {ok:false,reason:'movement-blocked'}
+      areaPath=descent.path
+      destinationElevation=descent.bottomFeet
+    }
+    if(movement.maximumBottomHeightAboveGroundFeet!==undefined){
+      const maximum=movement.maximumBottomHeightAboveGroundFeet
+      if(!Number.isFinite(maximum)||maximum<0||maximum>1000||destinationElevation>mapGeometryTerrainElevationAtPoint(geometry,to)+maximum+1e-7)return {ok:false,reason:'invalid-target'}
+    }
+    const steps=areaPath??[{...from,elevationFeet:previousElevation},{...to,elevationFeet:destinationElevation}]
+    for(let segment=1;segment<steps.length;segment++){
+    const start=steps[segment-1],end=steps[segment]
+    const impact = mapGeometryTerrainRayImpact({geometry,from:start,to:end,fromElevationFeet:start.elevationFeet,toElevationFeet:end.elevationFeet})
+    if (impact && impact.t < 1-1e-7 || destinationElevation < mapGeometryTerrainElevationAtPoint(geometry,to)-1e-7) return {ok:false,reason:'movement-blocked'}
+    // Probe the saved effect volume, not its caster. Do not add probe tokens to map state.
+    const collisionMap = {...input.map, tokens: input.map.tokens.filter(token => !independentEffectAnchor || token.id !== area.anchorTokenId), dnd5ePluginAreas: input.map.dnd5ePluginAreas?.filter(candidate=>candidate.id!==area.id)}
+    const height=area.vertical?.mode==='volume'?area.vertical.heightFeet:5
+    for(const cell of area.cells) {
+      const origin=tokenCenterForAnchorCell(cell,{size:1},input.map)
+      const cellFrom={x:origin.x+start.x-from.x,y:origin.y+start.y-from.y}
+      const cellTo={x:origin.x+end.x-from.x,y:origin.y+end.y-from.y}
+      if(mapGeometryVolumeMovementBlocked({geometry,map:collisionMap,from:cellFrom,to:cellTo,
+        fromElevationFeet:start.elevationFeet,toElevationFeet:end.elevationFeet,halfSizePixels:input.map.gridSize/2,heightFeet:height}).blocked) {
+        return {ok:false,reason:'movement-blocked'}
+      }
+      for(let layer=0;layer<height;layer+=5) {
+        const layerOffset=Math.min(layer,Math.max(0,height-5))
+        const probe:Token={id:`area-probe:${area.id}`,type:'obstacle',label:area.label,color:'',emoji:'',size:1,...cellFrom,elevationFeet:start.elevationFeet+layerOffset}
+        if(mapGeometryMovementBlocked({geometry,map:collisionMap,token:probe,to:cellTo,
+          fromElevationFeet:start.elevationFeet+layerOffset,toElevationFeet:end.elevationFeet+layerOffset}).blocked ||
+          mapGeometryPlacementBlocked({geometry,map:collisionMap,token:probe,at:cellTo,
+            elevationFeet:end.elevationFeet+layerOffset,mappedBodyHeightFeet:Math.min(5,height)}).blocked) {
+          return {ok:false,reason:'movement-blocked'}
+        }
+      }
+    }
+
+  }
+
+  }
   const previousLightingAnchors = area.lightingAnchorCells?.length
     ? area.lightingAnchorCells
     : area.coreSpellId === 'dancing-lights' ? area.cells : undefined
@@ -1321,10 +1415,22 @@ export function moveDnd5eCoreSpellArea(input: {
   const destinationPairs = dancingLightTargets && previousLightingAnchors
     ? dancingLightTargets.map((target, index) => ({ previous: previousLightingAnchors[index], target }))
     : [{ previous, target: input.targetCell }]
-  const distanceFeet = Math.max(...destinationPairs.map(({ previous: origin, target }) =>
+  const distanceFeet = Math.max(verticalDistance, ...destinationPairs.map(({ previous: origin, target }) =>
     Math.max(Math.abs(target.col - origin.col), Math.abs(target.row - origin.row)) * feetPerCell
   ))
   if (distanceFeet > movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
+  if(movement.maximumSourceDistanceBeforeMoveFeet!=null) {
+    const maximum=movement.maximumSourceDistanceBeforeMoveFeet
+    if(!Number.isInteger(maximum)||maximum<1||maximum>10_000)return {ok:false,reason:'invalid-movement'}
+    const source=input.map.tokens.find(token=>token.id===input.sourceTokenId)
+    if(!source)return {ok:false,reason:'invalid-source'}
+    const occupied=tokenOccupiedCellsAt(source,input.map,source)
+    const horizontal=Math.min(...occupied.flatMap(from=>area.cells.map(to=>Math.max(Math.abs(from.col-to.col),Math.abs(from.row-to.row))*feetPerCell)))
+    const elevation=mapGeometryTokenElevation(input.geometry??mapGeometryRuntimeForMap(input.map.id),source)
+    const vertical=area.vertical?.mode==='volume'
+      ? Math.max(0,area.vertical.baseElevationFeet-elevation,elevation-area.vertical.baseElevationFeet-area.vertical.heightFeet):0
+    if(Math.max(horizontal,vertical)>maximum)return {ok:false,reason:'source-out-of-command-range'}
+  }
   if (movement.maximumDistanceFromSourceFeet != null && area.coreSpellId !== 'dancing-lights') {
     const sourceToken = input.map.tokens.find((token) => token.id === input.sourceTokenId)
     if (!sourceToken) return { ok: false, reason: 'invalid-source' }
@@ -1406,6 +1512,14 @@ export function moveDnd5eCoreSpellArea(input: {
   const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
     ? input.map.tokens.find((token) => token.id === area.anchorTokenId)
     : undefined
+  const sensor=anchorToken?.dnd5eSpellEffect
+  if(sensor&&(sensor.shareVisionWithSource||sensor.hearingFromSource)&&dnd5ePluginSpellDefinition(sensor.spellId)?.school==='divination'){
+    const from=tokenCenterForAnchorCell(previous,anchorToken!,input.map)
+    const to=tokenCenterForAnchorCell(input.targetCell,anchorToken!,input.map)
+    if(dnd5eTempleWardCrossed(input.geometry??mapGeometryRuntimeForMap(input.map.id),
+      {...from,elevationFeet:anchorToken!.elevationFeet??previousElevation},
+      {...to,elevationFeet:verticalMove?destinationElevation:anchorToken!.elevationFeet??previousElevation},input.worldMinute))return {ok:false,reason:'movement-blocked'}
+  }
   if (area.coreSpellId === 'flaming-sphere' && anchorToken) {
     const path = dnd5eMovementPathCells(previous, input.targetCell)
     if (movementPathCrossesUnsupportedGap({
@@ -1508,14 +1622,15 @@ export function moveDnd5eCoreSpellArea(input: {
     }
   }
   const anchorPosition = anchorToken
-    ? tokenCenterForAnchorCell(resolvedTargetCell, anchorToken, input.map)
+    ? tokenCenterForAnchorCell({ col: resolvedTargetCell.col - (area.anchorTokenOffsetCells?.col ?? 0),
+        row: resolvedTargetCell.row - (area.anchorTokenOffsetCells?.row ?? 0) }, anchorToken, input.map)
     : undefined
   const movedAnchorToken = anchorToken && anchorPosition
-    ? { ...anchorToken, ...anchorPosition }
+    ? { ...anchorToken, ...anchorPosition, ...(verticalMove ? { elevationFeet: destinationElevation } : {}) }
     : anchorToken
   const movementGeometry = input.geometry ?? mapGeometryRuntimeForMap(input.map.id)
   const movedVolumeBaseElevationFeet = nextArea.vertical?.mode === 'volume'
-    ? movedAnchorToken
+    ? verticalMove ? destinationElevation : movedAnchorToken
       ? mapGeometryTokenElevation(movementGeometry, movedAnchorToken)
       : mapGeometryTerrainElevationAtPoint(
           movementGeometry,
@@ -1528,12 +1643,12 @@ export function moveDnd5eCoreSpellArea(input: {
         vertical: {
           ...nextArea.vertical,
           baseElevationFeet: persistentAreaElevationFeet(
-            movedVolumeBaseElevationFeet + (nextArea.vertical.anchorOffsetFeet ?? 0),
+            movedVolumeBaseElevationFeet + (verticalMove ? 0 : nextArea.vertical.anchorOffsetFeet ?? 0),
           ),
         },
       }
     : nextArea
-  const resolvedDistanceFeet = dancingLightTargets
+  const resolvedDistanceFeet = verticalMove ? distanceFeet : dancingLightTargets
     ? distanceFeet
     : Math.max(
         Math.abs(resolvedTargetCell.col - previous.col),
@@ -1541,18 +1656,19 @@ export function moveDnd5eCoreSpellArea(input: {
       ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   return {
     ok: true,
-    map: {
+    map: applyDnd5eSurfaceCloudAfterMove({previous:area,next:resolvedArea,geometry:movementGeometry,round:input.round??area.createdRound,map: {
       ...input.map,
       dnd5ePluginAreas: input.map.dnd5ePluginAreas?.map((candidate) =>
         candidate.id === area.id ? resolvedArea : candidate,
       ),
       tokens: anchorToken && anchorPosition
-        ? input.map.tokens.map((token) => token.id === anchorToken.id ? { ...token, ...anchorPosition } : token)
+        ? input.map.tokens.map((token) => token.id === anchorToken.id ? movedAnchorToken! : token)
         : input.map.tokens,
-    },
+    }}),
     area: resolvedArea,
     distanceFeet: resolvedDistanceFeet,
     impactTargetId,
+    areaPath,
   }
 }
 
@@ -1689,6 +1805,22 @@ export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {
         }
       }
     }
+    if(area.sensorTarget && area.anchorMode==='effect-token' && area.anchorTokenId){
+      const candidates=tokens.filter(token=>token.type!=='obstacle' && (area.sensorTarget!.characterId
+        ? token.characterId===area.sensorTarget!.characterId : token.id===area.sensorTarget!.tokenId))
+      const entity=tokens.find(token=>token.id===area.anchorTokenId)
+      if(candidates.length!==1||!entity?.dnd5eSpellEffect){
+        removedAreaIds.add(area.id)
+        if(entity?.dnd5eSpellEffect)removedTokenIds.add(entity.id)
+        changed=true
+        continue
+      }
+      const target=candidates[0],elevationFeet=mapGeometryTokenElevation(geometry,target)
+      if(entity.x!==target.x||entity.y!==target.y||entity.elevationFeet!==elevationFeet){
+        tokens=tokens.map(token=>token.id===entity.id?{...token,x:target.x,y:target.y,elevationFeet}:token)
+        changed=true
+      }
+    }
     const follower = area.sourceFollower
     if (!follower || area.anchorMode !== 'effect-token' || !area.anchorTokenId) continue
     const source = tokens.find((token) => token.id === area.sourceTokenId)
@@ -1727,6 +1859,10 @@ export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {
     const anchorToken = tokens.find((token) => token.id === (area.anchorTokenId ?? area.sourceTokenId))
     if (!anchorToken) return area
     const anchorCell = tokenAnchorCellFromPixel(anchorToken.x, anchorToken.y, anchorToken, map)
+    if (area.anchorMode === 'effect-token' && area.anchorTokenOffsetCells) {
+      anchorCell.col += area.anchorTokenOffsetCells.col
+      anchorCell.row += area.anchorTokenOffsetCells.row
+    }
     const anchorCellChanged = anchorCell.col !== area.anchorCell?.col || anchorCell.row !== area.anchorCell?.row
     const anchorElevationFeet = mapGeometryTokenElevation(geometry, anchorToken)
     const vertical = area.vertical?.mode === 'volume'

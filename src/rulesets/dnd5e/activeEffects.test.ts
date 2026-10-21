@@ -57,6 +57,18 @@ import {
 } from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
+  it('preserves long runtime area/entity provenance without relaxing ordinary semantic tags', () => {
+    const id = 'activity-area:map:player-action:' + 'a'.repeat(180)
+    const effect = createDnd5eMechanicalEffect({ definitionId:'test:provenance', label:'Source',
+      source:{kind:'spell',actorId:'caster'}, targetId:'victim',
+      tags:[`persistent-area:${id}`,`condition-entity:${id}`] })
+    expect(validateDnd5eActiveEffectsStrict([effect]).ok).toBe(true)
+    expect(normalizeDnd5eActiveEffects([JSON.parse(JSON.stringify(effect))])[0].tags).toEqual(effect.tags)
+    for (const tag of ['custom:'+'a'.repeat(100), 'persistent-area:'+'a'.repeat(1025), 'condition-entity:bad/id']) {
+      expect(validateDnd5eActiveEffectsStrict([{...effect,tags:[tag]}]).ok).toBe(false)
+    }
+  })
+
   it('clears only turn-bound post-effect restrictions when combat ends', () => {
     const hasteLethargy = createDnd5eMechanicalEffect({
       definitionId: 'activity:haste:effect:after-effect-ends',
@@ -390,7 +402,9 @@ describe('D&D 5e ActiveEffectInstance', () => {
     })
     expect(dnd5eActiveEnvironmentalCapabilities([effect])).toEqual({
       canBreatheWater: true,
+      doesNotNeedAir: false,
       treatsLiquidSurfacesAsSolidGround: false,
+      ignoredDifficultTerrainMaterials: [],
       ignoresDifficultTerrain: false,
       ignoresUnderwaterMovementPenalty: false,
       ignoresUnderwaterAttackPenalty: false,
@@ -400,7 +414,9 @@ describe('D&D 5e ActiveEffectInstance', () => {
     expect(dnd5eActiveEnvironmentalCapabilities([{ ...effect, suspendedBy: ['antimagic-field'] }]))
       .toEqual({
         canBreatheWater: false, treatsLiquidSurfacesAsSolidGround: false,
-        ignoresDifficultTerrain: false, ignoresUnderwaterMovementPenalty: false,
+        doesNotNeedAir: false,
+        ignoredDifficultTerrainMaterials: [],
+      ignoresDifficultTerrain: false, ignoresUnderwaterMovementPenalty: false,
         ignoresUnderwaterAttackPenalty: false,
         canOccupyCreatureSpaces: false,
         minimumPassageGapInches: undefined,
@@ -457,6 +473,24 @@ describe('D&D 5e ActiveEffectInstance', () => {
     expect(validateDnd5eSourceBoundConditions({
       effects: [blinded], targetActorId: 'target', availableActorIds: new Set(),
     })).toEqual({ ok: true })
+  })
+
+  it('validates an independently selected condition entity without replacing the author', () => {
+    const effect = createDnd5eConditionEffect({ condition: 'frightened', targetId: 'target',
+      source: { kind: 'dm', actorId: 'author' }, tags: ['condition-entity:other'] })
+    const validate = (tags: string[], ids = ['author', 'other', 'target']) => validateDnd5eSourceBoundConditions({
+      effects: [{ ...effect, tags }], targetActorId: 'target', availableActorIds: new Set(ids),
+    })
+    expect(validate(['condition-entity:other'])).toEqual({ ok: true })
+    expect(validate(['condition-entity:target'])).toMatchObject({ ok: false, reason: 'self-source' })
+    expect(validate(['condition-entity:absent'])).toMatchObject({ ok: false, reason: 'unavailable-source' })
+    expect(validate(['condition-entity:'])).toMatchObject({ ok: false, reason: 'missing-source' })
+    expect(validate(['condition-entity:other', 'condition-entity:author'])).toMatchObject({ ok: false })
+    expect(validate(['condition-entity:other'], ['other'])).toMatchObject({ ok: false })
+    const restored = normalizeDnd5eActiveEffects(JSON.parse(JSON.stringify([effect])))[0]
+    expect(restored.source.actorId).toBe('author')
+    expect(restored.tags).toEqual(['condition-entity:other'])
+    expect(validateDnd5eActiveEffectsStrict([restored]).ok).toBe(true)
   })
 
   it('keeps suspended effects authoritative while excluding their conditions and modifiers', () => {
@@ -1343,4 +1377,24 @@ it('True Strike waits for a later caster turn, including a different extra-turn 
   expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, { ...state, initiativeIndex: 1 }).advantage).toBe(false)
   expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, { ...state, initiativeIndex: 2 }).advantage).toBe(true)
   expect(dnd5eActiveTargetLinkedAttackRollFlags([effect], 'wizard', undefined, { ...state, round: 2 }).advantage).toBe(true)
+})
+
+
+it('preserves selective terrain exemptions through serialization and suppresses them in antimagic', () => {
+  const effect = createDnd5eMechanicalEffect({
+    definitionId: 'test:ice-terrain', label: 'Ice terrain',
+    source: { kind: 'spell', actorId: 'caster', rulesId: 'test:ice', magical: true }, targetId: 'caster',
+    modifiers: { environmentalCapabilities: { ignoreDifficultTerrainMaterials: ['ice', 'snow'] } },
+  })
+  expect(validateDnd5eActiveEffectsStrict([effect]).ok).toBe(true)
+  const restored = normalizeDnd5eActiveEffects(JSON.parse(JSON.stringify([effect])))
+  expect(dnd5eActiveEnvironmentalCapabilities(restored)).toMatchObject({
+    ignoresDifficultTerrain: false, ignoredDifficultTerrainMaterials: ['ice', 'snow'],
+  })
+  expect(dnd5eActiveEnvironmentalCapabilities([{ ...effect, suspendedBy: ['antimagic'] }]).ignoredDifficultTerrainMaterials).toEqual([])
+  for (const materials of [[], ['ice', 'ice'], ['unknown'], 'ice', [42]]) {
+    const bad = { ...effect, modifiers: { environmentalCapabilities: { ignoreDifficultTerrainMaterials: materials } } }
+    expect(validateDnd5eActiveEffectsStrict([bad]).ok).toBe(false)
+    expect(normalizeDnd5eActiveEffects([bad])[0]?.modifiers?.environmentalCapabilities).toBeUndefined()
+  }
 })

@@ -75,6 +75,12 @@ export function automationCapabilityFromLegacyStatus(
 
 export function validateAutomationCapability(capability: AutomationCapability): readonly string[] {
   const errors: string[] = []
+  if (!capability || typeof capability !== 'object' || Array.isArray(capability)) return ['automation capability must be an object']
+  for (const field of ['supportedPhases', 'manualPhases', 'limitations'] as const) {
+    if (!Array.isArray(capability[field]) || capability[field].some(value => typeof value !== 'string')) errors.push(`automation ${field} must be an array of strings`)
+  }
+  if (!['full', 'assisted', 'dm-adjudication', 'display-only', 'unsupported'].includes(capability.level)) errors.push(`unknown automation level: ${capability.level}`)
+  if (errors.length) return errors
   const known = new Set<AutomationPhase>(AUTOMATION_PHASES)
   const supported = new Set(capability.supportedPhases)
   const manual = new Set(capability.manualPhases)

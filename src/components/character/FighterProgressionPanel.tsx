@@ -1,5 +1,6 @@
+import SelectionCard from './RuleChoiceCard'
 import { useSyncExternalStore } from 'react'
-import { Check, Sparkles, Swords } from 'lucide-react'
+import { Sparkles, Swords } from 'lucide-react'
 import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
   fighterAttacksPerAttackAction,
@@ -196,6 +197,7 @@ export default function FighterProgressionPanel({
                   key={option.id}
                   name={option.name}
                   summary={option.summary}
+                  description={option.description}
                   selected={selected.includes(option.id)}
                   disabled={lockedChoiceKeys.has(`fighter:subclass:${fighterSubclassChoiceKey(subclassOption.id, group.id)}`) || (!selected.includes(option.id) && selected.length >= limit)}
                   onClick={() => toggleSubclassChoice(group.id, option.id)}
@@ -278,29 +280,6 @@ export default function FighterProgressionPanel({
   )
 }
 
-function SelectionCard({ name, summary, selected, disabled, onClick }: {
-  name: string
-  summary: string
-  selected: boolean
-  disabled: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      aria-pressed={selected}
-      className={`rounded-xl border p-3 text-left transition-colors ${selected ? 'border-arcane-400/50 bg-arcane-500/15' : 'border-white/8 bg-white/[0.03] hover:bg-white/[0.06]'} disabled:cursor-not-allowed disabled:opacity-40`}
-    >
-      <span className="flex items-center justify-between gap-2">
-        <span className="text-sm font-semibold text-slate-200">{name}</span>
-        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-arcane-300 bg-arcane-500 text-white' : 'border-slate-600'}`}>{selected && <Check className="h-3.5 w-3.5" />}</span>
-      </span>
-      <span className="mt-1 block text-xs leading-5 text-slate-500">{summary}</span>
-    </button>
-  )
-}
 
 function ChoiceSelect({ label, value, placeholder, options, disabled = false, onChange }: {
   label: string

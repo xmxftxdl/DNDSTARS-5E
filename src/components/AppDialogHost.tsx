@@ -1,4 +1,6 @@
 import { createPortal } from 'react-dom'
+import { SurfaceDrawingInput } from './SurfaceDrawingInput'
+import { parseSurfaceDrawing } from '../rulesets/dnd5e/surfaceDrawing'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   AlertTriangle,
@@ -96,6 +98,7 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
     )
   }
   const accept = () => {
+    if(active.surfaceDrawing&&!parseSurfaceDrawing(draft))return
     settleAppDialog(
       active.id,
       active.kind === 'prompt'
@@ -197,7 +200,7 @@ function AppDialogContent({ active, queuedCount }: AppDialogContentProps) {
           </div>
 
           <div className="shrink-0 space-y-5 border-t border-white/10 px-6 py-5" data-testid="app-dialog-actions">
-            {active.kind === 'prompt' ? (
+            {active.kind === 'prompt' && active.surfaceDrawing ? <SurfaceDrawingInput onChange={setDraft} /> : active.kind === 'prompt' ? (
               <input
                 ref={inputRef}
                 value={draft}

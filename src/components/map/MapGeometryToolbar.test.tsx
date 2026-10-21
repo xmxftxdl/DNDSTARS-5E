@@ -78,6 +78,8 @@ describe('MapGeometryToolbar', () => {
       onCreateMapFromUvtt: async () => undefined,
     }))
 
+    expect(html).toContain('aria-label="地表材质"')
+    expect(html).toContain('<option value="sand">沙地</option>')
     const deleteButton = html.match(/<button(?=[^>]*title="删除选中几何")[^>]*>/)?.[0]
     expect(deleteButton).toBeDefined()
     expect(deleteButton).not.toContain('disabled')

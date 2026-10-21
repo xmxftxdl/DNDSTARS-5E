@@ -1,4 +1,10 @@
 import { modeFromPort } from '../lib/appMode'
+import { recordDnd5eAcceptedMovementSightings } from '../rulesets/dnd5e/mapMovementSightings'
+import { useCampaignTimeStore } from './campaignTime'
+import { useMapGeometryStore } from './mapGeometry'
+import { droppedDnd5eCompanionObjects } from '../rulesets/dnd5e/companionCarriedObjects'
+import { transferNewlyDroppedSurfaceAreas } from '../rulesets/dnd5e/surfaceAreaTransfer'
+import { readBrowserSceneWorldMinute } from '../composition/browserSceneClock'
 import { submitDnd5eInventoryMutation } from '../lib/inventoryAuthority'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
@@ -7,6 +13,7 @@ import {
   dnd5eConditionsFromActiveEffects,
   dnd5eIncomingConditionImmunityBlocks,
   normalizeDnd5eActiveEffects,
+  retainDnd5eEndedEffectAwareness,
   removeDnd5eActiveEffectsForEvent,
   removeDnd5eSpellEffectFromMap,
   validateDnd5eSourceBoundConditions,
@@ -509,13 +516,42 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
         elevationFeet: command.elevationFeet,
         movementAnimation: undefined,
       })
+      // DM placement has no traversed route. Observe only the committed endpoint.
+      const committedMap = useMapStore.getState().maps.find(candidate => candidate.id === map.id)
+      const committedToken = committedMap?.tokens.find(candidate => candidate.id === token.id)
+      if (committedMap && committedToken) {
+        const roster = useCharacterStore.getState().characters
+        const clock = useCampaignTimeStore.getState().state
+        const observed = recordDnd5eAcceptedMovementSightings({
+          map: committedMap, characters: roster, actorTokenId: token.id,
+          path: [committedToken], pathElevationsFeet: [committedToken.elevationFeet ?? 0],
+          geometry: useMapGeometryStore.getState().maps.find(candidate => candidate.mapId === map.id),
+          worldMinute: readBrowserSceneWorldMinute() ?? undefined, worldSecondRemainder: clock.worldSecondRemainder ?? 0,
+        })
+        let charactersChanged = false, tokensChanged = false
+        for (const character of observed.characters) {
+          if (character !== roster.find(candidate => candidate.id === character.id)) {
+            useCharacterStore.getState().applyAuthorityUpdate(character.id, { dnd5eCombatState: character.dnd5eCombatState })
+            charactersChanged = true
+          }
+        }
+        for (const nextToken of observed.map.tokens) {
+          if (nextToken !== committedMap.tokens.find(candidate => candidate.id === nextToken.id)) {
+            useMapStore.getState().applyAuthorityTokenUpdate(map.id, nextToken.id, { dnd5eCombatState: nextToken.dnd5eCombatState })
+            tokensChanged = true
+          }
+        }
+        if (charactersChanged || tokensChanged) {
+          await persistRoomStores(charactersChanged ? ['characters', 'maps'] : ['maps'])
+        }
+      }
       return { status: 'applied' }
     } catch (error) {
       // A conflict may mean another authoritative write already moved this
       // Token. Reload the winning server snapshot instead of restoring the
       // stale pre-drag closure, which would manufacture a visible rollback.
       try {
-        await state.loadShared()
+        await Promise.all([state.loadShared(), useCharacterStore.getState().loadShared()])
       } catch {
         state.applyAuthorityTokenUpdate(map.id, token.id, previous)
       }
@@ -587,7 +623,7 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       return { status: 'rejected', message: '找不到待调整状态的目标。' }
     }
 
-    const activeEffects = normalizeDnd5eActiveEffects(command.activeEffects)
+    let activeEffects = normalizeDnd5eActiveEffects(command.activeEffects)
     if (activeEffects.length !== command.activeEffects.length) {
       return { status: 'rejected', message: '状态数据未通过 Headless 校验。' }
     }
@@ -635,6 +671,7 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
         message: `目标现有防护使其免疫${sourceLabel}${dnd5eConditionLabel(block.condition)}。`,
       }
     }
+    activeEffects = retainDnd5eEndedEffectAwareness(currentActiveEffects, activeEffects)
     const conditions = dnd5eConditionsFromActiveEffects(activeEffects)
     const retainedEffectIds = new Set(activeEffects.map((effect) => effect.id))
     const removedEffectIds = currentActiveEffects
@@ -734,6 +771,7 @@ async function handleAppRoomCommand(command: AppRoomCommand): Promise<AppRoomCom
       tokenId: command.tokenId,
       characterId: command.characterId,
       expectedConcentrationId: command.expectedConcentrationId,
+      worldMinute: readBrowserSceneWorldMinute(),
     })
     // A repeated click after the first command committed is an idempotent no-op.
     if (plan.status === 'missing') return { status: 'applied' }
@@ -1197,6 +1235,7 @@ const DND5E_CREATURE_FORM_STATE_KEYS = [
   'wildShapeMode',
   'wildShapeSourceActorId',
   'wildShapeSourceActivityId',
+  'wildShapeConcentrationSpellId', 'wildShapeRequiresConcentration', 'wildShapeRetainsHitPoints',
   'wildShapeMaximumChallengeRating',
   'wildShapeMaximumSizeRank',
   'shapechangeEquipmentDisposition',
@@ -1241,6 +1280,7 @@ function concentrationLinkedCreatureForm(
 
 function clearConcentrationLinkedCreatureForm<T extends RoomCombatState>(state: T): T {
   const next = { ...state }
+  if (state.wildShapeRetainsHitPoints) Object.assign(next, { temporaryHp: undefined, temporaryHitPointsSource: undefined })
   for (const key of DND5E_CREATURE_FORM_STATE_KEYS) delete next[key]
   return next
 }
@@ -1271,6 +1311,7 @@ export function planRoomConcentrationEnd(input: {
   tokenId: string
   characterId?: string
   expectedConcentrationId: string
+  worldMinute?: number
 }): RoomConcentrationEndPlan {
   const sourceMap = input.maps.find((candidate) => candidate.id === input.mapId)
   const sourceToken = sourceMap?.tokens.find((candidate) => candidate.id === input.tokenId)
@@ -1365,6 +1406,8 @@ export function planRoomConcentrationEnd(input: {
             concentrationTargetIds: undefined,
             concentrationRoundsRemaining: undefined,
             concentrationStartedTurnKey: undefined,
+            concentrationTickOn: undefined,
+            concentrationLastTickTurnKey: undefined,
             huntersMarkTargetId: undefined,
           }
         : {}),
@@ -1395,6 +1438,7 @@ export function planRoomConcentrationEnd(input: {
     if (!endsOwn && nextState === previousState) return character
     return {
       ...character,
+      ...(previousState?.wildShapeRetainsHitPoints && concentrationLinkedCreatureForm(previousState, sourceActorIds) ? { tempHp: 0 } : {}),
       ...(endsOwn ? { concentrating: false } : {}),
       ...(nextState !== previousState && nextState
         ? { conditions: dnd5eConditionsFromActiveEffects(nextState.activeEffects) }
@@ -1436,7 +1480,7 @@ export function planRoomConcentrationEnd(input: {
           }]
         }
         const restored = dnd5eRestoredSummonedOriginalObject(token)
-        return restored ? [restored] : []
+        return [...(restored ? [restored] : []), ...droppedDnd5eCompanionObjects(token)]
       }
       const tokenOwnConcentrationId = token.dnd5eCombatState?.concentrationSpellId?.trim()
       const endsOwn = sourceActorIds.has(token.id) && (
@@ -1450,7 +1494,7 @@ export function planRoomConcentrationEnd(input: {
         : undefined
       const tokenCreatureFormReversion = concentrationLinkedCreatureForm(previousState, sourceActorIds)
         ? {
-            currentHp: previousState.wildShapeOriginalCurrentHp,
+            currentHp: previousState.wildShapeRetainsHitPoints ? token.hp : previousState.wildShapeOriginalCurrentHp,
             maxHp: previousState.wildShapeOriginalMaxHp,
             size: tokenSizeForDnd5eSizeRank(previousState.wildShapeOriginalSizeRank),
             formId: previousState.wildShapeFormId,
@@ -1497,7 +1541,7 @@ export function planRoomConcentrationEnd(input: {
 
   return {
     status: 'ended',
-    maps: nextMaps,
+    maps: transferNewlyDroppedSurfaceAreas(input.maps,nextMaps,input.worldMinute??Number.NaN),
     characters: nextCharacters,
     endedConcentrationId: currentConcentrationId,
     removedEffectIds: [...new Set(removedEffectIds)],

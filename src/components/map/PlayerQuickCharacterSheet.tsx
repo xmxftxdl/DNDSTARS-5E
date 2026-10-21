@@ -1,3 +1,4 @@
+import { dnd5eEffectiveCharacterMovementProfile } from '../../rulesets/dnd5e/characterMovement'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Dices, Backpack, Footprints, PackageOpen, Shield, X } from 'lucide-react'
 import type { Dnd5eAbilityCheckPayload } from '../../lib/sharedCombatTypes'
@@ -19,9 +20,9 @@ import {
 import {
   dnd5eActiveEffectRemainingLabel,
   dnd5eActiveFlySpeed,
+  dnd5eLimitFlySpeed,
   dnd5eActiveHitPointMaximumBonus,
   dnd5eConditionLabel,
-  dnd5eEffectiveWalkingSpeed,
   dnd5eSpellSaveDc,
   getDnd5eSrdCombatSpell,
   getDnd5eSrdMonster,
@@ -34,15 +35,17 @@ import Dnd5eInventoryTile from '../character/Dnd5eInventoryTile'
 import { dnd5eTruePolymorphObjectFormFromEffects } from '../../rulesets/dnd5e/truePolymorphObjectForms'
 
 export interface PlayerQuickCharacterSheetProps {
+  mapArmorClassBonus?: number
   character: Character
   onQuickCheck?: (check: Pick<Dnd5eAbilityCheckPayload, 'ability' | 'skill'>) => void
   quickCheckDisabled?: boolean
+  onDropItem?: () => void
   onClose: () => void
   embedded?: boolean
   view?: 'all' | 'data' | 'status'
 }
 
-export default function PlayerQuickCharacterSheet({ character, onClose, onQuickCheck, quickCheckDisabled = false, embedded = false, view = 'all' }: PlayerQuickCharacterSheetProps) {
+export default function PlayerQuickCharacterSheet({ character, onClose, onQuickCheck, onDropItem, quickCheckDisabled = false, embedded = false, view = 'all', mapArmorClassBonus = 0 }: PlayerQuickCharacterSheetProps) {
   const [selectedInventoryId, setSelectedInventoryId] = useState<string | null>(null)
   const portrait = resolveMapTokenPortrait(character)
   const inventory = useMemo(() => normalizeDnd5eInventory(character), [character])
@@ -101,10 +104,10 @@ export default function PlayerQuickCharacterSheet({ character, onClose, onQuickC
     : activeCreatureForm
     ? quickCreatureFormSkillRows(character, activeCreatureForm, character.dnd5eCombatState)
     : quickCharacterSkillRows(character)
-  const speed = activeObjectForm ? 0 : activeCreatureForm?.speed.walk ?? dnd5eEffectiveWalkingSpeed(character)
+  const speed = activeObjectForm ? 0 : dnd5eEffectiveCharacterMovementProfile(character).walkSpeed
   const flySpeed = activeObjectForm
     ? undefined
-    : Math.max(activeCreatureForm?.speed.fly ?? 0, dnd5eActiveFlySpeed(activeEffects) ?? 0) || undefined
+    : dnd5eLimitFlySpeed(activeEffects, Math.max(activeCreatureForm?.speed.fly ?? 0, dnd5eActiveFlySpeed(activeEffects) ?? 0)) || undefined
   const spellSaveDc = dnd5eSpellSaveDc(character) ?? character.saveDC
   const concentrationSpellId = character.dnd5eCombatState?.concentrationSpellId
   const concentrationLabel = concentrationSpellId
@@ -130,7 +133,7 @@ export default function PlayerQuickCharacterSheet({ character, onClose, onQuickC
     : character.currentHp
   const maximumHp = activeCreatureForm?.hitPoints.average ??
     character.maxHp + dnd5eActiveHitPointMaximumBonus(activeEffects)
-  const armorClass = activeCreatureForm?.armorClass.value ?? getEffectiveAc(character)
+  const armorClass = (activeCreatureForm?.armorClass.value ?? getEffectiveAc(character)) + mapArmorClassBonus
   const passivePerception = activeCreatureForm
     ? quickCreatureFormPassivePerception(character.passivePerception, activeCreatureForm, character.dnd5eCombatState)
     : character.passivePerception
@@ -184,6 +187,9 @@ export default function PlayerQuickCharacterSheet({ character, onClose, onQuickC
           {!embedded && <button type="button" aria-label="关闭快捷人物卡" onClick={onClose} className="rounded-xl border border-white/10 p-2.5 text-slate-400 transition hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>}
         </header>
 
+        {onDropItem && !creatureFormEquipmentUnavailable && <div className="shrink-0 border-b border-white/10 px-4 py-2">
+          <button type="button" className="rounded-lg border border-amber-400/30 bg-amber-900/30 px-3 py-2 text-sm text-amber-100" onClick={onDropItem}>放到地上</button>
+        </div>}
         <div className="quick-character-sheet__body min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {view === 'status' ? <div className="space-y-4" data-testid="quick-character-status"><Summary label="生命值" value={`${currentHp}/${maximumHp}`} detail={`临时生命值 ${character.tempHp}`} />{statusContent}</div> : <>
           <div data-testid="quick-character-overview" className="space-y-4">

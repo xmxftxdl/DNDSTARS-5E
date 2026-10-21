@@ -3,6 +3,8 @@ import type { SharedCampaignTimeState } from '../lib/campaignTime'
 import type { Character } from '../types/character'
 import { reconcileDnd5eCharacterCampaignTime } from '../rulesets/dnd5e/campaignTimeRules'
 import { runDnd5eCampaignLongRestTransaction } from './campaignLongRest'
+import {mutateCampaignTimeState} from '../../scripts/shared-server-core.mjs'
+import {normalizeSharedCampaignTime} from '../lib/campaignTime'
 
 function wizard(patch: Partial<Character> = {}): Character {
   return {
@@ -61,6 +63,29 @@ function clock(
 }
 
 describe('DM campaign long-rest transaction', () => {
+  it('restores resources through a completed session and does not replay recovery after reload',async()=>{
+    const host={memberId:'host',role:'dm'}
+    const context={host,restCharacterIds:['wizard']}
+    const started=mutateCampaignTimeState(clock(480),{operation:'start-rest-session',id:'rest',kind:'long-rest',characterIds:['wizard'],expectedWorldMinute:480},1,host,context)
+    expect(started.ok).toBe(true);if(!started.ok)throw Error(started.error)
+    let shared=normalizeSharedCampaignTime(started.next)
+    let character=wizard()
+    const complete=()=>runDnd5eCampaignLongRestTransaction({currentClock:shared,restSessionId:'rest',reason:'Test',
+      mutate:async mutation=>{
+        const result=mutateCampaignTimeState(shared,mutation,2,host,context)
+        if(!result.ok)throw Error(result.error)
+        shared=normalizeSharedCampaignTime(result.next);return shared
+      },reconcileCharacters:async current=>{character=reconcileDnd5eCharacterCampaignTime(character,current).character}})
+    await complete()
+    expect(character.currentHp).toBe(28)
+    expect(character.classResources?.['dnd5e-spell-slot-1'].current).toBe(4)
+    character={...character,currentHp:10,classResources:{...character.classResources,'dnd5e-spell-slot-1':{current:3,max:4}}}
+    shared=normalizeSharedCampaignTime(JSON.parse(JSON.stringify(shared)))
+    await complete()
+    expect(shared.advances).toHaveLength(1)
+    expect(character.currentHp).toBe(10)
+    expect(character.classResources?.['dnd5e-spell-slot-1'].current).toBe(3)
+  })
   it('establishes a new wizard clock baseline before restoring spent spell slots', async () => {
     let character = wizard()
     const before = clock(480)

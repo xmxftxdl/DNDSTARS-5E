@@ -21,6 +21,39 @@ function legacyCharacter(): Character {
 }
 
 describe('D&D 5e character boundary', () => {
+  it('uses plugin resource reset declarations and excludes unavailable resources', () => {
+    const ids: string[] = []
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'com.example.rests', name: 'Rest resources', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+      setup(api) {
+        ids.push(api.registerResource({ id: 'focus', label: 'Focus', classId: 'fighter', maximum: 3, resetOn: 'short-rest' }))
+        ids.push(api.registerResource({ id: 'daily', label: 'Daily', classId: 'fighter', maximum: 1, resetOn: 'long-rest' }))
+        ids.push(api.registerResource({ id: 'future', label: 'Future', classId: 'fighter', minimumLevel: 20, maximum: 1, resetOn: 'short-rest' }))
+      },
+    })
+    try {
+      const migrated = migrateCharacterToDnd5e({ ...legacyCharacter(), rulesetId: 'dnd5e-2014-srd-5.1', charClass: '战士' })
+      const combatant = createCombatantFromDnd5eCharacter({ character: migrated, controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 } })
+      expect(combatant.classResourceResets?.[ids[0]]).toBe('short-rest')
+      expect(combatant.classResourceResets?.[ids[1]]).toBe('long-rest')
+      expect(combatant.classResourceResets?.[ids[2]]).toBeUndefined()
+      expect(combatant.classResources[ids[0]]).toEqual({ current: 3, max: 3 })
+    } finally {
+      dispose()
+    }
+  })
+  it('carries declared rest cycles into independent combat snapshots without guessing unknown resources', () => {
+    const migrated = migrateCharacterToDnd5e({
+      ...legacyCharacter(), rulesetId: 'dnd5e-2014-srd-5.1', charClass: '战士', level: 9,
+      classResources: { 'unknown-short-rest': { current: 0, max: 2 } },
+    })
+    const combatant = createCombatantFromDnd5eCharacter({ character: migrated, controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 } })
+    expect(combatant.classResourceResets).toMatchObject({ fighterSecondWind: 'short-rest', fighterActionSurge: 'short-rest', fighterIndomitable: 'long-rest' })
+    expect(combatant.classResourceResets?.['unknown-short-rest']).toBeUndefined()
+    expect(combatant.classResources['unknown-short-rest']).toEqual({ current: 0, max: 2 })
+    combatant.classResourceResets!.fighterSecondWind = 'long-rest'
+    expect(migrated.classResourceResets?.fighterSecondWind).toBe('short-rest')
+  })
   it('converts the inherited 25-baseline ability scale', () => {
     expect(normalizeLegacyAbilityScore(25)).toBe(10)
     expect(normalizeLegacyAbilityScore(30)).toBe(12)

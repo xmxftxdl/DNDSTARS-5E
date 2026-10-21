@@ -1,3 +1,4 @@
+import { readCustomItemMaterial, writeCustomItemMaterial, type CustomItemMaterialDraft } from './customItemMaterial'
 import { exportLegacyDnd5eStarMod } from '../../rulesets/dnd5e/starModAdapter'
 import { parseDnd5eContentPackageV2 as parsePortableContent } from '../../rulesets/dnd5e/contentPackageV2'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -172,7 +173,7 @@ interface PersistentAreaTriggerEditorDraft {
   conditionExpiresAt: Dnd5ePluginEffectDuration['expiresAt']
   conditionRounds: number
   conditionSaveAbility: AbilityKey
-  conditionSaveDc: number
+  conditionSaveDc: number | 'source-save-dc'
   notificationEnabled: boolean
   notificationDelivery: 'mental-to-source' | 'audible'
   notificationAudibleRadiusFeet: number
@@ -244,7 +245,7 @@ interface HeadlessEffectEditorDraft {
   primitiveWeaponAttacksMagicalWhile: 'always' | 'transformed'
   primitiveAttackDefenseOutcome: 'disadvantage' | 'automatic-miss'
   primitiveAttackDefenseOnMiss: boolean
-  primitiveAttackDefenseProtects: 'self' | 'ally-or-self'
+  primitiveAttackDefenseProtects: 'self' | 'ally-or-self' | 'any'
   primitiveAttackRetargetSaveAbility: AbilityKey
   primitiveAttackRetargetDcAbility: AbilityKey
   primitiveAttackRetargetCharmImmunity: boolean
@@ -342,7 +343,8 @@ interface HeadlessEffectEditorDraft {
   effectSavingThrowAbility: AbilityKey | 'all'
   effectSavingThrowValue: number
   effectSavingThrowProficiency: AbilityKey | 'none'
-  effectAbilityCheckMode: 'none' | 'advantage' | 'disadvantage'
+  effectAbilityCheckMode: 'none' | 'advantage' | 'disadvantage' | 'add'
+  effectAbilityCheckValue: number
   effectAbilityCheckAbility: AbilityKey | 'all'
   effectAbilityCheckSkill: string
   effectPreventReactions: boolean
@@ -470,7 +472,7 @@ interface SpellDraft {
   sourceDefinition?: Dnd5ePluginSpellDefinition
 }
 
-interface ItemDraft {
+interface ItemDraft extends CustomItemMaterialDraft {
   id: string
   name: string
   description: string
@@ -479,10 +481,11 @@ interface ItemDraft {
   slot: 'mainWeapon' | 'offHand' | 'armor' | 'helmet' | 'shoes' | 'ring' | 'ring2' | 'belt' | 'necklace'
   weaponMode: 'melee' | 'ranged'
   weaponCategory: 'simple' | 'martial'
+  grantsProficiency: boolean
   attackAbility: 'str' | 'dex' | 'finesse'
   damageCount: number
   damageSides: number
-  damageType: 'slashing' | 'piercing' | 'bludgeoning'
+  damageType: Dnd5eDamageType
   reachFeet: number
   rangeNormal: number
   rangeLong: number
@@ -680,7 +683,6 @@ const EQUIPMENT_SLOTS = [['mainWeapon', '主手'], ['offHand', '副手'], ['armo
 const WEAPON_CATEGORIES = [['simple', '简易武器'], ['martial', '军用武器']] as const
 const WEAPON_MODES = [['melee', '近战'], ['ranged', '远程']] as const
 const ATTACK_ABILITIES = [['str', '力量'], ['dex', '敏捷'], ['finesse', '灵巧（取高）']] as const
-const WEAPON_DAMAGE_TYPES = [['slashing', '挥砍'], ['piercing', '穿刺'], ['bludgeoning', '钝击']] as const
 const ARMOR_CATEGORIES = [['light', '轻甲'], ['medium', '中甲'], ['heavy', '重甲']] as const
 const DEXTERITY_BONUSES = [['full', '完整敏捷调整'], ['max-2', '敏捷最高 +2'], ['none', '不加敏捷']] as const
 const ACTION_ECONOMIES = [['action', '动作'], ['bonusAction', '附赠动作'], ['reaction', '反应'], ['none', '免费行动']] as const
@@ -745,6 +747,7 @@ const EFFECT_BREAK_EVENTS: readonly [NonNullable<Dnd5eEffectDefinitionV1['breakO
   ['casts-spell', '施放法术'],
   ['moves', '发生移动'],
   ['spends-action', '消耗动作'],
+  ['spends-action-except-granted', '消耗动作（本效果授予的动作除外）'],
   ['spends-bonus-action', '消耗附赠动作'],
   ['spends-reaction', '消耗反应'],
   ['awakened', '被唤醒'],
@@ -1028,6 +1031,7 @@ function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
       effectSavingThrowValue: 0,
       effectSavingThrowProficiency: 'none',
       effectAbilityCheckMode: 'none',
+      effectAbilityCheckValue: 0,
       effectAbilityCheckAbility: 'all',
       effectAbilityCheckSkill: '',
       effectPreventReactions: false,
@@ -1196,8 +1200,9 @@ function newSpell(index: number): SpellDraft {
 
 function newItem(index: number): ItemDraft {
   return {
+    materialContainsMetal: false, materialValueCp: 0,
     id: `custom-item-${index}`, name: `自定义武器 ${index}`, description: '', rulesText: '',
-    kind: 'weapon', slot: 'mainWeapon', weaponMode: 'melee', weaponCategory: 'martial',
+    kind: 'weapon', slot: 'mainWeapon', weaponMode: 'melee', weaponCategory: 'martial', grantsProficiency: false,
     attackAbility: 'str', damageCount: 1, damageSides: 8, damageType: 'slashing',
     reachFeet: 5, rangeNormal: 20, rangeLong: 60,
     spellcastingFocusEnabled: false, spellcastingFocusClassId: 'wizard',
@@ -1711,6 +1716,9 @@ function importedHeadlessEffectDraft(
     effectAbilityCheckMode: effectAbilityCheck?.kind === 'ability-check'
       ? effectAbilityCheck.mode
       : fallback.effectAbilityCheckMode,
+    effectAbilityCheckValue: effectAbilityCheck?.kind === 'ability-check' && effectAbilityCheck.mode === 'add'
+      ? formulaConstant(effectAbilityCheck.value, fallback.effectAbilityCheckValue)
+      : fallback.effectAbilityCheckValue,
     effectAbilityCheckAbility: effectAbilityCheck?.kind === 'ability-check'
       ? effectAbilityCheck.ability ?? 'all'
       : fallback.effectAbilityCheckAbility,
@@ -2097,6 +2105,7 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
   else if (dnd5e?.kind === 'shield') kind = 'shield'
   return {
     ...draft,
+    ...readCustomItemMaterial(definition),
     id: definition.id,
     name: definition.name,
     description: definition.description,
@@ -2106,6 +2115,7 @@ function importedItemDraft(definition: Dnd5ePluginItemDefinition): ItemDraft {
     weaponMode: dnd5e?.kind === 'weapon' ? dnd5e.mode : draft.weaponMode,
     weaponCategory: dnd5e?.kind === 'weapon' ? dnd5e.category : draft.weaponCategory,
     attackAbility: dnd5e?.kind === 'weapon' ? dnd5e.attackAbility : draft.attackAbility,
+    grantsProficiency: dnd5e?.kind === 'weapon' && dnd5e.grantsProficiency === true,
     damageCount: dnd5e?.kind === 'weapon' ? dnd5e.damage.count : draft.damageCount,
     damageSides: dnd5e?.kind === 'weapon' ? dnd5e.damage.sides : draft.damageSides,
     damageType: dnd5e?.kind === 'weapon' ? dnd5e.damage.type : draft.damageType,
@@ -2341,7 +2351,12 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
     if (feature.headless.effectSavingThrowProficiency !== 'none') effectModifiers.push({
       kind: 'saving-throw-proficiency', ability: feature.headless.effectSavingThrowProficiency,
     })
-    if (feature.headless.effectAbilityCheckMode !== 'none') effectModifiers.push({
+    if (feature.headless.effectAbilityCheckMode === 'add') effectModifiers.push({
+      kind: 'ability-check', mode: 'add', skill: feature.headless.effectAbilityCheckSkill.trim(),
+      value: { kind: 'constant', value: feature.headless.effectAbilityCheckValue },
+      ...(feature.headless.effectAbilityCheckAbility !== 'all' ? { ability: feature.headless.effectAbilityCheckAbility } : {}),
+    })
+    else if (feature.headless.effectAbilityCheckMode !== 'none') effectModifiers.push({
       kind: 'ability-check', mode: feature.headless.effectAbilityCheckMode,
       ...(feature.headless.effectAbilityCheckAbility !== 'all'
         ? { ability: feature.headless.effectAbilityCheckAbility }
@@ -3191,6 +3206,7 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
               } : {}),
               ...(trigger.conditionEnabled ? {
                 condition: {
+                  ...trigger.sourceDeclaration?.condition,
                   condition: trigger.condition,
                   duration: {
                     expiresAt: trigger.conditionExpiresAt,
@@ -3238,7 +3254,10 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
   ) as Partial<Record<AbilityKey, number>>
   const raceIds = feat.prerequisiteRaceIds.split(/[，,]+/).map((entry) => entry.trim()).filter(Boolean)
   const choiceRerollResourceId = 'd20-choice-reroll-uses'
-  const sourceIsChoiceReroll = feat.sourceFeatDefinition?.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll'
+  const sourceRerollMechanic = feat.sourceFeatDefinition?.declarativeAbility?.mechanic
+  const sourceChoiceReroll = sourceRerollMechanic?.kind === 'd20-choice-reroll' ? sourceRerollMechanic : undefined
+  const sourceIsChoiceReroll = sourceChoiceReroll != null
+  const sourceRerollIsFree = sourceIsChoiceReroll && !feat.sourceFeatDefinition?.declarativeAbility?.cost?.resources?.length
   const choiceRerollAbility = feat.d20ChoiceRerollEnabled
     ? {
         schemaVersion: 1 as const,
@@ -3249,7 +3268,7 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
         trigger: { kind: 'after-d20-roll' as const },
         cost: {
           economy: 'none' as const,
-          resources: [{ resourceId: choiceRerollResourceId, amount: 1 }],
+          resources: sourceRerollIsFree ? [] : [{ resourceId: choiceRerollResourceId, amount: 1 }],
         },
         targeting: { kind: 'self' as const },
         effects: [],
@@ -3257,8 +3276,11 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
           kind: 'd20-choice-reroll' as const,
           rollKinds: [...feat.d20ChoiceRerollRollKinds],
           scopes: [...feat.d20ChoiceRerollScopes],
-          additionalDice: 1 as const,
-          selection: 'owner-chooses' as const,
+          additionalDice: sourceChoiceReroll?.additionalDice ?? 1 as const,
+          selection: sourceChoiceReroll?.selection ?? 'owner-chooses' as const,
+          triggerD20Values: sourceChoiceReroll?.triggerD20Values ? [...sourceChoiceReroll.triggerD20Values] : undefined,
+          requiresAdvantage: sourceChoiceReroll?.requiresAdvantage,
+          attackAbilities: sourceChoiceReroll?.attackAbilities ? [...sourceChoiceReroll.attackAbilities] : undefined,
         },
         automation: 'full' as const,
       }
@@ -3271,7 +3293,7 @@ function toFeatDefinition(feat: FeatDraft): Dnd5ePluginFeatDefinition {
       action: undefined,
       passiveEffects: undefined,
       declarativeAbility: choiceRerollAbility,
-      resources: [{
+      resources: sourceRerollIsFree ? feat.sourceFeatDefinition?.resources : [{
         id: choiceRerollResourceId,
         label: `${feat.name.trim()}次数`,
         shortLabel: '重掷',
@@ -3597,8 +3619,9 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
         : item.sourceDefinition?.use
   const common = {
     ...sourceDefinition,
+    ...writeCustomItemMaterial(item, sourceDefinition),
     id: item.id.trim(), name: item.name.trim(), description: item.description.trim(),
-    rulesText: item.rulesText.trim(), weightLb: 0, stackable: false,
+    rulesText: item.rulesText.trim(), weightLb: sourceDefinition?.weightLb ?? 0, stackable: sourceDefinition?.stackable ?? false,
     ...(needsChargeResource ? {
       resources: [{
         id: 'charges', label: '充能', maximum: item.attackRerollCharges,
@@ -3615,14 +3638,15 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
   if (item.kind === 'weapon') return {
     ...common, category: 'equipment', icon: 'weapon',
     equipment: {
+      ...sourceDefinition?.equipment,
       slot: item.slot, ...(effects ? { effects } : {}),
-      ...(item.spellcastingFocusEnabled
-        ? { spellcastingFocusClassIds: [item.spellcastingFocusClassId] }
-        : {}),
+      spellcastingFocusClassIds: item.spellcastingFocusEnabled ? [item.spellcastingFocusClassId] : undefined,
       dnd5e: {
+        ...(sourceDefinition?.equipment?.dnd5e?.kind==='weapon' ? sourceDefinition.equipment.dnd5e : {}),
         kind: 'weapon', category: item.weaponCategory, mode: item.weaponMode,
         damage: { count: item.damageCount, sides: item.damageSides, type: item.damageType },
         attackAbility: item.attackAbility,
+        grantsProficiency: item.grantsProficiency || undefined,
         ...(item.weaponMode === 'melee' ? { reachFeet: item.reachFeet } : {
           rangeFeet: { normal: item.rangeNormal, long: item.rangeLong },
         }),
@@ -4684,6 +4708,9 @@ export default function Dnd5eCustomPluginBuilder({
                         })}
                       </div>
                     </div>
+                    {feat.sourceFeatDefinition?.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll' &&
+                      !feat.sourceFeatDefinition.declarativeAbility.cost?.resources?.length ?
+                      <p className="text-xs text-sky-100/70">此导入特性不消耗次数，保存时保留原有触发条件。</p> :
                     <div className="grid gap-3 sm:grid-cols-2">
                       <BuilderNumber
                         label="可用次数"
@@ -4705,9 +4732,9 @@ export default function Dnd5eCustomPluginBuilder({
                           <option value="short-rest">完成短休</option>
                         </select>
                       </label>
-                    </div>
+                    </div>}
                     <p className="text-xs leading-5 text-sky-100/70">
-                      Host 会先公开原始结果，再等待该玩家明确选择“使用”或“不使用”。选择使用后由 Host 投掷额外 d20、选择对能力拥有者有利的结果，并在同一权威事务中消耗次数。
+                      Host 会先公开原始结果，再等待该玩家明确选择“使用”或“不使用”。选择使用后由 Host 投掷额外 d20，按特性规则采用结果；若特性声明了次数消耗，则同时扣除。
                     </p>
                     {feat.headless.enabled && <p className="text-xs text-amber-200/80">启用此机制时，它会取代本专长下方配置的另一项 Headless 效果；一个专长当前只能声明一项自动化机制。</p>}
                   </div>}
@@ -5030,11 +5057,17 @@ export default function Dnd5eCustomPluginBuilder({
                   {item.kind !== 'armor' && item.kind !== 'shield' && item.kind !== 'consumable' && <BuilderSelect label="装备槽位" value={item.slot} options={EQUIPMENT_SLOTS} onChange={(value) => patchItem(index, { slot: value as ItemDraft['slot'] })} />}
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-2"><BuilderTextarea label="物品说明" value={item.description} onChange={(value) => patchItem(index, { description: value })} /><BuilderTextarea label="规则正文" value={item.rulesText} onChange={(value) => patchItem(index, { rulesText: value })} /></div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <Toggle label="材质包含金属" value={item.materialContainsMetal} onChange={(materialContainsMetal) => patchItem(index, { materialContainsMetal })} />
+                  <BuilderNumber label="每件规则价值（铜币；0 表示未填写）" value={item.materialValueCp} min={0} max={100000000} onChange={(materialValueCp) => patchItem(index, { materialValueCp })} />
+                </div>
+                <p className="mt-2 text-xs text-slate-500">100 铜币 = 1 金币。按物品的实际材质填写；制作能力会另行核对非魔法资格、价值上限与材料。</p>
                 {item.kind === 'weapon' && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <BuilderSelect label="武器类别" value={item.weaponCategory} options={WEAPON_CATEGORIES} onChange={(value) => patchItem(index, { weaponCategory: value as ItemDraft['weaponCategory'] })} />
                   <BuilderSelect label="攻击模式" value={item.weaponMode} options={WEAPON_MODES} onChange={(value) => patchItem(index, { weaponMode: value as ItemDraft['weaponMode'] })} />
+                  <Toggle label="物品授予使用者武器熟练" value={item.grantsProficiency} onChange={(grantsProficiency) => patchItem(index, { grantsProficiency })} />
                   <BuilderSelect label="攻击属性" value={item.attackAbility} options={ATTACK_ABILITIES} onChange={(value) => patchItem(index, { attackAbility: value as ItemDraft['attackAbility'] })} />
-                  <BuilderSelect label="伤害类型" value={item.damageType} options={WEAPON_DAMAGE_TYPES} onChange={(value) => patchItem(index, { damageType: value as ItemDraft['damageType'] })} />
+                  <BuilderSelect label="伤害类型" value={item.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(value) => patchItem(index, { damageType: value as ItemDraft['damageType'] })} />
                   <BuilderNumber label="伤害骰数量" value={item.damageCount} min={0} max={20} onChange={(value) => patchItem(index, { damageCount: value })} />
                   <BuilderNumber label="伤害骰面数" value={item.damageSides} min={2} max={1000} onChange={(value) => patchItem(index, { damageSides: value })} />
                   {item.weaponMode === 'melee' ? <BuilderNumber label="触及（尺）" value={item.reachFeet} min={0} max={500} onChange={(value) => patchItem(index, { reachFeet: value })} /> : <><BuilderNumber label="普通射程" value={item.rangeNormal} min={0} max={10000} onChange={(value) => patchItem(index, { rangeNormal: value })} /><BuilderNumber label="最大射程" value={item.rangeLong} min={0} max={10000} onChange={(value) => patchItem(index, { rangeLong: value })} /></>}
@@ -5411,9 +5444,10 @@ function HeadlessEffectEditor({
                 {value.effectSavingThrowMode !== 'none' && <BuilderSelect label="豁免属性" value={value.effectSavingThrowAbility} options={[["all", "全部"], ...ABILITIES.map((ability) => [ability.key, ability.label] as const)]} onChange={(effectSavingThrowAbility) => patch({ effectSavingThrowAbility: effectSavingThrowAbility as HeadlessEffectEditorDraft['effectSavingThrowAbility'] })} />}
                 {value.effectSavingThrowMode === 'add' && <BuilderNumber label="豁免加值" value={value.effectSavingThrowValue} min={-20} max={20} onChange={(effectSavingThrowValue) => patch({ effectSavingThrowValue })} />}
                 <BuilderSelect label="授予豁免熟练" value={value.effectSavingThrowProficiency} options={[["none", "不授予"], ...ABILITIES.map((ability) => [ability.key, ability.label] as const)]} onChange={(effectSavingThrowProficiency) => patch({ effectSavingThrowProficiency: effectSavingThrowProficiency as HeadlessEffectEditorDraft['effectSavingThrowProficiency'] })} />
-                <BuilderSelect label="技能／属性检定修正" value={value.effectAbilityCheckMode} options={[["none", "不修改"], ["advantage", "优势"], ["disadvantage", "劣势"]]} onChange={(effectAbilityCheckMode) => patch({ effectAbilityCheckMode: effectAbilityCheckMode as HeadlessEffectEditorDraft['effectAbilityCheckMode'] })} />
+                <BuilderSelect label="技能／属性检定修正" value={value.effectAbilityCheckMode} options={[["none", "不修改"], ["advantage", "优势"], ["disadvantage", "劣势"], ["add", "技能数值加值"]]} onChange={(effectAbilityCheckMode) => patch({ effectAbilityCheckMode: effectAbilityCheckMode as HeadlessEffectEditorDraft['effectAbilityCheckMode'] })} />
+                {value.effectAbilityCheckMode === 'add' && <BuilderNumber label="技能加值" value={value.effectAbilityCheckValue} min={-20} max={20} onChange={(effectAbilityCheckValue) => patch({ effectAbilityCheckValue })} />}
                 {value.effectAbilityCheckMode !== 'none' && <BuilderSelect label="检定属性" value={value.effectAbilityCheckAbility} options={[["all", "全部属性"], ...ABILITIES.map((ability) => [ability.key, ability.label] as const)]} onChange={(effectAbilityCheckAbility) => patch({ effectAbilityCheckAbility: effectAbilityCheckAbility as HeadlessEffectEditorDraft['effectAbilityCheckAbility'] })} />}
-                {value.effectAbilityCheckMode !== 'none' && <BuilderInput label="限定技能 ID（可留空，如 stealth）" value={value.effectAbilityCheckSkill} onChange={(effectAbilityCheckSkill) => patch({ effectAbilityCheckSkill })} />}
+                {value.effectAbilityCheckMode !== 'none' && <BuilderInput label={value.effectAbilityCheckMode === 'add' ? "技能 ID（必填，如 persuasion）" : "限定技能 ID（可留空，如 stealth）"} value={value.effectAbilityCheckSkill} onChange={(effectAbilityCheckSkill) => patch({ effectAbilityCheckSkill })} />}
                 <BuilderNumber label="每回合最多攻击数（0＝不限）" value={value.effectMaximumAttacksPerTurn} min={0} max={100} onChange={(effectMaximumAttacksPerTurn) => patch({ effectMaximumAttacksPerTurn })} />
                 <BuilderNumber label="黑暗视觉距离（尺，0＝不授予）" value={value.effectDarkvisionRangeFeet} min={0} max={10000} onChange={(effectDarkvisionRangeFeet) => patch({ effectDarkvisionRangeFeet })} />
                 <BuilderNumber label="飞行速度（尺，0＝不授予）" value={value.effectFlightSpeedFeet} min={0} max={10000} onChange={(effectFlightSpeedFeet) => patch({ effectFlightSpeedFeet })} />
@@ -5667,7 +5701,7 @@ function HeadlessEffectEditor({
           {value.executionMode === 'reaction-attack-defense' && (
             <div className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <BuilderSelect label="保护对象" value={value.primitiveAttackDefenseProtects} options={[["self", "仅自己"], ["ally-or-self", "自己或盟友"]]} onChange={(primitiveAttackDefenseProtects) => patch({ primitiveAttackDefenseProtects: primitiveAttackDefenseProtects as HeadlessEffectEditorDraft['primitiveAttackDefenseProtects'] })} />
+                <BuilderSelect label="保护对象" value={value.primitiveAttackDefenseProtects} options={[["self", "仅自己"], ["ally-or-self", "自己或盟友"], ["any", "任意生物"]]} onChange={(primitiveAttackDefenseProtects) => patch({ primitiveAttackDefenseProtects: primitiveAttackDefenseProtects as HeadlessEffectEditorDraft['primitiveAttackDefenseProtects'] })} />
                 <BuilderSelect label="防御结果" value={value.primitiveAttackDefenseOutcome} options={[["disadvantage", "令该次攻击具有劣势"], ["automatic-miss", "令该次攻击自动未命中"]]} onChange={(primitiveAttackDefenseOutcome) => patch({ primitiveAttackDefenseOutcome: primitiveAttackDefenseOutcome as HeadlessEffectEditorDraft['primitiveAttackDefenseOutcome'] })} />
                 <BuilderNumber label="触发目标距离（尺）" value={value.rangeFeet} min={0} max={1000} onChange={(rangeFeet) => patch({ rangeFeet })} />
                 <div className="self-end pb-0.5"><Toggle label="若未命中，下次攻击该攻击者时获得优势" value={value.primitiveAttackDefenseOnMiss} onChange={(primitiveAttackDefenseOnMiss) => patch({ primitiveAttackDefenseOnMiss })} /></div>
@@ -6057,7 +6091,8 @@ function HeadlessEffectEditor({
                             <BuilderNumber label="持续轮数" value={trigger.conditionRounds} min={1} max={14400} onChange={(conditionRounds) => patchPersistentAreaTrigger(index, { conditionRounds })} />
                             {trigger.conditionExpiresAt === 'target-turn-end-save' && <>
                               <BuilderSelect label="重复豁免属性" value={trigger.conditionSaveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(conditionSaveAbility) => patchPersistentAreaTrigger(index, { conditionSaveAbility: conditionSaveAbility as AbilityKey })} />
-                              <BuilderNumber label="重复豁免 DC" value={trigger.conditionSaveDc} min={1} max={40} onChange={(conditionSaveDc) => patchPersistentAreaTrigger(index, { conditionSaveDc })} />
+                              <BuilderSelect label="重复豁免 DC" value={trigger.conditionSaveDc === 'source-save-dc' ? 'source-save-dc' : 'fixed'} options={PERSISTENT_AREA_SAVE_DC_MODES} onChange={(mode) => patchPersistentAreaTrigger(index, { conditionSaveDc: mode === 'source-save-dc' ? 'source-save-dc' : 10 })} />
+                              {typeof trigger.conditionSaveDc === 'number' && <BuilderNumber label="固定 DC" value={trigger.conditionSaveDc} min={1} max={40} onChange={(conditionSaveDc) => patchPersistentAreaTrigger(index, { conditionSaveDc })} />}
                             </>}
                           </div>}
                         </fieldset>

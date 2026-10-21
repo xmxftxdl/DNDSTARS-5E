@@ -34,6 +34,15 @@ import {
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+it.each(['sourceClassId', 'sourceSubclassId'])('rejects standalone feature %s before installation', async field => {
+  const feature = { id: 'standalone', name: 'Standalone', summary: 'Test', description: 'Test', automation: 'manual' }
+  await expect(prepareDnd5eLocalContentJson(JSON.stringify({ features: [{ ...feature, [field]: 'warlock' }] })))
+    .rejects.toThrow('不可声明 sourceClassId/sourceSubclassId')
+  const accepted = await prepareDnd5eLocalContentJson(JSON.stringify({ features: [feature] }))
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(accepted.package))
+  dispose()
+})
 const LOCAL_PHB_COLLECTION_DIRECTORY = fileURLToPath(new URL(
   '../../../local-content/phb-2014/',
   import.meta.url,

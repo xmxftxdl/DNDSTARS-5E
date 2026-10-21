@@ -145,6 +145,11 @@ export type RoomCommunicationMutationResult =
       next: Record<string, unknown>
       message?: Record<string, unknown>
     }
+
+export function atomicMutateJsonStateLocked<T extends { ok: boolean }>(
+  filePath: string,
+  updater: (current: unknown) => T | Promise<T>,
+): Promise<T | { ok: false; changed: false; status: number; error: string; next: unknown }>
 export function parseRoomChatRollCommand(value: unknown): ParsedRoomChatRollCommand | null
 export function mutateRoomChatState(
   current: unknown,
@@ -235,6 +240,7 @@ export function applyPlayerCharacterCommand(
     now?: number
     rollDie?: (sides: number) => number
     concentrationSourceActorIds?: readonly string[]
+    subclassChoicePolicies?: readonly import('../shared/subclass-choice-policy.mjs').SubclassLevelChoicePolicy[]
   },
 ): any
 export function sendExpoPushMessages(
@@ -250,9 +256,20 @@ export function mutateCampaignTimeState(
   current: unknown,
   mutation: Record<string, unknown>,
   now: number,
-  member: Record<string, unknown>,
+  member: Record<string, unknown> | null | undefined,
   context?: Record<string, unknown>,
 ): RoomCommunicationMutationResult
+export function atomicMutateCampaignTimeAndMaps<T extends { ok: boolean }>(
+  ctx: { stateRoot: string }, updater: (current: unknown) => T | Promise<T>, writerId: string,
+  options?: {prepareOnly?: boolean},
+): Promise<(T | { ok: false; changed: false; status: number; error: string }) & {
+  prepared?: boolean
+  plan?: {writes: Array<{name:string;expectedRevision:number;data:unknown}>;readRevisions:Record<string,number>;combat:unknown}
+  previous?: unknown
+  mapsMutation?: { ok: true; changed: true; previous: unknown; next: unknown }
+  charactersMutation?: { ok: true; changed: true; previous: unknown; next: unknown }
+  geometryMutation?: { ok: true; changed: true; previous: unknown; next: unknown }
+}>
 export function mutateSceneAudioPlaybackState(
   current: unknown,
   mutation: Record<string, unknown>,
@@ -319,13 +336,14 @@ export function atomicWriteJsonStateCasLocked(
   | { ok: false; conflict?: boolean; stale?: boolean; invalid?: boolean; reason?: string; currentRevision: number; current: unknown }
 >
 export function removeCharacterConcentrationEffectsFromMaps<T>(
-  currentState: T, characterId: string, endedSpellId?: string, revertedCreatureForms?: readonly Record<string, unknown>[],
+  currentState: T, characterId: string | undefined, endedSpellId?: string, revertedCreatureForms?: readonly Record<string, unknown>[],
+  authority?: { round?: number; worldMinute?: number; sourceActorIds?: readonly string[]; lingerRollsByTokenId?: Readonly<Record<string, readonly number[]>> },
 ): { changed: boolean; next: T; removedEffectIds: string[]; sourceActorIds: string[] }
 export function mergePlayerCharactersStateForAuthority(
   currentState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null } | null,
   incomingState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null; [key: string]: unknown },
   memberId: string,
-  options?: { combatActive?: boolean },
+  options?: { combatActive?: boolean; subclassChoicePolicies?: readonly import('../shared/subclass-choice-policy.mjs').SubclassLevelChoicePolicy[]; expectedHitPointRoll?: number },
 ): { characters: Array<Record<string, unknown>>; selectedId: string | null; [key: string]: unknown }
 export function atomicDeleteJsonStateCasLocked(
   filePath: string,
@@ -453,3 +471,11 @@ export function enforceImageQuota(imageRoot: string): Promise<string[]>
 
 export function replaySlice<T>(backlog: T[]): T[]
 export function pushBacklog<T>(backlog: T[], payload: T): T[]
+
+/** Host observation over an already accepted path and authoritative scene. */
+export function recordServerMovementSightings(input: {
+  map: any; characters: any[]; geometry?: any;
+  path: any[]; actorId: string | null;
+  clock?: { worldMinute?: number; worldSecondRemainder?: number };
+  observerIds?: string[];
+}): { map: any; characters: any[] }

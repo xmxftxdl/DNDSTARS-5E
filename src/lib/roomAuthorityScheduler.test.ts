@@ -42,3 +42,16 @@ describe('RoomAuthorityScheduler', () => {
     expect(runs).toBe(1)
   })
 })
+
+it('reads recovery after the pending action commits so spent economy is not restored',async()=>{
+ const scheduler=new RoomAuthorityScheduler()
+ let serverAction=1,localAction=1,release!:()=>void
+ const gate=new Promise<void>(resolve=>{release=resolve})
+ const action=scheduler.run('companion-order',async()=>{localAction=0;await gate;serverAction=localAction})
+ await Promise.resolve()
+ const recovery=scheduler.run('combat-publication-recovery',async()=>{localAction=serverAction})
+ await Promise.resolve()
+ expect(localAction).toBe(0)
+ release();await Promise.all([action,recovery])
+ expect(serverAction).toBe(0);expect(localAction).toBe(0)
+})

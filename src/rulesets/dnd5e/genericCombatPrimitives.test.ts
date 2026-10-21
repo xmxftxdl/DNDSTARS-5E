@@ -1,9 +1,17 @@
+import { automationCapabilityFromLegacyStatus } from '../../domain/automation/automationCapability'
+import { exportDnd5eStarMod, readDnd5eStarMod } from './starModAdapter'
+import { dnd5eRulesPluginFromUnifiedContentBundleV1, type Dnd5eUnifiedContentBundleV1 } from './unifiedContent'
+import { validateDeclarativeSubclassAbilityV1 } from './declarativeSubclassAbility'
+import {isTokenAlive,isTokenDefeated,decideTurnAction,checkCombatOutcome} from '../../lib/combatTokens'
+import type {Token} from '../../store/maps'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
-import { migrateCharacterToDnd5e } from './character'
+import { migrateCharacterToDnd5e, createCombatantFromDnd5eCharacter } from './character'
 import { resolveDnd5eDamageDefenses } from './damageDefenses'
 import {
   createDnd5eCombatant,
+  applyDnd5eStandardConditionEffect,
   commitDnd5eActivityExecution,
   type Dnd5eAction,
   dnd5eCombatantPairKey,
@@ -11,6 +19,8 @@ import {
   dnd5eDeclarativeCreatureSpaceTraversalMinimumLargerSizeRanks,
   dnd5eDeclarativeEnvironmentalMovementSpeed,
   dnd5eWeaponClassDamageDefinitions,
+  dnd5eSavingThrowRerollFeature,
+  dnd5eSavingThrowRerollFeatures,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
 } from './headlessCombatEngine'
@@ -23,6 +33,89 @@ import {
 } from './pluginApi'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 18, cha: 8 } as const
+
+it('enumerates owned rerolls and rejects unavailable explicit selections without changing resources', () => {
+  let featureId=''
+  const dispose=registerDnd5eRulesPlugin({manifest:{id:'test.reroll-options',name:'Rerolls',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+    featureId=api.registerFeature({id:'focus',name:'Focus',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{schemaVersion:1,id:'focus',name:'Focus',description:'Synthetic',level:1,trigger:{kind:'after-d20-roll'},cost:{economy:'none'},targeting:{kind:'self'},effects:[],mechanic:{kind:'rage-saving-throw-reroll'},automation:'full'}})
+  }})
+  try {
+    const hero=combatant('hero',20,{classId:'barbarian',level:15,classLevels:{barbarian:6,fighter:9},pluginFeatureIds:[featureId],classResources:{fighterIndomitable:{current:1,max:1}}})
+    hero.classState.raging=true
+    const before=structuredClone(hero)
+    expect(dnd5eSavingThrowRerollFeatures(hero).map(option=>option.resourceKey)).toEqual([`rage-saving-throw-reroll:${featureId}`,'fighterIndomitable'])
+    expect(dnd5eSavingThrowRerollFeature(hero,'fighterIndomitable')?.name).toBe('不屈')
+    expect(dnd5eSavingThrowRerollFeature(hero,'unowned')).toBeUndefined()
+    expect(hero).toEqual(before)
+    hero.classResources.fighterIndomitable.current=0
+    expect(dnd5eSavingThrowRerollFeature(hero,'fighterIndomitable')).toBeUndefined()
+    hero.classState.declarativeUsedTurnKeys={[`rage-saving-throw-reroll:${featureId}`]:'used'}
+    expect(dnd5eSavingThrowRerollFeatures(hero)).toEqual([])
+  } finally {dispose()}
+})
+
+it('settles a per-rage failed-save reroll with the actual save mode and persists consumption', () => {
+  let featureId = ''
+  const dispose = registerDnd5eRulesPlugin({manifest:{id:'test.rage-save',name:'Save',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+    featureId=api.registerFeature({id:'save',name:'Save',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{
+      schemaVersion:1,id:'save',name:'Save',description:'Synthetic',level:1,trigger:{kind:'after-d20-roll'},cost:{economy:'none'},targeting:{kind:'self'},
+      effects:[],mechanic:{kind:'rage-saving-throw-reroll'},automation:'full',
+    }})
+  }})
+  try { for (const mode of ['normal','advantage','disadvantage'] as const) {
+    const target=combatant('target',10,{controller:'dm',pluginFeatureIds:[featureId],savingThrowBonuses:{con:0}})
+    target.classState.raging=true
+    if(mode!=='normal')target.classState.activeEffects=[createDnd5eMechanicalEffect({definitionId:'save-mode',label:'Save mode',source:{kind:'plugin'},targetId:'target',
+      modifiers: mode==='advantage'?{savingThrowAdvantages:['con']}:{savingThrowDisadvantages:['con']}})]
+    expect(dnd5eSavingThrowMode(target,'con')).toBe(mode)
+    const attacker=combatant('attacker',20,{classId:'monk',level:5,classResources:{'dnd5e-ki':{current:4,max:4}}})
+    const state=startDnd5eHeadlessCombat('rage-save',[attacker,target])
+    const action:Dnd5eAction={type:'attack',actorId:'attacker',targetId:'target',spendAction:false,attackModifier:20,d20:10,
+      stunningStrikeSaveD20:1,stunningStrikeSaveRerollD20:20,...(mode==='normal'?{}:{stunningStrikeSaveD20Second:2,stunningStrikeSaveRerollD20Second:3}),
+      classDamageContext:{mode:'melee',finesse:false,strengthBased:true,weaponDamageSides:6,damageType:'bludgeoning',adjacentEnemyOfTarget:false,stunningStrike:true},
+      damage:{count:1,sides:6,bonus:0,rolls:[3],type:'bludgeoning'}}
+    const result=resolveDnd5eHeadlessAction(state,action)
+    expect(result.ok,JSON.stringify(result.ok?null:result.reason)).toBe(true)
+    if(!result.ok)continue
+    expect(result.events).toContainEqual(expect.objectContaining({type:'saving-throw-resolved',targetId:'target',d20:mode==='disadvantage'?3:20,success:mode!=='disadvantage'}))
+    const restored=JSON.parse(JSON.stringify(result.state))
+    expect(dnd5eSavingThrowRerollFeature(restored.combatants.target)).toBeUndefined()
+    expect(restored.combatants.target.turn.reactionAvailable).toBe(target.turn.reactionAvailable)
+    expect(resolveDnd5eHeadlessAction(restored,action).ok).toBe(false)
+  }}finally{dispose()}
+})
+
+it('gates a raging own-turn creature weapon rider and evaluates class-level bonus', () => {
+  let featureId = ''
+  const dispose = registerDnd5eRulesPlugin({manifest:{id:'test.rage-rider',name:'Rider',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+    featureId=api.registerFeature({id:'rider',name:'Rider',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{
+      schemaVersion:1,id:'rider',name:'Rider',description:'Synthetic',level:3,trigger:{kind:'after-attack-hit'},targeting:{kind:'single-creature',relation:'any'},
+      rolls:[{id:'extra',kind:'damage',label:'Extra',dice:{count:1,sides:6,modifier:{kind:'class-level',classId:'barbarian',divisor:2,minimum:0}},damageType:'radiant'}],
+      effects:[],limits:{oncePerTurn:true},mechanic:{kind:'weapon-damage-rider',rollId:'extra',requiresRage:true,ownTurnOnly:true,creaturesOnly:true},automation:'full',
+    }})
+  }})
+  try {
+    for(const mode of ['allowed','not-raging','other-turn','object'] as const){
+      const actor=combatant('actor',30,{pluginFeatureIds:[featureId],classLevels:{barbarian:5,fighter:10}})
+      actor.classState.raging=mode!=='not-raging'
+      const target=combatant('target',20,{controller:'dm',...(mode==='object'?{objectDamageThreshold:0}:{})})
+      const state=startDnd5eHeadlessCombat('rider',[actor,target]);if(mode==='other-turn')state.initiativeIndex=1
+      const context={mode:'melee' as const,finesse:false,strengthBased:true,weaponDamageSides:8,damageType:'slashing' as const,adjacentEnemyOfTarget:false}
+      const definitions=dnd5eWeaponClassDamageDefinitions({state,actorId:'actor',targetId:'target',context,critical:false}).filter(d=>d.featureId===featureId)
+      expect(definitions,mode).toHaveLength(mode==='allowed'?1:0)
+      if(mode==='allowed'){
+        expect(definitions[0]).toMatchObject({count:1,sides:6,bonus:2,type:'radiant',doubleOnCritical:true})
+        const hit=resolveDnd5eHeadlessAction(state,{type:'attack',actorId:'actor',targetId:'target',attackModifier:20,d20:10,damage:{count:1,sides:8,bonus:0,rolls:[4],type:'slashing'},classDamageContext:context,classDamageRolls:[{source:'weapon-damage-rider',rolls:[3]}]})
+        expect(hit.ok).toBe(true)
+        if(hit.ok){
+          expect(hit.state.combatants.target.currentHp).toBe(31)
+          const restored=JSON.parse(JSON.stringify(hit.state))
+          expect(dnd5eWeaponClassDamageDefinitions({state:restored,actorId:'actor',targetId:'target',context,critical:false}).some(d=>d.featureId===featureId)).toBe(false)
+        }
+      }
+    }
+  }finally{dispose()}
+})
 
 function testCharacter(pluginFeatureIds: string[]): Character {
   return {
@@ -83,7 +176,139 @@ function combatant(
   })
 }
 
+
+it('ends deferred rage death only when independent unconsciousness actually takes effect', () => {
+  let featureId = ''
+  const dispose = registerDnd5eRulesPlugin({manifest:{id:'test.rage-death',name:'Death boundary',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+    featureId=api.registerFeature({id:'defer',name:'Defer',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{
+      schemaVersion:1,id:'defer',name:'Defer',description:'Synthetic',level:1,trigger:{kind:'passive'},cost:{economy:'none'},targeting:{kind:'self'},
+      effects:[],mechanic:{kind:'rage-death-deferral'},automation:'full',
+    }})
+  }})
+  try {
+  for(const pending of [false,true])for(const mode of ['active','not-raging','unowned','confirmed-dead','exhausted'] as const){
+    const hero=testCharacter(mode==='unowned'?[]:[featureId]);hero.currentHp=0;hero.deathSaveFailures=pending?3:0
+    hero.dnd5eCombatState={raging:mode!=='not-raging',...(pending?{declarativeUsedTurnKeys:{'rage-deferred-death':'pending'}}:{}),...(mode==='confirmed-dead'?{deathRound:1}:{})}
+    if(mode==='exhausted')hero.exhaustionLevel=6
+    const token={id:'hero',characterId:hero.id,type:'player',hp:0,maxHp:80} as Token
+    expect(isTokenAlive(token,[hero])).toBe(mode==='active')
+    expect(isTokenDefeated(token,[hero],{hp:0,max:80})).toBe(mode!=='active')
+    if(mode==='active'){
+      expect(decideTurnAction(token,[hero])).toBe('player')
+      expect(checkCombatOutcome([token,{id:'foe',type:'enemy',hp:10,maxHp:10} as Token],[hero])).toEqual({ended:false})
+    }
+  }
+  for (const pending of [false,true]) for (const mode of ['active','immune','suspended'] as const) {
+    const target=combatant('target',10,{currentHp:0,pluginFeatureIds:[featureId],conditionImmunities:mode==='immune'?['unconscious']:[]})
+    target.classState.raging=true
+    target.classState.rageTurnsRemaining=5
+    target.deathSaves={successes:0,failures:pending?3:0,stable:false,dead:false}
+    if(pending)target.classState.declarativeUsedTurnKeys={'rage-deferred-death':'pending'}
+    if(mode==='suspended')target.classState.activeEffects=[createDnd5eMechanicalEffect({definitionId:'suspender',label:'Suspender',source:{kind:'plugin'},targetId:target.id,modifiers:{}})]
+    const applied=applyDnd5eStandardConditionEffect(target,undefined,{
+      rulesId:'independent-unconsciousness',condition:'unconscious',duration:{type:'permanent'},
+      ...(mode==='suspended'?{suspendWhileEffectId:'suspender'}:{}),
+    },[])
+    expect(applied).toBe(mode!=='immune')
+    expect(target.classState.raging===true).toBe(mode!=='active')
+    expect(target.deathSaves.dead).toBe(mode==='active'&&pending)
+    expect(target.conditions.includes('unconscious')).toBe(mode==='active')
+  }
+  for(const pending of [false,true]){
+    const target=combatant('target',10,{currentHp:0,pluginFeatureIds:[featureId]})
+    target.classState.raging=true;target.classState.rageTurnsRemaining=5
+    target.deathSaves={successes:0,failures:pending?3:0,stable:false,dead:false}
+    if(pending)target.classState.declarativeUsedTurnKeys={'rage-deferred-death':'pending'}
+    const caster=combatant('caster',20,{classId:'wizard',level:3,classSelections:{'spell-prepared':['sleep']},classResources:{'dnd5e-spell-slot-1':{current:1,max:1}}})
+    const result=resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('sleep-deferred',[caster,target]),{
+      type:'cast-spell',actorId:'caster',targetId:'target',spellId:'sleep',slotLevel:1,effectRolls:[4,4,4,4,4],
+    })
+    expect(result.ok).toBe(true)
+    if(!result.ok)continue
+    expect(result.state.combatants.target.classState.raging).not.toBe(true)
+    expect(result.state.combatants.target.deathSaves.dead).toBe(pending)
+    expect(result.events).toContainEqual(expect.objectContaining({type:'sleep-resolved',affectedTargetIds:['target']}))
+    expect(result.state.combatants.caster.classResources['dnd5e-spell-slot-1'].current).toBe(0)
+  }}finally{dispose()}
+})
+
 describe('generic declarative combat primitives', () => {
+  it('applies imported condition save advantage only to the owned feature and matching condition', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({ manifest: { id: 'test.condition-save', name: 'Condition save', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+      featureId = api.registerFeature({ id: 'defense', name: 'Defense', summary: 'Synthetic.', description: 'Synthetic.', automation: 'full', declarativeAbility: {
+        schemaVersion: 1, id: 'defense', name: 'Defense', description: 'Synthetic.', level: 1,
+        trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], automation: 'full',
+        mechanic: { kind: 'passive-defense', savingThrowAdvantageAgainstConditions: ['poisoned'] },
+      } })
+    } })
+    try {
+      const hero = testCharacter([featureId])
+      const projected = migrateCharacterToDnd5e(hero)
+      expect(dnd5eSavingThrowMode(projected, 'con', { condition: 'poisoned' })).toBe('advantage')
+      expect(dnd5eSavingThrowMode(projected, 'con', { condition: '中毒' })).toBe('advantage')
+      expect(dnd5eSavingThrowMode(projected, 'wis', { condition: 'frightened' })).toBe('normal')
+      expect(dnd5eSavingThrowMode(projected, 'con', { damageType: 'poison' })).toBe('normal')
+      expect(projected.conditionImmunities).not.toContain('poisoned')
+      const token = createCombatantFromDnd5eCharacter({ character: projected, controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 } })
+      const state = startDnd5eHeadlessCombat('condition-defense', [token])
+      expect(dnd5eSavingThrowMode(state.combatants[token.id], 'con', { condition: 'poisoned' })).toBe('advantage')
+      const removed = migrateCharacterToDnd5e(testCharacter([]))
+      expect(dnd5eSavingThrowMode(removed, 'con', { condition: 'poisoned' })).toBe('normal')
+    } finally { dispose() }
+  })
+  it.each(['enemy', 'ally', 'any'] as const)('enforces the imported %s weapon rider relation against the actual attack target', (relation) => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({ manifest: {
+      id: `test.rider-relation-${relation}`, name: 'Rider relation', version: '1.0.0', apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0',
+    }, setup(api) {
+      featureId = api.registerFeature({ id: 'rider', name: 'Rider', summary: 'Synthetic.', description: 'Synthetic.', automation: 'full', declarativeAbility: {
+        schemaVersion: 1, id: 'rider', name: 'Rider', description: 'Synthetic.', level: 1,
+        trigger: { kind: 'after-attack-hit' }, targeting: { kind: 'single-creature', relation },
+        rolls: [{ id: 'extra', kind: 'damage', label: 'Extra', dice: { count: 1, sides: 6 }, damageType: 'fire' }],
+        effects: [], mechanic: { kind: 'weapon-damage-rider', rollId: 'extra' }, automation: 'full',
+      } })
+    } })
+    try {
+      for (const controller of ['player', 'dm'] as const) {
+        const actor = combatant('actor', 30, { pluginFeatureIds: [featureId] })
+        const target = combatant('target', 20, { controller })
+        const state = startDnd5eHeadlessCombat('rider-relation', [actor, target])
+        const context = { mode: 'melee' as const, finesse: false, strengthBased: true, weaponDamageSides: 8, damageType: 'slashing' as const, adjacentEnemyOfTarget: false }
+        const allowed = relation === 'any' || (relation === 'ally') === (controller === 'player')
+        const definitions = dnd5eWeaponClassDamageDefinitions({ state, actorId: actor.id, targetId: target.id, context, critical: false })
+        expect(definitions.some(entry => entry.featureId === featureId)).toBe(allowed)
+        const result = resolveDnd5eHeadlessAction(state, {
+          type: 'attack', actorId: actor.id, targetId: target.id, attackModifier: 20, d20: 10,
+          damage: { count: 1, sides: 8, bonus: 0, rolls: [4], type: 'slashing' }, classDamageContext: context,
+          classDamageRolls: allowed ? [{ source: 'weapon-damage-rider', rolls: [3] }] : [],
+        })
+        expect(result.ok).toBe(true)
+        if (result.ok) expect(result.state.combatants[target.id].currentHp).toBe(40 - 4 - (allowed ? 3 : 0))
+      }
+    } finally { dispose() }
+  })
+  it('keeps an animated-creature order across attacks and turn ends, and rejects another caster', () => {
+    const owner=combatant('owner',30)
+    const companion=combatant('companion',20,{summonedSourceCombatantId:'owner',summonedCommandPolicy:'persistent-order',summonedSourceActivityId:'animate'})
+    const enemy=combatant('enemy',10,{controller:'dm',position:{x:5,y:0}})
+    const state=startDnd5eHeadlessCombat('persistent-order',[owner,companion,enemy])
+    const request={actorId:'owner',activityId:'order',targetIds:['companion'],source:{kind:'spell' as const,id:'animate'},resolution:{ok:true as const,status:'resolved' as const,checks:[],consumptions:[{kind:'action-economy' as const,economy:'bonus-action' as const,amount:1 as const,consumeOn:'resolve' as const}],proposals:[{kind:'command-owned-companion' as const,operationId:'order',targetId:'companion',sourceActivityId:'animate',command:'attack' as const}]}}
+    expect(commitDnd5eActivityExecution(state,{...request,actorId:'enemy'}).ok).toBe(false)
+    const issued=commitDnd5eActivityExecution(state,request)
+    expect(issued.ok).toBe(true)
+    if(!issued.ok)return
+    expect(issued.state.combatants.owner.turn.bonusActionAvailable).toBe(false)
+    issued.state.initiativeIndex=1
+    const attack=resolveDnd5eHeadlessAction(issued.state,{type:'attack',actorId:'companion',targetId:'enemy',attackModifier:20,d20:10,damage:{count:1,sides:6,bonus:0,rolls:[4],type:'piercing'}})
+    expect(attack.ok).toBe(true)
+    if(!attack.ok)return
+    expect(attack.state.combatants.companion.classState.companionCommand).toMatchObject({persistentOrder:true,command:'attack'})
+    const end=resolveDnd5eHeadlessAction(attack.state,{type:'end-turn',actorId:'companion'})
+    expect(end.ok).toBe(true)
+    if(end.ok)expect(end.state.combatants.companion.classState.companionCommand?.command).toBe('attack')
+  })
   it('opens signed reaction-attack windows for nearby spell casts and enemy attacks against allies', () => {
     let sentinelFeatureId = ''
     let mageSlayerFeatureId = ''
@@ -434,7 +659,7 @@ describe('generic declarative combat primitives', () => {
           id: 'extra-attack', name: '额外攻击', summary: '测试。', description: '测试。', automation: 'full',
           declarativeAbility: {
             schemaVersion: 1, id: 'extra-attack', name: '额外攻击', description: '测试。', level: 1,
-            trigger: { kind: 'active-use' }, targeting: { kind: 'self' },
+            trigger: { kind: 'passive' }, targeting: { kind: 'self' },
             mechanic: { kind: 'attacks-per-action', attacks: 2 }, effects: [], automation: 'full',
           },
         })
@@ -882,6 +1107,19 @@ describe('generic declarative combat primitives', () => {
       shaped.state.combatants.shapechanger.currentHp = 30
       shaped.state.combatants.shapechanger.classState.wildShapeCurrentHp = 30
       shaped.state.combatants.shapechanger.turn.bonusActionAvailable = true
+      const maximumState = structuredClone(shaped.state)
+      maximumState.combatants.shapechanger.currentHp = 1
+      maximumState.combatants.shapechanger.classState.wildShapeCurrentHp = 1
+      maximumState.combatants.shapechanger.classState.activeEffects = [createDnd5eMechanicalEffect({
+        definitionId: 'maximum', label: 'Maximum', source: { kind: 'plugin' }, targetId: 'shapechanger',
+        modifiers: { maximizeHealingDice: true },
+      })]
+      const maximumHealing = resolveDnd5eHeadlessAction(maximumState, {
+        type: 'druid-creature-form-heal', actorId: 'shapechanger', slotLevel: 2, healingRolls: [1, 1],
+      })
+      expect(maximumHealing.ok).toBe(true)
+      expect(maximumHealing.state.combatants.shapechanger.currentHp).toBe(17)
+      expect(maximumHealing.state.combatants.shapechanger.classState.wildShapeCurrentHp).toBe(17)
       const formHealing = resolveDnd5eHeadlessAction(shaped.state, {
         type: 'druid-creature-form-heal', actorId: 'shapechanger', slotLevel: 2,
         healingRolls: [8, 7],
@@ -1048,4 +1286,95 @@ describe('generic declarative combat primitives', () => {
       dispose()
     }
   })
+})
+
+
+
+it('gates an activated weapon rider by base type, ranged mode and self-owned effect', () => {
+  const ability = {
+    schemaVersion: 1, id: 'shot', name: 'Shot', description: 'Synthetic', level: 3,
+    trigger: { kind: 'after-attack-hit' }, targeting: { kind: 'single-creature', relation: 'any' },
+    rolls: [{ id: 'extra', kind: 'damage', label: 'Extra', dice: { count: 1, sides: 4 }, damageType: 'parent-weapon' }],
+    effects: [], mechanic: { kind: 'weapon-damage-rider', rollId: 'extra', ownTurnOnly: true,
+      weaponBaseIds: ['dnd5e-longbow'], attackMode: 'ranged', requiredEffectDefinitionId: 'test.shot:active' }, automation: 'full',
+  } as const
+  validateDeclarativeSubclassAbilityV1(ability)
+  for (const patch of [{ weaponBaseIds: [] }, { weaponBaseIds: ['a', 'a'] }, { attackMode: 'spell' }, { requiredEffectDefinitionId: '' }]) {
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...ability, mechanic: { ...ability.mechanic, ...patch } })).toThrow()
+  }
+  let featureId = ''
+  const dispose = registerDnd5eRulesPlugin({ manifest: { id: 'test.shot', name: 'Shot', version: '1.0.0', apiVersion: 2,
+    rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+    featureId = api.registerFeature({ id: 'shot', name: 'Shot', summary: 'Synthetic', description: 'Synthetic', automation: 'full', declarativeAbility: ability })
+  } })
+  try {
+    for (const mode of ['active', 'inactive', 'foreign-source', 'wrong-effect', 'wrong-weapon', 'melee', 'spell', 'other-turn', 'unowned'] as const) {
+      const actor = combatant('actor', 30, { pluginFeatureIds: mode === 'unowned' ? [] : [featureId] })
+      if (mode !== 'inactive') actor.classState.activeEffects = [createDnd5eMechanicalEffect({
+        definitionId: mode === 'wrong-effect' ? 'test.shot:other' : 'test.shot:active', label: 'Shot', targetId: 'actor',
+        source: { kind: 'plugin', actorId: mode === 'foreign-source' ? 'target' : 'actor' }, modifiers: {},
+      })]
+      const target = combatant('target', 20, { controller: 'dm' })
+      const state = startDnd5eHeadlessCombat('shot', [actor, target])
+      if (mode === 'other-turn') state.initiativeIndex = 1
+      const context = { mode: mode === 'melee' ? 'melee' as const : 'ranged' as const, finesse: false, strengthBased: false,
+        weaponId: 'instance-42', weaponBaseId: mode === 'wrong-weapon' ? 'dnd5e-shortbow' : 'dnd5e-longbow',
+        spellAttack: mode === 'spell', weaponDamageSides: 8, damageType: 'piercing' as const, adjacentEnemyOfTarget: false }
+      const definitions = () => dnd5eWeaponClassDamageDefinitions({ state, actorId: 'actor', targetId: 'target', context, critical: false }).filter(d => d.featureId === featureId)
+      expect(definitions(), mode).toHaveLength(mode === 'active' ? 1 : 0)
+      if (mode === 'active') {
+        expect(definitions()[0]).toMatchObject({ count: 1, sides: 4, type: 'piercing', doubleOnCritical: true })
+        let current = state
+        for (let hit = 1; hit <= 2; hit++) {
+          const result = resolveDnd5eHeadlessAction(current, { type: 'attack', actorId: 'actor', targetId: 'target', spendAction: false,
+            attackModifier: 20, d20: 10, damage: { count: 1, sides: 8, bonus: 0, rolls: [4], type: 'piercing' },
+            classDamageContext: context, classDamageRolls: [{ source: 'weapon-damage-rider', rolls: [3] }] })
+          expect(result.ok).toBe(true)
+          if (!result.ok) throw Error(result.reason)
+          expect(result.state.combatants.target.currentHp).toBe(40 - hit * 7)
+          current = JSON.parse(JSON.stringify(result.state))
+        }
+        current.combatants.actor.classState.activeEffects = []
+        expect(dnd5eWeaponClassDamageDefinitions({ state: current, actorId: 'actor', targetId: 'target', context, critical: false }).some(d => d.featureId === featureId)).toBe(false)
+      }
+    }
+  } finally { dispose() }
+})
+
+
+it('activates an imported weapon focus with a bonus action and expires it at the current turn end', async () => {
+  const focusId = 'test.focus:focus'
+  const automation = automationCapabilityFromLegacyStatus('full')
+  const bundle: Dnd5eUnifiedContentBundleV1 = { format: 'dndstars5e-unified-content', schemaVersion: 1,
+    manifest: { id: 'test.focus', name: 'Focus', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1',
+      publisher: 'Tests', license: 'CC0-1.0', distributionPolicy: 'local-only', contentCategory: 'mixed' }, assets: [],
+    definitions: [{ schemaVersion: 1, namespace: 'test.focus', version: '1.0.0', kind: 'feature', id: 'focus', name: 'Focus', automation,
+      payload: { id: 'focus', name: 'Focus', summary: 'Synthetic', description: 'Synthetic', automation: 'full' },
+      activities: [{ schemaVersion: 1, id: 'focus', name: 'Focus', automation, legacySource: { kind: 'feature', id: 'focus' },
+        activation: { kind: 'bonus-action', cost: 1 }, target: { kind: 'self' },
+        effects: [{ schemaVersion: 1, id: 'focused', name: 'Focused', stacking: 'replace',
+          duration: { kind: 'rounds', rounds: 1, expiresAt: 'target-turn-end', includeCreationTurn: true }, modifiers: [] }],
+        outcomes: [{ id: 'apply', when: { kind: 'always' }, operations: [{ id: 'apply', kind: 'apply-effect', target: 'actor', effectId: 'focused' }] }],
+      }] }],
+  }
+  const decoded = await readDnd5eStarMod(await exportDnd5eStarMod(bundle))
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(decoded.bundle))
+  try {
+    const actor = combatant('actor', 30, { classId: 'monk', level: 3, classLevels: { monk: 3 }, subclassIds: { monk: 'test.focus:focus' }, pluginFeatureIds: [focusId] }), target = combatant('target', 20)
+    const state = startDnd5eHeadlessCombat('focus', [actor, target])
+    const action = { id: 'focus' }
+    const command = { type: 'plugin' as const, pluginId: 'test.focus', actionId: action.id, featureId: focusId,
+      actorId: 'actor', targetId: 'actor', distanceFeet: 0, rolls: {} }
+    const applied = resolveDnd5eHeadlessAction(state, command)
+    expect(applied.ok, JSON.stringify(applied)).toBe(true)
+    if (!applied.ok) throw Error(applied.reason)
+    const effects = applied.state.combatants.actor.classState.activeEffects!
+    expect(effects).toHaveLength(1)
+    expect(effects[0].source.actorId).toBe('actor')
+    expect(resolveDnd5eHeadlessAction(applied.state, command).ok).toBe(false)
+    const ended = resolveDnd5eHeadlessAction(JSON.parse(JSON.stringify(applied.state)), { type: 'end-turn', actorId: 'actor' })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) throw Error(ended.reason)
+    expect(ended.state.combatants.actor.classState.activeEffects ?? []).toHaveLength(0)
+  } finally { dispose() }
 })

@@ -1,18 +1,17 @@
 import { useEffect } from 'react'
 import { useMapStore } from '../../store/maps'
-import { teleportationCircleCrossed, teleportationCircleExpiredAfterDeparture, travelThroughTeleportationCircle } from '../../rulesets/dnd5e/teleportationCircle'
+
+import { teleportationCircleCrossed, teleportationCircleExpiredAfterDeparture } from '../../rulesets/dnd5e/teleportationCircle'
 
 /** Only the DM turns observed, already-authorized movement into portal travel. */
-export function useTeleportationCircleTravel(enabled: boolean, notify: (message: string) => void, onTravelled: (travelers: Array<{ tokenId: string; sourceMapId: string; destinationMapId: string }>) => Promise<void>, combat?: { active: boolean; mapId?: string; round: number; tokenId?: string }) {
+export function useTeleportationCircleTravel(enabled: boolean, notify: (message: string) => void, commitTravel: (sourceMapId: string, areaId: string, tokenId: string, crossed?: boolean) => Promise<boolean>, combat?: { active: boolean; mapId?: string; round: number; tokenId?: string }) {
   useEffect(() => {
     if (!enabled) return
     let applying = false
     const unsubscribe = useMapStore.subscribe((state, previous) => {
       if (applying || state.maps === previous.maps) return
-      let maps = state.maps
-      const messages: string[] = []
+      const candidates: Array<{ sourceMapId: string; areaId: string; tokenId: string }> = []
       const traveled = new Set<string>()
-      const travelers: Array<{ tokenId: string; sourceMapId: string; destinationMapId: string }> = []
       for (const map of state.maps) {
         const before = previous.maps.find(m => m.id === map.id)
         if (!before) continue
@@ -22,24 +21,19 @@ export function useTeleportationCircleTravel(enabled: boolean, notify: (message:
             const old = before.tokens.find(t => t.id === token.id)
             if (!old || traveled.has(token.id) || token.type === 'obstacle' || old.x === token.x && old.y === token.y) continue
             if (!teleportationCircleCrossed(map, area, old, token)) continue
-            const next = travelThroughTeleportationCircle(maps, map.id, area.id, token.id)
-            if (!next) { messages.push(`${token.label}未能穿越传送法阵：出口不存在、已过期、重复角色或没有可用落点。`); continue }
-            maps = next
             traveled.add(token.id)
-            travelers.push({ tokenId: token.id, sourceMapId: map.id, destinationMapId: area.teleportationExit.mapId })
-            messages.push(`${token.label}穿过传送法阵，到达${maps.find(m => m.id === area.teleportationExit?.mapId)?.name ?? '目标地图'}。`)
+            candidates.push({ sourceMapId: map.id, areaId: area.id, tokenId: token.id })
           }
         }
       }
-      if (maps !== state.maps) {
-        applying = true
-        useMapStore.setState({ maps })
-        applying = false
-        void onTravelled(travelers).then(() => useMapStore.getState().saveSharedNow()).then(() => messages.forEach(notify)).catch(() => {
-          notify('传送同步失败，正在重新读取服务器状态。')
-          void useMapStore.getState().loadShared()
-        })
-      } else messages.forEach(notify)
+      if (!candidates.length) return
+      applying = true
+      void (async () => {
+        for (const candidate of candidates) await commitTravel(candidate.sourceMapId, candidate.areaId, candidate.tokenId, true)
+      })().catch(() => {
+        notify('传送同步失败，正在重新读取服务器状态。')
+        void useMapStore.getState().loadShared()
+      }).finally(() => { applying = false })
     })
     const expire = () => {
       const state = useMapStore.getState()
@@ -61,5 +55,5 @@ export function useTeleportationCircleTravel(enabled: boolean, notify: (message:
     expire()
     const timer = setInterval(expire, 1000)
     return () => { unsubscribe(); clearInterval(timer) }
-  }, [enabled, notify, onTravelled, combat?.active, combat?.mapId, combat?.round, combat?.tokenId])
+  }, [enabled, notify, commitTravel, combat?.active, combat?.mapId, combat?.round, combat?.tokenId])
 }

@@ -1,0 +1,29 @@
+{
+  "features": [
+    { "id": "chain-demo", "name": "连锁结算测试", "summary": "原创接口测试", "description": "首段造成 2d6 伤害；两骰相同时授予一次后续动作。后续复用首段骰值，必须选择不同目标。", "automation": "partial" }
+  ],
+  "activityPatterns": [
+    {
+      "schemaVersion": 1, "id": "chain-demo", "name": "连锁结算测试",
+      "source": { "kind": "feature", "id": "chain-demo" },
+      "target": { "kind": "creature", "relation": "any", "count": 1, "rangeFeet": 60 },
+      "pattern": "roll-effect",
+      "result": { "kind": "damage", "damageType": "fire", "amount": { "kind": "dice", "rollId": "damage", "count": 2, "sides": 6 } },
+      "continuation": {
+        "nextActivityId": "chain-demo-next", "maximumSteps": 2, "excludePreviousTargets": true,
+        "maximumDistanceFromPreviousTargetFeet": 30,
+        "when": { "kind": "equal-dice", "rollId": "damage", "first": 0, "second": 1 },
+        "carryRolls": [{ "from": "damage", "to": "prior-damage" }]
+      }
+    },
+    {
+      "schemaVersion": 1, "id": "chain-demo-next", "name": "连锁结算测试·后续",
+      "source": { "kind": "feature", "id": "chain-demo" },
+      "activation": { "kind": "free" },
+      "target": { "kind": "creature", "relation": "any", "count": 1, "rangeFeet": 60 },
+      "requiresContinuationFrom": "chain-demo",
+      "pattern": "roll-effect",
+      "result": { "kind": "damage", "damageType": "cold", "amount": { "kind": "dice", "rollId": "prior-damage", "count": 2, "sides": 6 } }
+    }
+  ]
+}

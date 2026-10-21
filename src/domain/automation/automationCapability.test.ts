@@ -5,6 +5,12 @@ import {
 } from './automationCapability'
 
 describe('automation capability contract', () => {
+  it('reports malformed imported claims without throwing or accepting an unknown level', () => {
+    const malformed = { schemaVersion: 1, level: 'partial', supportedPhases: [], manualPhases: [] }
+    expect(validateAutomationCapability(malformed as unknown as Parameters<typeof validateAutomationCapability>[0])).toEqual([
+      'automation limitations must be an array of strings', 'unknown automation level: partial',
+    ])
+  })
   it('turns legacy partial automation into an explicit assisted phase split', () => {
     const capability = automationCapabilityFromLegacyStatus('partial', ['区域移动需要 DM 裁定。'])
     expect(capability).toMatchObject({

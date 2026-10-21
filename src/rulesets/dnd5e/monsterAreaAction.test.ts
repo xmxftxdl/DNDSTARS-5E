@@ -1,3 +1,4 @@
+import {createDnd5eMechanicalEffect,createDnd5eConditionEffect} from './activeEffects'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createEmptyMapGeometry,
@@ -20,6 +21,7 @@ import {
 import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
 import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function token(patch: Partial<Token>): Token {
   return {
@@ -99,6 +101,75 @@ describe('monster area action map authority', () => {
   afterEach(() => {
     setMapGeometryRuntime([])
     setDnd5eRoomMonsterCatalog([])
+  })
+
+  it.each([true, false])('settles a pre-save weapon counter in the parent monster area transaction (hit=%s)', hit => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'test.area-counter', name: 'Counter', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0' },
+      setup(api) { api.registerDeclarativeSubclass({
+        schemaVersion: 1, id: 'hunter', name: 'Hunter', classId: 'ranger', summary: 'Synthetic',
+        abilities: [{ schemaVersion: 1, id: 'counter', name: 'Counter', description: 'Synthetic',
+          level: 15, trigger: { kind: 'before-saving-throw' }, cost: { economy: 'reaction' },
+          targeting: { kind: 'self' }, effects: [], automation: 'full',
+          mechanic: { kind: 'saving-throw-weapon-counterattack', markEffectDefinitionId: 'prey' } }],
+      }) },
+    })
+    try {
+      const draft = createDnd5eCustomMonsterDraft()
+      const action = createDnd5eCustomMonsterActionDraft()
+      Object.assign(action, { id: 'burst', name: 'Burst', description: 'Synthetic save',
+        kind: 'area-saving-throw', areaShape: 'circle', areaSizeFeet: 10,
+        areaSaveAbility: 'dex', areaSaveDc: 16, areaDamageDice: '2d6', areaDamageType: 'fire' })
+      draft.actions = [action]
+      const monster = buildDnd5eCustomMonster(draft)
+      setDnd5eRoomMonsterCatalog([monster])
+      const source = token({ id: 'source', poolId: monster.id, hp: 50, maxHp: 50 })
+      const target = token({ id: 'hunter', type: 'player', characterId: 'hunter-character', x: 75 })
+      const map = battleMap('counter-area', [source, target])
+      const prepared = prepareDnd5eMonsterAreaAction({
+        combatId: 'counter-area', map, characters: [character('hunter-character')],
+        initiativeOrder: initiative(map.tokens), actorTokenId: source.id,
+        actionId: action.id, targetTokenIds: [target.id],
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) throw Error('counter area preparation failed')
+      const hunter = prepared.prepared.state.combatants.hunter
+      hunter.classId = 'ranger'; hunter.classLevels = { ranger: 15 }; hunter.level = 15
+      hunter.subclassIds = { ranger: 'test.area-counter:hunter' }
+      hunter.pluginFeatureIds = ['test.area-counter:hunter.counter']
+      hunter.classState.activeEffects = [createDnd5eMechanicalEffect({
+        definitionId: 'prey', label: 'Prey', targetId: 'hunter',
+        source: { kind: 'plugin', actorId: 'hunter', pluginId: 'test.area-counter' },
+        modifiers: { onHitBonusDamage: { count: 1, sides: 6, bonus: 0,
+          damageType: 'inherit-primary', appliesTo: 'all-weapon-attacks',
+          doubleDiceOnCritical: true, oncePerTurn: true, consumeEffectOnHit: false,
+          boundTargetId: 'source' } },
+      })]
+      const before = structuredClone(prepared.prepared.state)
+      const result = resolvePreparedDnd5eMonsterAreaAction({
+        prepared: prepared.prepared,
+        savingThrowCounterattacks: [{ targetId: 'hunter', sourceId: 'source', ability: 'dex',
+          occurrence: 0, featureId: 'test.area-counter:hunter.counter', attack: {
+            type: 'attack', actorId: 'hunter', targetId: 'source', d20: hit ? 18 : 1,
+            attackModifier: 20,
+            damage: { count: 1, sides: 6, bonus: 0, rolls: hit ? [2] : [], type: 'slashing' },
+            classDamageContext: { mode: 'melee', weaponId: 'sword', finesse: false,
+              strengthBased: true, weaponDamageSides: 6, damageType: 'slashing', adjacentEnemyOfTarget: false },
+            classDamageRolls: hit ? [{ source: 'activity-effect-rider',
+              rollId: `activity-on-hit:${hunter.classState.activeEffects[0].id}`, rolls: [4] }] : [],
+          } }],
+        resolution: { targetSavingThrows: [{ targetId: 'hunter', d20: hit ? 0 : 1 }],
+          damageRolls: [4, 4] },
+      })
+      expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+      expect(prepared.prepared.state).toEqual(before)
+      expect(result.application).toBeDefined()
+      expect(result.result.state.combatants.hunter.turn.reactionAvailable).toBe(false)
+      expect(result.result.state.combatants.source.currentHp).toBe(hit ? 44 : 50)
+      expect(result.result.events.find(e => e.type === 'saving-throw-resolved' && e.targetId === 'hunter'))
+        .toMatchObject({ success: hit, d20: hit ? 0 : 1 })
+    } finally { dispose() }
   })
 
   it('requires and resolves each target-selected saving throw ability authoritatively', () => {
@@ -657,6 +728,20 @@ describe('monster area action map authority', () => {
       .toBe(false)
   })
 
+  it.each(['crossing','above','save'] as const)('halves dragon fire through water: %s', mode => {
+    const dragon=token({id:'red-dragon',poolId:'srd-5.1:red-dragon-wyrmling',x:200,y:225,hp:75,maxHp:75,dnd5eCombatState:{monsterRechargeReadyByActionId:{'fire-breath':true}}})
+    const hero=token({id:'hero',type:'player',characterId:'hero-character',x:250,y:225})
+    const map=battleMap('water-breath',[dragon,hero])
+    map.dnd5ePluginAreas=[{id:'water',pluginId:'test.water',featureId:'water',label:'Water',color:'#0ff',sourceCharacterId:'owner',sourceTokenId:dragon.id,slotLevel:3,sourceSpellSaveDc:15,createdRound:1,expiresAfterRound:101,anchorMode:'fixed',anchorCell:{col:4,row:4},cells:[{col:4,row:3},{col:4,row:4},{col:4,row:5}],rectGeometry:{widthFeet:1,lengthFeet:10,gridAligned:false,direction:{dc:0,dr:1}},vertical:{mode:'volume',baseElevationFeet:mode==='above'?30:0,heightFeet:10},blocking:{halvedDamageTypes:['fire']}}]
+    const prepared=prepareDnd5eMonsterAreaAction({combatId:'combat',map,characters:[character('hero-character')],initiativeOrder:initiative(map.tokens),actorTokenId:dragon.id,actionId:'fire-breath',targetTokenIds:[hero.id],areaTargetCell:{col:5,row:4}})
+    expect(prepared.ok,JSON.stringify(prepared)).toBe(true)
+    if(!prepared.ok)return
+    const resolved=resolvePreparedDnd5eMonsterAreaAction({prepared:prepared.prepared,resolution:{targetSavingThrows:[{targetId:hero.id,d20:mode==='save'?20:1}],damageRolls:[1,2,3,4,5,6,1],forcedMovements:[]}})
+    expect(resolved.result.ok,JSON.stringify(resolved.result)).toBe(true)
+    expect(resolved.application?.characters.find(entry=>entry.id==='hero-character')?.currentHp).toBe(40-(mode==='above'?22:mode==='save'?5:11))
+    expect(resolved.application?.map.tokens.find(entry=>entry.id===dragon.id)?.dnd5eCombatState?.monsterRechargeReadyByActionId?.['fire-breath']).toBe(false)
+  })
+
   it('lets a DM-controlled red dragon use a breath recharged on its previous turn', () => {
     const dragon = token({
       id: 'red-dragon',
@@ -759,4 +844,23 @@ describe('monster area action map authority', () => {
     if (!prepared.ok) return
     expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([airborne.id])
   })
+})
+
+it('includes visible same-side creatures in hostile areas under Enemies Abound',()=>{
+ const dragon=token({id:'dragon',poolId:'srd-5.1:adult-red-dragon'})
+ const effect=createDnd5eMechanicalEffect({definitionId:'test:enemies',label:'Enemies',targetId:'dragon',source:{kind:'spell'},modifiers:{perceiveVisibleCreaturesAsHostile:true,randomVisibleCreatureTargets:true}})
+ dragon.dnd5eCombatState={activeEffects:[effect]}
+ const ally=token({id:'ally',poolId:'srd-5.1:goblin',x:75})
+ const hidden=token({id:'hidden',poolId:'srd-5.1:goblin',x:725,dnd5eCombatState:{activeEffects:[createDnd5eConditionEffect({condition:'invisible',targetId:'hidden',source:{kind:'dm'}})]}})
+ const map=battleMap('perceived-area',[dragon,ally,hidden])
+ const input={combatId:map.id,map,characters:[],initiativeOrder:initiative(map.tokens),actorTokenId:dragon.id,actionId:'frightful-presence',areaTargetCell:{col:0,row:0},targetTokenIds:['ally']}
+ expect(dnd5eMonsterAreaActionTargetIds(input)).toEqual(['ally'])
+ const ready=prepareDnd5eMonsterAreaAction(input)
+ expect(ready.ok,JSON.stringify(ready)).toBe(true);if(!ready.ok)throw Error(ready.reason)
+ const result=resolvePreparedDnd5eMonsterAreaAction({prepared:ready.prepared,resolution:{damageRolls:[],targetSavingThrows:[{targetId:'ally',ability:'wis',d20:1}]}})
+ expect(result.result.ok,JSON.stringify(result.result)).toBe(true)
+ expect(result.result.events).toContainEqual(expect.objectContaining({type:'condition-applied',targetId:'ally',condition:'frightened'}))
+ expect(map.tokens[1].type).toBe('enemy')
+ effect.suspendedBy=['antimagic-test']
+ expect(dnd5eMonsterAreaActionTargetIds(input)).toEqual([])
 })

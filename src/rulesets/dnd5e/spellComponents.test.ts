@@ -10,6 +10,25 @@ import { normalizeCharacter } from '../../store/characters'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 
 describe('D&D 5e spell component authority checks', () => {
+  it('allows an explicit nonconsumed ingredient alternative without bypassing costly or bound materials', () => {
+    const actor = normalizeCharacter({ id: 'component-test', name: 'Wizard', equipment: {},
+      dnd5eInventory: { schemaVersion: 3, entries: [{ instanceId: 'pouch', templateId: 'srd-5.1:item:component-pouch',
+        quantity: 1, acquiredAt: 1, item: { id: 'srd-5.1:item:component-pouch', name: 'Pouch',
+          category: 'adventuring-gear', icon: 'generic', description: '', rulesText: '', stackable: false,
+          source: { book: 'SRD 5.1', license: 'CC BY 4.0' } } }] } })
+    const requirement = { label: 'Ingredient', allowFocusSubstitution: true,
+      options: [{ label: 'Fresh ingredient', components: [{ tag: 'local:blood', label: 'Blood', consumed: false, requiresExpiry: true }] }] }
+    const check = (specificMaterial: typeof requirement) => dnd5eSpellComponentCheck(actor,
+      { verbal: true, somatic: true, material: true, specificMaterial }, 'wizard')
+    expect(check(requirement)).toMatchObject({ material: 'focus-or-pouch', somatic: 'available' })
+    expect(check(requirement).materialPlan).toBeUndefined()
+    for (const restricted of [{ consumed: true }, { minimumUnitValueGp: 1 }, { minimumTotalValueGp: 1 }, { bindEffectId: 'bound' }, { mustBeEquipped: true }]) {
+      const value = structuredClone(requirement)
+      Object.assign(value.options[0].components[0], restricted)
+      expect(dnd5eSpellComponentsAvailable(check(value))).toBe(false)
+    }
+    expect(dnd5eSpellComponentsAvailable(check({ ...requirement, allowFocusSubstitution: false }))).toBe(false)
+  })
   it('parses the reviewed SRD component text instead of treating every spell alike', () => {
     expect(dnd5eCoreSpellComponentRequirements('fireball')).toMatchObject({
       verbal: true,

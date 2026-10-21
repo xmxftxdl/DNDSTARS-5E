@@ -1,4 +1,5 @@
 import type { AbilityKey } from './dnd'
+import { validScenePortalSurvey, type ScenePortalSurvey } from './scenePortalSurvey'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 import {
@@ -138,6 +139,10 @@ export type SceneAction =
     })
   | (SceneActionBase & {
       kind: 'teleport'
+      /** A persistent portal at the trigger region, rather than scripted transport. */
+      isPortal?: boolean
+      /** Entrance elevation in feet; independent from the destination's position. */
+      portalElevationFeet?: number
       targetMapId: string
       x: number
       y: number
@@ -163,6 +168,7 @@ export interface OrchestratedScene {
   name: string
   description: string
   environmentLabel: string
+  planarPortalSurvey?: ScenePortalSurvey
   weather: SceneWeatherConfig
   backgroundCue: SceneAudioCue
   backgroundAudioMode: SceneBackgroundAudioMode
@@ -536,6 +542,9 @@ function normalizeAction(value: unknown): SceneAction | null {
     const targetMapId = id(value.targetMapId)
     return targetMapId ? {
       ...base, kind: value.kind, targetMapId, x: finite(value.x), y: finite(value.y), moveTriggeringToken: value.moveTriggeringToken !== false,
+      ...(typeof value.isPortal === 'boolean' ? { isPortal: value.isPortal } : {}),
+      ...(typeof value.portalElevationFeet === 'number' && Number.isFinite(value.portalElevationFeet)
+        ? { portalElevationFeet: value.portalElevationFeet } : {}),
     } : null
   }
   if (value.kind === 'task' || value.kind === 'journal') {
@@ -582,6 +591,8 @@ function normalizeScene(value: unknown): OrchestratedScene | null {
     name: text(value.name, 160) || '未命名场景',
     description: text(value.description, 2_000),
     environmentLabel: text(value.environmentLabel, 300),
+    ...(validScenePortalSurvey(value.planarPortalSurvey)
+      ? { planarPortalSurvey: structuredClone(value.planarPortalSurvey) } : {}),
     weather: normalizeSceneWeather(value.weather),
     backgroundCue: cue,
     backgroundAudioMode: value.backgroundAudioMode === 'silent'
@@ -777,6 +788,7 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
     if (
       !object(raw) ||
       sceneIds.has(scene.id) ||
+      (raw.planarPortalSurvey != null && !validScenePortalSurvey(raw.planarPortalSurvey)) ||
       (raw.weather != null && !validateSceneWeather(raw.weather)) ||
       (raw.backgroundAudioMode != null && !['inherit', 'override', 'silent'].includes(String(raw.backgroundAudioMode))) ||
       (raw.backgroundAudioAutoPlay != null && typeof raw.backgroundAudioAutoPlay !== 'boolean') ||
@@ -858,6 +870,10 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
       const retainedRawActions = trigger.actions.filter(
         (action) => !object(action) || action.kind !== 'group-roll',
       )
+      if (retainedRawActions.some(action => object(action) && action.kind === 'teleport' &&
+        ((action.isPortal != null && typeof action.isPortal !== 'boolean') ||
+          (action.portalElevationFeet != null &&
+            (typeof action.portalElevationFeet !== 'number' || !Number.isFinite(action.portalElevationFeet)))))) return false
       if (retainedRawActions.length !== normalizedTrigger.actions.length) return false
       triggerIds.add(normalizedTrigger.id)
       const actionIds = new Set<string>()
@@ -984,7 +1000,7 @@ export function sceneActionSummary(action: SceneAction): string {
     case 'encounter': return `投放 ${action.entries.reduce((sum, entry) => sum + entry.quantity, 0)} 个遭遇单位${action.startInitiative ? '并开始先攻' : ''}`
     case 'sound': return `播放音效：${action.cue}`
     case 'audio': return action.operation === 'stop' ? '停止房间场景音频' : `播放房间音频 ${action.assetId}`
-    case 'teleport': return `传送至地图 ${action.targetMapId}`
+    case 'teleport': return `${action.isPortal ? '传送门' : '传送'}至地图 ${action.targetMapId}`
     case 'task': return `写入任务：${action.title}`
     case 'journal': return `写入日志：${action.title}`
   }

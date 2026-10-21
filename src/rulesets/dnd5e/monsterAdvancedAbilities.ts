@@ -19,6 +19,7 @@ const WEREWOLF_FORMS = [
 ] as const
 
 const STRUCTURED_SHAPECHANGE_FORMS: readonly (readonly string[])[] = [
+  ['srd-5.1:quasit', 'srd-5.1:quasit-bat', 'srd-5.1:quasit-centipede', 'srd-5.1:quasit-toad'],
   VAMPIRE_FORMS,
   WEREBEAR_FORMS,
   WEREWOLF_FORMS,
@@ -60,6 +61,7 @@ const MONSTER_CORE_ACTIVE_EFFECT_SPELL_IDS = new Set([
 ])
 
 const MONSTER_CORE_CONTROL_SPELL_IDS = new Set([
+  'confusion',
   'faerie-fire',
   'banishment',
   'hold-person',
@@ -98,6 +100,7 @@ const MONSTER_CORE_PERSISTENT_AREA_SPELL_IDS = new Set([
 export function dnd5eMonsterCoreSpellCompatibility(
   spell: Dnd5eSrdSpellDefinition,
 ): Dnd5eMonsterCoreSpellCompatibility {
+  if(spell.id==='detect-magic' && spell.effect==='active-effect') return {automation:'full'}
   const supportedActiveEffect = spell.effect === 'active-effect' &&
     spell.appliedEffect === spell.id &&
     MONSTER_CORE_ACTIVE_EFFECT_SPELL_IDS.has(spell.id)

@@ -63,6 +63,8 @@ describe('plugin spell targeting', () => {
   })
 
   it('uses the scaled audited Activity target count when legacy metadata omits upcast targets', () => {
+    expect(dnd5ePluginSpellTargetCapacity({level:5,targeting:{maximumTargets:1}},5,Number.POSITIVE_INFINITY)).toEqual({maximumTargets:Number.POSITIVE_INFINITY,allowDuplicateTargets:false})
+    expect(dnd5ePluginSpellTargetCapacity({level:1,targeting:{maximumTargets:3},mechanics:{kind:'damage',resolution:'automatic',upcast:{fromSlotLevel:1,effects:[{kind:'additional-projectiles',countPerSlot:1}]}}},5,Number.POSITIVE_INFINITY)).toEqual({maximumTargets:Number.POSITIVE_INFINITY,allowDuplicateTargets:false})
     expect(dnd5ePluginSpellTargetCapacity({
       level: 1,
       targeting: { maximumTargets: 1 },

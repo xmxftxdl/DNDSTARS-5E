@@ -1,4 +1,7 @@
 import { getDnd5eCoreSpellAreaDeclaration } from '../../rulesets/dnd5e/coreSpellAreas'
+import { resolveRemoteAreaDismissal } from '../../rulesets/dnd5e/remoteAreaDismissal'
+import { getRegisteredDnd5eActivity } from '../../rulesets/dnd5e/activities/dnd5eActivityRegistry'
+import { dnd5eAreaInitialActivationAvailable, type Dnd5eAreaActivationClock } from '../../rulesets/dnd5e/persistentAreaInitialActivation'
 import {
   dnd5eSpellcastingClassIdForSpell,
   dnd5eSustainedSpellControlLabel,
@@ -61,6 +64,15 @@ export function playerMovementEntersStoppingArea(
 
 export function playerMapMovablePersistentAreas(map: BattleMap, character: Character) {
   return (map.dnd5ePluginAreas ?? []).flatMap((area) => {
+    // A declared relocation Activity owns its targeting, cost, and lifecycle.
+    // Keep the generic control only when the area has no usable relocation grant.
+    const hasRelocationActivity = area.grantedActivities?.some(grant => {
+      const feature = dnd5ePluginFeatureDefinition(`${area.pluginId}:area-control.${grant.activityId}`)
+      const activity = getRegisteredDnd5eActivity(area.pluginId, grant.activityId)
+      return feature?.action?.id === grant.activityId && activity?.outcomes.some(outcome =>
+        outcome.operations.some(operation => operation.kind === 'relocate-granting-area'))
+    })
+    if (hasRelocationActivity) return []
     const movement = area.movement ?? (area.coreSpellId
       ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)?.movement
       : undefined)
@@ -84,6 +96,7 @@ export function playerMapMovablePersistentAreas(map: BattleMap, character: Chara
 
 export interface PlayerMapGrantedActivityControl {
   areaId?: string
+  areaMapId?: string
   effectId?: string
   /** Effect source used as the natural counterparty for target-owned controls. */
   sourceActorTokenId?: string
@@ -97,6 +110,7 @@ export interface PlayerMapGrantedActivityControl {
 
 function effectGrantedActivityControls(
   activeEffects: readonly Dnd5eActiveEffectInstance[] | undefined,
+  bearerTokenId?: string,
 ): PlayerMapGrantedActivityControl[] {
   return effectiveDnd5eActiveEffects(activeEffects).flatMap((effect) => {
     const packageId = effect.source.pluginId ?? (effect.source.kind === 'spell'
@@ -114,10 +128,12 @@ function effectGrantedActivityControls(
       if (!action || action.id !== activityId) return []
       return [{
         effectId: effect.id,
-        sourceActorTokenId: effect.source.actorId,
+        sourceActorTokenId: effect.source.actorId !== bearerTokenId ? effect.source.actorId : undefined,
         featureId,
         activityId,
-        label: action.label,
+        label: effect.linkedTargetSnapshots?.length
+          ? `${action.label} · ${effect.linkedTargetSnapshots.map(target => target.name).join('、')}${effect.grantedActivityCharges ? ` · 剩余 ${effect.grantedActivityCharges.current}/${effect.grantedActivityCharges.maximum} 次` : ''}`
+          : action.label,
         economy: action.economy === 'bonusAction' ? 'bonus-action' as const : action.economy,
         targeting: action.targeting.kind === 'self'
           ? 'self' as const
@@ -130,13 +146,14 @@ function effectGrantedActivityControls(
   })
 }
 
-/** Projects effect-granted controls owned by an unlinked map creature. */
+/** Projects effect and area controls owned by an unlinked map creature. */
 export function mapTokenGrantedActivityControls(
   token: BattleMap['tokens'][number],
   map?: BattleMap,
   characters: readonly Character[] = [],
+  clock?: Dnd5eAreaActivationClock,
 ): readonly PlayerMapGrantedActivityControl[] {
-  const owned = effectGrantedActivityControls(token.dnd5eCombatState?.activeEffects)
+  const owned = effectGrantedActivityControls(token.dnd5eCombatState?.activeEffects, token.id)
   if (!map) return owned
   const external = map.tokens.flatMap((target) => {
     if (target.id === token.id || target.type === 'obstacle') return []
@@ -170,16 +187,18 @@ export function mapTokenGrantedActivityControls(
       })
     })
   })
-  return [...owned, ...external]
+  const areas = areaGrantedActivityControls((map.dnd5ePluginAreas ?? []).filter(area =>
+    area.sourceTokenId === token.id && area.sourceCharacterId === (token.characterId ?? token.id)), map.id, clock)
+  return [...areas, ...owned, ...external]
 }
 
 /** Projects active controls from the Host-owned area instead of character ownership. */
-export function playerMapGrantedActivityControls(
-  map: BattleMap,
-  character: Character,
-): readonly PlayerMapGrantedActivityControl[] {
-  const areaControls: PlayerMapGrantedActivityControl[] = (map.dnd5ePluginAreas ?? []).flatMap((area) => {
-    if (area.sourceCharacterId !== character.id) return []
+function areaGrantedActivityControls(
+  areas: NonNullable<BattleMap['dnd5ePluginAreas']>,
+  mapId: string,
+  clock?: Dnd5eAreaActivationClock,
+): PlayerMapGrantedActivityControl[] {
+  return areas.flatMap((area) => {
     return (area.grantedActivities ?? []).flatMap((grant) => {
       const featureId = `${area.pluginId}:area-control.${grant.activityId}`
       const feature = dnd5ePluginFeatureDefinition(featureId)
@@ -190,8 +209,7 @@ export function playerMapGrantedActivityControls(
         featureId,
         activityId: grant.activityId,
         label: grant.label ?? action.label,
-        economy: grant.activateOnCreate === true &&
-          !area.grantedActivityUseReceipts?.includes(grant.activityId)
+        economy: dnd5eAreaInitialActivationAvailable(mapId, area, grant, clock)
           ? 'none' as const
           : action.economy === 'bonusAction' ? 'bonus-action' as const : action.economy,
         targeting: action.targeting.kind === 'self'
@@ -203,8 +221,29 @@ export function playerMapGrantedActivityControls(
       }]
     })
   })
-  const effectControls = effectGrantedActivityControls(character.dnd5eCombatState?.activeEffects)
-  return [...areaControls, ...effectControls]
+}
+
+export function playerMapGrantedActivityControls(
+  map: BattleMap,
+  character: Character,
+  clock?: Dnd5eAreaActivationClock,
+  roomMaps: readonly BattleMap[] = [],
+): readonly PlayerMapGrantedActivityControl[] {
+  const areaControls = areaGrantedActivityControls((map.dnd5ePluginAreas ?? []).filter(area => area.sourceCharacterId === character.id), map.id, clock)
+  const effectControls = effectGrantedActivityControls(character.dnd5eCombatState?.activeEffects,
+    map.tokens.find(token => token.characterId === character.id)?.id)
+  const actor=map.tokens.find(token=>token.characterId===character.id&&!token.dnd5eSimulacrum)
+  const remoteControls=actor?roomMaps.filter(candidate=>candidate.id!==map.id).flatMap(remote=>
+    areaGrantedActivityControls(remote.dnd5ePluginAreas??[],remote.id,clock).flatMap(control=>{
+      const area=remote.dnd5ePluginAreas?.find(candidate=>candidate.id===control.areaId)
+      const activity=area&&getRegisteredDnd5eActivity(area.pluginId,control.activityId)
+      if(!area||!activity||!resolveRemoteAreaDismissal({maps:roomMaps,actor,actorMapId:map.id,areaMapId:remote.id,
+        areaId:area.id,packageId:area.pluginId,activity,worldMinute:clock?.worldMinute}))return []
+      const action=dnd5ePluginFeatureDefinition(control.featureId)?.action
+      return [{...control,areaMapId:remote.id,label:`${control.label} · ${remote.name}`,
+        economy:action?.economy==='bonusAction'?'bonus-action' as const:action!.economy}]
+    })):[]
+  return [...areaControls, ...effectControls, ...remoteControls]
 }
 
 export interface PlayerMapSustainedAreaControl {

@@ -466,7 +466,7 @@ function normalizedTrait(trait) {
   const description = String(trait.desc ?? '')
   if (/^regeneration$/i.test(name)) {
     const amount = Number(description.match(/regains?\s+(\d+)\s+hit points/i)?.[1])
-    const suppressed = description.match(/takes?\s+([^.;]+?)\s+damage,?\s+this trait doesn't function/i)?.[1]
+    const suppressed = description.match(/takes?\s+([^.;]+?),?\s+this trait doesn't function/i)?.[1]
     const suppressedByDamageTypes = suppressed
       ? [...DAMAGE_TYPES].filter((type) => new RegExp(`\\b${type}\\b`, 'i').test(suppressed))
       : []
@@ -475,12 +475,21 @@ function normalizedTrait(trait) {
         name, description, automation: 'headless',
         rule: {
           kind: 'regeneration', amount,
+          ...(/isn't in sunlight/i.test(description) ? { suppressedInSunlight: true } : {}),
           requiresPositiveHp: /if (?:it|the [^.]+) has at least 1 hit point/i.test(description),
           suppressedByDamageTypes,
           diesAtZeroWhenSuppressed: /dies only if it starts its turn with 0 hit points and doesn't regenerate/i.test(description),
         },
       }
     }
+  }
+  if (/^sunlight sensitivity$/i.test(name) && /While in sunlight,/.test(description) && /checks that rely on sight/.test(description)) {
+    return { name, description, automation: 'headless', rule: { kind: 'sunlight-sensitivity' } }
+  }
+  const sunlightDamage = description.match(/Sunlight Hypersensitivity\. [^.]*takes (\d+) radiant damage when it starts its turn in sunlight\./i)?.[1]
+  if (sunlightDamage && /While in sunlight, it has disadvantage on attack rolls and ability checks/i.test(description)) {
+    return { name, description, automation: 'dm-adjudication',
+      rule: { kind: 'sunlight-hypersensitivity', radiantDamageAtTurnStart: Number(sunlightDamage) } }
   }
   if (/^swarm$/i.test(name) && /can't regain hit points or gain temporary hit points/i.test(description)) {
     return {

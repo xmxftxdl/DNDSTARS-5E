@@ -1,3 +1,4 @@
+import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
 import type { Character } from '../../types/character'
 import type {
   Dnd5eDamageReductionEffect,
@@ -61,7 +62,7 @@ function workshopModifierForCombatant(
 export interface Dnd5eOnHitBonusDamageResolution {
   ok: boolean
   reason?: 'invalid-inventory-effect-rolls'
-  components: readonly { total: number; type: Dnd5eDamageType; application: Dnd5eInventoryEffectApplication }[]
+  components: readonly { total: number; type: Dnd5eDamageType; rolled?: boolean; application: Dnd5eInventoryEffectApplication }[]
 }
 
 function normalizedEffectId(kind: string, index: number, id?: string): string {
@@ -71,6 +72,7 @@ function normalizedEffectId(kind: string, index: number, id?: string): string {
 export function dnd5eInventoryHeadlessEffectSnapshots(
   character: Character,
 ): Dnd5eInventoryHeadlessEffectSnapshot[] {
+  if (dnd5eEquipmentMergedBySpellForm(character)) return []
   return normalizeDnd5eInventory(character).entries.flatMap((entry) => {
     if (!entry.equippedSlot || !dnd5eInventoryEntryIsActive(entry)) return []
     return (entry.item.headlessEffects ?? []).map((effect, index) => ({
@@ -87,6 +89,19 @@ export function dnd5eInventoryHeadlessEffectSnapshots(
       ])),
     }))
   })
+}
+
+/** All owned instance resources, including items without equipped combat effects. */
+export interface Dnd5eInventoryResourceSnapshot {
+  instanceId: string
+  resources: Record<string, Dnd5eInventoryResourceState>
+}
+
+export function dnd5eInventoryResourceSnapshots(character: Character): Dnd5eInventoryResourceSnapshot[] {
+  return normalizeDnd5eInventory(character).entries.flatMap((entry) =>
+    entry.resources && Object.keys(entry.resources).length
+      ? [{ instanceId: entry.instanceId, resources: structuredClone(entry.resources) }]
+      : [])
 }
 
 export function dnd5eInventoryEffectRollKey(instanceId: string, effectId: string): string {
@@ -130,6 +145,16 @@ function spendEffectResource(
       resources: {
         ...candidate.resources,
         [resourceId]: { ...shared, current: Math.max(0, shared.current - resourceCost) },
+      },
+    }
+  })
+  combatant.inventoryResourceSnapshots = combatant.inventoryResourceSnapshots?.map((candidate) => {
+    if (candidate.instanceId !== snapshot.instanceId || !candidate.resources[resourceId]) return candidate
+    return {
+      ...candidate,
+      resources: {
+        ...candidate.resources,
+        [resourceId]: { ...candidate.resources[resourceId], current: Math.max(0, resource.current - resourceCost) },
       },
     }
   })
@@ -234,21 +259,28 @@ export function resolveDnd5eOnHitBonusDamage(input: {
   targetCreatureType?: string
   inheritedDamageType: Dnd5eDamageType
   critical: boolean
+  /** Host-authorized cancellation of this attack's previously confirmed critical. */
+  criticalCancelled?: boolean
   turnKey: string
   rolls?: Readonly<Record<string, readonly number[]>>
 }): Dnd5eOnHitBonusDamageResolution {
   const requirements = dnd5eOnHitBonusDamageRequirements(input)
   const supplied = input.rolls ?? {}
+  const cancelledRequirements = input.criticalCancelled && !input.critical
+    ? dnd5eOnHitBonusDamageRequirements({ ...input, critical: true }) : []
+  const validatedRolls: Record<string, readonly number[]> = {}
   const requirementKeys = new Set(requirements.map((entry) => entry.key))
   if (Object.keys(supplied).some((key) => !requirementKeys.has(key))) {
     return { ok: false, reason: 'invalid-inventory-effect-rolls', components: [] }
   }
   for (const requirement of requirements) {
     const rolls = supplied[requirement.key]
+    const originalCount = cancelledRequirements.find(entry => entry.key === requirement.key)?.count
     if (
-      !rolls || rolls.length !== requirement.count ||
+      !rolls || (rolls.length !== requirement.count && rolls.length !== originalCount) ||
       rolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > requirement.sides)
     ) return { ok: false, reason: 'invalid-inventory-effect-rolls', components: [] }
+    validatedRolls[requirement.key] = rolls.slice(0, requirement.count)
   }
 
   const components: Dnd5eOnHitBonusDamageResolution['components'][number][] = []
@@ -260,9 +292,10 @@ export function resolveDnd5eOnHitBonusDamage(input: {
       return { ok: false, reason: 'invalid-inventory-effect-rolls', components: [] }
     }
     markEffectUsedThisTurn(input.combatant, snapshot, input.turnKey, snapshot.effect.oncePerTurn)
-    const total = Math.max(0, (supplied[requirement.key] ?? []).reduce((sum, roll) => sum + roll, 0) + requirement.bonus)
+    const total = Math.max(0, validatedRolls[requirement.key].reduce((sum, roll) => sum + roll, 0) + requirement.bonus)
     const type = requirement.damageType === 'inherit' ? input.inheritedDamageType : requirement.damageType
     components.push({
+      rolled: requirement.count > 0,
       total,
       type,
       application: {
@@ -373,9 +406,19 @@ export function applyDnd5eInventoryHeadlessSnapshotToCharacter(input: {
   snapshots: readonly Dnd5eInventoryHeadlessEffectSnapshot[] | undefined
   revision: number | undefined
 }): Character {
+  return applyDnd5eInventoryResourceSnapshotsToCharacter(input)
+}
+
+/** Merge shared instance charges once, including ordinary backpack items and
+ * equipped combat effects. Multiple projections retain the lowest spent value. */
+export function applyDnd5eInventoryResourceSnapshotsToCharacter(input: {
+  character: Character
+  snapshots: readonly Dnd5eInventoryResourceSnapshot[] | undefined
+  revision: number | undefined
+}): Character {
   if (!input.snapshots || input.snapshots.length === 0 || input.revision == null) return input.character
   const inventory = normalizeDnd5eInventory(input.character)
-  if (input.revision === inventory.revision) return input.character
+  if (input.revision <= (inventory.revision ?? 0)) return input.character
   const byInstance = new Map<string, Record<string, Dnd5eInventoryResourceState>>()
   for (const snapshot of input.snapshots) {
     const current = byInstance.get(snapshot.instanceId) ?? {}

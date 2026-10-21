@@ -11,6 +11,11 @@ import {
 } from './spellNarrativeResolution'
 
 describe('voice narrative object spell policy', () => {
+  it('keeps an imported mixed rite and concrete map inventory conversion on the structured route',()=>{
+    const activity={outcomes:[{operations:[{id:'water',kind:'convert-map-inventory-item',originalTemplateIds:['water'],templateId:'holy-water',quantity:1}]},{operations:[{id:'blessing',kind:'apply-effect',effectId:'bonus',target:'target'}]}]} as unknown as Dnd5eActivityDefinitionV1
+    expect(dnd5eSpellUsesNarrativeResolution('test.package:ceremony',activity)).toBe(false)
+    expect(dnd5eSpellUsesNarrativeObjectResolution('test.package:water-conversion',{...activity,outcomes:[activity.outcomes[0]]})).toBe(false)
+  })
   it('keeps Arcane Lock on the door/password transaction', () => {
     expect(dnd5eSpellUsesNarrativeResolution('arcane-lock', dnd5eSrdAuditedSpellActivityV1('arcane-lock'))).toBe(false)
   })

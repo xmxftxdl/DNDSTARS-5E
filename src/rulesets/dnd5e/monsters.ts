@@ -3,7 +3,7 @@ import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import generatedSrdMonsterCatalog from './generated/srdMonsters.generated.json'
 import reviewedMonsterTranslations from './generated/srdMonsterTranslationsZh.reviewed.generated.json'
 import monsterHeadlessSafetyDecisions from './generated/monsterHeadlessSafetyDecisions.generated.json'
-import { getDnd5eRoomMonster } from './roomMonsterCatalog'
+import { getDnd5eRoomMonster, listDnd5eRoomMonsters } from './roomMonsterCatalog'
 import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eStandardConditionId } from './conditions'
 import type {
@@ -581,6 +581,10 @@ export type Dnd5eMonsterOnHitEffect =
   | Dnd5eMonsterZeroHitPointOutcomeOnHitEffect
 
 export interface Dnd5eMonsterWeaponAttack {
+  /** Explicit natural weapon classification; false overrides legacy catalog inference. */
+  naturalWeapon?: boolean
+  /** Magic belongs to this specific attack, not every weapon attack of the creature. */
+  magical?: boolean
   mode: 'melee' | 'ranged' | 'melee-or-ranged'
   /** Explicit ability used by the attack. Older catalog rows are inferred conservatively. */
   attackAbility?: 'str' | 'dex'
@@ -1106,7 +1110,13 @@ export interface Dnd5eMonsterTrait {
     excludedDamageTypes: readonly Dnd5eDamageType[]
     excludedOnCritical: boolean
   } | {
+    kind: 'sunlight-sensitivity'
+  } | {
+    kind: 'sunlight-hypersensitivity'
+    radiantDamageAtTurnStart: number
+  } | {
     kind: 'regeneration'
+    suppressedInSunlight?: true
     amount: number
     requiresPositiveHp: boolean
     suppressedByDamageTypes: readonly Dnd5eDamageType[]
@@ -1123,6 +1133,10 @@ export interface Dnd5eMonsterTrait {
     kind: 'flyby'
     movementMode: 'fly'
     provokesOpportunityAttacks: false
+  } | {
+    /** Advantage for a concrete perception sense, without changing its numerical bonus. */
+    kind: 'keen-perception'
+    senses: readonly ('smell' | 'hearing' | 'sight')[]
   } | {
     /** A conditional skill bonus tied to one sense, with an optional combat sense. */
     kind: 'keen-sense'
@@ -1193,6 +1207,11 @@ export interface Dnd5eMonsterTrait {
     /** Marilith-style reaction refresh at the start of every creature's turn. */
     kind: 'reactive'
     reactionRefresh: 'every-turn-start'
+  } | {
+    /** Extra melee weapon damage after a qualifying descending flight segment. */
+    kind: 'dive-damage'
+    minimumStraightMovementFeet: number
+    extraDamage: Dnd5eMonsterDamage
   } | {
     /** Conditional damage after a straight-line approach; path qualification remains authoritative. */
     kind: 'charge-damage'
@@ -1394,6 +1413,8 @@ export interface Dnd5eMonsterAction {
   automationReason?: string
   attack?: Dnd5eMonsterWeaponAttack
   sequence?: readonly string[]
+  /** A composite child may choose one spell from this creature's own spellcasting list. */
+  innateSpellStep?: true
   /**
    * A Multiattack whose number of identical weapon occurrences is decided by
    * one authoritative die roll supplied with the transaction.  This keeps
@@ -1487,6 +1508,8 @@ export interface Dnd5eMonsterStatBlock {
   size: Dnd5eMonsterSize
   creatureType: string
   subtypes?: readonly string[]
+  /** Authored anatomy of this base creature; omitted facts require Host confirmation. */
+  bodyPartPresence?: Readonly<Record<string, boolean>>
   alignment: string
   armorClass: { value: number; note?: string }
   hitPoints: { average: number; dice: string }
@@ -1507,10 +1530,11 @@ export interface Dnd5eMonsterStatBlock {
   conditionImmunities?: readonly string[]
   /** Presentation badge capabilities exposed to the encounter-scoped DM marker picker. */
   tokenStatusMarkerGrants?: readonly Dnd5eTokenStatusMarkerGrantDeclaration[]
-  senses: readonly { name: string; distanceFeet?: number }[]
+  senses: readonly { name: string; distanceFeet?: number; blindBeyond?: boolean }[]
   passivePerception: number
   languages: readonly string[]
-  challenge: { rating: string; xp: number }
+  /** Use rating '—' and omit xp when the source supplies neither value. */
+  challenge: { rating: string; xp?: number }
   legendaryResistanceUses?: number
   /** Defaults to 3 for legacy legendary monsters. */
   legendaryActionPoints?: number
@@ -6723,7 +6747,7 @@ const CATALOG_STRUCTURED_SPECIAL_ACTION_USAGE = {
   },
   vrock: {
     spores: { kind: 'recharge', dieSides: 6, minimum: 6 },
-    'stunning-screech': { kind: 'recharge', dieSides: 6, minimum: 6 },
+    'stunning-screech': { kind: 'per-day', max: 1 },
   },
   dretch: {
     'fetid-cloud': { kind: 'per-day', max: 1 },
@@ -8638,6 +8662,15 @@ function applyCatalogMonsterActionRules(
           sequenceAttackMode: alternative.sequenceAttackMode,
         }
       }),
+      ...(monster.slug === 'glabrezu' ? [{
+        id:'innate-spell-step',name:'天生施法（多重攻击）',description:'使用本生物天生施法列表中的一个动作法术。',
+        kind:'other' as const,automation:'headless' as const,innateSpellStep:true as const,
+      },{
+        id:'multiattack-pincers-and-spell',name:'多重攻击：两次钳击与施法',
+        description:monster.actions.find(action=>action.id==='multiattack')?.description??'',
+        kind:'multiattack' as const,automation:'headless' as const,
+        sequence:['pincer','pincer','innate-spell-step'],sequenceAttackMode:'melee' as const,
+      }]:[]),
       ...multiattackCandidates.map((candidate) => {
         const base = monster.actions.find((action) => action.id === 'multiattack')
         const child = monster.actions.find((action) => action.id === candidate.sequence[0])
@@ -9332,6 +9365,27 @@ export const DND5E_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] =
 
 const MONSTERS_BY_ID = new Map(DND5E_SRD_MONSTERS.map((monster) => [monster.id, monster]))
 const MONSTERS_BY_SLUG = new Map(DND5E_SRD_MONSTERS.map((monster) => [monster.slug, monster]))
+
+// These are the quasit's own statistics in alternate appearances, not animal stat blocks.
+// Keep derived forms out of the summon catalog; expose them through the shapechange selector.
+const quasitBase = MONSTERS_BY_ID.get('srd-5.1:quasit')
+if (quasitBase) {
+  for (const [suffix, label, speed] of [
+    ['bat', '蝙蝠形态', { walk: 10, fly: 40 }],
+    ['centipede', '蜈蚣形态', { walk: 40, climb: 40 }],
+    ['toad', '蟾蜍形态', { walk: 40, swim: 40 }],
+  ] as const) {
+    const form: Dnd5eMonsterStatBlock = { ...structuredClone(quasitBase),
+      id: `srd-5.1:quasit-${suffix}`, slug: `quasit-${suffix}`,
+      name: `${quasitBase.name}（${label}）`, speed: { ...speed } }
+    MONSTERS_BY_ID.set(form.id, form)
+    MONSTERS_BY_SLUG.set(form.slug, form)
+  }
+}
+
+export function listDnd5eInstalledMonsters(): readonly Dnd5eMonsterStatBlock[] {
+  return [...new Map([...DND5E_SRD_MONSTERS, ...listDnd5eRoomMonsters()].map(monster => [monster.id, monster])).values()]
+}
 
 export function getDnd5eSrdMonster(id: string): Dnd5eMonsterStatBlock | undefined {
   return getDnd5eRoomMonster(id) ?? MONSTERS_BY_ID.get(id) ??

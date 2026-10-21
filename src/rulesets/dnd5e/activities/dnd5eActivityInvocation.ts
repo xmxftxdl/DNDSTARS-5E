@@ -116,6 +116,14 @@ export function validateDnd5eActivityTriggerContextV1(
   if (context.source.kind === 'movement' && (!Number.isFinite(context.source.distanceFeet) || context.source.distanceFeet < 0)) {
     errors.push('trigger context movement distance is invalid')
   }
+  if (context.source.kind === 'movement' && context.source.straightDistanceFeet != null &&
+    (!Number.isFinite(context.source.straightDistanceFeet) || context.source.straightDistanceFeet < 0)) {
+    errors.push('trigger context straight movement distance is invalid')
+  }
+  if (context.source.kind === 'attack' && context.source.precedingStraightMovementFeet != null &&
+    (!Number.isFinite(context.source.precedingStraightMovementFeet) || context.source.precedingStraightMovementFeet < 0)) {
+    errors.push('trigger context preceding attack movement is invalid')
+  }
   if (context.source.kind === 'attack' && context.source.weaponProperties?.some((property) => !ID_PATTERN.test(property))) {
     errors.push('trigger context weapon properties are invalid')
   }
@@ -160,12 +168,26 @@ export function dnd5eContextPredicateSatisfiedV1(
     const modes = predicate.modes ?? (predicate.mode ? [predicate.mode] : [])
     return context?.source.kind === 'attack' && context.source.mode != null && modes.includes(context.source.mode)
   }
+  if (predicate.kind === 'attack-magical') {
+    return context?.source.kind === 'attack' && context.source.magical === predicate.magical
+  }
   if (predicate.kind === 'attack-proficiency') {
     return context?.source.kind === 'attack' && context.source.proficient === predicate.proficient
   }
+  if (predicate.kind === 'attack-category') {
+    return context?.source.kind === 'attack' && context.source.category === predicate.category
+  }
+  if (predicate.kind === 'attack-delivery') {
+    return context?.source.kind === 'attack' && context.source.delivery === predicate.delivery
+  }
   if (predicate.kind === 'attack-weapon') {
-    return context?.source.kind === 'attack' && context.source.weaponId != null &&
-      predicate.weaponIds.includes(context.source.weaponId)
+    if (context?.source.kind !== 'attack') return false
+    const id = predicate.identity === 'base' ? context.source.weaponBaseId : context.source.weaponId
+    return id != null && predicate.weaponIds.includes(id)
+  }
+  if (predicate.kind === 'attack-weapon-category') {
+    return context?.source.kind === 'attack' && context.source.category === 'weapon' &&
+      context.source.weaponCategory != null && predicate.categories.includes(context.source.weaponCategory)
   }
   if (predicate.kind === 'attack-origin') {
     return context?.source.kind === 'attack' && context.source.origin != null &&
@@ -174,7 +196,13 @@ export function dnd5eContextPredicateSatisfiedV1(
   if (predicate.kind === 'attack-hands') {
     return context?.source.kind === 'attack' && context.source.handsUsed === predicate.hands
   }
-  if (predicate.kind === 'attack-result') return context?.source.kind === 'attack' && context.source.result === predicate.result
+  if (predicate.kind === 'attack-result') {
+    if (context?.source.kind !== 'attack') return false
+    const result = context.source.result
+    return result === predicate.result ||
+      (predicate.result === 'hit' && result === 'critical-hit') ||
+      (predicate.result === 'miss' && result === 'critical-miss')
+  }
   if (predicate.kind === 'attack-outcome') {
     if (context?.source.kind !== 'attack') return false
     const source = context.source
@@ -199,18 +227,37 @@ export function dnd5eContextPredicateSatisfiedV1(
       damage.temporaryHitPointsAfter <= (predicate.maximumTemporaryHitPointsAfter ?? Number.POSITIVE_INFINITY)
   }
   if (predicate.kind === 'movement-distance') {
+    if (predicate.basis === 'before-attack-straight-streak') {
+      const distance = context?.source.kind === 'attack' ? context.source.precedingStraightMovementFeet : undefined
+      return distance != null && Number.isFinite(distance) && distance >= 0 && distance >= (predicate.minimumFeet ?? 0) &&
+        distance <= (predicate.maximumFeet ?? Number.POSITIVE_INFINITY)
+    }
     if (!context || context.source.kind !== 'movement') return false
-    return context.source.distanceFeet >= (predicate.minimumFeet ?? 0) &&
-      context.source.distanceFeet <= (predicate.maximumFeet ?? Number.POSITIVE_INFINITY)
+    const distance = predicate.basis === 'straight-streak' ? context.source.straightDistanceFeet : context.source.distanceFeet
+    return distance != null && Number.isFinite(distance) && distance >= (predicate.minimumFeet ?? 0) &&
+      distance <= (predicate.maximumFeet ?? Number.POSITIVE_INFINITY)
+  }
+  if (predicate.kind === 'initial-space-exit') {
+    return context?.source.kind === 'movement' && context.source.crossedInitialSpaceTags?.includes(predicate.effectTag) === true
+  }
+  if (predicate.kind === 'initial-space-melee-crossing') {
+    return context?.source.kind === 'attack' && context.source.crossedInitialSpaceTags?.includes(predicate.effectTag) === true
+  }
+  if (predicate.kind === 'movement-source-distance') {
+    if (context?.source.kind !== 'movement' || context.source.distanceFromSourceFeet == null) return false
+    return context.source.distanceFromSourceFeet >= (predicate.minimumFeet ?? 0) &&
+      context.source.distanceFromSourceFeet <= (predicate.maximumFeet ?? Number.POSITIVE_INFINITY)
   }
   if (predicate.kind === 'movement-property') {
     if (!context || context.source.kind !== 'movement') return false
     return (predicate.straightLine == null || context.source.straightLine === predicate.straightLine) &&
-      (predicate.dashedThisTurn == null || context.source.dashedThisTurn === predicate.dashedThisTurn)
+      (predicate.dashedThisTurn == null || context.source.dashedThisTurn === predicate.dashedThisTurn) &&
+      (predicate.movementKind == null || context.source.movementKind === predicate.movementKind)
   }
   if (predicate.kind === 'spell-used') {
     if (!context || context.source.kind !== 'spell') return false
     return (predicate.spellId == null || context.source.id === predicate.spellId) &&
+      (predicate.castingClassIds == null || (context.source.castingClassId != null && predicate.castingClassIds.includes(context.source.castingClassId))) &&
       (predicate.schools == null || (context.source.school != null && predicate.schools.includes(context.source.school))) &&
       context.source.level >= (predicate.minimumLevel ?? 0) &&
       context.source.level <= (predicate.maximumLevel ?? 9)

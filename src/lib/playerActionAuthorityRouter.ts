@@ -1,3 +1,4 @@
+import { normalizeDnd5eDreamContact } from '../rulesets/dnd5e/dreamContact'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { isTokenAlive } from './combatTokens'
@@ -14,6 +15,8 @@ export type PlayerActionAuthorityRejectReason =
   | 'duplicate-action'
 
 export interface PlayerActionAuthorityAction {
+  dnd5ePluginAction?: { featureId: string; payload?: unknown }
+  dnd5eBasicAction?: { kind: string; effectId?: string; targetTokenId?: string }
   dnd5eMapInteraction?: import('../rulesets/dnd5e/mapInteraction').Dnd5eMapInteractionPayload
   id: string
   mapId: string
@@ -38,7 +41,7 @@ export interface PlayerActionAuthorityPreflightContext {
   currentTokenId?: string
   /** Host-validated reaction caster allowed to act without becoming the current initiative Token. */
   authorizedOutOfTurnActorTokenId?: string
-  characters: readonly Pick<Character, 'id' | 'roomMemberId'>[]
+  characters: readonly Pick<Character, 'id' | 'roomMemberId' | 'dnd5eCombatState' | 'dnd5eDreamContact'>[]
   /**
    * Local table/dev mode has no room identity service. It may accept an action
    * only when both sides are genuinely unowned; a partially supplied or
@@ -113,7 +116,21 @@ export function preflightPlayerActionAuthority(
     return { status: 'accepted', currentToken: actorToken }
   }
 
+  if (action.type === 'dnd5e-short-rest-recovery') {
+    if (context.combatActive || action.combatId) return { status: 'rejected', reason: 'stale-combat' }
+    if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) return { status: 'ignored' }
+    return { status: 'accepted', currentToken: actorToken }
+  }
+
   if (action.type === 'dnd5e-map-interaction') {
+    if (action.dnd5eMapInteraction?.operation === 'grove-password' || action.dnd5eMapInteraction?.operation === 'fortress-feast' || action.dnd5eMapInteraction?.operation === 'fortress-command' || action.dnd5eMapInteraction?.operation === 'fortress-pickup' || action.dnd5eMapInteraction?.operation === 'fortress-drop' || action.dnd5eMapInteraction?.operation === 'fortress-move' || action.dnd5eMapInteraction?.operation === 'fortress-door' || action.dnd5eMapInteraction?.operation === 'clear-terrain' || action.dnd5eMapInteraction?.operation === 'pickup-item' || action.dnd5eMapInteraction?.operation === 'drop-item') {
+      if (context.combatActive ? !action.combatId || action.combatId !== context.combatId : !!action.combatId) {
+        return { status: 'rejected', reason: 'stale-combat' }
+      }
+      if (context.combatActive && (action.round !== context.round || action.initiativeIndex !== context.initiativeIndex)) {
+        return { status: 'rejected', reason: 'stale-turn' }
+      }
+    }
     if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
       return { status: 'ignored' }
     }
@@ -140,6 +157,7 @@ export function preflightPlayerActionAuthority(
   }
 
   const explorationRulesAction =
+    (action.type === 'dnd5e-basic-action' && action.dnd5eBasicAction?.kind === 'dismiss-effect') ||
     action.type === 'dnd5e-ability-check' ||
     action.type === 'dnd5e-spell-cast' ||
     action.type === 'dnd5e-adjudicated-spell' ||
@@ -185,7 +203,33 @@ export function preflightPlayerActionAuthority(
     action.initiativeIndex === context.initiativeIndex &&
     actorToken.id === context.authorizedOutOfTurnActorTokenId
 
-  if (!validTurn && !validHostAuthorizedReaction) {
+  // An owned free self-removal is not an action or reaction. Derive permission
+  // from the Host's current character effect, never from request-supplied flags.
+  const dismissal = action.dnd5eBasicAction
+  const validFreeSelfDismissal = action.type === 'dnd5e-basic-action' && dismissal?.kind === 'dismiss-effect' &&
+    action.round === context.round && action.initiativeIndex === context.initiativeIndex &&
+    actorToken.characterId === action.characterId &&
+    (dismissal.targetTokenId == null || dismissal.targetTokenId === actorToken.id) &&
+    context.characters.find(character => character.id === action.characterId)?.dnd5eCombatState?.activeEffects?.some(effect =>
+      effect.id === dismissal.effectId && effect.removal?.action?.economy === 'free' &&
+      effect.removal.action.selfOnly === true && effect.removal.action.maxDistanceFeet === 0 &&
+      effect.removal.action.abilityCheck == null) === true
+
+  // Speaking in an already connected dream is a continuation, not a new cast.
+  // Only the matching live trance grants this exception to turn ownership.
+  const nightmarePayload = action.dnd5ePluginAction?.payload
+  const nightmareSource = context.characters.find(character => character.id === action.characterId)
+  const contact = normalizeDnd5eDreamContact(nightmareSource?.dnd5eDreamContact, action.characterId)
+  const validDreamContinuation = action.type === 'dnd5e-plugin-action' &&
+    action.round === context.round && action.initiativeIndex === context.initiativeIndex &&
+    nightmarePayload != null && typeof nightmarePayload === 'object' && !Array.isArray(nightmarePayload) &&
+    'dreamNightmareSessionId' in nightmarePayload && contact?.phase === 'connected' && !contact.nightmareAttempted &&
+    nightmarePayload.dreamNightmareSessionId === contact.id &&
+    nightmareSource?.dnd5eCombatState?.activeEffects?.some(effect => effect.id === `dream-trance:${contact.id}` &&
+      effect.source.rulesId === 'dream' && !!effect.source.pluginId &&
+      action.dnd5ePluginAction?.featureId === `${effect.source.pluginId}:dream-nightmare`) === true
+
+  if (!validTurn && !validHostAuthorizedReaction && !validFreeSelfDismissal && !validDreamContinuation) {
     return { status: 'rejected', reason: 'stale-turn' }
   }
 

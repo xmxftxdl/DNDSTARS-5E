@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react'
+import { dnd5eCharacterWeaponAttackSlot } from '../../rulesets/dnd5e/characterWeaponAttackSlot'
+import { migrateCharacterToDnd5e } from '../../rulesets/dnd5e/character'
+import { dnd5eFlurryMaximumForCharacter, dnd5eFlurryTargetsValid } from '../../rulesets/dnd5e/flurryExtraAttacks'
 import { Clock3, Crosshair, Footprints, PackageOpen, RotateCcw, Shield, Sparkles, Sword } from 'lucide-react'
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
 import type { Dnd5eClassFeaturePayload, Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
@@ -25,10 +28,12 @@ import {
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 import Dnd5eBasicActionsPanel from './Dnd5eBasicActionsPanel'
+import { dnd5eCharacterAttackTeleportRange } from '../../rulesets/dnd5e/characterWeaponAttackSlot'
 import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 import { dnd5eCreatureFormEndControl } from './dnd5eCreatureFormEndControl'
 
 export interface Dnd5eFeatureTargetOption {
+  removableEffects?: readonly { effectId: string; label: string; actionLabel: string; maxDistanceFeet: number }[]
   tokenId: string
   tokenType?: 'player' | 'enemy'
   characterId?: string
@@ -128,10 +133,19 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
   const hunterMultiattackAvailable = !!profile && turnEconomy.action.current > 0 &&
     ((hunterMultiattack === 'volley' && profile.mode === 'ranged') ||
       (hunterMultiattack === 'whirlwind-attack' && profile.mode === 'melee'))
-  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(storedCharacter)
-  const attackLimit = attacksPerAction * Math.max(1, turnEconomy.action.max)
-  const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
-  const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (
+  const loadingLimited = !!profile?.properties.some(property => property.includes('装填')) &&
+    migrateCharacterToDnd5e(storedCharacter).ignoreLoadingWeaponProperty !== true
+  const attacksPerAction = loadingLimited ? 1 : dnd5eEffectiveAttacksPerAttackAction(storedCharacter)
+  const attackSlot = dnd5eCharacterWeaponAttackSlot({
+    distinctTargetEligible: storedCharacter.equipment?.mainWeapon?.dnd5e?.kind !== 'weapon' ||
+      storedCharacter.equipment.mainWeapon.dnd5e.usesSourceSpellcastingAbility !== true,
+    character: storedCharacter, turnKey: turnEconomy.turnKey, attacksUsed: turnEconomy.attacksUsed,
+    attacksPerAction, actionCount: Math.max(1, turnEconomy.action.max), loadingLimited,
+    extraWeaponEligible: storedCharacter.equipment?.mainWeapon?.dnd5e?.kind === 'weapon' &&
+      storedCharacter.equipment.mainWeapon.dnd5e.usesSourceSpellcastingAbility !== true,
+  })
+  const canContinueAttackAction = attackSlot != null && !attackSlot.spendsAction
+  const weaponAttackAvailable = attackSlot != null && (
     turnEconomy.action.current > 0 || canContinueAttackAction || restrictedWeaponAttackAvailable
   )
   const offHandAttackAvailable = !!offHandProfile && turnEconomy.attacksUsed > 0 && turnEconomy.bonusAction.current > 0
@@ -243,6 +257,8 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
           </button>)}
           {wildShapeAttackActions.length === 0 ? <p className="text-xs text-slate-500">此形态没有可用的攻击动作。</p> : null}
         </div>}
+        {!activeWildShape && profile?.rangeFeet && profile.properties.some(property => property === 'thrown' || property.includes('投掷')) ? <button type="button" onClick={() => onAttack({...requestedAttackOptions, thrownAttack:true})} disabled={!ordinaryActionCanAct || pending || !weaponAttackAvailable} className="mt-2 w-full rounded-xl bg-arcane-500/20 px-4 py-2 text-sm disabled:opacity-40">投掷武器</button> : null}
+        {!activeWildShape && profile?.slingRangeFeet ? <button type="button" onClick={() => onAttack({...requestedAttackOptions,useSling:true})} disabled={!ordinaryActionCanAct || pending || !weaponAttackAvailable} className="mt-2 w-full rounded-xl bg-arcane-500/20 px-4 py-2 text-sm disabled:opacity-40">用投石索发射（需副手持有投石索）</button> : null}
         {!activeWildShape && offHandProfile ? <button
           type="button"
           onClick={() => onAttack({ ...requestedAttackOptions, offHandAttack: true })}
@@ -307,8 +323,9 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
       />
 
       <Dnd5eBasicActionsPanel
+        attackTeleportRangeFeet={dnd5eCharacterAttackTeleportRange(storedCharacter)}
         canAct={canAct}
-        actionAvailable={turnEconomy.action.current > 0 || canContinueAttackAction}
+        actionAvailable={turnEconomy.action.current > 0 || (canContinueAttackAction && !attackSlot?.weaponOnly)}
         bonusActionAvailable={turnEconomy.bonusAction.current > 0}
         pending={pending}
         targets={featureTargets}
@@ -319,8 +336,8 @@ export default function Dnd5eClassCombatPanel({ character: storedCharacter, canA
           dc: grapple.dc,
         }))}
         dismissibleEffects={(character.dnd5eCombatState?.activeEffects ?? []).flatMap((effect) =>
-          effect.removal?.action?.economy === 'action' && effect.removal.action.maxDistanceFeet >= 0
-            ? [{ effectId: effect.id, label: effect.label, actionLabel: effect.removal.action.label }]
+          (effect.removal?.action?.economy === 'action' || effect.removal?.action?.economy === 'free') && effect.removal.action.maxDistanceFeet >= 0
+            ? [{ effectId: effect.id, label: effect.label, actionLabel: effect.removal.action.label, economy: effect.removal.action.economy }]
             : [])}
         canDismissWardingBond={canDismissWardingBond}
         allowedBasicActions={actionRestriction?.allowedBasicActions}
@@ -350,6 +367,7 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
   const definition = dnd5eClassDefinitionForCharacter(character)
   const [selectedTargetId, setSelectedTargetId] = useState('')
   const [selectedSecondaryTargetId, setSelectedSecondaryTargetId] = useState('')
+  const [extraFlurryTargets, setExtraFlurryTargets] = useState<string[]>([])
   const [selectedCleansingTargetId, setSelectedCleansingTargetId] = useState('')
   const [selectedCleansingEffectKey, setSelectedCleansingEffectKey] = useState('')
   const [layOnHandsAmount, setLayOnHandsAmount] = useState(1)
@@ -801,7 +819,11 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
     const quiveringPalmTarget = targets.find((target) => target.tokenId === quiveringPalmTargetId)
     const quiveringPalmRequested = subclassId === 'open-hand' && character.level >= 17 && quiveringPalmAttack !== 'none'
     const martialArtsKiCost = (stunningStrike ? 1 : 0) + (quiveringPalmAttack === 'first' ? 3 : 0)
-    const flurryKiCost = 1 + (stunningStrike ? 2 : 0) + (quiveringPalmRequested ? 3 : 0)
+    const flurryMaximum = dnd5eFlurryMaximumForCharacter(character)
+    const flurryTargets = [firstTarget?.tokenId, secondTarget?.tokenId,
+      ...extraFlurryTargets.filter(id => hostileTargets.some(target => target.tokenId === id) && id !== firstTarget?.tokenId && id !== secondTarget?.tokenId).slice(0, flurryMaximum - 2),
+    ].filter((id): id is string => !!id)
+    const flurryKiCost = 1 + (stunningStrike ? flurryTargets.length : 0) + (quiveringPalmRequested ? 3 : 0)
     const charmed = character.conditions.some((condition) => condition === 'charmed' || condition === '魅惑')
     const frightened = character.conditions.some((condition) => ['frightened', '惊惧', '恐慌'].includes(condition))
     controls = <div className="grid gap-3">
@@ -812,6 +834,16 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
         <TargetSelect targets={hostileTargets} value={firstTarget?.tokenId ?? ''} onChange={setSelectedTargetId} />
         <TargetSelect targets={hostileTargets} value={secondTarget?.tokenId ?? ''} onChange={setSelectedSecondaryTargetId} />
       </div>
+      {flurryMaximum > 2 ? <fieldset className="rounded-lg border border-white/10 p-3 text-xs text-slate-300">
+        <legend>疾风连击额外目标（可选，最多 {flurryMaximum - 2} 个）</legend>
+        <p className="mb-2 text-slate-400">增加攻击时，每次须攻击不同生物，请先选择两个不同的基础目标。</p>
+        {hostileTargets.filter(target => target.tokenId !== firstTarget?.tokenId && target.tokenId !== secondTarget?.tokenId).map(target => <label key={target.tokenId} className="mr-3 inline-flex items-center gap-1">
+          <input type="checkbox" checked={flurryTargets.slice(2).includes(target.tokenId)}
+            disabled={disabled || firstTarget?.tokenId === secondTarget?.tokenId || (!flurryTargets.includes(target.tokenId) && flurryTargets.length >= flurryMaximum)}
+            onChange={event => setExtraFlurryTargets(current => event.target.checked ? [...current.filter(id => id !== target.tokenId), target.tokenId] : current.filter(id => id !== target.tokenId))} />
+          {target.label}
+        </label>)}
+      </fieldset> : null}
       {subclassId === 'open-hand' && character.level >= 3 ? <div className="grid gap-2 sm:grid-cols-2">
         {([
           ['第一次命中后的散打技法', firstOpenHandTechnique, setFirstOpenHandTechnique],
@@ -856,12 +888,12 @@ function ClassFeatureControls({ character, canAct, pending, stunningStrike, turn
         />
         <FeatureButton
           label="疾风连击"
-          detail="使用攻击动作后 · 附赠动作 · 1 气 · 2 次徒手攻击"
-          disabled={disabled || !bonusAvailable || character.level < 2 || !attackActionTaken || (ki?.current ?? 0) < flurryKiCost || !firstTarget || !secondTarget}
+          detail={`使用攻击动作后 · 附赠动作 · 1 气 · ${flurryTargets.length} 次徒手攻击`}
+          disabled={disabled || !bonusAvailable || character.level < 2 || !attackActionTaken || (ki?.current ?? 0) < flurryKiCost || !dnd5eFlurryTargetsValid(flurryTargets, flurryMaximum)}
           onClick={() => firstTarget && secondTarget && onFeature({
             feature: 'monk-unarmed-bonus',
             mode: 'flurry',
-            targetTokenIds: [firstTarget.tokenId, secondTarget.tokenId],
+            targetTokenIds: flurryTargets,
             stunningStrike,
             ...(quiveringPalmAttack !== 'none' ? { quiveringPalmAttackIndex: quiveringPalmAttack === 'first' ? 0 : 1 } : {}),
             ...(subclassId === 'open-hand' && character.level >= 3 ? {

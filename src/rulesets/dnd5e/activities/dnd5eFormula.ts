@@ -1,6 +1,13 @@
 import type { AbilityKey } from '../../../lib/dnd'
+import { SKILLS } from '../../../lib/dnd'
 
 export const DND5E_FORMULA_SCHEMA_VERSION = 1 as const
+
+/** Direct skill references identify the roll context; complex formulas can declare it explicitly. */
+export function dnd5eOpposedSourceSkill(check: { sourceSkill?: string; sourceModifier: Dnd5eFormulaV1 }): string | undefined {
+  return check.sourceSkill ?? (check.sourceModifier.kind === 'reference' &&
+    check.sourceModifier.reference.kind === 'actor-skill-check-modifier' ? check.sourceModifier.reference.skill : undefined)
+}
 
 export interface Dnd5eFormulaActorSnapshot {
   level: number
@@ -9,6 +16,9 @@ export interface Dnd5eFormulaActorSnapshot {
   classLevels?: Readonly<Record<string, number>>
   currentHp?: number
   maxHp?: number
+  /** Host stat-block total; unavailable for current/spending references. */
+  hitPointDiceMaximum?: readonly { sides: number; max: number }[]
+  hitPointDice?: readonly { sides: number; current: number; max: number }[]
   resources?: Readonly<Record<string, { current: number; maximum: number }>>
   spellAttackBonus?: number
   spellSaveDc?: number
@@ -17,12 +27,15 @@ export interface Dnd5eFormulaActorSnapshot {
   /** Host-captured source save DCs for effects currently carried by this actor. */
   activeEffectSourceSpellSaveDcs?: readonly { definitionId: string; sourceSpellSaveDc: number }[]
   speed?: number
+  skillCheckModifiers?: Readonly<Record<string, number>>
 }
 
 export type Dnd5eFormulaReferenceV1 =
   | { kind: 'actor-level' }
   | { kind: 'actor-proficiency-bonus' }
   | { kind: 'actor-ability-modifier'; ability: AbilityKey }
+  | { kind: 'actor-skill-check-modifier'; skill: string }
+  | { kind: 'target-skill-check-modifier'; skill: string }
   | { kind: 'actor-class-level'; classId: string }
   | { kind: 'actor-spell-attack-bonus' }
   | { kind: 'actor-spell-save-dc' }
@@ -31,6 +44,8 @@ export type Dnd5eFormulaReferenceV1 =
   | { kind: 'actor-spellcasting-ability-modifier' }
   | { kind: 'actor-current-hp' }
   | { kind: 'actor-max-hp' }
+  | { kind: 'actor-hit-dice'; field: 'current' | 'maximum'; sides?: 4 | 6 | 8 | 10 | 12 | 20 }
+  | { kind: 'target-hit-dice'; field: 'current' | 'maximum'; sides?: 4 | 6 | 8 | 10 | 12 | 20 }
   | { kind: 'target-level' }
   | { kind: 'target-proficiency-bonus' }
   | { kind: 'target-ability-modifier'; ability: AbilityKey }
@@ -46,6 +61,7 @@ export type Dnd5eFormulaV1 =
   | { kind: 'constant'; value: number }
   | { kind: 'reference'; reference: Dnd5eFormulaReferenceV1 }
   | { kind: 'dice'; rollId: string; count: number; sides: number }
+  | { kind: 'damage-roll'; rollId: string; value: Dnd5eFormulaV1 }
   | { kind: 'add' | 'multiply' | 'minimum' | 'maximum'; values: readonly Dnd5eFormulaV1[] }
   | { kind: 'floor' | 'ceil' | 'round'; value: Dnd5eFormulaV1 }
   | { kind: 'clamp'; value: Dnd5eFormulaV1; minimum?: number; maximum?: number }
@@ -54,7 +70,20 @@ export interface Dnd5eFormulaRollResult {
   values: readonly number[]
 }
 
+/** Host-derived evidence from a validated dice node, before outer formula arithmetic. */
+export interface Dnd5eFormulaDiceEvidenceV1 {
+  rollId: string
+  count: number
+  sides: number
+  submittedCount: number
+  rawValues: readonly number[]
+  values: readonly number[]
+}
+
 export interface Dnd5eFormulaEvaluationContext {
+  /** Host-owned; invoked only for an explicit damage-roll boundary containing consumed dice. */
+  damageRollBonus?: (rollId: string) => number
+  onDiceEvaluated?: (evidence: Dnd5eFormulaDiceEvidenceV1) => void
   actor: Dnd5eFormulaActorSnapshot
   target?: Dnd5eFormulaActorSnapshot
   castLevel?: number
@@ -105,6 +134,15 @@ function validateReference(reference: unknown, label: string, errors: string[]):
   }
   if (reference.kind === 'actor-ability-modifier' || reference.kind === 'target-ability-modifier') {
     if (!ABILITIES.has(reference.ability as AbilityKey)) errors.push(`${label}.ability is invalid`)
+    return
+  }
+  if (reference.kind === 'actor-hit-dice' || reference.kind === 'target-hit-dice') {
+    if (!['current', 'maximum'].includes(reference.field as string)) errors.push(`${label}.field is invalid`)
+    if (reference.sides != null && ![4, 6, 8, 10, 12, 20].includes(reference.sides as number)) errors.push(`${label}.sides is invalid`)
+    return
+  }
+  if (reference.kind === 'actor-skill-check-modifier' || reference.kind === 'target-skill-check-modifier') {
+    if (!SKILLS.some(skill => skill.key === reference.skill)) errors.push(`${label}.skill is invalid`)
     return
   }
   if (reference.kind === 'actor-class-level') {
@@ -185,6 +223,11 @@ export function validateDnd5eFormulaV1(formula: unknown, label = 'formula'): rea
       value.values.forEach((entry, index) => visit(entry, `${path}.values[${index}]`, depth + 1))
       return
     }
+    if (value.kind === 'damage-roll') {
+      if (typeof value.rollId !== 'string' || !ID_PATTERN.test(value.rollId)) errors.push(`${path}.rollId is invalid`)
+      visit(value.value, `${path}.value`, depth + 1)
+      return
+    }
     if (value.kind === 'floor' || value.kind === 'ceil' || value.kind === 'round') {
       visit(value.value, `${path}.value`, depth + 1)
       return
@@ -229,6 +272,17 @@ function referenceValue(
   reference: Dnd5eFormulaReferenceV1,
   context: Dnd5eFormulaEvaluationContext,
 ): number {
+  if (reference.kind === 'actor-hit-dice' || reference.kind === 'target-hit-dice') {
+    const subject = reference.kind === 'actor-hit-dice' ? context.actor : context.target
+    const pools = subject?.hitPointDice ?? (reference.field === 'maximum'
+      ? subject?.hitPointDiceMaximum?.map(pool => ({ ...pool, current: 0 }))
+      : undefined)
+    if (!pools || new Set(pools.map(pool => pool.sides)).size !== pools.length || pools.some(pool =>
+      ![4, 6, 8, 10, 12, 20].includes(pool.sides) || !Number.isSafeInteger(pool.current) || !Number.isSafeInteger(pool.max) ||
+      pool.current < 0 || pool.max < pool.current)) throw new Dnd5eFormulaEvaluationError('Hit Dice are unavailable or invalid')
+    return pools.filter(pool => reference.sides == null || pool.sides === reference.sides)
+      .reduce((sum, pool) => sum + (reference.field === 'current' ? pool.current : pool.max), 0)
+  }
   if (reference.kind === 'actor-level') return context.actor.level
   if (reference.kind === 'actor-proficiency-bonus') return context.actor.proficiencyBonus
   if (reference.kind === 'actor-ability-modifier') return abilityModifier(context.actor.abilities[reference.ability])
@@ -262,6 +316,12 @@ function referenceValue(
       throw new Dnd5eFormulaEvaluationError('spellcasting ability modifier is unavailable')
     }
     return context.actor.spellcastingAbilityModifier
+  }
+  if (reference.kind === 'actor-skill-check-modifier' || reference.kind === 'target-skill-check-modifier') {
+    const subject = reference.kind === 'actor-skill-check-modifier' ? context.actor : context.target
+    const modifier = subject?.skillCheckModifiers?.[reference.skill]
+    if (!Number.isFinite(modifier)) throw new Dnd5eFormulaEvaluationError(`skill modifier is unavailable: ${reference.skill}`)
+    return modifier!
   }
   if (reference.kind === 'actor-current-hp') return actorReferenceValue(context.actor, 'currentHp', reference.kind)
   if (reference.kind === 'actor-max-hp') return actorReferenceValue(context.actor, 'maxHp', reference.kind)
@@ -303,6 +363,14 @@ export function evaluateDnd5eFormulaV1(
 ): number {
   if (formula.kind === 'constant') return formula.value
   if (formula.kind === 'reference') return referenceValue(formula.reference, context)
+  if (formula.kind === 'damage-roll') {
+    let rolled = false
+    const amount = evaluateDnd5eFormulaV1(formula.value, { ...context, damageRollBonus: undefined,
+      onDiceEvaluated: evidence => { rolled ||= evidence.count > 0; context.onDiceEvaluated?.(evidence) } })
+    const bonus = rolled ? context.damageRollBonus?.(formula.rollId) ?? 0 : 0
+    if (!Number.isFinite(bonus)) throw new Dnd5eFormulaEvaluationError('invalid damage roll bonus')
+    return amount + bonus
+  }
   if (formula.kind === 'dice') {
     const multiplier = context.diceMultiplierByRollId?.[formula.rollId] ?? 1
     if (!finiteInteger(multiplier, 1, 10)) throw new Dnd5eFormulaEvaluationError(`invalid dice multiplier: ${formula.rollId}`)
@@ -321,8 +389,14 @@ export function evaluateDnd5eFormulaV1(
     if (!finiteInteger(minimum, 1, formula.sides)) {
       throw new Dnd5eFormulaEvaluationError(`invalid minimum die value: ${formula.rollId}`)
     }
-    if (context.maximizeDiceRollIds?.includes(formula.rollId)) return requiredCount * formula.sides
-    return roll.values.slice(0, requiredCount).reduce((total, value) => total + Math.max(minimum, value), 0)
+    const rawValues = roll.values.slice(0, requiredCount)
+    const values = context.maximizeDiceRollIds?.includes(formula.rollId)
+      ? rawValues.map(() => formula.sides)
+      : rawValues.map(value => Math.max(minimum, value))
+    const total = values.reduce((sum, value) => sum + value, 0)
+    context.onDiceEvaluated?.({ rollId: formula.rollId, count: requiredCount, sides: formula.sides,
+      submittedCount, rawValues, values })
+    return total
   }
   if (formula.kind === 'add') {
     return formula.values.reduce((total, value) => total + evaluateDnd5eFormulaV1(value, context), 0)
@@ -363,7 +437,7 @@ export function collectDnd5eFormulaRollDeclarations(
     }
     if (formula.kind === 'add' || formula.kind === 'multiply' || formula.kind === 'minimum' || formula.kind === 'maximum') {
       formula.values.forEach(visit)
-    } else if (formula.kind === 'floor' || formula.kind === 'ceil' || formula.kind === 'round' || formula.kind === 'clamp') {
+    } else if (formula.kind === 'damage-roll' || formula.kind === 'floor' || formula.kind === 'ceil' || formula.kind === 'round' || formula.kind === 'clamp') {
       visit(formula.value)
     }
   }

@@ -13,6 +13,7 @@ export type Dnd5eMonsterCompositeRuntimeChildKind =
   | 'weapon'
   | 'area'
   | 'special'
+  | 'spell'
 
 export interface Dnd5eMonsterCompositeRuntimeChild {
   sequenceIndex: number
@@ -67,6 +68,7 @@ function runtimeChildKind(
   action: Dnd5eMonsterAction,
 ): Dnd5eMonsterCompositeRuntimeChildKind | undefined {
   if (action.kind === 'weapon-attack' && action.attack) return 'weapon'
+  if (action.kind === 'other' && action.innateSpellStep === true) return 'spell'
   if (action.kind !== 'other' || !action.rule) return undefined
   return action.rule.kind === 'area-saving-throw' ? 'area' : 'special'
 }

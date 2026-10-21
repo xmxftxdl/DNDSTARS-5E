@@ -35,6 +35,7 @@ export interface DeclarativeClassChoiceGroupV1 {
     id: string
     name: string
     summary: string
+    description?: string
     minimumClassLevel?: number
   }[]
 }
@@ -271,12 +272,13 @@ export function validateDeclarativeClassDefinitionV1(value: unknown, path = '声
       const optionIds = new Set<string>()
       for (const option of group.options) {
         if (!isRecord(option)) throw new Error(`${path}升级选项无效`)
-        assertKeys(option, ['id', 'name', 'summary', 'minimumClassLevel'], `${path}升级选项`)
+        assertKeys(option, ['id', 'name', 'summary', 'description', 'minimumClassLevel'], `${path}升级选项`)
         assertId(option.id, `${path}升级选项`)
         if (optionIds.has(option.id)) throw new Error(`${path}升级选项 ID 重复`)
         optionIds.add(option.id)
         assertText(option.name, `${path}升级选项名称`, 160)
         assertText(option.summary, `${path}升级选项摘要`)
+        if (option.description != null) assertText(option.description, `${path}升级选项说明`, 20_000)
         if (option.minimumClassLevel != null && !integer(option.minimumClassLevel, 1, 20)) throw new Error(`${path}升级选项等级无效`)
       }
     }

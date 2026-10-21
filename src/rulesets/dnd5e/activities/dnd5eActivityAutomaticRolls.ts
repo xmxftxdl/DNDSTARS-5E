@@ -7,6 +7,9 @@ import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 interface ControlledActivityActor {
   id: string
   controller?: string
+  conditions?: readonly string[]
+  /** Effective sources supplied by the Host snapshot, not action payload. */
+  charmedByActorIds?: readonly string[]
 }
 
 /**
@@ -17,6 +20,7 @@ interface ControlledActivityActor {
  */
 export function planDnd5eAutomaticAlliedSavingThrowRolls(input: {
   activity: Dnd5eActivityDefinitionV1
+  willingTargetIds?: readonly string[]
   actor: ControlledActivityActor
   targets: readonly ControlledActivityActor[]
   declarations: readonly Dnd5ePluginDiceRollDeclaration[]
@@ -28,10 +32,11 @@ export function planDnd5eAutomaticAlliedSavingThrowRolls(input: {
     if (
       check.kind !== 'saving-throw' ||
       check.scope !== 'per-target' ||
-      check.automaticFailureIfAllied !== true
+      (check.automaticFailureIfAllied !== true && check.allowWillingFailure !== true && check.automaticFailureIfCharmedByActor !== true)
     ) return []
     return input.targets.flatMap((target) =>
-      target.id === input.actor.id || target.controller === input.actor.controller
+      (check.automaticFailureIfCharmedByActor && target.conditions?.includes('charmed') && target.charmedByActorIds?.includes(input.actor.id)) ||
+      (check.allowWillingFailure && input.willingTargetIds?.includes(target.id)) || (check.automaticFailureIfAllied && (target.id === input.actor.id || target.controller === input.actor.controller))
         ? [`${check.rollId}:${target.id}`]
         : [])
   }) ?? [])

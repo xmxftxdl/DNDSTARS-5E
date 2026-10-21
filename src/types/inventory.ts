@@ -288,6 +288,7 @@ export interface Dnd5eItemCost {
 
 export type Dnd5eInventoryUseEffect =
   | { kind: 'stabilize' }
+  | { kind: 'remove-active-effects'; stackingKeys: readonly string[] }
   | {
       kind: 'active-effect'
       durationRounds: number
@@ -421,10 +422,22 @@ export interface Dnd5eInventoryItemTemplate {
  * 在规则包暂时未加载时仍能显示；执行时仍由权威端按当前模板重新验证。
  */
 export interface Dnd5eInventoryEntry {
+  /** Owner explicitly offers this instance for other characters' enchantments. */
+  enchantmentExposed?: true
+  /** Explicitly displayed physical surface; never inferred from backpack ownership. */
+  surfaceExposed?: true
+  surfaceProfile?: import('../rulesets/dnd5e/mapObjectSurface').Dnd5eMapObjectSurface
+  structureBinding?: import('../rulesets/dnd5e/structureObjectBinding').Dnd5eStructureObjectBinding
   instanceId: string
   templateId: string
   item: Dnd5eInventoryItemTemplate
   quantity: number
+  /** Host-owned original form of an existing object, distinct from a conjured item. */
+  spellAlteration?: {
+    sourceEffectTag: string
+    sourceEffectOwnerId: string
+    original: Omit<Dnd5eInventoryEntry, 'spellAlteration'>
+  }
   resources?: Record<string, Dnd5eInventoryResourceState>
   /** schema V1 迁移字段；V2 运行时不会再写入。 */
   remainingCharges?: number
@@ -450,8 +463,17 @@ export interface Dnd5eInventoryEntry {
   expiresAtWorldMinute?: number
   /** Traceable rules identity; never interpreted as executable content. */
   generatedByRulesId?: string
+  /** Host-generated link to the exact effect generation; preserved across transfers. */
+  sourceEffectTag?: string
+  sourceEffectOwnerId?: string
+  sourceSpellcastingModifier?: number
+  maximumPerSource?: number
+  /** Unusable until it disappears at the releasing actor turn end. */
+  releasedByCharacterId?: string
   /** Host-owned food/drink contamination markers. Empty/omitted means safe. */
   contaminants?: readonly ('poison' | 'disease')[]
+  /** Exact contents of a picked-up physical water vessel. */
+  waterContainer?: import('../rulesets/dnd5e/createOrDestroyWater').Dnd5eWaterContainerStateV1
   /** Host-owned location for a spell-linked object; Ethereal entries cannot be used/equipped. */
   planarState?: 'material' | 'ethereal'
   /** Durable spell-authority record that owns the planar transition. */
@@ -481,14 +503,43 @@ export interface Dnd5eInventory {
    * transport's in-memory request cache these survive refresh and SSE replay.
    */
   authorityUseReceipts?: string[]
+  pendingExchangeRitual?: import('../rulesets/dnd5e/inventoryExchangeRitualState').Dnd5eInventoryExchangeRitual
+  /** Host-owned components set aside until one exact spell effect ends. */
+  spellMaterialEscrows?: Dnd5eSpellMaterialEscrow[]
+  /** Physical objects released by an attack; not usable inventory until recovered. */
+  releasedObjects?: Dnd5eInventoryEntry[]
+}
+
+export interface Dnd5eSpellMaterialEscrow {
+  id: string
+  sourceSpellId: string
+  sourceEffectId: string
+  label: string
+  status: 'reserved' | 'consumed'
+  /** Removed from usable inventory; consumed records keep only the identity receipt. */
+  entries: Dnd5eInventoryEntry[]
 }
 
 export interface Dnd5eInventoryGrant {
+  equipToFreeHand?: true
+  surfaceProfile?: import('../rulesets/dnd5e/mapObjectSurface').Dnd5eMapObjectSurface
+  structureBinding?: import('../rulesets/dnd5e/structureObjectBinding').Dnd5eStructureObjectBinding
   templateId: string
   quantity: number
+  /** Host-owned contamination retained when a physical scene item enters inventory. */
+  contaminants?: readonly ('poison' | 'disease')[]
+  /** Exact contents of a picked-up physical water vessel. */
+  waterContainer?: import('../rulesets/dnd5e/createOrDestroyWater').Dnd5eWaterContainerStateV1
   identified?: boolean
   expiresAtWorldMinute?: number
   generatedByRulesId?: string
+  /** Host-generated link to the exact effect generation; preserved across transfers. */
+  sourceEffectTag?: string
+  sourceEffectOwnerId?: string
+  sourceSpellcastingModifier?: number
+  maximumPerSource?: number
+  /** Unusable until it disappears at the releasing actor turn end. */
+  releasedByCharacterId?: string
 }
 
 export interface Dnd5eInventoryCurrencyGrant {
@@ -497,11 +548,13 @@ export interface Dnd5eInventoryCurrencyGrant {
 }
 
 export type Dnd5eInventoryMutation =
-  | { type: 'grant'; characterId: string; templateId: string; quantity: number; identified?: boolean }
+  | { type: 'grant'; characterId: string; templateId: string; quantity: number; identified?: boolean; summonBinding?: { tagPrefix: string; monsterId: string } }
   | { type: 'discard'; characterId: string; instanceId: string; quantity: number }
   | { type: 'transfer'; characterId: string; targetCharacterId: string; instanceId: string; quantity: number }
   | { type: 'equip'; characterId: string; instanceId: string; slot?: EquipmentSlot }
   | { type: 'unequip'; characterId: string; instanceId: string }
+  | { type: 'set-surface-exposure'; characterId: string; instanceId: string; exposed: boolean }
+  | { type: 'set-enchantment-exposure'; characterId: string; instanceId: string; exposed: boolean }
   | { type: 'prepare-attunement'; characterId: string; instanceId: string; dmPrerequisiteConfirmed?: boolean }
   | { type: 'cancel-attunement'; characterId: string; instanceId: string }
   | { type: 'end-attunement'; characterId: string; instanceId: string }
@@ -587,6 +640,7 @@ export type Dnd5eInventoryMutationFailure =
   | 'unauthorized'
 
 export interface Dnd5eInventoryMutationResult {
+  effectRemovalTargetProjection?: import('../rulesets/dnd5e/activeEffects').Dnd5eActiveEffectProjection
   ok: boolean
   reason?: Dnd5eInventoryMutationFailure
   characters: import('./character').Character[]

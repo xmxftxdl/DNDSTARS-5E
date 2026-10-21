@@ -1,0 +1,187 @@
+{
+  "format": "dndstars5e-content",
+  "schemaVersion": 2,
+  "manifest": {
+    "id": "test.timed",
+    "name": "持续交互机制验收",
+    "version": "1.0.0",
+    "apiVersion": 2,
+    "rulesetId": "dnd5e-2014-srd-5.1",
+    "publisher": "Local Tests",
+    "license": "CC0-1.0",
+    "distributionPolicy": "room-ephemeral",
+    "contentCategory": "mixed"
+  },
+  "provenance": {
+    "edition": "2014",
+    "contentMode": "incremental",
+    "sourceTitle": "Synthetic mechanism verification; not converted book content"
+  },
+  "assets": [],
+  "content": {
+    "races": [],
+    "backgrounds": [],
+    "features": [
+      {
+        "id": "prepare",
+        "name": "交互准备（验收）",
+        "summary": "合成机制验收",
+        "description": "仅用于隔离自动化验收，不对应任何出版内容。",
+        "automation": "full"
+      },
+      {
+        "id": "finish",
+        "name": "交互完成奖励（验收）",
+        "summary": "合成机制验收",
+        "description": "仅用于隔离自动化验收，不对应任何出版内容。",
+        "automation": "full"
+      }
+    ],
+    "feats": [],
+    "spells": [],
+    "items": [],
+    "abilityGenerationMethods": [],
+    "headlessActions": [],
+    "activities": [
+      {
+        "schemaVersion": 1,
+        "id": "prepare",
+        "name": "交互准备（验收）",
+        "activation": {
+          "kind": "free"
+        },
+        "target": {
+          "kind": "creature",
+          "relation": "any",
+          "count": 1,
+          "rangeFeet": 30
+        },
+        "legacySource": {
+          "kind": "feature",
+          "id": "prepare"
+        },
+        "automation": {
+          "schemaVersion": 1,
+          "level": "full",
+          "supportedPhases": [
+            "eligibility",
+            "cost",
+            "targeting",
+            "attack-roll",
+            "saving-throw",
+            "damage",
+            "healing",
+            "effects",
+            "duration",
+            "interrupt",
+            "persistence"
+          ],
+          "manualPhases": [],
+          "limitations": []
+        },
+        "outcomes": [
+          {
+            "id": "prepare",
+            "when": {
+              "kind": "always"
+            },
+            "operations": [
+              {
+                "id": "apply",
+                "kind": "apply-effect",
+                "target": "target",
+                "effectId": "preparation"
+              }
+            ]
+          }
+        ],
+        "effects": [
+          {
+            "schemaVersion": 1,
+            "id": "preparation",
+            "name": "持续交互准备",
+            "stacking": "replace",
+            "duration": {
+              "kind": "rounds",
+              "rounds": 10,
+              "expiresAt": "target-turn-end"
+            },
+            "completionGrant": {
+              "activityIds": [
+                "finish"
+              ],
+              "availableRounds": 10,
+              "recipient": "source",
+              "bindTarget": "bearer",
+              "singleUse": true
+            },
+            "sourceLink": {
+              "requiresSourceCommunication": true,
+              "requiresSharedLanguage": true
+            }
+          }
+        ]
+      },
+      {
+        "schemaVersion": 1,
+        "id": "finish",
+        "name": "交互完成奖励（验收）",
+        "activation": {
+          "kind": "free"
+        },
+        "target": {
+          "kind": "creature",
+          "relation": "any",
+          "count": 1,
+          "rangeFeet": 30
+        },
+        "legacySource": {
+          "kind": "feature",
+          "id": "finish"
+        },
+        "automation": {
+          "schemaVersion": 1,
+          "level": "full",
+          "supportedPhases": [
+            "eligibility",
+            "cost",
+            "targeting",
+            "attack-roll",
+            "saving-throw",
+            "damage",
+            "healing",
+            "effects",
+            "duration",
+            "interrupt",
+            "persistence"
+          ],
+          "manualPhases": [],
+          "limitations": []
+        },
+        "outcomes": [
+          {
+            "id": "finish",
+            "when": {
+              "kind": "always"
+            },
+            "operations": [
+              {
+                "id": "benefit",
+                "kind": "temporary-hit-points",
+                "target": "target",
+                "amount": {
+                  "kind": "constant",
+                  "value": 3
+                }
+              }
+            ]
+          }
+        ],
+        "requiresEffectGrant": true
+      }
+    ],
+    "subclasses": [],
+    "classes": [],
+    "monsters": []
+  }
+}

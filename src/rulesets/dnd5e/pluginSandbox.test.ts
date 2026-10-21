@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDnd5ePluginSandbox } from './pluginSandbox'
+import { createDnd5eCombatant } from './headlessCombatEngine'
 
 class FakeWorker {
   static last: FakeWorker | undefined
+  static operations: unknown[] = []
   readonly sent: unknown[] = []
   private readonly messageListeners: Array<(event: MessageEvent) => void> = []
   private readonly errorListeners: Array<(event: ErrorEvent) => void> = []
@@ -47,6 +49,8 @@ class FakeWorker {
             migrations: [{ fromVersion: 1, toVersion: 2 }],
           },
         })
+      } else if (message.type === 'resolve') {
+        this.emit({type:'resolved',requestId:message.requestId,ok:true,operations:FakeWorker.operations})
       } else if (message.type === 'migrate') {
         this.emit({
           type: 'migrated',
@@ -99,5 +103,24 @@ describe('D&D 5e plugin state migration sandbox protocol', () => {
     })
     session.terminate()
     expect(FakeWorker.last?.terminated).toBe(true)
+  })
+})
+
+
+describe('Worker rolled damage response boundary', () => {
+  afterEach(() => { vi.unstubAllGlobals(); FakeWorker.operations=[] })
+  it.each([1, 0.5, 2, 3, NaN])('validates multiplier %s at the message boundary', async multiplier => {
+    vi.stubGlobal('Worker',FakeWorker)
+    vi.stubGlobal('window',{setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout})
+    const session=await createDnd5ePluginSandbox(new TextEncoder().encode('plugin').buffer)
+    try {
+      FakeWorker.operations=[{kind:'deal-rolled-damage',targetId:'target',rollId:'damage',multiplier}]
+      const actor=createDnd5eCombatant({id:'actor',name:'Actor',controller:'player',initiative:10,
+        abilities:{str:10,dex:10,con:10,int:10,wis:10,cha:10},proficiencyBonus:2,armorClass:10,
+        currentHp:10,maxHp:10,temporaryHp:0,speed:30,position:{x:0,y:0},concentrating:false})
+      const pending=session.resolve({actor,action:{type:'plugin',pluginId:session.manifest.id,actionId:'damage',actorId:actor.id}})
+      if ([0.5,1,2].includes(multiplier)) await expect(pending).resolves.toEqual({ok:true,operations:FakeWorker.operations})
+      else await expect(pending).rejects.toThrow('Headless capability')
+    } finally {session.terminate()}
   })
 })

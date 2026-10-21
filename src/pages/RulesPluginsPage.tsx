@@ -6,13 +6,13 @@ import PageHeader from '../components/PageHeader'
 import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
 import Dnd5eEffectDiagnosticsPanel from '../components/Dnd5eEffectDiagnosticsPanel'
 import RoomManagementPanel from '../components/RoomManagementPanel'
+import { dnd5eRoomRuntimeProjectionBytes } from '../rulesets/dnd5e/roomRuntimeProjection'
 import { SharedSyncDiagnosticsPanel } from '../components/SharedSyncStatus'
 import {
   activeDnd5eRulesPluginRequirements,
   compileDnd5eLocalContentCollection,
   prepareDnd5eLocalContentJson,
   prepareDnd5eLocalContentJsonFile,
-  dnd5eRoomRuntimeProjectionBytesV2,
   roomActiveDnd5eRulesPluginRequirements,
   type Dnd5eContentAutomationCoverageReportV2,
   type Dnd5eLocalContentCollectionAudit,
@@ -174,7 +174,7 @@ export default function RulesPluginsPage() {
           throw new Error('当前位于联网房间；内容包必须明确声明 room-distributable 或 room-ephemeral。')
         }
         if (inspected.manifest.distributionPolicy === 'room-ephemeral') {
-          const runtimeBytes = dnd5eRoomRuntimeProjectionBytesV2(inspected.bytes)
+          const runtimeBytes = dnd5eRoomRuntimeProjectionBytes(inspected.bytes)
           const runtimeFile = new File(
             [new Uint8Array(runtimeBytes)],
             inspected.fileName,

@@ -59,7 +59,7 @@
           "modifiers": [
             {
               "kind": "speed",
-              "mode": "bonus",
+              "mode": "add",
               "value": {
                 "kind": "constant",
                 "value": -5
@@ -200,7 +200,7 @@
               "modifiers": [
                 {
                   "kind": "speed",
-                  "mode": "bonus",
+                  "mode": "add",
                   "value": {
                     "kind": "constant",
                     "value": -5

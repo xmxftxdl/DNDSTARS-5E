@@ -8,6 +8,8 @@ import {
   dnd5eCombatantPairKey,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
+  setDnd5eSourcedExhaustion,
+  commitDnd5eActivityExecution,
   type Dnd5eCombatant,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
@@ -77,6 +79,7 @@ function monsterAttack(input: {
     | 'bite-hit-point-maximum-reduction'
   damageRolls: number[][]
   saveD20?: number
+  saveD20Second?: number
   attackerPatch?: Partial<Dnd5eCombatant>
   targetPatch?: Partial<Dnd5eCombatant>
   additionalCombatants?: readonly Dnd5eCombatant[]
@@ -119,6 +122,7 @@ function monsterAttack(input: {
       onHitEffectRolls: [{
         effectId: input.effectId,
         ...(input.saveD20 == null ? {} : { d20: input.saveD20 }),
+        ...(input.saveD20Second == null ? {} : { d20Second: input.saveD20Second }),
       }],
     }],
   })
@@ -299,6 +303,28 @@ describe('monster hit-point maximum reductions', () => {
       succeeded.result.state.combatants.target.classState
         .hitPointMaximumReductionLedger,
     ).toBeUndefined()
+  })
+
+  it.each([false,true])('keeps a drain independent of exhaustion when fatigue is cleared first: %s',fatigueFirst=>{
+    const attacked=monsterAttack({slug:'clay-golem',actionId:'slam',effectId:'slam-hit-point-maximum-reduction',
+      damageRolls:[[4,4]],saveD20:1,saveD20Second:2,targetPatch:{currentHp:50,maxHp:50,exhaustionLevel:4,
+        classState:{sourcedExhaustion:{schemaVersion:1,baseLevel:4,sources:[]},exhaustionBaseMaxHp:101}}})
+    expect(attacked.result.ok,attacked.result.ok?undefined:attacked.result.reason).toBe(true)
+    const target=attacked.result.state.combatants.target
+    expect(target).toMatchObject({currentHp:37,maxHp:44,classState:{exhaustionBaseMaxHp:88,
+      hitPointMaximumReductionLedger:{baseMaximum:101,entries:[{amount:13}]}}})
+    if(fatigueFirst){
+      setDnd5eSourcedExhaustion(target,{schemaVersion:1,baseLevel:3,sources:[]})
+      expect(target).toMatchObject({maxHp:88,currentHp:37})
+    }
+    const cured=commitDnd5eActivityExecution(attacked.result.state,{actorId:'clay-golem',activityId:'test:restore',targetIds:['target'],
+      resolution:{ok:true,status:'resolved',checks:[],consumptions:[],proposals:[{kind:'recover-hit-point-maximum',operationId:'restore',targetId:'target',maximumCount:1}]}})
+    expect(cured.ok).toBe(true)
+    expect(cured.state.combatants.target).toMatchObject({maxHp:fatigueFirst?101:50,currentHp:37})
+    if(!fatigueFirst){
+      setDnd5eSourcedExhaustion(cured.state.combatants.target,{schemaVersion:1,baseLevel:3,sources:[]})
+      expect(cured.state.combatants.target).toMatchObject({maxHp:101,currentHp:37})
+    }
   })
 
   it('uses the complete Clay Golem Slam damage after its Constitution save fails', () => {

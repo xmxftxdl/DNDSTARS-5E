@@ -14,7 +14,7 @@ import {
   dnd5eRacialRulesForCharacter,
   type Dnd5eRacialRulesSnapshot,
 } from './racialAutomation'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
@@ -66,7 +66,7 @@ describe('D&D 5e racial Headless automation', () => {
           selections: {},
           resolvedGrants: [
             { kind: 'spell' as const, spellId: 'fire-bolt', mode: 'cantrip' as const, ability: 'int' as const },
-            { kind: 'spell' as const, spellId: 'magic-missile', mode: 'once-per-long-rest' as const, ability: 'int' as const, castAtLevel: 1 },
+            { kind: 'spell' as const, spellId: 'magic-missile', mode: 'once-per-long-rest' as const, ability: 'int' as const, castAtLevel: 1, targetRestriction: 'self' as const },
             { kind: 'spell' as const, spellId: 'alarm', mode: 'ritual-book' as const, ability: 'int' as const },
           ],
         },
@@ -74,7 +74,7 @@ describe('D&D 5e racial Headless automation', () => {
     }
     expect(dnd5eIndependentSpellRulesForCharacter(character).innateSpells).toEqual([
       expect.objectContaining({ spellId: 'fire-bolt', castAtLevel: 0, resetOn: 'at-will', requiresComponents: true }),
-      expect.objectContaining({ spellId: 'magic-missile', castAtLevel: 1, resetOn: 'long-rest', requiresComponents: true }),
+      expect.objectContaining({ spellId: 'magic-missile', castAtLevel: 1, resetOn: 'long-rest', requiresComponents: true, targetRestriction: 'self' }),
     ])
     expect(dnd5eRacialResourceDefinitions(character as never)).toContainEqual(
       expect.objectContaining({ key: DND5E_RACIAL_RESOURCE_KEYS.innateSpell('magic-missile'), resetOn: 'long-rest' }),
@@ -582,4 +582,23 @@ describe('D&D 5e racial Headless automation', () => {
       },
     })
   })
+})
+
+it.each([false, true])('Dragonborn shared breath adds only the source-qualified target bonus before defenses (half=%s)', half => {
+  const ancestry = DND5E_DRAGONBORN_ANCESTRIES.find(candidate => candidate.id === 'red')!
+  const actor = combatant('dragonborn', 20, { level: 1, racialRules: racialRules({ dragonbornAncestry: ancestry }),
+    classResources: { [DND5E_RACIAL_RESOURCE_KEYS.dragonbornBreath]: { current: 1, max: 1 } } })
+  const target = combatant('target', 10, { controller: 'dm', currentHp: 50, maxHp: 50, damageVulnerabilities: ['fire'] })
+  const other = combatant('other', 5, { controller: 'dm', currentHp: 50, maxHp: 50 })
+  const state = startDnd5eHeadlessCombat('racial-source-bonus', [actor, target, other])
+  state.combatants.target.classState.activeEffects = [createDnd5eMechanicalEffect({ definitionId: 'mark', label: 'Mark',
+    targetId: 'target', source: { kind: 'feature', actorId: 'dragonborn' }, modifiers: { damageRollsBySourceBonus: 2 } })]
+  const result = resolveDnd5eHeadlessAction(state, { type: 'dragonborn-breath', actorId: 'dragonborn',
+    resolution: { schemaVersion: 1, targetIds: ['target', 'other'], damageRolls: [3, 4],
+      targetSavingThrows: ['target', 'other'].map(targetId => ({ targetId, d20: half ? 20 : 1 })) } })
+  expect(result.ok, result.ok ? '' : result.reason).toBe(true)
+  expect(result.state.combatants.target.currentHp).toBe(half ? 42 : 32)
+  expect(result.state.combatants.other.currentHp).toBe(half ? 47 : 43)
+  expect(result.state.combatants.dragonborn.classResources[DND5E_RACIAL_RESOURCE_KEYS.dragonbornBreath].current).toBe(0)
+  expect(result.events.filter(event => event.type === 'damage-roll-bonus-applied')).toHaveLength(1)
 })

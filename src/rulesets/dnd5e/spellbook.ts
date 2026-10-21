@@ -78,6 +78,11 @@ export interface Dnd5eImportedSpell {
     materialConsumed?: boolean
     /** Optional exact inventory recipe for room and plugin spells. */
     materialRequirement?: Dnd5eSpellMaterialRequirement
+    /** Closed Activity choice selecting an exact recipe; omitted recipe uses the base components. */
+    materialRequirementByChoice?: {
+      choiceId: string
+      options: readonly { optionId: string; requirement?: Dnd5eSpellMaterialRequirement }[]
+    }
   }
   duration: {
     type: 'instantaneous' | 'timed' | 'until-dispelled' | 'special'
@@ -85,6 +90,7 @@ export interface Dnd5eImportedSpell {
     unit?: Dnd5eSpellbookDurationUnit
     concentration: boolean
   }
+  /** Empty for spells available only through an explicit grant, not a class list. */
   classes: Dnd5eSpellcastingClassId[]
   description: string
   higherLevels?: string
@@ -478,11 +484,17 @@ function parseMaterialRequirement(
       }
       const componentLabel = boundedString(rawComponent.label, `${componentPrefix}.label`, problems, 300) ?? ''
       const consumed = booleanValue(rawComponent.consumed, `${componentPrefix}.consumed`, problems)
+      const bindEffectId = rawComponent.bindEffectId == null ? undefined : boundedString(rawComponent.bindEffectId, `${componentPrefix}.bindEffectId`, problems, 200)
+      const requiresExpiry = rawComponent.requiresExpiry == null ? undefined : booleanValue(rawComponent.requiresExpiry, `${componentPrefix}.requiresExpiry`, problems)
+      const mustBeEquipped = rawComponent.mustBeEquipped == null ? undefined : booleanValue(rawComponent.mustBeEquipped, `${componentPrefix}.mustBeEquipped`, problems)
       const quantity = rawComponent.quantity == null
         ? undefined
         : nonNegativeNumber(rawComponent.quantity, `${componentPrefix}.quantity`, problems, true)
       if (quantity != null && (quantity < 1 || quantity > 1_000_000)) {
         problems.push(`${componentPrefix}.quantity 必须在 1 到 1000000 之间`)
+      }
+      if (bindEffectId && (consumed || (quantity ?? 1) !== 1 || value.consumptionTiming === 'spell-end')) {
+        problems.push(`${componentPrefix}.bindEffectId 必须绑定一个不消耗且不托管的独立材料实例`)
       }
       const minimumUnitValueGp = rawComponent.minimumUnitValueGp == null
         ? undefined
@@ -497,6 +509,9 @@ function parseMaterialRequirement(
         tag,
         label: componentLabel,
         consumed,
+        ...(bindEffectId ? { bindEffectId } : {}),
+        ...(requiresExpiry != null ? { requiresExpiry } : {}),
+        ...(mustBeEquipped != null ? { mustBeEquipped } : {}),
         ...(quantity != null ? { quantity } : {}),
         ...(minimumUnitValueGp != null ? { minimumUnitValueGp } : {}),
         ...(minimumTotalValueGp != null ? { minimumTotalValueGp } : {}),
@@ -504,7 +519,12 @@ function parseMaterialRequirement(
     })
     return [{ label: optionLabel, components }]
   })
-  return { label, options }
+  if (value.consumptionTiming != null && !['cast', 'spell-end'].includes(String(value.consumptionTiming))) problems.push(`${prefix}.consumptionTiming 无效`)
+  if (value.allowFocusSubstitution != null && typeof value.allowFocusSubstitution !== 'boolean') problems.push(`${prefix}.allowFocusSubstitution 必须为布尔值`)
+  if (value.allowFocusSubstitution === true && options.some(option => option.components.some(component =>
+    component.consumed || (component.minimumUnitValueGp ?? 0) > 0 || (component.minimumTotalValueGp ?? 0) > 0 || component.bindEffectId || component.mustBeEquipped,
+  ))) problems.push(`${prefix}.allowFocusSubstitution 不能替代消耗、有价格、绑定或必须装备的材料`)
+  return { label, options, ...(typeof value.allowFocusSubstitution === 'boolean' ? { allowFocusSubstitution: value.allowFocusSubstitution } : {}), ...(value.consumptionTiming === 'cast' || value.consumptionTiming === 'spell-end' ? { consumptionTiming: value.consumptionTiming } : {}) }
 }
 
 function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell; problems: string[] } {
@@ -596,6 +616,26 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
   if (materialRequirement && !material) {
     problems.push(`${prefix}.components.materialRequirement 只能用于包含材料成分的法术`)
   }
+  let materialRequirementByChoice: Dnd5eImportedSpell['components']['materialRequirementByChoice']
+  if (componentsInput.materialRequirementByChoice != null) {
+    const raw = componentsInput.materialRequirementByChoice
+    const label = `${prefix}.components.materialRequirementByChoice`
+    if (!material || !objectValue(raw) || !Array.isArray(raw.options) || raw.options.length < 1 || raw.options.length > 64) {
+      problems.push(`${label} 必须为材料法术声明 1 到 64 个选择分支`)
+    } else {
+      const choiceId = boundedString(raw.choiceId, `${label}.choiceId`, problems, 160) ?? ''
+      const seen = new Set<string>()
+      const options = raw.options.flatMap((entry, index) => {
+        if (!objectValue(entry)) { problems.push(`${label}.options[${index}] 必须是对象`); return [] }
+        const optionId = boundedString(entry.optionId, `${label}.options[${index}].optionId`, problems, 160) ?? ''
+        if (seen.has(optionId)) problems.push(`${label} 存在重复 optionId`)
+        seen.add(optionId)
+        const requirement = parseMaterialRequirement(entry.requirement, `${label}.options[${index}].requirement`, problems)
+        return [{ optionId, ...(requirement ? { requirement } : {}) }]
+      })
+      materialRequirementByChoice = { choiceId, options }
+    }
+  }
 
   const durationInput = objectValue(value.duration) ? value.duration : {}
   if (!objectValue(value.duration)) problems.push(`${prefix}.duration 必须是对象`)
@@ -615,8 +655,8 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
         typeof classId === 'string' && (DND5E_SPELLCASTING_CLASS_IDS as readonly string[]).includes(classId),
       ))]
     : []
-  if (!Array.isArray(value.classes) || classes.length !== value.classes.length || classes.length === 0) {
-    problems.push(`${prefix}.classes 必须是非空的 2014 施法职业 ID 数组`)
+  if (!Array.isArray(value.classes) || classes.length !== value.classes.length) {
+    problems.push(`${prefix}.classes 必须是 2014 施法职业 ID 数组；仅授予使用的法术可以为空`)
   }
   const description = boundedString(value.description, `${prefix}.description`, problems, 20_000) ?? ''
   const higherLevels = boundedString(value.higherLevels, `${prefix}.higherLevels`, problems, 8_000, false)
@@ -675,6 +715,7 @@ function parseSpell(value: unknown, index: number): { spell?: Dnd5eImportedSpell
         ...(materialCostGp != null ? { materialCostGp } : {}),
         ...(materialConsumed != null ? { materialConsumed } : {}),
         ...(materialRequirement ? { materialRequirement } : {}),
+        ...(materialRequirementByChoice ? { materialRequirementByChoice } : {}),
       },
       duration: {
         type: durationType,

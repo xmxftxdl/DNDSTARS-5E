@@ -769,7 +769,13 @@ describe('pending room-authority character patches', () => {
     expect(protectedCharacter.dnd5eCombatState?.activeEffects).toEqual(resolved.dnd5eCombatState?.activeEffects)
     expect(pendingAuthorityCharacterPatchesNeedRepublish([before], [protectedCharacter])).toBe(true)
 
-    const [acknowledged] = mergePendingAuthorityCharacterPatches([resolved], 1_001)
+    // JSON object member order may change through validation/normalization.
+    // An equal server echo must release protection before a later legitimate
+    // effect removal, otherwise the old full state is repeatedly republished.
+    const reorderedEcho = JSON.parse(JSON.stringify(resolved, (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).reverse().map(key => [key, value[key]])) : value))
+    const [acknowledged] = mergePendingAuthorityCharacterPatches([reorderedEcho], 1_001)
     expect(acknowledged.classResources?.['spell-slot-7']?.current).toBe(1)
     expect(acknowledged.dnd5eCombatState?.activeEffects).toEqual(resolved.dnd5eCombatState?.activeEffects)
     expect(pendingAuthorityCharacterPatchesNeedRepublish([resolved], [acknowledged])).toBe(false)
@@ -863,7 +869,9 @@ describe('pending local level advancement receipts', () => {
         dnd5eClassLevels: { fighter: 2 },
         abilities: { ...base.abilities, str: 18 },
         skills: [...(base.skills ?? []), 'perception'],
+        savingThrows: ['str', 'con', 'wis'] as Character['savingThrows'],
         dnd5eFeatIds: ['srd5.1:grappler'],
+        dnd5eContentChoices: {'test:style:level-3':{schemaVersion:1 as const,contentId:'test:style:level-3',selections:{'fighting-style':['dueling']},resolvedGrants:[{kind:'tag' as const,key:'fighting-style',value:'dueling'}]}},
         maxHp: base.maxHp + 6,
         currentHp: base.currentHp + 6,
       },
@@ -879,7 +887,15 @@ describe('pending local level advancement receipts', () => {
     expect(merged.dnd5eClassLevels).toEqual({ fighter: 2 })
     expect(merged.abilities.str).toBe(18)
     expect(merged.skills).toContain('perception')
+    expect(merged.savingThrows).toEqual(record.after.savingThrows)
+    const missingSave = { ...merged, savingThrows: ['str', 'con'] as Character['savingThrows'] }
+    expect(mergePendingLocalAdvancements([missingSave], 1_002)[0].savingThrows).toEqual(record.after.savingThrows)
+    expect(values.size).toBe(1)
     expect(merged.dnd5eFeatIds).toEqual(['srd5.1:grappler'])
+    expect(merged.dnd5eContentChoices).toEqual(record.after.dnd5eContentChoices)
+    const missingBuild = {...merged,dnd5eContentChoices:undefined}
+    expect(mergePendingLocalAdvancements([missingBuild],1_002)[0].dnd5eContentChoices).toEqual(record.after.dnd5eContentChoices)
+    expect(values.size).toBe(1)
     expect(merged.maxHp).toBe(record.after.maxHp)
     expect(merged.currentHp).toBe(record.after.currentHp)
     expect(values.size).toBe(1)
@@ -891,7 +907,9 @@ describe('pending local level advancement receipts', () => {
         dnd5eClassLevels: { ...record.after.dnd5eClassLevels },
         abilities: { ...record.after.abilities },
         skills: [...record.after.skills],
+        savingThrows: [...record.after.savingThrows],
         dnd5eFeatIds: [...(record.after.dnd5eFeatIds ?? [])],
+        dnd5eContentChoices:structuredClone(record.after.dnd5eContentChoices),
         maxHp: record.after.maxHp,
         currentHp: record.after.currentHp,
         dnd5eLevelAdvancements: [record],
@@ -903,6 +921,17 @@ describe('pending local level advancement receipts', () => {
 
 describe('T13/AC6 mergePlayerTokenCombatFields preserves DM-authoritative token positions', () => {
   afterEach(() => vi.restoreAllMocks())
+
+  it('does not resurrect an extinguished light during an unrelated player map write', () => {
+    const lightSource = { enabled: true, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#ffffff' }
+    const localMap = map({ tokens: [token({ id: 'torch', lightSource })] })
+    const sharedMap = map({ tokens: [token({ id: 'torch', lightSource: undefined })] })
+    const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
+    expect(result.tokens[0].lightSource).toBeUndefined()
+    expect(localMap.tokens[0].lightSource).toEqual(lightSource)
+    const [relit] = mergePlayerTokenCombatFields([result], [localMap])
+    expect(relit.tokens[0].lightSource).toEqual(lightSource)
+  })
 
   it('keeps DM-authored item areas when a player publishes an unrelated map write', () => {
     const localMap = map({ dnd5eItemAreas: [] })

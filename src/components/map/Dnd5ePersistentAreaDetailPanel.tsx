@@ -11,10 +11,10 @@ import type { BattleMap, Dnd5ePluginArea } from '../../store/maps'
 export interface Dnd5ePersistentAreaEntityAttackResult {
   outcome: 'miss' | 'hit' | 'destroyed'
   attackTotal: number
-  armorClass: number
+  armorClass: number | null
   damage: number
-  hitPointsBefore: number
-  hitPointsAfter: number
+  hitPointsBefore: number | null
+  hitPointsAfter: number | null
 }
 
 const MAGIC_CIRCLE_CREATURE_TYPE_LABELS: Readonly<Record<string, string>> = {
@@ -309,7 +309,7 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, map, sourceName, 
         {triggerExemptionCount > 0 ? <div className="col-span-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2"><dt className="text-slate-500">不触发目标</dt><dd className="mt-0.5 font-semibold text-slate-200">{excludedTargetNames?.length ? excludedTargetNames.join('、') : `${triggerExemptionCount} 个已登记生物`}</dd></div> : null}
         {area.entityProfile ? <>
           <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2"><dt className="text-slate-500">实体防护</dt><dd className="mt-0.5 font-semibold text-slate-200">AC {area.entityProfile.armorClass} · HP {area.entityCurrentHitPoints ?? area.entityProfile.hitPoints}/{area.entityProfile.hitPoints}</dd></div>
-          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2"><dt className="text-slate-500">实体规则</dt><dd className="mt-0.5 font-semibold text-slate-200">力量 {area.entityProfile.strength}{area.entityProfile.dexterity != null ? ` · 敏捷 ${area.entityProfile.dexterity}` : ''} · {area.entityProfile.invisible ? '隐形' : '可见'} · {area.entityProfile.cannotAttack ? '不能独立攻击' : '可以攻击'}</dd></div>
+          <div className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-2"><dt className="text-slate-500">实体规则</dt><dd className="mt-0.5 font-semibold text-slate-200">{area.entityProfile.strength != null ? `力量 ${area.entityProfile.strength}` : '物体'}{area.entityProfile.dexterity != null ? ` · 敏捷 ${area.entityProfile.dexterity}` : ''} · {area.entityProfile.invisible ? '隐形' : '可见'} · {area.entityProfile.cannotAttack ? '不能独立攻击' : '可以攻击'}</dd></div>
         </> : null}
       </dl>
       {area.symbol ? <div className="mt-3 rounded-xl border border-violet-300/20 bg-violet-500/10 p-3 text-xs text-violet-100">
@@ -420,11 +420,11 @@ export default function Dnd5ePersistentAreaDetailPanel({ area, map, sourceName, 
         <button type="button" disabled={settlingAttack} onClick={() => void resolveEntityAttack()} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-wait disabled:opacity-50">{settlingAttack ? '结算中…' : '结算对实体的攻击'}</button>
         {attackResult ? <p role="status" className="mt-2 text-xs leading-relaxed text-cyan-100">{attackResult}</p> : null}
       </div> : null}
-      {area.entityProfile ? <div className="mt-3 rounded-xl border border-violet-300/15 bg-violet-500/[0.06] p-3">
+      {area.entityProfile?.strength != null ? <div className="mt-3 rounded-xl border border-violet-300/15 bg-violet-500/[0.06] p-3">
         <div className="text-xs font-semibold text-violet-100">实体能力与动作限制</div>
         <div className="mt-2 flex items-end gap-2">
           <label className="min-w-0 flex-1 text-xs text-slate-400">力量检定 d20<input aria-label="力量检定 d20" type="number" min={1} max={20} value={strengthRoll} onChange={(event) => setStrengthRoll(Math.max(1, Math.min(20, Math.floor(Number(event.target.value) || 1))))} className="mt-1 w-full rounded-md border border-white/10 bg-black/25 px-2 py-1 text-slate-100" /></label>
-          <button type="button" onClick={() => { const modifier = Math.floor((area.entityProfile!.strength - 10) / 2); const total = strengthRoll + modifier; setStrengthResult(`力量 ${area.entityProfile!.strength}（${modifier >= 0 ? '+' : ''}${modifier}），d20 ${strengthRoll}，检定结果 ${total}。`) }} className="rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/25">结算力量检定</button>
+          <button type="button" onClick={() => { const modifier = Math.floor((area.entityProfile!.strength! - 10) / 2); const total = strengthRoll + modifier; setStrengthResult(`力量 ${area.entityProfile!.strength}（${modifier >= 0 ? '+' : ''}${modifier}），d20 ${strengthRoll}，检定结果 ${total}。`) }} className="rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/25">结算力量检定</button>
         </div>
         {strengthResult ? <p role="status" className="mt-2 text-xs text-violet-100">{strengthResult}</p> : null}
         {area.entityProfile.cannotAttack ? <button type="button" disabled aria-label="实体攻击（规则禁止）" className="mt-2 w-full cursor-not-allowed rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-slate-500">实体攻击（规则禁止）</button> : null}

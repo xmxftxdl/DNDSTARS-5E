@@ -1536,3 +1536,20 @@ describe('SRD 5.1 inventory', () => {
       entry.templateId === 'srd-5.1:item:goodberry')).toBe(false)
   })
 })
+
+it.each([false, true])('maximizes potion dice for the recipient with matching ledger unless suppressed: %s', suspended => {
+  const hero = { ...character('hero', 1), maxHp: 50, dnd5eCombatState: { activeEffects: [{
+    ...createDnd5eMechanicalEffect({ definitionId: 'maximum', label: 'Maximum', source: { kind: 'plugin' },
+      targetId: 'hero', modifiers: { maximizeHealingDice: true } }), ...(suspended ? { suspendedBy: ['antimagic'] } : {}),
+  }] } }
+  const grant = applyDnd5eInventoryMutation([hero], { type: 'grant', characterId: hero.id,
+    templateId: 'srd-5.1:item:potion-of-healing', quantity: 1 })
+  const entry = inventoryEntry(grant.characters[0], 'srd-5.1:item:potion-of-healing')
+  const result = applyDnd5eInventoryMutation(grant.characters, { type: 'use', characterId: hero.id,
+    instanceId: entry.instanceId, healingRolls: [1, 2] }, { transaction: createCombatTransaction({
+      id: 'max-potion', mapId: 'map', combatId: 'combat', actorId: hero.id, actionId: 'max-potion', actionKind: 'item-use', now: 1 }) })
+  expect(result).toMatchObject({ ok: true, healingRolled: suspended ? 5 : 10, healingApplied: suspended ? 5 : 10 })
+  expect(result.transaction?.rollLedger.entries).toContainEqual(expect.objectContaining({ kind: 'healing',
+    dice: { sides: 4, values: suspended ? [1, 2] : [4, 4] }, modifier: 2 }))
+  expect(result.characters[0].currentHp).toBe(suspended ? 6 : 11)
+})

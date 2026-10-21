@@ -914,7 +914,8 @@ describe('D&D 5e combat simulator', () => {
     expect(turn?.candidates.some((candidate) =>
       candidate.actionId === constrict.id ||
       candidate.actionId === multiattack.id)).toBe(false)
-    expect(turn?.actionName).toBeUndefined()
+    expect(turn?.actionName).toBe('闪避')
+    expect(turn?.executionSteps.some(step => step.kind === 'resource' && step.text.endsWith('消耗动作'))).toBe(true)
   })
 
   it('does not consume hidden random rolls for source-linked on-hit conditions', () => {
@@ -1478,10 +1479,10 @@ describe('D&D 5e combat simulator', () => {
     expect(monsterTurn?.candidates.map((candidate) => candidate.candidateId))
       .not.toContain(`escape-active-effect:${root.id}`)
     expect(monsterTurn).toMatchObject({
-      actionName: undefined,
+      actionName: '闪避',
       candidateId: expect.stringContaining('dodge:'),
       actorPositionAfter: { x: 25, y: 25 },
-      outcome: { executed: false, headlessTransactions: 0 },
+      outcome: { executed: true, headlessTransactions: 1 },
     })
     expect(monsterTurn?.candidates.every((candidate) =>
       candidate.metrics.movementFeet === 0)).toBe(true)
@@ -1972,9 +1973,9 @@ describe('D&D 5e combat simulator', () => {
     // to attack. Slowing Breath leaves only 15, so it must Dash instead of
     // producing a seemingly legal move-and-attack candidate.
     expect(targetTurn).toMatchObject({
-      actionName: undefined,
+      actionName: '疾走',
       candidateId: 'player:fallback:dash',
-      outcome: { executed: false, headlessTransactions: 1 },
+      outcome: { executed: true, headlessTransactions: 2 },
     })
     expect(movedPixels).toBe(200)
   })

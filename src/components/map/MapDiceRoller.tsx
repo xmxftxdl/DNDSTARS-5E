@@ -13,6 +13,8 @@ import {
   dnd5eRageFeatureForCharacter,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
+import { DND5E_TOOL_CHOICES } from '../../rulesets/dnd5e/buildChoiceCatalogs'
+import { dnd5eCharacterBuildProficienciesV1 } from '../../rulesets/dnd5e/buildChoices'
 import {
   mixedDiceFormula, updateMixedDice, type MapFreeDiceSelection,
   type MapFreeDiceResolution,
@@ -82,21 +84,33 @@ export default function MapDiceRoller({
   }
   const [asCheck, setAsCheck] = useState(false)
   const [selection, setSelection] = useState('ability:str')
+  const [toolAbility, setToolAbility] = useState<(typeof ABILITIES)[number]['key']>('int')
   const [dc, setDc] = useState(10)
   const [mode, setMode] = useState<'normal' | 'advantage' | 'disadvantage'>('normal')
   const [spendAction, setSpendAction] = useState(false)
   const [bearAspectTask, setBearAspectTask] = useState(false)
   const [climbingTask, setClimbingTask] = useState(false)
+  const [sightPerception, setSightPerception] = useState(false)
   const [draconicInteraction, setDraconicInteraction] = useState(false)
   const [perceivedTargetId, setPerceivedTargetId] = useState('')
+  const [detectedCreatureId, setDetectedCreatureId] = useState('')
 
   const selectedCheck = useMemo(() => {
     if (!character) return undefined
     const [kind, key] = selection.split(':')
+    if (kind === 'tool') {
+      const tool = DND5E_TOOL_CHOICES.find(candidate => candidate.id === key)
+      if (!tool) return undefined
+      return { ability: toolAbility, skill: undefined, toolId: tool.id,
+        label: `${ABILITIES.find(ability => ability.key === toolAbility)?.label}（${tool.label}）`,
+        modifier: dnd5eAbilityCheckModifier(character, toolAbility, dnd5eCharacterBuildProficienciesV1(character, 'tool').has(tool.id) ? 1 : 0),
+      }
+    }
     if (kind === 'skill') {
       const skill = SKILLS.find((candidate) => candidate.key === key) ?? SKILLS[0]
       return {
         ability: skill.ability,
+        toolId: undefined,
         skill: skill.key,
         label: `${ABILITIES.find((ability) => ability.key === skill.ability)?.label ?? skill.ability}（${skill.label}）`,
         modifier: dnd5eSkillCheckModifier(character, skill.key),
@@ -105,16 +119,18 @@ export default function MapDiceRoller({
     const ability = ABILITIES.find((candidate) => candidate.key === key) ?? ABILITIES[0]
     return {
       ability: ability.key,
+      toolId: undefined,
       skill: undefined,
       label: `${ability.label}检定`,
       modifier: dnd5eAbilityCheckModifier(character, ability.key),
     }
-  }, [character, selection])
+  }, [character, selection, toolAbility])
 
   const bearAspectAvailable =
     character != null &&
     selectedCheck?.ability === 'str' &&
     selectedCheck.skill == null &&
+    selectedCheck.toolId == null &&
     !!dnd5eRageFeatureForCharacter(character, 'object-strength-and-carrying')
   const selectedProficiencyRank = character && selectedCheck?.skill
     ? dnd5eSkillCheckProficiencyRank(character, selectedCheck.skill)
@@ -171,12 +187,16 @@ export default function MapDiceRoller({
     }
     close()
     onCheck({
+      detectedCreatureId: !selectedCheck.toolId && selectedCheck.skill !== 'perception' && detectedCreatureId ? detectedCreatureId : undefined,
+      toolId: selectedCheck.toolId,
       ability: selectedCheck.ability,
       skill: selectedCheck.skill,
       perceivedTargetId: selectedCheck.skill === 'perception' && perceivedTargetId
         ? perceivedTargetId
         : undefined,
-      context: bearAspectAvailable && bearAspectTask
+      context: selectedCheck.skill === 'perception' && sightPerception
+        ? 'sight'
+        : bearAspectAvailable && bearAspectTask
         ? 'push-pull-lift-break'
         : selectedCheck.skill === 'athletics' && climbingTask
           ? 'climbing'
@@ -351,6 +371,9 @@ export default function MapDiceRoller({
                             return <option key={skill.key} value={`skill:${skill.key}`}>{skill.label} · {modifier >= 0 ? '+' : ''}{modifier}{rank === 2 ? '（专精）' : rank === 1 ? '（熟练）' : ''}</option>
                           })}
                         </optgroup>
+                        <optgroup label="工具检定">
+                          {DND5E_TOOL_CHOICES.map(tool => <option key={tool.id} value={`tool:${tool.id}`}>{tool.label}{dnd5eCharacterBuildProficienciesV1(character, 'tool').has(tool.id) ? '（熟练）' : ''}</option>)}
+                        </optgroup>
                       </select>
                     </label>
                     <label className="text-[10px] font-semibold text-slate-500">DC
@@ -360,6 +383,19 @@ export default function MapDiceRoller({
                       <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100"><option value="normal">正常</option><option value="advantage">优势</option><option value="disadvantage">劣势</option></select>
                     </label>
                   </div>
+                  {selectedCheck.toolId ? <label className="mt-2 block text-[10px] font-semibold text-slate-500">使用属性
+                    <select value={toolAbility} onChange={event => setToolAbility(event.target.value as typeof toolAbility)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
+                      {ABILITIES.map(ability => <option key={ability.key} value={ability.key}>{ability.label}</option>)}
+                    </select>
+                  </label> : null}
+                  {!selectedCheck.toolId && selectedCheck.skill !== 'perception' && perceptionTargets.length > 0 ? (
+                    <label className="mt-2 block text-[10px] font-semibold text-slate-500">探测生物（仅在本次检定用于发现该生物时选择）
+                      <select value={detectedCreatureId} onChange={event => setDetectedCreatureId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
+                        <option value="">本次不是探测生物检定</option>
+                        {perceptionTargets.map(target => <option key={target.id} value={target.id}>{target.label}</option>)}
+                      </select>
+                    </label>
+                  ) : null}
                   {selectedCheck.skill === 'perception' && perceptionTargets.length > 0 ? (
                     <label className="mt-2 block text-[10px] font-semibold text-slate-500">观察目标
                       <select value={perceivedTargetId} onChange={(event) => setPerceivedTargetId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100">
@@ -373,6 +409,12 @@ export default function MapDiceRoller({
                   ) : (
                     <p className="mt-2 text-[11px] leading-5 text-emerald-300/80">战斗外鉴定不会消耗行动；骰值、调整值与是否通过会公开同步。</p>
                   )}
+                  {headlessCheck && selectedCheck.skill === 'perception' ? (
+                    <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+                      <input type="checkbox" checked={sightPerception} onChange={event => setSightPerception(event.target.checked)} />
+                      本次察觉依赖视觉
+                    </label>
+                  ) : null}
                   {selectedCheck.skill === 'athletics' ? (
                     <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
                       <input type="checkbox" checked={climbingTask} onChange={event => setClimbingTask(event.target.checked)} />

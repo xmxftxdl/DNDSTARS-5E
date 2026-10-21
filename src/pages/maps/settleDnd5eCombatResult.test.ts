@@ -24,6 +24,10 @@ import { setDnd5eRoomMonsterCatalog } from '../../rulesets/dnd5e/monsters'
 import type { BattleMap, Token } from '../../store/maps'
 import { planMapsManualSettlement } from './manualSettlementTransaction'
 import { settleDnd5eConcentrationChecks } from './settleDnd5eCombatResult'
+import { planDnd5eMapResultApplication } from '../../rulesets/dnd5e/mapBridge'
+import { registerDnd5eActivityPackage } from '../../rulesets/dnd5e/activities/dnd5eActivityRegistry'
+import { settleDnd5eActivityTriggerWindowsV1 } from '../../rulesets/dnd5e/activities/dnd5eActivityTriggerSettlement'
+import { automationCapabilityFromLegacyStatus } from '../../domain/automation/automationCapability'
 
 const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
 
@@ -72,6 +76,105 @@ function map(): BattleMap {
 const unusedRoll = async () => 1
 
 describe('地图战斗结果结算器', () => {
+  it.each(['consumed', 'refreshed', 'old-round', 'off-map'] as const)(
+    'retains prior reaction spending only when still authoritative: %s', async scenario => {
+      const state = startDnd5eHeadlessCombat('reaction-continuation', [combatant('hero', 20), combatant('enemy', 10)])
+      state.combatants.hero.turn.reactionAvailable = scenario === 'refreshed'
+      const currentMap = map()
+      if (scenario === 'off-map') currentMap.tokens = currentMap.tokens.filter(token => token.id !== 'hero')
+      const priorApplication = {
+        changedTokenIds: [], changedCharacterIds: [],
+        spentReactions: { round: scenario === 'old-round' ? state.round - 1 : state.round, tokenIds: ['hero', 'hero'] },
+      }
+      const settled = await settleDnd5eConcentrationChecks({
+        result: { ok: true, state, events: [] }, map: currentMap, priorApplication,
+        characters: [], characterIdByCombatantId: {}, preserveOffMapParticipants: scenario === 'off-map',
+        rollD20: unusedRoll, rollD4: unusedRoll, rollDice: async () => [],
+      })
+      expect(settled.application.spentReactions).toEqual(scenario === 'consumed'
+        ? { round: state.round, tokenIds: ['hero'] } : undefined)
+    },
+  )
+
+  it('commits granted movement damage and concentration while retaining already-planned position patches', async () => {
+    const packageId='test.movement-recipient'
+    const registration=registerDnd5eActivityPackage({packageId,packageVersion:'1.0.0',activities:[{
+      schemaVersion:1,id:'cut',name:'Cut',activation:{kind:'free'},requiresEffectGrant:true,target:{kind:'self'},
+      invocation:{kind:'triggered',event:'movement-completed',confirmation:'automatic'},
+      requirements:[{kind:'movement-distance',minimumFeet:1},{kind:'once-per-turn',key:'cut'}],
+      outcomes:[{id:'cut',when:{kind:'always'},operations:[{id:'cut',kind:'damage',target:'actor',damageSource:'grant-source',damageType:'slashing',amount:{kind:'dice',rollId:'cut',count:1,sides:6}}]}],
+      automation:automationCapabilityFromLegacyStatus('full'),legacySource:{kind:'feature',id:'cut'},
+    }]})
+    try {
+      const state=startDnd5eHeadlessCombat('recipient-move',[combatant('hero',20),combatant('enemy',10,true)])
+      state.combatants.enemy.classState.activeEffects=[createDnd5eMechanicalEffect({definitionId:'test:binding',label:'Binding',targetId:'enemy',
+        source:{kind:'feature',actorId:'hero',pluginId:packageId,rulesId:'cut'},duration:{type:'permanent'},grantedActivities:['cut']})]
+      state.combatants.enemy.position={x:50,y:0}
+      const prior=planDnd5eMapResultApplication({state,map:map(),characters:[],characterIdByCombatantId:{}})
+      const settled=await settleDnd5eConcentrationChecks({result:{ok:true,state,events:[{type:'moved',actorId:'enemy',from:{x:0,y:0},to:{x:50,y:0},distance:5,movementKind:'voluntary'}]},
+        map:prior.map,priorApplication:prior,characters:[],characterIdByCombatantId:{},rollD20:async()=>20,rollD4:unusedRoll,rollDice:async count=>Array(count).fill(4),
+        settleActivityTriggers:async request=>{
+          const triggered=await settleDnd5eActivityTriggerWindowsV1({...request,eventBatchId:'recipient-move',combatRevision:1,confirm:async()=>{throw Error('automatic')},roll:async r=>Array(r.count).fill(4)})
+          return {state:triggered.state,events:triggered.events}
+        },
+      })
+      expect(settled.application.map.tokens.find(t=>t.id==='enemy')).toMatchObject({x:50,y:0,hp:16})
+      expect(settled.application.changedTokenIds).toContain('enemy')
+      expect(settled.result.events.filter(event=>event.type==='damage-applied')).toHaveLength(1)
+      expect(settled.result.events).toContainEqual(expect.objectContaining({type:'damage-applied',sourceId:'hero',targetId:'enemy'}))
+      expect(state.combatants.enemy.currentHp).toBe(20)
+    } finally {registration.dispose()}
+  })
+
+  it('publishes movement patches when a trigger already materialized its destination map', async () => {
+    const state = startDnd5eHeadlessCombat('trigger-move-patch', [combatant('hero', 20), combatant('enemy', 10)])
+    const initial = map()
+    initial.tokens[0].characterId = 'character-hero'
+    const source = planDnd5eMapResultApplication({ state, map: initial, characters: [], characterIdByCombatantId: {} }).map
+    const settled = await settleDnd5eConcentrationChecks({ result: { ok: true, state, events: [] },
+      map: source, characters: [], characterIdByCombatantId: {}, rollD20: unusedRoll, rollD4: unusedRoll, rollDice: async () => [],
+      settleActivityTriggers: async request => {
+        const next = structuredClone(request.state)
+        next.combatants.hero.position = { x: 100, y: 100 }
+        next.combatants.hero.turn.reactionAvailable = false
+        return { state: next, events: [{ type: 'moved', actorId: 'hero', from: { x: 0, y: 0 }, to: { x: 100, y: 100 }, distance: 10 }],
+          map: { ...request.map, tokens: request.map.tokens.map(t => t.id === 'hero' ? { ...t, x: 100, y: 100 } : t) } }
+      },
+    })
+    expect(settled.application.map.tokens.find(t => t.id === 'hero')).toMatchObject({ x: 100, y: 100 })
+    expect(settled.application.changedTokenIds).toContain('hero')
+    expect(settled.application.tokenPatches?.hero).toMatchObject({ x: 100, y: 100 })
+    expect(source.tokens[0]).toMatchObject({ x: 0, y: 0 })
+  })
+  it('rolls mandatory concentration penalties per occurrence before preview and retains both audit entries',async()=>{
+    const hero=combatant('hero',20,true)
+    hero.classState.activeEffects=[createDnd5eMechanicalEffect({id:'penalty',definitionId:'penalty',label:'Penalty',source:{kind:'plugin'},targetId:hero.id,
+      modifiers:{rollDiceModifiers:[{count:1,sides:6,direction:'subtract',appliesTo:['concentration-save']}]}})]
+    const state=startDnd5eHeadlessCombat('combat',[hero,combatant('enemy',10)])
+    const result:Extract<Dnd5eActionResult,{ok:true}>={ok:true,state,events:[
+      {type:'concentration-check-required',targetId:'hero',dc:10},
+      {type:'concentration-check-required',targetId:'hero',dc:10},
+    ]}
+    const order:string[]=[],previews:boolean[]=[],offeredTotals:number[]=[]
+    const values=[1,6]
+    const settled=await settleDnd5eConcentrationChecks({result,map:map(),characters:[],characterIdByCombatantId:{},
+      rollDice:async()=>{order.push('effect');return [values.shift()!]},rollD4:unusedRoll,
+      rollD20:async(_label,_name,context)=>{order.push('d20');previews.push(context!.checkPreview!.evaluate(15));return 15},
+      requestOptionalBonusDie:async request=>{offeredTotals.push(request.total);return undefined},
+    })
+    expect(order).toEqual(['effect','d20','effect','d20'])
+    expect(previews).toEqual([true,false])
+    expect(offeredTotals).toEqual([14,9])
+    expect(settled.result.state.combatants.hero.concentrating).toBe(false)
+    expect(state.combatants.hero.concentrating).toBe(true)
+    const audit=settled.result.transaction!.rollLedger.entries.filter(entry=>entry.sourceId==='penalty')
+    expect(audit.map(entry=>entry.dice.values)).toEqual([[1],[6]])
+    expect(new Set(audit.map(entry=>entry.id)).size).toBe(2)
+    expect(settled.result.transaction!.rollLedger.entries.filter(entry=>entry.kind==='saving-throw')).toHaveLength(2)
+    await expect(settleDnd5eConcentrationChecks({result,map:map(),characters:[],characterIdByCombatantId:{},
+      rollDice:async()=>[7],rollD4:unusedRoll,rollD20:async()=>15})).rejects.toThrow('roll-dice-missing-or-invalid')
+    expect(state.combatants.hero.concentrating).toBe(true)
+  })
   it('preserves Sunburst scene darkness dispelling through concentration settlement', async () => {
     const currentMap = map()
     const geometry = createEmptyMapGeometry(currentMap.id)
@@ -289,6 +392,24 @@ describe('地图战斗结果结算器', () => {
     expect(settleActivityTriggers).toHaveBeenCalledOnce()
     expect(settled.result.state.combatants.hero.currentHp).toBe(19)
     expect(settled.application.map.tokens.find((entry) => entry.id === 'hero')?.hp).toBe(19)
+  })
+
+  it('persists a declined Activity receipt even without new combat events', async () => {
+    const state = startDnd5eHeadlessCombat('declined-production', [combatant('hero', 20), combatant('enemy', 10)])
+    const receipt = { combatId: state.combatId, ids: ['synthetic-declined-window'] }
+    const settled = await settleDnd5eConcentrationChecks({
+      result: { ok: true, state, events: [] }, map: map(), characters: [], characterIdByCombatantId: {},
+      rollD20: unusedRoll, rollD4: unusedRoll, rollDice: async () => [],
+      settleActivityTriggers: async request => {
+        const next = structuredClone(request.state)
+        next.combatants.hero.classState.activityTriggerReceipts = receipt
+        return { state: next, events: [] }
+      },
+    })
+    const restored = JSON.parse(JSON.stringify(settled.application.map)) as BattleMap
+    expect(restored.tokens.find(entry => entry.id === 'hero')?.dnd5eCombatState?.activityTriggerReceipts).toEqual(receipt)
+    expect(state.combatants.hero.classState.activityTriggerReceipts).toBeUndefined()
+    expect(settled.result.state.combatants.hero.turn.reactionAvailable).toBe(true)
   })
 
   it('builds the final application from the map returned by Activity placement handoffs', async () => {
@@ -578,7 +699,7 @@ describe('地图战斗结果结算器', () => {
     }))
   })
 
-  it('uses Host d6 rolls when a failed Fly concentration save causes a fall', async () => {
+  it.each([false,true])('uses Host d6 rolls when a failed Fly concentration save causes a fall (effect die: %s)', async (effectDie) => {
     const hero = combatant('hero', 20, true, {
       elevationFeet: 30,
       groundElevationFeet: 0,
@@ -596,6 +717,8 @@ describe('地图战斗结果结算器', () => {
       duration: { type: 'concentration', sourceActorId: hero.id, concentrationId: 'fly' },
       modifiers: { flySpeedFeet: 60 },
     })]
+    if(effectDie) hero.classState.activeEffects.push(createDnd5eMechanicalEffect({id:'fall-penalty',definitionId:'fall-penalty',label:'Penalty',source:{kind:'plugin'},targetId:hero.id,
+      modifiers:{rollDiceModifiers:[{count:1,sides:6,direction:'subtract',appliesTo:['concentration-save']}]}}))
     const state = startDnd5eHeadlessCombat('combat', [hero, combatant('enemy', 10, false, {position:{x:20,y:0}})])
     const result: Extract<Dnd5eActionResult, { ok: true }> = {
       ok: true,
@@ -605,14 +728,14 @@ describe('地图战斗结果结算器', () => {
     const battleMap = map()
     battleMap.tokens = battleMap.tokens.map((entry) =>
       entry.id === hero.id ? { ...entry, elevationFeet: 30 } : entry)
-    const rollDice = vi.fn(async () => [2, 3, 4])
+    const rollDice = vi.fn(async (count:number) => count===1 ? [6] : [2, 3, 4])
 
     const settled = await settleDnd5eConcentrationChecks({
       result,
       map: battleMap,
       characters: [],
       characterIdByCombatantId: {},
-      rollD20: async () => 1,
+      rollD20: async () => effectDie ? 15 : 1,
       rollD4: unusedRoll,
       rollDice,
     })
@@ -683,6 +806,63 @@ describe('地图战斗结果结算器', () => {
     })
 
     expect(rollD20).toHaveBeenCalledTimes(2)
+    expect(settled.result.state.combatants.enemy.conditions).not.toContain('incapacitated')
+    expect(settled.result.state.combatants.hero.concentrating).toBe(false)
+    expect(settled.result.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-save-resolved', targetId: 'enemy', success: true,
+    }))
+  })
+
+  it('keeps two damage save occurrences and their modes until each is settled', async () => {
+    const caster = combatant('hero', 20, true)
+    caster.classState.concentrationSpellId = 'hideous-laughter'
+    caster.classState.concentrationTargetIds = ['enemy']
+    caster.classState.concentrationRoundsRemaining = 10
+    const target = combatant('enemy', 10)
+    const effect = createDnd5eConditionEffect({
+      condition: 'incapacitated',
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'hideous-laughter' },
+      targetId: target.id,
+      duration: {
+        type: 'concentration', sourceActorId: caster.id,
+        concentrationId: 'hideous-laughter', remainingRounds: 10,
+      },
+      repeatSave: {
+        ability: 'wis', dc: 10, timing: 'target-turn-end', onSuccess: 'remove',
+        onDamage: { mode: 'normal' },
+      },
+    })
+    target.classState.activeEffects = [effect]
+    target.classState.activeEffectDamageSavePendingIds = [effect.id,effect.id]
+    target.classState.activeEffectDamageSavePendingQueue = [{effectId:effect.id,mode:'normal'},{effectId:effect.id,mode:'advantage'}]
+    target.classState.concentrationEffectsBySource = { [caster.id]: 'hideous-laughter' }
+    target.conditions = dnd5eConditionsFromActiveEffects([effect])
+    const state = startDnd5eHeadlessCombat('combat', [caster, target])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = {
+      ok: true,
+      state,
+      events: [{type:'active-effect-save-required',targetId:target.id,effectId:effect.id,ability:'wis',dc:10,timing:'takes-damage',mode:'normal'}, {
+        type: 'active-effect-save-required', targetId: target.id, effectId: effect.id,
+        ability: 'wis', dc: 10, timing: 'takes-damage', mode: 'advantage',
+      }],
+    }
+    const rolls = [1, 1, 15]
+    const rollD20 = vi.fn(async () => rolls.shift() ?? 1)
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(rollD20).toHaveBeenCalledTimes(3)
+    expect(settled.result.events.filter(event=>event.type==='active-effect-save-resolved').map(event=>event.success)).toEqual([false,true])
+    expect(settled.result.state.combatants.enemy.classState.activeEffectDamageSavePendingIds).toBeUndefined()
+    expect(target.classState.activeEffectDamageSavePendingQueue).toHaveLength(2)
     expect(settled.result.state.combatants.enemy.conditions).not.toContain('incapacitated')
     expect(settled.result.state.combatants.hero.concentrating).toBe(false)
     expect(settled.result.events).toContainEqual(expect.objectContaining({
@@ -990,4 +1170,33 @@ describe('地图战斗结果结算器', () => {
       dispose()
     }
   })
+})
+
+it.each([14,15])('settles a restored ending save through the map dice pipeline (%s)',async die=>{
+ const hero=combatant('hero',1)
+ hero.classState.activeEffects=[createDnd5eMechanicalEffect({id:'pending-end',definitionId:'pending:effect-end-save',label:'Ending save',source:{kind:'system'},targetId:hero.id,pendingEndSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1}})]
+ const state=startDnd5eHeadlessCombat('end-save',[combatant('enemy',20),hero])
+ const rollD20=vi.fn(async()=>die)
+ const input={result:{ok:true as const,state:JSON.parse(JSON.stringify(state)),events:[]},map:map(),characters:[],characterIdByCombatantId:{},rollD20,rollD4:unusedRoll,rollDice:async()=>[]}
+ const settled=await settleDnd5eConcentrationChecks(input)
+ expect(rollD20).toHaveBeenCalledTimes(1)
+ expect(settled.result.state.combatants.hero.exhaustionLevel).toBe(die<15?1:0)
+ expect(settled.result.state.combatants.hero.classState.activeEffects?.some(e=>e.pendingEndSavingThrow)??false).toBe(false)
+ const again=await settleDnd5eConcentrationChecks({...input,result:{ok:true,state:JSON.parse(JSON.stringify(settled.result.state)),events:[]}})
+ expect(rollD20).toHaveBeenCalledTimes(1)
+ expect(again.result.state.combatants.hero.exhaustionLevel).toBe(die<15?1:0)
+})
+
+it('gives a restored pending save the same durable identity and a new instance a different identity',async()=>{
+ const hero=combatant('hero',1)
+ hero.classState.activeEffects=[createDnd5eMechanicalEffect({id:'pending-end',definitionId:'pending:effect-end-save',label:'Ending save',source:{kind:'system'},targetId:hero.id,pendingEndSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1}})]
+ const state=startDnd5eHeadlessCombat('durable-end',[combatant('enemy',20),hero]),keys:string[]=[]
+ const scope=async <T>(key:string,run:()=>Promise<T>):Promise<T>=>{keys.push(key);return run()}
+ const input={result:{ok:true as const,state,events:[]},map:map(),characters:[],characterIdByCombatantId:{},rollD20:async()=>15,rollD4:unusedRoll,rollDice:async()=>[],runEffectEndSavingThrow:scope}
+ await settleDnd5eConcentrationChecks(input)
+ await settleDnd5eConcentrationChecks({...input,result:{...input.result,state:JSON.parse(JSON.stringify(state))}})
+ expect(keys).toHaveLength(2);expect(keys[0]).toBe(keys[1])
+ const next=JSON.parse(JSON.stringify(state));next.combatants.hero.classState.activeEffects[0].appliedAt+=1
+ await settleDnd5eConcentrationChecks({...input,result:{...input.result,state:next}})
+ expect(keys[2]).not.toBe(keys[0])
 })

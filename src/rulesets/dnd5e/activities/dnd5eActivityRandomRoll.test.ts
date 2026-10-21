@@ -45,6 +45,13 @@ function randomTableActivity(scope: 'shared' | 'per-target' = 'shared'): Dnd5eAc
 }
 
 describe('Host-authoritative Activity random tables', () => {
+  it('reports formula/check dice collisions before plugin registration', () => {
+    const activity = randomTableActivity()
+    activity.outcomes[0].operations = [{ id: 'damage', kind: 'damage', target: 'actor',
+      amount: { kind: 'dice', rollId: 'table-roll', count: 1, sides: 10 }, damageType: 'psychic' }]
+    expect(() => compileDnd5eActivityHeadlessAction(activity)).toThrow('duplicate shared dice declaration: table-roll')
+  })
+
   it('validates and executes exactly the matching total range', () => {
     const activity = randomTableActivity()
     expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])

@@ -7,6 +7,7 @@ import {
   grantDnd5eActionSurge,
   normalizeDnd5eTurnEconomyCounts,
   projectDnd5eHeadlessTurnEconomy,
+  projectDnd5eStartingTurnEconomy,
   refreshDnd5eReactiveReactionEconomies,
   spendDnd5eMovement,
   spendDnd5eTurnResource,
@@ -168,4 +169,17 @@ describe('Slow shared action choice', () => {
     expect(constrained.reaction).toEqual(fresh.reaction)
     expect(constrainDnd5eTurnEconomyForEffects(spent, [])).toBe(spent)
   })
+})
+
+it('projects resumed attack usage only for the matching resolved turn', () => {
+  const fresh = createDnd5eTurnEconomyCounts('combat:1:hero', 30)
+  const turn = {actionAvailable:false,bonusActionAvailable:true,reactionAvailable:true,
+    objectInteractionAvailable:true,movementRemaining:25,movementSpent:5}
+  const usage = {attacksMadeTurnKey:fresh.turnKey,attacksMadeThisTurn:2}
+  const projected = projectDnd5eStartingTurnEconomy(fresh, turn, fresh.turnKey, usage)
+  expect(projected.attacksUsed).toBe(2)
+  expect(projected.action.current).toBe(0)
+  expect(projected.movement.current).toBe(25)
+  expect(projectDnd5eStartingTurnEconomy(fresh, turn, fresh.turnKey, {...usage,attacksMadeTurnKey:'older'}).attacksUsed).toBe(0)
+  expect(projectDnd5eStartingTurnEconomy(fresh, turn, 'older', usage)).toBe(fresh)
 })

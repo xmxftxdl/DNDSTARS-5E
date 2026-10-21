@@ -1,4 +1,5 @@
 import type { Character, CharacterResourceState } from '../types/character'
+import { resourceBalanceAfterRest } from './resourceRestRecovery'
 import {
   classDefinitionForCharacter,
   mergeClassResourceDefinitions,
@@ -127,6 +128,8 @@ const DND5E_LEGACY_RESOURCE_LABELS: Readonly<Record<string, string>> = {
  * character contains resources from a class that is no longer active.
  */
 export function classResourceDisplayLabel(character: Character, key: string): string {
+  const hitDie = /^hit-die:d(6|8|10|12)$/.exec(key)
+  if (hitDie) return `生命骰（d${hitDie[1]}）`
   const registered = classResourceDefinition(character, key)
   if (registered) return registered.label
   const spellSlot = /^dnd5e-spell-slot-([1-9])$/.exec(key)
@@ -140,7 +143,7 @@ export function getClassResource(character: Character, key: string): CharacterRe
   const definition = classResourceDefinition(character, key)
   if (!definition) return undefined
   const structured = character.classResources?.[key]
-  return clampResource(structured?.current, definition.max(character))
+  return clampResource(structured?.current ?? definition.initialCurrent, definition.max(character))
 }
 
 export function getClassResourceCurrent(character: Character, key: string): number {
@@ -168,7 +171,7 @@ export function syncCharacterClassResources(character: Character): Character {
   )
   for (const definition of available) {
     const existing = character.classResources?.[definition.key]
-    resources[definition.key] = clampResource(existing?.current, definition.max(character))
+    resources[definition.key] = clampResource(existing?.current ?? definition.initialCurrent, definition.max(character))
   }
   return withClassResources(character, resources)
 }
@@ -195,8 +198,18 @@ export function spendClassResource(character: Character, key: string, amount = 1
 export function restoreClassResources(character: Character, reset: ClassResourceReset): Character {
   let next = syncCharacterClassResources(character)
   for (const definition of classResourceDefinitions(next)) {
+    const rule = reset === 'combat' ? definition.combatStartRecovery : definition.restRecovery?.[reset]
+    if (reset === 'combat' && definition.combatStartRecovery?.minimumClassLevel) {
+      const required = definition.combatStartRecovery.minimumClassLevel
+      if ((normalizeDnd5eClassLevels(next)[required.classId] ?? 0) < required.level) continue
+    }
+    if (rule) {
+      next = updateClassResource(next, definition.key, resource => resourceBalanceAfterRest(resource.current, resource.max, rule)) ?? next
+      continue
+    }
     const shouldReset =
       definition.resetOn === reset ||
+      (reset === 'combat' && definition.restoreOnCombatStart === true) ||
       (reset === 'long-rest' && definition.resetOn === 'short-rest') ||
       (reset === 'long-rest' && definition.resetOn === 'combat')
     if (!shouldReset) continue

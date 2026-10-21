@@ -18,6 +18,20 @@ const lock: Dnd5eArcaneLockStateV1 = {
 }
 
 describe('D&D 5e mapped magic object state', () => {
+  it('roundtrips explicit fractional weight without guessing absent weights', () => {
+    for (const weightPounds of [0, 0.5, 1, 5, 45]) {
+      const state = { schemaVersion: 1, weightPounds, magical: true, wornOrCarried: false }
+      expect(normalizeDnd5eMapObjectStateV1(JSON.parse(JSON.stringify(state)))).toEqual(state)
+    }
+    expect(normalizeDnd5eMapObjectStateV1({ schemaVersion: 1 })?.weightPounds).toBeUndefined()
+    for (const weightPounds of [-1, Infinity, NaN, '5', {}, true]) {
+      expect(normalizeDnd5eMapObjectStateV1({ schemaVersion: 1, weightPounds })).toBeUndefined()
+    }
+  })
+  it('preserves explicit vegetation life while rejecting invented classifications', () => {
+    for (const vegetation of ['living', 'dead']) expect(normalizeDnd5eMapObjectStateV1({ schemaVersion: 1, vegetation })?.vegetation).toBe(vegetation)
+    for (const vegetation of ['plant-creature', 'tree.png', true, { run: 'script' }]) expect(normalizeDnd5eMapObjectStateV1({ schemaVersion: 1, vegetation })).toBeUndefined()
+  })
   it('normalizes bounded authorization state without storing plaintext passwords', () => {
     expect(normalizeDnd5eArcaneLockStateV1(lock)).toEqual(lock)
     expect(hashDnd5eArcaneLockPasswordV1(' moon   door ')).toBe(lock.passwordDigest)
@@ -60,4 +74,10 @@ describe('D&D 5e mapped magic object state', () => {
       waterContainer: { ...state.waterContainer, waterGallons: 51 },
     })).toBeUndefined()
   })
+})
+
+it('roundtrips explicit scene features without guessing them from plant life', () => {
+ for(const naturalFeature of ['tree','undergrowth','rock']) expect(normalizeDnd5eMapObjectStateV1({schemaVersion:1,naturalFeature})?.naturalFeature).toBe(naturalFeature)
+ expect(normalizeDnd5eMapObjectStateV1({schemaVersion:1,vegetation:'living'})?.naturalFeature).toBeUndefined()
+ for(const naturalFeature of ['tree.png','plant-creature',true,{}]) expect(normalizeDnd5eMapObjectStateV1({schemaVersion:1,naturalFeature})).toBeUndefined()
 })

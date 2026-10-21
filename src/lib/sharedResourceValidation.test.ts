@@ -366,6 +366,22 @@ describe('shared resource runtime validation', () => {
       } }] }],
     }).status).toBe('valid')
   })
+  it('accepts declared lost-control concentration state and rejects malformed control policies', () => {
+    const summon = { schemaVersion: 1, pluginId: 'test', featureId: 'test:summon', sourceCharacterId: 'hero',
+      sourceTokenId: 'hero-token', createdRound: 1, expiresAfterRound: 600,
+      concentrationId: 'summon', side: 'enemy', controlEnded: true }
+    const validate = (patch: object) => validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, ...patch } }] }],
+    }).status
+    expect(validate({ controlSave: { ability: 'cha', dc: 15, lingerDieSides: 6 } })).toBe('valid')
+    expect(validate({ uncontrolledLinger: { count: 3, sides: 6, unit: 'minute' } })).toBe('valid')
+    for (const controlSave of [{}, { ability: 'cha', dc: 0 }, { ability: 'cha', dc: 15, disadvantage: 'yes' }]) {
+      expect(validate({ controlSave })).toBe('invalid')
+    }
+    for (const uncontrolledLinger of [{}, { count: 0, sides: 6, unit: 'minute' }, { count: 3, sides: 6, unit: 'hour' }]) {
+      expect(validate({ uncontrolledLinger })).toBe('invalid')
+    }
+  })
 
   it('fails closed for malformed core spell effect-token ownership metadata', () => {
     const effect = {

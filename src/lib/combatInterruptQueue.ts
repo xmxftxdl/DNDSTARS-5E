@@ -212,7 +212,7 @@ export function markCombatInterruptRolling(
       status: 'rolling',
       response: response ?? interrupt.response,
       ...(interrupt.kind === 'roll-confirmation' && interrupt.payload.visibility !== 'dm-only'
-        ? { expiresAt: now + 10_000 }
+        ? { expiresAt: now + 120_000 }
         : {}),
       updatedAt: now,
     }) : interrupt,
@@ -310,9 +310,21 @@ export function recordCombatInterruptRollOptions(
   rollOptions: { contributionId: string; values: number[] },
   now = Date.now(),
 ): SharedCombatInterruptQueueState | null {
-  return updateCombatInterrupt(queue, id, (interrupt) => ({
-    ...interrupt, payload: { ...interrupt.payload, rollOptions }, updatedAt: now,
-  }), now)
+  return updateCombatInterrupt(queue, id, (interrupt) => {
+    if (interrupt.payload.rollOptions != null) return interrupt
+    const contribution = interrupt.contributions?.find((entry) =>
+      entry.id === rollOptions.contributionId && entry.kind === 'choice-reroll' && entry.decision === 'use')
+    const modifiers = interrupt.payload.eligibleModifiers
+    const eligible = contribution?.kind === 'choice-reroll' && Array.isArray(modifiers) ? modifiers.find((entry) =>
+      entry.characterId === contribution.characterId && entry.featureId === contribution.featureId &&
+      entry.featureLabel === contribution.featureLabel && entry.modifierKind === 'choice-reroll') : undefined
+    const ownerChooses = eligible && (eligible.selectionPolicy ?? 'owner-chooses') === 'owner-chooses'
+    return {
+      ...interrupt, payload: { ...interrupt.payload, rollOptions }, updatedAt: now,
+      status: ownerChooses ? 'pending' : interrupt.status,
+      expiresAt: interrupt.payload.visibility === 'dm-only' ? interrupt.expiresAt : now + 10_000,
+    }
+  }, now)
 }
 
 export function waitCombatInterruptForDm(

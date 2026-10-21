@@ -1,3 +1,7 @@
+import { alternateResourceSpellHotbarSources } from './alternateResourceSpellHotbarSources'
+import { registerDnd5eRulesPlugin } from '../../rulesets/dnd5e/pluginApi'
+import { independentSpellHotbarSources } from './independentSpellHotbarSources'
+import { dnd5eSpellbookEntriesWithPlugins } from '../../rulesets/dnd5e/spellbook'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
@@ -13,7 +17,7 @@ import PlayerCombatHotbar, {
 import { resolveDnd5eHotbarSpellCommand } from './playerCombatHotbarSpellCommand'
 import { DND5E_QUARTERSTAFF, getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e'
 import { dnd5ePluginSpellActivity } from '../../rulesets/dnd5e/pluginSpellTransaction'
-import { dnd5ePluginSpellDefinition } from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
+import { registeredDnd5ePluginSpells, dnd5ePluginSpellDefinition } from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import { createDnd5eMechanicalEffect } from '../../rulesets/dnd5e/activeEffects'
 import { dnd5eWeaponAttackProfile } from '../../rulesets/dnd5e/equipment'
 
@@ -69,10 +73,12 @@ describe('PlayerCombatHotbar', () => {
     expect(dnd5eHotbarSpellTargeting(
       getDnd5eSrdCombatSpell('light'),
       dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition('light')),
+      'light',
     )).toBe('none')
     expect(dnd5eHotbarSpellTargeting(
       undefined,
       dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition('identify')),
+      'identify',
     )).toBe('none')
     expect(dnd5eHotbarSpellTargeting(
       getDnd5eSrdCombatSpell('demiplane'),
@@ -314,10 +320,11 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('data-testid="combat-hotbar-character-portrait"')
     expect(html).toContain('aria-label="快速查看冒险者的人物卡"')
     expect(html).toMatch(/data-action-id="system:move"[^>]*aria-disabled="true"/)
+    expect(html).toMatch(/data-action-id="system:other-actions"[^>]*data-command-kind="open-panel"[^>]*aria-disabled="false"/)
     expect(html).toContain('基础动作只能在战斗中、轮到自己时使用。')
   })
 
-  it('仅在探索模式开放分钟级长时间施法', () => {
+  it('opens automated long casting in combat only when the starting action is available', () => {
     const wizard: Character = {
       ...character(),
       rulesetId: 'dnd5e-2014-srd-5.1',
@@ -331,19 +338,20 @@ describe('PlayerCombatHotbar', () => {
         'dnd5e-spell-slot-1': { current: 1, max: 4 },
       },
     }
-    const render = (mode: 'combat' | 'exploration') => renderToStaticMarkup(
+    const render = (mode: 'combat' | 'exploration', action = 1) => renderToStaticMarkup(
       createElement(PlayerCombatHotbar, {
         character: wizard,
         mode,
         canAct: true,
         pending: false,
-        turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+        turnEconomy: { action: { current: action }, bonusAction: { current: 1 }, movement: { current: 30 } },
         onCommand: () => undefined,
       }),
     )
 
     expect(render('exploration')).toMatch(/aria-label="鉴定术"[^>]*aria-disabled="false"/)
-    expect(render('combat')).toMatch(/aria-label="鉴定术"[^>]*aria-disabled="true"/)
+    expect(render('combat')).toMatch(/aria-label="鉴定术"[^>]*aria-disabled="false"/)
+    expect(render('combat', 0)).toMatch(/aria-label="鉴定术"[^>]*aria-disabled="true"/)
   })
 
   it('routes a non-Headless prepared spell through direct casting', () => {
@@ -863,5 +871,87 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toMatch(/aria-label="魔法飞弹"[^>]*aria-disabled="false"/)
     expect(html).toMatch(/aria-label="攻击：长棍"[^>]*aria-disabled="true"/)
     expect(html).toContain('本体武器已融入法术形态')
+  })
+})
+
+
+describe('independent spell hotbar entries', () => {
+  const granted = (): Character => ({...character(),rulesetId:'dnd5e-2014-srd-5.1',
+    classResources:{'dnd5e-racial-spell-pass-without-trace':{current:1,max:1}},
+    dnd5eContentChoices:{'local.test:wood':{schemaVersion:1,contentId:'local.test:wood',selections:{},resolvedGrants:[
+      {kind:'spell',spellId:'pass-without-trace',mode:'once-per-long-rest',ability:'wis',castAtLevel:2},
+      {kind:'spell',spellId:'guidance',mode:'cantrip',ability:'wis'},
+    ]}},
+  })
+  const sources = (hero:Character) => independentSpellHotbarSources({character:hero,
+    entries:new Map(dnd5eSpellbookEntriesWithPlugins([], registeredDnd5ePluginSpells()).map(e=>[e.id,e])),exploration:true,triggeredReactionSpellIds:[]})
+  it('exposes fixed-level independent commands and separate counts for a fighter', () => {
+    expect(sources(granted())).toEqual(expect.arrayContaining([
+      expect.objectContaining({available:true,resource:{label:'免费',current:1,maximum:1},command:{kind:'cast-independent-spell',spellId:'pass-without-trace',slotLevel:2}}),
+      expect.objectContaining({available:true,command:{kind:'cast-independent-spell',spellId:'guidance',slotLevel:0}}),
+    ]))
+  })
+  it('disables exhausted free uses while leaving the cantrip available and removes revoked grants', () => {
+    const hero=granted();hero.classResources!['dnd5e-racial-spell-pass-without-trace'].current=0
+    expect(sources(hero).find(s=>s.command?.kind==='cast-independent-spell'&&s.command.spellId==='pass-without-trace')).toMatchObject({available:false})
+    expect(sources(hero).find(s=>s.command?.kind==='cast-independent-spell'&&s.command.spellId==='guidance')).toMatchObject({available:true})
+    hero.dnd5eContentChoices={};expect(sources(hero)).toEqual([])
+  })
+  it('renders the independent cast button in the real hotbar', () => {
+    const html=renderToStaticMarkup(createElement(PlayerCombatHotbar,{character:granted(),canAct:true,pending:false,
+      turnEconomy:{action:{current:1},bonusAction:{current:1},movement:{current:30}},onCommand:()=>undefined}))
+    expect(html).toContain('data-command-kind="cast-independent-spell"')
+    expect(html).toContain('独立施法')
+    expect(html).toContain('1/1')
+  })
+})
+
+
+describe('alternate resource spell hotbar', () => {
+  it('renders owned grants with separate level costs and disables depleted or revoked grants', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'test.resource-hotbar', name: 'Synthetic resource grant', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        featureId = api.registerFeature({ id: 'cast', name: '资源施法', summary: 'Synthetic', description: 'Synthetic', automation: 'full',
+          declarativeAbility: { schemaVersion: 1, id: 'cast', name: 'Cast', description: 'Synthetic', level: 1,
+            trigger: { kind: 'active-use' }, targeting: { kind: 'self' }, effects: [], automation: 'full',
+            mechanic: { kind: 'alternate-resource-spellcasting', classId: 'monk', ability: 'wis',
+              resourceId: 'dnd5e-ki', resourceScope: 'core', grants: [{ id: 'bolt', spellId: 'magic-missile',
+                castAtLevel: 1, resourceCost: 2, upcast: { resourcePerSlotLevel: 1,
+                  maximumResourceCostByClassLevel: [{ level: 1, maximumResourceCost: 3 }] } },
+                { id: 'omen', spellId: 'augury', castAtLevel: 2, resourceCost: 1 }] } } })
+      },
+    })
+    try {
+      const hero: Character = { ...character(), charClass: '武僧', level: 5, dnd5eClassLevels: { monk: 5 },
+        dnd5ePluginFeatureIds: [featureId], classResources: { 'dnd5e-ki': { current: 2, max: 5 } } }
+      const entries = new Map(dnd5eSpellbookEntriesWithPlugins([], registeredDnd5ePluginSpells()).map(entry => [entry.id, entry]))
+      const sources = () => alternateResourceSpellHotbarSources({ character: hero, entries, exploration: true, triggeredReactionSpellIds: [] })
+      expect(sources()).toMatchObject([
+        { available: true, economy: 'special', command: { kind: 'cast-resource-spell', grantId: 'omen', spellId: 'augury' } },
+        { available: true, command: { kind: 'cast-resource-spell', featureId, grantId: 'bolt', slotLevel: 1 } },
+        { available: false, command: { slotLevel: 2 } },
+      ])
+      expect(alternateResourceSpellHotbarSources({ character: hero, entries, exploration: false, triggeredReactionSpellIds: [] })
+        .find(source => source.command?.kind === 'cast-resource-spell' && source.command.grantId === 'omen')?.available).toBe(false)
+      const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, { character: hero, canAct: true, pending: false, mode: 'exploration',
+        turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } }, onCommand: () => undefined }))
+      expect(html).toContain('data-command-kind="cast-resource-spell"')
+      expect(html).toContain('资源施法')
+      const original = entries.get('magic-missile')!
+      for (const unit of ['minute', 'hour'] as const) {
+        entries.set('magic-missile', { ...original, imported: { ...original.imported, castingTime: { unit, value: 10 } } as any })
+        expect(sources().find(source => source.command?.kind === 'cast-resource-spell' && source.command.grantId === 'bolt' && source.command.slotLevel === 1)).toMatchObject({ available: true, economy: 'special', command: { kind: 'cast-resource-spell' } })
+      }
+      entries.set('magic-missile', { ...original, imported: { ...original.imported, castingTime: { unit: 'minute', value: 0 } } as any })
+      expect(sources().find(source => source.command?.kind === 'cast-resource-spell' && source.command.grantId === 'bolt')?.available).toBe(false)
+      entries.set('magic-missile', original)
+      hero.classResources!['dnd5e-ki'].current = 0
+      expect(sources().every(entry => !entry.available)).toBe(true)
+      hero.dnd5ePluginFeatureIds = []
+      expect(sources()).toEqual([])
+    } finally { dispose() }
   })
 })

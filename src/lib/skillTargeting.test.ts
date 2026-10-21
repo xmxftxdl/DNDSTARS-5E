@@ -3,6 +3,14 @@ import type { BattleMap, Token } from '../store/maps'
 import { cellToPixel, tokenCenterForAnchorCell } from './gridCombat'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, resolveAoeDimensions, tokensInAoe, tokensInCells } from './skillTargeting'
 
+it('preserves an authored one-foot line without allowing a forged width', () => {
+  const line = { shape: 'line' as const, origin: 'self' as const, lengthFeet: 30, widthFeet: 1 }
+  expect(resolveAoeDimensions(line, { widthFeet: 1, lengthFeet: 30 })).toEqual(line)
+  for (const widthFeet of [0, 0.5, 2, 5, NaN, Infinity]) {
+    expect(resolveAoeDimensions(line, { widthFeet })).toBeNull()
+  }
+})
+
 function map(tokens: Token[]): BattleMap {
   return {
     id: 'map',
@@ -200,9 +208,52 @@ describe('AOE token coverage targeting', () => {
   })
 
   it('resolves adjustable dimensions only inside the declared five-foot bounds', () => {
-    const template = { shape: 'rect', origin: 'point', widthFeet: 100, heightFeet: 5, minimumWidthFeet: 5 } as const
+    const template = { shape: 'rect', origin: 'point', widthFeet: 100, heightFeet: 5, minimumWidthFeet: 5, gridAligned: true } as const
     expect(resolveAoeDimensions(template, { widthFeet: 35 })).toMatchObject({ widthFeet: 35, heightFeet: 5 })
     expect(resolveAoeDimensions(template, { widthFeet: 105 })).toBeNull()
     expect(resolveAoeDimensions(template, { widthFeet: 33 })).toBeNull()
   })
+
+  it('preserves exact non-grid rectangular dimensions and rejects out-of-range selections', () => {
+    const template = { shape: 'rect', origin: 'point', widthFeet: 1, heightFeet: 20, minimumHeightFeet: 1 } as const
+    expect(resolveAoeDimensions(template, { widthFeet: 1, heightFeet: 13 })).toMatchObject({ widthFeet: 1, heightFeet: 13 })
+    for (const widthFeet of [0, 2, NaN, Infinity]) expect(resolveAoeDimensions(template, { widthFeet })).toBeNull()
+    for (const heightFeet of [0, 21, NaN, Infinity]) expect(resolveAoeDimensions(template, { heightFeet })).toBeNull()
+  })
+})
+
+
+describe('independent vertical area dimensions', () => {
+  const area = { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 30, volumeHeightFeet: 20, minimumVolumeHeightFeet: 5 } as const
+  it('changes vertical extent without changing footprint', () => {
+    const small = resolveAoeDimensions(area, { volumeHeightFeet: 5 })!
+    expect(small).toMatchObject({ widthFeet: 10, heightFeet: 30, volumeHeightFeet: 5 })
+    expect(cellsForAoe(small, { col: 0, row: 0 }, { col: 3, row: 3 })).toEqual(cellsForAoe(area, { col: 0, row: 0 }, { col: 3, row: 3 }))
+  })
+  it.each([0, 3, 25, NaN, Infinity])('rejects invalid height %s', (volumeHeightFeet) => {
+    expect(resolveAoeDimensions(area, { volumeHeightFeet })).toBeNull()
+  })
+  it('rejects height selection for shapes with no vertical contract', () => {
+    expect(resolveAoeDimensions({ shape: 'circle', origin: 'point', radiusFeet: 10 }, { volumeHeightFeet: 5 })).toBeNull()
+  })
+})
+
+it('places a point-origin cone independently of the caster with bounded range and four directions', () => {
+  const template = { shape: 'cone', origin: 'point', rotatable: true, lengthFeet: 60, placeRangeFeet: 60 } as const
+  const anchor = { col: 12, row: 12 }
+  for (const [rotation, point] of [[0, {col:12,row:8}], [1, {col:16,row:12}], [2, {col:12,row:16}], [3, {col:8,row:12}]] as const) {
+    const cells = cellsForAoe(template, aoeOrientFromCell(template, { col: 0, row: 0 }, anchor, { rectRotation: rotation }), anchor)
+    expect(cells).toContainEqual(point)
+    expect(cells).not.toContainEqual({ col: 24 - point.col, row: 24 - point.row })
+    expect(cells).toEqual(cellsForAoe(template, aoeOrientFromCell(template, { col: 30, row: 30 }, anchor, { rectRotation: rotation }), anchor))
+  }
+  expect(canPlaceAoe(template, { col:0,row:12 }, anchor)).toBe(true)
+  expect(canPlaceAoe(template, { col:-1,row:12 }, anchor)).toBe(false)
+})
+
+it('accepts exact non-grid box heights while preserving grid constraints and bounds',()=>{
+ const box:any={shape:'rect',origin:'point',widthFeet:5,heightFeet:5,volumeHeightFeet:5,gridAligned:false,minimumWidthFeet:0.001,minimumHeightFeet:0.001,minimumVolumeHeightFeet:0.001}
+ expect(resolveAoeDimensions(box,{widthFeet:0.5,heightFeet:0.75,volumeHeightFeet:0.25})).toMatchObject({widthFeet:0.5,heightFeet:0.75,volumeHeightFeet:0.25})
+ for(const volumeHeightFeet of [0,6,NaN,Infinity])expect(resolveAoeDimensions(box,{volumeHeightFeet})).toBeNull()
+ expect(resolveAoeDimensions({...box,gridAligned:true},{volumeHeightFeet:0.25})).toBeNull()
 })

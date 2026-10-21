@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Award, Dices, Footprints, GraduationCap, HeartPulse, LockKeyhole, Shield, Sparkles, Swords } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
+import { isPlayerPort } from '../../lib/appMode'
 import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '../../lib/dnd'
 import {
   DND5E_2014_ALIGNMENT_OPTIONS,
@@ -265,6 +266,8 @@ export default function CharacterSheet({
               }}
             />
             <SelectField label="阵营" value={c.alignment ?? ''} options={DND5E_2014_ALIGNMENT_OPTIONS} onChange={(value) => updateCharacter({ alignment: value })} />
+            {!isPlayerPort() && <SelectField label="原始阵营（DM记录）" value={c.dnd5eOriginalAlignment ?? ''}
+              options={['', ...DND5E_2014_ALIGNMENT_OPTIONS]} onChange={(value) => updateCharacter({ dnd5eOriginalAlignment: value || undefined })} />}
             <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => updateCharacter({ experience: value })} />
             <Field label="玩家" value={c.player} onChange={(value) => updateCharacter({ player: value })} />
             <NumberField label="激励骰数量" value={c.inspiration} min={0} max={99} onChange={(value) => updateCharacter({ inspiration: value })} />

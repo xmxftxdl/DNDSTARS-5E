@@ -1,9 +1,10 @@
 import { prepareDnd5eModuleUploadFile } from '../rulesets/dnd5e/starModAdapter'
 import { useRef, useState, useSyncExternalStore } from 'react'
-import { AlertTriangle, BadgeDollarSign, CheckCircle2, PackageCheck, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, PackageCheck, Upload } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import Dnd5eLocalRulesAiImporter from '../components/dm/Dnd5eLocalRulesAiImporter'
+import Dnd5ePdfSpellImporter from '../components/dm/Dnd5ePdfSpellImporter'
 import MarketplacePublicationDialog, {
   type MarketplacePublicationInput,
 } from '../components/marketplace/MarketplacePublicationDialog'
@@ -22,10 +23,10 @@ import { publishAccountPluginVersion } from '../lib/pluginCatalogApi'
 import { getRoomSession } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
 import { showAppConfirm } from '../lib/appDialog'
+import { dnd5eRoomRuntimeProjectionBytes } from '../rulesets/dnd5e/roomRuntimeProjection'
 import { consumeDmWorkshopMonsterHandoff } from '../lib/dmWorkshopMonsterHandoff'
 import {
   compileDnd5eLocalContentCollection,
-  dnd5eRoomRuntimeProjectionBytesV2,
   type Dnd5eContentAutomationCoverageReportV2,
 } from '../rulesets/dnd5e'
 
@@ -52,8 +53,14 @@ export default function DmWorkshopPage() {
   const campaignAuthorityId = /^[A-HJ-NP-Z2-9]{12}$/.test(campaignId) ? campaignId : undefined
 
   const saveAndActivate = async (file: File, options: { skipConfirmation?: boolean } = {}) => {
-    if (!host) throw new Error('规则插件 Host 尚未初始化，请刷新页面后重试。')
-    if (busy) throw new Error('另一个规则包正在处理，请稍后重试。')
+    const host = window.DNDSTARS_5E_RULES_PLUGINS
+    if (!host || busy) {
+      const message = !host
+        ? '规则插件 Host 尚未初始化，请刷新页面后重试。'
+        : '另一个规则包正在处理，请稍后重试。'
+      setError(message)
+      throw new Error(message)
+    }
     setBusy(true)
     setNotice(null)
     setError(null)
@@ -79,7 +86,7 @@ export default function DmWorkshopPage() {
           throw new Error('联网房间中的工坊扩展必须声明 room-distributable 或 room-ephemeral。')
         }
         if (policy === 'room-ephemeral') {
-          const projected = dnd5eRoomRuntimeProjectionBytesV2(inspected.bytes)
+          const projected = dnd5eRoomRuntimeProjectionBytes(inspected.bytes)
           inspected = await host.inspectFile(new File(
             [new Uint8Array(projected)],
             inspected.fileName,
@@ -265,7 +272,7 @@ export default function DmWorkshopPage() {
       )}
       <PageHeader
         title="自定义工坊"
-        description="可粘贴规则交给本地或自选 AI 转换，也可使用结构化编辑器创建内容；仅在 Host 校验和 DM 确认后启用。"
+        description="导入规则包，或创建和编辑自己的法术、怪物与角色选项。"
         actions={(
           <div className="flex flex-wrap gap-2">
             <input
@@ -327,10 +334,6 @@ export default function DmWorkshopPage() {
         <div className="mb-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.05] px-4 py-3 text-xs leading-5 text-sky-100/75">
           自动化覆盖：完整 {coverage.totals.full} · 部分 {coverage.totals.partial} ·
           手动 {coverage.totals.manual} · 仅资料 {coverage.totals.referenceOnly}
-          <span className="ml-2">
-            Activity：通用 {coverage.activityMigration.adapted} · 兼容回退 {coverage.activityMigration.legacyFallback} ·
-            DM 裁定 {coverage.activityMigration.dmAdjudication}
-          </span>
         </div>
       )}
       {error && (
@@ -339,13 +342,15 @@ export default function DmWorkshopPage() {
         </div>
       )}
 
-      <div className="mb-5 flex items-start gap-3 rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.04] px-4 py-3 text-sm leading-6 text-emerald-50/90">
-        <BadgeDollarSign className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
-        <div>
-          <strong>工坊与插件中心已连接</strong>
-          <p className="text-emerald-100/65">登录战役所有者账号后，可将 room-distributable 纯数据包保存到账号库，并继续定价和提交审核。local-only、room-ephemeral、PHB 原文或无分发权的官方美术不能上传市场。</p>
-        </div>
-      </div>
+      <Dnd5ePdfSpellImporter
+        key={`pdf-spells:${draftStorageScope}`}
+        scope={draftStorageScope}
+        busy={busy}
+        onEditContent={(request) => setContentWorkshopImport((current) => ({
+          requestId: (current?.requestId ?? 0) + 1,
+          ...request,
+        }))}
+      />
 
       <Dnd5eLocalRulesAiImporter
         key={`ai-draft:${draftStorageScope}`}
@@ -359,8 +364,7 @@ export default function DmWorkshopPage() {
       />
 
       <div className="mb-3">
-        <h2 className="text-lg font-semibold text-slate-100">结构化内容编辑器</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">适合逐条创建、校对和维护怪物、法术、特性及其他规则资源。</p>
+        <h2 className="text-lg font-semibold text-slate-100">内容编辑器</h2>
       </div>
       <Dnd5eCustomPluginBuilder
         key={`builder-draft:${draftStorageScope}`}

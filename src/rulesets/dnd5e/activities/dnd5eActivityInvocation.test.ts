@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
+import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
+import { dnd5eActivityAutomationAnalysisV1 } from '../plugins/pluginMechanicsRegistry'
 import type { Dnd5eActivityDefinitionV1, Dnd5eActivityTriggerContextV1 } from './dnd5eActivityContracts'
 import {
   canonicalDnd5eTriggerEventV1,
+  validateDnd5eActivityTriggerContextV1,
+  dnd5eContextPredicateSatisfiedV1,
   matchDnd5eActivityInvocationV1,
   resolveDnd5eActivityInvocationV1,
 } from './dnd5eActivityInvocation'
@@ -11,6 +15,18 @@ import {
   listAvailableRegisteredDnd5eActivitiesV1,
   registerDnd5eActivityPackage,
 } from './dnd5eActivityRegistry'
+
+it('never treats mounted, unknown, forced or teleport movement as voluntary movement', () => {
+  for (const movementKind of [undefined, 'voluntary', 'mounted', 'forced', 'teleport'] as const) {
+    const context: Dnd5eActivityTriggerContextV1 = {
+      eventId: 'movement-1', event: 'movement-completed', eligibleActorIds: ['hero'], eligibleTargetIds: ['hero'],
+      source: { kind: 'movement', distanceFeet: 5, completed: true, movementKind },
+    }
+    expect(dnd5eContextPredicateSatisfiedV1({ kind: 'movement-property', movementKind: 'voluntary' },
+      JSON.parse(JSON.stringify(context)))).toBe(movementKind === 'voluntary')
+    expect(dnd5eContextPredicateSatisfiedV1({ kind: 'movement-property', movementKind: 'mounted' }, context)).toBe(movementKind === 'mounted')
+  }
+})
 
 const followUp: Dnd5eActivityDefinitionV1 = {
   schemaVersion: 1,
@@ -49,7 +65,38 @@ const attackContext: Dnd5eActivityTriggerContextV1 = {
 
 afterEach(clearDnd5eActivityRegistryForTests)
 
+it('distinguishes an inventory weapon instance from its Host-resolved base definition', () => {
+  const context: Dnd5eActivityTriggerContextV1 = { ...attackContext,
+    source: { kind: 'attack', mode: 'ranged', weaponId: 'owned-bow-42', weaponBaseId: 'dnd5e-longbow' } }
+  for (const identity of [undefined, 'instance', 'base'] as const) {
+    for (const id of ['owned-bow-42', 'dnd5e-longbow', 'dnd5e-shortbow']) {
+      const predicate = { kind: 'attack-weapon' as const, identity, weaponIds: [id] }
+      expect(dnd5eContextPredicateSatisfiedV1(predicate, JSON.parse(JSON.stringify(context))))
+        .toBe(id === (identity === 'base' ? 'dnd5e-longbow' : 'owned-bow-42'))
+      expect(validateDnd5eActivityDefinitionV1({ ...followUp, requirements: [predicate] })).toEqual([])
+    }
+  }
+  expect(dnd5eContextPredicateSatisfiedV1({ kind: 'attack-weapon', identity: 'base', weaponIds: ['dnd5e-longbow'] },
+    { ...context, source: { kind: 'attack', mode: 'ranged', weaponId: 'dnd5e-longbow' } })).toBe(false)
+  expect(dnd5eContextPredicateSatisfiedV1({ kind: 'attack-weapon', identity: 'base', weaponIds: ['dnd5e-longbow'] }, undefined)).toBe(false)
+  expect(validateDnd5eActivityDefinitionV1({ ...followUp,
+    requirements: [{ kind: 'attack-weapon', identity: 'either', weaponIds: ['dnd5e-longbow'] } as never] }))
+    .toContainEqual(expect.stringContaining('.identity'))
+})
+
 describe('unified Activity invocation', () => {
+  it('includes critical results in hit/miss while retaining exact critical predicates', () => {
+    const results = ['hit', 'miss', 'critical-hit', 'critical-miss'] as const
+    for (const actual of results) for (const required of results) {
+      const context: Dnd5eActivityTriggerContextV1 = {
+        ...attackContext, source: {kind:'attack',mode:'melee',result:actual},
+      }
+      expect(dnd5eContextPredicateSatisfiedV1({kind:'attack-result',result:required},context)).toBe(
+        actual === required || required === 'hit' && actual === 'critical-hit' || required === 'miss' && actual === 'critical-miss')
+    }
+    expect(dnd5eContextPredicateSatisfiedV1({kind:'attack-result',result:'hit'},undefined)).toBe(false)
+    expect(dnd5eContextPredicateSatisfiedV1({kind:'attack-result',result:'hit'},{...attackContext,source:{kind:'spell',id:'sample',level:0}})).toBe(false)
+  })
   it('normalizes legacy event names without changing stored packages', () => {
     expect(canonicalDnd5eTriggerEventV1('on-hit')).toBe('attack-hit')
     expect(resolveDnd5eActivityInvocationV1({
@@ -147,4 +194,34 @@ describe('unified Activity invocation', () => {
       confirmedBy: 'actor',
     })).toMatchObject({ ok: true })
   })
+})
+
+it('rejects unknown equipment classifications and spell attacks for weapon-category requirements', () => {
+  for (const category of ['weapon', 'spell'] as const) for (const weaponCategory of [undefined, 'simple', 'martial'] as const) {
+    const context: Dnd5eActivityTriggerContextV1 = { ...attackContext,
+      source: { kind: 'attack', mode: category === 'spell' ? 'spell' : 'melee', category, weaponCategory } }
+    expect(dnd5eContextPredicateSatisfiedV1({ kind: 'attack-weapon-category', categories: ['simple', 'martial'] }, context))
+      .toBe(category === 'weapon' && weaponCategory != null)
+  }
+  for (const categories of [[], ['simple', 'simple'], ['natural'], null]) {
+    const activity = structuredClone(followUp)
+    activity.requirements = [{ kind: 'attack-weapon-category', categories } as never]
+    expect(validateDnd5eActivityDefinitionV1(activity).some(error => error.includes('.categories'))).toBe(true)
+  }
+  expect(validateDnd5eActivityDefinitionV1({ ...followUp,
+    requirements: [{ kind: 'attack-weapon-category', categories: ['simple', 'martial'] }] })).toEqual([])
+  expect(dnd5eActivityAutomationAnalysisV1({ ...followUp,
+    requirements: [{ kind: 'attack-weapon-category', categories: ['simple', 'martial'] }] }))
+    .toMatchObject({ capability: { level: 'full', limitations: [] }, missingComponents: [],
+      handlerIds: expect.arrayContaining(['core.predicate.attack-weapon-category']) })
+})
+
+
+it.each([undefined, 5, 10, -1, Number.NaN, Number.POSITIVE_INFINITY])('checks only validated attack movement snapshots: %s',distance=>{
+  const context:Dnd5eActivityTriggerContextV1={eventId:'attack',event:'attack-hit',eligibleActorIds:['hero'],eligibleTargetIds:['target'],
+    source:{kind:'attack',mode:'melee',result:'hit',precedingStraightMovementFeet:distance}}
+  const valid=distance==null || Number.isFinite(distance)&&distance>=0
+  expect(validateDnd5eActivityTriggerContextV1(context).length===0).toBe(valid)
+  expect(dnd5eContextPredicateSatisfiedV1({kind:'movement-distance',basis:'before-attack-straight-streak',minimumFeet:10},context)).toBe(distance===10)
+  expect(dnd5eContextPredicateSatisfiedV1({kind:'movement-distance',basis:'straight-streak',minimumFeet:10},context)).toBe(false)
 })

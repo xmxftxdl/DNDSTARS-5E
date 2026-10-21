@@ -21,6 +21,7 @@ const charger: Dnd5eActivityDefinitionV1 = {
     { kind: 'event-source', source: 'movement' },
     { kind: 'movement-distance', minimumFeet: 10 },
     { kind: 'movement-property', straightLine: true, dashedThisTurn: true },
+    { kind: 'movement-property', movementKind: 'voluntary' },
     { kind: 'action-economy-available', economy: 'bonus-action' },
   ],
   choices: [{

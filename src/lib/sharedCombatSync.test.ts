@@ -23,6 +23,17 @@ function makeState(patch: Partial<SharedCombatState> = {}): SharedCombatState {
 }
 
 describe('shared combat sync', () => {
+  it('restores unchanged authority after leaving and returning to the combat scene, without accepting stale state', () => {
+    const input = { state: makeState(), mapId: 'map-1', validTokenIds: ['hero-token', 'enemy-token'],
+      currentCombatId: 'combat-1', lastAppliedCombatId: 'combat-1', lastAppliedUpdatedAt: 1000, lastSnapshot: '', isDm: false }
+    const first = resolveSharedCombatStateApply(input)
+    expect(first.status).toBe('apply')
+    if (first.status !== 'apply') throw Error('Expected initial snapshot')
+    expect(resolveSharedCombatStateApply({ ...input, lastSnapshot: first.snapshot })).toEqual({ status: 'ignored', reason: 'unchanged' })
+    const restored = resolveSharedCombatStateApply({ ...input, currentCombatId: '', lastSnapshot: first.snapshot })
+    expect(restored).toMatchObject({ status: 'apply', active: true, round: 2 })
+    expect(resolveSharedCombatStateApply({ ...input, currentCombatId: '', lastSnapshot: first.snapshot, state: makeState({updatedAt:999}) })).toEqual({ status: 'ignored', reason: 'stale' })
+  })
   it('ignores an old combat reload while the DM is committing a new combat', () => {
     const input = { state: makeState(), mapId: 'map-1', validTokenIds: ['hero-token', 'enemy-token'],
       currentCombatId: 'new-combat', pendingStartCombatId: 'new-combat', lastAppliedCombatId: 'combat-1',

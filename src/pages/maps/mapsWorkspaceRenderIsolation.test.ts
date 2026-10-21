@@ -179,7 +179,7 @@ describe('MapsWorkspacePage render isolation', () => {
 
   it('keeps passive enemy area warnings visible without turning them into pointer-input mode', () => {
     expect(workspaceSource).toContain('?? enemySpellAoeWarning?.highlight')
-    expect(workspaceSource).toContain('aoeSelectMode={!!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
+    expect(workspaceSource).toContain('aoeSelectMode={!!terrainClearingArea || !!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
     expect(workspaceSource).not.toContain('aoeSelectMode={!!enemySpellAoeWarning')
     expect(mapCanvasSource).toContain('const aoeHighlightVisible = aoeSelectMode || aoeHighlight != null')
     expect(mapCanvasSource).toContain('aoeHighlightVisible && aoeHighlight && aoeHighlight.cells.length > 0')
@@ -206,7 +206,7 @@ describe('MapsWorkspacePage render isolation', () => {
   it('keeps player spell area selection interactive after an ended combat locks other map actions', () => {
     expect(workspaceSource).toContain('const playerSpellAoeSelectActive = !!dnd5eSpellTargeting && (')
     expect(workspaceSource).toContain('!!activeAoeTargeting || dnd5eSpellTargeting.guessedTargeting === true')
-    expect(workspaceSource).toContain('aoeSelectMode={!!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
+    expect(workspaceSource).toContain('aoeSelectMode={!!terrainClearingArea || !!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
   })
 
   it('offers an accessible creature picker for non-area spell targeting', () => {
@@ -220,13 +220,13 @@ describe('MapsWorkspacePage render isolation', () => {
   it('keeps player-granted persistent area Activities interactive during exploration', () => {
     expect(workspaceSource).toContain('const playerActivityAoeSelectActive = (!isDM && !!dnd5eActivityMapTargeting) || playerGrantedActivityAoeSelectActive({')
     expect(workspaceSource).toContain('pluginArea: dnd5ePluginAreaTargeting,')
-    expect(workspaceSource).toContain('aoeSelectMode={!!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
+    expect(workspaceSource).toContain('aoeSelectMode={!!terrainClearingArea || !!stoneEscapeArea || !!webIgnitionArea || mapAoeSelectMode({')
   })
 
   it('offers an accessible creature picker for persistent-area granted Activities', () => {
     expect(workspaceSource).toContain('data-testid="persistent-area-activity-target-picker"')
     expect(workspaceSource).toContain('dnd5ePersistentAreaActivityTargeting.label')
-    expect(workspaceSource).toContain('点击地图上的生物目标')
+    expect(workspaceSource).toContain('{dnd5ePersistentAreaActivityTargeting.label} · 点击地图上的目标')
     expect(workspaceSource).toContain('className="map-combat-action-bar border-emerald-300/30"')
     expect(workspaceSource).toContain('onClick={() => setDnd5ePersistentAreaActivityTargeting(null)}')
   })

@@ -3,9 +3,20 @@ import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { advanceDnd5eActivityTurnClock, initializeDnd5eActivityTurnClock, normalizeDnd5eActivityTurnClock } from '../../rulesets/dnd5e/activities/dnd5eActivityTurnClock'
+import { settleDnd5eDelayedSummonsAtTurnStart } from '../../rulesets/dnd5e/activities/dnd5eDelayedSummonQueue'
+import { applyDnd5eActivityMapHandoffsV1 } from '../../rulesets/dnd5e/activities/dnd5eActivityMapInteraction'
 
 function jsonEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function turnClockEqual(left:BattleMap['dnd5eActivityTurnClock'],right:BattleMap['dnd5eActivityTurnClock']):boolean{
+  // Shared-state hydration canonicalizes field order; a clock is identified by
+  // its values, not the insertion order used by the in-memory advance operation.
+  const a=normalizeDnd5eActivityTurnClock(left),b=normalizeDnd5eActivityTurnClock(right)
+  if((left!=null&&!a)||(right!=null&&!b))return false
+  return jsonEqual(a,b)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -210,6 +221,17 @@ export function mergeDnd5ePersistentAreaTurnMapDelta(input: {
   settled: BattleMap
   current: BattleMap
 }): BattleMap {
+  const queueChanged = !jsonEqual(input.before.dnd5eDelayedSummons, input.settled.dnd5eDelayedSummons)
+  const clockChanged = !turnClockEqual(input.before.dnd5eActivityTurnClock, input.settled.dnd5eActivityTurnClock)
+  // A queue receipt and its spawned tokens are one transaction. Rebasing them
+  // independently could resurrect a cancelled summon or occupy a newly blocked
+  // cell. Reject before committing any map/character part; the Host reloads.
+  if (queueChanged && !jsonEqual(input.current, input.before)) {
+    throw new Error('stale-delayed-summon-map-commit')
+  }
+  if (clockChanged && !turnClockEqual(input.current.dnd5eActivityTurnClock, input.before.dnd5eActivityTurnClock)) {
+    throw new Error('stale-activity-turn-clock-commit')
+  }
   const tokens = mergeEntityDelta({
     before: input.before.tokens,
     settled: input.settled.tokens,
@@ -228,9 +250,11 @@ export function mergeDnd5ePersistentAreaTurnMapDelta(input: {
   })
   if (
     jsonEqual(tokens, input.current.tokens) &&
-    jsonEqual(dnd5ePluginAreas, input.current.dnd5ePluginAreas ?? [])
+    jsonEqual(dnd5ePluginAreas, input.current.dnd5ePluginAreas ?? []) && !queueChanged && !clockChanged
   ) return input.current
-  return { ...input.current, tokens, dnd5ePluginAreas }
+  return { ...input.current, tokens, dnd5ePluginAreas,
+    dnd5eDelayedSummons: queueChanged ? input.settled.dnd5eDelayedSummons : input.current.dnd5eDelayedSummons,
+    dnd5eActivityTurnClock: clockChanged ? input.settled.dnd5eActivityTurnClock : input.current.dnd5eActivityTurnClock }
 }
 
 /** Three-way merge for boundary damage/effect changes against the latest roster. */
@@ -376,6 +400,9 @@ export function dnd5ePersistentAreaTurnCursor(input: {
 
 export async function settleDnd5ePersistentAreaTurnTransition(input: {
   transition: Dnd5ePersistentAreaTurnTransition
+  initiativeOrder?: readonly InitiativeEntry[]
+  sourceLimitMaps?: readonly BattleMap[]
+  worldMinute?: number
   /** Presentation only: never advances authoritative resources before saves settle. */
   presentTurnStart?: (cursor: Dnd5ePersistentAreaTurnCursor | null) => void
   map: BattleMap
@@ -400,13 +427,63 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
   characters: Character[]
   logs: string[]
   events: Dnd5eCombatEvent[]
+  initiativeEntries: InitiativeEntry[]
 }> {
   let map = input.map
+  const durable = map.dnd5eActivityTurnClock
+  const origin = durable?.cursor
+  const requestedStart = input.transition.boundaries.find(boundary => boundary.timing === 'turn-start')
+  if (requestedStart && !input.transition.boundaries.some(boundary => boundary.timing === 'turn-end') &&
+    durable?.combatId === input.transition.cursor.combatId && origin &&
+    durable.turnKey !== requestedStart.turnKey && `${origin.round}:${origin.slotId}` === durable.turnKey) {
+    input = { ...input, transition: planDnd5ePersistentAreaTurnTransition({
+      ...origin, mapId: map.id, combatId: durable.combatId,
+    }, input.transition.cursor) }
+  }
+  // Prepare the entire transition before any asynchronous saves or interrupts.
+  // A refresh at an already committed turn does not advance the durable clock.
+  const start = input.transition.boundaries.find(boundary => boundary.timing === 'turn-start')
+  let nextClock = map.dnd5eActivityTurnClock
+  if (start) {
+    if (map.id !== input.transition.cursor.mapId) throw new Error('invalid-activity-turn-map')
+    if (nextClock?.combatId === input.transition.cursor.combatId && nextClock.turnKey === start.turnKey) {
+      if (!nextClock.cursor) {
+        const { tokenId, slotId, round, initiativeIndex } = input.transition.cursor
+        map = { ...map, dnd5eActivityTurnClock: { ...nextClock, cursor: { tokenId, slotId, round, initiativeIndex } } }
+      }
+      return { map, characters: [...input.characters], logs: [], events: [], initiativeEntries: [] }
+    }
+    const previous = input.transition.boundaries.find(boundary => boundary.timing === 'turn-end')
+    map = initializeDnd5eActivityTurnClock(map, input.transition.cursor.combatId, previous?.turnKey ?? start.turnKey)
+    const clock = map.dnd5eActivityTurnClock!
+    if (clock.turnKey !== start.turnKey) {
+      if (!previous) throw new Error('missing-activity-turn-transition-origin')
+      const advanced = advanceDnd5eActivityTurnClock({ map, combatId: input.transition.cursor.combatId,
+        fromTurnKey: previous.turnKey, toTurnKey: start.turnKey, expectedSequence: clock.sequence })
+      if (!advanced.ok) throw new Error(advanced.reason)
+      nextClock = advanced.clock
+    } else {
+      nextClock = clock
+    }
+    const { tokenId, slotId, round, initiativeIndex } = input.transition.cursor
+    nextClock = { ...nextClock, cursor: { tokenId, slotId, round, initiativeIndex } }
+  }
   let characters = [...input.characters]
   const logs: string[] = []
   const events: Dnd5eCombatEvent[] = []
+  const initiativeEntries: InitiativeEntry[] = []
   try {
     for (const boundary of input.transition.boundaries) {
+      if (boundary.timing === 'turn-start') {
+        map = { ...map, dnd5eActivityTurnClock: nextClock }
+        const delayed = settleDnd5eDelayedSummonsAtTurnStart({ map, characters,
+          sourceLimitMaps: input.sourceLimitMaps, initiativeOrder:input.initiativeOrder, slotId:input.transition.cursor.slotId,
+          combatId: input.transition.cursor.combatId, round: boundary.round, tokenId: boundary.tokenId,
+          turnKey: boundary.turnKey, turnSequence: nextClock!.sequence,
+          worldMinute: input.worldMinute, apply: applyDnd5eActivityMapHandoffsV1 })
+        map = delayed.map
+        initiativeEntries.push(...delayed.results.flatMap(result => result.initiativeEntries))
+      }
       input.presentTurnStart?.(boundary.timing === 'turn-start' ? input.transition.cursor : null)
       const settled = await input.settleBoundary({ boundary, map, characters })
       const expired = input.expireBoundary({
@@ -425,7 +502,7 @@ export async function settleDnd5ePersistentAreaTurnTransition(input: {
       logs.push(...settled.logs)
       events.push(...(settled.events ?? []))
     }
-    return { map, characters, logs, events }
+    return { map, characters, logs, events, initiativeEntries }
   } finally {
     input.presentTurnStart?.(null)
   }

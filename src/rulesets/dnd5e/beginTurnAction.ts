@@ -1,3 +1,4 @@
+import { dnd5eHeightenedSavingThrowMode } from './spells'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { AbilityKey } from '../../lib/dnd'
@@ -96,6 +97,8 @@ export interface PreparedDnd5eBeginTurn {
   actorName: string
   actorToken: Token
   state: Dnd5eHeadlessCombatState
+  /** Preview after turn-boundary resource refresh, before saves settle. */
+  turnStartState: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
   turnSlotId: string
   alreadyResolved: boolean
@@ -114,6 +117,7 @@ export interface PreparedDnd5eBeginTurn {
 }
 
 export interface Dnd5eBeginTurnContext {
+  worldMinute?: number
   turnEconomy?: Dnd5eTurnEconomyCounts
   combatId: string
   round: number
@@ -153,6 +157,7 @@ export function prepareDnd5eBeginTurn(
   }
   const turnSlotId = slot.slotId ?? slot.tokenId
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: input.combatId,
     round: input.round,
     turnSlotId,
@@ -195,13 +200,13 @@ export function prepareDnd5eBeginTurn(
           targetName: previewActor.name,
           modifier: turnStartSavingThrowModifier(previewActor, repeatSave.ability),
           dc: repeatSave.dc,
-          mode: dnd5eSavingThrowMode(previewActor, repeatSave.ability, {
+          mode: dnd5eHeightenedSavingThrowMode(dnd5eSavingThrowMode(previewActor, repeatSave.ability, {
             effectVisible: effect.visibility !== 'dm-only',
             condition: effect.standardCondition,
             sourceCreatureType: source?.creatureType,
             sourceIsSpell: effect.source.kind === 'spell',
             sourceIsMagical: effect.source.magical === true,
-          }),
+          }), repeatSave.disadvantage === true),
           blessed: dnd5eCombatantHasConcentrationEffect(
             preview,
             previewActor.id,
@@ -325,6 +330,7 @@ export function prepareDnd5eBeginTurn(
       actorName: actor?.name ?? actorToken.label,
       actorToken,
       state: snapshot.state,
+      turnStartState: preview,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       turnSlotId,
       alreadyResolved,
@@ -338,6 +344,7 @@ export function prepareDnd5eBeginTurn(
 }
 
 export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
+  savingThrowCounterattacks?: import('./headlessCombatEngine').Dnd5eAction['savingThrowCounterattacks']
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   turnStartActiveEffectPeriodicDamageRolls?: readonly Dnd5eActiveEffectPeriodicDamageRoll[]
   turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
@@ -370,6 +377,7 @@ export function resolveDnd5eBeginTurn(input: Dnd5eBeginTurnContext & {
   } = prepared.prepared
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(state, {
     type: 'begin-turn',
+    savingThrowCounterattacks: input.savingThrowCounterattacks,
     actionAlreadyConsumed: input.turnEconomy?.turnKey === `${input.combatId}:${input.round}:${turnSlotId}` && input.turnEconomy.action.current === 0,
     actorId: actorToken.id,
     turnSlotId,

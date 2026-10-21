@@ -109,7 +109,7 @@ export interface Dnd5eDamageDefenseApplication {
 }
 
 export interface Dnd5eDamageDefenseResolution {
-  /** Non-negative integer damage before defenses. */
+  /** Non-negative damage before defenses; grouped resolution may retain a save fraction. */
   baseDamage: number
   finalDamage: number
   /**
@@ -175,12 +175,21 @@ function matchingReasons(
  */
 export function resolveDnd5eDamageDefenses(
   input: Dnd5eDamageDefenseResolutionInput,
+  options?: { deferComponentRounding: true },
+): Dnd5eDamageDefenseResolution {
+  return resolveDamageDefenseComponent(input, options?.deferComponentRounding === true)
+}
+
+/** Internal fractional mode is used only by the complete damage-group resolver. */
+function resolveDamageDefenseComponent(
+  input: Dnd5eDamageDefenseResolutionInput,
+  preserveFraction: boolean,
 ): Dnd5eDamageDefenseResolution {
   if (!Number.isFinite(input.damage) || input.damage < 0) {
     throw new RangeError('damage must be a finite non-negative number')
   }
 
-  const baseDamage = Math.floor(input.damage)
+  const baseDamage = preserveFraction ? input.damage : Math.floor(input.damage)
   const defenses = input.defenses ?? {}
   const immunityReasons = matchingReasons('immune', input.source, defenses)
   if (immunityReasons.length > 0) {
@@ -230,4 +239,37 @@ export function resolveDnd5eDamageDefenses(
     ? vulnerabilityReasons.length > 0 ? 1 : 0.5
     : vulnerabilityReasons.length > 0 ? 2 : 1
   return { baseDamage, finalDamage, multiplier, applied }
+}
+
+/**
+ * Resolve one simultaneous damage occurrence. Components must already contain
+ * complete typed/source packets (not separate dice of the same packet).
+ *
+ * A successful-save multiplier retains fractions until the occurrence total is
+ * known. Immunity removes its own component, resistance rounds its own component
+ * down, then vulnerability applies. Only the final total is rounded for HP.
+ * Per-component resolutions may therefore be fractional and must never be
+ * committed to HP independently. The ordinary single-component API is unchanged.
+ */
+export function resolveDnd5eDamageGroup(input: {
+  components: readonly Dnd5eDamageDefenseResolutionInput[]
+  multiplier: 0.5 | 1
+}): { components: readonly Dnd5eDamageDefenseResolution[]; finalDamage: number } {
+  if (input.multiplier !== 0.5 && input.multiplier !== 1) {
+    throw new RangeError('damage group multiplier must be one or one half')
+  }
+  if (!Array.isArray(input.components) || input.components.length > 1000) {
+    throw new RangeError('damage group must contain at most 1000 components')
+  }
+  const components = input.components.map(component => {
+    if (!Number.isSafeInteger(component.damage) || component.damage < 0 || component.damage > 1_000_000) {
+      throw new RangeError('damage group components must be integers between zero and one million')
+    }
+    return resolveDamageDefenseComponent({
+      ...component, damage: component.damage * input.multiplier,
+    }, true)
+  })
+  const total = components.reduce((sum, component) => sum + component.finalDamage, 0)
+  if (!Number.isSafeInteger(Math.floor(total))) throw new RangeError('damage group total exceeds safe integer range')
+  return { components, finalDamage: Math.floor(total) }
 }

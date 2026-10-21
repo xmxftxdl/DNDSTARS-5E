@@ -2,6 +2,7 @@ import type { GridCell } from '../../lib/gridCombat'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
 import type { MapSpellStatusId } from './tokenStatusTooltip'
 export interface AoeHighlight {
+  objectFlight?: import('../../rulesets/dnd5e/mapObjectFlight').Dnd5eMapObjectFlightPlan
   iceWallPreview?: boolean
   forceWallPreview?: boolean
   stoneWallPanels?: import('../../rulesets/dnd5e/stoneWall').StoneWallPanel[]
@@ -16,6 +17,7 @@ export interface AoeHighlight {
     centerX: number
     centerY: number
     radiusPx: number
+    innerRadiusPx?: number
   }
   /** Already committed origins of a multi-area spell. */
   committedAreaCircles?: {

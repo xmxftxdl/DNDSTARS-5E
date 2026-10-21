@@ -1,3 +1,4 @@
+import './activeEffects'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { monsterMechanicFixture } from './test-utils/monsterMechanicFixture'
 import type { BattleMap, Token } from '../../store/maps'
@@ -592,13 +593,14 @@ describe('SRD monster 5e turn planner', () => {
       hp: 58,
       maxHp: 58,
     })
-    const planFor = (monster: Dnd5eMonsterStatBlock) => {
+    const planFor = (monster: Dnd5eMonsterStatBlock, summon?: Token['dnd5eSummon']) => {
       const attacker = token({
         id: `${monster.id}:token`,
         label: monster.name,
         poolId: monster.id,
         hp: monster.hitPoints.average,
         maxHp: monster.hitPoints.average,
+        dnd5eSummon: summon,
       })
       return planDnd5eMonsterTurn(map([attacker, target]), attacker)
     }
@@ -619,6 +621,24 @@ describe('SRD monster 5e turn planner', () => {
     })
     expect(magicalPlan.decision?.metrics?.expectedDamage)
       .toBeGreaterThan(ordinaryPlan.decision?.metrics?.expectedDamage ?? 0)
+    const summon: NonNullable<Token['dnd5eSummon']> = {
+      schemaVersion: 1, pluginId: 'test', featureId: 'summon', sourceTokenId: 'owner',
+      sourceCharacterId: 'owner', createdRound: 1, expiresAfterRound: 100, side: 'enemy',
+      naturalWeaponAttacksMagical: true,
+    }
+    // A held weapon remains ineffective; an explicitly natural attack receives
+    // the same magical qualification used by authoritative damage settlement.
+    expect(planFor(ordinaryAttacker, summon).actionIndex).toBe(1)
+    const naturalAttacker: Dnd5eMonsterStatBlock = {
+      ...ordinaryAttacker, id: 'dm-custom:natural-summon', slug: 'natural-summon',
+      actions: ordinaryAttacker.actions.map((action, index) => index === 0
+        ? { ...action, attack: { ...action.attack!, naturalWeapon: true } } : action),
+    }
+    setDnd5eRoomMonsterCatalog([ordinaryAttacker, magicAttacker, naturalAttacker])
+    expect(planFor(naturalAttacker).actionIndex).toBe(1)
+    expect(planFor(naturalAttacker, summon).actionIndex).toBe(0)
+    expect(planFor(ordinaryAttacker, { ...summon, naturalWeaponAttacksMagical: undefined,
+      weaponAttacksMagical: true }).actionIndex).toBe(0)
   })
 
   it('scores structured Pack Tactics as advantage and cancels it against Dodge', () => {

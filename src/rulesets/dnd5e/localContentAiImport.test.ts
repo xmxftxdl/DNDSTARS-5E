@@ -3,14 +3,188 @@ import type { AiProviderRuntimeV1 } from '../../lib/aiProvider'
 import { AiProviderRegistryV1 } from '../../lib/aiProvider'
 import {
   dnd5eLocalContentAiErrorMessage,
+  dnd5eLocalContentAiFormatGuide,
+  Dnd5eLocalContentAiDraftError,
   generateDnd5eLocalContentAiDraft,
   validateDnd5eLocalContentAiDraft,
+  normalizeDnd5eLocalContentAiSyntax,
+  readDnd5eLocalContentAiWireDraft,
 } from './localContentAiImport'
 import { prepareDnd5eLocalContentJson } from './localContentCollection'
 import { dnd5eContentPackageAutomationCoverageV2 } from './contentPackageV2'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { buildDnd5eCustomMonster } from './customMonsterWorkshop'
 import { parseDnd5ePastedMonster } from './monsterStatBlockPaste'
+import { DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS, validateDeclarativeSubclassAbilityV1 } from './declarativeSubclassAbility'
+import { DND5E_NATIVE_SUBCLASS_REST_EXAMPLE } from './activities/dnd5eNativeSubclassAuthoringExample'
+import { dnd5eLocalContentAiSdkGuide } from './localContentAiSdkGuide'
+import { dnd5eRulesPluginFromContentPackageV2 } from './contentPackageV2'
+import { registerDnd5eRulesPlugin, dnd5ePluginFeatureDefinition } from './pluginApi'
+import { dnd5eFeatureActivityControls } from './activities/dnd5eFeatureActivityControls'
+
+it('imports the native rest example supplied to the converter into an executable subclass control', async () => {
+  const guide = dnd5eLocalContentAiSdkGuide('subclass', '长休之后选择一个物品', { mechanics: [], needsActivities: true, needsAreas: false })
+  expect(guide).toContain(JSON.stringify(DND5E_NATIVE_SUBCLASS_REST_EXAMPLE))
+  const prepared = await prepareDnd5eLocalContentJson(JSON.stringify({
+    name: 'Native example', version: '1.0.0', activities: [DND5E_NATIVE_SUBCLASS_REST_EXAMPLE],
+    subclasses: [{ schemaVersion: 1, id: 'example-school', classId: 'fighter', name: 'Example school', summary: 'Synthetic', abilities: [{
+      schemaVersion: 1, id: 'example-gift', name: 'Example gift', description: 'Synthetic', level: 3,
+      trigger: { kind: 'long-rest-complete' }, targeting: { kind: 'self' }, effects: [], automation: 'manual',
+    }] }],
+  }))
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromContentPackageV2(prepared.package))
+  try {
+    const feature = dnd5ePluginFeatureDefinition(`${prepared.package.manifest.id}:example-school.example-gift`)
+    expect(feature).toBeDefined()
+    const controls = dnd5eFeatureActivityControls(feature!)
+    expect(controls.map(control => control.activity.id)).toContain('example-rest-armor')
+    expect(controls.find(control => control.activity.id === 'example-rest-armor')?.activity.effects).toEqual(DND5E_NATIVE_SUBCLASS_REST_EXAMPLE.effects)
+  } finally { dispose() }
+})
+
+it('preserves executable passive mechanics through AI normalization and package preparation', async () => {
+  const mechanics = [
+    { kind: 'passive-defense', armorClassBonus: { value: 1, requiresHeavyArmor: true } },
+    { kind: 'attacks-per-action', attacks: 2 },
+    { kind: 'revival-material-waiver' },
+  ]
+  const abilities = mechanics.map((mechanic, index) => ({
+    schemaVersion: 1, id: `passive-${index}`, name: `Passive ${index}`, description: 'Supported passive mechanism.',
+    level: 6, trigger: { kind: 'passive' }, cost: { economy: 'none' }, targeting: { kind: 'self' },
+    rolls: [], effects: [], automation: 'full', mechanic,
+  }))
+  const normalized = normalizeDnd5eLocalContentAiSyntax({ schemaVersion: 1, assumptions: [], unsupported: [], contentJson: JSON.stringify({
+    name: 'Passive import', version: '1.0.0', subclasses: [{ schemaVersion: 1, id: 'passive-school', classId: 'fighter', name: 'Passive school', summary: 'Supported mechanics.', resources: [], abilities }],
+  }) })
+  const actual = JSON.parse(normalized.contentJson).subclasses[0].abilities
+  expect(actual).toEqual(abilities)
+  actual.forEach((entry: unknown) => validateDeclarativeSubclassAbilityV1(entry))
+  const prepared = await prepareDnd5eLocalContentJson(normalized.contentJson)
+  expect(prepared.package.content.subclasses[0].abilities).toEqual(abilities)
+  const guide = dnd5eLocalContentAiFormatGuide('subclass', '被动能力')
+  for (const kind of DND5E_PASSIVE_SUBCLASS_MECHANIC_KINDS) expect(guide).toContain(kind)
+  expect(guide).not.toContain('passive 仅用于保留尚未实现')
+})
+
+it('fills a mapped damage base only from explicit valid types without hiding malformed mappings', () => {
+  const operations = [
+    {kind:'damage',damageTypeFromRoll:{types:['cold','fire']}},
+    {kind:'damage',damageType:'acid',damageTypeFromRoll:{types:['cold','fire']}},
+    {kind:'damage',damageTypeFromRoll:{types:['invalid']}},
+    {kind:'damage'},
+    {kind:'damage',damageTypeFromRoll:{types:[]}},
+    {kind:'damage',damageTypeChoiceId:'other',damageTypeFromRoll:{types:['cold']}},
+  ]
+  const draft={schemaVersion:1 as const,assumptions:[],unsupported:['unchanged limitation'],contentJson:JSON.stringify({activities:[{outcomes:[{operations}]}]})}
+  const normalized=normalizeDnd5eLocalContentAiSyntax(draft)
+  const actual=JSON.parse(normalized.contentJson).activities[0].outcomes[0].operations
+  expect(actual[0]).toEqual({...operations[0],damageType:'cold'})
+  expect(actual.slice(1)).toEqual(operations.slice(1))
+  expect(normalized.unsupported).toEqual(draft.unsupported)
+  expect(normalized.assumptions.join(' ')).toContain('缺失或非法骰值继续拒绝')
+  expect(JSON.parse(draft.contentJson).activities[0].outcomes[0].operations).toEqual(operations)
+})
+
+it('includes creature authoring contracts for spell dependencies only when stat block evidence is supplied', () => {
+  expect(dnd5eLocalContentAiFormatGuide('spell', '普通法术原文')).not.toContain('怪物最少需要')
+  expect(dnd5eLocalContentAiFormatGuide('spell', '[相关属性块原文]\n护甲等级 12\n生命值 8')).toContain('armorClass:{value:数值')
+  expect(dnd5eLocalContentAiFormatGuide('spell', '[相关属性块原文]\n没有属性块')).not.toContain('怪物最少需要')
+})
+
+it('fills only the fixed reaction cost of an explicitly declared mitigation interrupt', () => {
+  const ability = { trigger: { kind: 'before-damage-taken' }, mechanic: { kind: 'damage-mitigation-interrupt' } }
+  const draft = { schemaVersion: 1 as const, assumptions: [], unsupported: ['other rule missing'], contentJson: JSON.stringify({ subclasses: [{ abilities: [ability, { ...ability, cost: { economy: 'action' } }] }] }) }
+  const normalized = normalizeDnd5eLocalContentAiSyntax(draft)
+  const abilities = JSON.parse(normalized.contentJson).subclasses[0].abilities
+  expect(abilities[0].cost).toEqual({ economy: 'reaction' })
+  expect(abilities[1].cost).toEqual({ economy: 'action' })
+  expect(normalized.unsupported).toEqual(draft.unsupported)
+  expect(JSON.parse(draft.contentJson).subclasses[0].abilities[0].cost).toBeUndefined()
+})
+
+it('fills only presentation targeting for empty manual passives without making them executable', () => {
+  const passive = { trigger: { kind: 'passive' }, automation: 'manual', effects: [] }
+  const entries = [passive, { ...passive, automation: 'full' }, { ...passive, trigger: { kind: 'active-use' } },
+    { ...passive, effects: [{ kind: 'damage' }] }, { ...passive, cost: { economy: 'action' } },
+    { ...passive, targeting: { kind: 'multiple-creatures' } }]
+  const draft = { schemaVersion: 1 as const, assumptions: [], unsupported: ['Still manual'], contentJson: JSON.stringify({subclasses:[{abilities:entries}]}) }
+  const normalized = normalizeDnd5eLocalContentAiSyntax(draft)
+  const actual = JSON.parse(normalized.contentJson).subclasses[0].abilities
+  expect(actual[0].targeting).toEqual({kind:'self'})
+  expect(actual[0].automation).toBe('manual')
+  expect(actual.slice(1)).toEqual(entries.slice(1))
+  expect(normalized.unsupported).toEqual(['Still manual'])
+  expect(JSON.parse(draft.contentJson).subclasses[0].abilities[0].targeting).toBeUndefined()
+})
+
+it('normalizes authoring aliases without inventing rule values or converting arbitrary target choices', () => {
+  const draft = { schemaVersion: 1 as const, assumptions: [], unsupported: ['unimplemented effect'], contentJson: JSON.stringify({ activities: [
+    { invocation: { kind: 'active-use' }, target: { kind: 'area', origin: 'self', shape: 'line', lengthFeet: 30, selection: 'choose-direction' } },
+    { target: { kind: 'area', origin: 'point', shape: 'sphere', selection: 'choose-direction' } },
+  ] }) }
+  const normalized = normalizeDnd5eLocalContentAiSyntax(draft)
+  const activities = JSON.parse(normalized.contentJson).activities
+  expect(activities[0]).toEqual({ invocation: { kind: 'active' }, target: { kind: 'area', origin: 'self', shape: 'line', lengthFeet: 30, rotatable: true } })
+  expect(activities[1].target.selection).toBe('choose-direction')
+  expect(normalized.unsupported).toEqual(['unimplemented effect'])
+  expect(JSON.parse(draft.contentJson).activities[0].invocation.kind).toBe('active-use')
+})
+
+it('completes equal cube dimensions but does not guess the height of rectangular volumes', () => {
+ const draft = {schemaVersion:1 as const, assumptions:[],unsupported:[],contentJson:JSON.stringify({activities:[
+  {target:{kind:'area',shape:'cube',lengthFeet:20}},
+  {target:{kind:'area',shape:'cube',lengthFeet:20,widthFeet:10}},
+ ]})}
+ const data=JSON.parse(normalizeDnd5eLocalContentAiSyntax(draft).contentJson)
+ expect(data.activities[0].target).toMatchObject({lengthFeet:20,widthFeet:20,heightFeet:20})
+ expect(data.activities[1].target.heightFeet).toBeUndefined()
+})
+
+it('resolves contradictory capability metadata conservatively without deleting manual limitations or rule operations', () => {
+  const activity = { id: 'one', automation: { schemaVersion: 1, level: 'full', supportedPhases: ['damage', 'targeting'], manualPhases: ['damage'], limitations: ['Missing terrain facts'] }, outcomes: [{ id: 'unchanged' }] }
+  const result = normalizeDnd5eLocalContentAiSyntax({ schemaVersion: 1, contentJson: JSON.stringify({ activities: [activity] }), assumptions: [], unsupported: ['Source limitation'] })
+  const normalized = JSON.parse(result.contentJson).activities[0]
+  expect(normalized.automation).toMatchObject({ level: 'assisted', supportedPhases: ['targeting'], manualPhases: ['damage'], limitations: ['Missing terrain facts'] })
+  expect(normalized.outcomes).toEqual(activity.outcomes)
+  expect(result.unsupported).toEqual(['Source limitation'])
+})
+
+it('keeps manual movement manual when normalizing its capability phase alias', () => {
+  const result = normalizeDnd5eLocalContentAiSyntax({ schemaVersion: 1, assumptions: [], unsupported: ['Movement needs geometry'], contentJson: JSON.stringify({
+    activities: [{ automation: { schemaVersion: 1, level: 'full', supportedPhases: ['effects'], manualPhases: ['movement'], limitations: ['Missing geometry'] } }],
+  }) })
+  expect(JSON.parse(result.contentJson).activities[0].automation).toMatchObject({ level: 'assisted', supportedPhases: [], manualPhases: ['effects'], limitations: ['Missing geometry'] })
+  expect(result.unsupported).toEqual(['Movement needs geometry'])
+})
+
+it('maps legacy manual capability spelling without changing phases, limitations or operations', () => {
+ const automation={schemaVersion:1,level:'manual',supportedPhases:['targeting'],manualPhases:['effects'],limitations:['Requires DM']}
+ const outcomes=[{id:'manual',when:{kind:'always'},operations:[{kind:'manual-adjudication',id:'adjudicate',prompt:'Review',reason:'Requires DM',requiresDmApproval:true}]}]
+ const draft={schemaVersion:1 as const,assumptions:[],unsupported:['Unimplemented'],contentJson:JSON.stringify({activities:[{automation,outcomes}]})}
+ const normalized=normalizeDnd5eLocalContentAiSyntax(draft)
+ expect(JSON.parse(normalized.contentJson).activities[0]).toEqual({automation:{...automation,level:'dm-adjudication'},outcomes})
+ expect(normalized.unsupported).toEqual(draft.unsupported)
+ expect(JSON.parse(draft.contentJson).activities[0].automation.level).toBe('manual')
+})
+
+it('retains misplaced unsupported notes and ignores parent-level certification claims', () => {
+  const draft = { schemaVersion: 1 as const, assumptions: [], unsupported: ['existing'], contentJson: JSON.stringify({
+    subclasses: [{ id: 'school', name: 'School', automation: 'full', unsupported: ['missing resource'], abilities: [{ id: 'ability', name: 'Ability', automation: 'manual', unsupported: ['missing effect'] }] }],
+  }) }
+  const normalized = normalizeDnd5eLocalContentAiSyntax(draft)
+  expect(normalized.unsupported).toEqual(expect.arrayContaining(['existing', 'School：missing resource', 'Ability：missing effect']))
+  const subclass = JSON.parse(normalized.contentJson).subclasses[0]
+  expect(subclass.automation).toBeUndefined()
+  expect(subclass.abilities[0].automation).toBe('manual')
+})
+
+it('normalizes partial Activity metadata conservatively without inventing coverage', () => {
+  const draft = {schemaVersion: 1 as const, assumptions: [], unsupported: ['missing lifecycle'], contentJson: JSON.stringify({activities: [{automation: {schemaVersion: 1, level: 'partial', supportedPhases: ['damage'], manualPhases: ['persistence'], limitations: ['missing lifecycle']}}]})}
+  const normalized = normalizeDnd5eLocalContentAiSyntax(draft)
+  expect(JSON.parse(normalized.contentJson).activities[0].automation).toEqual({schemaVersion: 1, level: 'assisted', supportedPhases: ['damage'], manualPhases: ['persistence'], limitations: ['missing lifecycle']})
+  expect(normalized.unsupported).toEqual(draft.unsupported)
+  expect(draft.contentJson).toContain('partial')
+})
 
 function runtime(output: unknown): AiProviderRuntimeV1 {
   return {
@@ -49,6 +223,49 @@ function runtime(output: unknown): AiProviderRuntimeV1 {
     })),
   }
 }
+
+it('retains a rejected draft and sends its complete repair context as data instead of truncated instructions', async () => {
+  const rejected = {schemaVersion: 1 as const, assumptions: ['preserve'], unsupported: ['still missing'], contentJson: JSON.stringify({name: 'Rejected', features: [{id: 'broken', description: 'x'.repeat(4_000) + 'TAIL-MUST-SURVIVE'}]})}
+  const first = new AiProviderRegistryV1(); first.register(runtime(rejected))
+  let captured: unknown
+  try { await generateDnd5eLocalContentAiDraft({sourceText: 'Synthetic feature', targetKind: 'feature', registry: first, selection}) } catch (error) { captured = error }
+  expect(captured).toBeInstanceOf(Dnd5eLocalContentAiDraftError)
+  const failed = captured as Dnd5eLocalContentAiDraftError
+  expect(failed.rejectedDraft?.contentJson).toContain('TAIL-MUST-SURVIVE')
+  const fixed = {schemaVersion: 1 as const, assumptions: [], unsupported: ['still missing'], contentJson: JSON.stringify({name: 'Fixed', features: [{id: 'valid', name: 'Valid', summary: 'Example', description: 'Example', automation: 'manual'}]})}
+  const provider = runtime(fixed), second = new AiProviderRegistryV1(); second.register(provider)
+  const feedback = failed.message + '\n' + 'diagnostic '.repeat(500) + 'FINAL-ENTRY-FAILURE'
+  await generateDnd5eLocalContentAiDraft({sourceText: 'Synthetic feature', targetKind: 'feature', registry: second, selection, repairFeedback: feedback, repairDraft: failed.rejectedDraft})
+  const request = vi.mocked(provider.generateStructured).mock.calls[0][0]
+  const document = request.documents?.find(doc => doc.id === 'rejected-rule-draft')
+  expect(JSON.parse(document!.text)).toEqual(failed.rejectedDraft)
+  expect(request.userPrompt).not.toContain('TAIL-MUST-SURVIVE')
+  expect(request.documents?.find(doc => doc.id === 'host-validation-feedback')?.text).toBe(feedback)
+  expect(request.userPrompt).not.toContain('FINAL-ENTRY-FAILURE')
+})
+
+it.each([true, false])('falls back from advisory retrieval without bypassing the Host gate (valid=%s)', async valid => {
+  const draft = { schemaVersion: 1, assumptions: [], unsupported: ['Narrative only'], contentJson: JSON.stringify({
+    name: 'Synthetic', features: [{ id: 'sample', ...(valid ? { name: 'Sample', summary: 'Example', description: 'Example', automation: 'manual' } : {}) }],
+  }) }
+  const provider = runtime(draft)
+  vi.mocked(provider.generateStructured).mockRejectedValueOnce(new Error('synthetic retrieval failure'))
+  const registry = new AiProviderRegistryV1(); registry.register(provider)
+  const conversion = generateDnd5eLocalContentAiDraft({ sourceText: 'Synthetic narrative feature.', targetKind: 'feature', registry, selection, planMechanisms: true })
+  if (valid) {
+    const result = await conversion
+    expect(result.mechanismPlan).toBeUndefined()
+    expect(result.draft.assumptions).toContain('协议检索计划失败；本次使用完整 Host 协议进行转换，仍通过同一配置校验。')
+    expect(result.draft.unsupported).toEqual(['Narrative only'])
+  } else {
+    await expect(conversion).rejects.toBeInstanceOf(Dnd5eLocalContentAiDraftError)
+  }
+  expect(provider.generateStructured).toHaveBeenCalledTimes(2)
+  const request = vi.mocked(provider.generateStructured).mock.calls[1][0]
+  expect(request.userPrompt).toContain('export interface DeclarativeWardPoolMechanicV1')
+  expect(request.userPrompt).toContain('export interface DeclarativeDamageMitigationInterruptMechanicV1')
+  expect(request.documents?.[0].text).toBe('Synthetic narrative feature.')
+})
 
 function routedExternalRuntime(outputs: Record<string, unknown>): AiProviderRuntimeV1 {
   const modelIds = Object.keys(outputs)
@@ -98,6 +315,47 @@ const selection = {
 }
 
 describe('natural-language local content AI import', () => {
+  it('returns the unmodified rejected draft when generated roll scopes contradict explicit source constraints', async () => {
+    const draft = { schemaVersion: 1, assumptions: [], unsupported: [], contentJson: JSON.stringify({
+      spells: [{ id: 'scope-example' }],
+      activities: [{ id: 'scope-cast', legacySource: { kind: 'spell', id: 'scope-example' },
+        target: { kind: 'area' }, checks: [{ kind: 'saving-throw' }], effects: [{ modifiers: [{
+          kind: 'roll-dice', dice: { count: 1, sides: 6, direction: 'subtract', appliesTo: ['attack', 'ability-check', 'saving-throw'] },
+        }] }],
+      }],
+    }) }
+    const registry = new AiProviderRegistryV1()
+    registry.register(runtime(draft))
+    let caught: unknown
+    try {
+      await generateDnd5eLocalContentAiDraft({ registry, selection, targetKind: 'spell',
+        sourceText: '投掷一个d6，每次它进行攻击检定、属性检定和因为维持专注进行体质豁免检定时，它都要从结果上减去这个数值。',
+      })
+    } catch (error) { caught = error }
+    expect(caught).toBeInstanceOf(Dnd5eLocalContentAiDraftError)
+    expect((caught as Error).message).toContain('不能扩大为普通 saving-throw')
+    expect(JSON.parse((caught as Dnd5eLocalContentAiDraftError).rejectedDraft!.contentJson).activities[0].effects)
+      .toEqual(JSON.parse(draft.contentJson).activities[0].effects)
+  })
+  it('accepts structured objects without JSON strings and rejects ambiguous envelopes', async () => {
+    const output = { schemaVersion: 1, content: { features: [{ id: 'wire-feature', name: 'Wire', summary: 'Synthetic', description: 'Synthetic', automation: 'manual' }] }, assumptions: [], unsupported: [] }
+    const registry = new AiProviderRegistryV1()
+    registry.register(runtime(output))
+    const result = await generateDnd5eLocalContentAiDraft({ registry, selection, sourceText: 'Synthetic feature.' })
+    expect(JSON.parse(result.draft.contentJson).features[0].id).toBe('wire-feature')
+    expect(readDnd5eLocalContentAiWireDraft({ ...output, contentJson: '{}' })).toBeNull()
+    expect(readDnd5eLocalContentAiWireDraft({ ...output, content: [] })).toBeNull()
+  })
+  it('rejects completeness claims without a bound execution activity', async () => {
+    const registry = new AiProviderRegistryV1()
+    registry.register(runtime({ schemaVersion: 1, assumptions: [], unsupported: [], contentJson: JSON.stringify({ spells: [{
+      id: 'claimed', name: 'Claimed', level: 1, school: 'evocation', ritual: false,
+      castingTime: { value: 1, unit: 'action' }, range: { type: 'self' },
+      components: { verbal: true, somatic: true, material: false }, duration: { type: 'instantaneous', concentration: false },
+      classes: ['wizard'], description: 'Synthetic', automation: { mode: 'partial' },
+    }] }) }))
+    await expect(generateDnd5eLocalContentAiDraft({ registry, selection, targetKind: 'spell', sourceText: 'Synthetic spell.' })).rejects.toThrow('Activity')
+  })
   it('returns a preview draft without installing or executing it', async () => {
     const registry = new AiProviderRegistryV1()
     const provider = runtime({

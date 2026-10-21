@@ -40,23 +40,40 @@ function permanentEffect(
   if (staticModifiers?.speedBonusFeet) modifiers.push({ kind: 'speed', mode: 'add', value: { kind: 'constant', value: staticModifiers.speedBonusFeet } })
   if (staticModifiers?.savingThrowBonus) modifiers.push({ kind: 'saving-throw', mode: 'add', value: { kind: 'constant', value: staticModifiers.savingThrowBonus } })
   if (staticModifiers?.darkvisionRangeFeet) modifiers.push({ kind: 'darkvision', rangeFeet: staticModifiers.darkvisionRangeFeet })
+  if (staticModifiers?.darkvisionIfAbsentFeet) modifiers.push({
+    kind: 'darkvision', rangeFeet: staticModifiers.darkvisionIfAbsentFeet, ifAbsent: true,
+    existingBonusFeet: staticModifiers.darkvisionExistingBonusFeet,
+  })
+  if (staticModifiers?.darkvisionRacialFallbackFeet) modifiers.push({
+    kind: 'darkvision', rangeFeet: staticModifiers.darkvisionRacialFallbackFeet, ifAbsent: true,
+    existingBonusFeet: staticModifiers.darkvisionRacialBonusFeet, existingRangeSource: 'race',
+  })
+  if (staticModifiers?.invisibleToDarkvision) modifiers.push({ kind: 'darkvision-concealment' })
   staticModifiers?.damageResistances?.forEach((damageType) => modifiers.push({ kind: 'damage-resistance', damageType }))
   staticModifiers?.damageImmunities?.forEach((damageType) => modifiers.push({ kind: 'damage-immunity', damageType }))
   staticModifiers?.conditionImmunities?.forEach((condition) => {
     if (CONDITIONS.has(condition)) modifiers.push({ kind: 'condition-immunity', condition: condition as Dnd5eStandardConditionId })
   })
+  staticModifiers?.maximizeHealingDiceNearCompanion?.forEach(query => modifiers.push({ kind: 'maximize-healing-dice', whenOwnedCompanionWithin: structuredClone(query) }))
+  staticModifiers?.skillCheckAbilityBonuses?.forEach(rule => modifiers.push({kind:'ability-check',mode:'add',
+    skill:rule.skill,ability:rule.ability,value:{kind:'reference',reference:{kind:'actor-ability-modifier',ability:rule.bonusAbility}}}))
   const nativeStaticKeys = new Set([
+    'skillCheckAbilityBonuses',
+    'maximizeHealingDiceNearCompanion',
     'armorClassBonus', 'speedBonusFeet', 'savingThrowBonus', 'darkvisionRangeFeet',
+    'invisibleToDarkvision',
+    ...(staticModifiers?.darkvisionIfAbsentFeet ? ['darkvisionIfAbsentFeet', 'darkvisionExistingBonusFeet'] : []),
+    ...(staticModifiers?.darkvisionRacialFallbackFeet ? ['darkvisionRacialFallbackFeet', 'darkvisionRacialBonusFeet'] : []),
     'damageResistances', 'damageImmunities', 'conditionImmunities',
   ])
   for (const [capability, rawValue] of Object.entries(staticModifiers ?? {})) {
     if (nativeStaticKeys.has(capability) || rawValue == null || rawValue === false || rawValue === 0) continue
-    const value = Array.isArray(rawValue) ? [...rawValue] : rawValue
+    const value = Array.isArray(rawValue) ? structuredClone(rawValue) : rawValue
     if (Array.isArray(value) && value.length === 0) continue
     modifiers.push({
       kind: 'character-capability',
       capability: capability as Extract<Dnd5eEffectModifierV1, { kind: 'character-capability' }>['capability'],
-      value: value as boolean | number | readonly string[],
+      value: value as Extract<Dnd5eEffectModifierV1, { kind: 'character-capability' }>['value'],
     })
   }
   if (racialRules?.naturalOneReroll) {
@@ -409,16 +426,21 @@ export function dnd5eContentDefinitionsFromPackageV2(
     ))
   }
   for (const subclass of value.content.subclasses) {
-    const grants: Dnd5eAdvancementDefinitionV1[] = []
+    const grants: Dnd5eAdvancementDefinitionV1[] = [...(subclass.advancements ?? [])]
     const subclassActivities: Dnd5eActivityDefinitionV1[] = []
     for (const ability of subclass.abilities) {
       const sourceId = `${subclass.id}:${ability.id}`
       const activities = activitiesBySource.get(`subclass-ability:${sourceId}`) ?? []
       subclassActivities.push(...activities)
       const abilityContentId = definitionId('feature', `subclass-ability.${subclass.id}.${ability.id}`)
+      const aquatic = ability.mechanic?.kind === 'passive-defense' ? permanentEffect(abilityContentId, ability.name, {
+        canBreatheWater: ability.mechanic.canBreatheWater, swimSpeedMinimumFeet: ability.mechanic.swimSpeedMinimumFeet,
+        opportunityAttacksOnMoveWithinReach: ability.mechanic.opportunityAttacksOnMoveWithinReach,
+        opportunityAttackHitStopsMovement: ability.mechanic.opportunityAttackHitStopsMovement,
+      }) : undefined
       definitions.push(definition(value, 'feature', `subclass-ability.${subclass.id}.${ability.id}`, ability.name, ability,
         activities.length ? combinedCapability(activities) : automationCapabilityFromLegacyStatus(ability.automation), {
-          description: ability.description, activities,
+          description: ability.description, activities, effects: aquatic ? [aquatic] : undefined,
         }))
       grants.push({
         schemaVersion: 1, id: `${definitionId('subclass', subclass.id)}.grant.${safeSegment(ability.id)}`,

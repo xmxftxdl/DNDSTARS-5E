@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { requestCompanionHelpSelections } from './map/companionHelpSelection'
 import {
   getAppDialogSnapshot,
   resetAppDialogsForTests,
@@ -16,6 +17,26 @@ import AppDialogHost from './AppDialogHost'
 afterEach(() => resetAppDialogsForTests())
 
 describe('AppDialogHost', () => {
+  it('collects bound companion Help through the real application choice dialogs', async () => {
+    const pending = requestCompanionHelpSelections({ operationIds: ['help'],
+      options: [{ id: 'enemy-token', label: '牛头人' }], choose: showAppActionChoice })
+    let html = renderToStaticMarkup(<AppDialogHost />)
+    expect(html).toContain('选择协助方式')
+    expect(html).toContain('协助角色检定')
+    expect(html).not.toContain('app-dialog-input')
+    settleAppDialog(getAppDialogSnapshot().active!.id, 'attack')
+    await vi.waitFor(() => expect(getAppDialogSnapshot().active?.title).toBe('选择要干扰的敌人'))
+    html = renderToStaticMarkup(<AppDialogHost />)
+    expect(html).toContain('牛头人')
+    expect(html).not.toContain('app-dialog-input')
+    settleAppDialog(getAppDialogSnapshot().active!.id, 'enemy-token')
+    await expect(pending).resolves.toEqual({ help: { targetId: 'enemy-token', helpKind: 'attack' } })
+    const cancelled = requestCompanionHelpSelections({ operationIds: ['help'],
+      options: [{ id: 'enemy-token', label: '牛头人' }], choose: showAppActionChoice })
+    settleAppDialog(getAppDialogSnapshot().active!.id, null)
+    await expect(cancelled).resolves.toBeNull()
+    expect(getAppDialogSnapshot().active).toBeNull()
+  })
   it('renders creature exemptions as checkboxes with no search or number input', async () => {
     const pending = showAppMultiChoice({ title: '警报术·豁免生物', message: '勾选不会触发警报的生物',
       options: [{ id: 'a', label: '牛头人' }, { id: 'b', label: '新冒险者（施法者）' }], selectedIds: ['b'] })

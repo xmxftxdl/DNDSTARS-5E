@@ -1,4 +1,12 @@
+import { ControlledWaterSceneLayer } from './ControlledWaterSceneLayer'
+import type { MapSurfaceMaterial } from '../../lib/mapSurfaceMaterials'
+import type { MapTraversableSolidMaterial } from '../../lib/mapSolidMaterialTraversal'
 import { IceWallVisual } from './IceWallVisual'
+import { FortressStructureVisual } from './FortressStructureVisual'
+import { TempleStructureVisual } from './TempleStructureVisual'
+import { fortressFurnitureOnViewedStory } from './fortressVisualGeometry'
+import { ControlledFlameSceneLayer } from './ControlledFlameSceneLayer'
+import { ObjectFlightPreview } from './ObjectFlightPreview'
 import { ForceWallPanelsVisual } from './ForceWallPanelsVisual'
 import { StoneWallAttackTargets } from './StoneWallAttackTargets'
 import { StoneWallVisual } from './StoneWallVisual'
@@ -83,9 +91,13 @@ import {
 } from './MapTokenNode'
 import { usePrefersReducedMotion, useStatusAnimation } from './mapEffectHooks'
 import { FogOfWarLayer, LightingLayer, PlayerVisibilityLayer } from './MapVisibilityLayers'
+import { PersonalPerceptionMask } from './PersonalPerceptionMask'
+import { originalPlaneSceneView } from './originalPlaneSceneView'
 import { MapGeometryDiagnosticsLayer, MapGeometryLayer } from './MapGeometryLayers'
 import { Dnd5ePluginAreaOverlays, DifficultTerrainCellOverlays, TerrainElevationContours } from './MapPersistentAreaLayers'
+import { companionGuardOverlays } from './companionGuardOverlays'
 import { gridLinePositions, isMapTokenNode, mapTokenIdFromNode } from './mapCanvasGeometryUtils'
+import { illusionRecognizedByViewer } from './illusionObserverPresentation'
 import type { TokenStatusTooltipContent } from './tokenStatusTooltip'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
@@ -207,6 +219,8 @@ interface MapCanvasProps {
   moveCanOccupyCreatureSpaces?: boolean
   moveIgnoreMaterialCollision?: boolean
   moveIgnoreDifficultTerrain?: boolean
+  moveIgnoreDifficultTerrainMaterials?: readonly MapSurfaceMaterial[]
+  movePassThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
   moveTreatsLiquidSurfacesAsSolidGround?: boolean
   difficultTerrainMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
   speedCostMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
@@ -362,6 +376,7 @@ interface MapCanvasProps {
   isDM?: boolean
   /** Current player character used for source-only spell-entity presentation. */
   viewerCharacterId?: string
+  viewerMaterialSightRangeFeet?: number
 }
 
 export default function MapCanvas({
@@ -385,6 +400,8 @@ export default function MapCanvas({
   moveCanOccupyCreatureSpaces = false,
   moveIgnoreMaterialCollision = false,
   moveIgnoreDifficultTerrain = false,
+  moveIgnoreDifficultTerrainMaterials,
+  movePassThroughSolidMaterials,
   moveTreatsLiquidSurfacesAsSolidGround = false,
   difficultTerrainMultiplierAtPosition,
   speedCostMultiplierAtPosition,
@@ -484,9 +501,23 @@ export default function MapCanvas({
   onTabletopToolCancel,
   isDM = false,
   viewerCharacterId,
+  viewerMaterialSightRangeFeet,
 }: MapCanvasProps) {
   const appTheme = useSyncExternalStore(subscribeAppTheme, getAppTheme, getAppTheme)
   const canvasMatteColor = mapCanvasMatteColor(appTheme)
+  const originalPlanePolygons = useMemo(() => originalPlaneSceneView({
+    map, geometry, viewerCharacterId, materialSightRangeFeet: viewerMaterialSightRangeFeet, isDM, worldMinute,
+  }), [map, geometry, viewerCharacterId, viewerMaterialSightRangeFeet, isDM, worldMinute])
+  const clipOriginalPlane = useCallback((context: Konva.Context) => {
+    context.beginPath()
+    for (const polygon of originalPlanePolygons ?? []) {
+      if (polygon.length < 3) continue
+      context.moveTo(polygon[0].x, polygon[0].y)
+      for (const point of polygon.slice(1)) context.lineTo(point.x, point.y)
+      context.closePath()
+    }
+  }, [originalPlanePolygons])
+  const originalPlaneClip = originalPlanePolygons === undefined ? undefined : clipOriginalPlane
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
   const savingThrowMarkerRef = useRef<HTMLDivElement>(null)
@@ -871,7 +902,10 @@ export default function MapCanvas({
           token.dnd5eSpellEffect.sourceCharacterId === viewerCharacterId
         ))
 
+  const fortressObserver = map.tokens.find(token => token.id === (isDM ? selectedTokenId : visionSourceTokenIds[0]))
+  const fortressViewElevation = fortressObserver ? mapGeometryTokenElevation(geometry, fortressObserver) : 0
   const renderedTokens = authoritativeVisibleTokens(map.tokens, visibilityTokens)
+    .filter(token => fortressFurnitureOnViewedStory(token, geometry, fortressViewElevation))
   const visibleTokenIdsKey = renderedTokens.map(token => token.id).join(',')
   useEffect(() => {
     const visibleIds = new Set(visibleTokenIdsKey.split(','))
@@ -1358,7 +1392,9 @@ export default function MapCanvas({
       canClimb: moveTraversalMode === 'climb' || moveTraversalMode === 'fly',
       canSwim: moveTraversalMode === 'swim' || moveTreatsLiquidSurfacesAsSolidGround,
       canFly: moveTraversalMode === 'fly' || moveIgnoreMaterialCollision,
-      targetElevationFeet: moveTraversalMode === 'climb' || moveTraversalMode === 'fly' || moveIgnoreMaterialCollision
+      targetElevationFeet: moveTraversalMode === 'walk' && movePassThroughSolidMaterials?.length
+        ? Math.min(mapGeometryTerrainElevationAtPoint(geometry, cursor), moveTargetElevationFeet ?? mapGeometryTokenElevation(geometry, movingToken))
+        : moveTraversalMode === 'climb' || moveTraversalMode === 'fly' || moveIgnoreMaterialCollision
         ? moveTargetElevationFeet ?? mapGeometryTokenElevation(geometry, movingToken)
         : undefined,
       maximumTerrainStepFeet: moveTraversalMode === 'fall' ? 10_000 : 10,
@@ -1369,6 +1405,8 @@ export default function MapCanvas({
         : undefined,
       allowOccupiedDestination: moveIgnoreMaterialCollision || moveCanOccupyCreatureSpaces,
       minimumPassageGapInches: moveMinimumPassageGapInches,
+      ignoreDifficultTerrainMaterials: moveIgnoreDifficultTerrainMaterials,
+      passThroughSolidMaterials: movePassThroughSolidMaterials,
       ignoreDifficultTerrain: moveIgnoreMaterialCollision || moveIgnoreDifficultTerrain,
       additionalDifficultTerrainMultiplier: moveIgnoreMaterialCollision
         ? undefined
@@ -1377,7 +1415,7 @@ export default function MapCanvas({
         ? undefined
         : speedCostMultiplierAtPosition,
     })
-  }, [cursor, difficultTerrainMultiplierAtPosition, geometry, map, moveCanOccupyCreatureSpaces, moveCircle, moveIgnoreDifficultTerrain, moveIgnoreMaterialCollision, moveMinimumPassageGapInches, moveSelectMode, moveTargetElevationFeet, moveTraversalMode, moveTreatsLiquidSurfacesAsSolidGround, selectedTokenId, speedCostMultiplierAtPosition])
+  }, [cursor, difficultTerrainMultiplierAtPosition, geometry, map, moveCanOccupyCreatureSpaces, moveCircle, moveIgnoreDifficultTerrain, moveIgnoreDifficultTerrainMaterials, movePassThroughSolidMaterials, moveIgnoreMaterialCollision, moveMinimumPassageGapInches, moveSelectMode, moveTargetElevationFeet, moveTraversalMode, moveTreatsLiquidSurfacesAsSolidGround, selectedTokenId, speedCostMultiplierAtPosition])
 
   const handleFogMouseMove = (stage: Konva.Stage | null): boolean => {
     if (!fogEditMode || !fogDragStartRef.current) return false
@@ -2021,14 +2059,14 @@ export default function MapCanvas({
     }
   }
 
-  return <Layer name="map-background-layer">
+  return <Layer name="map-background-layer" clipFunc={originalPlaneClip}>
     <Rect x={0} y={0} width={map.width} height={map.height} fill={canvasMatteColor} listening={false} />
     {image && <KonvaImage image={image} width={map.width} height={map.height} />}
     {gridLines}
     {coordinateLabels}
   </Layer>
   }, [image, canvasMatteColor, map.width, map.height, map.gridSize,
-    map.gridOffsetX, map.gridOffsetY, map.showCoordinates, showGridOverlay, gridStroke, gridAdjustMode])
+    map.gridOffsetX, map.gridOffsetY, map.showCoordinates, showGridOverlay, gridStroke, gridAdjustMode, originalPlaneClip])
 
   const inv = 1 / view.scale // Keep strokes/text size stable while zooming.
 
@@ -2425,6 +2463,7 @@ export default function MapCanvas({
         if (geometryEditMode) event.preventDefault()
       }}
       data-testid="map-canvas"
+      data-original-plane-sight-feet={originalPlanePolygons === undefined ? undefined : viewerMaterialSightRangeFeet}
       data-vision-source-count={visionSourceTokenIds.length}
       data-vision-enabled={geometry?.vision.enabled === true ? 'true' : 'false'}
       data-ambient-light={geometry?.vision.ambientLight ?? 'bright'}
@@ -2503,7 +2542,7 @@ export default function MapCanvas({
         ref={stageRef}
         width={size.width}
         height={size.height}
-        style={{ backgroundColor: canvasMatteColor }}
+        style={{ backgroundColor: canvasMatteColor, filter: originalPlanePolygons === undefined ? undefined : 'grayscale(1)' }}
         scaleX={view.scale}
         scaleY={view.scale}
         x={view.x}
@@ -2810,7 +2849,9 @@ export default function MapCanvas({
         }}
       >
         {backgroundLayer}
-        <Layer name="map-ground-overlay-layer">
+        <Layer name="map-ground-overlay-layer" clipFunc={originalPlaneClip}>
+          <FortressStructureVisual geometry={geometry} worldMinute={worldMinute} elevationFeet={fortressViewElevation} />
+          <TempleStructureVisual geometry={geometry} worldMinute={worldMinute} elevationFeet={fortressViewElevation} />
           {(geometryEditMode || moveSelectMode) && <DifficultTerrainCellOverlays map={map} cells={difficultTerrainCells} showLabels={geometryEditMode} />}
           {isDM && sceneTriggerZones.map((zone) =>
             sceneRegionNode(
@@ -2894,18 +2935,23 @@ export default function MapCanvas({
             )
           })}
           {!isDM && sceneInteractionPointNodes}
+          {aoeHighlightVisible && aoeHighlight?.objectFlight && <ObjectFlightPreview plan={aoeHighlight.objectFlight} valid={aoeHighlight.valid} gridSize={map.gridSize} visibleTokenIds={new Set(renderedTokens.map(token => token.id))} />}
           {aoeHighlightVisible && aoeHighlight?.areaCircle && (
             <Circle
               x={aoeHighlight.areaCircle.centerX}
               y={aoeHighlight.areaCircle.centerY}
               radius={aoeHighlight.areaCircle.radiusPx}
-              fill="rgba(127, 29, 29, 0.12)"
+              fill={aoeHighlight.areaCircle.innerRadiusPx == null ? 'rgba(127, 29, 29, 0.12)' : undefined}
               stroke="rgba(185, 28, 28, 0.9)"
               strokeWidth={3}
               dash={[12, 7]}
               listening={false}
             />
           )}
+          {aoeHighlightVisible && aoeHighlight?.areaCircle?.innerRadiusPx != null && <Circle
+            x={aoeHighlight.areaCircle.centerX} y={aoeHighlight.areaCircle.centerY}
+            radius={aoeHighlight.areaCircle.innerRadiusPx} stroke="rgba(185, 28, 28, 0.9)"
+            strokeWidth={2} dash={[12,7]} listening={false} />}
           {aoeHighlightVisible && aoeHighlight?.areaPolygon && (
             <Line
               points={aoeHighlight.areaPolygon}
@@ -3000,6 +3046,13 @@ export default function MapCanvas({
           )}
         </Layer>
         <Layer name="token-body-layer">
+          {companionGuardOverlays(map, isDM, viewerCharacterId).map(area =>
+            <Group key={`guard:${area.minX}:${area.minY}:${area.maxX}:${area.maxY}`} listening={false}>
+              <Rect x={area.minX} y={area.minY} width={area.maxX-area.minX} height={area.maxY-area.minY}
+                fill="rgba(56,189,248,0.07)" stroke="#7dd3fc" strokeWidth={2*inv} dash={[8*inv,5*inv]} />
+              <Text x={area.minX+5*inv} y={area.minY+5*inv} text="守卫区域" fontSize={12*inv}
+                fill="#e0f2fe" stroke="#082f49" strokeWidth={0.5*inv} />
+            </Group>)}
           <Dnd5eItemAreaOverlays map={map} />
           <Dnd5ePluginAreaOverlays
             map={map}
@@ -3024,6 +3077,7 @@ export default function MapCanvas({
             <TokenNode
               key={`body-${t.id}`}
               renderMode="body"
+              illusionRecognized={illusionRecognizedByViewer(map, t.id, viewerCharacterId, isDM)}
               token={displayToken(t)}
               gridSize={map.gridSize}
               builtinGrid={builtinGrid}
@@ -3063,6 +3117,11 @@ export default function MapCanvas({
             />
             )
           })}
+          {/* Object markings belong on the object body, below status/visibility layers. */}
+          <Group listening={false} name="object-surface-markings">
+            <Dnd5ePluginAreaOverlays map={map} isDM={isDM} renderPass="object-surface"
+              dragPreviewPositions={dragPreviewPositions} />
+          </Group>
         </Layer>
         <Layer
           ref={tokenBorderFlowLayerRef}
@@ -3376,8 +3435,12 @@ export default function MapCanvas({
           </Group>
           {isDM && sceneInteractionPointNodes}
         </Layer>
-        <Layer name="map-world-overlay-layer">
+        <Layer name="map-world-overlay-layer" clipFunc={originalPlaneClip}>
           <LightingLayer map={visibilityMap} geometry={geometry} worldMinute={worldMinute} isDM={isDM} visionSourceTokenIds={visionSourceTokenIds} />
+          <ControlledWaterSceneLayer map={visibilityMap} geometry={geometry} fog={fog} worldMinute={worldMinute}
+            isDM={isDM && !geometryPreviewAsPlayer && !fogPreviewAsPlayer} visionSourceTokenIds={visionSourceTokenIds} inv={inv} />
+          <ControlledFlameSceneLayer map={visibilityMap} geometry={geometry} fog={fog} worldMinute={worldMinute}
+            isDM={isDM && !geometryPreviewAsPlayer && !fogPreviewAsPlayer} visionSourceTokenIds={visionSourceTokenIds} inv={inv} />
         {isDM && (
           <MapGeometryDiagnosticsLayer
             diagnostics={geometryDiagnostics}
@@ -3389,6 +3452,7 @@ export default function MapCanvas({
           {geometryOverlayVisible && (
           <MapGeometryLayer
             map={map}
+            worldMinute={worldMinute}
             geometry={geometry}
             draft={geometryDraft}
             editMode={geometryEditMode}
@@ -3441,6 +3505,21 @@ export default function MapCanvas({
             />
           )}
         </Layer>
+        {!isDM && <Layer name="map-personal-perception-mask" listening={false}>
+          <PersonalPerceptionMask map={visibilityMap} geometry={geometry}
+            viewerCharacterId={viewerCharacterId} worldMinute={worldMinute} />
+        </Layer>}
+        {!isDM && <Layer name="map-source-location-hints" listening={false}>
+          {visibilityTokens.filter(token => token.sourceLocationKnown === true && token.perceptionVisibility === 'detected-unseen').map(token => (
+            <Group key={token.id} x={token.x} y={token.y} name="source-location-hint">
+              <Circle radius={map.gridSize * 0.3} stroke="#c4b5fd" strokeWidth={2 * inv} dash={[5 * inv, 4 * inv]} />
+              <Line points={[-7 * inv, 0, 7 * inv, 0]} stroke="#ede9fe" strokeWidth={2 * inv} />
+              <Line points={[0, -7 * inv, 0, 7 * inv]} stroke="#ede9fe" strokeWidth={2 * inv} />
+              <Text x={-45 * inv} y={map.gridSize * 0.3 + 5 * inv} width={90 * inv}
+                text="已定位 · 未看见" fontSize={11 * inv} align="center" fill="#ede9fe" />
+            </Group>
+          ))}
+        </Layer>}
       </Stage> : null}
       {tokenStatusTooltip ? (
         <div
@@ -3494,3 +3573,4 @@ export default function MapCanvas({
     </div>
   )
 }
+

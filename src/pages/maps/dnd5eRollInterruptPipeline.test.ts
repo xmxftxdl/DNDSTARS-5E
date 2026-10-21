@@ -10,6 +10,36 @@ import {
 
 const abilities = { str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10 } as const
 
+it('passes explicit saving and grapple sources to optional-die selection without inferring one for ordinary checks', async () => {
+  const hero = createDnd5eCombatant({ id: 'hero', name: 'Hero', controller: 'player', initiative: 20, abilities,
+    proficiencyBonus: 2, armorClass: 10, currentHp: 20, maxHp: 20, temporaryHp: 0, speed: 30,
+    position: { x: 0, y: 0 }, concentrating: false })
+  const requestOptionalBonusDie = vi.fn(async () => undefined)
+  const common = { combatant: hero, targetName: 'Hero', dc: 15, mode: 'normal' as const, label: 'Check',
+    rollD20: async () => 10, requestOptionalBonusDie }
+  await resolveDnd5eSavingThrowInterrupts({ ...common, state: startDnd5eHeadlessCombat('source', [hero]),
+    ability: 'str', rollD4: async () => 1, sourceActorId: 'prey' })
+  expect(requestOptionalBonusDie).toHaveBeenLastCalledWith(expect.objectContaining({
+    source: { actorId: 'prey', kind: 'saving-throw' },
+  }))
+  await resolveDnd5eAbilityCheckInterrupts({ ...common, previewTotal: d20 => d20, grappleSourceId: 'prey' })
+  expect(requestOptionalBonusDie).toHaveBeenLastCalledWith(expect.objectContaining({
+    source: { actorId: 'prey', kind: 'grapple-escape' },
+  }))
+  await resolveDnd5eAbilityCheckInterrupts({ ...common, previewTotal: d20 => d20 })
+  expect(requestOptionalBonusDie).toHaveBeenLastCalledWith(expect.objectContaining({ source: undefined }))
+})
+
+it('preserves the selected reroll resource alongside replacement dice', async () => {
+  const hero=createDnd5eCombatant({id:'hero',name:'Hero',controller:'player',initiative:20,abilities,proficiencyBonus:4,armorClass:12,currentHp:20,maxHp:20,temporaryHp:0,speed:30,position:{x:0,y:0},concentrating:false,classId:'fighter',level:9,classResources:{fighterIndomitable:{current:1,max:1}}})
+  const target={id:'hero',name:'Hero'} as import('../../types/character').Character
+  const requestSavingThrowReroll=vi.fn(async()=>({d20:20,resourceKey:'fighterIndomitable'}))
+  const resolved=await resolveDnd5eSavingThrowInterrupts({state:startDnd5eHeadlessCombat('selected-reroll',[hero]),combatant:hero,target,targetName:'Hero',ability:'con',dc:30,mode:'normal',label:'Save',rollD20:async()=>1,rollD4:async()=>1,requestSavingThrowReroll})
+  expect(requestSavingThrowReroll).toHaveBeenCalledOnce()
+  expect(resolved).toMatchObject({rerollD20:20,rerollResourceKey:'fighterIndomitable'})
+  expect(hero.classResources.fighterIndomitable.current).toBe(1)
+})
+
 describe('D&D 5E d20 结算中断管线', () => {
   it('让属性检定复用幸运上下文和同一奖励骰请求', async () => {
     const hero = createDnd5eCombatant({

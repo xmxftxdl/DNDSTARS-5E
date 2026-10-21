@@ -21,6 +21,27 @@ const map: BattleMap = {
 }
 
 describe('spellAoeHighlight', () => {
+  it('uses four 2.5-foot cells for a five-foot cube and the same scale for its outline/range', () => {
+    const small={...map,feetPerCell:2.5,gridSize:25}
+    const targeting={shape:'rect' as const,origin:'point' as const,widthFeet:5,heightFeet:5,gridAligned:true,placeRangeFeet:30}
+    const preview=buildSpellOrSkillAoeHighlight({targeting,previewCell:{col:12,row:0},casterCell:{col:0,row:0},map:small,rectRotation:0,spellTargeting:null})!
+    expect(preview.valid).toBe(true)
+    expect(preview.cells).toHaveLength(4)
+    expect(preview.areaPolygon).toEqual([310,20,360,20,360,70,310,70])
+    expect(buildSpellOrSkillAoeHighlight({targeting,previewCell:{col:13,row:0},casterCell:{col:0,row:0},map:small,rectRotation:0,spellTargeting:null})!.valid).toBe(false)
+  })
+  it('previews a fortress footprint without enumerating a one-mile placement range', () => {
+    const preview = buildSpellOrSkillAoeHighlight({
+      targeting: { shape: 'rect', origin: 'point', widthFeet: 120, heightFeet: 120, gridAligned: true, placeRangeFeet: 5280 },
+      previewCell: { col: 14, row: 14 }, casterCell: { col: 0, row: 0 },
+      map: { ...map, width: 2000, height: 2000 }, rectRotation: 0, spellTargeting: null,
+    })!
+    expect(preview.valid).toBe(true)
+    expect(preview.cells).toHaveLength(576)
+    expect(preview.areaPolygon).toHaveLength(8)
+    expect(preview.rangeCells).toBeUndefined()
+  })
+
   it.each([5, 15, 20, 30])('aligns a %s-foot grid rectangle outline with its affected cells regardless of caster direction', (widthFeet) => {
     const polygons = [{ col: 0, row: 0 }, { col: 8, row: 3 }, { col: 3, row: 9 }].map((casterCell) => {
       const preview = buildSpellOrSkillAoeHighlight({
@@ -303,4 +324,11 @@ describe('spellAoeHighlight', () => {
     expect(polygon?.[1]).not.toBeCloseTo(polygon?.[7] ?? 0)
     expect(highlight?.cells).not.toContainEqual({ col: 1, row: 1 })
   })
+})
+
+it('draws a point-origin cone from the selected point and selected angle', () => {
+  const targeting = { shape: 'cone', origin: 'point', rotatable: true, lengthFeet: 60, placeRangeFeet: 60 } as const
+  const preview = buildSpellOrSkillAoeHighlight({ targeting, previewCell:{col:4,row:4}, casterCell:{col:0,row:0}, map, rectRotation:0, rectAngleDegrees:90, spellTargeting:null })!
+  expect(preview.cells).toContainEqual({col:8,row:4})
+  expect(preview.areaPolygon?.slice(0,2)).toEqual([235,245])
 })

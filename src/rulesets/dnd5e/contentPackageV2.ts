@@ -1,3 +1,10 @@
+import { SKILLS } from '../../lib/dnd'
+import { validDnd5eInherentFeatureLight } from './inherentFeatureLightContract'
+import { getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
+import type { Dnd5eBuildGrantV1 } from './activities/dnd5eAdvancementContracts'
+import { DND5E_BUILD_FIGHTING_STYLES } from './fightingStyleGrants'
+import { dnd5eConditionalSpellMaterialProblems } from './conditionalSpellMaterials'
+import { ROOM_SPELL_TEXT_KEYS, ROOM_SPELL_TEXT_MAX_LENGTH, roomSpellTextObjects } from '../../../shared/room-spell-text.mjs'
 import {
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomHeadlessActionDraft,
@@ -42,6 +49,7 @@ import { resolveDnd5ePluginKind } from '../../domain/plugins/pluginKind'
 import { dnd5eContentPackageActivityProjectionV1 } from './activities/dnd5eContentPackageActivityProjection'
 import { dnd5eContentDefinitionsFromPackageV2 } from './activities/dnd5eContentDefinitionProjection'
 import { registerDnd5eUnifiedContentPackageV1 } from './activities/dnd5eUnifiedContentRegistry'
+import { getRegisteredDnd5eActivity } from './activities/dnd5eActivityRegistry'
 import { dnd5eActivityAutomationAnalysisV1 } from './plugins/pluginMechanicsRegistry'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
 import { dnd5ePluginFeatureActionFromActivityV1 } from './activities/dnd5eActivityFeatureActionAdapter'
@@ -318,7 +326,7 @@ export function dnd5eContentPackageAutomationCoverageV2(
   const activityProjection = dnd5eContentPackageActivityProjectionV1(value)
   const projectedActivityById = new Map(activityProjection.activities.map((activity) => [activity.id, activity]))
   const projectedAutomation = (
-    sourceKind: 'feature' | 'feat' | 'spell' | 'item',
+    sourceKind: 'feature' | 'feat' | 'spell' | 'item' | 'subclass-ability',
     sourceId: string,
   ): { status: Dnd5eContentAutomationStatusV2; reasons?: readonly string[] } | undefined => {
     const projectedEntries = activityProjection.entries.filter((entry) =>
@@ -409,11 +417,135 @@ export function dnd5eContentPackageAutomationCoverageV2(
     for (const ability of subclass.abilities) {
       const compatibility = compatibilityByAbilityId.get(ability.id)
       if (!compatibility) continue
+      const sourceId = `${subclass.id}:${ability.id}`
+      // Explicit Activities replace the legacy recipe for this exact ability.
+      // Unbound summaries and passive mechanics retain their compatibility result.
+      const hasExplicitActivity = value.content.activities?.some(activity =>
+        activity.legacySource?.kind === 'subclass-ability' && activity.legacySource.id === sourceId)
+      const projected = hasExplicitActivity ? projectedAutomation('subclass-ability', sourceId) : undefined
+      // A passive summary may be implemented by its same-id, same-level build entry.
+      // Arbitrary tags, spell/feature references and active recipes are not evidence of execution.
+      const build = subclass.advancements?.find(entry => entry.id === ability.id && entry.level === ability.level)
+      const supportedGrant = (grant: Dnd5eBuildGrantV1): boolean =>
+        grant.kind === 'proficiency' && ['armor', 'weapon', 'tool'].includes(grant.category) ||
+        grant.kind === 'tag' && (
+          grant.key === 'fighting-style' && DND5E_BUILD_FIGHTING_STYLES.some(style => style === grant.value) ||
+          grant.key === 'proficient-melee-weapon-focus' && grant.value === subclass.classId ||
+          ['language', 'creature-communication'].includes(grant.key) && grant.value.trim().length > 0
+        )
+      const buildImplemented = ability.trigger.kind === 'passive' && ability.targeting.kind === 'self' &&
+        !ability.mechanic && !ability.cost && !ability.rolls?.length && ability.effects.length === 0 &&
+        !(subclass.combatHooks ?? []).some(hook => hook.abilityId === ability.id) && !!build && (
+          build.kind === 'build-grant' && build.grants.length > 0 && build.grants.every(supportedGrant) ||
+          build.kind === 'select' && build.options.length >= build.count && build.count > 0 &&
+          build.options.every(option => option.grants.length > 0 && option.grants.every(supportedGrant))
+        )
+      const passiveReferences = ability.passiveImplementationReferences
+      const passiveGrantImplemented = (grant: Dnd5eBuildGrantV1): boolean => supportedGrant(grant) ||
+        grant.kind === 'proficiency' && grant.category === 'saving-throw' && ['str','dex','con','int','wis','cha'].includes(grant.id) ||
+        grant.kind === 'proficiency' && grant.category === 'skill' && SKILLS.some(skill => skill.key === grant.id) ||
+        grant.kind === 'spell' && grant.mode === 'cantrip' && (
+          getDnd5eSrdSpellCatalogEntry(grant.spellId)?.level === 0 ||
+          value.content.spells.some(spell => spell.id === grant.spellId && spell.level === 0))
+      const passiveReferencesImplemented = !!passiveReferences?.length &&
+        ability.trigger.kind === 'passive' && ability.targeting.kind === 'self' &&
+        !ability.mechanic && !ability.cost && !ability.rolls?.length && !ability.predicates &&
+        !ability.requirements?.length && !ability.choices?.length && !ability.limits && !ability.duration &&
+        ability.effects.length === 0 && !ability.activityEffects?.length && !hasExplicitActivity &&
+        !(subclass.combatHooks ?? []).some(hook => hook.abilityId === ability.id) &&
+        passiveReferences.every(ref => {
+          if (ref.kind === 'bound-source-bonus') {
+            const activity = value.content.activities?.find(entry => entry.id === ref.id)
+            const source = activity?.legacySource
+            const sibling = source?.kind === 'subclass-ability' && subclass.abilities.find(entry =>
+              source.id === `${subclass.id}:${entry.id}` && entry.id !== ability.id && entry.level <= ability.level)
+            if (!activity || !sibling || activity.automation.level !== 'full' ||
+              activity.target.kind !== 'creature' || activity.target.count !== 1 ||
+              !contentActivityHasExecutableAutomation(activity) ||
+              dnd5eActivityAutomationAnalysisV1(activity).capability.level !== 'full') return false
+            return activity.effects?.some(effect => effect.modifiers?.some(modifier =>
+              modifier.kind === 'on-hit-bonus-damage' && modifier.bindToSelectedTarget === true) && effect.modifiers?.some(modifier =>
+              modifier.kind === 'optional-bonus-die' &&
+              modifier.boundTargetSource?.classId === subclass.classId &&
+              modifier.boundTargetSource.minimumLevel === ability.level) &&
+              activity.outcomes.some(outcome => outcome.when.kind === 'always' && outcome.operations.some(operation =>
+                operation.kind === 'apply-effect' && operation.effectId === effect.id &&
+                operation.target === 'actor'))) === true
+          }
+          if (ref.kind === 'advancement') {
+            const advancement = subclass.advancements?.find(entry => entry.id === ref.id && entry.level === ability.level)
+            return !!advancement && (
+              advancement.kind === 'build-grant' && advancement.grants.length > 0 && advancement.grants.every(passiveGrantImplemented) ||
+              advancement.kind === 'select' && advancement.count > 0 && advancement.options.length >= advancement.count &&
+                advancement.options.every(option => option.grants.length > 0 && option.grants.every(passiveGrantImplemented)))
+          }
+          if (ref.kind === 'choice-group') {
+            const group = subclass.choiceGroups?.find(entry => entry.id === ref.id && entry.level === ability.level)
+            return !!group && group.options.length >= group.maxSelections && group.options.every(option =>
+              subclass.abilities.some(sibling => sibling.id !== ability.id &&
+                sibling.predicates?.subclassChoices?.some(choice => choice.groupId === group.id && choice.optionId === option.id) &&
+                projectedAutomation('subclass-ability', `${subclass.id}:${sibling.id}`)?.status === 'full'))
+          }
+          if (ref.kind === 'feature') {
+            const feature = value.content.features.find(entry => entry.id === ref.id)
+            const modifiers = feature?.staticModifiers
+            // The summary delegates to an owned feature, never merely to its claimed full label.
+            const owned = !!feature && feature.grantedBySubclass === true &&
+              feature.sourceClassId === subclass.classId &&
+              feature.sourceSubclassId === `${value.manifest.id}:${subclass.id}` &&
+              feature.minimumLevel === ability.level && feature.automation === 'full' &&
+              !feature.declarativeAbility
+            if (!owned) return false
+            const supportedModifiers = !!modifiers && Object.keys(modifiers).length > 0 &&
+              Object.keys(modifiers).every(key => key === 'inherentLight'
+                ? validDnd5eInherentFeatureLight(modifiers.inherentLight)
+                : key === 'skillCheckAbilityBonuses'
+                ? !!modifiers.skillCheckAbilityBonuses?.length
+                : key === 'standFromProneMovementCostFeet' &&
+                  Number.isFinite(modifiers.standFromProneMovementCostFeet) &&
+                  modifiers.standFromProneMovementCostFeet! >= 0 && modifiers.standFromProneMovementCostFeet! <= 500)
+            const explicitActivities = value.content.activities?.filter(activity =>
+              activity.legacySource?.kind === 'feature' && activity.legacySource.id === feature.id) ?? []
+            if (explicitActivities.length) return (!modifiers || supportedModifiers) &&
+              projectedAutomation('feature', feature.id)?.status === 'full' &&
+              explicitActivities.every(contentActivityHasExecutableAutomation)
+            return supportedModifiers
+          }
+          const resource = subclass.resources?.find(entry => entry.id === ref.id)
+          if (!resource) return false
+          if (ref.kind === 'resource') return (resource.minimumLevel ?? 1) === ability.level
+          const recovery = resource.combatStartRecovery
+          return !!recovery && recovery.minimumClassLevel?.classId === subclass.classId &&
+            recovery.minimumClassLevel.level === ability.level
+        })
+      const outcomeReferences = ability.activityOutcomeReferences
+      const referencedOutcomesImplemented = !!outcomeReferences?.length &&
+        ability.trigger.kind === 'passive' && ability.targeting.kind === 'self' &&
+        !ability.mechanic && !ability.cost && !ability.rolls?.length && !ability.predicates &&
+        !ability.requirements?.length && !ability.choices?.length && !ability.limits && !ability.duration &&
+        ability.effects.length === 0 && !ability.activityEffects?.length &&
+        !(subclass.combatHooks ?? []).some(hook => hook.abilityId === ability.id) &&
+        outcomeReferences.every(ref => {
+          const activity = value.content.activities?.find(entry => entry.id === ref.activityId)
+          const outcome = activity?.outcomes.find(entry => entry.id === ref.outcomeId)
+          const source = activity?.legacySource
+          const sibling = source?.kind === 'subclass-ability' && subclass.abilities.find(entry =>
+            source.id === `${subclass.id}:${entry.id}` && entry.id !== ability.id && entry.level <= ability.level)
+          if (!activity || !outcome?.operations.length || !sibling) return false
+          // A link cannot turn an unrelated or earlier-level action into proof of this upgrade.
+          const gate = outcome.when.kind === 'predicate' ? outcome.when.predicate : undefined
+          return gate?.kind === 'class-level' && gate.classId === subclass.classId &&
+            gate.minimum === ability.level && gate.maximum == null &&
+            dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full'
+        })
       add(
         'subclass-ability',
-        `${subclass.id}:${ability.id}`,
-        compatibility.effective,
-        compatibility.reasons,
+        sourceId,
+        passiveReferences ? (passiveReferencesImplemented ? 'full' : 'manual') : outcomeReferences ? (referencedOutcomesImplemented ? 'full' : 'manual') : projected?.status ?? (buildImplemented ? 'full' : compatibility.effective),
+        passiveReferences ? [passiveReferencesImplemented ? '由关联的构筑选择、资源及先攻恢复规则执行；不创建重复动作' : '被动实现关联缺失、等级不匹配或机制未完整支持'] : outcomeReferences ? [referencedOutcomesImplemented
+          ? '由同子职关联 Activity 的同等级条件分支执行；不创建额外动作'
+          : '关联 Activity 分支缺失、等级不匹配或尚未完整支持']
+          : projected?.reasons ?? (projected ? undefined : buildImplemented ? ['由同标识、同等级的构筑授予执行；无需额外战斗动作'] : compatibility.reasons),
       )
     }
   }
@@ -671,20 +803,24 @@ const ROOM_RUNTIME_PROSE_KEYS = new Set([
   'reasons',
 ])
 
-function replaceRoomRuntimeProse(value: unknown): void {
+export function replaceRoomRuntimeProse(value: unknown, spellText = new WeakSet<object>()): void {
   if (Array.isArray(value)) {
-    for (const entry of value) replaceRoomRuntimeProse(entry)
+    for (const entry of value) replaceRoomRuntimeProse(entry, spellText)
     return
   }
   if (!record(value)) return
   for (const [key, entry] of Object.entries(value)) {
+    if (spellText.has(value) && ROOM_SPELL_TEXT_KEYS.has(key) && typeof entry === 'string') {
+      if (entry.length > ROOM_SPELL_TEXT_MAX_LENGTH) throw new Error('内容说明超过房间文本长度限制')
+      continue
+    }
     if (ROOM_RUNTIME_PROSE_KEYS.has(key) && typeof entry === 'string') {
       value[key] = DND5E_ROOM_RUNTIME_PROSE_PLACEHOLDER
     } else if (ROOM_RUNTIME_PROSE_KEYS.has(key) && Array.isArray(entry)) {
       value[key] = entry.map((item) =>
         typeof item === 'string' ? DND5E_ROOM_RUNTIME_PROSE_PLACEHOLDER : item)
     } else {
-      replaceRoomRuntimeProse(entry)
+      replaceRoomRuntimeProse(entry, spellText)
     }
   }
 }
@@ -692,7 +828,7 @@ function replaceRoomRuntimeProse(value: unknown): void {
 /**
  * Builds the only package form that may use `room-ephemeral`.
  * Names, structured mechanics, stable IDs, and caller-owned images remain usable;
- * source prose and local provenance are not sent to the room service.
+ * source prose and local provenance are reduced unless spell display text is explicitly shared.
  */
 export function dnd5eRoomRuntimeProjectionV2(
   value: Dnd5eContentPackageV2,
@@ -708,7 +844,7 @@ export function dnd5eRoomRuntimeProjectionV2(
     sourceTitle: DND5E_ROOM_RUNTIME_PROSE_PLACEHOLDER,
     projection: DND5E_ROOM_RUNTIME_PROJECTION,
   }
-  replaceRoomRuntimeProse(projected.content)
+  replaceRoomRuntimeProse(projected.content, roomSpellTextObjects(projected))
   const bytes = new TextEncoder().encode(`${JSON.stringify(projected)}\n`)
   const validated = parseDnd5eContentPackageV2(bytes.buffer)
   if (!validated) throw new Error('Failed to build the room runtime content package')
@@ -719,21 +855,35 @@ export function encodeDnd5eContentPackageV2(value: Dnd5eContentPackageV2): Array
   return new TextEncoder().encode(`${JSON.stringify(value)}\n`).buffer
 }
 
+function contentActivityHasExecutableAutomation(activity: Dnd5eActivityDefinitionV1): boolean {
+  const level = dnd5eActivityAutomationAnalysisV1(activity).capability.level
+  return level === 'full' || (level === 'assisted' &&
+    dnd5eActivityManualAdjudicationOperationsV1(activity).length > 0)
+}
+
 function activeContentActivity(
   value: Dnd5eContentPackageV2,
   kind: 'feature' | 'feat' | 'spell',
   id: string,
 ): Dnd5eActivityDefinitionV1 | undefined {
-  return value.content.activities?.find((activity) =>
+  return activeContentActivities(value, kind, id)[0]
+}
+
+function activeContentActivities(
+  value: Dnd5eContentPackageV2,
+  kind: 'feature' | 'feat' | 'spell' | 'subclass-ability',
+  id: string,
+): readonly Dnd5eActivityDefinitionV1[] {
+  const areaGrantedIds = new Set(value.content.activities?.flatMap(source => source.outcomes.flatMap(outcome =>
+    outcome.operations.flatMap(operation => operation.kind === 'create-persistent-area'
+      ? (operation.grantedActivities ?? []).map(grant => grant.activityId) : []))) ?? [])
+  return value.content.activities?.filter((activity) =>
     activity.legacySource?.kind === kind && activity.legacySource.id === id &&
-    (activity.invocation == null || activity.invocation.kind === 'active') &&
-    (
-      dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full' ||
-      (
-        dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'assisted' &&
-        dnd5eActivityManualAdjudicationOperationsV1(activity).length > 0
-      )
-    ) && !activity.authorityBinding)
+    (kind !== 'spell' || (!activity.requiresEffectGrant && !areaGrantedIds.has(activity.id))) &&
+    (activity.invocation == null || activity.invocation.kind === 'active' ||
+      (kind !== 'spell' && activity.invocation.kind === 'triggered' &&
+        ['long-rest-complete', 'short-rest-complete', 'long-rest-started', 'short-rest-started'].includes(activity.invocation.event))) &&
+    contentActivityHasExecutableAutomation(activity) && !activity.authorityBinding) ?? []
 }
 
 function areaGrantedContentActivities(
@@ -749,8 +899,38 @@ function areaGrantedContentActivities(
     const activity = value.content.activities?.find((candidate) => candidate.id === activityId)
     if (
       !activity || (activity.invocation != null && activity.invocation.kind !== 'active') ||
-      dnd5eActivityAutomationAnalysisV1(activity).capability.level !== 'full' || activity.authorityBinding
+      !contentActivityHasExecutableAutomation(activity) || activity.authorityBinding
     ) throw new Error(`Persistent area grants unavailable Activity: ${activityId}`)
+    return activity
+  })
+}
+
+function effectGrantedContentActivities(value: Dnd5eContentPackageV2): readonly Dnd5eActivityDefinitionV1[] {
+  const ids = new Set(value.content.activities?.flatMap(activity => [
+    // Continuations grant an effect-backed control at runtime, just like an
+    // authored Effect grant. Both next steps and finishers need native actions.
+    ...(activity.continuation ? [...(activity.continuation.nextActivityId ? [activity.continuation.nextActivityId] : []),
+      ...(activity.continuation.finishActivityId ? [activity.continuation.finishActivityId] : [])] : []),
+    ...(activity.effects ?? []).flatMap(effect => [...effect.grants ?? [], ...effect.completionGrant?.activityIds ?? []]),
+    ...activity.outcomes.flatMap(outcome => outcome.operations.flatMap(operation =>
+      operation.kind === 'summon' && operation.persistent && operation.bondKey
+        ? [...operation.bondActivityIds ?? [], ...operation.bondDismissActivityId ? [operation.bondDismissActivityId] : []]
+        : [])),
+  ]) ?? [])
+  return [...ids].flatMap(id => {
+    const activity = value.content.activities?.find(candidate => candidate.id === id)
+    if (!activity || activity.authorityBinding) {
+      throw new Error(`Effect grants unavailable Activity: ${id}`)
+    }
+    const singleUseCompletion = value.content.activities?.some(root => root.effects?.some(effect =>
+      effect.completionGrant?.singleUse && effect.completionGrant.activityIds.includes(id)))
+    if (singleUseCompletion && !activity.requiresEffectGrant) throw new Error(`Single-use completion Activity requiresEffectGrant: ${id}`)
+    // Granted event listeners are registered in the Activity package and
+    // executed by the trigger pipeline, not the active feature adapter.
+    // Rest controls use the feature adapter, which requires a current Host
+    // rest receipt. Other event listeners remain trigger-pipeline-only.
+    if (activity.invocation?.kind === 'triggered' &&
+      !['long-rest-complete', 'short-rest-complete', 'long-rest-started', 'short-rest-started'].includes(activity.invocation.event)) return []
     return activity
   })
 }
@@ -765,9 +945,40 @@ export function dnd5eRoomRuntimeProjectionBytesV2(bytes: ArrayBuffer): ArrayBuff
   return projected
 }
 
+/** Runtime-only reference resolution; serialized archives retain their original signed projection. */
+export function resolveDnd5eContentPackageItemReferences(value: Dnd5eContentPackageV2): Dnd5eContentPackageV2 {
+  const content = structuredClone(value.content)
+  // Resolve only items declared by this package; external qualified IDs stay intact.
+  const localItemIds = new Set(content.items.map(item => item.id))
+  const itemReference = (id: string) => !id.includes(':') && localItemIds.has(id)
+    ? `${value.manifest.id}:${id}` : id
+  content.activities = (content.activities ?? []).map(activity => ({
+    ...activity,
+    outcomes: activity.outcomes.map(outcome => ({
+      ...outcome,
+      operations: outcome.operations.map(operation => operation.kind === 'exchange-inventory-items'
+        ? {...operation,templateId:itemReference(operation.templateId),
+          ...(operation.templateOptions ? {templateOptions:operation.templateOptions.map(itemReference)} : {})}
+        : operation.kind === 'grant-inventory-item'
+        ? { ...operation, templateId: itemReference(operation.templateId),
+          ...(operation.templateVariants ? { templateVariants: operation.templateVariants.map(variant => ({
+            ...variant, templateId: itemReference(variant.templateId),
+          })) } : {}) }
+        : operation.kind === 'alter-inventory-item' || operation.kind === 'convert-map-inventory-item'
+          ? { ...operation, templateId: itemReference(operation.templateId), originalTemplateIds: operation.originalTemplateIds.map(itemReference) }
+          : operation.kind === 'create-persistent-area' && operation.structureServices
+            ? {...operation,structureServices:{...operation.structureServices,mealTemplateId:itemReference(operation.structureServices.mealTemplateId),...(operation.structureServices.furnishings?{furnishings:operation.structureServices.furnishings.map(entry=>({...entry,templateId:itemReference(entry.templateId)}))}:{})}}
+            : operation),
+    })),
+  }))
+
+  return { ...value, content }
+}
+
 export function dnd5eRulesPluginFromContentPackageV2(
   value: Dnd5eContentPackageV2,
 ): Dnd5eRulesPlugin {
+  value = resolveDnd5eContentPackageItemReferences(value)
   return {
     manifest: structuredClone(value.manifest),
     setup(api) {
@@ -777,7 +988,17 @@ export function dnd5eRulesPluginFromContentPackageV2(
         contentDefinitionDisposer = registerDnd5eUnifiedContentPackageV1({
           packageId: value.manifest.id,
           packageVersion: value.manifest.version,
-          definitions: dnd5eContentDefinitionsFromPackageV2(value),
+          definitions: dnd5eContentDefinitionsFromPackageV2(value).map(definition => {
+            // Runtime provenance must not alter the archived content projection.
+            const explicit = definition.kind === 'feature' && definition.activities?.some(candidate => {
+              const source = (candidate as Dnd5eActivityDefinitionV1).legacySource
+              return source?.kind === 'subclass-ability' && value.content.activities?.some(activity =>
+                activity.legacySource?.kind === source.kind && activity.legacySource.id === source.id)
+            })
+            return explicit ? { ...definition, payload: {
+              ...(definition.payload as Record<string, unknown>), explicitActivityImplementation: true,
+            } } : definition
+          }),
         }).dispose
         for (const asset of value.assets) {
           assetDisposers.push(registerDnd5ePluginImageAsset(value.manifest.id, asset).dispose)
@@ -786,19 +1007,20 @@ export function dnd5eRulesPluginFromContentPackageV2(
           api.registerHeadlessAction(dnd5eHeadlessActionFromDeclarativeDraft(action))
         }
         const nativeActiveActivities = [
+          ...value.content.subclasses.flatMap(subclass => subclass.abilities.flatMap(ability =>
+            activeContentActivities(value, 'subclass-ability', `${subclass.id}:${ability.id}`)
+              .filter(activity => dnd5ePluginFeatureActionFromActivityV1(activity))
+              .map(activity => ({ activity, outerSpellTransaction: false })))),
+          ...effectGrantedContentActivities(value).map(activity => ({ activity, outerSpellTransaction: false })),
           ...value.content.features.flatMap((feature) => {
-            if (feature.action) return []
-            const activity = activeContentActivity(value, 'feature', feature.id)
-            return activity && dnd5ePluginFeatureActionFromActivityV1(activity)
-              ? [{ activity, outerSpellTransaction: false }]
-              : []
+            return activeContentActivities(value, 'feature', feature.id)
+              .filter(activity => (activity.id !== feature.action?.id || !value.content.headlessActions.some(action => action.id === activity.id)) && dnd5ePluginFeatureActionFromActivityV1(activity))
+              .map(activity => ({ activity, outerSpellTransaction: false }))
           }),
           ...value.content.feats.flatMap((feat) => {
-            if (feat.action) return []
-            const activity = activeContentActivity(value, 'feat', feat.id)
-            return activity && dnd5ePluginFeatureActionFromActivityV1(activity)
-              ? [{ activity, outerSpellTransaction: false }]
-              : []
+            return activeContentActivities(value, 'feat', feat.id)
+              .filter(activity => (activity.id !== feat.action?.id || !value.content.headlessActions.some(action => action.id === activity.id)) && dnd5ePluginFeatureActionFromActivityV1(activity))
+              .map(activity => ({ activity, outerSpellTransaction: false }))
           }),
           ...value.content.spells.flatMap((spell) => {
             const activity = activeContentActivity(value, 'spell', spell.id)
@@ -813,7 +1035,10 @@ export function dnd5eRulesPluginFromContentPackageV2(
           entry.activity.id,
           entry,
         ])).values()]
-        for (const { activity, outerSpellTransaction } of uniqueNativeActiveActivities) {
+        for (const { activity: sourceActivity, outerSpellTransaction } of uniqueNativeActiveActivities) {
+          // Compile the registered definition so local resource references have
+          // the same package qualification as direct Activity execution.
+          const activity = getRegisteredDnd5eActivity(value.manifest.id, sourceActivity.id) ?? sourceActivity
           const compatibility = dnd5eActivityHeadlessCompatibility(activity, { outerSpellTransaction })
           if (!compatibility.supported) {
             throw new Error(`Activity ${activity.id} cannot become an active Headless action: ${compatibility.reasons.join('; ')}`)
@@ -822,7 +1047,7 @@ export function dnd5eRulesPluginFromContentPackageV2(
         }
         for (const race of value.content.races) api.registerRace(structuredClone(race))
         for (const background of value.content.backgrounds) api.registerBackground(structuredClone(background))
-        for (const feature of value.content.features) {
+        for (const feature of value.content.features.filter(feature => !feature.grantedBySubclass)) {
           const activity = feature.action ? undefined : activeContentActivity(value, 'feature', feature.id)
           api.registerFeature(structuredClone({
             ...feature,
@@ -845,17 +1070,25 @@ export function dnd5eRulesPluginFromContentPackageV2(
             summary: activity.description ?? activity.name,
             description: activity.description ?? activity.name,
             sourceLabel: '持续区域授予',
-            automation: 'full',
+            automation: dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full' ? 'full' : 'partial',
             action,
           })
         }
         for (const spell of value.content.spells) {
           const activity = activeContentActivity(value, 'spell', spell.id)
+          const materialProblems = dnd5eConditionalSpellMaterialProblems(spell.components, activity, spell.duration)
+          if (materialProblems.length) throw new Error(`${spell.id}: ${materialProblems.join(' ')}`)
           api.registerSpell(structuredClone({
             ...spell,
+            // Runtime handlers establish executability, not completion of the
+            // author's declared unresolved rules or end-to-end acceptance.
+            tags: activity && activity.automation.level !== 'full'
+              ? [...new Set([...(spell.tags ?? []), 'headless-target:partial'])] : spell.tags,
             automation: activity
               ? { mode: 'headless-action' as const, actionId: activity.id }
-              : spell.automation,
+              : spell.automation?.mode === 'headless-action'
+                ? spell.automation
+                : { mode: 'reference-only' as const },
           }))
         }
         for (const item of value.content.items) api.registerItem(structuredClone(item))
@@ -864,6 +1097,15 @@ export function dnd5eRulesPluginFromContentPackageV2(
         }
         for (const definition of value.content.classes ?? []) api.registerDeclarativeClass(structuredClone(definition))
         for (const subclass of value.content.subclasses) api.registerDeclarativeSubclass(structuredClone(subclass))
+        // A separately authored passive may belong to a declarative subclass.
+        // Its source must exist before registerFeature validates that ownership.
+        for (const feature of value.content.features.filter(feature => feature.grantedBySubclass)) {
+          const activity = feature.action ? undefined : activeContentActivity(value, 'feature', feature.id)
+          api.registerFeature(structuredClone({
+            ...feature,
+            action: feature.action ?? (activity ? dnd5ePluginFeatureActionFromActivityV1(activity) : undefined),
+          }))
+        }
         for (const monster of value.content.monsters) api.registerMonster(structuredClone(monster))
       } catch (error) {
         contentDefinitionDisposer?.()
@@ -877,3 +1119,4 @@ export function dnd5eRulesPluginFromContentPackageV2(
     },
   }
 }
+

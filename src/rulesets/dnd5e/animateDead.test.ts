@@ -1,13 +1,32 @@
 import { describe, expect, it } from 'vitest'
 import {
+  dnd5eAnimateDeadRemainsKind,
   dnd5eAnimateDeadAnimationCapacity,
   dnd5eAnimateDeadReassertionCapacity,
   dnd5eCreateUndeadCapacity,
   dnd5eCreateUndeadIsNight,
   normalizeDnd5eAnimateDeadDeclarationV1,
 } from './animateDead'
+import { normalizeDnd5eMapObjectStateV1 } from './mapObjectState'
+import type { Token } from '../../store/maps'
 
 describe('Animate Dead declarations', () => {
+  it.each(['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'] as const)('preserves %s general corpse classification without granting humanoid animation', creatureSize => {
+    const objectState = normalizeDnd5eMapObjectStateV1({ schemaVersion: 1,
+      remains: { kind: 'creature-corpse', creatureSize, creatureType: 'dragon' } })!
+    expect(objectState.remains).toEqual({ kind: 'creature-corpse', creatureSize, creatureType: 'dragon' })
+    const token: Token = { id: 'body', label: 'Corpse', type: 'obstacle', x: 25, y: 25, color: '', emoji: '', size: 1,
+      dnd5eObjectState: objectState }
+    expect(dnd5eAnimateDeadRemainsKind(token)).toBeUndefined()
+    expect(normalizeDnd5eMapObjectStateV1(JSON.parse(JSON.stringify(objectState)))).toEqual(objectState)
+  })
+  it('rejects malformed corpse metadata and retains the existing native humanoid restriction', () => {
+    for (const remains of [{ kind: 'creature-corpse', creatureSize: 'colossal' },
+      { kind: 'creature-corpse', creatureSize: 'large', creatureType: '' },
+      { kind: 'humanoid-corpse', creatureSize: 'large' }]) {
+      expect(normalizeDnd5eMapObjectStateV1({ schemaVersion: 1, remains })).toBeUndefined()
+    }
+  })
   it('scales animation and control capacities independently', () => {
     expect(dnd5eAnimateDeadAnimationCapacity(3)).toBe(1)
     expect(dnd5eAnimateDeadAnimationCapacity(4)).toBe(3)

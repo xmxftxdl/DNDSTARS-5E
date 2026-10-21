@@ -80,6 +80,8 @@ export interface AiStructuredGenerationRequestV1 {
   outputSchema: JsonSchemaV1
   /** Host-controlled upper bound. Providers must clamp this to their own task cap. */
   maxOutputTokens?: number
+  /** Host-selected reasoning budget; omitted preserves the provider default policy. */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high'
   documents?: AiDocumentChunkV1[]
   images?: AiImageInputV1[]
 }

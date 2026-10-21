@@ -55,6 +55,12 @@ import { listDnd5eActivityTriggerWindowsV1 } from './dnd5eActivityTriggerWindows
 afterEach(clearContentDefinitionRegistryForTests)
 
 describe('built-in spell Unified Activity migration', () => {
+  it('registers the core catalog required by imported spell settlement', () => {
+    expect(() => ensureDnd5eCoreSpellActivitiesRegisteredV1()).not.toThrow()
+    const movement = getRegisteredContentDefinition(DND5E_CORE_SPELL_PACKAGE_ID, 'spell', 'levitate')
+      ?.activities?.find(activity => (activity as Dnd5eActivityDefinitionV1).id === 'spell:levitate:move-self')
+    expect(movement).toBeDefined()
+  })
   it.each(['slashing', 'piercing', 'bludgeoning', 'aquatic', 'appearance'])('casts Alter Self %s without adjudication and removes it with concentration', (mode) => {
     ensureDnd5eCoreSpellActivitiesRegisteredV1()
     const activity = dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition('alter-self'))!
@@ -500,7 +506,8 @@ describe('built-in spell Unified Activity migration', () => {
       expect(activity, spellId).toBeDefined()
       if (!activity) continue
       const analysis = dnd5eActivityAutomationAnalysisV1(activity)
-      expect(analysis.capability.level, spellId).toBe('full')
+      const mapWriteLimited = ['arcane-lock', 'knock', 'light', 'passwall', 'magic-mouth', 'true-polymorph'].includes(spellId)
+      expect(analysis.capability.level, spellId).toBe(mapWriteLimited ? 'assisted' : 'full')
       expect(definition?.automation.level, spellId).toBe(analysis.capability.level)
       expect(activity.outcomes.flatMap((outcome) => outcome.operations).length, spellId).toBeGreaterThan(0)
       expect(dnd5eActivityManualAdjudicationOperationsV1(activity), spellId).toEqual([])
@@ -510,7 +517,8 @@ describe('built-in spell Unified Activity migration', () => {
         expect(() => compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction: true }), spellId)
           .not.toThrow()
       } else {
-        expect(analysis.capability.limitations?.every((entry) => entry.includes('未注册 Host handler')), spellId).toBe(true)
+        expect(analysis.capability.limitations, spellId).toEqual(expect.arrayContaining([expect.stringContaining('地图写入边界')]))
+        expect(dnd5ePluginSpellHasFullHeadlessAutomation(dnd5ePluginSpellDefinition(spellId)), spellId).toBe(false)
       }
     }
     for (const spellId of DND5E_SRD_AUDITED_PARTIAL_SPELL_IDS) {
@@ -1990,7 +1998,8 @@ describe('built-in spell Unified Activity migration', () => {
       }),
     )
     expect(dnd5eActivityAutomationAnalysisV1(passwall)).toMatchObject({
-      capability: { level: 'full' }, missingComponents: [],
+      capability: { level: 'assisted', limitations: expect.arrayContaining([expect.stringContaining('地图写入边界')]) },
+      missingComponents: [],
     })
   })
 
@@ -2353,7 +2362,8 @@ describe('built-in spell Unified Activity migration', () => {
       accessPolicy: 'selected-creatures-and-password',
     })
     expect(dnd5eActivityAutomationAnalysisV1(arcaneLock)).toMatchObject({
-      capability: { level: 'full' }, missingComponents: [],
+      capability: { level: 'assisted', limitations: expect.arrayContaining([expect.stringContaining('地图写入边界')]) },
+      missingComponents: [],
     })
     expect(knock.target).toMatchObject({
       kind: 'area', origin: 'point', placeRangeFeet: 60,
@@ -2363,7 +2373,8 @@ describe('built-in spell Unified Activity migration', () => {
       expect.objectContaining({ kind: 'emit-sound', audibleRadiusFeet: 300 }),
     ]))
     expect(dnd5eActivityAutomationAnalysisV1(knock)).toMatchObject({
-      capability: { level: 'full' }, missingComponents: [],
+      capability: { level: 'assisted', limitations: expect.arrayContaining([expect.stringContaining('地图写入边界')]) },
+      missingComponents: [],
     })
   })
 
@@ -2404,7 +2415,8 @@ describe('built-in spell Unified Activity migration', () => {
       durationMinutes: 60,
     })
     expect(dnd5eActivityAutomationAnalysisV1(light)).toMatchObject({
-      capability: { level: 'full' }, missingComponents: [],
+      capability: { level: 'assisted', limitations: expect.arrayContaining([expect.stringContaining('地图写入边界')]) },
+      missingComponents: [],
     })
     expect(light.checks?.[0]).toMatchObject({
       kind: 'saving-throw', ability: 'dex', automaticFailureIfAllied: true,

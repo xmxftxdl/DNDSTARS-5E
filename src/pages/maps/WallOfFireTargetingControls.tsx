@@ -1,8 +1,11 @@
 import { useCallback, useEffect } from 'react'
+import { tiltableSpellActivity } from './tiltedAreaTargeting'
 import type { Dispatch, SetStateAction } from 'react'
 import type { Dnd5eSpellTargetingSession } from '../../presentation/maps/useCombatInteraction'
 import { normalizeWallOfFireAngle } from '../../rulesets/dnd5e/wallOfFireGeometry'
 import { moveEarthSquareTargetingPatch } from './moveEarthTargeting'
+import { dnd5ePluginSpellDefinition } from '../../rulesets/dnd5e/pluginApi'
+import { dnd5ePluginSpellActivity } from '../../rulesets/dnd5e/pluginSpellTransaction'
 
 interface Props {
   inline?: boolean
@@ -19,13 +22,17 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
   const moveEarthActive = targeting?.spellId === 'move-earth' && targeting.area?.shape === 'rect' &&
     !targeting.areaTargetSelected
   const adjustableAreaActive = targeting?.spellId !== 'wall-of-fire' && targeting?.spellId !== 'blade-barrier' && !!targeting?.area && !targeting.areaTargetSelected && (
+    targeting.area.minimumVolumeHeightFeet != null ||
     ('minimumRadiusFeet' in targeting.area && targeting.area.minimumRadiusFeet != null) ||
     ('minimumWidthFeet' in targeting.area && targeting.area.minimumWidthFeet != null) ||
     ('minimumHeightFeet' in targeting.area && targeting.area.minimumHeightFeet != null) ||
     ('minimumLengthFeet' in targeting.area && targeting.area.minimumLengthFeet != null)
   )
   const forceActive = targeting?.spellId === 'wall-of-force' && !!targeting.area && !targeting.areaTargetSelected
-  const active = forceActive || wallActive || bladeActive || moveEarthActive || genericRectActive || adjustableAreaActive
+  const launchActive = !!targeting?.area && !targeting.areaTargetSelected &&
+    dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition(targeting.spellId))?.outcomes.some(outcome =>
+      outcome.operations.some(operation => operation.kind === 'launch-map-object'))
+  const active = launchActive || forceActive || wallActive || bladeActive || moveEarthActive || genericRectActive || adjustableAreaActive
   const shape = targeting?.wallOfFireShape ?? 'line'
   const angle = wallActive
     ? targeting?.wallOfFireAngleDegrees ?? 0
@@ -39,6 +46,18 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
     current?.area && !current.areaTargetSelected
       ? { ...current, ...values }
       : current), [setTargeting])
+  const tiltControls = tiltableSpellActivity(targeting) ? <>
+    <label className="flex items-center gap-2">长轴抬升
+      <input aria-label="法术范围俯仰角" type="range" min="-90" max="90" step="1" value={targeting?.areaTargetPitchDegrees??0}
+        onChange={event=>patch({areaTargetPitchDegrees:Number(event.target.value)})} className="w-28 accent-cyan-400"/>
+      <output>{targeting?.areaTargetPitchDegrees??0}°</output>
+    </label>
+    <label className="flex items-center gap-2">绕长轴旋转
+      <input aria-label="法术范围绕轴角" type="range" min="-180" max="180" step="1" value={targeting?.areaTargetRollDegrees??0}
+        onChange={event=>patch({areaTargetRollDegrees:Number(event.target.value)})} className="w-28 accent-cyan-400"/>
+      <output>{targeting?.areaTargetRollDegrees??0}°</output>
+    </label>
+  </> : null
 
   useEffect(() => {
     if (!active || targeting?.spellId === 'wall-of-stone' || targeting?.spellId === 'wall-of-ice' || targeting?.spellId === 'wall-of-force' || moveEarthActive || (wallActive && shape !== 'line')) return
@@ -53,6 +72,20 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
   }, [active, angle, bladeActive, moveEarthActive, patch, shape, wallActive, targeting?.spellId])
 
   if (!active) return null
+  if (launchActive) return <div data-testid="object-launch-targeting-controls" className={controlsClassName('text-cyan-50')}>
+    <strong>物件发射方向</strong>
+    <label className="flex items-center gap-2">水平方向
+      <input aria-label="物件发射水平方向" type="range" min="0" max="359" step="1" value={angle}
+        onChange={event => patch({ areaTargetAngleDegrees: Number(event.target.value) })} />
+      <output>{Math.round(angle)}°</output>
+    </label>
+    <label className="flex items-center gap-2">俯仰角
+      <input aria-label="物件发射俯仰角" type="range" min="-90" max="90" step="1" value={targeting?.objectLaunchPitchDegrees ?? 0}
+        onChange={event => patch({ objectLaunchPitchDegrees: Number(event.target.value) })} />
+      <output>{targeting?.objectLaunchPitchDegrees ?? 0}°</output>
+    </label>
+    <span>正角度向上，负角度向下，0° 水平 · 点击要发射的物件所在格</span>
+  </div>
   if (targeting?.spellId === 'wall-of-stone' || targeting?.spellId === 'wall-of-ice') {
     const ice = targeting.spellId === 'wall-of-ice'
     const layout = targeting.stoneWall
@@ -141,7 +174,11 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
     )
   }
   if (adjustableAreaActive && targeting?.area) {
-    const controls: Array<{ key: 'areaTargetRadiusFeet' | 'areaTargetWidthFeet' | 'areaTargetHeightFeet' | 'areaTargetLengthFeet'; label: string; min: number; max: number; value: number }> = []
+    const controls: Array<{ key: 'areaTargetVolumeHeightFeet' | 'areaTargetRadiusFeet' | 'areaTargetWidthFeet' | 'areaTargetHeightFeet' | 'areaTargetLengthFeet'; label: string; min: number; max: number; value: number }> = []
+    if (targeting.area.minimumVolumeHeightFeet != null && targeting.area.volumeHeightFeet != null) controls.push({
+      key: 'areaTargetVolumeHeightFeet', label: '垂直高度', min: targeting.area.minimumVolumeHeightFeet, max: targeting.area.volumeHeightFeet,
+      value: targeting.areaTargetVolumeHeightFeet ?? targeting.area.volumeHeightFeet,
+    })
     if (targeting.area.shape === 'circle' && targeting.area.minimumRadiusFeet != null) controls.push({
       key: 'areaTargetRadiusFeet', label: '半径', min: targeting.area.minimumRadiusFeet, max: targeting.area.radiusFeet,
       value: targeting.areaTargetRadiusFeet ?? targeting.area.radiusFeet,
@@ -162,7 +199,9 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
       <div data-testid="adjustable-area-targeting-controls" className={controlsClassName('border-cyan-300/50 text-cyan-50')}>
         <strong className="text-cyan-200">调整法术范围</strong>
         {controls.map((control) => {
-          const stepFeet = control.min % 5 !== 0 ? 2.5 : 5
+          const area = targeting.area
+          const exactBox = area?.shape === 'rect' && area.gridAligned === false
+          const stepFeet = exactBox ? Math.min(0.1, control.min) : control.min % 5 !== 0 ? 2.5 : 5
           return <label key={control.key} className="flex items-center gap-2">{control.label}
           <button
             type="button"
@@ -177,7 +216,9 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
             onClick={() => patch({ [control.key]: Math.min(control.max, control.value + stepFeet) })}
             className="rounded border border-cyan-300/30 bg-white/5 px-1.5 py-0.5 hover:bg-cyan-400/20"
           >+</button>
-          <output className="w-12 tabular-nums">{control.value} 尺</output>
+          {exactBox ? <><input aria-label={`法术范围${control.label}精确尺数`} type="number" min={control.min} max={control.max} step="any" value={control.value}
+            onChange={event=>{const value=event.target.valueAsNumber;if(Number.isFinite(value)&&value>=control.min&&value<=control.max)patch({[control.key]:value})}}
+            className="w-20 rounded bg-void-950 px-1"/>尺</> : <output className="w-12 tabular-nums">{control.value} 尺</output>}
         </label>
         })}
         {targeting.area.shape === 'rect' && targeting.area.rotatable ? <label className="flex items-center gap-2">角度
@@ -185,6 +226,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
           <output className="w-11 tabular-nums">{Math.round(angle)}°</output>
         </label> : null}
         <span className="text-slate-400">移动鼠标预览，点击地图确认。</span>
+        {tiltControls}
       </div>
     )
   }
@@ -196,6 +238,7 @@ export function WallOfFireTargetingControls({ targeting, setTargeting, inline = 
         <output className="w-11 tabular-nums">{Math.round(angle)}°</output>
       </label>
       <span className="text-slate-400">Q / E 微调 5° · 移动鼠标选择中心 · 点击地图确认</span>
+      {tiltControls}
     </div>
   )
   return (

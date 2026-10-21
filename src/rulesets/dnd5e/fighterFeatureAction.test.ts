@@ -79,3 +79,22 @@ describe('D&D 5e fighter feature authority', () => {
     })).toEqual({ ok: false, reason: 'bonus-action-unavailable' })
   })
 })
+
+it.each([99, 100, undefined])('uses the Host clock for a timed companion during Second Wind: %s', worldMinute => {
+  const input = fixture('second-wind')
+  const owner = input.map.tokens[0]
+  input.actor.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({ definitionId: 'near-companion',
+    label: 'Near companion', source: { kind: 'plugin' }, targetId: input.actor.id,
+    modifiers: { maximizeHealingDiceNearCompanion: [{ maximumDistanceFeet: 100, bondKey: 'familiar' }] } })] }
+  input.map.tokens.push({ ...owner, id: 'familiar', characterId: undefined, type: 'npc', hp: 1,
+    dnd5eSummon: { schemaVersion: 1, pluginId: 'test.companion', featureId: 'summon', sourceTokenId: owner.id,
+      sourceCharacterId: input.actor.id, createdRound: 1, expiresAfterRound: 10, side: 'player',
+      persistent: true, bondKey: 'familiar', controlExpiresAtWorldMinute: 100 } })
+  const prepared = prepareDnd5eFighterFeature({ ...input, worldMinute, characters: [input.actor], actionSurgeAlreadyUsed: false })
+  expect(prepared.ok).toBe(true)
+  if (!prepared.ok) throw Error('prepare failed')
+  const settled = resolvePreparedDnd5eFighterFeature({ prepared: prepared.prepared, d10: 1 })
+  expect(settled.result.ok).toBe(true)
+  expect(settled.application?.characters[0].currentHp).toBe(worldMinute === 99 ? 35 : 26)
+  expect(input.actor.currentHp).toBe(20)
+})

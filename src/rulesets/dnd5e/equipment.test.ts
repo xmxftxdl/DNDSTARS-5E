@@ -24,6 +24,7 @@ import {
   dnd5eVirtualWeaponDamageSource,
   dnd5eWeaponDamageSource,
   dnd5eWeaponAttackProfile,
+  dnd5eNaturalWeaponProfiles,
   dnd5eWeaponProficient,
   dnd5eWearingUnproficientArmor,
   normalizeDnd5eCharacterEquipment,
@@ -31,6 +32,7 @@ import {
 import { dnd5eWalkingSpeed } from './classes'
 import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { migrateCharacterToDnd5e } from './character'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -43,6 +45,88 @@ function fighter(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e 2014 fighter equipment', () => {
+  it.each(['polymorph', 'true-polymorph', 'animal-shapes'] as const)('suppresses merged weapon attacks during %s without deleting equipment', wildShapeMode => {
+    const character = fighter({ equipment: { mainWeapon: DND5E_SHORTSWORD, offHand: DND5E_OFFHAND_SHORTSWORD } })
+    const equipment = character.equipment
+    expect(dnd5eWeaponAttackProfile(character)).toBeDefined()
+    expect(dnd5eOffHandWeaponAttackProfile(character)).toBeDefined()
+    character.dnd5eCombatState = { wildShapeFormId: 'srd-5.1:wolf', wildShapeMode }
+    expect(dnd5eWeaponAttackProfile(character)).toBeUndefined()
+    expect(dnd5eOffHandWeaponAttackProfile(character)).toBeUndefined()
+    expect(character.equipment).toBe(equipment)
+    character.dnd5eCombatState = undefined
+    expect(dnd5eWeaponAttackProfile(character)).toBeDefined()
+    expect(dnd5eOffHandWeaponAttackProfile(character)).toBeDefined()
+  })
+  it('combines natural strikes with martial arts and suppresses heavy-armor rage damage', () => {
+    let id = ''
+    const dispose = registerDnd5eRulesPlugin({ manifest: { id: 'test.natural-combinations', name: 'Natural combinations', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+      id = api.registerFeature({ id: 'claws', name: 'Claws', summary: 'Synthetic.', description: 'Synthetic.', automation: 'full', staticModifiers: { naturalWeapons: [{ id: 'claw', name: 'Claw', damageDieSides: 4, damageType: 'slashing' }] } })
+    } })
+    try {
+      const base = fighter({ equipment: {}, dnd5ePluginFeatureIds: [id] })
+      const monk = { ...base, charClass: '武僧', level: 6, abilities: { ...base.abilities, dex: 18 } }
+      expect(dnd5eNaturalWeaponProfiles(monk)[0]).toMatchObject({ attackAbility: 'dex', attackModifier: 7, magical: true, damage: { sides: 6, bonus: 4 } })
+      expect(dnd5eNaturalWeaponProfiles({ ...monk, equipment: { offHand: DND5E_SHIELD } })[0]).toMatchObject({ attackAbility: 'str', damage: { sides: 4, bonus: 3 } })
+      const raging = { ...base, charClass: '野蛮人', level: 5, dnd5eCombatState: { schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, raging: true } }
+      expect(dnd5eNaturalWeaponProfiles(raging)[0].damage.bonus).toBe(5)
+      expect(dnd5eNaturalWeaponProfiles({ ...raging, equipment: DND5E_FIGHTER_STARTING_EQUIPMENT })[0].damage.bonus).toBe(3)
+      expect(dnd5eNaturalWeaponProfiles(base, [])).toEqual([])
+    } finally { dispose() }
+  })
+  it('projects imported heavy-armor defenses only while the actor owns and wears them', () => {
+    const id = 'local.test.armor-defense'
+    const dispose = registerDnd5eRulesPlugin({manifest: {id, name: 'Armor defense', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0'}, setup(api) {
+      api.registerFeature({id: 'defense', name: 'Defense', summary: 'Synthetic', description: 'Synthetic', automation: 'full', declarativeAbility: {
+        schemaVersion: 1, id: 'defense', name: 'Defense', description: 'Synthetic', level: 1,
+        trigger: {kind: 'passive'}, targeting: {kind: 'self'}, effects: [], automation: 'full',
+        mechanic: {kind: 'passive-defense', armorClassBonus: {value: 1, requiresHeavyArmor: true}, damageImmunities: ['fire'], damageResistance: {damageTypes: ['slashing'], delivery: 'weapon-attack', magical: false, requiresHeavyArmor: true}},
+      }})
+    }})
+    try {
+      const subject = fighter({dnd5ePluginFeatureIds: [`${id}:defense`]})
+      const heavy = migrateCharacterToDnd5e(subject)
+      expect(dnd5eArmorClass(subject)).toBe(19)
+      expect(heavy.armorClass).toBe(19)
+      expect(heavy.damageImmunities).toContain('fire')
+      expect(heavy.damageDefenseRules).toContainEqual(expect.objectContaining({outcome: 'resistant', damageTypes: ['slashing'], delivery: 'weapon-attack', magical: false}))
+      for (const equipment of [{}, {armor: DND5E_LEATHER_ARMOR}]) {
+        const unarmored = migrateCharacterToDnd5e({...subject, equipment})
+        expect(unarmored.damageDefenseRules?.some(rule => rule.reason === `${id}:defense`)).toBe(false)
+        expect(unarmored.damageImmunities).toContain('fire')
+        expect(dnd5eArmorClass({...subject, equipment})).toBe(equipment.armor ? 12 : 11)
+      }
+      const removed = migrateCharacterToDnd5e({...subject, dnd5ePluginFeatureIds: []})
+      expect(removed.armorClass).toBe(18)
+      expect(removed.damageImmunities).not.toContain('fire')
+      expect(removed.damageDefenseRules?.some(rule => rule.reason === `${id}:defense`)).toBe(false)
+    } finally { dispose() }
+  })
+  it('uses imported unarmored formulas without stacking them or retaining them after armor is equipped', () => {
+    const pluginId = 'local.test.unarmored-formula'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: pluginId, name: 'Unarmored formula', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+      setup(api) {
+        for (const [id, base, shield] of [['hide', 13, true], ['higher', 14, false]] as const) {
+          api.registerFeat({ id, name: id, summary: 'Synthetic formula.', description: 'Synthetic formula.',
+            automation: 'full', staticModifiers: { unarmoredArmorClassBase: base, unarmoredArmorClassAllowsShield: shield } })
+        }
+      },
+    })
+    try {
+      const subject = fighter({ equipment: {}, dnd5eFeatIds: [`${pluginId}:hide`] })
+      expect(dnd5eArmorClass(subject)).toBe(14)
+      expect(dnd5eArmorClass({ ...subject, dnd5eFeatIds: [] })).toBe(11)
+      const both = { ...subject, dnd5eFeatIds: [`${pluginId}:hide`, `${pluginId}:higher`] }
+      expect(dnd5eArmorClass(both)).toBe(15)
+      expect(dnd5eArmorClass({ ...both, equipment: { offHand: DND5E_SHIELD } })).toBe(16)
+      expect(dnd5eArmorClass({ ...subject, equipment: DND5E_FIGHTER_STARTING_EQUIPMENT })).toBe(18)
+      expect(dnd5eArmorClass({ ...subject, equipment: { armor: DND5E_LEATHER_ARMOR } })).toBe(12)
+      expect(dnd5eArmorClass({ ...subject, abilities: { ...subject.abilities, dex: 8 } })).toBe(12)
+      expect(dnd5eArmorClass({ ...subject, charClass: '野蛮人', abilities: { ...subject.abilities, con: 20 } })).toBe(16)
+    } finally { dispose() }
+  })
   it('provides longsword, shield, and chain mail as the ready-to-play kit', () => {
     const equipment = defaultEquipmentForDnd5eCharacter({ charClass: '战士' })
     expect(equipment).toMatchObject({
@@ -468,4 +552,16 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(dnd5eWalkingSpeed(weak)).toBe(20)
     expect(dnd5eWalkingSpeed({ ...weak, race: '矮人' })).toBe(30)
   })
+})
+
+it('uses a declared magical damage type and item-granted proficiency without changing ability rules', () => {
+  const weapon = structuredClone(DND5E_SHORTSWORD)
+  weapon.id = 'local-test:temporary-blade'
+  if(weapon.dnd5e?.kind !== 'weapon') throw new Error('missing weapon')
+  weapon.dnd5e.damage = {count:2,sides:8,type:'psychic'}
+  weapon.dnd5e.grantsProficiency = true
+  const character = fighter({charClass:'法师',level:5,abilities:{str:10,dex:16,con:12,int:18,wis:10,cha:10},equipment:{mainWeapon:weapon}})
+  expect(dnd5eWeaponAttackProfile(character)).toMatchObject({proficient:true,attackModifier:6,attackAbility:'dex',damage:{count:2,sides:8,type:'psychic',bonus:3}})
+  weapon.dnd5e.grantsProficiency = false
+  expect(dnd5eWeaponProficient(character,weapon)).toBe(false)
 })

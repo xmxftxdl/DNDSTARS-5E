@@ -7,6 +7,8 @@ export type SharedResourceSaveResult =
   | { status: 'failed' }
 
 export interface SharedResourceWriteOptions {
+  /** Atomic transactions only: validate read dependencies without modifying them. */
+  readRevisions?: Readonly<Record<string, number>>
   undoGroupId?: string
   undoLabel?: string
   roomJournalMutations?: readonly unknown[]
@@ -15,6 +17,8 @@ export interface SharedResourceWriteOptions {
 export interface SharedResourceTransactionWrite<T = unknown> {
   name: string
   data: T
+  /** Revision of the snapshot used to plan this write; never replace it with a newer watermark. */
+  expectedRevision?: number
 }
 
 export interface SharedResourceTransactionResult {

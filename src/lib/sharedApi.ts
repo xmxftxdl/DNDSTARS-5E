@@ -59,6 +59,8 @@ export type SharedResourceSaveResult =
   | { status: 'failed' }
 
 export interface SharedResourceWriteOptions {
+  /** Atomic transactions only: validate read dependencies without modifying them. */
+  readRevisions?: Readonly<Record<string, number>>
   undoGroupId?: string
   undoLabel?: string
   /**
@@ -281,6 +283,22 @@ export function sharedEventApiCandidates(production = import.meta.env.PROD): str
   if (configured && configured.length > 0) return [configured[0]]
   if (isLocalSplitSharedRuntime()) return [defaultDmApiBase()]
   return production ? [sameOriginApiBase()] : [defaultDmApiBase()]
+}
+
+/** Single canonical endpoint: acquire must never be replayed after an ambiguous response. */
+export async function sendLongCastingOwnerCommand(roomId:string,memberId:string,command:unknown,signal:AbortSignal):Promise<{status:number;body:Record<string,unknown>}>{
+  const session=getRoomSession()
+  if(session?.role!=='dm'||session.roomId!==roomId||session.memberId!==memberId)throw Error('casting-owner-room-changed')
+  const api=sharedEventApiCandidates()[0]
+  if(!api)throw Error('casting-owner-api-unavailable')
+  const response=await fetch(sharedSessionUrl(`${api}/rooms/${encodeURIComponent(roomId)}/long-casting-owner`),{
+    method:'POST',signal,cache:'no-store',
+    headers:{'Content-Type':'application/json',...sharedAccessHeaders(),...sharedMemberHeaders(),...sharedProtocolHeaders()},
+    body:JSON.stringify(command),
+  })
+  const body:unknown=await response.json()
+  if(!body||typeof body!=='object'||Array.isArray(body))throw Error('invalid-casting-owner-response')
+  return {status:response.status,body:body as Record<string,unknown>}
 }
 
 async function requestJson<T>(path: string, init?: RequestInit, resourceName?: string): Promise<T | null> {
@@ -538,6 +556,8 @@ export function saveSharedResourceWithResult<T>(
 export interface SharedResourceTransactionWrite<T = unknown> {
   name: string
   data: T
+  /** Revision of the exact snapshot used to compute this transaction. */
+  expectedRevision?: number
 }
 
 export interface SharedResourceTransactionResult {
@@ -556,7 +576,8 @@ async function performSharedResourcesAtomicSave(
   options: SharedResourceWriteOptions & { transactionId?: string } = {},
 ): Promise<SharedResourceTransactionResult> {
   if (writes.length < 1) throw new Error('shared-state-transaction-empty')
-  const normalized = writes.map(({ name, data }) => {
+  const normalized = writes.map(({ name, data, expectedRevision }) => {
+    if (expectedRevision != null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) throw new Error(`shared-state-transaction-invalid-revision:${name}`)
     const validation = validateAndMigrateSharedResource(name, data)
     if (validation.status === 'invalid') {
       throw new Error(`shared-state-transaction-invalid:${name}`)
@@ -564,12 +585,12 @@ async function performSharedResourcesAtomicSave(
     return {
       name,
       data: validation.value,
-      expectedRevision: sharedResourceRevisions.get(sharedResourceRevisionKey(name)) ?? 0,
+      expectedRevision: expectedRevision ?? sharedResourceRevisions.get(sharedResourceRevisionKey(name)) ?? 0,
     }
   })
   for (const write of normalized) {
     const revisionKey = sharedResourceRevisionKey(write.name)
-    if (!sharedResourceRevisions.has(revisionKey)) {
+    if (!sharedResourceRevisions.has(revisionKey) && writes.find(candidate => candidate.name === write.name)?.expectedRevision == null) {
       await requestJson(`/state/${write.name}`, undefined, write.name)
       write.expectedRevision = sharedResourceRevisions.get(revisionKey) ?? 0
     }
@@ -591,6 +612,7 @@ async function performSharedResourcesAtomicSave(
       undoGroupId: options.undoGroupId,
       undoLabel: options.undoLabel,
       roomJournalMutations: options.roomJournalMutations,
+      readRevisions: options.readRevisions,
       writes: normalized,
     }),
   })

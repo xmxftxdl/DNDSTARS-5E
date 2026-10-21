@@ -5,6 +5,7 @@ import { createDnd5eMechanicalEffect } from '../../rulesets/dnd5e/activeEffects'
 import { buildMapViewportPresentation } from './MapViewportLayer'
 import { dnd5eTokenStatusMarkerStyle, dnd5eTokenStatusMarkerTooltip } from '../../components/map/dnd5eTokenStatusMarkerPresentation'
 import { normalizeDnd5eTokenStatusMarkers } from '../../rulesets/dnd5e/tokenStatusMarkers'
+import { registerDnd5eRulesPlugin } from '../../rulesets/dnd5e/pluginApi'
 
 function character(id: string, charClass: string, sourceActorId?: string): Character {
   return {
@@ -70,6 +71,36 @@ function token(id: string, characterId: string, x: number): Token {
     size: 1,
   }
 }
+
+it('projects a mechanical first-hit mark from its live source and removes stale or revoked marks', () => {
+  const subclassId = 'test.viewport-rage:protector', featureId = `${subclassId}.first-hit`
+  const dispose = registerDnd5eRulesPlugin({
+    manifest: { id: 'test.viewport-rage', name: 'Fixture', version: '1.0.0', apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+    setup(api) { api.registerDeclarativeSubclass({ schemaVersion: 1, id: 'protector', classId: 'barbarian', name: 'Fixture', summary: 'Fixture',
+      abilities: [{ schemaVersion: 1, id: 'first-hit', name: '保护标记', description: 'Synthetic fixture', level: 3,
+        trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], automation: 'full', mechanic: { kind: 'rage-first-hit-protection' } }] }) },
+  })
+  try {
+    const source = { ...character('guard', '野蛮人'), level: 3, dnd5eClassLevels: { barbarian: 3 },
+      dnd5eClassChoices: { classes: { barbarian: { subclass: subclassId } } },
+      dnd5eCombatState: { raging: true, rageAttackMark: { targetId: 'enemy', featureId } } }
+    const map: BattleMap = { id: 'rage-view', name: 'Map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [token('source', source.id, 50), { ...token('enemy', '', 100), type: 'enemy', characterId: undefined }] }
+    const before = JSON.stringify({ map, source })
+    const marker = buildMapViewportPresentation(map, [source]).dnd5eTokenStatusMarkersByToken.enemy?.[0]
+    expect(marker).toMatchObject({ label: '保护标记', sourceActorId: 'source', sourceLabel: 'guard', mechanical: true, source: 'headless' })
+    expect(dnd5eTokenStatusMarkerTooltip(marker!).description).toContain('抗性')
+    expect(buildMapViewportPresentation(JSON.parse(JSON.stringify(map)), [JSON.parse(JSON.stringify(source))]).dnd5eTokenStatusMarkersByToken.enemy).toEqual([marker])
+    expect(JSON.stringify({ map, source })).toBe(before)
+    for (const state of [{ raging: false, rageAttackMark: source.dnd5eCombatState.rageAttackMark }, { raging: true }]) {
+      expect(buildMapViewportPresentation(map, [{ ...source, dnd5eCombatState: state }]).dnd5eTokenStatusMarkersByToken.enemy ?? []).toHaveLength(0)
+    }
+    expect(buildMapViewportPresentation({ ...map, tokens: [map.tokens[1]] }, [source]).dnd5eTokenStatusMarkersByToken.enemy ?? []).toHaveLength(0)
+    expect(buildMapViewportPresentation(map, [{ ...source, level: 2, dnd5eClassLevels: { barbarian: 2 } }]).dnd5eTokenStatusMarkersByToken.enemy ?? []).toHaveLength(0)
+  } finally { dispose() }
+})
 
 describe('batch 132–151 spell badges follow authoritative effects', () => {
   const spells = ['water-breathing', 'weird', 'web', 'acid-arrow', 'alter-self', 'wish'] as const
@@ -652,3 +683,44 @@ it('marks the monster targeted by True Strike with its own named badge, and clea
   const cleared = buildMapViewportPresentation({ ...map, tokens: [{ ...monster, dnd5eCombatState: { schemaVersion: 2 } }] }, [])
   expect(cleared.dnd5eTokenStatusMarkersByToken.monster ?? []).toHaveLength(0)
 })
+
+it('projects occupied-area condition badges without advancing turns or mutating saved effects', () => {
+  const hero = character('hero', '法师', 'source')
+  hero.dnd5eCombatState!.activeEffects![0].duration = { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-start' }
+  const player = { ...token('player', hero.id, 25), y: 25 }
+  const enemy: Token = { ...token('enemy', '', 25), characterId: undefined, type: 'enemy', y: 25, hp: 20, maxHp: 20 }
+  const map: BattleMap = { id: 'occupied-status', name: 'Status', width: 200, height: 100, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [player, enemy], dnd5ePluginAreas: [{ id: 'sand', pluginId: 'test', featureId: 'sand', label: 'Sand', color: '#aaa', sourceTokenId: 'source', sourceCharacterId: 'source', cells: [{ col: 0, row: 0 }], createdRound: 1, expiresAfterRound: 100, includeSelf: true, relation: 'any', occupantModifiers: { conditions: ['blinded'] } }] }
+  const before = JSON.stringify({ map, hero })
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const view = buildMapViewportPresentation(map, [hero])
+    for (const id of ['player', 'enemy']) {
+      expect(view.dnd5eConditionsByToken[id]).toContain('blinded')
+      expect(view.standardConditionTokenMarks.some(mark => mark.instance.tokenId === id && mark.instance.statusId === 'blinded')).toBe(true)
+    }
+    expect(view.dnd5eConditionsByToken.player).toContain('prone')
+  }
+  expect(JSON.stringify({ map, hero })).toBe(before)
+  const outside = buildMapViewportPresentation({ ...map, tokens: map.tokens.map(t => ({ ...t, x: 125 })) }, [hero])
+  expect(outside.dnd5eConditionsByToken.player).toEqual(['prone'])
+  expect(outside.standardConditionTokenMarks.some(mark => mark.instance.statusId === 'blinded')).toBe(false)
+  for (const protection of [{ conditionImmunities: ['blinded'] as const }, { suppressesMagic: true }]) {
+    const view = buildMapViewportPresentation({ ...map, dnd5ePluginAreas: [...map.dnd5ePluginAreas!, { ...map.dnd5ePluginAreas![0], id: 'protection', occupantModifiers: protection }] }, [hero])
+    expect(view.standardConditionTokenMarks.some(mark => mark.instance.statusId === 'blinded')).toBe(false)
+  }
+})
+
+ it('projects character-owned initial-space limits into canvas tokens and removes them after expiry', () => {
+  const victim=character('prisoner','fighter')
+  const boundary={mapId:'prison-map',x:150,y:50,halfWidthUnits:25,bottomFeet:0,topFeet:5}
+  victim.dnd5eCombatState={activeEffects:[{...createDnd5eMechanicalEffect({
+   definitionId:'test:prison',label:'Prison',source:{kind:'spell'},targetId:victim.id,
+  }),initialSpaceBoundary:boundary}]}
+  const map:BattleMap={id:'prison-map',name:'Map',width:500,height:500,gridSize:50,
+   gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[token('prisoner-token',victim.id,150)]}
+  const before=JSON.stringify(map)
+  const projected=buildMapViewportPresentation(map,[victim]).map
+  expect(projected.tokens[0].dnd5eCombatState?.activeEffects?.[0].initialSpaceBoundary).toEqual(boundary)
+  expect(JSON.stringify(map)).toBe(before)
+  victim.dnd5eCombatState.activeEffects=[]
+  expect(buildMapViewportPresentation(map,[victim]).map.tokens[0].dnd5eCombatState?.activeEffects??[]).toEqual([])
+ })

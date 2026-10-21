@@ -1,4 +1,5 @@
 import { dnd5eActiveActionOrBonusActionOnly, type Dnd5eActiveEffectInstance } from './activeEffects'
+import type { Dnd5eCombatEvent, Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import type {
   Dnd5eTurnEconomyByToken,
   Dnd5eTurnEconomyCounts,
@@ -88,6 +89,27 @@ export interface Dnd5eReactiveReactionRefresh {
   turnKey: string
   reactionAvailable: boolean
   speed?: number
+}
+
+/** Mirror authoritative boundary results without granting a fresh ordinary turn. */
+export function refreshDnd5eReactionEconomiesFromEvents(
+  current: Dnd5eTurnEconomyByToken,
+  state: Dnd5eHeadlessCombatState,
+  events: readonly Dnd5eCombatEvent[],
+): Dnd5eTurnEconomyByToken {
+  const refreshes=events.flatMap(event => {
+    const reactive=event.type === 'monster-reactive-refreshed'
+    const specialEnded=event.type === 'class-state-changed' &&
+      event.stateKey === 'special-opportunity-reaction-used' && event.active === false
+    if (!reactive && !specialEnded) return []
+    const actor=state.combatants[event.actorId]
+    if (!actor) return []
+    return [{actorId:actor.id,speed:actor.speed,
+      turnKey:reactive ? event.turnKey : current[actor.id]?.turnKey ?? `${state.combatId}:${state.round}:${actor.id}`,
+      reactionAvailable:actor.turn.reactionAvailable && (!reactive || actor.classState.monsterReactiveUsedTurnKey !== event.turnKey),
+    }]
+  })
+  return refreshDnd5eReactiveReactionEconomies(current,refreshes)
 }
 
 /**
@@ -189,10 +211,13 @@ export function projectDnd5eStartingTurnEconomy(
   fresh: Dnd5eTurnEconomyCounts,
   turn: Parameters<typeof projectDnd5eHeadlessTurnEconomy>[1] | undefined,
   resolvedTurnKey: string | undefined,
+  attackUsage?: { attacksMadeTurnKey?: string; attacksMadeThisTurn?: number },
 ): Dnd5eTurnEconomyCounts {
-  return turn && resolvedTurnKey === fresh.turnKey
-    ? projectDnd5eHeadlessTurnEconomy(fresh, turn)
-    : fresh
+  if (!turn || resolvedTurnKey !== fresh.turnKey) return fresh
+  const projected = projectDnd5eHeadlessTurnEconomy(fresh, turn)
+  return attackUsage?.attacksMadeTurnKey === resolvedTurnKey
+    ? { ...projected, attacksUsed: Math.max(0, Math.floor(attackUsage.attacksMadeThisTurn ?? 0)) }
+    : projected
 }
 
 export function spendDnd5eMovement(

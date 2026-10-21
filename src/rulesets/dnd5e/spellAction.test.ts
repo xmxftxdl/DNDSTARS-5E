@@ -1,7 +1,11 @@
+import { prepareDnd5eRandomTargetCoreSpellCast } from './randomCoreSpellTargets'
 import { afterEach, describe, expect, it } from 'vitest'
+import { dnd5eActivityTriggerContextsFromCombatEventV1 } from './activities/dnd5eActivityTriggerWindows'
+import { dnd5eContextPredicateSatisfiedV1 } from './activities/dnd5eActivityInvocation'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { restoreClassResources } from '../../lib/classResources'
 import {
   applyDnd5eStandardConditionEffect,
   createDnd5eCombatant,
@@ -10,7 +14,7 @@ import {
   endDnd5eConcentration,
   resolveDnd5eHeadlessAction,
 } from './headlessCombatEngine'
-import { dnd5eForcedMovementFall, dnd5eForcedPullDestination, dnd5eForcedPushDestination, dnd5eRepellingBlastPushDestination, prepareDnd5eSpellCast, previewDnd5eSpellAttack, previewDnd5eSpellSavingThrow, resolvePreparedDnd5eSpellCast } from './spellAction'
+import { dnd5eForcedMovementFall, dnd5eForcedPullDestination, dnd5eForcedPushDestination, dnd5eRepellingBlastPushDestination, prepareDnd5eSpellCast, previewDnd5eSpellAttack, previewDnd5eSpellTargetAttack, previewDnd5eSpellSavingThrow, resolvePreparedDnd5eSpellCast } from './spellAction'
 import {
   dnd5eBardMagicalSecretSpellIds,
   dnd5eCombatSpellSelectionLimits,
@@ -35,6 +39,63 @@ import { resolveDnd5eSpellModifierIntents } from './spellModifierIntents'
 import { buildSpellOrSkillAoeHighlight } from '../../pages/maps/spellAoeHighlight'
 import type { Dnd5eSpellTargetingSession } from '../../application/combat/spells/SpellTargetingContracts'
 
+it('preserves area reaction advantage and disadvantage reasons through spell preview and settlement', () => {
+  const caster = character('hawk-caster', '法师', { level: 1, equipment: {},
+    dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['shocking-grasp'] } } } } })
+  const input = fixture(caster, 'shocking-grasp', 0, token('enemy', 'enemy', 75))
+  input.map.dnd5ePluginAreas = [{ id: 'hawk', pluginId: 'test', featureId: 'totem', label: 'Hawk', color: '#fff',
+    sourceTokenId: input.action.actorTokenId!, sourceCharacterId: caster.id, cells: [{ col: 1, row: 0 }],
+    createdRound: 1, expiresAfterRound: 10, relation: 'any', includeSelf: true, attackAdvantageReaction: 'area-source' }]
+  const result = prepareDnd5eSpellCast(input)
+  expect(result.ok, result.ok ? undefined : result.reason).toBe(true); if (!result.ok) return
+  const prepared = result.prepared
+  expect(previewDnd5eSpellAttack(prepared, 2, 18).roll.d20).toBe(2)
+  prepared.areaAttackAdvantageReaction = { areaId: 'hawk', sourceId: prepared.actorToken.id }
+  expect(previewDnd5eSpellAttack(prepared, 2, 18).roll.d20).toBe(18)
+  expect(previewDnd5eSpellAttack(prepared, 2, 18, true).roll.d20).toBe(2)
+  const resolved = resolvePreparedDnd5eSpellCast({ prepared, d20: 2, d20Second: 18, effectRolls: [3] })
+  expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+  expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 18, hit: true }))
+  expect(resolved.result.state.combatants[prepared.actorToken.id].turn.reactionAvailable).toBe(false)
+  const balanced = { ...prepared, attackMode: 'normal' as const,
+    attackModeResolution: { mode: 'normal' as const, advantageReasons: ['existing advantage'], disadvantageReasons: ['existing disadvantage'] } }
+  expect(previewDnd5eSpellAttack(balanced, 2, 18).roll.d20).toBe(2)
+  prepared.areaAttackAdvantageReaction = { areaId: 'forged', sourceId: prepared.actorToken.id }
+  expect(previewDnd5eSpellAttack(prepared, 2, 18).roll.d20).toBe(2)
+  expect(resolvePreparedDnd5eSpellCast({ prepared, d20: 2, d20Second: 18, effectRolls: [3] }).result.ok).toBe(false)
+})
+
+it('keeps projectile reaction previews independent and checks the current beam position', () => {
+  const caster = character('hawk-caster', '法师', { level: 3, equipment: {},
+    classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['scorching-ray'] } } } } })
+  const input = fixture(caster, 'scorching-ray', 2, token('enemy', 'enemy', 275))
+  input.action.dnd5eSpellCast!.projectileTargetIds = ['enemy', 'enemy', 'enemy']
+  input.map.dnd5ePluginAreas = [{ id: 'hawk', pluginId: 'test', featureId: 'totem', label: 'Hawk', color: '#fff',
+    sourceTokenId: input.action.actorTokenId!, sourceCharacterId: caster.id, cells: [{ col: 5, row: 0 }],
+    createdRound: 1, expiresAfterRound: 10, relation: 'any', includeSelf: true, attackAdvantageReaction: 'area-source' }]
+  const result = prepareDnd5eSpellCast(input)
+  expect(result.ok, result.ok ? undefined : result.reason).toBe(true); if (!result.ok) return
+  const prepared = result.prepared
+  const use = { areaId: 'hawk', sourceId: prepared.actorToken.id }
+  prepared.targetSpellAttacks![1].areaAttackAdvantageReaction = use
+  expect(previewDnd5eSpellTargetAttack(prepared, 0, 2, 18).roll.d20).toBe(2)
+  expect(previewDnd5eSpellTargetAttack(prepared, 1, 2, 18).roll.d20).toBe(18)
+  expect(previewDnd5eSpellTargetAttack(prepared, 2, 2, 18).roll.d20).toBe(2)
+  const moved = { ...prepared, state: { ...prepared.state, combatants: { ...prepared.state.combatants,
+    enemy: { ...prepared.state.combatants.enemy, position: { x: 375, y: 25 } } } } }
+  expect(previewDnd5eSpellTargetAttack(moved, 1, 2, 18).roll.d20).toBe(2)
+  expect(prepared.state.combatants.enemy.position).toEqual({ x: 275, y: 25 })
+  const resolved = resolvePreparedDnd5eSpellCast({ prepared, effectRolls: [], targetAttacks: [
+    { targetId: 'enemy', d20: 2, effectRolls: [] },
+    { targetId: 'enemy', d20: 2, d20Second: 18, effectRolls: [1, 1], areaAttackAdvantageReaction: use },
+    { targetId: 'enemy', d20: 2, effectRolls: [] },
+  ] })
+  expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+  expect(resolved.result.events.filter(e => e.type === 'attack-resolved').map(e => e.d20)).toEqual([2, 18, 2])
+  expect(resolved.result.state.combatants[prepared.actorToken.id].turn.reactionAvailable).toBe(false)
+})
+
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
     rulesetId: 'dnd5e-2014-srd-5.1', id, name: id, player: '', avatar: '', accent: '', race: '人类', charClass,
@@ -50,6 +111,38 @@ function character(id: string, charClass: string, patch: Partial<Character> = {}
 function token(id: string, type: Token['type'], x: number, characterId?: string): Token {
   return { id, label: id, x, y: 25, color: '', emoji: '', size: 1, type, characterId, hp: 30, maxHp: 30 }
 }
+
+it.each(['mounted', 'unmounted', 'foreign'] as const)('shares a self spell with an off-initiative companion only when eligible: %s', mode => {
+  const actor = character('rider', '圣武士', { equipment: {},
+    classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    dnd5eClassChoices: { classes: { paladin: { selections: { 'spell-prepared': ['divine-favor'] } } } },
+  })
+  const caster = token('caster', 'player', 25, actor.id)
+  const mount: Token = { ...token('mount', 'enemy', 25), poolId: 'srd-5.1:warhorse',
+    dnd5eSummon: { schemaVersion: 1, pluginId: 'test.mount', featureId: 'call', sourceCharacterId: actor.id,
+      sourceTokenId: mode === 'foreign' ? 'someone-else' : caster.id, createdRound: 1, expiresAfterRound: 1,
+      side: 'player', persistent: true, shareSelfSpellsRangeFeet: 5, shareSelfSpellsRequiresMounted: true },
+    dnd5eCombatState: { activeEffects: mode === 'unmounted' ? [] : [createDnd5eMechanicalEffect({
+      definitionId: 'riding', label: 'Riding', targetId: 'mount', source: { kind: 'feature', actorId: caster.id, rulesId: 'basic-action:mount' },
+      legacyCondition: 'attached', relation: { schemaVersion: 1, kind: 'attachment', sourceActorId: caster.id,
+        sourceActionId: 'basic-action:mount', slotGroup: 'riding', maxDistanceFeet: 5, movement: 'source-rides-target', endsOnSourceIncapacitated: true },
+    })] },
+  }
+  const map: BattleMap = { id: 'sharing', name: 'Map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+    feetPerCell: 5, showGrid: true, tokens: [caster, mount] }
+  const action: SharedPlayerActionState = { id: 'share', type: 'dnd5e-spell-cast', sourceMode: 'player', status: 'pending',
+    mapId: map.id, actorTokenId: caster.id, characterId: actor.id, round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+    dnd5eSpellCast: { spellId: 'divine-favor', castingClassId: 'paladin', slotLevel: 1, targetTokenId: caster.id, targetTokenIds: [caster.id] } }
+  const prepared = prepareDnd5eSpellCast({ action, map, characters: [actor],
+    initiativeOrder: [{ tokenId: caster.id, label: caster.label, roll: 20, color: '', emoji: '' }] })
+  expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(prepared.prepared.state.initiativeOrder).toEqual([caster.id])
+  const result = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+  expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
+  expect(result.application!.map.tokens.find(entry => entry.id === mount.id)?.dnd5eCombatState?.activeEffects?.some(effect => effect.source.rulesId === 'divine-favor') ?? false).toBe(mode === 'mounted')
+  expect(result.application!.characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(0)
+})
 
 function fixture(actor: Character, spellId: string, slotLevel: number, target: Token, allies: Character[] = []) {
   const actorToken = token(`${actor.id}-token`, 'player', 25, actor.id)
@@ -75,7 +168,158 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
   }
 }
 
+it('settles an ethereal return when Dispel Magic ends the phase spell', () => {
+  const effect = createDnd5eMechanicalEffect({
+    definitionId: 'test:ethereal-step', label: 'Ethereal Step', targetId: 'wizard-token',
+    source: { kind: 'spell', actorId: 'wizard-token', rulesId: 'etherealness', spellLevel: 7, magical: true },
+    modifiers: { planarPhase: { plane: 'ethereal', ignoresMaterialCollision: true,
+      suppressCrossPlaneEffects: true, unrestrictedVerticalMovement: true, materialSightRangeFeet: 60 } },
+  })
+  const wizard = character('wizard', '法师', { level: 13,
+    dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['dispel-magic'] } } } },
+    classResources: { 'dnd5e-spell-slot-7': { current: 1, max: 1 } },
+    dnd5eCombatState: { schemaVersion: 2, activeEffects: [effect] },
+  })
+  const input = fixture(wizard, 'dispel-magic', 7, token('occupant', 'enemy', 25))
+  input.action.targetTokenId = 'wizard-token'
+  input.action.dnd5eSpellCast!.targetTokenId = 'wizard-token'
+  const prepared = prepareDnd5eSpellCast(input)
+  expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+  expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+  expect(resolved.result.state.combatants['wizard-token'].classState.activeEffects ?? []).toEqual([])
+  expect(resolved.result.state.combatants['wizard-token'].position).not.toEqual({ x: 25, y: 25 })
+  expect(resolved.result.state.combatants['wizard-token'].currentHp).toBe(20)
+  expect(resolved.application!.characters[0].currentHp).toBe(20)
+  expect(resolved.application!.characters[0].classResources?.['dnd5e-spell-slot-7'].current).toBe(0)
+})
+
+it.each([[0,false],[45,false],[45,true]] as const)('freezes only the actual Ice Storm column: height %s, tall target %s',(wallHeight,tallTarget)=>{
+ const wizard=character('wizard','法师',{level:7,
+  dnd5eClassChoices:{classes:{wizard:{selections:{'spell-prepared':['ice-storm']}}}},
+  classResources:{'dnd5e-spell-slot-4':{current:1,max:1}}})
+ const input=fixture(wizard,'ice-storm',4,token('outside','enemy',125))
+ input.map.height=1000
+ if(tallTarget)Object.assign(input.map.tokens[1],{x:525,y:525,elevationFeet:35,creatureSize:'巨型',size:4})
+ input.action.dnd5eSpellCast!.areaTargetCell={col:10,row:10}
+ input.action.dnd5eSpellCast!.targetTokenIds=[]
+ input.map.dnd5ePluginAreas=[{id:'water',pluginId:'test.water',featureId:'water',label:'Water',color:'#0ff',
+  sourceCharacterId:'other',sourceTokenId:'other',slotLevel:3,sourceSpellSaveDc:15,createdRound:1,expiresAfterRound:101,
+  anchorMode:'fixed',anchorCell:{col:10,row:10},cells:Array.from({length:7},(_,i)=>({col:10,row:7+i})),
+  rectGeometry:{lengthFeet:30,widthFeet:1,gridAligned:false,direction:{dc:0,dr:1}},
+  vertical:{mode:'volume',baseElevationFeet:wallHeight,heightFeet:10},blocking:{freezesOnColdSpell:true}}]
+ const prepared=prepareDnd5eSpellCast(input)
+ expect(prepared.ok,prepared.ok?'':prepared.reason).toBe(true)
+ if(!prepared.ok)return
+ expect(prepared.prepared.targetTokens).toHaveLength(tallTarget?1:0)
+ const result=resolvePreparedDnd5eSpellCast({prepared:prepared.prepared,
+  savingThrowD20:tallTarget?1:undefined,effectRolls:tallTarget?[8,8]:[],
+  additionalEffectRolls:tallTarget?[[1,1,1,1]]:undefined})
+ expect(result.result.ok,result.result.ok?'':result.result.reason).toBe(true)
+ const ice=result.application!.map.dnd5ePluginAreas!.filter(a=>a.linkedParentAreaId==='water')
+ expect(ice).toHaveLength(wallHeight===0?12:0)
+ expect(ice.every(a=>a.entityCurrentHitPoints===15)).toBe(true)
+ expect(result.application!.characters[0].classResources!['dnd5e-spell-slot-4'].current).toBe(0)
+ expect(result.application!.map.tokens.find(t=>t.id==='outside')!.hp).toBe(tallTarget?10:30)
+ expect(result.result.events.some(e=>e.type==='cold-spell-path-resolved')).toBe(false)
+ expect(input.map.dnd5ePluginAreas).toHaveLength(1)
+})
+
+it.each([0,40])('freezes empty water only inside the actual Cone of Cold pitch %s',aimElevation=>{
+ const wizard=character('wizard','法师',{level:9,
+  dnd5eClassChoices:{classes:{wizard:{selections:{'spell-prepared':['cone-of-cold']}}}},
+  classResources:{'dnd5e-spell-slot-5':{current:1,max:1}}})
+ const input=fixture(wizard,'cone-of-cold',5,token('outside','enemy',125))
+ input.map.height=1000
+ input.map.tokens[0].y=225
+ input.action.targetElevationFeet=aimElevation
+ input.action.dnd5eSpellCast!.areaTargetCell={col:8,row:4}
+ input.action.dnd5eSpellCast!.targetTokenIds=[]
+ input.map.dnd5ePluginAreas=[{id:'water',pluginId:'test.water',featureId:'water',label:'Water',color:'#0ff',
+  sourceCharacterId:'other',sourceTokenId:'other',slotLevel:3,sourceSpellSaveDc:15,createdRound:1,expiresAfterRound:101,
+  anchorMode:'fixed',anchorCell:{col:8,row:4},cells:[{col:8,row:3},{col:8,row:4},{col:8,row:5}],
+  rectGeometry:{lengthFeet:10,widthFeet:1,gridAligned:false,direction:{dc:0,dr:1}},
+  vertical:{mode:'volume',baseElevationFeet:0,heightFeet:10},blocking:{freezesOnColdSpell:true}}]
+ const prepared=prepareDnd5eSpellCast(input)
+ expect(prepared.ok,prepared.ok?'':prepared.reason).toBe(true)
+ if(!prepared.ok)return
+ expect(prepared.prepared.targetTokens).toHaveLength(0)
+ const result=resolvePreparedDnd5eSpellCast({prepared:prepared.prepared,targetSavingThrows:[],effectRolls:[]})
+ expect(result.result.ok,result.result.ok?'':result.result.reason).toBe(true)
+ expect(result.application!.map.dnd5ePluginAreas!.filter(a=>a.linkedParentAreaId==='water')).toHaveLength(aimElevation===0?4:0)
+ expect(result.application!.characters[0].classResources!['dnd5e-spell-slot-5'].current).toBe(0)
+})
+
 describe('SRD 5.1 Headless spell authority bridge', () => {
+  it('prepares critical spell damage only for the marked source and retains blind misses', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } } } },
+    })
+    const prepared = prepareDnd5eSpellCast(fixture(wizard, 'fire-bolt', 0, token('enemy', 'enemy', 125)))
+    expect(prepared.ok).toBe(true); if (!prepared.ok) return
+    const target = prepared.prepared.state.combatants.enemy
+    target.armorClass = 40
+    const effect = createDnd5eMechanicalEffect({ definitionId: 'mark', label: 'Mark', targetId: target.id,
+      source: { kind: 'feature', actorId: prepared.prepared.actorToken.id }, modifiers: { attacksBySourceCriticalThreshold: 19 } })
+    target.classState.activeEffects = [effect]
+    expect(previewDnd5eSpellAttack(prepared.prepared, 19)).toMatchObject({ hit: true, critical: true })
+    effect.source.actorId = 'foreign'
+    expect(previewDnd5eSpellAttack(prepared.prepared, 19)).toMatchObject({ hit: false, critical: false })
+    effect.source.actorId = prepared.prepared.actorToken.id
+    prepared.prepared.blindTargetMiss = true
+    expect(previewDnd5eSpellAttack(prepared.prepared, 19)).toMatchObject({ hit: false, critical: false })
+  })
+  it.each([false, true])('checks costly material waiver from an owned resource-spell grant: %s', ignoreMaterialComponents => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'test.material-waiver', name: 'Synthetic waiver', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        featureId = api.registerFeature({ id: 'cast', name: 'Cast', summary: 'Synthetic', description: 'Synthetic', automation: 'full',
+          declarativeAbility: { schemaVersion: 1, id: 'cast', name: 'Cast', description: 'Synthetic', level: 1,
+            trigger: { kind: 'active-use' }, targeting: { kind: 'self' }, effects: [], automation: 'full',
+            mechanic: { kind: 'alternate-resource-spellcasting', classId: 'monk', ability: 'wis',
+              resourceId: 'dnd5e-ki', resourceScope: 'core', ignoreMaterialComponents,
+              grants: [{ id: 'ward', spellId: 'warding-bond', castAtLevel: 2, resourceCost: 2 }] },
+          } })
+      },
+    })
+    try {
+      const caster = character('waiver-caster', '武僧', { level: 9, dnd5eClassLevels: { monk: 9 },
+        dnd5ePluginFeatureIds: [featureId], classResources: { 'dnd5e-ki': { current: 3, max: 9 } } })
+      const input = fixture(caster, 'warding-bond', 2, token('ally', 'player', 75))
+      input.action.dnd5eSpellCast!.alternateResourceSpell = { featureId, grantId: 'ward' }
+      const before = structuredClone(input)
+      const prepared = prepareDnd5eSpellCast(input)
+      if (!ignoreMaterialComponents) {
+        expect(prepared).toMatchObject({ ok: false, reason: 'costly-material-unavailable' })
+      } else {
+        expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+        if (!prepared.ok) throw Error(prepared.reason)
+        expect(prepared.prepared.spellMaterialPlan).toBeUndefined()
+        const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+        expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+        if (!resolved.result.ok) throw Error(resolved.result.reason)
+        expect(resolved.result.state.combatants['waiver-caster-token'].classResources['dnd5e-ki'].current).toBe(1)
+        expect(resolved.result.state.combatants.ally.classState.activeEffects).toContainEqual(expect.objectContaining({ definitionId: 'srd-5.1:spell:warding-bond' }))
+        const restored = JSON.parse(JSON.stringify(resolved.result.state)) as typeof resolved.result.state
+        const advanced = resolveDnd5eHeadlessAction(restored, { type: 'end-turn', actorId: 'waiver-caster-token' })
+        expect(advanced.ok).toBe(true)
+        expect(advanced.state.combatants.ally.classState.activeEffects).toContainEqual(expect.objectContaining({
+          definitionId: 'srd-5.1:spell:warding-bond', tags: ['spell-materials-waived'],
+        }))
+      }
+      expect(input).toEqual(before)
+      const silenced = structuredClone(input)
+      silenced.characters[0].conditions = ['silenced']
+      expect(prepareDnd5eSpellCast(silenced)).toMatchObject({ ok: false, reason: 'verbal-component-unavailable' })
+      const unowned = structuredClone(input)
+      unowned.characters[0].dnd5ePluginFeatureIds = []
+      expect(prepareDnd5eSpellCast(unowned).ok).toBe(false)
+    } finally { dispose() }
+  })
+
   it.each(['thick', 'thin'] as const)('creates independent %s stone panels with matching authority cells', mode => {
     const wizard = character('wizard', '法师', { level: 10, dnd5eClassLevels: { wizard: 10 },
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['wall-of-stone'] } } } },
@@ -793,6 +1037,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       castingClassId: undefined,
       racialInnate: true,
       spellcastingAbility: 'cha',
+      attackAbility: 'cha',
     })
     expect(prepared.prepared.savingThrow?.mode).toBe('normal')
     const resolved = resolvePreparedDnd5eSpellCast({
@@ -812,6 +1057,61 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     } finally {
       dispose()
     }
+  })
+
+  it('casts an at-will levelled build spell without creating or consuming a slot', () => {
+    const hero = character('at-will-grant', '战士', {
+      classResources: {},
+      dnd5eContentChoices: { 'local.test:grant': {
+        schemaVersion: 1, contentId: 'local.test:grant', selections: {},
+        resolvedGrants: [{ kind: 'spell', spellId: 'faerie-fire', mode: 'at-will', ability: 'int', castAtLevel: 1 }],
+      } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(hero, 'faerie-fire', 1, enemy)
+    input.action.targetTokenIds = [enemy.id]
+    input.action.dnd5eSpellCast = { spellId: 'faerie-fire', slotLevel: 1, racialInnate: true, targetTokenId: enemy.id, targetTokenIds: [enemy.id], areaTargetCell: { col: 2, row: 0 } }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? '' : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.slotLevel).toBe(1)
+    const result = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, savingThrowD20: 2, effectRolls: [] })
+    expect(result.result.ok).toBe(true)
+    const actor = result.result.state.combatants['at-will-grant-token']
+    expect(actor.classResources['dnd5e-racial-spell-faerie-fire']).toBeUndefined()
+    expect(actor.classResources['dnd5e-spell-slot-1']).toBeUndefined()
+    expect(actor.turn.actionAvailable).toBe(false)
+    const removed = fixture({ ...hero, dnd5eContentChoices: {} }, 'faerie-fire', 1, enemy)
+    removed.action.dnd5eSpellCast = input.action.dnd5eSpellCast
+    expect(prepareDnd5eSpellCast(removed).ok).toBe(false)
+  })
+
+  it.each(['short-rest', 'long-rest'] as const)('casts and restores a short-rest build spell after %s', (rest) => {
+    const key = 'dnd5e-racial-spell-faerie-fire'
+    const hero = character('short-rest-grant', '战士', {
+      classResources: { [key]: { current: 1, max: 1 } },
+      dnd5eContentChoices: { 'local.test:grant': {
+        schemaVersion: 1, contentId: 'local.test:grant', selections: {},
+        resolvedGrants: [{ kind: 'spell', spellId: 'faerie-fire', mode: 'once-per-short-rest', ability: 'int', castAtLevel: 1 }],
+      } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(hero, 'faerie-fire', 1, enemy)
+    input.action.targetTokenIds = [enemy.id]
+    input.action.dnd5eSpellCast = { spellId: 'faerie-fire', slotLevel: 1, racialInnate: true, targetTokenId: enemy.id, targetTokenIds: [enemy.id], areaTargetCell: { col: 2, row: 0 } }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? '' : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    const result = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, savingThrowD20: 2, effectRolls: [] })
+    expect(result.result.ok).toBe(true)
+    const actor = result.result.state.combatants['short-rest-grant-token']
+    expect(actor.classResources[key].current).toBe(0)
+    expect(actor.classResources['dnd5e-spell-slot-1']).toBeUndefined()
+    const spent = { ...hero, classResources: { [key]: { current: 0, max: 1 } } }
+    const exhausted = fixture(spent, 'faerie-fire', 1, enemy)
+    exhausted.action.dnd5eSpellCast = input.action.dnd5eSpellCast
+    expect(prepareDnd5eSpellCast(exhausted)).toMatchObject({ ok: false, reason: 'slot-unavailable' })
+    expect(restoreClassResources(spent, rest).classResources?.[key].current).toBe(1)
   })
 
   it('casts a build-granted cantrip without a class while still enforcing ordinary components', () => {
@@ -843,7 +1143,35 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       castingClassId: undefined,
       racialInnate: true,
       spellcastingAbility: 'int',
+      attackAbility: 'int',
     })
+  })
+  it('enforces self-only build grants in the core Host and Headless paths', () => {
+    const hero=character('self-grant','战士',{
+      classResources:{'dnd5e-racial-spell-longstrider':{current:1,max:1}},
+      dnd5eContentChoices:{'local.test:self':{schemaVersion:1,contentId:'local.test:self',selections:{},resolvedGrants:[
+        {kind:'spell',spellId:'longstrider',mode:'once-per-long-rest',ability:'wis',castAtLevel:1,targetRestriction:'self'},
+      ]}},
+    })
+    const supply=applyDnd5eInventoryMutation([hero],{type:'grant',characterId:hero.id,templateId:'srd-5.1:item:component-pouch',quantity:1})
+    expect(supply.ok).toBe(true);if(!supply.ok)return
+    const other=token('other','player',75),input=fixture(supply.characters[0],'longstrider',1,other)
+    input.action.dnd5eSpellCast!.racialInnate=true
+    expect(prepareDnd5eSpellCast(input)).toMatchObject({ok:false,reason:'invalid-target'})
+    input.action.targetTokenId='self-grant-token'
+    input.action.dnd5eSpellCast!.targetTokenId='self-grant-token'
+    const prepared=prepareDnd5eSpellCast(input)
+    expect(prepared.ok,JSON.stringify(prepared)).toBe(true);if(!prepared.ok)return
+    const legal=resolvePreparedDnd5eSpellCast({prepared:prepared.prepared,effectRolls:[]}).result
+    expect(legal.ok,JSON.stringify(legal)).toBe(true)
+    expect(legal.state.combatants['self-grant-token'].classResources['dnd5e-racial-spell-longstrider'].current).toBe(0)
+    prepared.prepared.targetToken=other
+    prepared.prepared.targetTokens=[other]
+    const before=structuredClone(prepared.prepared.state)
+    const forged=resolvePreparedDnd5eSpellCast({prepared:prepared.prepared,effectRolls:[]}).result
+    expect(forged.ok).toBe(false)
+    expect(forged.state).toEqual(before)
+    expect(prepared.prepared.state).toEqual(before)
   })
 
   it('casts Scorching Ray from the authoritative Circlet of Blasting without preparing or spending a class spell slot', () => {
@@ -902,6 +1230,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       modifier: 5,
       total: 15,
     })
+    expect(prepared.prepared.attackAbility).toBeUndefined()
 
     const resolved = resolvePreparedDnd5eSpellCast({
       prepared: prepared.prepared,
@@ -1719,6 +2048,18 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     expect(resolvedBlast.result.ok, resolvedBlast.result.ok ? undefined : resolvedBlast.result.reason).toBe(true)
     expect(resolvedBlast.result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(2)
+    expect(resolvedBlast.result.events.filter(event => event.type === 'attack-resolved')).toEqual([
+      expect.objectContaining({ spellId: 'eldritch-blast', targetId: 'enemy' }),
+      expect.objectContaining({ spellId: 'eldritch-blast', targetId: 'enemy' }),
+    ])
+    for (const [index, event] of resolvedBlast.result.events.entries()) {
+      if (event.type !== 'attack-resolved') continue
+      const contexts = dnd5eActivityTriggerContextsFromCombatEventV1(resolvedBlast.result.state, event, index, 'blast-source', resolvedBlast.result.events)
+      const hit = contexts.find(context => context.event === 'attack-hit')!
+      expect(hit.eligibleTargetIds).toEqual(['enemy'])
+      expect(dnd5eContextPredicateSatisfiedV1({ kind: 'event-source', source: 'attack', sourceId: 'eldritch-blast' }, hit)).toBe(true)
+      expect(dnd5eContextPredicateSatisfiedV1({ kind: 'event-source', source: 'attack', sourceId: 'scorching-ray' }, hit)).toBe(false)
+    }
 
     const wizard = character('wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['scorching-ray'] } } } },
@@ -2501,6 +2842,12 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       spellId: 'spiritual-weapon',
       success: true,
     }))
+    const counterContexts = countered.result.events.flatMap((event, index) =>
+      dnd5eActivityTriggerContextsFromCombatEventV1(countered.result.state, event, index, 'counter-result', countered.result.events))
+      .filter(context => context.event === 'spell-countered')
+    expect(counterContexts).toHaveLength(1)
+    expect(counterContexts[0]).toMatchObject({ eligibleActorIds: [target.id],
+      source: { kind: 'spell', id: 'spiritual-weapon', level: 2 } })
     expect(countered.application?.map.dnd5ePluginAreas ?? []).toEqual([])
     expect(countered.application?.map.tokens.some((candidate) => candidate.dnd5eSpellEffect)).toBe(false)
     expect(countered.application?.characters.find((candidate) => candidate.id === cleric.id)
@@ -4491,6 +4838,14 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     beastSpellsInput.action.targetTokenId = 'druid-token'
     beastSpellsInput.action.dnd5eSpellCast!.targetTokenId = 'druid-token'
     expect(prepareDnd5eSpellCast(beastSpellsInput).ok).toBe(true)
+    for (const wildShapeMode of ['polymorph', 'true-polymorph', 'animal-shapes'] as const) {
+      const transformedInput = fixture({ ...shaped, level: 20,
+        dnd5eCombatState: { wildShapeFormId: 'srd-5.1:wolf', wildShapeMode },
+      }, 'produce-flame', 0, enemy)
+      expect(prepareDnd5eSpellCast(transformedInput)).toEqual({
+        ok: false, reason: 'wild-shape-spellcasting-unavailable',
+      })
+    }
   })
 
   it('separates Bard Magical Secrets from ordinary spells known and casts an off-list secret through Headless', () => {
@@ -7271,4 +7626,106 @@ describe('standard condition spell attack disadvantage', () => {
     const cleared = prepareDnd5eSpellCast(input)
     expect(cleared.ok && cleared.prepared.attackMode).toBe('normal')
   })
+})
+
+it.each(['fire-bolt', 'scorching-ray', 'poison-spray'] as const)('randomizes native %s before independent attack rolls', spellId => {
+  const wizard = character('random-wizard', '法师', {
+    dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt', 'poison-spray'], 'spell-prepared': ['scorching-ray'] } } } },
+    classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 3 } },
+    dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({ id: 'random', definitionId: 'test:random', label: 'Random',
+      source: { kind: 'spell' }, targetId: 'random-wizard-token', modifiers: { randomVisibleCreatureTargets: true, perceiveVisibleCreaturesAsHostile: true } })] },
+  })
+  const input = fixture(wizard, spellId, spellId === 'scorching-ray' ? 2 : 0, token('original', 'enemy', 75))
+  const ally = token('ally', 'enemy', 125); ally.dnd5eSide = 'player'
+  const hidden = token('hidden', 'enemy', 175)
+  hidden.dnd5eCombatState = { activeEffects: [createDnd5eConditionEffect({ id: 'invis', targetId: hidden.id, condition: 'invisible', source: { kind: 'dm' } })] }
+  input.map.width = 3000
+  input.map.tokens.push(ally, hidden, token('far', 'enemy', 2525), token('object', 'obstacle', 225))
+  if (spellId === 'scorching-ray') input.action.dnd5eSpellCast!.projectileTargetIds = ['original', 'original', 'original']
+  const chosen: string[] = []
+  const pools: string[][] = []
+  const prepared = prepareDnd5eRandomTargetCoreSpellCast({ ...input, chooseRandomTarget: (occurrence, candidates) => {
+    pools.push([...candidates].sort())
+    const id = occurrence === 1 ? 'original' : 'ally'; chosen.push(id); return id
+  } })
+  expect(prepared.ok, JSON.stringify({ prepared, pools })).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  for (const pool of pools) expect(pool).toEqual(['ally', 'original'])
+  expect(chosen).toEqual(spellId === 'scorching-ray' ? ['ally', 'original', 'ally'] : ['ally'])
+  if (spellId === 'scorching-ray') {
+    expect(prepared.prepared.projectileTargetIds).toEqual(chosen)
+    expect(prepared.prepared.targetSpellAttacks?.map(attack => attack.targetToken.id)).toEqual(chosen)
+  }
+  const settled = resolvePreparedDnd5eSpellCast(spellId === 'poison-spray'
+    ? { prepared: prepared.prepared, savingThrowD20: 1, effectRolls: [4, 4] }
+    : spellId === 'fire-bolt'
+    ? { prepared: prepared.prepared, d20: 19, effectRolls: [4, 4] }
+    : { prepared: prepared.prepared, effectRolls: [], targetAttacks: chosen.map((targetId, index) => ({ targetId, d20: index === 1 ? 1 : 19, d20Second: prepared.prepared.targetSpellAttacks?.[index].mode !== 'normal' ? index === 1 ? 1 : 19 : undefined, mode: prepared.prepared.targetSpellAttacks?.[index].mode, effectRolls: index === 1 ? [] : [4, 4] })) })
+  expect(settled.result.ok, JSON.stringify(settled.result)).toBe(true)
+  expect(settled.application?.map.tokens.find(t => t.id === 'ally')?.hp).toBe(spellId === 'scorching-ray' ? 14 : 22)
+  expect(settled.application?.map.tokens.find(t => t.id === 'original')?.hp).toBe(30)
+  expect(settled.result.state.initiativeOrder).toEqual(['random-wizard-token', 'original'])
+  expect(settled.application?.characters[0].classResources?.['dnd5e-spell-slot-2'].current).toBe(spellId === 'scorching-ray' ? 0 : 1)
+  expect(wizard.classResources?.['dnd5e-spell-slot-2'].current).toBe(1)
+  expect(ally.dnd5eSide).toBe('player')
+  wizard.dnd5eCombatState!.activeEffects![0].suspendedBy = ['antimagic-test']
+  let unexpectedChoices = 0
+  const suspended = prepareDnd5eRandomTargetCoreSpellCast({ ...input, chooseRandomTarget: () => { unexpectedChoices++; return 'ally' } })
+  expect(suspended.ok).toBe(true)
+  expect(unexpectedChoices).toBe(0)
+  if (suspended.ok) expect(suspended.prepared.targetToken.id).toBe('original')
+})
+
+
+it.each([1,20])('passes Shield casting saves through the core spell map adapter: %s',d20=>{
+  const wizard=character('wizard','法师',{classResources:{'dnd5e-spell-slot-1':{current:1,max:1}},dnd5eClassChoices:{classes:{wizard:{selections:{'spell-prepared':['magic-missile']}}}}})
+  const pain=createDnd5eMechanicalEffect({definitionId:'pain',label:'Pain',targetId:'enemy',source:{kind:'spell'},spellcastingSave:{ability:'con',dc:18}})
+  const enemy={...token('enemy','enemy',125),poolId:'srd-5.1:mage',dnd5eCombatState:{activeEffects:[pain],monsterSpellSlots:{1:{current:1,max:1}}}}
+  const input=fixture(wizard,'magic-missile',1,enemy)
+  input.action.dnd5eSpellCast!.projectileTargetIds=['enemy','enemy','enemy']
+  const ready=prepareDnd5eSpellCast(input)
+  expect(ready.ok,ready.ok?'':ready.reason).toBe(true);if(!ready.ok)return
+  const result=resolvePreparedDnd5eSpellCast({prepared:ready.prepared,effectRolls:[4,3,2],shieldSpellcastingSavingThrows:{enemy:[{effectId:pain.id,d20}]}})
+  expect(result.result.ok,result.result.ok?'':result.result.reason).toBe(true);if(!result.result.ok)return
+  expect(result.result.state.combatants.enemy.currentHp).toBe(d20===20?30:18)
+  expect(result.result.state.combatants.enemy.classState.monsterSpellSlots?.[1].current).toBe(0)
+})
+
+it('commits a failed casting save without requesting target damage dice', () => {
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: 'wizard-token',
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  const wizard = character('wizard', '法师', { classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['magic-missile'] } } } },
+    dnd5eCombatState: { activeEffects: [pain] } })
+  const input = fixture(wizard, 'magic-missile', 1, token('enemy', 'enemy', 125))
+  input.action.dnd5eSpellCast!.projectileTargetIds = ['enemy', 'enemy', 'enemy']
+  const ready = prepareDnd5eSpellCast(input)
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const result = resolvePreparedDnd5eSpellCast({ prepared: ready.prepared, effectRolls: [],
+    spellcastingSavingThrows: [{ effectId: pain.id, d20: 1 }] })
+  expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+  if (!result.result.ok) return
+  expect(result.result.state.combatants.enemy.currentHp).toBe(30)
+  expect(result.result.state.combatants['wizard-token'].classResources['dnd5e-spell-slot-1'].current).toBe(0)
+  expect(result.result.state.combatants['wizard-token'].turn.actionAvailable).toBe(false)
+  expect(result.result.events.filter(e => e.type === 'damage-applied')).toHaveLength(0)
+})
+it.each([1, 20])('creates a native persistent area only after its casting save succeeds: %s', d20 => {
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: 'wizard-token',
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  const wizard = character('wizard', '法师', { classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['darkness'] } } } },
+    dnd5eCombatState: { activeEffects: [pain] } })
+  const input = fixture(wizard, 'darkness', 2, token('enemy', 'enemy', 125))
+  input.action.dnd5eSpellCast!.areaTargetCell = { col: 3, row: 3 }
+  const ready = prepareDnd5eSpellCast(input)
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const result = resolvePreparedDnd5eSpellCast({ prepared: ready.prepared, effectRolls: [],
+    spellcastingSavingThrows: [{ effectId: pain.id, d20 }] })
+  expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+  if (!result.result.ok) return
+  expect(result.application?.map.dnd5ePluginAreas ?? []).toHaveLength(d20 === 20 ? 1 : 0)
+  expect(result.result.state.combatants['wizard-token'].classResources['dnd5e-spell-slot-2'].current).toBe(0)
 })

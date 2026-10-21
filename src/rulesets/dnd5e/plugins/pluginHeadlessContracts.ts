@@ -1,3 +1,5 @@
+import type { Dnd5eActivityNegationChoice } from '../activities/dnd5eActivityDisadvantageNegation'
+import type { Dnd5eFormulaDiceEvidenceV1 } from '../activities/dnd5eFormula'
 import type { RulesetAdapter } from '../../contracts'
 import type {
   Dnd5eActionFailure,
@@ -5,6 +7,8 @@ import type {
   Dnd5eAttackDecoyOccurrenceRoll,
   Dnd5eCombatant,
   Dnd5eCombatEvent,
+  Dnd5eCounterspellReaction,
+  Dnd5eSpellcastingSavingThrowRoll,
   Dnd5eHeadlessCombatState,
 } from '../headlessCombatEngine'
 import type { Dnd5eStandardConditionId } from '../conditions'
@@ -16,6 +20,16 @@ import type { Dnd5eActivityCapabilityProposal } from '../activities/dnd5eActivit
 import type { JsonValue } from './pluginManifestContracts'
 
 export interface Dnd5ePluginAction {
+  /** Host-collected weapon reactions; each is revalidated against an actual Activity save. */
+  savingThrowCounterattacks?: readonly import('../headlessCombatEngine').Dnd5eSavingThrowCounterattackUse[]
+  activityTeleportInterruptions?: readonly import('../headlessCombatEngine').Dnd5eActivityTeleportInterruptionUse[]
+  /** Host-collected reaction to the registered feature's spell invocation. */
+  sourceActionInterruptionReaction?: import('../headlessCombatEngine').Dnd5eSourceActionInterruptionReaction
+  counterspellReaction?: Dnd5eCounterspellReaction
+  spellcastingSavingThrows?: readonly Dnd5eSpellcastingSavingThrowRoll[]
+  effectRollDice?: Readonly<Record<string, readonly number[]>>
+  /** Host-collected choices; the registered Activity revalidates ownership, context and cost. */
+  disadvantageNegationChoices?: Readonly<Record<string, Dnd5eActivityNegationChoice>>
   type: 'plugin'
   pluginId: string
   actionId: string
@@ -26,6 +40,8 @@ export interface Dnd5ePluginAction {
   actorId: string
   targetId?: string
   targetIds?: string[]
+  /** Ordered occurrences; targetIds remains the unique authority snapshot set. */
+  projectileTargetIds?: string[]
   targetCell?: { col: number; row: number }
   targetOrientation?: 0 | 1 | 2 | 3
   distanceFeet?: number
@@ -55,6 +71,8 @@ export interface Dnd5ePluginDiceRollDeclaration {
   id: string
   label: string
   count: number
+  /** Explicit Worker damage pool. Host owns its damage type and source attribution. */
+  damageType?: Dnd5eDamageType
   /** Host-only compatibility counts accepted for an already-recorded roll. */
   acceptedCounts?: readonly number[]
   sides: number
@@ -69,6 +87,8 @@ export interface Dnd5ePluginDiceRollDeclaration {
   d20RollKind?: 'attack' | 'ability-check' | 'saving-throw'
   /** Inspiration grants advantage and therefore cannot add another die to an existing mode. */
   d20RollMode?: 'normal' | 'advantage' | 'disadvantage'
+  /** Host-derived from the actual attack formula and selected casting source. */
+  attackAbility?: import('../../../lib/dnd').AbilityKey
 }
 
 /**
@@ -100,6 +120,16 @@ export interface Dnd5ePluginInterruptDeclaration {
 }
 
 export interface Dnd5ePluginHeadlessActionContext {
+  /** Derived by Host attack settlement, never by the submitted Activity payload. */
+  weaponCounterattackSuccessCheckKeys?: ReadonlySet<string>
+  /** Host checkpoint before saving-throw reactions, used only for target eligibility. */
+  activityTargetingState?: Dnd5eHeadlessCombatState
+  weaponCounterattackChecks?: ReadonlyMap<string, { targetId: string; ability: import('../../../lib/dnd').AbilityKey }>
+  settleActivityTeleportInterruptions?(proposals: readonly Dnd5eActivityCapabilityProposal[]): ReadonlySet<string> | undefined
+  /** Host preview; never accepted from action payload. */
+  featureSpellInvocationInterrupted?: boolean
+  /** Undefined rejects an invalid reaction; false suppresses only declared spell operations. */
+  settleFeatureSpellInvocation?(): boolean | undefined
   state: Dnd5eHeadlessCombatState
   action: Dnd5ePluginAction
   events: Dnd5eCombatEvent[]
@@ -109,6 +139,12 @@ export interface Dnd5ePluginHeadlessActionContext {
   targets: readonly Dnd5eCombatant[]
   rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>>
   parentAttackDamageType?: Dnd5eDamageType
+  /** Host-only legacy compiler bridge; call only for an actual damage die pool. */
+  claimDamageRollBonus?(targetId: string, rollId: string, shareParentAttack: boolean, damageType: Dnd5eDamageType): number
+  /** Host-owned source/package eligibility; checked before any Activity effects or costs. */
+  canReceiveRestCompletion?(targetId: string): boolean
+  /** Read-only Host lifetime-benefit gate, checked before any cost or effect. */
+  canReceiveBenefitHistory?(targetId: string, benefitKey: string, renewal?: import('../benefitHistoryRenewal').Dnd5eBenefitRenewalPolicy, scope?: 'package' | 'ruleset'): boolean
   /** Host-derived attack mode using the authoritative map/combat snapshot. */
   attackRollMode(targetId: string, delivery?: 'melee' | 'ranged'): 'normal' | 'advantage' | 'disadvantage'
   /** Settles a generic attack-decoy effect before Activity outcomes are committed. */
@@ -118,12 +154,13 @@ export interface Dnd5ePluginHeadlessActionContext {
     d20: number
     total: number
   }): { ok: true; redirected: boolean } | { ok: false; result: Dnd5eActionResult }
-  grantTemporaryHitPoints(targetId: string, amount: number): number
+  grantTemporaryHitPoints(targetId: string, amount: number, sourceEffectId?: string, replacement?: 'replace'): number
   heal(targetId: string, amount: number): number
   revive(
     proposal: Extract<Dnd5eActivityCapabilityProposal, { kind: 'revive' }>,
   ): boolean
-  dealDamage(targetId: string, amount: number, damageType: Dnd5eDamageType): number
+  /** Negative result rejects an unavailable or ambiguous grant source. */
+  dealDamage(targetId: string, amount: number, damageType: Dnd5eDamageType, damageSource?: 'grant-source', options?: { damageComponents?: readonly import('../activities/dnd5eActivityDamageGroups').Dnd5eActivityDamageComponent[]; damageGroupMultiplier?: 0.5 | 1; magical?: boolean; attackVulnerabilityEvents?: readonly Extract<Dnd5eCombatEvent, { type: 'attack-resolved' }>[]; attackEvents?: readonly Extract<Dnd5eCombatEvent, { type: 'attack-resolved' }>[]; cannotBeReduced?: boolean; destroysBodyOnDeath?: boolean; destroysBodyPartOnDeath?: import('../lethalBodyPart').Dnd5eLethalBodyPartDestruction; bodyPartPresent?: boolean; attackDamage?: boolean; sharesParentAttack?: boolean; attackCheckKeys?: readonly string[]; formulaRoll?: { activityId: string; operationId: string; attackCheckKeys?: readonly string[]; dice: readonly Dnd5eFormulaDiceEvidenceV1[]; formulaAdjustment: number } }): number
   applyStandardCondition(
     targetId: string,
     condition: Dnd5eStandardConditionId,
@@ -173,9 +210,12 @@ export interface Dnd5ePluginHeadlessActionContext {
   lowerAbilityScore?(targetId: string, ability: import('../../../lib/dnd').AbilityKey, maximumScore: number, recoveryGroupId?: string): boolean
   recoverAbilityScore?(targetId: string, ability: import('../../../lib/dnd').AbilityKey, maximumCount?: number): boolean
   recoverHitPointMaximum?(targetId: string, maximumCount?: number): boolean
+  reduceHitPointMaximum?(proposal: Extract<import('../activities/dnd5eActivityExecutor').Dnd5eActivityCapabilityProposal, { kind: 'reduce-hit-point-maximum' }>): boolean
+  transferHitPointMaximum?(proposal: Extract<import('../activities/dnd5eActivityExecutor').Dnd5eActivityCapabilityProposal, { kind: 'transfer-hit-point-maximum' }>): boolean
   /** Damage-free Host death transaction; returns true when the target is valid even if Death Ward intercepts it. */
   instantDeath?(targetId: string): boolean
   spendResource(resourceId: string, amount?: number): boolean
+  spendHitDice?(resourceId: string, amount: number): boolean
   restoreResource(resourceId: string, amount?: number): boolean
   /** Host-only turn movement mutation for unified Activity consumption. */
   spendMovement?(amount: number): boolean

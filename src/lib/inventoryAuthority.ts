@@ -277,6 +277,8 @@ export function sanitizeDnd5ePlayerInventoryMutation(
     healingRolls: undefined,
   }
   if (mutation.type === 'prepare-attunement') return { ...mutation, dmPrerequisiteConfirmed: undefined }
+  if (mutation.type === 'set-surface-exposure' || mutation.type === 'set-enchantment-exposure') return { type: mutation.type,
+    characterId: mutation.characterId, instanceId: mutation.instanceId, exposed: mutation.exposed }
   return mutation
 }
 
@@ -289,7 +291,7 @@ export function dnd5ePlayerInventoryMutationAllowed(
 
 function validRequest(request: Dnd5eInventoryAuthorityRequest, dmRoomId?: string): boolean {
   if (!request || !request.mutation || typeof request.mutation !== 'object') return false
-  if (!['discard', 'transfer', 'equip', 'unequip', 'prepare-attunement', 'cancel-attunement', 'end-attunement', 'set-container', 'adjust-currency', 'use'].includes(request.mutation.type)) return false
+  if (!['discard', 'transfer', 'equip', 'unequip', 'set-surface-exposure', 'set-enchantment-exposure', 'prepare-attunement', 'cancel-attunement', 'end-attunement', 'set-container', 'adjust-currency', 'use'].includes(request.mutation.type)) return false
   if (!dnd5ePlayerInventoryMutationAllowed(request.mutation)) return false
   if (dmRoomId && (request.roomId !== dmRoomId || typeof request.memberId !== 'string')) return false
   return request.sourceMode === 'player' &&

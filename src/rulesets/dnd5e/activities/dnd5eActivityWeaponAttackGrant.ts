@@ -1,3 +1,8 @@
+export interface Dnd5eProjectileAttackSnapshotV1 {
+  attackModifier: number
+  damage: { count: number; sides: number; bonus: number; type: import('../damageTypes').Dnd5eDamageType }
+}
+
 export const DND5E_ACTIVITY_WEAPON_ATTACK_GRANT_SCHEMA_VERSION = 1 as const
 
 /**
@@ -11,9 +16,22 @@ export interface Dnd5eActivityWeaponAttackGrantV1 {
   label: string
   sourceActivityId: string
   appliedTurnKey: string
+  /** Host clears this only when this actor's next turn actually starts. */
+  pendingNextOwnTurn?: true
+  /** Separate active and queued copies preserve both windows for one target. */
+  activatedGrantId?: string
+  requiredTargetId?: string
+  /** Follow-up remains part of the triggering Attack action. */
+  attackActionFollowUp?: true
+  inheritedAttackOrigin?: 'attack-action' | 'bonus-action' | 'reaction' | 'other'
+  attackAdvantage?: true
+  attackResourceCost?: { resourceId: string; amount: number }
   economy: 'bonus-action' | 'none'
   /** Omitted by legacy snapshots and interpreted as one. */
   remainingAttacks?: number
+  projectileAttackSnapshot?: Dnd5eProjectileAttackSnapshotV1
+  reusedProjectileWeaponId?: string
+  targetRestriction?: { originTargetId: string; maximumFeet: number }
   weaponModes?: readonly ('melee' | 'ranged')[]
   weaponIds?: readonly string[]
   requiredWeaponProperties?: readonly string[]
@@ -42,10 +60,22 @@ export function dnd5eActivityWeaponAttackGrantMatchesV1(
 ): grant is Dnd5eActivityWeaponAttackGrantV1 {
   if (
     !grant || grant.schemaVersion !== DND5E_ACTIVITY_WEAPON_ATTACK_GRANT_SCHEMA_VERSION ||
+    grant.pendingNextOwnTurn === true ||
     grant.appliedTurnKey !== turnKey || !['bonus-action', 'none'].includes(grant.economy) ||
     !Number.isInteger(grant.remainingAttacks ?? 1) || (grant.remainingAttacks ?? 1) < 1 ||
     (grant.remainingAttacks ?? 1) > 10
   ) return false
+  if (grant.inheritedAttackOrigin != null && (
+    !['attack-action', 'bonus-action', 'reaction', 'other'].includes(grant.inheritedAttackOrigin) ||
+    grant.economy !== 'none' || grant.pendingNextOwnTurn
+  )) return false
+  if (grant.reusedProjectileWeaponId != null && (profile.mode !== 'ranged' || profile.weaponId !== grant.reusedProjectileWeaponId)) return false
+  if (grant.reusedProjectileWeaponId != null) {
+    const original=grant.projectileAttackSnapshot
+    if (!original || !Number.isFinite(original.attackModifier) || !Number.isInteger(original.damage.count) ||
+      original.damage.count < 1 || !Number.isInteger(original.damage.sides) || original.damage.sides < 2 ||
+      !Number.isFinite(original.damage.bonus)) return false
+  }
   if (grant.weaponModes?.length && !grant.weaponModes.includes(profile.mode)) return false
   if (
     grant.weaponIds?.length && !grant.weaponIds.includes(profile.weaponId) &&

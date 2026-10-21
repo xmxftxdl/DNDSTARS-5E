@@ -1,3 +1,7 @@
+import { geometryEntityDestroyed, normalizeGeometryDurability } from './map-geometry-durability.mjs'
+import { normalizeStructureStairPath, structureStairRayHit } from './structure-stair-path.mjs'
+import { normalizeStructureLifetimes } from './structure-lifetime.mjs'
+import { normalizeStructureCastingHistory } from './structure-casting-history.mjs'
 const EPSILON = 1e-7
 
 function finitePoint(point) {
@@ -25,18 +29,20 @@ export function wallEdgeId(wall, segmentIndex) {
 }
 
 export function doorOpenState(door) {
-  if (door?.physicalState === 'destroyed') return 'open'
+  if (door?.physicalState === 'destroyed' || geometryEntityDestroyed(door)) return 'open'
   if (door?.openState === 'open' || door?.openState === 'closed') return door.openState
   return door?.state === 'open' ? 'open' : 'closed'
 }
 
 export function doorLockState(door) {
+  if (geometryEntityDestroyed(door)) return 'unlocked'
   if (door?.physicalState === 'destroyed' || door?.physicalState === 'broken') return 'unlocked'
   if (['unlocked', 'locked', 'jammed'].includes(door?.lockState)) return door.lockState
   return door?.state === 'locked' ? 'locked' : 'unlocked'
 }
 
 export function doorPhysicalState(door) {
+  if (geometryEntityDestroyed(door)) return 'destroyed'
   return ['intact', 'broken', 'destroyed'].includes(door?.physicalState)
     ? door.physicalState
     : 'intact'
@@ -138,6 +144,9 @@ export function wallRenderSegments(geometry, wall) {
 }
 
 function obstacleSegments(obstacle) {
+  if (geometryEntityDestroyed(obstacle)) return []
+  // Sloping stair slabs have their own volume test; flat perimeter heights create false walls.
+  if (obstacle.stairPath?.thicknessInches > 0) return []
   return (obstacle?.points ?? []).map((a, index) => ({
     entityId: obstacle.id,
     entityKind: 'obstacle',
@@ -215,7 +224,7 @@ function terrainCliffSegments(geometry) {
 export function effectiveGeometrySegments(geometry) {
   if (!geometry) return []
   const walls = (geometry.walls ?? []).flatMap((wall) =>
-    wallRenderSegments(geometry, wall).map((segment) => ({
+    (geometryEntityDestroyed(wall) ? [] : wallRenderSegments(geometry, wall)).map((segment) => ({
       entityId: wall.id,
       entityKind: 'wall',
       wallEdgeId: segment.wallEdgeId,
@@ -245,6 +254,7 @@ export function effectiveGeometrySegments(geometry) {
     }]
   })
   const windows = (geometry.windows ?? []).flatMap((window) => {
+    if (geometryEntityDestroyed(window)) return []
     const points = openingPoints(geometry, window)
     if (points.length !== 2) return []
     const open = window.windowState === 'open' || window.windowState === 'broken'
@@ -343,9 +353,29 @@ export function raycastGeometry(input) {
     ? querySegmentSpatialIndex(input.compiled.index, input.from, input.to)
     : input.compiled?.segments ?? effectiveGeometrySegments(input.geometry)
   let nearest = null
+  const geometry=input.compiled?.geometry??input.geometry
+  for(const obstacle of geometry?.obstacles??[]){
+    const path=obstacle.stairPath
+    if(!path?.thicknessInches || !path.widthMapUnits || geometryEntityDestroyed(obstacle))continue
+    const blocks=input.purpose==='movement'?obstacle.blocksMovement:input.purpose==='vision'?obstacle.blocksVision:input.purpose==='opaque-cover'?(obstacle.blocksVision&&obstacle.blocksLineOfEffect):obstacle.blocksLineOfEffect
+    if(!blocks)continue
+    const fromHeight=(input.fromElevationFeet??0)+(input.fromEyeHeightFeet??0)
+    const toHeight=(input.toElevationFeet??input.fromElevationFeet??0)+(input.toEyeHeightFeet??0)
+    const t=structureStairRayHit(path,path.widthMapUnits/path.widthFeet,{...input.from,elevationFeet:fromHeight},{...input.to,elevationFeet:toHeight})
+    if(t==null || t<=(input.ignoreStart?1e-5:-EPSILON))continue
+    const heights=path.points.map(point=>point.elevationFeet)
+    const baseHeightFeet=Math.min(...heights)-path.thicknessInches/12
+    const segment={entityId:obstacle.id,entityKind:'obstacle',a:path.points[0],b:path.points.at(-1),
+      blocksMovement:obstacle.blocksMovement,blocksVision:obstacle.blocksVision,blocksLineOfEffect:obstacle.blocksLineOfEffect,
+      baseHeightFeet,heightFeet:Math.max(...heights)-baseHeightFeet,cover:obstacle.cover}
+    if(input.ignoreSegment?.(segment,t,fromHeight+(toHeight-fromHeight)*t)===true)continue
+    if(!nearest||t<nearest.t)nearest={segment,t}
+  }
   for (const segment of candidates) {
     const blocks = input.purpose === 'movement'
       ? segment.blocksMovement
+      : input.purpose === 'opaque-cover'
+        ? segment.blocksVision && segment.blocksLineOfEffect
       : input.purpose === 'line-of-effect'
         ? segment.blocksLineOfEffect
         : segment.blocksVision
@@ -377,18 +407,18 @@ const compiledGeometryCache = new WeakMap()
 
 function geometryCacheSignature(geometry) {
   const walls = (geometry.walls ?? []).map((wall) =>
-    `${wall.id}:${wall.blocksVision}:${wall.blocksMovement}:${wall.blocksLineOfEffect}:${wall.baseHeightFeet}:${wall.heightFeet}:` +
+    `${wall.id}:${wall.dnd5eDurability?.hitPoints ?? ''}:${wall.blocksVision}:${wall.blocksMovement}:${wall.blocksLineOfEffect}:${wall.baseHeightFeet}:${wall.heightFeet}:` +
       `${wall.points?.length ?? 0}:${wall.points?.map((point) => `${point.x},${point.y}`).join(';') ?? ''}:` +
       `${wall.edgeIds?.join(';') ?? ''}`,
   ).join('|')
   const openings = [...(geometry.doors ?? []), ...(geometry.windows ?? [])].map((opening) =>
-    `${opening.id}:${doorOpenState(opening)}:${opening.windowState ?? ''}:${opening.blocksVision}:${opening.blocksMovement}:` +
+    `${opening.id}:${opening.dnd5eDurability?.hitPoints ?? ''}:${doorOpenState(opening)}:${opening.windowState ?? ''}:${opening.blocksVision}:${opening.blocksMovement}:` +
       `${opening.blocksLineOfEffect}:${opening.baseHeightFeet}:${opening.heightFeet}:${opening.wallEdgeId ?? ''}:${opening.startT ?? ''}:${opening.endT ?? ''}:` +
       `${opening.parentWallId ?? ''}:${opening.parentWallSegmentIndex ?? ''}:${opening.points?.map((point) => `${point.x},${point.y}`).join(';') ?? ''}`,
   ).join('|')
   const obstacles = (geometry.obstacles ?? []).map((obstacle) =>
-    `${obstacle.id}:${obstacle.points?.map((point) => `${point.x},${point.y}`).join(';') ?? ''}:` +
-      `${obstacle.blocksVision}:${obstacle.blocksMovement}:${obstacle.blocksLineOfEffect}:${obstacle.baseHeightFeet}:${obstacle.heightFeet}:${obstacle.terrainElevationFeet}:${obstacle.terrainRegion}:${obstacle.traversal}:${obstacle.terrainCostMultiplier}`,
+    `${obstacle.id}:${obstacle.dnd5eDurability?.hitPoints ?? ''}:${obstacle.points?.map((point) => `${point.x},${point.y}`).join(';') ?? ''}:` +
+      `${obstacle.blocksVision}:${obstacle.blocksMovement}:${obstacle.blocksLineOfEffect}:${obstacle.baseHeightFeet}:${obstacle.heightFeet}:${obstacle.terrainElevationFeet}:${obstacle.terrainRegion}:${obstacle.traversal}:${obstacle.terrainCostMultiplier}:${JSON.stringify(obstacle.stairPath??null)}`,
   ).join('|')
   return `${geometry.updatedAt ?? ''}#${walls}#${openings}#${obstacles}`
 }
@@ -486,6 +516,8 @@ export function validateGeometryRelationships(geometry) {
 
 export function validateGeometryStructure(geometry) {
   const issues = []
+  if(geometry?.structureLifetimes!=null&&!normalizeStructureLifetimes(geometry.structureLifetimes))issues.push({code:'invalid-structure-lifetimes'})
+  if(geometry?.structureCastingHistory!=null&&!normalizeStructureCastingHistory(geometry.structureCastingHistory))issues.push({code:'invalid-structure-casting-history'})
   const pointValid = (point) => finitePoint(point) && Math.abs(point.x) <= 1_000_000 && Math.abs(point.y) <= 1_000_000
   const commonValid = (entity) =>
     entity && typeof entity.id === 'string' && entity.id.length > 0 && entity.id.length <= 160 &&
@@ -493,6 +525,8 @@ export function validateGeometryStructure(geometry) {
     Array.isArray(entity.points) && entity.points.every(pointValid) &&
     typeof entity.blocksVision === 'boolean' && typeof entity.blocksMovement === 'boolean' &&
     typeof entity.blocksLineOfEffect === 'boolean' &&
+    (entity.dnd5eDurability == null || normalizeGeometryDurability(entity.dnd5eDurability) != null) &&
+    (entity.stairPath == null || (entity.kind === 'obstacle' && normalizeStructureStairPath(entity.stairPath) != null)) &&
     Number.isFinite(entity.baseHeightFeet) && entity.baseHeightFeet >= -1_000 && entity.baseHeightFeet <= 10_000 &&
     Number.isFinite(entity.heightFeet) && entity.heightFeet >= 0 && entity.heightFeet <= 10_000 &&
     Number.isFinite(entity.createdAt) && entity.createdAt >= 0
@@ -510,7 +544,7 @@ export function validateGeometryStructure(geometry) {
   }
   for (const wall of geometry.walls) {
     if (!commonValid(wall) || wall.kind !== 'wall' || wall.points.length < 2 || wall.points.length > 2_048 ||
-      !['stone', 'brick', 'wood', 'metal', 'natural'].includes(wall.material ?? 'stone') ||
+      !['stone', 'brick', 'wood', 'metal', 'natural', 'earth'].includes(wall.material ?? 'stone') ||
       (wall.edgeIds != null && (!Array.isArray(wall.edgeIds) || wall.edgeIds.length !== wall.points.length - 1 ||
         wall.edgeIds.some((id) => typeof id !== 'string' || !id || id.length > 200)))) {
       issues.push({ code: 'invalid-wall', entityId: wall?.id })
@@ -541,7 +575,7 @@ export function validateGeometryStructure(geometry) {
     }
   }
   for (const light of geometry.lights) {
-    if (!light || light.kind !== 'light' || typeof light.id !== 'string' || !light.id || light.id.length > 160 ||
+    if (!light || (light.flame != null && typeof light.flame !== 'boolean') || light.kind !== 'light' || typeof light.id !== 'string' || !light.id || light.id.length > 160 ||
       typeof light.label !== 'string' || light.label.length > 120 || !Array.isArray(light.points) ||
       light.points.length !== 1 || !light.points.every(pointValid) || typeof light.enabled !== 'boolean' ||
       !Number.isFinite(light.brightRadiusFeet) || light.brightRadiusFeet < 0 || light.brightRadiusFeet > 10_000 ||

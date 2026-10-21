@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createDnd5eMechanicalEffect } from '../rulesets/dnd5e/activeEffects'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import {
@@ -82,6 +83,88 @@ function makeContext(patch: Partial<Parameters<typeof preflightPlayerActionAutho
 }
 
 describe('player action authority router', () => {
+  it('authorizes off-turn free self dismissal only from the live owned effect and current combat snapshot', () => {
+    const effect = createDnd5eMechanicalEffect({ id: 'trance', definitionId: 'trance', label: 'Trance',
+      targetId: 'hero', source: { kind: 'spell', rulesId: 'dream' }, duration: { type: 'permanent' },
+      removal: { action: { label: 'End', economy: 'free', selfOnly: true, maxDistanceFeet: 0 } } })
+    const context = makeContext({ currentTokenId: 'other-token', activeMap: makeMap([makeToken(), makeToken({ id: 'other-token', characterId: 'other' })]),
+      characters: [makeCharacter({ dnd5eCombatState: { activeEffects: [effect] } })] })
+    const action = makeAction({ type: 'dnd5e-basic-action', dnd5eBasicAction: { kind: 'dismiss-effect', effectId: effect.id } })
+    expect(preflightPlayerActionAuthority(action, context)).toMatchObject({ status: 'accepted', currentToken: { id: 'hero-token' } })
+    for (const patch of [{ round: 0 }, { initiativeIndex: 1 }, { combatId: 'old' }, { roomMemberId: 'foreign' },
+      { dnd5eBasicAction: { kind: 'dismiss-effect', effectId: 'missing' } },
+      { dnd5eBasicAction: { kind: 'dismiss-effect', effectId: effect.id, targetTokenId: 'other-token' } }]) {
+      expect(preflightPlayerActionAuthority({ ...action, ...patch }, context).status).toBe('rejected')
+    }
+    expect(preflightPlayerActionAuthority(action, { ...context, characters: [makeCharacter()] }).status).toBe('rejected')
+    expect(preflightPlayerActionAuthority(action, { ...context, processedActionIds: new Set([action.id]) }).status).toBe('ignored')
+    effect.removal!.action!.economy = 'action'
+    expect(preflightPlayerActionAuthority(action, context).status).toBe('rejected')
+  })
+  it('authorizes owned exploration effect removal while rejecting stale combat, other actions and replay', () => {
+    const action = makeAction({ type: 'dnd5e-basic-action', combatId: undefined, dnd5eBasicAction: { kind: 'dismiss-effect' } })
+    const context = makeContext({ combatActive: false })
+    expect(preflightPlayerActionAuthority(action, context).status).toBe('accepted')
+    expect(preflightPlayerActionAuthority({ ...action, combatId: 'old' }, context)).toMatchObject({ status: 'rejected', reason: 'stale-combat' })
+    expect(preflightPlayerActionAuthority({ ...action, dnd5eBasicAction: { kind: 'shove' } }, context).status).toBe('rejected')
+    expect(preflightPlayerActionAuthority({ ...action, roomMemberId: 'another-member' }, context).status).toBe('rejected')
+    expect(preflightPlayerActionAuthority(action, { ...context, processedActionIds: new Set([action.id]) }).status).toBe('ignored')
+  })
+  it('binds ground drop to the current owner and combat revision before any inventory mutation', () => {
+    const action = makeAction({ type: 'dnd5e-map-interaction', dnd5eMapInteraction: {
+      operation: 'drop-item', instanceId: 'weapon-instance', expectedInventoryRevision: 3 } })
+    expect(preflightPlayerActionAuthority(action, makeContext()).status).toBe('accepted')
+    expect(preflightPlayerActionAuthority({ ...action, round: 0 }, makeContext())).toMatchObject({status:'rejected',reason:'stale-turn'})
+    expect(preflightPlayerActionAuthority({ ...action, combatId: 'old-combat' }, makeContext())).toMatchObject({status:'rejected',reason:'stale-combat'})
+    expect(preflightPlayerActionAuthority({ ...action, roomMemberId: 'other-player' }, makeContext()).status).toBe('rejected')
+  })
+  it('binds Grove password speech to the owner and current scene/turn', () => {
+    const action = makeAction({ type: 'dnd5e-map-interaction', dnd5eMapInteraction: { operation: 'grove-password', areaId: 'grove', spokenPassword: 'moon' } })
+    expect(preflightPlayerActionAuthority(action, makeContext()).status).toBe('accepted')
+    for (const patch of [{ round: 2 }, { combatId: 'old' }, { roomMemberId: 'foreign' }, { actorTokenId: 'missing' }]) {
+      expect(preflightPlayerActionAuthority({ ...action, ...patch }, makeContext()).status).toBe('rejected')
+    }
+    expect(preflightPlayerActionAuthority({ ...action, combatId: undefined }, makeContext({ combatActive: false })).status).toBe('accepted')
+  })
+  it('binds fortress meal requests to the owned actor and current turn',()=>{
+    const action=makeAction({type:'dnd5e-map-interaction',dnd5eMapInteraction:{operation:'fortress-feast',structureId:'keep',guests:5,expectedWorldDay:0}})
+    expect(preflightPlayerActionAuthority(action,makeContext()).status).toBe('accepted')
+    for(const patch of [{round:2},{combatId:'old'},{roomMemberId:'foreign'},{actorTokenId:'missing'}]){
+      expect(preflightPlayerActionAuthority({...action,...patch},makeContext()).status).toBe('rejected')
+    }
+    expect(preflightPlayerActionAuthority({...action,combatId:undefined},makeContext({combatActive:false})).status).toBe('accepted')
+  })
+  it('binds fortress servant commands to the owned actor and current turn',()=>{
+    const action=makeAction({type:'dnd5e-map-interaction',dnd5eMapInteraction:{operation:'fortress-command',structureId:'keep',servantNumbers:[1,100],instruction:'清理餐桌'}})
+    expect(preflightPlayerActionAuthority(action,makeContext()).status).toBe('accepted')
+    for(const patch of [{round:2},{combatId:'old'},{roomMemberId:'foreign'},{actorTokenId:'missing'}]){
+      expect(preflightPlayerActionAuthority({...action,...patch},makeContext()).status).toBe('rejected')
+    }
+    expect(preflightPlayerActionAuthority({...action,combatId:undefined},makeContext({combatActive:false})).status).toBe('accepted')
+  })
+  it('binds fortress pickups to the commander owner, not a client-selected servant',()=>{
+    const action=makeAction({type:'dnd5e-map-interaction',dnd5eMapInteraction:{operation:'fortress-pickup',servantTokenId:'servant',objectTokenId:'item',expectedReceiptId:'receipt',expectedQuantity:1}})
+    expect(preflightPlayerActionAuthority(action,makeContext()).status).toBe('accepted')
+    for(const patch of [{round:2},{roomMemberId:'foreign'},{actorTokenId:'servant'}]){
+      expect(preflightPlayerActionAuthority({...action,...patch},makeContext()).status).toBe('rejected')
+    }
+  })
+  it('binds fortress door requests to the commander owner and current turn',()=>{
+    const action=makeAction({type:'dnd5e-map-interaction',dnd5eMapInteraction:{operation:'fortress-door',servantTokenId:'servant',doorId:'door',doorOperation:'open'}})
+    expect(preflightPlayerActionAuthority(action,makeContext()).status).toBe('accepted')
+    for(const patch of [{round:2},{combatId:'old'},{roomMemberId:'foreign'},{actorTokenId:'servant'}]){
+      expect(preflightPlayerActionAuthority({...action,...patch},makeContext()).status).toBe('rejected')
+    }
+    expect(preflightPlayerActionAuthority(action,makeContext({currentTokenId:'other'})).status).toBe('rejected')
+  })
+  it('accepts current-turn terrain work and rejects stale combat or round requests', () => {
+    const action = makeAction({ type: 'dnd5e-map-interaction', dnd5eMapInteraction: { operation: 'clear-terrain', areaId: 'rubble', cells: [{ col: 1, row: 1 }] } })
+    expect(preflightPlayerActionAuthority(action, makeContext()).status).toBe('accepted')
+    expect(preflightPlayerActionAuthority({ ...action, round: 2 }, makeContext())).toMatchObject({ status: 'rejected', reason: 'stale-turn' })
+    expect(preflightPlayerActionAuthority({ ...action, combatId: 'old' }, makeContext())).toMatchObject({ status: 'rejected', reason: 'stale-combat' })
+    expect(preflightPlayerActionAuthority(action, makeContext({ currentTokenId: 'other' }))).toMatchObject({ status: 'rejected', reason: 'stale-turn' })
+    expect(preflightPlayerActionAuthority(action, makeContext({ combatActive: false }))).toMatchObject({ status: 'rejected', reason: 'stale-combat' })
+  })
   it('assigns a copied character to the caster owner, not the copied subject owner', () => {
     const duplicate = makeToken({ characterId: 'subject', hp: 10,
       dnd5eSimulacrum: { sourceCharacterId: 'hero', maximumHitPoints: 10 } as NonNullable<Token['dnd5eSimulacrum']> })
@@ -404,4 +487,36 @@ describe('player action authority router', () => {
       characters: [makeCharacter({ currentHp: 0 })],
     })).toBe(false)
   })
+})
+
+it.each([false, true])('permits short-rest requests only outside combat: %s', combatActive => {
+  const result = preflightPlayerActionAuthority(makeAction({ type: 'dnd5e-short-rest-recovery', combatId: undefined }), {
+    isDm: true, activeMap: makeMap(), combatActive, combatId: combatActive ? 'combat-1' : undefined,
+    round: 1, initiativeIndex: 0, currentTokenId: 'hero-token', characters: [makeCharacter()],
+    processedActionIds: new Set(), seenActionIds: new Set(),
+  })
+  expect(result.status).toBe(combatActive ? 'rejected' : 'accepted')
+})
+
+
+it('authorizes only the owned connected dream continuation off turn', () => {
+  const contact = { schemaVersion: 1 as const, id: 'contact', sourceCharacterId: 'hero', targetCharacterId: 'target',
+    startedWorldMinute: 10, expiresWorldMinute: 490, phase: 'connected' as const }
+  const effect = createDnd5eMechanicalEffect({ id: 'dream-trance:contact', definitionId: 'trance', label: 'Dream',
+    targetId: 'hero', source: { kind: 'spell', rulesId: 'dream', pluginId: 'test.dream' }, duration: { type: 'permanent' } })
+  const character = makeCharacter({ dnd5eDreamContact: contact, dnd5eCombatState: { activeEffects: [effect] } })
+  const context = makeContext({ currentTokenId: 'other-token', activeMap: makeMap([makeToken(), makeToken({ id: 'other-token', characterId: 'other' })]), characters: [character] })
+  const action = makeAction({ type: 'dnd5e-plugin-action', dnd5ePluginAction: { featureId: 'test.dream:dream-nightmare', payload: { dreamNightmareSessionId: 'contact', message: 'Beware' } } })
+  expect(preflightPlayerActionAuthority(action, context)).toMatchObject({ status: 'accepted', currentToken: { id: 'hero-token' } })
+  for (const patch of [{ round: 0 }, { combatId: 'old' }, { roomMemberId: 'foreign' },
+    { dnd5ePluginAction: { featureId: 'other:spell', payload: action.dnd5ePluginAction!.payload } },
+    { dnd5ePluginAction: { featureId: 'test.dream:dream-nightmare', payload: { dreamNightmareSessionId: 'wrong' } } }]) {
+    expect(preflightPlayerActionAuthority({ ...action, ...patch }, context).status).toBe('rejected')
+  }
+  for (const changed of [{ ...character, dnd5eDreamContact: { ...contact, nightmareAttempted: true as const } },
+    { ...character, dnd5eDreamContact: { ...contact, phase: 'waiting' as const } },
+    { ...character, dnd5eCombatState: { activeEffects: [] } }]) {
+    expect(preflightPlayerActionAuthority(action, { ...context, characters: [changed] }).status).toBe('rejected')
+  }
+  expect(preflightPlayerActionAuthority(action, { ...context, processedActionIds: new Set([action.id]) }).status).toBe('ignored')
 })

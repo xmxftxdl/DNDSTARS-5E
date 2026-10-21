@@ -23,6 +23,30 @@ function monsterToken(patch: Partial<Token> = {}): Token {
 }
 
 describe('EnemyDetailPanel monster thumbnail', () => {
+  it('offers explicit alignment history only to DM management and displays the restored current alignment', () => {
+    const token = monsterToken({ dnd5eAlignment: '守序善良', dnd5eOriginalAlignment: '守序善良' })
+    const props = { token, onClose: () => {}, mapId: 'map-1', updateToken: () => {} }
+    const dm = renderToStaticMarkup(<EnemyDetailPanel {...props} isDM view="management" />)
+    expect(dm).toContain('aria-label="怪物当前阵营"')
+    expect(dm).toContain('aria-label="怪物原始阵营（DM记录）"')
+    const player = renderToStaticMarkup(<EnemyDetailPanel {...props} view="statblock" />)
+    expect(player).not.toContain('aria-label="怪物原始阵营（DM记录）"')
+    expect(player).toContain('守序善良')
+  })
+  it.each(['creature', 'area'] as const)('allows %s controls to enter map targeting without a predetermined target', targeting => {
+    const markup = renderToStaticMarkup(<EnemyDetailPanel token={monsterToken()} onClose={() => {}} isDM canUseGrantedActivities grantedActivityControls={[{ areaId: 'aura', featureId: 'local.area:control', activityId: 'choose', label: 'Choose target', economy: 'action', targeting }]} />)
+    const button = markup.match(/<button[^>]*data-testid="enemy-detail-granted-activity-choose"[^>]*>/)?.[0]
+    expect(button).toBeDefined()
+    expect(button).not.toContain('disabled=""')
+  })
+  it('uses the declared economy for area controls instead of disabling all controls after an action', () => {
+    const control = { areaId: 'aura', featureId: 'local.area:area-control.dismiss', activityId: 'dismiss', label: 'Dismiss aura', economy: 'bonus-action' as const, targeting: 'self' as const }
+    const render = (available: boolean) => renderToStaticMarkup(<EnemyDetailPanel token={monsterToken()} onClose={() => {}} isDM canUseGrantedActivities monsterActionUsed grantedActivityControls={[control]} canUseGrantedActivity={() => available} />)
+    const button = (markup: string) => markup.match(/<button[^>]*data-testid="enemy-detail-granted-activity-dismiss"[^>]*>/)?.[0]
+    expect(button(render(true))).toBeDefined()
+    expect(button(render(true))).not.toContain('disabled=""')
+    expect(button(render(false))).toContain('disabled=""')
+  })
   it('separates DM management from the stat block', () => {
     const props = { token: monsterToken(), onClose: () => {}, isDM: true, mapId: 'map-1', updateToken: () => {}, canManageConditions: true, onConditionsChange: () => {} }
     const management = renderToStaticMarkup(<EnemyDetailPanel {...props} view="management" />)

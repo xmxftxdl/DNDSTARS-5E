@@ -1,3 +1,4 @@
+import { dnd5eHeadlessMaximizeHealingDice } from './headlessCompanionHealing'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
@@ -5,7 +6,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
-import { resolveDnd5eBeginTurn } from './beginTurnAction'
+import { prepareDnd5eBeginTurn, resolveDnd5eBeginTurn } from './beginTurnAction'
 import { prepareDnd5ePlayerEndTurn, resolveDnd5ePlayerEndTurn } from './endTurnAction'
 import { DND5E_AVERTED_GAZE_DEFINITION_ID } from './headlessCombatEngine'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
@@ -39,6 +40,42 @@ function fixture(actor: Character) {
 }
 
 describe('D&D 5e map end-turn authority bridge', () => {
+  it('forwards and rejects an unsolicited counterattack without applying the end-turn transaction', () => {
+    const input = fixture(barbarian(false))
+    const before = structuredClone(input)
+    expect(resolveDnd5ePlayerEndTurn(input).ok).toBe(true)
+    const result = resolveDnd5ePlayerEndTurn({ ...input, savingThrowCounterattacks: [{
+      targetId: 'barbarian-token', sourceId: 'enemy-token', ability: 'dex', occurrence: 0,
+      featureId: 'unowned-counter',
+      attack: { type: 'attack', actorId: 'barbarian-token', targetId: 'enemy-token',
+        d20: 20, attackModifier: 5, damage: {count: 1, sides: 6, bonus: 0, rolls: [6], type: 'slashing'} },
+    }] })
+    expect(result.ok).toBe(false)
+    expect(input).toEqual(before)
+  })
+
+  it('returns an expiring ethereal actor from an occupied space and projects displacement and force damage', () => {
+    const actor = barbarian(false)
+    actor.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({
+      definitionId: 'ethereal-return', label: 'Ethereal return', targetId: 'barbarian-token',
+      source: { kind: 'spell', actorId: 'barbarian-token', rulesId: 'etherealness', magical: true },
+      duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end' },
+      modifiers: { planarPhase: { plane: 'ethereal', ignoresMaterialCollision: true,
+        suppressCrossPlaneEffects: true, unrestrictedVerticalMovement: true } },
+    })] }
+    const input = fixture(actor)
+    input.map.tokens[1].x = 25
+    const original = structuredClone(input)
+    const resolved = resolveDnd5ePlayerEndTurn(input)
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok || !resolved.result.ok) throw Error('return did not settle')
+    expect(resolved.result.state.combatants['barbarian-token'].position).toEqual({ x: 75, y: 25 })
+    expect(resolved.application.map.tokens.find(token => token.id === 'barbarian-token')).toMatchObject({ x: 75, y: 25 })
+    expect(resolved.application.characters.find(character => character.id === actor.id)?.currentHp).toBe(45)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'damage-applied', damageTypes: ['force'] }))
+    expect(input).toEqual(original)
+  })
+
   it('defers a player delayed spell until map areas and the explicit begin-turn settle', () => {
     const input = fixture(barbarian(false))
     const wizard: Character = { ...barbarian(false), id: 'wizard', charClass: '法师',
@@ -100,7 +137,16 @@ describe('D&D 5e map end-turn authority bridge', () => {
       reactionAvailable: false,
       objectInteractionAvailable: false,
       movementRemaining: 0,
+      movementSpent: 30,
     })
+  })
+
+  it('preserves explicit zero movement spent while speed is suppressed',()=>{
+    const input=fixture(barbarian(false)),turnEconomy=createDnd5eTurnEconomyCounts('combat:3:barbarian-token',30)
+    turnEconomy.movement={current:0,max:30,spent:0}
+    const prepared=prepareDnd5ePlayerEndTurn({...input,turnEconomy})
+    expect(prepared.ok).toBe(true)
+    if(prepared.ok)expect(prepared.prepared.state.combatants['barbarian-token'].turn).toMatchObject({movementRemaining:0,movementSpent:0})
   })
 
   it('advances an explicit one-slot map combat instead of treating it as ended', () => {
@@ -166,6 +212,36 @@ describe('D&D 5e map end-turn authority bridge', () => {
     ])
     expect(resolved.result.state.oneShotInitiativeSlotIds).toEqual([extraSlotIds[1]])
     expect(resolved.result.state.initiativeIndex).toBe(1)
+  })
+
+  it.each([false, true])('clears a persisted zero-HP slot and resumes after death=%s through the player facade', dead => {
+    const actor = barbarian(false)
+    actor.currentHp = 0
+    actor.dnd5eCombatState = {...actor.dnd5eCombatState,
+      zeroHitPointExtraTurn: dead ? undefined : {featureId:'test:zero-turn',slotId:'interrupting-turn:test',phase:'active'},
+      interruptedTurnResume: {receipt:{schemaVersion:1,combatId:'combat',round:3,actorId:'barbarian-token',
+        interruptedActorId:'enemy-token',interruptedSlotId:'enemy-base',extraSlotId:'interrupting-turn:test'},
+        economy:{actionAvailable:false,bonusActionAvailable:false,reactionAvailable:false,objectInteractionAvailable:false,movementRemaining:5,movementSpent:25},
+        turnStartResolvedTurnKey:'combat:3:enemy-base'}}
+    if (dead) actor.deathSaveFailures = 3
+    const input = fixture(actor)
+    input.initiativeOrder = [
+      {...input.initiativeOrder[0],slotId:'interrupting-turn:test'},
+      {...input.initiativeOrder[1],slotId:'enemy-base'},
+      {...input.initiativeOrder[0],slotId:'hero-base'},
+    ]
+    input.action.initiativeIndex = 0
+    const resolved = resolveDnd5ePlayerEndTurn(input)
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.state.initiativeSlotIds).toEqual(['enemy-base','hero-base'])
+    const updated = resolved.application.characters.find(character => character.id === actor.id)!
+    expect(updated.dnd5eCombatState?.zeroHitPointExtraTurn).toBeUndefined()
+    expect(updated.dnd5eCombatState?.interruptedTurnResume).toBeUndefined()
+    expect(resolved.result.state.combatants['barbarian-token'].deathSaves.dead).toBe(dead)
+    expect(resolved.result.state.combatants['enemy-token'].turn.actionAvailable).toBe(false)
+    expect(resolved.result.state.combatants['enemy-token'].classState.turnStartResolvedTurnKey).toBe('combat:3:enemy-base')
+    if (!dead) expect(updated.conditions).toContain('unconscious')
   })
 
   it('treats an Activity slot id as one-shot when shared presentation metadata was filtered', () => {
@@ -708,6 +784,8 @@ describe('D&D 5e map end-turn authority bridge', () => {
       .toEqual({
         schemaVersion: 2,
         turnStartResolvedTurnKey: 'combat:3:enemy-token',
+        firstOwnCombatTurn: { combatId: 'combat', turnKey: 'combat:3:enemy-token' },
+        deathSaveTurn: {turnKey:'combat:3:enemy-token',eligible:false,resolved:false},
       })
     expect(resolved.result.events).toContainEqual({ type: 'condition-ended', targetId: 'enemy-token', condition: '震慑' })
   })
@@ -806,4 +884,26 @@ describe('D&D 5e map end-turn authority bridge', () => {
       }),
     ])
   })
+})
+
+it.each([99, 100, undefined])('preserves conditional healing clock across turn preparation: %s', worldMinute => {
+  const actor = barbarian(false)
+  actor.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({ definitionId: 'companion-heal',
+    label: 'Companion healing', targetId: actor.id, source: { kind: 'plugin' },
+    modifiers: { maximizeHealingDiceNearCompanion: [{ maximumDistanceFeet: 100, bondKey: 'familiar' }] } })] }
+  const input = fixture(actor)
+  const owner = input.map.tokens[0]
+  input.map.tokens.push({ ...owner, id: 'pet', type: 'npc', characterId: undefined, hp: 1,
+    dnd5eSummon: { schemaVersion: 1, pluginId: 'test.pet', featureId: 'summon', sourceTokenId: owner.id,
+      sourceCharacterId: actor.id, bondKey: 'familiar', persistent: true, side: 'player',
+      createdRound: 1, expiresAfterRound: 10, dismissAtWorldMinute: 100 } })
+  const begin = prepareDnd5eBeginTurn({ ...input, worldMinute, combatId: 'combat', round: 3, initiativeIndex: 0 })
+  const end = prepareDnd5ePlayerEndTurn({ ...input, worldMinute })
+  for (const prepared of [begin, end]) {
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw Error('prepare failed')
+    const state = prepared.prepared.state
+    expect(dnd5eHeadlessMaximizeHealingDice(state, state.combatants[owner.id])).toBe(worldMinute === 99)
+    expect(state.combatants.pet).toBeUndefined()
+  }
 })

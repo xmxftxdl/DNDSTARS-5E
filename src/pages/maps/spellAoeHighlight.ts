@@ -1,4 +1,5 @@
 import type { GridCell } from '../../lib/gridCombat'
+import { tiltedAreaTargetingPreview } from './tiltedAreaTargeting'
 import { mapGeometryLineOfEffectBlocked, mapGeometryRuntimeForMap, mapGeometryTokenElevation } from '../../lib/mapGeometry'
 import { resolveSpellAreaObstruction, spellAreaPointElevation } from '../../rulesets/dnd5e/spellAreaObstruction'
 import {
@@ -14,6 +15,8 @@ import type { BattleMap } from '../../store/maps'
 import type { AoeHighlight } from '../../components/map/mapCanvasContracts'
 import { wallOfFireTargetingPreview } from './wallOfFireTargeting'
 import { spellAreaSelectionLocked } from './aoeTargetingSession'
+import { objectLaunchTargetingPlan } from './objectLaunchTargeting'
+import { dnd5eMapTokenDistanceFeet } from '../../rulesets/dnd5e/verticalCombatGeometry'
 
 /** Beyond this budget the vector outline communicates the same area without
  * mounting thousands of Konva Rect nodes. */
@@ -60,6 +63,7 @@ export function buildSpellOrSkillAoeHighlight(input: {
   casterCell: GridCell | null
   map: BattleMap | null | undefined
   rectRotation: number
+  rectAngleDegrees?: number
   spellTargeting: Dnd5eSpellTargetingSession | null
 }): AoeHighlight | undefined {
   const { targeting, previewCell: hoverPreviewCell, casterCell, map, rectRotation, spellTargeting } = input
@@ -67,6 +71,28 @@ export function buildSpellOrSkillAoeHighlight(input: {
     ? spellTargeting?.areaTargetCell ?? hoverPreviewCell
     : hoverPreviewCell
   if (!targeting || !previewCell || !casterCell) return undefined
+  if(map&&spellTargeting){
+    const tilted=tiltedAreaTargetingPreview(map,spellTargeting,previewCell)
+    if(tilted)return tilted
+  }
+  if(spellTargeting?.surfaceTargetMode==='vertical')return {
+    cells:spellTargeting.verticalSurfacePreviewCells??[previewCell],valid:!!spellTargeting.verticalSurface,variant:'attack',
+  }
+  if (map && spellTargeting) {
+    const geometry = mapGeometryRuntimeForMap(map.id)
+    const flight = objectLaunchTargetingPlan({ targeting: spellTargeting, map, geometry, anchor: previewCell })
+    if (flight) {
+      if (!flight.ok) return { cells: [previewCell], valid: false, variant: 'attack' }
+      const source = map.tokens.find(token => token.characterId === spellTargeting.characterId)
+      const object = map.tokens.find(token => token.id === flight.plan.objectId)!
+      const valid = !!source &&
+        (!('placeRangeFeet' in targeting) || targeting.placeRangeFeet == null ||
+          dnd5eMapTokenDistanceFeet({ map, geometry, left: source, right: object }) <= targeting.placeRangeFeet + 1e-4) &&
+        !mapGeometryLineOfEffectBlocked({ map, geometry, from: source, to: object,
+          fromElevationFeet: mapGeometryTokenElevation(geometry, source), toElevationFeet: flight.plan.elevationFeet })
+      return { cells: [previewCell], valid, variant: 'attack', objectFlight: flight.plan }
+    }
+  }
   if (map) {
     const wallPreview = wallOfFireTargetingPreview({
       targeting: spellTargeting,
@@ -80,16 +106,16 @@ export function buildSpellOrSkillAoeHighlight(input: {
   const gridSize = map?.gridSize ?? 1
   const gridOffsetX = map?.gridOffsetX ?? 0
   const gridOffsetY = map?.gridOffsetY ?? 0
-  let valid = canPlaceAoe(targeting, casterCell, previewCell)
+  let valid = canPlaceAoe(targeting, casterCell, previewCell, map?.feetPerCell)
   const orientFrom = aoeOrientFromCell(targeting, casterCell, previewCell, {
     rectRotation,
-    ...(targeting.shape === 'rect' && targeting.rotatable && spellTargeting?.spellId !== 'wall-of-fire'
-      ? { rectAngleDegrees: spellTargeting?.areaTargetAngleDegrees ?? 0 }
+    ...((targeting.shape === 'rect' || targeting.shape === 'cone' && targeting.origin === 'point') && targeting.rotatable && spellTargeting?.spellId !== 'wall-of-fire'
+      ? { rectAngleDegrees: spellTargeting ? spellTargeting.areaTargetAngleDegrees ?? 0 : input.rectAngleDegrees }
       : {}),
   })
   let cells = shouldUseVectorOnlyAoePreview(targeting)
     ? []
-    : cellsForAoe(targeting, orientFrom, previewCell)
+    : cellsForAoe(targeting, orientFrom, previewCell, map?.feetPerCell)
   if (map && spellTargeting) {
     const geometry = mapGeometryRuntimeForMap(map.id)
     const source = map.tokens.find(token => token.characterId === spellTargeting.characterId)
@@ -116,12 +142,15 @@ export function buildSpellOrSkillAoeHighlight(input: {
           { shape: 'circle', origin: 'self', radiusFeet: targeting.placeRangeFeet },
           casterCell,
           casterCell,
+          map?.feetPerCell,
         )
       : targeting.shape === 'rect' && targeting.placeRangeFeet != null
+        && targeting.placeRangeFeet < mapDiagonalFeet
         ? cellsForAoe(
             { shape: 'circle', origin: 'self', radiusFeet: targeting.placeRangeFeet },
             casterCell,
             casterCell,
+            map?.feetPerCell,
           )
         : undefined
   const cellCenterToPixel = (cell: GridCell) => ({
@@ -133,7 +162,8 @@ export function buildSpellOrSkillAoeHighlight(input: {
     ? {
         centerX: areaCenter.x,
         centerY: areaCenter.y,
-        radiusPx: targeting.radiusFeet / 5 * gridSize,
+        radiusPx: targeting.radiusFeet / (map?.feetPerCell ?? 5) * gridSize,
+        ...(targeting.wallThicknessFeet != null ? {innerRadiusPx:(targeting.radiusFeet-targeting.wallThicknessFeet)/(map?.feetPerCell??5)*gridSize} : {}),
       }
     : undefined
   const committedAreaCircles = targeting.shape === 'circle'
@@ -142,14 +172,14 @@ export function buildSpellOrSkillAoeHighlight(input: {
         return {
           centerX: center.x,
           centerY: center.y,
-          radiusPx: targeting.radiusFeet / 5 * gridSize,
+          radiusPx: targeting.radiusFeet / (map?.feetPerCell ?? 5) * gridSize,
         }
       })
     : undefined
   const areaPolygon = (() => {
     if (targeting.shape === 'circle') return undefined
     if (targeting.shape === 'rect' && targeting.gridAligned) {
-      const bounds = gridAlignedRectBounds(previewCell, targeting.widthFeet, targeting.heightFeet)
+      const bounds = gridAlignedRectBounds(previewCell, targeting.widthFeet, targeting.heightFeet, map?.feetPerCell)
       const left = gridOffsetX + bounds.firstCol * gridSize
       const top = gridOffsetY + bounds.firstRow * gridSize
       const right = left + bounds.widthCells * gridSize
@@ -157,8 +187,9 @@ export function buildSpellOrSkillAoeHighlight(input: {
       return [left, top, right, top, right, bottom, left, bottom]
     }
     if (targeting.shape === 'cone') {
-      const origin = cellCenterToPixel(casterCell)
-      const aim = cellCenterToPixel(previewCell)
+      const origin = cellCenterToPixel(targeting.origin === 'point' ? previewCell : casterCell)
+      const aim = cellCenterToPixel(targeting.origin === 'point'
+        ? { col: 2 * previewCell.col - orientFrom.col, row: 2 * previewCell.row - orientFrom.row } : previewCell)
       const dx = aim.x - origin.x
       const dy = aim.y - origin.y
       const len = Math.hypot(dx, dy) || 1
@@ -166,7 +197,7 @@ export function buildSpellOrSkillAoeHighlight(input: {
       const uy = dy / len
       const px = -uy
       const py = ux
-      const length = targeting.lengthFeet / 5 * gridSize
+      const length = targeting.lengthFeet / (map?.feetPerCell ?? 5) * gridSize
       const halfWidth = length / 2
       const endX = origin.x + ux * length
       const endY = origin.y + uy * length
@@ -187,7 +218,7 @@ export function buildSpellOrSkillAoeHighlight(input: {
       const end = gridPointToPixel(geometry.end)
       const px = -geometry.direction.y
       const py = geometry.direction.x
-      const width = targeting.widthFeet / 5 * gridSize
+      const width = targeting.widthFeet / (map?.feetPerCell ?? 5) * gridSize
       return [
         start.x + px * width / 2, start.y + py * width / 2,
         end.x + px * width / 2, end.y + py * width / 2,
@@ -207,8 +238,8 @@ export function buildSpellOrSkillAoeHighlight(input: {
     const uy = dy / len
     const px = -uy
     const py = ux
-    const width = targeting.widthFeet / 5 * gridSize
-    const height = targeting.heightFeet / 5 * gridSize
+    const width = targeting.widthFeet / (map?.feetPerCell ?? 5) * gridSize
+    const height = targeting.heightFeet / (map?.feetPerCell ?? 5) * gridSize
     return [
       origin.x - ux * height / 2 + px * width / 2, origin.y - uy * height / 2 + py * width / 2,
       origin.x + ux * height / 2 + px * width / 2, origin.y + uy * height / 2 + py * width / 2,

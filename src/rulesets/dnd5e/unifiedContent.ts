@@ -30,6 +30,9 @@ import {
   type Dnd5ePluginImageAssetDefinition,
 } from './pluginAssets'
 import type { Dnd5eActivityDefinitionV1 } from './activities/dnd5eActivityContracts'
+import { dnd5ePluginFeatureActionFromActivityV1 } from './activities/dnd5eActivityFeatureActionAdapter'
+import { compileDnd5eActivityHeadlessAction, dnd5eActivityHeadlessCompatibility } from './activities/dnd5eActivityHeadlessCompiler'
+import { dnd5eActivityAutomationAnalysisV1 } from './plugins/pluginMechanicsRegistry'
 import { registerDnd5eUnifiedContentPackageV1 } from './activities/dnd5eUnifiedContentRegistry'
 import {
   validateDnd5eActivityDefinitionV1,
@@ -87,6 +90,7 @@ export type Dnd5eUnifiedContentDefinitionV1<
   : never
 
 export interface Dnd5eUnifiedContentBundleV1 {
+  runtimeProjection?: 'room-runtime-mechanics'
   format: typeof DND5E_UNIFIED_CONTENT_FORMAT
   schemaVersion: typeof DND5E_UNIFIED_CONTENT_SCHEMA_VERSION
   manifest: Dnd5eRulesPluginManifest
@@ -110,7 +114,7 @@ export interface Dnd5eUnifiedContentSummaryV1 {
   imageAssetBytes: number
 }
 
-const ROOT_KEYS = new Set(['format', 'schemaVersion', 'manifest', 'assets', 'definitions'])
+const ROOT_KEYS = new Set(['format', 'schemaVersion', 'manifest', 'assets', 'definitions', 'runtimeProjection'])
 const DEFINITION_KEYS = new Set([
   'schemaVersion', 'id', 'namespace', 'version', 'kind', 'name', 'description', 'source', 'tags',
   'payload', 'activities', 'effects', 'advancements', 'automation',
@@ -156,10 +160,41 @@ function errorFromValidator(run: () => readonly string[], label: string): readon
   }
 }
 
+function inferredFeatureAction(definition: Dnd5eUnifiedContentDefinitionV1<'feature'> | Dnd5eUnifiedContentDefinitionV1<'feat'>) {
+  if (definition.payload.action || definition.payload.automation !== 'full' || definition.automation.level !== 'full') return undefined
+  const grantedIds = unifiedGrantedControlIds(definition.activities ?? [])
+  const candidates = (definition.activities ?? []).filter(activity =>
+    !grantedIds.has(activity.id) &&
+    !activity.requiresEffectGrant && !activity.requiresContinuationFrom &&
+    (activity.invocation == null || activity.invocation.kind === 'active') &&
+    activity.legacySource?.kind === definition.kind &&
+    [definition.id, `${definition.namespace}:${definition.id}`].includes(activity.legacySource.id))
+  if (candidates.length !== 1) return undefined
+  const activity = candidates[0]
+  if (activity.authorityBinding || activity.automation.level !== 'full' || dnd5eActivityAutomationAnalysisV1(activity).capability.level !== 'full' ||
+    !dnd5eActivityHeadlessCompatibility(activity).supported) return undefined
+  return dnd5ePluginFeatureActionFromActivityV1(activity)
+}
+
+function unifiedGrantedControlIds(activities: readonly Dnd5eActivityDefinitionV1[]): Set<string> {
+  return new Set(activities.flatMap(activity => [
+    ...(activity.effects ?? []).flatMap(effect => [...effect.grants ?? [], ...effect.completionGrant?.activityIds ?? []]),
+    ...(activity.continuation ? [...(activity.continuation.nextActivityId ? [activity.continuation.nextActivityId] : []),
+      ...(activity.continuation.finishActivityId ? [activity.continuation.finishActivityId] : [])] : []),
+    ...activity.outcomes.flatMap(outcome => outcome.operations.flatMap(operation =>
+      operation.kind === 'create-persistent-area'
+        ? (operation.grantedActivities ?? []).map(grant => grant.activityId)
+        : operation.kind === 'summon' && operation.persistent && operation.bondKey
+          ? [...operation.bondActivityIds ?? [], ...(operation.bondDismissActivityId ? [operation.bondDismissActivityId] : [])]
+          : [])),
+  ]))
+}
+
 function legacyFeaturePayload(
   definition: Dnd5eUnifiedContentDefinitionV1<'feature'>,
 ): Dnd5eAuthorableFeatureDefinitionV1 {
   const payload = structuredClone(definition.payload)
+  payload.action ??= inferredFeatureAction(definition)
   if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
@@ -171,6 +206,7 @@ function legacyFeatPayload(
   definition: Dnd5eUnifiedContentDefinitionV1<'feat'>,
 ): Dnd5eAuthorableFeatDefinitionV1 {
   const payload = structuredClone(definition.payload)
+  payload.action ??= inferredFeatureAction(definition)
   if ((definition.activities?.length || definition.effects?.length) && !payload.action && !payload.staticModifiers && payload.automation !== 'manual') {
     payload.automation = 'manual'
     payload.automationReasons = ['可执行机制由统一 Activity 注册表提供。']
@@ -201,6 +237,7 @@ function legacyDraftFromBundle(bundle: Dnd5eUnifiedContentBundleV1): Dnd5eCustom
     classes: byKind('class').map((entry) => structuredClone(entry.payload)),
     subclasses: byKind('subclass').map((entry) => structuredClone(entry.payload)),
     monsters: byKind('monster').map((entry) => structuredClone(entry.payload)),
+    activities: bundle.definitions.flatMap(definition => structuredClone([...(definition.activities ?? [])])),
   }
 }
 
@@ -215,6 +252,8 @@ export function validateDnd5eUnifiedContentBundleV1(value: unknown): readonly st
   errors.push(...unknownKeys(value, ROOT_KEYS, 'Unified content bundle'))
   if (value.format !== DND5E_UNIFIED_CONTENT_FORMAT) errors.push('Unsupported unified content format')
   if (value.schemaVersion !== DND5E_UNIFIED_CONTENT_SCHEMA_VERSION) errors.push('Unsupported unified content schema')
+  if (value.runtimeProjection != null && (value.runtimeProjection !== 'room-runtime-mechanics' ||
+    !record(value.manifest) || value.manifest.distributionPolicy !== 'room-ephemeral')) errors.push('Invalid unified room runtime projection')
   if (!record(value.manifest)) errors.push('Unified content manifest is invalid')
   else {
     try {
@@ -391,10 +430,32 @@ export function dnd5eRulesPluginFromUnifiedContentBundleV1(
 ): Dnd5eRulesPlugin {
   const errors = validateDnd5eUnifiedContentBundleV1(bundle)
   if (errors.length) throw new Error(errors.join('\n'))
+  // Resolve only declared local items in the runtime copy. Keep the signed
+  // archive and external qualified references unchanged.
+  bundle = structuredClone(bundle)
+  const localItemIds = new Set(bundle.definitions.filter(definition => definition.kind === 'item').map(definition => definition.id))
+  const itemReference = (id: string) => !id.includes(':') && localItemIds.has(id) ? `${bundle.manifest.id}:${id}` : id
+  for (const definition of bundle.definitions) {
+    if (!definition.activities) continue
+    definition.activities = definition.activities.map(activity => ({ ...activity,
+      outcomes: activity.outcomes.map(outcome => ({ ...outcome, operations: outcome.operations.map(operation =>
+        operation.kind === 'alter-inventory-item'
+          ? { ...operation, templateId: itemReference(operation.templateId), originalTemplateIds: operation.originalTemplateIds.map(itemReference) }
+          : operation.kind === 'exchange-inventory-items'
+            ? { ...operation, templateId: itemReference(operation.templateId) }
+          : operation.kind === 'grant-inventory-item'
+            ? { ...operation, templateId: itemReference(operation.templateId),
+              ...(operation.templateVariants ? { templateVariants: operation.templateVariants.map(variant => ({ ...variant, templateId: itemReference(variant.templateId) })) } : {}) }
+            : operation) })),
+    }))
+  }
   return {
     manifest: structuredClone(bundle.manifest),
     setup(api) {
       const disposers: Array<() => void> = []
+      const compiledActivityIds = new Set<string>()
+      const activities = bundle.definitions.flatMap(definition => definition.activities ?? [])
+      const grantedIds = unifiedGrantedControlIds(activities)
       try {
         disposers.push(registerDnd5eUnifiedContentPackageV1({
           packageId: bundle.manifest.id,
@@ -403,16 +464,79 @@ export function dnd5eRulesPluginFromUnifiedContentBundleV1(
         }).dispose)
         for (const asset of bundle.assets) disposers.push(registerDnd5ePluginImageAsset(bundle.manifest.id, asset).dispose)
         for (const definition of bundle.definitions) {
+          if (definition.kind !== 'feature' && definition.kind !== 'feat') continue
+          const action = definition.payload.action ?? inferredFeatureAction(definition)
+          if (!action) continue
+          const candidates = (definition.activities ?? []).filter(activity => activity.id === action.id &&
+            activity.legacySource?.kind === definition.kind &&
+            [definition.id, `${bundle.manifest.id}:${definition.id}`].includes(activity.legacySource.id))
+          if (candidates.length !== 1 || candidates[0].authorityBinding || !dnd5eActivityHeadlessCompatibility(candidates[0]).supported)
+            throw new Error(`Feature ${definition.id} has no matching compilable Activity for ${action.id}`)
+          api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(candidates[0]))
+          compiledActivityIds.add(candidates[0].id)
+        }
+        for (const definition of bundle.definitions) {
           if (definition.kind === 'race') api.registerRace(structuredClone(definition.payload))
           else if (definition.kind === 'background') api.registerBackground(structuredClone(definition.payload))
           else if (definition.kind === 'feature') api.registerFeature(legacyFeaturePayload(definition))
           else if (definition.kind === 'feat') api.registerFeat(legacyFeatPayload(definition))
-          else if (definition.kind === 'spell') api.registerSpell(legacySpellPayload(definition))
+          else if (definition.kind === 'spell') {
+            const payload = legacySpellPayload(definition)
+            const candidates = (definition.activities ?? []).filter((activity) =>
+              !grantedIds.has(activity.id) &&
+              !activity.requiresEffectGrant && !activity.requiresContinuationFrom &&
+              (activity.invocation == null || activity.invocation.kind === 'active') &&
+              activity.legacySource?.kind === 'spell' &&
+              (activity.legacySource.id === definition.id ||
+                activity.legacySource.id === `${bundle.manifest.id}:${definition.id}`) &&
+              ['action', 'bonus-action', 'reaction', 'special'].includes(activity.activation.kind))
+            // Only an unambiguous, verified entry point may become a live cast.
+            // Triggered/follow-up Activities and assisted branches must not be
+            // silently selected or promoted to automatic spell settlement.
+            const activity = candidates.length === 1 ? candidates[0] : undefined
+            if (activity && !activity.authorityBinding &&
+              dnd5eActivityAutomationAnalysisV1(activity).capability.level === 'full' &&
+              dnd5eActivityHeadlessCompatibility(activity, { outerSpellTransaction: true }).supported) {
+              api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity, { outerSpellTransaction: true }))
+              compiledActivityIds.add(activity.id)
+              payload.automation = { mode: 'headless-action', actionId: activity.id }
+              if (activity.target.kind === 'creature') {
+                payload.targeting = { ...payload.targeting, relation: activity.target.relation,
+                  includeSelf: activity.target.includeSelf, maximumTargets: activity.target.count }
+              }
+            }
+            api.registerSpell(payload)
+          }
           else if (definition.kind === 'item') api.registerItem(structuredClone(definition.payload))
           else if (definition.kind === 'ability-generation') api.registerAbilityGenerationMethod(structuredClone(definition.payload))
           else if (definition.kind === 'class') api.registerDeclarativeClass(structuredClone(definition.payload))
           else if (definition.kind === 'subclass') api.registerDeclarativeSubclass(structuredClone(definition.payload))
           else if (definition.kind === 'monster') api.registerMonster(structuredClone(definition.payload))
+        }
+        // A feature can own several controls without one unambiguous default.
+        // Register each recipe; ownership, grants and rest authorization remain
+        // enforced by the selected Activity and the Host execution path.
+        for (const activity of activities) {
+          const invocation = activity.invocation
+          const visibleControl = invocation == null || invocation.kind === 'active' ||
+            invocation.kind === 'triggered' && invocation.confirmation === 'actor-choice' &&
+            ['short-rest-started', 'long-rest-started', 'short-rest-complete', 'long-rest-complete'].includes(invocation.event)
+          if (compiledActivityIds.has(activity.id) || activity.authorityBinding ||
+            !activity.legacySource || !['feature', 'feat', 'subclass-ability'].includes(activity.legacySource.kind) ||
+            !visibleControl || !['full', 'assisted'].includes(activity.automation.level) ||
+            !dnd5ePluginFeatureActionFromActivityV1(activity)) continue
+          api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity))
+          compiledActivityIds.add(activity.id)
+        }
+        for (const id of grantedIds) {
+          const activity = activities.find(candidate => candidate.id === id)
+          if (!activity || activity.authorityBinding) throw new Error(`Effect grants unavailable Activity: ${id}`)
+          if (activity.invocation?.kind === 'triggered' || compiledActivityIds.has(id)) continue
+          if (!dnd5eActivityHeadlessCompatibility(activity).supported) {
+            throw new Error(`Granted Activity cannot become an active Headless action: ${id}`)
+          }
+          api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity))
+          compiledActivityIds.add(id)
         }
       } catch (error) {
         for (const dispose of disposers.reverse()) dispose()

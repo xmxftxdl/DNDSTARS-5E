@@ -1,3 +1,8 @@
+import { validCombatRoundCredits } from '../../shared/combat-round-credits.mjs'
+import { validCampaignRestLocations, type CampaignRestLocation } from '../../shared/campaign-rest-locations.mjs'
+import { validCampaignEnvironmentalExposures, type CampaignEnvironmentalExposure } from '../../shared/campaign-environmental-exposures.mjs'
+import { interruptCampaignInteractionsForTimeAdvance, validCampaignInteractions, type CampaignInteraction, type CampaignInteractionMutation } from '../../shared/campaign-interactions.mjs'
+import { interruptCampaignRestSessionsForTimeAdvance, validCampaignRestSessions, type CampaignRestSession, type CampaignRestSessionMutation } from '../../shared/campaign-rest-sessions.mjs'
 export const CAMPAIGN_TIME_RESOURCE = 'campaign-time'
 export const CAMPAIGN_TIME_SCHEMA_VERSION = 2
 export const CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE = 8 * 60
@@ -56,6 +61,7 @@ export interface CampaignRestFeatureD20Roll {
 }
 
 export interface CampaignTimeAdvance {
+  combatRoundCredits?: Record<string, number>
   id: string
   kind: 'advance' | 'short-rest' | 'long-rest'
   fromWorldMinute: number
@@ -72,18 +78,27 @@ export interface CampaignTimeAdvance {
 }
 
 export interface SharedCampaignTimeState {
+  restLocations?: CampaignRestLocation[]
   schemaVersion: typeof CAMPAIGN_TIME_SCHEMA_VERSION
   worldMinute: number
+  worldSecondRemainder?: number
   displayMode: CampaignTimeDisplayMode
   displayMinuteOffset: number
   calendarEpochDate?: string
   timers: CampaignTimer[]
   advances: CampaignTimeAdvance[]
+  interactions?: CampaignInteraction[]
+  restSessions?: CampaignRestSession[]
+  environmentalExposures?: CampaignEnvironmentalExposure[]
   updatedAt: number
 }
 
 export type CampaignTimeMutation =
+  | CampaignInteractionMutation
+  | CampaignRestSessionMutation
+  | {operation:'complete-rest-session';id:string;expectedWorldMinute:number;reason?:string;ignoreLongRestCooldown?:boolean;restRecoveryReports?:CampaignRestRecoveryReport[];restFeatureD20Rolls?:CampaignRestFeatureD20Roll[]}
   | { operation: 'advance'; minutes: number; reason?: string }
+  | { operation: 'advance-seconds'; seconds: number; reason?: string }
   | {
       operation: 'short-rest' | 'long-rest'
       reason?: string
@@ -116,6 +131,8 @@ export type CampaignTimeMutation =
 export type CampaignLightSourceKind = 'permanent' | 'torch' | 'candle' | 'lamp' | 'hooded-lantern' | 'spell' | 'custom'
 
 export interface CampaignTimedLight {
+  flame?: boolean
+  flameProtected?: boolean
   enabled?: boolean
   sourceKind?: CampaignLightSourceKind
   startedAtWorldMinute?: number
@@ -307,6 +324,7 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
     dawnsCrossed,
     expiredTimerIds,
     ...(beneficiaryCharacterIds ? { beneficiaryCharacterIds } : {}),
+    ...(kind === 'advance' && value.combatRoundCredits && validCombatRoundCredits(value.combatRoundCredits, minutes * 10) ? { combatRoundCredits: { ...value.combatRoundCredits } } : {}),
     ...(kind === 'long-rest' && value.ignoreLongRestCooldown === true
       ? { ignoreLongRestCooldown: true }
       : {}),
@@ -328,6 +346,7 @@ export function normalizeSharedCampaignTime(value: unknown): SharedCampaignTimeS
   return {
     schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
     worldMinute,
+    ...(Number.isSafeInteger(source.worldSecondRemainder) && integer(source.worldSecondRemainder,0,59) != null ? {worldSecondRemainder:Number(source.worldSecondRemainder)} : {}),
     displayMode,
     displayMinuteOffset: safeDisplayMinuteOffset,
     calendarEpochDate: campaignGregorianDayNumber(calendarEpochDate) == null ? undefined : calendarEpochDate,
@@ -339,6 +358,14 @@ export function normalizeSharedCampaignTime(value: unknown): SharedCampaignTimeS
       .map(normalizeAdvance)
       .filter((entry): entry is CampaignTimeAdvance => entry !== null)
       .slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+    interactions: validCampaignInteractions(source.interactions, worldMinute, source.advances) && Array.isArray(source.interactions)
+      ? source.interactions.map(entry => ({ ...entry })) : undefined,
+    restSessions: validCampaignRestSessions(source.restSessions,worldMinute,source.advances) && Array.isArray(source.restSessions)
+      ? source.restSessions.map(entry=>({...entry,characterIds:[...entry.characterIds]})) : undefined,
+    restLocations: validCampaignRestLocations(source.restLocations,worldMinute) && Array.isArray(source.restLocations)
+      ? source.restLocations.map(entry=>({...entry})) : undefined,
+    environmentalExposures: validCampaignEnvironmentalExposures(source.environmentalExposures, worldMinute) && Array.isArray(source.environmentalExposures)
+      ? source.environmentalExposures.map(entry => ({ ...entry })) : undefined,
     updatedAt: integer(source.updatedAt) ?? 0,
   }
 }
@@ -347,6 +374,7 @@ export function validateSharedCampaignTime(value: unknown): boolean {
   if (!object(value) || ![1, CAMPAIGN_TIME_SCHEMA_VERSION].includes(Number(value.schemaVersion)) || !Array.isArray(value.timers) || !Array.isArray(value.advances)) return false
   if (value.timers.length > CAMPAIGN_TIME_TIMER_LIMIT || value.advances.length > CAMPAIGN_TIME_ADVANCE_LIMIT) return false
   if (integer(value.worldMinute) == null || integer(value.updatedAt) == null) return false
+  if(value.worldSecondRemainder != null && (!Number.isSafeInteger(value.worldSecondRemainder)||integer(value.worldSecondRemainder,0,59)==null))return false
   if (value.schemaVersion === CAMPAIGN_TIME_SCHEMA_VERSION) {
     const offset = signedInteger(value.displayMinuteOffset)
     const validMode = value.displayMode === 'campaign-day' || value.displayMode === 'gregorian'
@@ -354,10 +382,15 @@ export function validateSharedCampaignTime(value: unknown): boolean {
     if (!validMode || offset == null || Number(value.worldMinute) + offset < 0 || !validEpoch) return false
     if (value.displayMode === 'gregorian' && value.calendarEpochDate == null) return false
   }
+  if (!validCampaignInteractions(value.interactions, Number(value.worldMinute), value.advances)) return false
+  if (!validCampaignRestSessions(value.restSessions,Number(value.worldMinute),value.advances)) return false
+  if (!validCampaignRestLocations(value.restLocations,Number(value.worldMinute))) return false
+  if (!validCampaignEnvironmentalExposures(value.environmentalExposures, Number(value.worldMinute))) return false
   const normalized = normalizeSharedCampaignTime(value)
   if (normalized.timers.length !== value.timers.length || normalized.advances.length !== value.advances.length) return false
   if (!value.advances.every((entry) => {
     if (!object(entry)) return false
+    if (!validCombatRoundCredits(entry.combatRoundCredits, Number(entry.minutes) * 10) || (entry.combatRoundCredits !== undefined && entry.kind !== 'advance')) return false
     if (entry.beneficiaryCharacterIds != null) {
       if (!Array.isArray(entry.beneficiaryCharacterIds) || entry.beneficiaryCharacterIds.length > 64) return false
       const ids = entry.beneficiaryCharacterIds
@@ -415,19 +448,20 @@ export function campaignGregorianDate(clock: Pick<SharedCampaignTimeState, 'worl
   return gregorianDateFromDayNumber(epochDay + Math.floor(campaignDisplayMinute(clock) / 1_440))
 }
 
-export function formatCampaignTime(clock: number | Pick<SharedCampaignTimeState, 'worldMinute' | 'displayMode' | 'displayMinuteOffset' | 'calendarEpochDate'>): string {
+export function formatCampaignTime(clock: number | Pick<SharedCampaignTimeState, 'worldMinute' | 'worldSecondRemainder' | 'displayMode' | 'displayMinuteOffset' | 'calendarEpochDate'>): string {
   const displayMinute = campaignDisplayMinute(clock)
   const minuteOfDay = campaignMinuteOfDay(displayMinute)
   const hour = Math.floor(minuteOfDay / 60).toString().padStart(2, '0')
   const minute = (minuteOfDay % 60).toString().padStart(2, '0')
+  const seconds=typeof clock!=='number' && (clock.worldSecondRemainder??0)>0 ? `:${String(clock.worldSecondRemainder).padStart(2,'0')}` : ''
   if (typeof clock !== 'number' && clock.displayMode === 'gregorian') {
     const date = campaignGregorianDate(clock)
     if (date) {
       const [year, month, day] = date.split('-').map(Number)
-      return `${year}年${month}月${day}日 ${hour}:${minute}`
+      return `${year}年${month}月${day}日 ${hour}:${minute}${seconds}`
     }
   }
-  return `第 ${campaignDay(displayMinute)} 日 ${hour}:${minute}`
+  return `第 ${campaignDay(displayMinute)} 日 ${hour}:${minute}${seconds}`
 }
 
 export interface CampaignDisplayTimeInput {
@@ -529,6 +563,8 @@ export function advanceCampaignTimeSnapshot(input: {
     worldMinute: toWorldMinute,
     timers,
     advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+    interactions: interruptCampaignInteractionsForTimeAdvance(base.interactions, toWorldMinute),
+    restSessions: interruptCampaignRestSessionsForTimeAdvance(base.restSessions,toWorldMinute),
     updatedAt: input.now,
   }
 }
@@ -552,6 +588,8 @@ export function campaignLightPresetPatch(presetId: CampaignLightPreset['id'], wo
   return {
     enabled: true,
     sourceKind: preset.id,
+    flame: preset.id !== 'permanent',
+    flameProtected: ['lamp', 'hooded-lantern'].includes(preset.id),
     brightRadiusFeet: preset.brightRadiusFeet,
     dimRadiusFeet: preset.dimRadiusFeet,
     color: preset.color,

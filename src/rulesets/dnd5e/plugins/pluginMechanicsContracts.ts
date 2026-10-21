@@ -1,3 +1,4 @@
+import type { Dnd5eOwnedCompanionProximity } from '../ownedCompanionProximity'
 import type { SkillAoeTargeting } from '../../../lib/skillTargeting'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Dnd5eDamageType } from '../damageTypes'
@@ -20,6 +21,8 @@ export interface Dnd5ePluginFeatPrerequisite {
   anyAbilityScores?: Partial<Record<AbilityKey, number>>
   /** Core race names/IDs or namespaced plugin race IDs. */
   raceIds?: readonly string[]
+  /** Ancestral sizes; alternatives to raceIds when both are provided. */
+  raceSizes?: readonly ('small' | 'medium')[]
   /** Stable build-time capabilities; independent from currently equipped armor. */
   armorProficiencies?: readonly ('light' | 'medium' | 'heavy' | 'shield')[]
   /** The character must currently have at least one Host-recognized spell source. */
@@ -52,6 +55,7 @@ export type Dnd5ePluginTargeting =
   | { kind: 'self' }
   | {
       kind: 'single-creature'
+      allowObjectAttack?: true
       relation?: Dnd5ePluginTargetRelation
       rangeFeet?: number
       includeSelf?: boolean
@@ -99,18 +103,48 @@ export interface Dnd5ePluginFeatureAction {
   }
 }
 
+export interface Dnd5eSkillCheckAbilityBonus {
+  skill: string
+  ability?: AbilityKey
+  bonusAbility: AbilityKey
+}
+
 export interface Dnd5ePluginStaticCombatModifiers {
+  /** Owned magical illumination, on by default unless its persisted off marker is present. */
+  inherentLight?: import('../inherentFeatureLightContract').Dnd5eInherentFeatureLight
+  skillCheckAbilityBonuses?: readonly Dnd5eSkillCheckAbilityBonus[]
+  /** Re-evaluate owned companion proximity whenever healing dice resolve. */
+  maximizeHealingDiceNearCompanion?: readonly Dnd5eOwnedCompanionProximity[]
+  /** Owned natural weapons usable as unarmed strikes, with ordinary attack economy. */
+  naturalWeapons?: readonly { id: string; name: string; damageDieSides: 4 | 6 | 8 | 10 | 12; damageType: 'bludgeoning' | 'piercing' | 'slashing'; magical?: boolean }[]
+  /** Alternative unarmored AC = this base + Dexterity modifier; formulas never stack. */
+  unarmoredArmorClassBase?: number
+  /** Whether the alternative formula remains available with an equipped shield. Defaults to false. */
+  unarmoredArmorClassAllowsShield?: boolean
   armorClassBonus?: number
   initiativeBonus?: number
+  /** Add this ability modifier to initiative; evaluated from current ability scores. */
+  initiativeBonusFromAbility?: AbilityKey
   speedBonusFeet?: number
+  /** Add to an existing movement mode only; never grants a missing mode. */
+  existingMovementSpeedBonuses?: Partial<Record<'walk' | 'climb' | 'swim' | 'fly', number>>
+  /** Grants a fixed swimming speed; stronger existing speeds remain available. */
+  swimSpeedMinimumFeet?: number
+  swimSpeedEqualsWalking?: boolean
+  canBreatheWater?: boolean
   savingThrowBonus?: number
   darkvisionRangeFeet?: number
+  darkvisionIfAbsentFeet?: number
+  darkvisionExistingBonusFeet?: number
+  darkvisionRacialFallbackFeet?: number
+  darkvisionRacialBonusFeet?: number
   hitPointsPerLevelBonus?: number
   passivePerceptionBonus?: number
   passiveInvestigationBonus?: number
   minimumHitDieHealingConstitutionMultiplier?: number
   cannotBeSurprisedWhileConscious?: boolean
   unseenAttackersDoNotGainAdvantage?: boolean
+  invisibleToDarkvision?: boolean
   ignoreLongRangeRangedWeaponDisadvantage?: boolean
   ignoreNearbyHostileRangedAttackDisadvantage?: boolean
   /** Allows every attack granted by one Attack action to ignore the loading cap. */
@@ -132,10 +166,14 @@ export interface Dnd5ePluginStaticCombatModifiers {
   opportunityAttacksIgnoreDisengage?: boolean
   /** A qualifying opportunity-attack hit reduces the mover's remaining movement to zero. */
   opportunityAttackHitStopsMovement?: boolean
+  /** A creature moving at least 5 feet within melee reach provokes. */
+  opportunityAttacksOnMoveWithinReach?: boolean
   /** Stable weapon catalog ids that may make an opportunity attack when a hostile enters reach. */
   opportunityAttacksOnEnterReachWeaponIds?: readonly string[]
   /** Difficult terrain contributes no extra movement cost during a Host-recorded Dash. */
   ignoreDifficultTerrainWhileDashing?: boolean
+  /** Advantage only on Athletics/Acrobatics checks to escape a grapple. */
+  grappleEscapeAdvantage?: boolean
   /** Ordinary climbing multiplies movement by this amount when no climb speed applies. */
   climbWithoutSpeedCostMultiplier?: number
   /** Feet that must be moved on foot immediately before a running jump. Lower compatible values win. */

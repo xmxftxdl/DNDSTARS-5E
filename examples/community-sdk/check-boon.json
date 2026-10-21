@@ -1,0 +1,221 @@
+{
+  "format": "dndstars5e-unified-content",
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "community.check-boon",
+    "name": "一次性奖励骰示例",
+    "publisher": "Community",
+    "license": "CC0-1.0",
+    "version": "1.0.0",
+    "apiVersion": 2,
+    "rulesetId": "dnd5e-2014-srd-5.1",
+    "pluginKind": "content-package",
+    "distributionPolicy": "room-distributable"
+  },
+  "assets": [],
+  "definitions": [
+    {
+      "schemaVersion": 1,
+      "namespace": "community.check-boon",
+      "version": "1.0.0",
+      "automation": {
+        "schemaVersion": 1,
+        "level": "full",
+        "supportedPhases": [
+          "eligibility",
+          "cost",
+          "targeting",
+          "effects",
+          "duration",
+          "persistence"
+        ],
+        "manualPhases": [],
+        "limitations": []
+      },
+      "id": "boon-mark",
+      "kind": "condition",
+      "name": "检定祝福",
+      "payload": {
+        "id": "boon-mark",
+        "name": "检定祝福",
+        "effectId": "boon-mark"
+      },
+      "effects": [
+        {
+          "schemaVersion": 1,
+          "id": "boon-mark",
+          "name": "检定祝福",
+          "duration": {
+            "kind": "rounds",
+            "rounds": 10,
+            "expiresAt": "target-turn-end"
+          },
+          "extensionCondition": "community.check-boon.boon-mark",
+          "tags": [
+            "magical"
+          ],
+          "modifiers": [
+            {
+              "kind": "optional-bonus-die",
+              "sides": 6,
+              "appliesTo": [
+                "ability-check",
+                "saving-throw"
+              ],
+              "consumeOnUse": true
+            }
+          ],
+          "stacking": "refresh-duration"
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "namespace": "community.check-boon",
+      "version": "1.0.0",
+      "automation": {
+        "schemaVersion": 1,
+        "level": "full",
+        "supportedPhases": [
+          "eligibility",
+          "cost",
+          "targeting",
+          "effects",
+          "duration",
+          "persistence"
+        ],
+        "manualPhases": [],
+        "limitations": []
+      },
+      "id": "check-boon",
+      "kind": "spell",
+      "name": "检定祝福示例",
+      "description": "自定义演示：给予目标一个可选 d6，可用于一次属性检定或豁免。选择使用时才掷骰，使用后移除效果；未使用则在目标第十次回合结束时到期。不是正式 D&D 法术。",
+      "payload": {
+        "id": "check-boon",
+        "name": "检定祝福示例",
+        "level": 0,
+        "school": "abjuration",
+        "ritual": false,
+        "castingTime": {
+          "value": 1,
+          "unit": "action"
+        },
+        "range": {
+          "type": "distance",
+          "feet": 30
+        },
+        "components": {
+          "verbal": true,
+          "somatic": true,
+          "material": false
+        },
+        "duration": {
+          "type": "timed",
+          "value": 10,
+          "unit": "round",
+          "concentration": false
+        },
+        "classes": [
+          "wizard"
+        ],
+        "description": "自定义演示：给予目标一个可选 d6，可用于一次属性检定或豁免。选择使用时才掷骰，使用后移除效果；未使用则在目标第十次回合结束时到期。不是正式 D&D 法术。",
+        "automation": {
+          "mode": "reference-only"
+        }
+      },
+      "activities": [
+        {
+          "schemaVersion": 1,
+          "id": "check-boon",
+          "name": "检定祝福示例",
+          "activation": {
+            "kind": "action",
+            "cost": 1
+          },
+          "invocation": {
+            "kind": "active",
+            "confirmation": "actor-choice"
+          },
+          "target": {
+            "kind": "creature",
+            "relation": "any",
+            "rangeFeet": 30,
+            "count": 1,
+            "includeSelf": true
+          },
+          "consumption": [
+            {
+              "kind": "action-economy",
+              "economy": "action",
+              "amount": 1,
+              "consumeOn": "resolve"
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "resolve",
+              "when": {
+                "kind": "always"
+              },
+              "operations": [
+                {
+                  "id": "mark",
+                  "kind": "apply-effect",
+                  "target": "target",
+                  "effectId": "boon-mark"
+                }
+              ]
+            }
+          ],
+          "effects": [
+            {
+              "schemaVersion": 1,
+              "id": "boon-mark",
+              "name": "检定祝福",
+              "duration": {
+                "kind": "rounds",
+                "rounds": 10,
+                "expiresAt": "target-turn-end"
+              },
+              "extensionCondition": "community.check-boon.boon-mark",
+              "tags": [
+                "magical"
+              ],
+              "modifiers": [
+                {
+                  "kind": "optional-bonus-die",
+                  "sides": 6,
+                  "appliesTo": [
+                    "ability-check",
+                    "saving-throw"
+                  ],
+                  "consumeOnUse": true
+                }
+              ],
+              "stacking": "refresh-duration"
+            }
+          ],
+          "automation": {
+            "schemaVersion": 1,
+            "level": "full",
+            "supportedPhases": [
+              "eligibility",
+              "cost",
+              "targeting",
+              "effects",
+              "duration",
+              "persistence"
+            ],
+            "manualPhases": [],
+            "limitations": []
+          },
+          "legacySource": {
+            "kind": "spell",
+            "id": "check-boon"
+          }
+        }
+      ]
+    }
+  ]
+}

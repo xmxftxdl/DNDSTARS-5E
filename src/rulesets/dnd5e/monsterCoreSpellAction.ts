@@ -1,6 +1,12 @@
+import { dnd5eSpellInterrupted } from './spellInterruption'
+import {dnd5eTokenHeightFeet} from './verticalCombatGeometry'
+import {getDnd5eMonsterCombatSpell as getDnd5eSrdCombatSpell} from './monsterCombatSpells'
+import { createDnd5eMapHostilityView } from './mapPerceivedHostility'
 import { iceWallFromCells } from './wallObjectRules'
 import { settleSunburstSpellDarknessDispels } from './sunburstDarknessDispel'
 import { igniteDnd5eWebAreasFromSpell } from './webAreaRules'
+import { freezeDnd5eWaterWallsFromSpellArea, type Dnd5eSpellAreaExposure } from './waterWallFreezing'
+import { resolveSpellAreaObstruction } from './spellAreaObstruction'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   DND_FEET_PER_CELL,
@@ -22,6 +28,7 @@ import {
   dnd5eHitIsAutomaticCritical,
   dnd5eMonsterSpellAttackMode,
   previewDnd5eUnsupportedAirborneFalls,
+  previewDnd5eSpellcastingSaves,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCounterspellReaction,
@@ -48,7 +55,6 @@ import {
   dnd5eSpellAttackDelivery,
   dnd5eSpellDiceCount,
   dnd5eSpellMaximumTargets,
-  getDnd5eSrdCombatSpell,
   type Dnd5eSrdSpellDefinition,
 } from './spells'
 import { dnd5eCoreSpellComponentRequirements } from './spellComponents'
@@ -92,12 +98,14 @@ export type Dnd5eMonsterCoreSpellRejectReason =
   | 'combatant-missing'
 
 export interface PreparedDnd5eMonsterCoreSpell {
+  damagePathOrigin?:{x:number;y:number;elevationFeet:number}
   map: BattleMap
   characters: readonly Character[]
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actorToken: Token
   targetTokens: readonly Token[]
+  randomizedProjectileTargetIds?: readonly string[]
   monster: Dnd5eMonsterStatBlock
   listedSpell: ListedMonsterSpell
   spell: Dnd5eSrdSpellDefinition
@@ -109,6 +117,7 @@ export interface PreparedDnd5eMonsterCoreSpell {
   spellAttackAutomaticCritical?: boolean
   areaTargetCell?: GridCell
   areaCells?: readonly GridCell[]
+  spellAreaExposure?: Dnd5eSpellAreaExposure
   areaBaseElevationFeet?: number
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaTargetElevationFeet?: number
@@ -270,6 +279,7 @@ export function dnd5eMonsterCoreSpellAreaTargetIds(input: {
 }
 
 export function prepareDnd5eMonsterCoreSpell(input: {
+  worldMinute?: number
   combatId: string
   round?: number
   map: BattleMap
@@ -310,7 +320,8 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   if (input.legendaryActionId && (
     !legendaryDefinition ||
     legendaryDefinition.kind !== 'other' ||
-    !/(?:^|-)cast-a-spell(?:-|$)/.test(legendaryDefinition.id)
+    (!/(?:^|-)cast-a-spell(?:-|$)/.test(legendaryDefinition.id) && legendaryDefinition.id !== 'cantrip') ||
+    (legendaryDefinition.id === 'cantrip' && (listedSpell.level !== 0 || input.slotLevel !== 0))
   )) return { ok: false, reason: 'invalid-spell' }
   const occupantModifiers = dnd5ePersistentAreaOccupantModifiersAt({
     map: input.map,
@@ -334,9 +345,11 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   const maximumTargets = dnd5eSpellMaximumTargets(spell, input.slotLevel, casterLevel)
   if (targetIds.length !== input.targetTokenIds.length) return { ok: false, reason: 'invalid-target' }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  let damagePathOrigin={x:actorToken.x,y:actorToken.y,elevationFeet:mapGeometryTokenElevation(geometry,actorToken)+dnd5eTokenHeightFeet(actorToken)/2}
   let teleportDestination: Dnd5eSpellTeleportDestination | undefined
   let preparedAreaTargetCell: GridCell | undefined
   let preparedAreaCells: readonly GridCell[] | undefined
+  let spellAreaExposure: Dnd5eSpellAreaExposure | undefined
   let preparedAreaBaseElevationFeet: number | undefined
   const spellArea = dnd5eSpellAreaAtSlot(spell, input.slotLevel)
   if (spellArea) {
@@ -391,9 +404,13 @@ export function prepareDnd5eMonsterCoreSpell(input: {
     const effectOriginElevation = spellArea.origin === 'point'
       ? effectAimElevation
       : mapGeometryTokenElevation(geometry, actorToken)
+    damagePathOrigin={x:effectOrigin.x,y:effectOrigin.y,elevationFeet:effectOriginElevation+(spellArea.origin==='point'?0:dnd5eTokenHeightFeet(actorToken)/2)}
     preparedAreaTargetCell = targetCell
     preparedAreaCells = cells
     preparedAreaBaseElevationFeet = effectAimElevation
+    spellAreaExposure={area:spellArea,origin:{x:effectOrigin.x,y:effectOrigin.y},originElevationFeet:effectOriginElevation,
+      cells:resolveSpellAreaObstruction({spellId:spell.id,map:input.map,geometry,cells,area:spellArea,origin:effectOrigin,elevationFeet:effectOriginElevation}).cells,
+      aim:effectAim,aimElevationFeet:effectAimElevation,sourceHeightFeet:dnd5eTokenHeightFeet(actorToken)}
     if (spellArea.origin === 'point') {
       const areaPointToken = {
         ...actorToken,
@@ -475,7 +492,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       effectAimElevationFeet: effectAimElevation,
     })
     if (
-      (!['teleport', 'persistent-area'].includes(spell.effect) && authoritativeTargets.length < 1) ||
+      (!['teleport', 'persistent-area'].includes(spell.effect) && spell.effect !== 'saving-throw' && authoritativeTargets.length < 1) ||
       authoritativeTargets.length > maximumTargets
     ) {
       return { ok: false, reason: 'invalid-target' }
@@ -500,8 +517,9 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   )) {
     return { ok: false, reason: 'invalid-target' }
   }
+  const perceivesHostile = createDnd5eMapHostilityView({ ...input, actorToken })
   if (targetTokens.some((target) => {
-    const opposed = areOpposedCombatTokens(actorToken, target!)
+    const opposed = perceivesHostile(target!)
     return (spell.target === 'hostile' && !opposed) ||
       (spell.target === 'ally' && opposed)
   })) return { ok: false, reason: 'invalid-target' }
@@ -539,11 +557,13 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   ) return { ok: false, reason: 'invalid-target' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: input.combatId,
     round: input.round,
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
+    additionalCreatureTokenIds: targetIds,
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   if (
@@ -588,6 +608,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       state: { ...snapshot.state, initiativeIndex: currentInitiativeIndex },
       actorToken,
+      damagePathOrigin,
       targetTokens: targetTokens as Token[],
       monster,
       listedSpell,
@@ -602,6 +623,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
             actorToken.id,
             targetTokens[0]!.id,
             dnd5eSpellAttackDelivery(spell),
+            monster.spellcasting?.ability,
           )
         : undefined,
       spellAttackAutomaticCritical: spell.effect === 'spell-attack'
@@ -613,6 +635,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
         : undefined,
       areaTargetCell: preparedAreaTargetCell,
       areaCells: preparedAreaCells,
+      spellAreaExposure,
       areaBaseElevationFeet: preparedAreaBaseElevationFeet,
       areaTargetOrientation: input.areaTargetOrientation,
       areaTargetElevationFeet: input.areaTargetElevationFeet,
@@ -623,10 +646,16 @@ export function prepareDnd5eMonsterCoreSpell(input: {
 }
 
 export function resolvePreparedDnd5eMonsterCoreSpell(input: {
+  /** Host staging only: caller must settle entry wards and landing before publication. */
+  deferForcedMovementLanding?: boolean
+  shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
+  spellcastingSavingThrows?: readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]
   prepared: PreparedDnd5eMonsterCoreSpell
   resolution: Omit<Dnd5eMonsterCoreSpellResolutionV1, 'schemaVersion' | 'targetIds'>
   counterspellReaction?: Dnd5eCounterspellReaction
   spellInterceptionReaction?: Dnd5eSpellInterceptionReaction
+  sourceActionInterruptionReaction?: import('./headlessCombatEngine').Dnd5eSourceActionInterruptionReaction
+  savingThrowCounterattacks?: import('./headlessCombatEngine').Dnd5eAction['savingThrowCounterattacks']
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
   attackDecoyRolls?: readonly import('./headlessCombatEngine').Dnd5eAttackDecoyOccurrenceRoll[]
 }): {
@@ -636,7 +665,10 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
   createdAreaId?: string
 } {
   const { prepared } = input
+  const castingPrevented = input.resolution.completeSlowSpell !== true &&
+    previewDnd5eSpellcastingSaves(prepared.state, prepared.actorToken.id, input.spellcastingSavingThrows, { spellId: prepared.spell.id, slotLevel: prepared.slotLevel }) === false
   if (
+    !castingPrevented &&
     prepared.spell.id === 'thunderwave' &&
     prepared.spell.onFailedSaveEffect === 'thunderwave-push'
   ) {
@@ -659,6 +691,10 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
           movement.to.y !== expected.to.y ||
           movement.distanceFeet !== expected.distanceFeet
         ) return false
+        if (input.deferForcedMovementLanding) {
+          return movement.toElevationFeet == null && movement.toGroundElevationFeet == null &&
+            (movement.fallingDamageRolls?.length ?? 0) === 0
+        }
         const fall = dnd5eForcedMovementFall({
           geometry,
           target,
@@ -684,12 +720,17 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
   }
   const action = {
     type: 'monster-core-spell',
+    damagePathOrigin:prepared.damagePathOrigin,
+    spellcastingSavingThrows: input.spellcastingSavingThrows,
+    shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows,
     actorId: prepared.actorToken.id,
     spellId: prepared.spell.id,
     slotLevel: prepared.slotLevel,
     legendaryActionId: prepared.legendaryActionId,
     counterspellReaction: input.counterspellReaction,
     spellInterceptionReaction: input.spellInterceptionReaction,
+    sourceActionInterruptionReaction: input.sourceActionInterruptionReaction,
+    savingThrowCounterattacks: input.savingThrowCounterattacks,
     resolution: {
       ...input.resolution,
       schemaVersion: 1,
@@ -705,6 +746,23 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
   const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
   const result = resolveDnd5eHeadlessAction(prepared.state, action)
   if (!result.ok) return { result, airborneFalls }
+  return projectResolvedDnd5eMonsterCoreSpell({ prepared, result, airborneFalls })
+}
+
+/** Project a spell that has already settled, including a child of an atomic
+ * multiattack. This must never execute the spell or consume its resources again. */
+export function projectResolvedDnd5eMonsterCoreSpell(input: {
+  prepared: PreparedDnd5eMonsterCoreSpell
+  result: Dnd5eActionResult
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
+  createdAreaId?: string
+} {
+  const { prepared, result, airborneFalls } = input
+  if (!result.ok) return { result, airborneFalls }
   const application = planDnd5eMapResultApplication({
     state: result.state,
     map: prepared.map,
@@ -713,13 +771,11 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
     events: [...result.events],
   })
   let createdAreaId: string | undefined
+  if (result.events.some(event => event.type === 'spellcasting-prevented' && event.actorId === prepared.actorToken.id)) {
+    return { result, application, airborneFalls }
+  }
   const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)
-  const counterspelled = result.events.some((event) =>
-    event.type === 'counterspell-resolved' &&
-    event.casterId === prepared.actorToken.id &&
-    event.spellId === prepared.spell.id &&
-    event.success,
-  )
+  const counterspelled = dnd5eSpellInterrupted(result.events, prepared.actorToken.id, prepared.spell.id)
   if (
     declaration &&
     prepared.spell.effect === 'persistent-area' &&
@@ -806,6 +862,9 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
     createdAreaId = area.id
   }
   if (!counterspelled && !result.events.some(event => event.type === 'slow-spell-delay-resolved' && event.delayed)) {
+    application.map = freezeDnd5eWaterWallsFromSpellArea({map:application.map,spell:prepared.spell,exposure:prepared.spellAreaExposure,
+      cells:prepared.areaCells,elevationFeet:prepared.areaBaseElevationFeet??0,actorId:prepared.actorToken.id,
+      round:result.state.round,worldMinute:result.state.companionScene?.worldMinute})
     application.map = igniteDnd5eWebAreasFromSpell({
       map: application.map, spell: prepared.spell, cells: prepared.areaCells,
       elevationFeet: prepared.areaBaseElevationFeet, round: result.state.round,

@@ -1,11 +1,12 @@
 import type { Character } from '../../types/character'
-import {
-  dnd5eActiveClimbSpeedEqualsWalking,
-  dnd5eActiveFlySpeed,
-  dnd5eActiveSwimSpeedEqualsWalking,
-} from './activeEffects'
-import { dnd5eEffectiveWalkingSpeed } from './classes'
+import { dnd5ePluginBooleanStaticModifierForCharacter } from './plugins/pluginContentCatalog'
+import { dnd5eWalkingSpeed, dnd5eClassDefinition } from './classes'
+import { dnd5eMovementBonusOwnerForCharacter, dnd5eImportedWalkingSpeedBonus } from './movementSpeedBonuses'
+import { createDnd5eCombatant, dnd5eEffectiveWalkSpeed, dnd5eEffectiveOptionalMovementSpeed, dnd5eEffectiveFlySpeed, dnd5eEffectiveMovementPoolSpeed } from './headlessCombatEngine'
+import { normalizeDnd5eClassLevels } from './classLevels'
 import { getDnd5eSrdMonster } from './monsters'
+import { dnd5eInventoryLoad } from './items'
+import { dnd5eRageFeatureCarryingCapacityMultiplier } from './rageFeature'
 
 export interface Dnd5eCharacterMovementProfile {
   walkSpeed: number
@@ -14,11 +15,12 @@ export interface Dnd5eCharacterMovementProfile {
   flySpeed?: number
   hover?: boolean
   maximumSpeed: number
+  canBreatheWater?: boolean
 }
 
 export type Dnd5eCharacterMovementStateProjection = Pick<
   NonNullable<Character['dnd5eCombatState']>,
-  'activeEffects' | 'wildShapeFormId'
+  'activeEffects' | 'wildShapeFormId' | 'wildShapeMode'
 >
 
 /**
@@ -27,7 +29,7 @@ export type Dnd5eCharacterMovementStateProjection = Pick<
  * movement must read the active monster form instead of those persisted fields.
  */
 export function dnd5eEffectiveCharacterMovementProfile(
-  character: Pick<
+  character: Partial<Character> & Pick<
     Character,
     | 'charClass'
     | 'level'
@@ -52,35 +54,23 @@ export function dnd5eEffectiveCharacterMovementProfile(
   const creatureForm = creatureFormId
     ? getDnd5eSrdMonster(creatureFormId)
     : undefined
-  const walkSpeed = Math.max(
-    0,
-    creatureForm?.speed.walk ?? dnd5eEffectiveWalkingSpeed(character),
-  )
-  const baseClimbSpeed = creatureForm?.speed.climb ?? character.dnd5eMovementSpeeds?.climb
-  const baseSwimSpeed = creatureForm?.speed.swim ?? character.dnd5eMovementSpeeds?.swim
-  const climbSpeed = dnd5eActiveClimbSpeedEqualsWalking(effects)
-    ? Math.max(baseClimbSpeed ?? 0, walkSpeed)
-    : baseClimbSpeed
-  const swimSpeed = dnd5eActiveSwimSpeedEqualsWalking(effects)
-    ? Math.max(baseSwimSpeed ?? 0, walkSpeed)
-    : baseSwimSpeed
-  const flySpeed = Math.max(
-    creatureForm?.speed.fly ?? character.dnd5eMovementSpeeds?.fly ?? 0,
-    dnd5eActiveFlySpeed(effects) ?? 0,
-  ) || undefined
-  const maximumSpeed = Math.max(
-    walkSpeed,
-    climbSpeed ?? 0,
-    swimSpeed ?? 0,
-    flySpeed ?? 0,
-  )
+  const owner = dnd5eMovementBonusOwnerForCharacter(character)
+  const baseWalk = creatureForm?.speed.walk ?? Math.max(0, dnd5eWalkingSpeed({ ...character, exhaustionLevel: 0 }, true) + dnd5eImportedWalkingSpeedBonus(owner))
+  const movementSpeeds = creatureForm ? { ...creatureForm.speed } : { ...character.dnd5eMovementSpeeds, walk: baseWalk }
+  const actor = createDnd5eCombatant({ ...owner,
+    carriedWeightLb: dnd5eInventoryLoad(character as Character).totalWeightLb,
+    carryingCapacityMultiplier: dnd5eRageFeatureCarryingCapacityMultiplier(character as Character),
+    id: character.id ?? 'movement-preview', name: character.name ?? 'Movement', controller: 'player', initiative: 0,
+    abilities: creatureForm?.abilities ?? character.abilities ?? { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, proficiencyBonus: 2,
+    armorClass: 10, currentHp: 1, maxHp: 1, temporaryHp: 0, exhaustionLevel: character.exhaustionLevel, speed: baseWalk, movementSpeeds,
+    position: { x: 0, y: 0 }, concentrating: false, conditions: character.conditions ?? [],
+    level: character.level, classId: dnd5eClassDefinition(character.charClass)?.id, classLevels: normalizeDnd5eClassLevels(character),
+    classState: { ...character.dnd5eCombatState, ...projectedCombatState, activeEffects: effects },
+    swimSpeedEqualsWalking: dnd5ePluginBooleanStaticModifierForCharacter(character as Character, 'swimSpeedEqualsWalking'),
+  })
+  return { walkSpeed: dnd5eEffectiveWalkSpeed(actor), climbSpeed: dnd5eEffectiveOptionalMovementSpeed(actor, 'climb'),
+    swimSpeed: dnd5eEffectiveOptionalMovementSpeed(actor, 'swim'), flySpeed: dnd5eEffectiveFlySpeed(actor),
+    maximumSpeed: dnd5eEffectiveMovementPoolSpeed(actor), hover: movementSpeeds.hover,
+    canBreatheWater: dnd5ePluginBooleanStaticModifierForCharacter(character as Character, 'canBreatheWater') }
 
-  return {
-    walkSpeed,
-    climbSpeed,
-    swimSpeed,
-    flySpeed,
-    hover: creatureForm?.speed.hover ?? character.dnd5eMovementSpeeds?.hover,
-    maximumSpeed,
-  }
 }

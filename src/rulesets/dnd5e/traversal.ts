@@ -1,5 +1,25 @@
 export type Dnd5eTraversalMode = 'walk' | 'climb' | 'swim' | 'fly' | 'long-jump-running' | 'long-jump-standing' | 'fall'
 
+/** One jump interrupted by reactions, rather than a new jump at each checkpoint. */
+export interface Dnd5eJumpMovementProgress {
+  turnKey: string
+  mode: 'long-jump-running' | 'long-jump-standing'
+  distanceFeet: number
+  launchElevationFeet: number
+  end: { x: number; y: number; elevationFeet: number }
+}
+
+/** Voluntary travel can commit up to a reaction window and resume. */
+export function dnd5eTraversalSupportsReactionSegments(mode: Dnd5eTraversalMode = 'walk'): boolean {
+  return mode === 'walk' || mode === 'climb' || mode === 'swim' || mode === 'fly' || mode === 'long-jump-running' || mode === 'long-jump-standing'
+}
+
+/** Persisted Host movement evidence; missing/invalid values do not imply flight. */
+export function normalizeDnd5eTraversalMode(value: unknown): Dnd5eTraversalMode | undefined {
+  return value === 'walk' || value === 'climb' || value === 'swim' || value === 'fly' ||
+    value === 'long-jump-running' || value === 'long-jump-standing' || value === 'fall' ? value : undefined
+}
+
 export interface Dnd5eTraversalProfile {
   strengthScore: number
   strengthModifier: number
@@ -16,6 +36,7 @@ export interface Dnd5eTraversalProfile {
   climbWithoutSpeedCostMultiplier?: number
   runningLongJumpBonusFeet?: number
   jumpDistanceMultiplier?: number
+  verticalJumpBonusFeet?: number
   /** Consecutive walking distance already committed immediately before this jump. */
   runningJumpApproachFeet?: number
   /** Defaults to 10 feet; features such as Athlete may reduce it. */
@@ -77,10 +98,11 @@ export function dnd5eHighJumpMaximumFeet(
   strengthModifier: number,
   runningStart: boolean,
   jumpDistanceMultiplier = 1,
+  verticalJumpBonusFeet = 0,
 ): number {
   const maximum = Math.max(0, 3 + Math.floor(strengthModifier))
   const base = runningStart ? maximum : Math.floor(maximum / 2)
-  return Math.floor(base * Math.max(1, jumpDistanceMultiplier))
+  return Math.floor(base * Math.max(1, jumpDistanceMultiplier) + Math.max(0, verticalJumpBonusFeet))
 }
 
 export function dnd5eTraversalMovementCost(input: {
@@ -128,6 +150,7 @@ export function dnd5eTraversalMovementCost(input: {
       input.profile.strengthModifier,
       running,
       input.profile.jumpDistanceMultiplier,
+      input.profile.verticalJumpBonusFeet,
     )) {
       return { ok: false, reason: 'jump-too-high' }
     }

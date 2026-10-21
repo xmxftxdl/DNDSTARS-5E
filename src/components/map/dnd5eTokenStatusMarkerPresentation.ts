@@ -132,7 +132,9 @@ export function dnd5eTokenStatusMarkerTooltip(
   return {
     title: marker.label ?? definition.label,
     description: marker.detailDescription ?? (marker.mechanical
-      ? definition.description
+      ? definition.description.startsWith('地图标注：')
+        ? '当前生效的规则效果；点击查看来源、持续时间与解除条件。'
+        : definition.description
       : `${definition.description} 该图标仅是 Token 标记，不会单独改变 Headless 规则。`),
   }
 }

@@ -1,4 +1,5 @@
 import type { Character } from '../types/character'
+import type { ResourceRestRecovery, CombatStartResourceRecovery } from './resourceRestRecovery'
 import type { CharacterEquipment, EquipmentItem } from '../types/equipment'
 
 export type ClassResourceReset = 'combat' | 'short-rest' | 'long-rest'
@@ -12,6 +13,12 @@ export interface ClassResourceDefinition {
   /** 规则上的无限次数；存档仍使用有限安全整数，界面显示为 ∞。 */
   unlimited?: (character: Character) => boolean
   resetOn: ClassResourceReset
+  /** Also refill when rolling initiative for a new combat; does not replace rest recovery. */
+  restoreOnCombatStart?: boolean
+  restRecovery?: ResourceRestRecovery
+  combatStartRecovery?: CombatStartResourceRecovery
+  /** Used only when no saved balance exists; omitted preserves legacy full initialization. */
+  initialCurrent?: number
   /**
    * Resources sharing a key normally keep the highest maximum. Additive
    * contributions increase that shared pool instead (for example a feat that
@@ -35,6 +42,7 @@ export function mergeClassResourceDefinitions(
     const representative = group.find((definition) => definition.stacking !== 'additive') ?? group[0]
     return {
       ...representative,
+      restoreOnCombatStart: group.some(definition => definition.isAvailable(_character) && definition.restoreOnCombatStart === true),
       stacking: 'maximum',
       isAvailable: (candidate) => group.some((definition) => definition.isAvailable(candidate)),
       max: (candidate) => {

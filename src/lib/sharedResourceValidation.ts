@@ -1,4 +1,9 @@
+import { isStrongWindFlameReceiptId } from '../rulesets/dnd5e/strongWindFlameReceipt'
+import { validAreaVisualRecognition } from '../../shared/area-visual-recognition.mjs'
+import { SHORT_REST_RECOVERY_RESOURCE, validShortRestRecoveryJournal } from '../../shared/short-rest-recovery.mjs'
 import { getRoomSession } from './roomSession'
+import { isDnd5eSummonControlSave, isDnd5eSummonLingerPolicy } from '../rulesets/dnd5e/summonedControl'
+import { inventoryAlterationIssue } from '../../shared/inventory-alteration.mjs'
 import {
   CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH,
   isCharacterPortraitDataUrl,
@@ -96,6 +101,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function validTimedLightState(value: unknown): boolean {
   if (!isPlainObject(value) || typeof value.enabled !== 'boolean' ||
+    (value.flame != null && typeof value.flame !== 'boolean') ||
+    (value.flameProtected != null && typeof value.flameProtected !== 'boolean') ||
+    (value.flameSize != null && !['torch-or-smaller', 'larger'].includes(value.flameSize as string)) ||
     !Number.isFinite(value.brightRadiusFeet) || Number(value.brightRadiusFeet) < 0 ||
     !Number.isFinite(value.dimRadiusFeet) || Number(value.dimRadiusFeet) < 0 ||
     typeof value.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(value.color) ||
@@ -133,8 +141,21 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     }
     if (typeof raw.id !== 'string' || !raw.id || ids.has(raw.id)) issues.push(`${areaPath}.id 无效或重复`)
     else ids.add(raw.id)
+    // The Host removes the identity and controls of an unseen light source.
+    // Accept only this inert projection, not anonymous executable areas.
+    const lightingOrigin = raw.lightingOrigin
+    const anonymousLightReduction = raw.lightingOnly === true &&
+      raw.pluginId === 'system.light-reduction' && raw.featureId === 'lighting' &&
+      isPlainObject(raw.lighting) && raw.lighting.kind === 'reduce-light' &&
+      isPlainObject(lightingOrigin) &&
+      ['x', 'y', 'elevationFeet'].every(key => Number.isFinite(lightingOrigin[key])) &&
+      Object.keys(raw).every(key => ['id', 'pluginId', 'featureId', 'label', 'color',
+        'sourceCharacterId', 'sourceTokenId', 'createdRound', 'expiresAfterRound',
+        'permanent', 'lightingOnly', 'lighting', 'lightingOrigin', 'cells'].includes(key))
     for (const key of ['pluginId', 'featureId', 'label', 'sourceCharacterId', 'sourceTokenId'] as const) {
-      if (typeof raw[key] !== 'string' || !raw[key]) issues.push(`${areaPath}.${key} 无效`)
+      const anonymousField = anonymousLightReduction &&
+        ['label', 'sourceCharacterId', 'sourceTokenId'].includes(key)
+      if (typeof raw[key] !== 'string' || (!raw[key] && !anonymousField)) issues.push(`${areaPath}.${key} 无效`)
     }
     if (typeof raw.label === 'string' && raw.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH) {
       issues.push(`${areaPath}.label 过长`)
@@ -189,6 +210,12 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     if (raw.vertical != null && !normalizeDnd5ePersistentAreaVerticalSnapshot(raw.vertical)) {
       issues.push(`${areaPath}.vertical 无效`)
     }
+    if (raw.visualRecognition != null && !validAreaVisualRecognition(raw.visualRecognition)) {
+      issues.push(`${areaPath}.visualRecognition 无效`)
+    }
+    if (raw.illusionRecognition != null && !validAreaVisualRecognition(raw.illusionRecognition)) {
+      issues.push(`${areaPath}.illusionRecognition 无效`)
+    }
     const triggerIds = new Set<string>()
     const receiptTriggerIds = new Set<string>()
     if (raw.triggers != null) {
@@ -215,7 +242,7 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
         raw.triggerReceipts.forEach((receipt, receiptIndex) => {
           const receiptPath = `${areaPath}.triggerReceipts[${receiptIndex}]`
           if (
-            !isPlainObject(receipt) || !receiptTriggerIds.has(String(receipt.triggerId)) ||
+            !isPlainObject(receipt) || !(receiptTriggerIds.has(String(receipt.triggerId)) || ((raw.strongWind === true || raw.coreSpellId === 'gust-of-wind') && isStrongWindFlameReceiptId(receipt.triggerId))) ||
             typeof receipt.targetTokenId !== 'string' || !receipt.targetTokenId ||
             !Number.isInteger(receipt.round) || Number(receipt.round) < 0 ||
             (receipt.turnKey != null && (typeof receipt.turnKey !== 'string' || !receipt.turnKey || receipt.turnKey.length > 160)) ||
@@ -268,7 +295,12 @@ function validateDnd5eSummon(value: unknown, path: string): string[] {
     typeof value.concentrationId !== 'string' || !value.concentrationId ||
     value.persistent === true || value.persistAfterConcentrationCompletes === true
   )) issues.push(`${path}.becomesHostileAfterConcentrationEnds 需要有效专注召唤`)
-  if (value.controlEnded === true && value.concentrationId != null) {
+  if (value.controlSave != null && !isDnd5eSummonControlSave(value.controlSave)) issues.push(`${path}.controlSave 无效`)
+  if (value.uncontrolledLinger != null && !isDnd5eSummonLingerPolicy(value.uncontrolledLinger)) issues.push(`${path}.uncontrolledLinger 无效`)
+  if (value.dismissAtWorldMinute != null && (typeof value.dismissAtWorldMinute !== 'number' || !Number.isFinite(value.dismissAtWorldMinute) || value.dismissAtWorldMinute < 0)) issues.push(`${path}.dismissAtWorldMinute 无效`)
+  if (value.controlEnded === true && value.concentrationId != null &&
+    !isDnd5eSummonControlSave(value.controlSave) && !isDnd5eSummonLingerPolicy(value.uncontrolledLinger) &&
+    value.commandPolicy !== 'persistent-order' && value.commandPolicy !== 'turn-order') {
     issues.push(`${path}.controlEnded 不能保留 concentrationId`)
   }
   if (value.createdWorldMinute != null &&
@@ -302,6 +334,8 @@ function validateDnd5eSpellEffect(value: unknown, path: string): string[] {
   if (value == null) return []
   if (!isPlainObject(value)) return [`${path} 必须是对象`]
   const issues: string[] = []
+  if (value.sensorSense != null && (!['sight', 'hearing'].includes(String(value.sensorSense)) || value.visionFromSource !== true || value.hearingFromSource !== true)) issues.push(`${path}.sensorSense 无效`)
+  if (value.visionFromSource != null && (value.visionFromSource !== true || value.shareVisionWithSource !== true)) issues.push(`${path}.visionFromSource 无效`)
   if (value.schemaVersion !== 1) issues.push(`${path}.schemaVersion 无效`)
   for (const key of ['spellId', 'sourceCharacterId', 'sourceTokenId'] as const) {
     if (typeof value[key] !== 'string' || !value[key]) issues.push(`${path}.${key} 无效`)
@@ -530,6 +564,8 @@ function migrateDnd5eStateEnvelope(
     const characters = (input.characters as unknown[]).map((entry, index) =>
       isPlainObject(entry)
         ? (() => {
+            const inventoryIssue = inventoryAlterationIssue(entry.dnd5eInventory)
+            if (inventoryIssue) issues.push(`characters[${index}].${inventoryIssue}`)
             if (entry.portrait != null) {
               if (!isCharacterPortraitDataUrl(entry.portrait)) {
                 issues.push(`characters[${index}].portrait 不是有效且受限的人物立绘`)
@@ -553,6 +589,10 @@ function migrateDnd5eStateEnvelope(
       issues.push('人物立绘总量超过房间同步上限，请移除部分立绘或重新压缩')
     }
     return { value: { ...input, characters }, issues, migrations }
+  }
+  if (input.deletedMapIds !== undefined && (!Array.isArray(input.deletedMapIds) ||
+    input.deletedMapIds.some(id => typeof id !== 'string' || !id.trim().length || id.length > 256))) {
+    issues.push('maps.deletedMapIds 无效')
   }
   const maps = (input.maps as unknown[]).map((entry, mapIndex) => {
     if (!isPlainObject(entry)) return entry
@@ -612,6 +652,7 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   ) {
     reasons.push('战斗日志回滚检查点损坏')
   }
+  if (name === SHORT_REST_RECOVERY_RESOURCE && !validShortRestRecoveryJournal(input)) reasons.push('短休结算记录结构损坏')
   if (name === CAMPAIGN_TIME_RESOURCE && !validateSharedCampaignTime(input)) {
     reasons.push('战役时间资源结构损坏')
   }

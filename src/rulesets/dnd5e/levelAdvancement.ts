@@ -1,5 +1,6 @@
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import { syncCharacterClassResources } from '../../lib/classResources'
+import { dnd5eGrantedFightingStyles } from './fightingStyleGrants'
 import type {
   Character,
   Dnd5eLevelAdvancementDecisionV1,
@@ -295,6 +296,7 @@ function genericChoiceGroups(
   const pluginSubclass = subclassId ? dnd5ePluginSubclassDefinition(subclassId) : undefined
   const pluginGroups: Dnd5eClassChoiceGroup[] = (pluginSubclass?.choiceGroups ?? []).map((group) => ({
     id: `${pluginSubclass!.id}/${group.id}`,
+    replaceOnClassLevelGain: group.replaceOnClassLevelGain,
     level: group.level,
     name: group.name,
     description: group.description,
@@ -335,7 +337,8 @@ function choiceRequirements(
   if (classId === 'fighter') {
     const targetCharacter: Character = {
       ...character,
-      level: toClassLevel,
+      level: character.level + toClassLevel - fromClassLevel,
+      dnd5eClassLevels: { ...normalizeDnd5eClassLevels(character), fighter: toClassLevel },
       dnd5eClassChoices: {
         ...character.dnd5eClassChoices,
         fighter: { ...character.dnd5eClassChoices?.fighter, subclass: subclassId },
@@ -377,8 +380,8 @@ function choiceRequirements(
     const targetLimit = dnd5eClassChoiceLimit(group, toClassLevel)
     const additionalRequired = Math.max(0, targetLimit - currentSelections.length)
     const replaceable =
-      classId === 'warlock' &&
-      group.id === 'eldritch-invocations' &&
+      (group.replaceOnClassLevelGain === true ||
+        (classId === 'warlock' && group.id === 'eldritch-invocations')) &&
       fromClassLevel >= group.level
     if (additionalRequired === 0 && group.level <= fromClassLevel && !replaceable) return []
     return [{
@@ -592,6 +595,10 @@ function applyGenericChoices(
       ? submitted.length > 0 ? submitted : [...requirement.currentSelections]
       : [...new Set([...requirement.currentSelections, ...submitted])]
     if (combined.length < requirement.targetLimit) return { ok: false, reason: 'missing-class-choice' }
+    if (requirement.key === 'fighting-style' && combined.some(style =>
+      !requirement.currentSelections.includes(style) && dnd5eGrantedFightingStyles(character).includes(style))) {
+      return { ok: false, reason: 'invalid-class-choice' }
+    }
     if (
       requirement.replaceable &&
       requirement.currentSelections.filter((optionId) => !combined.includes(optionId)).length > 1
@@ -671,6 +678,8 @@ function applyFighterChoices(
   const styleLimit = fighterFightingStyleSelectionLimit(targetCharacter)
   const allowedStyles = new Set(FIGHTER_FIGHTING_STYLE_OPTIONS.map((option) => option.id))
   const styles = [...new Set(decision.fighterFightingStyles ?? existing.fightingStyles ?? [])]
+  if (styles.some(style => !existing.fightingStyles?.includes(style as FighterFightingStyleId) &&
+    dnd5eGrantedFightingStyles(character).includes(style))) return { ok: false, reason: 'invalid-class-choice' }
   if (
     styles.length !== styleLimit ||
     styles.some((style) => !allowedStyles.has(style as FighterFightingStyleId))
@@ -993,6 +1002,16 @@ export function dnd5eAdvancementRevisionBaseCharacter(
 
 export function dnd5eAdvancementLockedChoiceKeys(character: Character): ReadonlySet<string> {
   const keys = new Set<string>()
+  for (const [classId, choices] of Object.entries(character.dnd5eClassChoices?.classes ?? {})) {
+    const subclass = choices.subclass ? dnd5ePluginSubclassDefinition(choices.subclass) : undefined
+    if (subclass?.classId !== classId) continue
+    for (const group of subclass.choiceGroups ?? []) {
+      const key = `${subclass.id}/${group.id}`
+      if (group.replaceOnClassLevelGain && choices.selections?.[key]?.length) {
+        keys.add(`${classId}:class:${key}`)
+      }
+    }
+  }
   for (const record of character.dnd5eLevelAdvancements ?? []) {
     if (record.decision.subclassId) keys.add(`${record.classId}:subclass`)
     for (const key of Object.keys(record.decision.classChoiceSelections ?? {})) {

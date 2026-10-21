@@ -93,16 +93,24 @@ export function settleSunburstSpellDarknessDispels(input: {
       endDnd5eConcentration(input.state, caster, events)
     }
     const beforeTokens = new Map(map.tokens.map((token) => [token.id, token]))
-    const removal = removePersistentAreaByDm({ map, characters, areaId })
+    const removal = removePersistentAreaByDm({ map, characters, areaId, round: input.state?.round })
     if (!removal) continue
     map = removal.map
     removedAreaIds.push(areaId)
-    if (removal.character) {
+    if (removal.characters) {
+      for (const character of removal.characters) {
+        if (JSON.stringify(character) !== JSON.stringify(characters.find(candidate => candidate.id === character.id))) {
+          changedCharacterIds.add(character.id)
+        }
+      }
+      characters = [...removal.characters]
+    } else if (removal.character) {
       characters = characters.map((character) =>
         character.id === removal.character!.id ? removal.character! : character,
       )
       changedCharacterIds.add(removal.character.id)
     }
+    events.push(...removal.events ?? [])
     for (const token of map.tokens) {
       if (JSON.stringify(beforeTokens.get(token.id)) !== JSON.stringify(token)) changedTokenIds.add(token.id)
     }

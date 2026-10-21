@@ -14,6 +14,7 @@ export interface Dnd5eSlowSpellGate {
   slotLevel: number
   d20: number
   delayed: boolean
+  spellcastingSaveOutcome?: 'allowed' | 'prevented'
   intent: Dnd5eSlowSpellIntent
 }
 

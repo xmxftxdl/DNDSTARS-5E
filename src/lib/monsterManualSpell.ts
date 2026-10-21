@@ -1,8 +1,8 @@
 import type { Token } from '../store/maps'
+import {getDnd5eMonsterCombatSpell as getDnd5eSrdCombatSpell} from '../rulesets/dnd5e/monsterCombatSpells'
 import {
   dnd5eAvailableMonsterSpellSlotLevels,
   dnd5eSpellDiceCount,
-  getDnd5eSrdCombatSpell,
   getDnd5eSrdMonster,
   type Dnd5eMonsterTurnPlan,
   type Dnd5eSrdSpellDefinition,

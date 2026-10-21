@@ -1,9 +1,12 @@
+import { characterCombatClockKey } from '../../../shared/combat-round-credits.mjs'
 import { describe, expect, it } from 'vitest'
 import type { SharedCampaignTimeState } from '../../lib/campaignTime'
 import type { Character } from '../../types/character'
 import {
+  advanceDnd5eCampaignTimedActiveEffects,
   applyDnd5eLongRestBenefits,
   applyDnd5eShortRestBenefits,
+  applyDnd5eGrantedShortRestBenefits,
   compensateDnd5eCompletedLongCastEffects,
   dnd5eCampaignTimeControlledDescentDistanceFeet,
   dnd5eCampaignRepeatSaveD20,
@@ -11,8 +14,79 @@ import {
   reconcileDnd5eCharacterCampaignTime,
 } from './campaignTimeRules'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
-import { applyDnd5eInventoryGrantBundle, normalizeDnd5eInventory } from './items'
+import { applyDnd5eInventoryGrantBundle, applyDnd5eInventoryMutation, normalizeDnd5eInventory } from './items'
 import { consumeDnd5eStoredD20Replacement, registerDnd5eRulesPlugin } from './pluginApi'
+import { planDnd5eExpiredRestCompletions } from './restCompletion'
+import { normalizeDnd5eActiveEffects, validateDnd5eActiveEffectsStrict } from './activeEffects'
+import { spendClassResource, syncCharacterClassResources } from '../../lib/classResources'
+import { normalizeCharacter } from '../../store/characters'
+import { beginDnd5eNaturalSleep } from './naturalSleep'
+
+describe('plugin-owned resource recovery through campaign rest events', () => {
+  it.each(['feature', 'feat'] as const)('%s resources recover on either rest, only for beneficiaries, without replay grants', kind => {
+    const pluginId = `test.rest-resource-${kind}`
+    const optionId = `${pluginId}:rest-options`
+    const shortId = `${pluginId}:short-use`
+    const longId = `${pluginId}:daily-use`
+    const conditionalIds = ['empty', 'populated'].map(id => `${pluginId}:${id}`)
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: pluginId, name: 'Synthetic rest resources', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+      setup(api) {
+        const definition = {
+          id: 'rest-options', name: 'Synthetic rest options', summary: 'Test', description: 'Test',
+          automation: 'full' as const,
+          resources: [
+            { id: 'short-use', label: 'Short use', maximum: 1, resetOn: 'short-rest' as const },
+            { id: 'daily-use', label: 'Daily use', maximum: 1, resetOn: 'long-rest' as const },
+            ...['empty', 'populated'].map(id => ({ id, label: id, maximum: 5, resetOn: 'long-rest' as const,
+              restRecovery: {
+                'short-rest': { mode: 'restore' as const, amount: 1, onlyWhenEmpty: true },
+                'long-rest': { mode: 'set' as const, amount: 1 },
+              },
+            })),
+          ],
+        }
+        if (kind === 'feature') api.registerFeature(definition)
+        else api.registerFeat(definition)
+      },
+    })
+    try {
+      const owned = syncCharacterClassResources(character({
+        dnd5eWorldTimeAppliedMinute: 480,
+        ...(kind === 'feature' ? { dnd5ePluginFeatureIds: [optionId] } : { dnd5eFeatIds: [optionId] }),
+      }))
+      expect(owned.classResources?.[shortId]).toEqual({ current: 1, max: 1 })
+      expect(syncCharacterClassResources(character()).classResources?.[shortId]).toBeUndefined()
+      let spent = spendClassResource(spendClassResource(owned, shortId, 1)!, longId, 1)!
+      spent = spendClassResource(spendClassResource(spent, conditionalIds[0], 5)!, conditionalIds[1], 2)!
+      for (const restKind of ['short-rest', 'long-rest'] as const) {
+        const end = restKind === 'short-rest' ? 540 : 960
+        const time = clock(end, [{
+          id: `synthetic-${restKind}`, kind: restKind, fromWorldMinute: 480, toWorldMinute: end,
+          minutes: end - 480, reason: 'Synthetic rest', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1,
+          beneficiaryCharacterIds: ['hero'],
+        }])
+        const recovered = reconcileDnd5eCharacterCampaignTime(spent, time).character
+        expect(recovered.classResources?.[shortId].current).toBe(1)
+        expect(recovered.classResources?.[longId].current).toBe(restKind === 'long-rest' ? 1 : 0)
+        expect(recovered.classResources?.[conditionalIds[0]].current).toBe(1)
+        expect(recovered.classResources?.[conditionalIds[1]].current).toBe(restKind === 'long-rest' ? 1 : 3)
+        expect(spent.classResources?.[shortId].current).toBe(0)
+        const skipped = reconcileDnd5eCharacterCampaignTime({ ...spent, id: 'other' }, time).character
+        expect(skipped.classResources?.[shortId].current).toBe(0)
+        expect(skipped.classResources?.[conditionalIds[0]].current).toBe(0)
+        expect(skipped.classResources?.[conditionalIds[1]].current).toBe(3)
+        const spentAgain = spendClassResource(spendClassResource(recovered, shortId, 1)!, conditionalIds[0], 1)!
+        const reloaded = JSON.parse(JSON.stringify(spentAgain)) as Character
+        expect(reconcileDnd5eCharacterCampaignTime(reloaded, time).character.classResources?.[shortId].current).toBe(0)
+        expect(reconcileDnd5eCharacterCampaignTime(reloaded, time).character.classResources?.[conditionalIds[0]].current).toBe(0)
+      }
+    } finally {
+      dispose()
+    }
+  })
+})
 
 function character(patch: Partial<Character> = {}): Character {
   return {
@@ -32,6 +106,147 @@ function clock(worldMinute: number, advances: SharedCampaignTimeState['advances'
 }
 
 describe('D&D 5e campaign-time reconciliation', () => {
+  it('starts only Host-confirmed natural sleep and expires it without granting rest benefits', () => {
+    const original = character({ dnd5eWorldTimeAppliedMinute: 480,
+      classResources: { fighterSecondWind: { current: 0, max: 1 } } })
+    const input = { eventId: 'sleep-1', worldMinute: 480, durationMinutes: 60, canSleep: true }
+    expect(beginDnd5eNaturalSleep(original, { ...input, canSleep: false }).ok).toBe(false)
+    expect(beginDnd5eNaturalSleep(original, { ...input, worldMinute: 479 }).ok).toBe(false)
+    expect(beginDnd5eNaturalSleep({ ...original, currentHp: 0 }, input).ok).toBe(false)
+    const started = beginDnd5eNaturalSleep(original, input)
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+    expect(beginDnd5eNaturalSleep(started.character, input).ok).toBe(false)
+    const restored = normalizeCharacter(JSON.parse(JSON.stringify(started.character)))
+    expect(restored.dnd5eCombatState?.activeEffects?.[0].source.magical).toBe(false)
+    expect(advanceDnd5eCampaignTimedActiveEffects(restored, 59).dnd5eAwakeningEvents).toBeUndefined()
+    const awake = advanceDnd5eCampaignTimedActiveEffects(restored, 60)
+    expect(awake.dnd5eAwakeningEvents?.[0]).toMatchObject({ worldMinute: 540, sourceRulesIds: ['natural-sleep'] })
+    expect(awake.classResources?.fighterSecondWind.current).toBe(0)
+    expect(awake.currentHp).toBe(original.currentHp)
+    expect(original.dnd5eCombatState?.activeEffects).toBeUndefined()
+  })
+  it('persists natural timed waking at the expiry minute and does not duplicate it after reload', () => {
+    const sleep = createDnd5eConditionEffect({ id: 'natural-timed-sleep', condition: 'unconscious', targetId: 'hero',
+      source: { kind: 'spell', rulesId: 'test-sleep' }, breakOn: ['awakened'],
+      duration: { type: 'rounds', remainingRounds: 20, tickOn: 'target-turn-end' } })
+    const source = character({ dnd5eWorldTimeAppliedMinute: 480, conditions: ['unconscious'],
+      dnd5eCombatState: { activeEffects: [sleep] } })
+    const early = advanceDnd5eCampaignTimedActiveEffects(source, 1)
+    expect(early.dnd5eAwakeningEvents).toBeUndefined()
+    const ended = advanceDnd5eCampaignTimedActiveEffects(source, 10)
+    expect(ended.dnd5eAwakeningEvents).toHaveLength(1)
+    expect(ended.dnd5eAwakeningEvents?.[0]).toMatchObject({ characterId: 'hero', worldMinute: 482,
+      sleepEffectIds: [sleep.id], sourceRulesIds: ['test-sleep'] })
+    const restored = normalizeCharacter(JSON.parse(JSON.stringify(ended)))
+    expect(restored.dnd5eAwakeningEvents).toEqual(ended.dnd5eAwakeningEvents)
+    expect(advanceDnd5eCampaignTimedActiveEffects(restored, 10).dnd5eAwakeningEvents).toEqual(ended.dnd5eAwakeningEvents)
+    expect(advanceDnd5eCampaignTimedActiveEffects({ ...source, currentHp: 0 }, 10).dnd5eAwakeningEvents).toBeUndefined()
+    const ordinary = { ...sleep, breakOn: undefined }
+    expect(advanceDnd5eCampaignTimedActiveEffects({ ...source, dnd5eCombatState: { activeEffects: [ordinary] } }, 10)
+      .dnd5eAwakeningEvents).toBeUndefined()
+  })
+  it('preserves a serialized rest denial before recovery, cleanup and forced rest accounting', () => {
+    const effect = createDnd5eMechanicalEffect({ definitionId: 'test-nightmare', label: 'Nightmare',
+      targetId: 'hero', source: { kind: 'spell', rulesId: 'test-dream', actorId: 'caster' },
+      duration: { type: 'permanent' }, modifiers: { preventRestBenefits: true },
+      breakOn: ['long-rest-complete'] })
+    const saved = normalizeDnd5eActiveEffects(JSON.parse(JSON.stringify([effect])))
+    expect(saved[0]?.modifiers?.preventRestBenefits).toBe(true)
+    const reward = createDnd5eConditionEffect({ id: 'denied-reward', condition: 'unconscious',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'test-rest' }, targetId: 'hero',
+      duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end' },
+      completionRequirement: { condition: 'unconscious', interrupted: false }, completionReward: { kind: 'short-rest' } })
+    expect(planDnd5eExpiredRestCompletions({ targetId: 'hero', effects: [...saved, reward],
+      expiredEffectIds: [reward.id] })).toEqual({ completed: [], lockouts: [] })
+    const source = character({ dnd5eWorldTimeAppliedMinute: 480,
+      classResources: { fighterSecondWind: { current: 0, max: 1 } },
+      dnd5eCombatState: { activeEffects: saved } })
+    expect(applyDnd5eShortRestBenefits(source, 540)).toBe(source)
+    expect(applyDnd5eGrantedShortRestBenefits(source, 540)).toBe(source)
+    expect(applyDnd5eLongRestBenefits(source, 960)).toBe(source)
+    const result = reconcileDnd5eCharacterCampaignTime(source, clock(960, [{
+      id: 'denied-rest', kind: 'long-rest', fromWorldMinute: 480, toWorldMinute: 960,
+      minutes: 480, reason: 'test', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1,
+      ignoreLongRestCooldown: true,
+    }]))
+    expect(result.longRestsApplied).toBe(0)
+    expect(result.longRestsBlocked).toBe(1)
+    expect(result.character.currentHp).toBe(1)
+    expect(result.character.classResources?.fighterSecondWind.current).toBe(0)
+    expect(result.character.dnd5eLastLongRestWorldMinute).toBeUndefined()
+    expect(result.character.dnd5eCombatState?.activeEffects?.[0].id).toBe(effect.id)
+    expect(applyDnd5eLongRestBenefits({ ...source, dnd5eCombatState: { activeEffects: [] } }, 960).currentHp).toBe(12)
+  })
+  it('grants uninterrupted expiry recovery once and retains a caster-independent receipt until long rest',()=>{
+    const effect=createDnd5eConditionEffect({id:'rest-reward',condition:'unconscious',source:{kind:'spell',actorId:'caster',rulesId:'test-rest'},targetId:'hero',
+      duration:{type:'rounds',remainingRounds:100,tickOn:'target-turn-end'},completionRequirement:{condition:'unconscious',interrupted:false},completionReward:{kind:'short-rest'}})
+    const source=character({classResources:{fighterSecondWind:{current:0,max:1}},dnd5eWorldTimeAppliedMinute:480,dnd5eCombatState:{schemaVersion:2,activeEffects:[effect]}})
+    const planned=planDnd5eExpiredRestCompletions({targetId:'hero',effects:[effect],expiredEffectIds:[effect.id]})
+    expect(normalizeDnd5eActiveEffects(planned.lockouts),JSON.stringify({planned,validation:validateDnd5eActiveEffectsStrict(planned.lockouts)})).toHaveLength(1)
+    const partial=advanceDnd5eCampaignTimedActiveEffects(source,9)
+    expect(partial.classResources?.fighterSecondWind.current).toBe(0)
+    expect(partial.dnd5eCombatState?.activeEffects?.[0].duration).toMatchObject({remainingRounds:10})
+    const completed=advanceDnd5eCampaignTimedActiveEffects({...partial,dnd5eWorldTimeAppliedMinute:489},1)
+    expect(completed.classResources?.fighterSecondWind.current).toBe(1)
+    expect(completed.currentHp).toBe(source.currentHp)
+    expect(completed.conditions).not.toContain('unconscious')
+    expect(completed.dnd5eRestActivityWindow).toMatchObject({completedWorldMinute:490})
+    const lockouts=completed.dnd5eCombatState!.activeEffects!
+    expect(lockouts,JSON.stringify(completed)).toHaveLength(1)
+    expect(lockouts[0].breakOn).toContain('long-rest-complete')
+    expect(lockouts[0].source).toMatchObject({kind:'system',magical:false})
+    const replay={...completed,classResources:{fighterSecondWind:{current:0,max:1}},dnd5eCombatState:{...completed.dnd5eCombatState!,activeEffects:[...lockouts,{...effect,id:'other-caster',source:{...effect.source,actorId:'other'}}]}}
+    expect(advanceDnd5eCampaignTimedActiveEffects(replay,10).classResources?.fighterSecondWind.current).toBe(0)
+    const rested=applyDnd5eLongRestBenefits(completed,970)
+    expect(rested.dnd5eCombatState?.activeEffects?.some(entry=>entry.definitionId===lockouts[0].definitionId)).toBeFalsy()
+    const renewed={...rested,dnd5eWorldTimeAppliedMinute:970,classResources:{fighterSecondWind:{current:0,max:1}},dnd5eCombatState:{...rested.dnd5eCombatState!,activeEffects:[effect]}}
+    const renewedCompletion=advanceDnd5eCampaignTimedActiveEffects(renewed,10)
+    expect(renewedCompletion.classResources?.fighterSecondWind.current).toBe(1)
+    expect(renewedCompletion.dnd5eRestActivityWindow).toMatchObject({completedWorldMinute:980})
+    expect(source.classResources?.fighterSecondWind.current).toBe(0)
+  })
+
+  it.each(['interrupted','removed','suppressed'] as const)('does not grant expiry recovery after %s',reason=>{
+    const effect=createDnd5eConditionEffect({id:'rest-reward',condition:'unconscious',source:{kind:'spell',rulesId:'test-rest'},targetId:'hero',
+      duration:{type:'rounds',remainingRounds:10,tickOn:'target-turn-end'},completionRequirement:{condition:'unconscious',interrupted:reason==='interrupted'},completionReward:{kind:'short-rest'},suspendedBy:reason==='suppressed'?['blocker']:undefined})
+    const blocker=createDnd5eMechanicalEffect({id:'blocker',definitionId:'blocker',label:'Blocker',targetId:'hero',source:{kind:'dm'},duration:{type:'permanent'},modifiers:{}})
+    const result=advanceDnd5eCampaignTimedActiveEffects(character({classResources:{fighterSecondWind:{current:0,max:1}},dnd5eCombatState:{schemaVersion:2,activeEffects:reason==='removed'?[]:reason==='suppressed'?[effect,blocker]:[effect]}}),1)
+    expect(result.classResources?.fighterSecondWind.current).toBe(0)
+    expect(result.dnd5eCombatState?.activeEffects?.some(entry=>entry.definitionId.startsWith('rest-completion:'))).toBeFalsy()
+  })
+  it('retains interrupted completion history across campaign-time advancement and resumed conditions',()=>{
+    const sleep=createDnd5eConditionEffect({id:'rest-sleep',condition:'unconscious',source:{kind:'spell'},targetId:'hero',duration:{type:'rounds',remainingRounds:100,tickOn:'target-turn-end'},completionRequirement:{condition:'unconscious',interrupted:false},suspendedBy:['blocker']})
+    const blocker=createDnd5eMechanicalEffect({id:'blocker',definitionId:'blocker',label:'Blocker',source:{kind:'dm'},targetId:'hero',duration:{type:'permanent'},modifiers:{}})
+    const advanced=advanceDnd5eCampaignTimedActiveEffects(character({dnd5eCombatState:{schemaVersion:2,activeEffects:[sleep,blocker]}}),1)
+    const recorded=advanced.dnd5eCombatState!.activeEffects!.find(effect=>effect.id==='rest-sleep')!
+    expect(recorded.completionRequirement?.interrupted).toBe(true)
+    const resumed=advanceDnd5eCampaignTimedActiveEffects({...advanced,dnd5eCombatState:{...advanced.dnd5eCombatState!,activeEffects:[{...recorded,suspendedBy:undefined}]}},1)
+    expect(resumed.dnd5eCombatState!.activeEffects![0].completionRequirement?.interrupted).toBe(true)
+    expect(sleep.completionRequirement?.interrupted).toBe(false)
+  })
+  it('grants short-rest recovery without completing attunement, advancing time or inventing healing',()=>{
+    const hero=character({classResources:{fighterSecondWind:{current:0,max:1}},dnd5eWorldTimeAppliedMinute:480})
+    const granted=applyDnd5eInventoryMutation([hero],{type:'grant',characterId:hero.id,templateId:'srd-5.1:magic-item:ring-of-protection',quantity:1,identified:true})
+    expect(granted.ok).toBe(true)
+    const ring=normalizeDnd5eInventory(granted.characters[0]).entries[0]
+    const pending=applyDnd5eInventoryMutation(granted.characters,{type:'prepare-attunement',characterId:hero.id,instanceId:ring.instanceId})
+    expect(pending.ok).toBe(true)
+    const source=pending.characters[0]
+    const recovered=applyDnd5eGrantedShortRestBenefits(source,490)
+    expect(recovered.classResources?.fighterSecondWind.current).toBe(1)
+    expect(recovered.currentHp).toBe(source.currentHp)
+    expect(recovered.hitDice).toBe(source.hitDice)
+    expect(recovered.dnd5eWorldTimeAppliedMinute).toBe(480)
+    expect(recovered.dnd5eRestActivityWindow).toMatchObject({event:'short-rest-complete',completedWorldMinute:490})
+    const stillPending=normalizeDnd5eInventory(recovered).entries.find(entry=>entry.instanceId===ring.instanceId)!
+    expect(stillPending.attuned).not.toBe(true)
+    expect(stillPending.attunementPending).toBe(true)
+    const actualRest=applyDnd5eShortRestBenefits(source,540)
+    expect(normalizeDnd5eInventory(actualRest).entries.find(entry=>entry.instanceId===ring.instanceId)?.attuned).toBe(true)
+    expect(source.classResources?.fighterSecondWind.current).toBe(0)
+    expect(normalizeDnd5eInventory(source).entries.find(entry=>entry.instanceId===ring.instanceId)?.attuned).not.toBe(true)
+  })
   it('wakes a creature restored from zero hit points by a long rest without removing unrelated magical unconsciousness', () => {
     const zeroHitPointUnconscious = createDnd5eConditionEffect({
       id: 'zero-hp-unconscious', condition: 'unconscious',
@@ -989,4 +1204,60 @@ describe('D&D 5e campaign-time reconciliation', () => {
       },
     })
   })
+})
+
+
+it('expires only effect-bound temporary hit points as exploration time advances', () => {
+ const effect=createDnd5eMechanicalEffect({id:'bound',definitionId:'activity:ward:shield:marker',label:'Ward',source:{kind:'feature',actorId:'caster',rulesId:'ward'},targetId:'hero',duration:{type:'rounds',remainingRounds:10,tickOn:'target-turn-end'}})
+ const hero=character({tempHp:7,dnd5eCombatState:{activeEffects:[effect],temporaryHitPointsSource:{actorId:'caster',rulesId:'ward',effectDefinitionId:'activity:ward:shield'}}})
+ expect(advanceDnd5eCampaignTimedActiveEffects(hero,0).tempHp).toBe(7)
+ const expired=advanceDnd5eCampaignTimedActiveEffects(hero,1)
+ expect(expired.tempHp).toBe(0)
+ expect(expired.dnd5eCombatState?.temporaryHitPointsSource).toBeUndefined()
+ const replaced={...hero,tempHp:15,dnd5eCombatState:{...hero.dnd5eCombatState,temporaryHitPointsSource:undefined}}
+ expect(advanceDnd5eCampaignTimedActiveEffects(replaced,1).tempHp).toBe(15)
+ expect(hero.tempHp).toBe(7)
+})
+
+
+it.each([1, 10])('interrupts unverified preparation on a %i minute campaign jump instead of banking partial progress', minutes => {
+  const preparation = createDnd5eMechanicalEffect({ id: 'prepare', definitionId: 'prepare', label: 'Prepare', targetId: 'hero',
+    source: { kind: 'feature', actorId: 'hero', pluginId: 'test.timed' },
+    duration: { type: 'rounds', remainingRounds: 100, tickOn: 'target-turn-end' }, completionGrant: { activityIds: ['finish'], availableRounds: 10 } })
+  const buff = createDnd5eMechanicalEffect({ id: 'buff', definitionId: 'buff', label: 'Buff', targetId: 'hero', source: { kind: 'feature', actorId: 'hero' },
+    duration: { type: 'rounds', remainingRounds: 200, tickOn: 'target-turn-end' }, modifiers: { speedBonusFeet: 1 } })
+  const original = character({ dnd5eCombatState: { schemaVersion: 2, activeEffects: [preparation, buff] } })
+  const before = structuredClone(original)
+  const result = advanceDnd5eCampaignTimedActiveEffects(original, minutes)
+  expect(original).toEqual(before)
+  expect(result.dnd5eCombatState?.activeEffects?.some(effect => effect.id === 'prepare')).toBe(false)
+  expect(result.dnd5eCombatState?.activeEffects?.some(effect => effect.grantedActivities?.includes('finish'))).toBe(false)
+  expect(result.dnd5eCombatState?.activeEffects?.find(effect => effect.id === 'buff')?.duration).toMatchObject({ remainingRounds: 200 - minutes * 10 })
+  const resumed = advanceDnd5eCampaignTimedActiveEffects(JSON.parse(JSON.stringify(result)), 1)
+  expect(resumed.dnd5eCombatState?.activeEffects?.some(effect => effect.completionGrant || effect.grantedActivities?.includes('finish'))).toBe(false)
+})
+
+
+it.each([0, 4, 10])('does not double-age %i combat rounds when the world minute advances', combatRounds => {
+  const source = character({ dnd5eWorldTimeAppliedMinute: 100,
+    dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({ id: 'guard', definitionId: 'guard', label: 'Guard',
+      source: { kind: 'spell', actorId: 'hero' }, targetId: 'hero',
+      duration: { type: 'rounds', remainingRounds: 30, tickOn: 'target-turn-end' } })] } })
+  const nextClock = clock(101, [{ id: 'combat-minute', kind: 'advance', fromWorldMinute: 100, toWorldMinute: 101, minutes: 1,
+    reason: 'combat', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1, combatRoundCredits: { [characterCombatClockKey('hero')]: combatRounds } }])
+  const next = reconcileDnd5eCharacterCampaignTime(source, nextClock).character
+  expect(next.dnd5eCombatState?.activeEffects?.[0].duration).toMatchObject({ remainingRounds: 20 + combatRounds })
+  expect(next.dnd5eWorldTimeAppliedMinute).toBe(101)
+  expect(reconcileDnd5eCharacterCampaignTime(next, nextClock).character).toEqual(next)
+})
+
+
+it.each(['source-turn-start','source-turn-end','target-turn-start','target-turn-end'] as const)('expires %s gates after exploration time passes, retaining permanent effects', boundary => {
+  const gate=createDnd5eMechanicalEffect({id:'one-turn',definitionId:'one-turn',label:'One turn',targetId:'hero',source:{kind:'dm'},duration:{type:'until-turn-boundary',boundary},modifiers:{}})
+  const permanent=createDnd5eMechanicalEffect({id:'permanent',definitionId:'permanent',label:'Permanent',targetId:'hero',source:{kind:'dm'},duration:{type:'permanent'},modifiers:{}})
+  const source=character({dnd5eCombatState:{schemaVersion:2,activeEffects:[gate,permanent]}})
+  const before=structuredClone(source)
+  expect(advanceDnd5eCampaignTimedActiveEffects(source,0).dnd5eCombatState?.activeEffects?.map(e=>e.id)).toEqual(['one-turn','permanent'])
+  expect(advanceDnd5eCampaignTimedActiveEffects(source,1).dnd5eCombatState?.activeEffects?.map(e=>e.id)).toEqual(['permanent'])
+  expect(source).toEqual(before)
 })

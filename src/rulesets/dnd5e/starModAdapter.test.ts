@@ -25,6 +25,20 @@ describe('starmod D&D runtime adapter', () => {
     const bytes = await exportLegacyDnd5eStarMod(original)
     expect((await readLegacyDnd5eStarMod(bytes))?.package).toEqual(original)
     expect(JSON.parse(new TextDecoder().decode(await projectDnd5eStarModRuntime(bytes)))).toEqual(original)
+    const oldPreview = await readStarModArchive(bytes)
+    oldPreview.entries = oldPreview.entries.map(entry => ({...entry, automationData: {
+      ...entry.automationData, capability: automationCapabilityFromLegacyStatus('full'),
+    }}))
+    // Even an inflated cached claim must not change executable rules or grant
+    // automation to a manual feature; current Host analysis remains authoritative.
+    const oldBytes = await writeStarModArchive(oldPreview)
+    expect((await readLegacyDnd5eStarMod(oldBytes))?.package).toEqual(original)
+    expect(JSON.parse(new TextDecoder().decode(await projectDnd5eStarModRuntime(oldBytes)))).toEqual(original)
+    const changedActivity = await readStarModArchive(oldBytes)
+    changedActivity.entries = changedActivity.entries.map(entry => ({...entry, automationData: {
+      ...entry.automationData, activities: [{schemaVersion:1,id:'hidden',name:'Hidden',activation:{kind:'free'},target:{kind:'self'},outcomes:[],automation:automationCapabilityFromLegacyStatus('full')}],
+    }}))
+    await expect(readLegacyDnd5eStarMod(await writeStarModArchive(changedActivity))).rejects.toThrow('projection-mismatch')
     const altered = await readStarModArchive(bytes)
     altered.entries = altered.entries.map(e => ({...e,rulesData:{id:'hidden-change'}}))
     await expect(readLegacyDnd5eStarMod(await writeStarModArchive(altered))).rejects.toThrow('projection-mismatch')

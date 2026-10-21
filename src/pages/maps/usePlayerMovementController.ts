@@ -36,8 +36,10 @@ export function usePlayerMovementController() {
     )
   }, [])
 
-  const targetElevationFeet = useCallback((terrainElevationFeet: number, currentElevationFeet = 0) =>
-    dnd5eTraversalMode === 'fly'
+  const targetElevationFeet = useCallback((terrainElevationFeet: number, currentElevationFeet = 0, allowSolidTraversal = false) =>
+    dnd5eTraversalMode === 'walk' && allowSolidTraversal
+      ? Math.min(terrainElevationFeet, dnd5eFlightTargetElevationFeet ?? terrainElevationFeet)
+      : dnd5eTraversalMode === 'fly'
       ? dnd5eFlightTargetElevationFeet ?? currentElevationFeet
       : dnd5eTraversalMode === 'climb' ? Math.max(terrainElevationFeet, dnd5eFlightTargetElevationFeet ?? terrainElevationFeet) : terrainElevationFeet,
   [dnd5eFlightTargetElevationFeet, dnd5eTraversalMode])

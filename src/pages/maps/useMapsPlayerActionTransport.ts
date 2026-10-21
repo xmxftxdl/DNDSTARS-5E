@@ -26,12 +26,15 @@ interface PendingPlayerAction {
   mapId?: string
 }
 
-interface PlayerActionAuthorityLockManager {
+export interface PlayerActionAuthorityLockManager {
   request(
     name: string,
     options: { mode: 'exclusive'; ifAvailable: true },
     callback: (lock: unknown | null) => Promise<boolean> | boolean,
   ): Promise<boolean>
+}
+export function dmPlayerActionAuthorityLockName(mapId: string, requestId: string): string {
+  return `astral-trace:dm-player-action:${mapId}:${requestId}`
 }
 
 function processedStateMatchesAction(
@@ -73,7 +76,7 @@ export async function runExclusiveDmPlayerAction(input: {
 
   if (!input.lockManager) return runIfPending()
   return input.lockManager.request(
-    `astral-trace:dm-player-action:${input.action.mapId}:${input.action.id}`,
+    dmPlayerActionAuthorityLockName(input.action.mapId, input.action.id),
     { mode: 'exclusive', ifAvailable: true },
     (lock) => lock ? runIfPending() : false,
   )
@@ -85,6 +88,7 @@ export interface PlayerActionRejectionNotice {
 }
 
 const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejectionNotice>> = {
+  'casting-continuity-lost': { title: '施法过程已中断', message: 'DM 重新载入后无法验证此前施法的连续性，旧请求已取消，未消耗材料或法术位。请重新发起施法。' },
   'component-unavailable': { title: '施法成分不可用', message: '角色受到沉默影响、缺少适用的法器或材料包，或该法术包含仍需 DM 确认数量的复杂特殊材料。' },
   'verbal-component-unavailable': { title: '无法说出咒语', message: '角色处于沉默效果中，而该法术需要言语成分，本次施法未结算。' },
   'somatic-component-unavailable': { title: '无法完成施法姿势', message: '该法术需要姿势成分，但角色双手均被占用，且不能用持用法器的手完成该法术姿势；请先空出一只手。' },
@@ -104,6 +108,7 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'invalid-spell-target-attack-fields': { title: '逐次法术攻击字段冲突', message: '多次法术攻击请求同时携带了只适用于单次攻击的顶层字段；本次结算已安全取消。' },
   'invalid-spell-attack-dice': { title: '逐次法术攻击骰无效', message: '某次法术攻击的攻击骰、优势/劣势骰或命中伤害骰与权威判定不一致；本次结算已安全取消。' },
   'invalid-dice': { title: '骰子数据无效', message: '提交的骰子数量、骰面或目标对应关系与该法术不一致；本次结算已安全取消，请重新施放。' },
+  'target-not-willing': { title: '目标未同意', message: '此法术要求目标自愿接受；目标拒绝或未及时确认，本次施放已取消，未消耗资源。' },
   'wall-attack-options-unsupported': { title: '请使用普通武器攻击', message: '墙段是物体，当前所选附加攻击特性不支持墙段；请取消特性后重选武器攻击。本次没有消耗资源。' },
   'target-out-of-range': { title: '距离不足', message: '目标已经超出该行动的有效距离，本次行动未消耗。' },
   'ammunition-unavailable': { title: '弹药不足', message: '当前武器没有可用弹药，本次攻击未结算。' },
@@ -117,8 +122,10 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'insufficient-movement': { title: '移动力不足', message: '剩余移动力不足以完成该移动。' },
   'movement-boundary-save-failed': { title: '移动被法术限制', message: '角色未通过离开来源范围所需的豁免，本次移动没有发生，也不会消耗移动力。' },
   'invalid-target': { title: '目标无效', message: '目标不符合该行动的规则或已不可用，本次行动未结算。' },
+  'planar-portal-scene-unavailable': { title: '侦测资料尚未就绪', message: '请 DM 在场景编排中检查传送门资料、完整覆盖范围及位面设置。本次未消耗动作或使用次数。' },
   'target-immune': { title: '目标免疫该法术', message: '该目标已经对当前施法者的这次法术免疫；本次施法未结算，也不会消耗时间、法术位或其他资源。' },
   'slot-unavailable': { title: '法术位不足', message: '没有可用的对应环阶法术位，本次施法未结算。' },
+  'ethereal-plane-unknown': { title: '位面关系未确定', message: '请 DM 在地图位面设置中确认是否与以太相邻，再施放此法术。本次未消耗资源。' },
   'spell-unavailable': { title: '法术不可用', message: '当前角色不能施放该法术，本次施法未结算。' },
   'spell-definition-unavailable': { title: '法术尚未接入', message: '该法术没有可用的 Headless 定义，或当前房间规则包未提供它，本次施法未结算。' },
   'spell-not-known-or-prepared': { title: '尚未学习或准备', message: '当前角色未学习该戏法，或该法术未被当前施法职业学习并准备，本次施法未结算。' },

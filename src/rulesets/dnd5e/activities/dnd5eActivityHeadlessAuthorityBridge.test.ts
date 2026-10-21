@@ -1,10 +1,11 @@
-import { endDnd5eActivityExtraTurnGroup } from '../headlessCombatEngine'
+import {createEmptyMapGeometry} from '../../../lib/mapGeometry'
+import { endDnd5eActivityExtraTurnGroup, dnd5eEffectiveMovementPoolSpeed, dnd5eHeadlessTurnKey } from '../headlessCombatEngine'
 import { afterEach, describe, expect, it } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import { validateAndMigrateSharedResource } from '../../../lib/sharedResourceValidation'
 import { normalizeCharacter } from '../../../store/characters'
 import { createDnd5eCombatant, commitDnd5eActivityExecution, dnd5eActiveEffectRepeatSaveEligibleAtBoundary, dnd5eCombatantPairKey, dnd5eEffectiveFlySpeed, dnd5eEffectiveSpeed, dnd5ePersistentDetectionReports, endDnd5eConcentration, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from '../headlessCombatEngine'
-import { createDnd5eMechanicalEffect } from '../activeEffects'
+import { createDnd5eMechanicalEffect, createDnd5eConditionEffect } from '../activeEffects'
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from '../items'
 import { registerDnd5eRulesPlugin } from '../pluginApi'
 import type { DeclarativeSubclassDefinitionV1 } from '../declarativeSubclassAbility'
@@ -14,8 +15,10 @@ import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { dnd5eActivityActorSnapshotFromCombatantV1 } from './dnd5eActivityCombatAuthority'
 import { resolveAndCommitDnd5eActivityCommand } from './dnd5eActivityHeadlessAuthorityBridge'
 import { dnd5eActivityManualAdjudicationOperationsV1 } from './dnd5eActivityHeadlessCompiler'
-import { clearDnd5eActivityRegistryForTests, registerDnd5eActivityPackage } from './dnd5eActivityRegistry'
+import { clearDnd5eActivityRegistryForTests, registerDnd5eActivityPackage, getRegisteredDnd5eActivity, listRegisteredDnd5eActivityPackages } from './dnd5eActivityRegistry'
 import { dnd5eActivityFromDeclarativeSubclassAbility } from './legacyContentActivityAdapters'
+import { dnd5eActivityTriggerContextsFromCombatEventV1 } from './dnd5eActivityTriggerWindows'
+import { dnd5eContextPredicateSatisfiedV1 } from './dnd5eActivityInvocation'
 
 const abilities = { str: 10, dex: 12, con: 12, int: 16, wis: 10, cha: 10 } as const
 
@@ -33,6 +36,209 @@ function combatant(id: string, controller: 'player' | 'dm', initiative: number) 
 }
 
 describe('Activity Headless authority commit bridge', () => {
+  it('rejects a feature replacement claiming a weapon-only extra slot', () => {
+    const actor = combatant('actor', 'player', 20)
+    const state = startDnd5eHeadlessCombat('weapon-only-budget', [actor, combatant('target', 'dm', 10)])
+    state.combatants.actor.classState.weaponAttackActionTurnKey = dnd5eHeadlessTurnKey(state, actor.id)
+    const activity: Dnd5eActivityDefinitionV1 = {
+      schemaVersion: 1, id: 'replacement', name: 'Replacement', activation: { kind: 'free' },
+      target: { kind: 'creature', relation: 'enemy', count: 1, rangeFeet: 5 },
+      usesAttackActionAttack: true,
+      checks: [{ kind: 'attack-roll', id: 'attack', scope: 'per-target',
+        rollId: 'attack', attackBonus: { kind: 'constant', value: 3 }, rollMode: 'normal' }],
+      automation: automationCapabilityFromLegacyStatus('full'),
+      outcomes: [{ id: 'hit', when: { kind: 'always' }, operations: [{
+        id: 'damage', kind: 'damage', target: 'target',
+        amount: { kind: 'constant', value: 1 }, damageType: 'bludgeoning',
+      }] }],
+    }
+    registerDnd5eActivityPackage({ packageId: 'test.weapon-only-budget', packageVersion: '1.0.0', activities: [activity] })
+    const snapshot = dnd5eActivityActorSnapshotFromCombatantV1(state.combatants.actor)
+    const target = dnd5eActivityActorSnapshotFromCombatantV1(state.combatants.target)
+    const before = structuredClone(state)
+    // Even a caller explicitly classifying this Activity as a weapon must not bypass the bridge.
+    const budget = { attacksPerAction: 2, actionCount: 1, attacksUsed: 2,
+      extraWeaponAttacksPerAction: 1, attackKind: 'weapon' as const }
+    const result = resolveAndCommitDnd5eActivityCommand(state, {
+      command: { schemaVersion: 1, commandId: 'replace', actorId: actor.id, packageId: 'test.weapon-only-budget',
+        packageVersion: '1.0.0', activityId: activity.id, targetIds: ['target'], expectedRevision: 0 },
+      currentRevision: 0, actor: snapshot, targets: [target], authoritativeRolls: {},
+      distanceFeetByTargetId: { target: 0 },
+    }, { featureAttackBudget: budget })
+    expect(result.phase).toBe('resolve')
+    expect(result.result.ok).toBe(false)
+    if (!result.result.ok) {
+      expect(result.result.reason).toBe('invalid-command')
+      expect('details' in result.result ? result.result.details : undefined).toEqual(['activity-attack-action-budget-unavailable'])
+    }
+    expect(state).toEqual(before)
+  })
+
+  it.each([[2, 0, true], [2, 1, true], [2, 2, false], [1, 1, false]] as const)('checks created weapon hands before committing inventory and actions (capacity %s, grapples %s)', (capacity, grapples, allowed) => {
+    const actor = combatant('actor', 'player', 20)
+    actor.grappleFreeHandCapacity = capacity
+    const targets = ['target-a', 'target-b'].map(id => combatant(id, 'dm', 10))
+    for (let index = 0; index < grapples; index++) targets[index].classState.activeEffects = [createDnd5eConditionEffect({
+      id: `held-${index}`, condition: 'grappled', targetId: targets[index].id,
+      source: { kind: 'feature', actorId: actor.id, rulesId: 'basic-action:grapple', magical: false },
+      relation: { schemaVersion: 1, kind: 'grapple', sourceActorId: actor.id, sourceActionId: 'basic-action:grapple', slotGroup: 'free-hand', maxDistanceFeet: 5, movement: 'drag-target', endsOnSourceIncapacitated: true },
+    })]
+    for (let index = 0; index < grapples; index++) targets[index].conditions = ['grappled']
+    const state = startDnd5eHeadlessCombat('create-weapon-hands', [actor, ...targets])
+    const owner = normalizeCharacter({ id: actor.id, name: 'Actor', equipment: {}, dnd5eInventory: { schemaVersion: 1, entries: [] } })
+    const activity: Dnd5eActivityDefinitionV1 = {
+      schemaVersion: 1, id: 'create-weapon', name: 'Synthetic created weapon', activation: { kind: 'bonus-action' }, target: { kind: 'self' },
+      consumption: [{ kind: 'action-economy', economy: 'bonus-action', amount: 1, consumeOn: 'resolve' }],
+      automation: automationCapabilityFromLegacyStatus('full'), outcomes: [{ id: 'create', when: { kind: 'always' }, operations: [{
+        id: 'weapon', kind: 'grant-inventory-item', target: 'actor', templateId: 'srd-5.1:equipment:dnd5e-longsword', quantity: { kind: 'constant', value: 1 }, equipToFreeHand: true,
+      }] }],
+    }
+    registerDnd5eActivityPackage({ packageId: 'test.created-weapon-hands', packageVersion: '1.0.0', activities: [activity] })
+    const snapshot = dnd5eActivityActorSnapshotFromCombatantV1(state.combatants.actor)
+    const before = structuredClone({ state, owner })
+    const result = resolveAndCommitDnd5eActivityCommand(state, {
+      command: { schemaVersion: 1, commandId: 'create', actorId: actor.id, packageId: 'test.created-weapon-hands', packageVersion: '1.0.0', activityId: activity.id, targetIds: [actor.id], expectedRevision: 0 },
+      currentRevision: 0, actor: snapshot, targets: [snapshot], authoritativeRolls: {}, distanceFeetByTargetId: { actor: 0 }, inventoryOwner: owner, inventoryRoster: [owner],
+    })
+    expect(result.result.ok).toBe(allowed)
+    expect({ state, owner }).toEqual(before)
+    if (result.phase !== 'commit') throw new Error('Expected authority commit boundary')
+    expect(result.result.state.combatants.actor.turn.bonusActionAvailable).toBe(!allowed)
+    expect(result.result.inventoryOwner?.dnd5eInventory?.entries.length ?? 0).toBe(allowed ? 1 : 0)
+    if (allowed) expect(result.result.inventoryOwner?.dnd5eInventory?.entries[0].equippedSlot).toBe('mainWeapon')
+  })
+  it.each([['direct', false], ['registered', false], ['direct', true], ['registered', true]] as const)('reconciles exhaustion movement without refunding spent distance through %s (flight %s)', (entry, flight) => {
+    for (const [before, amount, afterSpeed] of [[2, -1, 30], [1, 1, 15], [4, 1, 0], [5, -1, 15]]) {
+      const actor = combatant('actor', 'player', 20)
+      if (flight) actor.movementSpeeds = { walk: 30, fly: 60 }
+      actor.exhaustionLevel = before
+      const state = startDnd5eHeadlessCombat('exhaustion-movement', [actor, combatant('target', 'dm', 10)])
+      const initialSpeed = dnd5eEffectiveMovementPoolSpeed(actor)
+      const extraMovement = initialSpeed > 0 ? 15 : 0
+      state.combatants.actor.turn.movementSpent = 5
+      state.combatants.actor.turn.movementRemaining = Math.max(0, initialSpeed - 5) + extraMovement
+      const initial = structuredClone(state)
+      const activity: Dnd5eActivityDefinitionV1 = {
+        schemaVersion: 1, id: `fatigue-${before}`, name: 'Synthetic fatigue adjustment', activation: { kind: 'action' },
+        target: { kind: 'self' }, checks: [], automation: automationCapabilityFromLegacyStatus('full'),
+        outcomes: [{ id: 'adjust', when: { kind: 'always' }, operations: [{ id: 'fatigue', kind: 'adjust-exhaustion', target: 'actor', amount: { kind: 'constant', value: amount } }] }],
+      }
+      registerDnd5eActivityPackage({ packageId: `test.fatigue-${before}`, packageVersion: '1.0.0', activities: [activity] })
+      const snapshot = dnd5eActivityActorSnapshotFromCombatantV1(actor)
+      const command = resolveAndCommitDnd5eActivityCommand(state, {
+        command: { schemaVersion: 1, commandId: `fatigue-${before}`, actorId: actor.id, packageId: `test.fatigue-${before}`, packageVersion: '1.0.0', activityId: activity.id, targetIds: [actor.id], expectedRevision: 0 },
+        currentRevision: 0, actor: snapshot, targets: [snapshot], authoritativeRolls: {}, distanceFeetByTargetId: { actor: 0 },
+      })
+      const direct = entry === 'direct' ? commitDnd5eActivityExecution(state, {
+        actorId: actor.id, activityId: activity.id, targetIds: [actor.id], resolution: {
+          ok: true, status: 'resolved', checks: [], consumptions: [], proposals: [{ kind: 'adjust-exhaustion', operationId: 'fatigue', targetId: actor.id, amount }],
+        },
+      }) : undefined
+      expect(command.phase).toBe('commit')
+      if (command.phase !== 'commit') throw new Error('Fatigue command rejected')
+      const result = direct ?? command.result
+      expect(result.ok).toBe(true)
+      expect(result.state.combatants.actor.exhaustionLevel).toBe(before + amount)
+      expect(result.state.combatants.actor.turn.movementSpent).toBe(5)
+      expect(result.state.combatants.actor.turn.movementRemaining).toBe(afterSpeed === 0 ? 0 : Math.max(0, afterSpeed * (flight ? 2 : 1) - 5) + extraMovement)
+      expect(state).toEqual(initial)
+    }
+  })
+
+  it('updates sourced exhaustion through authority recovery without mutating the input ledger', () => {
+    const actor = combatant('actor', 'player', 20)
+    actor.exhaustionLevel = 3
+    actor.classState.sourcedExhaustion = {schemaVersion:1,baseLevel:0,sources:[{sourceId:'area-a',levels:2},{sourceId:'area-b',levels:1}]}
+    const state = startDnd5eHeadlessCombat('sourced-fatigue', [actor, combatant('target','dm',10)])
+    const initial = structuredClone(state)
+    const result = commitDnd5eActivityExecution(state, {
+      actorId:actor.id,activityId:'test:recover-fatigue',targetIds:[actor.id],
+      resolution:{ok:true,status:'resolved',checks:[],consumptions:[],proposals:[{kind:'adjust-exhaustion',operationId:'recover',targetId:actor.id,amount:-1}]},
+    })
+    expect(result.ok).toBe(true)
+    expect(result.state.combatants.actor.exhaustionLevel).toBe(2)
+    expect(result.state.combatants.actor.classState.sourcedExhaustion).toEqual({schemaVersion:1,baseLevel:0,sources:[{sourceId:'area-a',levels:1},{sourceId:'area-b',levels:1}]})
+    expect(state).toEqual(initial)
+  })
+
+  it.each([3, 10, 15])('commits an explicitly selected temporary HP pool without adding it to the previous pool (%s)', amount => {
+    const caster = combatant('caster', 'player', 20)
+    const recipient = combatant('recipient', 'dm', 10)
+    recipient.temporaryHp = 10
+    const state = startDnd5eHeadlessCombat('replace-hp', [caster, recipient])
+    const result = commitDnd5eActivityExecution(state, {
+      actorId: caster.id, activityId: 'test:replacement', targetIds: [recipient.id],
+      resolution: { ok: true, status: 'resolved', checks: [], consumptions: [], proposals: [{
+        kind: 'grant-temporary-hit-points', operationId: 'grant', targetId: recipient.id, amount, replacement: 'replace',
+      }] },
+    })
+    expect(result.ok).toBe(true)
+    expect(result.state.combatants.recipient.temporaryHp).toBe(amount)
+    expect(state.combatants.recipient.temporaryHp).toBe(10)
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'temporary-hit-points-gained', actorId: 'recipient', offered: amount, current: amount }))
+  })
+
+  it.each([0, 5, 10, 15])('opens a sourced recipient window only for actual temporary HP gains (previous %s)', previous => {
+    const caster = combatant('caster', 'player', 20)
+    const recipient = combatant('recipient', 'dm', 10)
+    recipient.temporaryHp = previous
+    const state = startDnd5eHeadlessCombat('temporary-hp-event', [caster, recipient])
+    const result = commitDnd5eActivityExecution(state, {
+      actorId: caster.id, activityId: 'test:inspiration', targetIds: [recipient.id],
+      resolution: { ok: true, status: 'resolved', checks: [], consumptions: [], proposals: [{
+        kind: 'grant-temporary-hit-points', operationId: 'grant', targetId: recipient.id, amount: 10,
+      }] },
+    })
+    expect(result.ok).toBe(true)
+    expect(result.state.combatants.recipient.temporaryHp).toBe(Math.max(previous, 10))
+    expect(state.combatants.recipient.temporaryHp).toBe(previous)
+    // Event provenance must not bind an ordinary pool to an effect's lifetime.
+    expect(result.state.combatants.recipient.classState.temporaryHitPointsSource).toBeUndefined()
+    const gains = result.events.filter(event => event.type === 'temporary-hit-points-gained')
+    expect(gains).toHaveLength(previous < 10 ? 1 : 0)
+    if (!gains.length) return
+    expect(gains[0]).toMatchObject({ actorId: 'recipient', amount: 10 - previous, offered: 10, current: 10,
+      source: { actorId: 'caster', rulesId: 'test:inspiration' } })
+    const [context] = dnd5eActivityTriggerContextsFromCombatEventV1(result.state,
+      JSON.parse(JSON.stringify(gains[0])), 0, 'temporary-hp-batch')
+    expect(context.event).toBe('temporary-hit-points-gained')
+    expect(context.eligibleActorIds).toEqual(['recipient'])
+    expect(context.eligibleTargetIds).toEqual(['recipient'])
+    expect(dnd5eContextPredicateSatisfiedV1({ kind: 'event-source', source: 'combat', sourceId: 'test:inspiration' }, context)).toBe(true)
+    expect(dnd5eContextPredicateSatisfiedV1({ kind: 'event-source', source: 'combat', sourceId: 'test:unrelated' }, context)).toBe(false)
+    expect(dnd5eActivityTriggerContextsFromCombatEventV1(result.state, { ...gains[0], amount: 0 }, 0, 'zero')).toEqual([])
+  })
+  it.each(['spell', 'feature', 'item', 'action', undefined] as const)('retains the authoritative damage origin without guessing missing provenance (%s)', kind => {
+    const actor = combatant('caster', 'player', 20)
+    const target = combatant('target', 'dm', 10)
+    const state = startDnd5eHeadlessCombat('damage-origin', [actor, target])
+    const result = commitDnd5eActivityExecution(state, {
+      actorId: actor.id, activityId: 'test:damage', castLevel: 3, targetIds: [target.id],
+      source: kind ? { kind, id: 'test:source' } : undefined,
+      resolution: { ok: true, status: 'resolved', checks: [], consumptions: [], proposals: [{
+        kind: 'deal-damage', operationId: 'damage', targetId: target.id, amount: 5, damageType: 'force', magical: true,
+      }] },
+    })
+    expect(result.ok).toBe(true)
+    const damage = result.events.filter(event => event.type === 'damage-applied')
+    expect(damage).toHaveLength(1)
+    expect(damage[0].origin).toEqual(kind ? { kind, id: 'test:source', activityId: 'test:damage',
+      ...(kind === 'spell' ? { spellLevel: 3 } : {}),
+    } : undefined)
+    expect(JSON.parse(JSON.stringify(damage))[0].origin).toEqual(damage[0].origin)
+    const contexts = dnd5eActivityTriggerContextsFromCombatEventV1(result.state, damage[0], 0, 'source-test')
+    expect(contexts.map(context => context.event)).toEqual(['after-damage', 'damage-dealt'])
+    expect(contexts[0].eligibleActorIds).toEqual(['target'])
+    expect(contexts[1].eligibleActorIds).toEqual(['caster'])
+    expect(contexts[1].eligibleTargetIds).toEqual(['target'])
+    expect(contexts[1].source.damage).toMatchObject({ amount: 5, damageTypes: ['force'] })
+    expect(dnd5eContextPredicateSatisfiedV1({ kind: 'event-source', source: 'spell' }, contexts[1])).toBe(kind === 'spell')
+    expect(dnd5eActivityTriggerContextsFromCombatEventV1(result.state, { ...damage[0], amount: 0 }, 0, 'zero')).toEqual([])
+    expect(dnd5eActivityTriggerContextsFromCombatEventV1(result.state,
+      { ...damage[0], suppressAfterDealtDamageTrigger: true }, 0, 'suppressed').map(context => context.event)).toEqual(['after-damage'])
+    expect(result.state.combatants.target.currentHp).toBe(25)
+    expect(state.combatants.target.currentHp).toBe(30)
+  })
   it('resolves a compound condition and extension with one repeat save', () => {
     const caster = combatant('prismatic-caster', 'player', 20)
     const target = combatant('prismatic-target', 'dm', 10)
@@ -1393,7 +1599,7 @@ describe('Activity Headless authority commit bridge', () => {
       targetIds: ['target'], resolution,
     })
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok) throw new Error(JSON.stringify(result))
     expect(result.state.combatants.target.currentHp).toBe(21)
     expect(result.state.combatants.actor.turn.actionAvailable).toBe(false)
     expect(result.state.combatants.actor.classResources['dnd5e-spell-slot-3']?.current).toBe(0)
@@ -1785,7 +1991,7 @@ describe('Activity Headless authority commit bridge', () => {
       inventoryOwner: owner,
     })
     expect(first.phase).toBe('commit')
-    if (first.phase !== 'commit' || !first.result.ok) return
+    if (first.phase !== 'commit' || !first.result.ok) throw new Error(JSON.stringify(first))
     expect(first.result.state.combatants.target.currentHp).toBe(25)
     expect(first.result.state.combatants.actor.classResources['item:srd-5.1:item:potion-of-healing:quantity']).toBeUndefined()
     expect(normalizeDnd5eInventory(first.result.inventoryOwner!).entries[0].quantity).toBe(1)
@@ -1811,12 +2017,10 @@ describe('Activity Headless authority commit bridge', () => {
 
   it('casts Goodberry into expiring inventory exactly once while spending the spell action and slot', () => {
     const activity = dnd5eSrdAuditedSpellActivityV1('goodberry')!
-    registerDnd5eActivityPackage({
-      packageId: 'srd-5.1', packageVersion: '1.0.0', activities: [activity],
-    })
+    expect(getRegisteredDnd5eActivity('srd-5.1', activity.id)).toBeDefined()
     const actorCombatant = combatant('actor', 'player', 20)
     actorCombatant.classResources['dnd5e-spell-slot-1'] = { current: 1, max: 1 }
-    const state = startDnd5eHeadlessCombat('activity-goodberry-bridge', [actorCombatant])
+    const state = startDnd5eHeadlessCombat('activity-goodberry-bridge', [actorCombatant, combatant('observer', 'dm', 10)])
     const inventoryOwner = normalizeCharacter({
       id: 'actor', name: 'actor', player: 'actor', charClass: '德鲁伊', maxHp: 30, currentHp: 20,
       equipment: {}, dnd5eWorldTimeAppliedMinute: 1_000,
@@ -1831,8 +2035,7 @@ describe('Activity Headless authority commit bridge', () => {
       schemaVersion: 1 as const,
       commandId: 'goodberry-command-1',
       actorId: 'actor',
-      packageId: 'srd-5.1',
-      packageVersion: '1.0.0',
+      packageId: 'srd-5.1', packageVersion: listRegisteredDnd5eActivityPackages().find(pkg => pkg.packageId === 'srd-5.1')!.packageVersion,
       activityId: activity.id,
       targetIds: ['actor'],
       castLevel: 1,
@@ -1843,10 +2046,10 @@ describe('Activity Headless authority commit bridge', () => {
       authoritativeRolls: {}, distanceFeetByTargetId: { actor: 0 }, inventoryOwner,
     })
     expect(first.phase).toBe('commit')
-    if (first.phase !== 'commit' || !first.result.ok) return
+    if (first.phase !== 'commit' || !first.result.ok) throw new Error(JSON.stringify(first))
     expect(first.result.state.combatants.actor).toMatchObject({
       classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 1 } },
-      turn: { action: { current: 0, max: 1 } },
+      turn: { actionAvailable: false },
     })
     const berries = normalizeDnd5eInventory(first.result.inventoryOwner!).entries
       .find((entry) => entry.templateId === 'srd-5.1:item:goodberry')
@@ -1869,11 +2072,9 @@ describe('Activity Headless authority commit bridge', () => {
 
   it('casts Create Food and Water into independently expiring food and durable water stacks', () => {
     const activity = dnd5eSrdAuditedSpellActivityV1('create-food-and-water')!
-    registerDnd5eActivityPackage({
-      packageId: 'srd-5.1', packageVersion: '1.0.0', activities: [activity],
-    })
+    expect(getRegisteredDnd5eActivity('srd-5.1', activity.id)).toBeDefined()
     const actorCombatant = combatant('actor', 'player', 20)
-    const state = startDnd5eHeadlessCombat('activity-create-food-bridge', [actorCombatant])
+    const state = startDnd5eHeadlessCombat('activity-create-food-bridge', [actorCombatant, combatant('observer', 'dm', 10)])
     const inventoryOwner = normalizeCharacter({
       id: 'actor', name: 'actor', player: 'actor', charClass: '牧师', maxHp: 30, currentHp: 30,
       equipment: {}, dnd5eWorldTimeAppliedMinute: 800,
@@ -1887,14 +2088,14 @@ describe('Activity Headless authority commit bridge', () => {
     const result = resolveAndCommitDnd5eActivityCommand(state, {
       command: {
         schemaVersion: 1, commandId: 'create-food-command-1', actorId: 'actor',
-        packageId: 'srd-5.1', packageVersion: '1.0.0', activityId: activity.id,
+        packageId: 'srd-5.1', packageVersion: listRegisteredDnd5eActivityPackages().find(pkg => pkg.packageId === 'srd-5.1')!.packageVersion, activityId: activity.id,
         targetIds: ['actor'], castLevel: 3, expectedRevision: 0,
       },
       currentRevision: 0, actor: actorSnapshot, targets: [actorSnapshot],
       authoritativeRolls: {}, distanceFeetByTargetId: { actor: 0 }, inventoryOwner,
     })
     expect(result.phase, JSON.stringify(result)).toBe('commit')
-    if (result.phase !== 'commit' || !result.result.ok) return
+    if (result.phase !== 'commit' || !result.result.ok) throw new Error(JSON.stringify(result))
     const entries = normalizeDnd5eInventory(result.result.inventoryOwner!).entries
     expect(entries.find((entry) => entry.templateId === 'srd-5.1:item:conjured-food-portion'))
       .toMatchObject({ quantity: 15, expiresAtWorldMinute: 2_240 })
@@ -1904,12 +2105,10 @@ describe('Activity Headless authority commit bridge', () => {
 
   it('casts Identify through the selected inventory instance and rejects replay duplication', () => {
     const activity = dnd5eSrdAuditedSpellActivityV1('identify')!
-    registerDnd5eActivityPackage({
-      packageId: 'srd-5.1', packageVersion: '1.0.0', activities: [activity],
-    })
+    expect(getRegisteredDnd5eActivity('srd-5.1', activity.id)).toBeDefined()
     const actorCombatant = combatant('actor', 'player', 20)
     actorCombatant.classResources['dnd5e-spell-slot-1'] = { current: 1, max: 1 }
-    const state = startDnd5eHeadlessCombat('activity-identify-bridge', [actorCombatant])
+    const state = startDnd5eHeadlessCombat('activity-identify-bridge', [actorCombatant, combatant('observer', 'dm', 10)])
     const emptyOwner = normalizeCharacter({
       id: 'actor', name: 'actor', player: 'actor', charClass: '法师', maxHp: 30, currentHp: 30,
       equipment: {}, dnd5eInventory: { schemaVersion: 1, entries: [] },
@@ -1927,7 +2126,7 @@ describe('Activity Headless authority commit bridge', () => {
     }
     const command = {
       schemaVersion: 1 as const, commandId: 'identify-command-1', actorId: 'actor',
-      packageId: 'srd-5.1', packageVersion: '1.0.0', activityId: activity.id,
+      packageId: 'srd-5.1', packageVersion: listRegisteredDnd5eActivityPackages().find(pkg => pkg.packageId === 'srd-5.1')!.packageVersion, activityId: activity.id,
       targetIds: ['actor'], castLevel: 1, expectedRevision: 0,
       inventoryInstanceId: entry.instanceId,
       expectedInventoryRevision: normalizeDnd5eInventory(inventoryOwner).revision ?? 0,
@@ -1937,7 +2136,7 @@ describe('Activity Headless authority commit bridge', () => {
       authoritativeRolls: {}, distanceFeetByTargetId: { actor: 0 }, inventoryOwner,
     })
     expect(first.phase).toBe('commit')
-    if (first.phase !== 'commit' || !first.result.ok) return
+    if (first.phase !== 'commit' || !first.result.ok) throw new Error(JSON.stringify(first))
     expect(normalizeDnd5eInventory(first.result.inventoryOwner!).entries[0].identified).toBe(true)
     expect(first.result.state.combatants.actor.classResources['dnd5e-spell-slot-1']?.current).toBe(0)
 
@@ -1956,9 +2155,7 @@ describe('Activity Headless authority commit bridge', () => {
       .find((entry) => entry.id === 'remove-curse')!
     const activity = (definition.activities as readonly Dnd5eActivityDefinitionV1[]).find((entry) =>
       entry.id === 'spell:remove-curse:cursed-item')!
-    registerDnd5eActivityPackage({
-      packageId: 'srd-5.1', packageVersion: '1.0.0', activities: [activity],
-    })
+    expect(getRegisteredDnd5eActivity('srd-5.1', activity.id)).toBeDefined()
     const caster = combatant('actor', 'player', 20)
     const target = combatant('target', 'player', 10)
     const state = startDnd5eHeadlessCombat('activity-remove-curse-item', [caster, target])
@@ -2001,7 +2198,7 @@ describe('Activity Headless authority commit bridge', () => {
     const result = resolveAndCommitDnd5eActivityCommand(state, {
       command: {
         schemaVersion: 1, commandId: 'remove-curse-item-command-1', actorId: 'actor',
-        packageId: 'srd-5.1', packageVersion: '1.0.0', activityId: activity.id,
+        packageId: 'srd-5.1', packageVersion: listRegisteredDnd5eActivityPackages().find(pkg => pkg.packageId === 'srd-5.1')!.packageVersion, activityId: activity.id,
         targetIds: ['target'], castLevel: 3, expectedRevision: 0,
         inventoryInstanceId: entry.instanceId,
         expectedInventoryRevision: normalizeDnd5eInventory(inventoryOwner).revision ?? 0,
@@ -2010,7 +2207,7 @@ describe('Activity Headless authority commit bridge', () => {
       authoritativeRolls: {}, distanceFeetByTargetId: { target: 5 }, inventoryOwner,
     })
     expect(result.phase, JSON.stringify(result)).toBe('commit')
-    if (result.phase !== 'commit' || !result.result.ok) return
+    if (result.phase !== 'commit' || !result.result.ok) throw new Error(JSON.stringify(result))
     const changed = normalizeDnd5eInventory(result.result.inventoryOwner!).entries[0]
     expect(changed.attuned).toBeUndefined()
     expect(changed.item.magicItem?.cursed).toBe(true)
@@ -2122,6 +2319,47 @@ describe('Activity Headless authority commit bridge', () => {
     }))
     expect(activity.choices?.[0]?.options).toHaveLength(15)
     expect(activity.choices?.[0]?.options.every((option) => option.id.startsWith('srd-5.1:'))).toBe(true)
+  })
+
+  it.each(['divination', 'conjuration'] as const)('honors imported %s metadata when reporting creatures protected by a temple', school => {
+    const packageId = 'local.temple.detection-audit'
+    const spellId = `${packageId}:presence`
+    const dispose = registerDnd5eRulesPlugin({manifest:{id:packageId,name:'Detection audit',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+      api.registerSpell(JSON.parse(JSON.stringify({id:'presence',name:'Presence',level:1,school,ritual:false,
+        castingTime:{value:1,unit:'action'},range:{type:'distance',feet:30},components:{verbal:true,somatic:true,material:false},
+        duration:{type:'timed',value:10,unit:'minute',concentration:true},classes:['wizard'],description:'Synthetic detection fixture',automation:{mode:'reference-only'}})))
+    }})
+    try {
+      const activity: Dnd5eActivityDefinitionV1 = JSON.parse(JSON.stringify(dnd5eSrdAuditedSpellActivityV1('detect-evil-and-good')!))
+      const actor = combatant('actor', 'player', 20), target = combatant('target', 'dm', 10)
+      actor.classResources['dnd5e-spell-slot-1'] = {current:1,max:1}
+      target.creatureType = 'celestial'
+      target.position = {x:125,y:125}
+      const state = startDnd5eHeadlessCombat('imported-detection', [actor,target])
+      state.distanceFeetByCombatantPair = {[dnd5eCombatantPairKey(actor.id,target.id)]:10}
+      const geometry = createEmptyMapGeometry('imported-temple-detection')
+      geometry.structureLifetimes = [{id:'temple',casterId:'builder',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:[],replacementGroup:'temple-of-the-gods',siteKey:'site',
+        objectBoundary:{points:[{x:100,y:100},{x:150,y:100},{x:150,y:150},{x:100,y:150}],bottomFeet:0,topFeet:20},
+        templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}]
+      state.mapId = geometry.mapId
+      state.companionScene = {map:{id:geometry.mapId,name:'Temple',width:1000,height:1000,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[]},geometry,worldMinute:100,projectedTokenIds:[]}
+      const snapshot = dnd5eActivityActorSnapshotFromCombatantV1(state.combatants.actor)
+      const resolution = resolveDnd5eActivity({activity,actor:snapshot,targets:[snapshot],castLevel:1,rolls:{},distanceFeetByTargetId:{actor:0}})
+      expect(resolution.ok).toBe(true)
+      const committed = commitDnd5eActivityExecution(state,{actorId:'actor',activityId:activity.id,castLevel:1,targetIds:['actor'],resolution,source:{kind:'spell',id:spellId,packageId}})
+      expect(committed.ok,committed.ok?undefined:committed.reason).toBe(true)
+      if(!committed.ok)return
+      const restored: typeof state = JSON.parse(JSON.stringify(committed.state))
+      const detected = () => dnd5ePersistentDetectionReports(restored,'actor').some(report=>report.presences.some(presence=>presence.targetId==='target'))
+      expect(detected()).toBe(school!=='divination')
+      expect(restored.combatants.actor.classResources['dnd5e-spell-slot-1'].current).toBe(0)
+      expect(state.combatants.actor.classResources['dnd5e-spell-slot-1'].current).toBe(1)
+      restored.combatants.target.elevationFeet=20
+      expect(detected()).toBe(true)
+      restored.combatants.target.elevationFeet=0
+      restored.companionScene!.worldMinute=1440
+      expect(detected()).toBe(true)
+    } finally {dispose()}
   })
 
   it('casts all three SRD detection modes and derives presences from Host state', () => {
@@ -2237,6 +2475,26 @@ describe('Activity Headless authority commit bridge', () => {
     expect(planarReport?.presences).toEqual(expect.arrayContaining([expect.objectContaining({
       targetId: 'planar-target', categories: ['celestial'],
     })]))
+    if(planar){
+      const state=planar.state,target=state.combatants['planar-target']
+      const geometry=createEmptyMapGeometry('temple-detection')
+      const {x,y}=target.position
+      geometry.structureLifetimes=[{id:'temple',casterId:'builder',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:[],replacementGroup:'temple-of-the-gods',siteKey:'site',
+        objectBoundary:{points:[{x:x-1,y:y-1},{x:x+1,y:y-1},{x:x+1,y:y+1},{x:x-1,y:y+1}],bottomFeet:0,topFeet:20},
+        templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}]
+      state.mapId=geometry.mapId
+      state.companionScene={map:{id:geometry.mapId,name:'Temple',width:1000,height:1000,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[]},geometry,worldMinute:100,projectedTokenIds:[]}
+      const detected=()=>dnd5ePersistentDetectionReports(state,'actor').some(report=>report.presences.some(presence=>presence.targetId===target.id))
+      expect(detected()).toBe(false)
+      target.elevationFeet=20
+      expect(detected()).toBe(true)
+      target.elevationFeet=0
+      state.companionScene.worldMinute=1440
+      expect(detected()).toBe(true)
+      state.companionScene.worldMinute=100
+      geometry.structureLifetimes=[]
+      expect(detected()).toBe(true)
+    }
 
     const poison = castDetection('detect-poison-and-disease')
     const poisonReport = poison ? dnd5ePersistentDetectionReports(poison.state, 'actor')[0] : undefined
@@ -2430,7 +2688,7 @@ describe('Activity Headless authority commit bridge', () => {
         confirmedBy: 'actor',
       })
       expect(result.phase).toBe('commit')
-      if (result.phase !== 'commit' || !result.result.ok) return
+      if (result.phase !== 'commit' || !result.result.ok) throw new Error(JSON.stringify(result))
       expect(result.result.state.combatants.actor.classResources[resourceId]?.current).toBe(0)
       expect(result.result.state.combatants.actor.classState.nextD20Advantage).toMatchObject({
         featureId,
@@ -2453,7 +2711,7 @@ it('DM ending Time Stop clears controller, suspension and future extra turns tog
     }] },
   })
   expect(result.ok).toBe(true)
-  if (!result.ok) return
+  if (!result.ok) throw new Error(JSON.stringify(result))
   const group = result.state.combatants.actor.classState.activityExtraTurnGroup!
   expect(result.state.combatants.actor.classState.activeEffects?.some(e => e.source.rulesId === 'time-stop')).toBe(true)
   endDnd5eActivityExtraTurnGroup(result.state, group.groupId, [])
@@ -2463,3 +2721,5 @@ it('DM ending Time Stop clears controller, suspension and future extra turns tog
   expect(result.state.combatants.target.turn.reactionAvailable).toBe(true)
   expect(result.state.combatants.actor.classState.activeEffects?.some(e => e.source.rulesId === 'time-stop') ?? false).toBe(false)
 })
+
+

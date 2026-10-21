@@ -118,7 +118,8 @@ export async function exportDnd5eStarMod(bundle: Dnd5eUnifiedContentBundleV1): P
       if (!type) throw new Error('unsupported-export-kind')
       const key = `${definition.kind}.${definition.id}`
       dictionary[`${key}.name`] = definition.name
-      dictionary[`${key}.description`] = definition.description ?? ''
+      dictionary[`${key}.description`] = definition.description ??
+        ('description' in definition.payload && typeof definition.payload.description === 'string' ? definition.payload.description : '')
       return { id: definition.id, type, systemId: 'dnd5e', sourcePackageId: manifest.packageId, sourceEntryId: definition.id,
         version: definition.version, localizationKey: key, tags: definition.tags ?? [], rulesData: definition.payload,
         automationData: { activities: definition.activities, effects: definition.effects, advancements: definition.advancements, capability: definition.automation },
@@ -159,9 +160,17 @@ export async function readLegacyDnd5eStarMod(bytes: ArrayBuffer): Promise<{packa
  const projected = legacyPackageCompendium(value)
  const manifest = {...neutral.manifest}
  delete manifest.files
+ // Capability is derived from the installed Host handlers, so its snapshot can
+ // change across app versions without any authored rule changing. Never trust
+ // that cached claim; runtime projection below uses the validated V2 payload.
+ const authoredEntries = (entries: StarModPackage['entries']) => entries.map(entry => {
+   const automationData = entry.automationData ? {...entry.automationData} : undefined
+   if (automationData) delete automationData.capability
+   return {...entry, ...(automationData ? {automationData} : {})}
+ })
  // A compatibility payload cannot hide different content or distribution permissions behind its preview.
  if (canonical(projected.manifest) !== canonical(manifest) ||
-     canonical(projected.entries) !== canonical(neutral.entries) ||
+     canonical(authoredEntries(projected.entries)) !== canonical(authoredEntries(neutral.entries)) ||
      canonical(projected.localizations) !== canonical(neutral.localizations) || Object.keys(neutral.assets).length) throw new Error('starmod-legacy-projection-mismatch')
  assertPackageManifest(neutral.manifest,{appVersion:appPackage.version,systemId:'dnd5e',systemVersion:'2014',checkDependencies:false})
  return {package:value,manifest:neutral.manifest}

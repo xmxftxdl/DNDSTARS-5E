@@ -44,6 +44,19 @@ function map(): BattleMap {
   }
 }
 
+it.each([0,20])('accepts explicit unchanged altitude for horizontal-only area movement at %i feet',height=>{
+ const current=map()
+ current.dnd5ePluginAreas=[{id:'horizontal',pluginId:'test',featureId:'test',label:'Horizontal',color:'',sourceTokenId:'caster-token',sourceCharacterId:'caster',
+  anchorMode:'fixed',anchorCell:{col:2,row:2},cells:[{col:2,row:2}],createdRound:1,expiresAfterRound:10,
+  vertical:{mode:'volume',baseElevationFeet:height,heightFeet:30},circularGeometry:{radiusFeet:10},movement:{economy:'action',maximumFeet:30}}]
+ const input={map:current,areaId:'horizontal',sourceTokenId:'caster-token',round:1,targetCell:{col:3,row:2}}
+ expect(moveDnd5eCoreSpellArea({...input,targetElevationFeet:height}).ok).toBe(true)
+ for(const targetElevationFeet of [height+5,height-5,NaN,Infinity]){
+  expect(moveDnd5eCoreSpellArea({...input,targetElevationFeet})).toMatchObject({ok:false,reason:'invalid-target'})
+ }
+ expect(current.dnd5ePluginAreas[0].anchorCell).toEqual({col:2,row:2})
+})
+
 describe('core spell persistent area declarations', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
@@ -1243,5 +1256,17 @@ describe('core spell persistent area declarations', () => {
       distanceFeet: 15,
       area: { anchorCell: { col: 5, row: 1 } },
     })
+    const templeGeometry=createEmptyMapGeometry(base.id,1)
+    templeGeometry.structureLifetimes=[{id:'temple',casterId:'builder',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:[],replacementGroup:'temple-of-the-gods',siteKey:'site',
+      objectBoundary:{points:[{x:190,y:50},{x:195,y:50},{x:195,y:100},{x:190,y:100}],bottomFeet:0,topFeet:20},
+      templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}]
+    const before=structuredClone(placed)
+    const move=(worldMinute:number)=>moveDnd5eCoreSpellArea({map:placed,geometry:templeGeometry,areaId:area.id,sourceTokenId:'caster-token',targetCell:{col:5,row:1},worldMinute})
+    // Both endpoints are outside, and this narrow rotated-capable volume lies between grid centres.
+    expect(move(100)).toMatchObject({ok:false,reason:'movement-blocked'})
+    expect(placed).toEqual(before)
+    expect(move(1440).ok).toBe(true)
+    templeGeometry.structureLifetimes=[]
+    expect(move(100).ok).toBe(true)
   })
 })

@@ -254,6 +254,25 @@ describe('CampaignTimeSystem authoritative hydration gate', () => {
 })
 
 describe('CampaignTimeSystem Creation object expiry', () => {
+  it('expires a corpse ward at seven days without removing the physical remains', () => {
+    const map: BattleMap = { id: 'corpse-map', name: 'Map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [{ id: 'corpse', label: 'Corpse', x: 100, y: 100, color: '', emoji: '', size: 1, type: 'obstacle',
+        dnd5eObjectState: { schemaVersion: 1, remains: { kind: 'humanoid-corpse', creatureSize: 'medium' },
+          undeadCreationProtection: { schemaVersion: 1, minimumPower: 'wish', sourceTokenId: 'cleric',
+            sourceActivityId: 'funeral', sourcePackageId: 'test.funeral', spellLevel: 1,
+            createdWorldMinute: 100, expiresAtWorldMinute: 10180 } } }] }
+    const before = structuredClone(map)
+    expect(projectDnd5eCampaignTimeCreatedObjects({ maps: [map], worldMinute: 10179 }).changed).toBe(false)
+    const expired = projectDnd5eCampaignTimeCreatedObjects({ maps: [map], worldMinute: 10180 })
+    expect(expired.changed).toBe(true)
+    expect(expired.removedTokenIds).toEqual([])
+    expect(expired.maps[0].tokens).toHaveLength(1)
+    expect(expired.maps[0].tokens[0].dnd5eObjectState?.remains).toEqual({ kind: 'humanoid-corpse', creatureSize: 'medium' })
+    expect(expired.maps[0].tokens[0].dnd5eObjectState?.undeadCreationProtection).toBeUndefined()
+    expect(map).toEqual(before)
+    expect(projectDnd5eCampaignTimeCreatedObjects({ maps: expired.maps, worldMinute: 10180 }).changed).toBe(false)
+  })
   it('keeps the object before its exact minute and removes it at expiry', () => {
     const map = {
       id: 'map', name: 'Map', width: 500, height: 500, gridSize: 50,

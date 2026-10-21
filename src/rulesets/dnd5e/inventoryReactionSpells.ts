@@ -1,3 +1,4 @@
+import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
 import type { Character } from '../../types/character'
 import type { Dnd5eInventoryReactionSpellSnapshot } from '../../types/inventory'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
@@ -9,6 +10,7 @@ const REACTION_SPELL_IDS = new Set(['shield', 'counterspell', 'hellish-rebuke'])
 export function dnd5eInventoryReactionSpellSnapshots(
   character: Character,
 ): Dnd5eInventoryReactionSpellSnapshot[] {
+  if (dnd5eEquipmentMergedBySpellForm(character)) return []
   const sources = dnd5eEffectiveSpellcastingSources(character)
   return normalizeDnd5eInventory(character).entries.flatMap((entry) => {
     if (

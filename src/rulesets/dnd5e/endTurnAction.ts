@@ -1,4 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import { settleDnd5eAreaRepeatSaveEjections } from './persistentAreaRepeatSave'
+import { settleDnd5eEtherealReturns } from './etherealReturnSettlement'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
@@ -33,6 +35,7 @@ import { dnd5eIsIncapacitated, dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
 import {
   dnd5eActiveFlySpeed,
+  dnd5eLimitFlySpeed,
   dnd5eActiveSafeFallFeet,
   dnd5eConditionsFromActiveEffects,
   reconcileDnd5eCompoundRepeatSaveEffects,
@@ -161,6 +164,7 @@ export interface PreparedDnd5ePlayerEndTurn {
 }
 
 export function prepareDnd5ePlayerEndTurn(input: {
+  worldMinute?: number
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -179,6 +183,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
     return { ok: false, reason: 'invalid-actor' }
   }
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: input.action.combatId ?? `map-${input.map.id}`,
     round: input.action.round,
     turnSlotId: input.initiativeOrder[input.action.initiativeIndex]?.slotId,
@@ -197,7 +202,10 @@ export function prepareDnd5ePlayerEndTurn(input: {
   snapshot.state.initiativeIndex = actorIndex
   const requestedSlotId = requestedSlot?.slotId ?? requestedSlot?.tokenId
   if (
-    requestedSlotId?.startsWith('activity-extra-turns:') &&
+    (requestedSlotId?.startsWith('activity-extra-turns:') ||
+      (requestedSlotId?.startsWith('interrupting-turn:') &&
+        (snapshot.state.combatants[actorToken.id].classState.zeroHitPointExtraTurn?.slotId === requestedSlotId ||
+          snapshot.state.combatants[actorToken.id].classState.interruptedTurnResume?.receipt.extraSlotId === requestedSlotId))) &&
     !snapshot.state.oneShotInitiativeSlotIds?.includes(requestedSlotId)
   ) {
     // Shared initiative payloads may come from an older/filtered client that
@@ -224,6 +232,8 @@ export function prepareDnd5ePlayerEndTurn(input: {
         actorCombatant.turn.objectInteractionAvailable !== false &&
         (input.turnEconomy.objectInteraction?.current ?? 1) > 0,
       movementRemaining: Math.max(0, input.turnEconomy.movement.current),
+      movementSpent: Math.max(0, input.turnEconomy.movement.spent ??
+        (input.turnEconomy.movement.max - Math.min(input.turnEconomy.movement.current, input.turnEconomy.movement.max))),
     }
   }
   const fearSourceId = actorCombatant.classState.intimidatingPresenceSourceId
@@ -257,6 +267,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
       sourceIsSpell: effect.source.kind === 'spell',
     })
     const creatureType = (actorCombatant.creatureType ?? '').trim().toLowerCase()
+    if(repeatSave.disadvantage) mode=dnd5eHeightenedSavingThrowMode(mode,true)
     if (
       effect.source.rulesId === 'sunburst' &&
       (creatureType === 'undead' || creatureType.includes('亡灵') || creatureType === 'ooze' || creatureType.includes('泥怪'))
@@ -419,13 +430,13 @@ export function prepareDnd5ePlayerEndTurn(input: {
       modifier: previewNextCombatant!.savingThrowBonuses[repeatSave.ability] ??
         Math.floor((previewNextCombatant!.abilities[repeatSave.ability] - 10) / 2),
       dc: repeatSave.dc,
-      mode: dnd5eSavingThrowMode(previewNextCombatant!, repeatSave.ability, {
+      mode: dnd5eHeightenedSavingThrowMode(dnd5eSavingThrowMode(previewNextCombatant!, repeatSave.ability, {
         effectVisible: effect.visibility !== 'dm-only',
         condition: effect.standardCondition,
         sourceCreatureType: source?.creatureType,
         sourceIsSpell: effect.source.kind === 'spell',
         sourceIsMagical: effect.source.magical === true,
-      }),
+      }), repeatSave.disadvantage === true),
       blessed: turnStartPreview
         ? dnd5eCombatantHasConcentrationEffect(turnStartPreview, previewNextCombatant!.id, 'bless')
         : false,
@@ -499,10 +510,10 @@ export function prepareDnd5ePlayerEndTurn(input: {
       actorCombatant,
       'turn-flight',
     )
-  const hasOtherFlight = Math.max(
+  const hasOtherFlight = dnd5eLimitFlySpeed(actorCombatant.classState.activeEffects, Math.max(
     actorCombatant.movementSpeeds?.fly ?? 0,
     dnd5eActiveFlySpeed(actorCombatant.classState.activeEffects) ?? 0,
-  ) > 0
+  )) > 0
   const landingElevationFeet = mapGeometryTerrainElevationAtPoint(
     mapGeometryRuntimeForMap(input.map.id),
     actorToken,
@@ -552,6 +563,8 @@ export function prepareDnd5ePlayerEndTurn(input: {
 }
 
 export function resolveDnd5ePlayerEndTurn(input: {
+  savingThrowCounterattacks?: import('./headlessCombatEngine').Dnd5eAction['savingThrowCounterattacks']
+  worldMinute?: number
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -593,6 +606,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
     state,
     {
       type: 'end-turn', actorId: actorToken.id,
+      savingThrowCounterattacks: input.savingThrowCounterattacks,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
       activeEffectPeriodicDamageRolls: input.activeEffectPeriodicDamageRolls,
       activeEffectRandomConditionRolls: input.activeEffectRandomConditionRolls,
@@ -613,8 +627,15 @@ export function resolveDnd5ePlayerEndTurn(input: {
       deferNextTurnStart: input.deferNextTurnStart,
     },
     input.airborneFallDamageRollsByCombatantId,
+    undefined,
+    {beforeAirborneFalls: result => {
+      const released = settleDnd5eAreaRepeatSaveEjections({before:state,result,map:input.map,
+        characters:input.characters,characterIdByCombatantId}) ?? {ok:false as const,state,events:[],reason:'invalid-target' as const}
+      return settleDnd5eEtherealReturns({before:state,result:released,map:input.map,
+        geometry:mapGeometryRuntimeForMap(input.map.id)})
+    }},
   )
-  if (!result.ok) return { ok: false, reason: 'invalid-action', airborneFalls }
+  if (!result?.ok) return { ok: false, reason: 'invalid-action', airborneFalls }
   return {
     ok: true,
     actor,

@@ -1,4 +1,6 @@
+import './activeEffects'
 import { describe, expect, it } from 'vitest'
+import { applyDnd5eInventoryMutation } from './items'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import type { BattleMap, Token } from '../../store/maps'
@@ -36,7 +38,7 @@ function action(feature: 'volley' | 'whirlwind-attack', centerId: string): Share
 }
 
 function prepare(feature: 'volley' | 'whirlwind-attack', tokens: Token[], extraCharacters: Character[] = []) {
-  const character = ranger(feature)
+  const character = applyDnd5eInventoryMutation([ranger(feature)],{type:'grant',characterId:'ranger',templateId:'srd-5.1:item:arrows',quantity:20}).characters[0]
   const map: BattleMap = {
     id: 'map', name: 'Map', width: 1000, height: 600, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
     showGrid: true, feetPerCell: 5, tokens,
@@ -49,6 +51,31 @@ function prepare(feature: 'volley' | 'whirlwind-attack', tokens: Token[], extraC
 }
 
 describe('Hunter Multiattack authority bridge', () => {
+  it('supports one target attack and preserves simultaneous advantage and disadvantage', () => {
+    const result = prepare('volley', [token('ranger-token', 'player', 25, 25, 'ranger'),
+      token('center', 'enemy', 275, 25), token('nearby', 'enemy', 325, 25)])
+    expect(result.ok).toBe(true); if (!result.ok) return
+    const prepared = result.prepared
+    prepared.state.companionScene!.map.dnd5ePluginAreas = [{ id: 'hawk', pluginId: 'test', featureId: 'totem', label: 'Hawk', color: '#fff',
+      sourceTokenId: 'ranger-token', sourceCharacterId: 'ranger', cells: [{ col: 5, row: 0 }, { col: 6, row: 0 }],
+      createdRound: 1, expiresAfterRound: 10, relation: 'any', includeSelf: true, attackAdvantageReaction: 'area-source' }]
+    const target = prepared.targets[0], use = { areaId: 'hawk', sourceId: 'ranger-token' }
+    target.areaAttackAdvantageReaction = use
+    expect(previewDnd5eHunterMultiattack(prepared, 0, 2, 18).roll.d20).toBe(18)
+    expect(previewDnd5eHunterMultiattack(prepared, 1, 2, 18).roll.d20).toBe(2)
+    const original = target.attackModeResolution
+    target.attackModeResolution = { mode: 'normal', advantageReasons: ['existing advantage'], disadvantageReasons: ['existing disadvantage'] }
+    expect(previewDnd5eHunterMultiattack(prepared, 0, 2, 18).mode).toBe('normal')
+    target.attackModeResolution = original
+    const resolved = resolvePreparedDnd5eHunterMultiattack({ prepared, rolls: [
+      { d20: 2, d20Second: 18, damageRolls: [3], classDamageRolls: [], areaAttackAdvantageReaction: use },
+      { d20: 2, damageRolls: [], classDamageRolls: [] },
+    ] })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events.filter(e => e.type === 'attack-resolved').map(e => e.d20)).toEqual([18, 2])
+    expect(resolved.result.state.combatants['ranger-token'].turn.reactionAvailable).toBe(false)
+  })
+
   it('uses a visible token as the Volley point and attacks each hostile creature within 10 feet once', () => {
     const prepared = prepare('volley', [
       token('ranger-token', 'player', 25, 25, 'ranger'),
@@ -144,4 +171,25 @@ describe('Hunter Multiattack authority bridge', () => {
       turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
     })).toEqual({ ok: false, reason: 'wrong-weapon' })
   })
+})
+
+it.each([1, 20, undefined])('passes Shield casting saves through hunter multiattack: %s', async d20 => {
+  const { createDnd5eMechanicalEffect } = await import('./activeEffects')
+  const target = token('center', 'enemy', 275, 25)
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: target.id,
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  target.poolId = 'srd-5.1:mage'
+  target.dnd5eCombatState = { activeEffects: [pain], monsterSpellSlots: { 1: { current: 1, max: 1 } } }
+  const ready = prepare('volley', [token('ranger-token', 'player', 25, 25, 'ranger'), target])
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const prepared = ready.prepared
+  const result = resolvePreparedDnd5eHunterMultiattack({ prepared,
+    rolls: [{ d20: prepared.targets[0].armorClass + 1 - prepared.profile.attackModifier,
+      damageRolls: d20 === 20 ? [] : [2], classDamageRolls: [] }],
+    shieldSpellcastingSavingThrows: d20 == null ? undefined : { center: [{ effectId: pain.id, d20 }] } })
+  expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(d20 != null)
+  if (!result.result.ok) { expect(result.application).toBeUndefined(); return }
+  expect(result.result.state.combatants.center.currentHp).toBe(d20 === 20 ? 30 : 30 - 2 - prepared.profile.damage.bonus)
+  expect(result.result.state.combatants.center.classState.monsterSpellSlots?.[1].current).toBe(0)
 })

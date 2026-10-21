@@ -27,6 +27,17 @@ function localStorageDouble() {
 // two write/event topologies diverge on purpose: state/image WRITES double-send to all configured
 // bases (file-backed, idempotent), while EVENTS go to a single canonical base (one SSE backlog).
 describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology)', () => {
+  it('keeps an explicit transaction revision even after a newer snapshot is read',async()=>{
+    const resource=`frozen-revision-${Date.now()}`
+    const fetchMock=vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({updatedAt:9}),{status:200,headers:{'X-Stars-State-Revision':'9'}}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({error:'shared-state-transaction-conflict',conflicts:[{name:resource,currentRevision:9}]}),{status:409}))
+    vi.stubGlobal('fetch',fetchMock)
+    await loadSharedResource(resource)
+    await expect(saveSharedResourcesAtomically([{name:resource,data:{updatedAt:4},expectedRevision:4}],{transactionId:'frozen-test',readRevisions:{combat:2,'map-geometry':3}})).rejects.toThrow('shared-state-transaction-conflict')
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).writes[0].expectedRevision).toBe(4)
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).readRevisions).toEqual({combat:2,'map-geometry':3})
+  })
   afterEach(() => {
     vi.useRealTimers()
     resetSharedResourceReadCacheForTests()

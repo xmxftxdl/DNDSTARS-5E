@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Crown, Download, FileSpreadsheet, LoaderCircle, Trash2, Upload, User, UserPlus, Users } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
-import CharacterSheet from '../components/character/CharacterSheet'
-import CharacterSetupDialog, { type CharacterSetupResult } from '../components/character/CharacterSetupDialog'
-import CharacterCreationAdvancementFlow from '../components/character/CharacterCreationAdvancementFlow'
-import CharacterExcelImportDialog from '../components/character/CharacterExcelImportDialog'
+import type { CharacterSetupResult } from '../components/character/CharacterSetupDialog'
 import DMRoster from '../components/character/DMRoster'
 import AccountCharacterVaultPanel from '../components/character/AccountCharacterVaultPanel'
 import { useCharacterStore } from '../store/characters'
@@ -30,13 +27,16 @@ import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
 import { dnd5eStartingEquipmentPlan, resolveDnd5eStartingEquipment } from '../rulesets/dnd5e/startingEquipment'
 import { showAppAlert, showAppConfirm } from '../lib/appDialog'
 import { createCharacterPortraitDataUrl } from '../lib/characterPortrait'
-import {
-  buildCharacterExcelImportDraft,
-  characterExcelImageFile,
-  parseCharacterExcelFile,
-  type CharacterExcelImportDraft,
-  type CharacterExcelWorkbook,
-} from '../lib/characterExcelImport'
+import type { CharacterExcelImportDraft, CharacterExcelWorkbook } from '../lib/characterExcelImport'
+
+const CharacterSheet = lazy(() => import('../components/character/CharacterSheet'))
+const CharacterSetupDialog = lazy(() => import('../components/character/CharacterSetupDialog'))
+const CharacterCreationAdvancementFlow = lazy(() => import('../components/character/CharacterCreationAdvancementFlow'))
+const CharacterExcelImportDialog = lazy(() => import('../components/character/CharacterExcelImportDialog'))
+
+function CharacterToolLoading() {
+  return <p className="p-4 text-sm text-slate-400" role="status">正在加载角色工具…</p>
+}
 
 type Mode = 'player' | 'dm'
 
@@ -269,6 +269,7 @@ export default function CharactersPage() {
     if (excelImportBusy) return
     setExcelImportBusy(true)
     try {
+      const { parseCharacterExcelFile, buildCharacterExcelImportDraft, characterExcelImageFile } = await import('../lib/characterExcelImport')
       const workbook = await parseCharacterExcelFile(file)
       const draft = buildCharacterExcelImportDraft(workbook)
       let portraitDataUrl: string | undefined
@@ -478,9 +479,10 @@ export default function CharactersPage() {
           description="点击右上角“新建角色”创建角色，或载入已有的角色 JSON。"
         />
       ) : !isDM ? (
-        <div>{activeId && <CharacterSheet id={activeId} isDM={false} />}</div>
+        <div>{activeId && <Suspense fallback={<CharacterToolLoading />}><CharacterSheet id={activeId} isDM={false} /></Suspense>}</div>
       ) : null}
 
+      <Suspense fallback={<CharacterToolLoading />}>
       {!isDM && showCreate && (
         <CharacterSetupDialog
           key={editingCreationId ?? 'new'}
@@ -516,6 +518,7 @@ export default function CharactersPage() {
           onImport={confirmExcelImport}
         />
       )}
+      </Suspense>
     </div>
   )
 }

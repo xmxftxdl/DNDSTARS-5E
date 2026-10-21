@@ -1,3 +1,4 @@
+import type { Dnd5eDamageReactionMapContext } from '../../rulesets/dnd5e/damageReactionFlow'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { resolveInitiativePortrait } from '../../lib/portraitPresentation'
 import type { RoomJournalMutation } from '../../lib/roomCommunications'
@@ -82,8 +83,9 @@ export interface Dnd5eMapInteractionActionContext {
     state: Parameters<typeof resolveDnd5eHeadlessAction>[0],
     action: Parameters<typeof resolveDnd5eHeadlessAction>[1],
     map: BattleMap,
-    options?: Parameters<typeof resolveDnd5eHeadlessAction>[2],
-  ) => Promise<ReturnType<typeof resolveDnd5eHeadlessAction>>
+    options: Parameters<typeof resolveDnd5eHeadlessAction>[2] | undefined,
+    materialApplication: Dnd5eDamageReactionMapContext,
+  ) => Promise<ReturnType<typeof resolveDnd5eHeadlessAction> & { application?: Dnd5eMapResultPlan }>
   applyDnd5eCombatApplication: (application: Dnd5eMapResultPlan) => void
   applyAuthorityGeometryDoorState: (
     mapId: string,
@@ -123,7 +125,7 @@ export async function processDnd5eMapInteractionAction(
   } = context
 
   const payload = action.dnd5eMapInteraction
-  if (payload?.operation === 'rope-trick' || payload?.operation === 'teleportation-circle') {
+  if (payload?.operation === 'grove-password' || payload?.operation === 'fortress-feast' || payload?.operation === 'fortress-command' || payload?.operation === 'fortress-pickup' || payload?.operation === 'fortress-drop' || payload?.operation === 'fortress-move' || payload?.operation === 'fortress-door' || payload?.operation === 'pickup-item' || payload?.operation === 'drop-item' || payload?.operation === 'clear-terrain' || payload?.operation === 'rope-trick' || payload?.operation === 'teleportation-circle') {
     acknowledgePlayerAction(action, 'rejected', 'invalid-map-interaction-route')
     completePlayerActionRequest(action)
     return
@@ -385,6 +387,8 @@ export async function processDnd5eMapInteractionAction(
             return
           }
           let outcomeState = { ...snapshot.state, initiativeIndex: actorIndex }
+          let outcomeMap = authorityMap
+          let outcomeCharacters = authorityCharacters
           if (combatActiveRef.current) {
             const economy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
             combatant.turn = {
@@ -401,7 +405,8 @@ export async function processDnd5eMapInteractionAction(
                 interactionId: prepared.prepared.interactionId,
                 useAction: prepared.prepared.turnCost === 'action' || mapInteractionTurnResource === 'action',
               },
-              authorityMap,
+              outcomeMap, undefined,
+              { map: outcomeMap, characters: outcomeCharacters, characterIdByCombatantId: snapshot.characterIdByCombatantId },
             )
             if (!economyResult.ok) {
               await finishMapInteractionInterrupt()
@@ -410,6 +415,10 @@ export async function processDnd5eMapInteractionAction(
               return
             }
             outcomeState = economyResult.state
+            if (economyResult.application) {
+              outcomeMap = economyResult.application.map
+              outcomeCharacters = economyResult.application.characters
+            }
           }
           if (outcomeSteps.length > 0) {
             const outcomeResult = await resolveDnd5eHeadlessActionWithAirborneFalls(outcomeState, {
@@ -417,7 +426,7 @@ export async function processDnd5eMapInteractionAction(
               actorId: action.actorTokenId,
               interactionId: prepared.prepared.interactionId,
               steps: outcomeSteps,
-            }, authorityMap)
+            }, outcomeMap, undefined, { map: outcomeMap, characters: outcomeCharacters, characterIdByCombatantId: snapshot.characterIdByCombatantId })
             if (!outcomeResult.ok) {
               await finishMapInteractionInterrupt()
               acknowledgePlayerAction(action, 'rejected', outcomeResult.reason)
@@ -425,11 +434,16 @@ export async function processDnd5eMapInteractionAction(
               return
             }
             outcomeState = outcomeResult.state
+            if (outcomeResult.application) {
+              outcomeMap = outcomeResult.application.map
+              outcomeCharacters = outcomeResult.application.characters
+            }
           }
           application = planDnd5eMapResultApplication({
             state: outcomeState,
-            map: authorityMap,
-            characters: authorityCharacters,
+            map: outcomeMap,
+            characters: outcomeCharacters,
+            baselineCharacters: authorityCharacters,
             characterIdByCombatantId: snapshot.characterIdByCombatantId,
           })
         }

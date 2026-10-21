@@ -11,6 +11,7 @@ import {
   type Dnd5eMonsterDeathAreaEffectSnapshot,
 } from './headlessCombatEngine'
 import {
+  createDnd5eMechanicalEffect,
   dnd5eSwallowedContainerActorId,
 } from './activeEffects'
 
@@ -335,4 +336,28 @@ describe('SRD monster death-area Headless runtime', () => {
       snapshot: chained[0],
     })
   })
+})
+
+it.each(['own', 'foreign', 'suspended', 'removed', 'invalid'] as const)('death burst uses the dead source identity before saves/defenses: %s', mode => {
+  const { killed, snapshot } = singleTargetDeathScenario('balor', 30)
+  const target = killed.state.combatants.target
+  target.damageVulnerabilities = ['fire']
+  target.classState.activeEffects = mode === 'removed' ? [] : [createDnd5eMechanicalEffect({
+    definitionId: 'death-mark', label: 'Mark', targetId: target.id, source: { kind: 'feature', actorId: mode === 'foreign' ? 'killer' : 'source' },
+    modifiers: { damageRollsBySourceBonus: 2 } })]
+  if (mode === 'suspended') target.classState.activeEffects![0].suspendedBy = ['antimagic']
+  const before = structuredClone(killed.state)
+  const resolved = resolveSingleTargetDeathArea({ state: killed.state, snapshot, d20: 20,
+    damageRolls: [mode === 'invalid' ? 7 : 2, ...Array(19).fill(1)] })
+  expect(resolved.ok, resolved.ok ? '' : resolved.reason).toBe(mode !== 'invalid')
+  expect(resolved.state.combatants.target.currentHp).toBe(mode === 'invalid' ? 100 : mode === 'own' ? 78 : 80)
+  expect(killed.state).toEqual(before)
+  if (!resolved.ok) { expect(resolved.reason).toBe('invalid-dice'); expect(resolved.state).toEqual(before) }
+  else {
+    expect(resolved.events.filter(event => event.type === 'damage-roll-bonus-applied')).toHaveLength(mode === 'own' ? 1 : 0)
+    const replay = resolveSingleTargetDeathArea({ state: JSON.parse(JSON.stringify(resolved.state)), snapshot,
+      d20: 20, damageRolls: [2, ...Array(19).fill(1)] })
+    expect(replay.ok).toBe(false)
+    expect(replay.state.combatants.target.currentHp).toBe(resolved.state.combatants.target.currentHp)
+  }
 })

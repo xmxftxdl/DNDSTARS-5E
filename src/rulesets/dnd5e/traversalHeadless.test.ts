@@ -15,6 +15,30 @@ const base = {
 }
 
 describe('D&D 5e traversal in Headless combat', () => {
+  it.each([0, 15])('charges both ethereal ascent and descent and rejects forged cheaper costs, from %s', from => {
+    const hero = createDnd5eCombatant({ ...base, id: 'hero', name: 'Hero', controller: 'player', initiative: 20,
+      armorClass: 10, currentHp: 20, maxHp: 20, speed: 30, position: { x: 0, y: 0 },
+      elevationFeet: from, groundElevationFeet: 0, airborne: from > 0 })
+    hero.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'ethereal-test', label: 'Ethereal', targetId: hero.id,
+      source: { kind: 'spell', actorId: hero.id, rulesId: 'etherealness', magical: true },
+      modifiers: { planarPhase: { plane: 'ethereal', ignoresMaterialCollision: true,
+        suppressCrossPlaneEffects: true, unrestrictedVerticalMovement: true } },
+    })]
+    const enemy = createDnd5eCombatant({ ...base, id: 'enemy', name: 'Enemy', controller: 'dm', initiative: 1,
+      armorClass: 10, currentHp: 20, maxHp: 20, speed: 30, position: { x: 50, y: 50 } })
+    const state = startDnd5eHeadlessCombat('ethereal', [hero, enemy]), before = structuredClone(state)
+    const move = { type: 'move' as const, actorId: hero.id, to: hero.position, distance: 0,
+      traversalMode: 'fly' as const, toElevationFeet: from ? 0 : 15, toGroundElevationFeet: 0 }
+    expect(resolveDnd5eHeadlessAction(state, { ...move, movementCost: 15 })).toMatchObject({ ok: false })
+    const resolved = resolveDnd5eHeadlessAction(state, move)
+    expect(resolved.ok, resolved.ok ? undefined : resolved.reason).toBe(true)
+    expect(resolved.state.combatants.hero).toMatchObject({
+      elevationFeet: from ? 0 : 15, currentHp: 20, turn: { movementRemaining: 0 },
+    })
+    expect(state).toEqual(before)
+  })
+
   it('requires a fly speed and charges vertical distance while flying', () => {
     const walker = createDnd5eCombatant({
       ...base, id: 'walker', name: '行者', controller: 'player', initiative: 20,

@@ -23,6 +23,7 @@ import {
   type SharedSceneOrchestrationState,
 } from '../lib/sceneOrchestration'
 import { DEFAULT_SCENE_WEATHER } from '../lib/sceneWeather'
+import { setSceneInteractionRuntime } from '../lib/sceneInteractionRuntime'
 
 const sharedWriteWatermark = createSharedWriteWatermark()
 
@@ -33,7 +34,7 @@ export interface SceneOrchestrationStore {
   ensureScene: (mapId: string, mapName: string, center?: { x: number; y: number }) => string
   updateGlobalAudio: (patch: Partial<SceneAudioPreset>) => void
   updateScene: (sceneId: string, patch: Partial<Pick<OrchestratedScene,
-    'name' | 'description' | 'environmentLabel' | 'weather' | 'backgroundCue' | 'backgroundAudioMode' | 'backgroundAudioId' |
+    'name' | 'description' | 'environmentLabel' | 'planarPortalSurvey' | 'weather' | 'backgroundCue' | 'backgroundAudioMode' | 'backgroundAudioId' |
     'backgroundAudioLoop' | 'backgroundAudioVolume' | 'backgroundAudioAutoPlay' | 'boundHandoutIds' | 'boundJournalEntryIds'
   >>) => void
   removeScene: (sceneId: string) => void
@@ -369,3 +370,6 @@ export const useSceneOrchestrationStore = create<SceneOrchestrationStore>()(
     partialize: (state) => ({ shared: state.shared }),
   }),
 )
+
+setSceneInteractionRuntime(useSceneOrchestrationStore.getState().shared.scenes)
+useSceneOrchestrationStore.subscribe(state => setSceneInteractionRuntime(state.shared.scenes))

@@ -224,6 +224,9 @@ export interface ExtractPdfDocumentsOptionsV1 {
   ocrProvider?: PdfOcrProviderV1
   languageHints?: string[]
   signal?: AbortSignal
+  /** Optional audit hook after OCR has failed; the caller decides how to review
+   * the image. This hook never marks a page resolved or discards its text. */
+  onUnresolvedPage?: (input: { documentId: string; page: number; image: Blob }) => Promise<void>
 }
 
 function modelParameterBillions(model: AiModelDescriptorV1): number | undefined {
@@ -1085,6 +1088,22 @@ export async function extractPdfDocuments(
                 operator === OPS.paintInlineImageXObject
               ))
             : false
+          const renderPage = async () => {
+            if (typeof document === 'undefined') throw new Error('pdf-ocr-canvas-unavailable')
+            const base = page.getViewport({ scale: 1 })
+            const viewport = page.getViewport({ scale: Math.max(1, Math.min(2.5, 3_200 / Math.max(base.width, base.height))) })
+            const canvas = document.createElement('canvas')
+            canvas.width = Math.max(1, Math.ceil(viewport.width)); canvas.height = Math.max(1, Math.ceil(viewport.height))
+            const context = canvas.getContext('2d', { alpha: false })
+            if (!context) throw new Error('pdf-ocr-canvas-context-unavailable')
+            try {
+              await page.render({ canvas, canvasContext: context, viewport }).promise
+              const image = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('pdf-ocr-image-encoding-failed')), 'image/png'))
+              return { image, width: canvas.width, height: canvas.height }
+            } finally { canvas.width = 0; canvas.height = 0 }
+          }
+          let rendered: Awaited<ReturnType<typeof renderPage>> | undefined
+          const renderOnce = async () => rendered ??= await renderPage()
           const resolved = await resolvePdfPageText({
             documentId: identity.id,
             page: pageNumber,
@@ -1100,27 +1119,10 @@ export async function extractPdfDocuments(
                 total: pdf.numPages,
                 message: `正在 OCR ${file.name} · 第 ${pageNumber}/${pdf.numPages} 页`,
               })
-              if (typeof document === 'undefined') throw new Error('pdf-ocr-canvas-unavailable')
-              const baseViewport = page.getViewport({ scale: 1 })
-              const scale = Math.max(1, Math.min(2.5, 3_200 / Math.max(baseViewport.width, baseViewport.height)))
-              const viewport = page.getViewport({ scale })
-              const canvas = document.createElement('canvas')
-              canvas.width = Math.max(1, Math.ceil(viewport.width))
-              canvas.height = Math.max(1, Math.ceil(viewport.height))
-              const context = canvas.getContext('2d', { alpha: false })
-              if (!context) throw new Error('pdf-ocr-canvas-context-unavailable')
-              try {
-                await page.render({ canvas, canvasContext: context, viewport }).promise
-                const image = await new Promise<Blob>((resolve, reject) => {
-                  canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('pdf-ocr-image-encoding-failed')), 'image/png')
-                })
-                return { image, width: canvas.width, height: canvas.height }
-              } finally {
-                canvas.width = 0
-                canvas.height = 0
-              }
+              return renderOnce()
             },
           })
+          if (resolved.unresolved && options.onUnresolvedPage) await options.onUnresolvedPage({ documentId: identity.id, page: pageNumber, image: (await renderOnce()).image })
           pages.push(resolved.unresolved ? '' : resolved.text)
           if (resolved.scanned) scannedPages.push(pageNumber)
           if (resolved.extractionMethod === 'ocr') ocrPages.push(pageNumber)

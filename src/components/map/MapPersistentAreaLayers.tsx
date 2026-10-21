@@ -1,5 +1,12 @@
+import {WaterWallSurfaceVisual} from './WaterWallSurfaceVisual'
+import {RectangularLightVisual} from './RectangularLightVisual'
+import { terrainElevationContours } from '../../lib/terrainElevationContours'
+import { useMapGeometryStore } from '../../store/mapGeometry'
+import { useCharacterStore } from '../../store/characters'
+import { projectAttachedSurfaceArea } from '../../rulesets/dnd5e/attachedSurfaceArea'
 import { stoneWallPanels } from '../../rulesets/dnd5e/stoneWall'
 import { fireWallVisualClip } from './fireWallVisualClip'
+import { persistentGasVisualClip } from './groveFogVisualClip'
 import { ForceWallPanelsVisual } from './ForceWallPanelsVisual'
 import { IceWallVisual } from './IceWallVisual'
 import { LegacyStoneWallVisual, StoneWallVisual } from './StoneWallVisual'
@@ -13,21 +20,21 @@ import { AlarmAreaVisual } from './AlarmAreaVisual'
 import { GridAreaOutline } from './GridAreaOutline'
 import { TeleportationCircleVisual, TeleportationCircleDestinations } from './TeleportationCircleVisual'
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
-import { Circle, Group, Image as KonvaImage, Line, Rect, Shape, Text } from 'react-konva'
+import { Circle, Group, Image as KonvaImage, Line, Rect, Ring, Shape, Text } from 'react-konva'
+import { CloudTextArea } from './CloudTextArea'
 import Konva from 'konva'
 import { cellKey, cellTopLeft, tokenCenterForAnchorCell } from '../../lib/gridCombat'
 import { collectMapDifficultTerrainCells } from '../../lib/mapDifficultTerrain'
 import { difficultTerrainLabelCells } from './difficultTerrainLabels'
 import { dnd5ePersistentAreaPresentationVisual } from '../../rulesets/dnd5e/persistentAreaPresentation'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
-import type { MapGeometryPoint, MapGeometryState } from '../../lib/mapGeometry'
+import type { MapGeometryState } from '../../lib/mapGeometry'
 import WallOfFireRingVisual from './WallOfFireRingVisual'
 import { toxicCloudPuffs } from './toxicCloudPresentation'
 import {
   FLAMING_SPHERE_VISUAL_DIAMETER_GRID_FACTOR,
   schedulePersistentAreaVisualReady,
 } from './flamingSphereHandoff'
-import { geometryEntityPoints } from './mapCanvasGeometryUtils'
 import { usePrefersReducedMotion, useStatusAnimation, useTokenBadgeImage } from './mapEffectHooks'
 import { mapCanvasEffectTokenAreaRenderOffset } from './mapCanvasInteraction'
 import {
@@ -41,7 +48,7 @@ import {
 } from './persistentAreaRangePresentation'
 import { dnd5ePersistentAreaRenderPreset } from './persistentAreaRenderPreset'
 import { createWebAreaStrands } from './webAreaPresentation'
-import { WebBurningCells } from './WebBurningCells'
+import { WebBurningCells, BurningAreaCells } from './WebBurningCells'
 import { moveEarthAreaPixelBounds } from './moveEarthAreaPresentation'
 
 interface Point {
@@ -717,6 +724,7 @@ const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>
   'spirit-guardians': { icon: '✦', glow: '#fef3c7' },
   'spike-growth': { icon: '✣', glow: '#bef264' },
   'flaming-sphere': { icon: '🔥', glow: '#fdba74' },
+  bonfire: { icon: '🔥', glow: '#fdba74' },
   'spiritual-weapon': { icon: '⚔', glow: '#c4b5fd' },
   entangle: { icon: '🌿', glow: '#a3e635' },
   'black-tentacles': { icon: '⌁', glow: '#a78bfa' },
@@ -1386,7 +1394,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           : preset === 'insect-plague'
             ? 0.76
             : 0.82
-  const hasMaterialVisual = preset === 'grease' || preset === 'flaming-sphere' || preset === 'silence' || preset === 'web' || preset === 'magic-circle' || !!persistentSpriteAsset || !!namedPresentation
+  const hasMaterialVisual = preset === 'bonfire' || preset === 'grease' || preset === 'flaming-sphere' || preset === 'silence' || preset === 'web' || preset === 'magic-circle' || !!persistentSpriteAsset || !!namedPresentation
   const reportPersistentVisualReady = useCallback(
     () => onPersistentVisualReady?.(area.id),
     [area.id, onPersistentVisualReady],
@@ -1433,8 +1441,122 @@ export function Dnd5eCoreSpellAreaOverlay({
       iconRef.current?.scale({ x: iconScale, y: iconScale })
       if (preset === 'spirit-guardians') iconRef.current?.rotation(Math.sin(seconds * 1.4) * 8)
     },
-    { active: !reducedMotion && preset !== 'wall-of-stone', fps: 16 },
+    { active: !reducedMotion && preset !== 'wall-of-stone' && preset !== 'surface-inscription' && preset !== 'surface-color' && preset !== 'surface-drawing', fps: 16 },
   )
+
+  const topSurface=area.visual?.horizontalSurface
+  if(topSurface && ['surface-inscription','surface-color','surface-drawing'].includes(preset)){
+    const [a,b,,d]=topSurface.corners,width=Math.hypot(b.x-a.x,b.y-a.y),height=Math.hypot(d.x-a.x,d.y-a.y)
+    if(topSurface.fragments){
+      const scale=map.gridSize/(map.feetPerCell??5)
+      return <Group ref={groupRef} listening={false} name="horizontal-surface-art">
+        {topSurface.fragments.map((fragment,index)=>{
+          const [worldA,worldB]=fragment.corners,[drawA,drawB]=fragment.drawingCornersFeet
+          const angle=Math.atan2(worldB.y-worldA.y,worldB.x-worldA.x)-Math.atan2(drawB.y-drawA.y,drawB.x-drawA.x)
+          const cosine=Math.cos(angle),sine=Math.sin(angle)
+          return <Group key={`${fragment.entityId}:${index}`} name="horizontal-surface-fragment"
+            x={worldA.x-(drawA.x*cosine-drawA.y*sine)*scale} y={worldA.y-(drawA.x*sine+drawA.y*cosine)*scale}
+            rotation={angle*180/Math.PI} clipFunc={ctx=>{
+              ctx.beginPath();fragment.drawingCornersFeet.forEach((point,i)=>{
+                if(i===0)ctx.moveTo(point.x*scale,point.y*scale);else ctx.lineTo(point.x*scale,point.y*scale)
+              });ctx.closePath()
+            }}>
+            <Rect width={width} height={height} fill={area.color} opacity={preset==='surface-color'?0.72:0.14}/>
+            {preset==='surface-drawing'&&area.visual?.drawing?.strokes.map((stroke,i)=><Line key={i}
+              points={stroke.points.map((n,j)=>n*(j%2===0?width:height))} stroke={stroke.color}
+              strokeWidth={stroke.width*Math.min(width,height)} lineCap="round" lineJoin="round"/>)}
+            {preset==='surface-inscription'&&<Text x={width*0.07} y={height*0.07} width={width*0.86} height={height*0.86}
+              text={area.label} fill={area.color} fontSize={Math.max(5,Math.min(width,height)*0.14)} align="center" verticalAlign="middle" wrap="char" ellipsis/>}
+          </Group>
+        })}
+      </Group>
+    }
+    return <Group ref={groupRef} listening={false} name="horizontal-surface-art" x={a.x} y={a.y}
+      rotation={Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI} clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
+      <Rect width={width} height={height} fill={area.color} opacity={preset==='surface-color'?0.72:0.14}/>
+      {preset==='surface-drawing'&&area.visual?.drawing?.strokes.map((stroke,index)=><Line key={index}
+        points={stroke.points.map((n,i)=>n*(i%2===0?width:height))} stroke={stroke.color}
+        strokeWidth={stroke.width*Math.min(width,height)} lineCap="round" lineJoin="round"/>)}
+      {preset==='surface-inscription'&&<Text x={width*0.07} y={height*0.07} width={width*0.86} height={height*0.86}
+        text={area.label} fill={area.color} fontSize={Math.max(5,Math.min(width,height)*0.14)} align="center" verticalAlign="middle" wrap="char" ellipsis/>}
+    </Group>
+  }
+  const wallSurface=area.visual?.verticalSurface
+  if(wallSurface?.fragments && ['surface-inscription','surface-color','surface-drawing'].includes(preset)){
+    const scale=grid/(map.feetPerCell??5),totalWidth=Math.hypot(wallSurface.b.x-wallSurface.a.x,wallSurface.b.y-wallSurface.a.y)
+    const totalDepth=Math.max(8,Math.min(grid*0.35,wallSurface.heightFeet*scale)),heightScale=totalDepth/wallSurface.heightFeet
+    return <Group ref={groupRef} listening={false} name="vertical-surface-art">
+      {wallSurface.fragments.map((part,index)=>{
+        const face=part.surface,origin=part.reversed?face.b:face.a,end=part.reversed?face.a:face.b
+        const dx=end.x-origin.x,dy=end.y-origin.y,length=Math.hypot(dx,dy)
+        const side=Math.sign(-dy/length*face.outward.x+dx/length*face.outward.y)
+        const depth=part.heightFeet*heightScale,low=Math.min(0,side*depth)
+        const left=-part.leftFeet*scale,base=-side*part.bottomFeet*heightScale,fullLow=base+Math.min(0,side*totalDepth)
+        return <Group key={index} name="vertical-surface-fragment" x={origin.x} y={origin.y} rotation={Math.atan2(dy,dx)*180/Math.PI}
+          clipX={0} clipY={low} clipWidth={length} clipHeight={depth}>
+          <Rect x={left} y={fullLow} width={totalWidth} height={totalDepth} fill={area.color} opacity={preset==='surface-color'?0.72:0.16}/>
+          {preset==='surface-drawing'&&area.visual?.drawing?.strokes.map((stroke,i)=><Line key={i}
+            points={stroke.points.map((n,j)=>j%2===0?left+n*totalWidth:base+side*totalDepth*(1-n))}
+            stroke={stroke.color} strokeWidth={Math.max(1,stroke.width*Math.min(totalWidth,totalDepth))} lineCap="round" lineJoin="round"/>)}
+          {preset==='surface-inscription'&&<Text x={left+2} y={fullLow+1} width={Math.max(1,totalWidth-4)} height={Math.max(1,totalDepth-2)}
+            text={area.label} fill={area.color} fontSize={Math.max(5,Math.min(12,totalDepth*0.6))} align="center" verticalAlign="middle" wrap="char" ellipsis/>}
+        </Group>
+      })}
+    </Group>
+  }
+  if(wallSurface && ['surface-inscription','surface-color','surface-drawing'].includes(preset)){
+    const dx=wallSurface.b.x-wallSurface.a.x,dy=wallSurface.b.y-wallSurface.a.y
+    const reverse=dx<0 || (Math.abs(dx)<1e-7 && dy<0)
+    const origin=reverse?wallSurface.b:wallSurface.a
+    const ux=(reverse?-dx:dx)/Math.hypot(dx,dy),uy=(reverse?-dy:dy)/Math.hypot(dx,dy)
+    const width=Math.hypot(dx,dy)
+    // Top-down maps show a shallow outward band for a vertical face; its actual
+    // dimensions remain in authoritative state rather than enlarging ground coverage.
+    const depth=Math.max(8,Math.min(grid*0.35,wallSurface.heightFeet/(map.feetPerCell??5)*grid))
+    const side=Math.sign(-uy*wallSurface.outward.x+ux*wallSurface.outward.y)
+    const low=Math.min(0,side*depth)
+    return <Group ref={groupRef} listening={false} name="vertical-surface-art" x={origin.x} y={origin.y}
+      rotation={Math.atan2(uy,ux)*180/Math.PI}>
+      <Rect y={low} width={width} height={depth} fill={area.color} opacity={preset==='surface-color'?0.72:0.16}/>
+      <Line points={[0,0,width,0]} stroke={area.color} strokeWidth={2}/>
+      {preset==='surface-drawing'&&area.visual?.drawing?.strokes.map((stroke,index)=><Line key={index}
+        points={stroke.points.map((n,i)=>i%2===0?(reverse?1-n:n)*width:side*depth*(1-n))}
+        stroke={stroke.color} strokeWidth={Math.max(1,stroke.width*Math.min(width,depth))} lineCap="round" lineJoin="round"/>)}
+      {preset==='surface-inscription'&&<Text x={2} y={low+1} width={Math.max(1,width-4)} height={Math.max(1,depth-2)}
+        text={area.label} fill={area.color} fontSize={Math.max(5,Math.min(12,depth*0.6))} align="center" verticalAlign="middle" wrap="char" ellipsis
+        shadowColor="#000000" shadowBlur={1}/>}
+    </Group>
+  }
+
+  if (preset === 'surface-drawing') {
+    if (!area.cells.length) return null
+    const corners=area.cells.map(cell=>cellTopLeft(cell,map))
+    const left=Math.min(...corners.map(p=>p.x)),top=Math.min(...corners.map(p=>p.y))
+    const width=Math.max(...corners.map(p=>p.x))+grid-left,height=Math.max(...corners.map(p=>p.y))+grid-top
+    return <Group ref={groupRef} listening={false} clipFunc={context=>{
+      context.beginPath()
+      for(const corner of corners)context.rect(corner.x,corner.y,grid,grid)
+      context.closePath()
+    }}>
+      <Rect x={left} y={top} width={width} height={height} fill={area.color} opacity={0.14} />
+      {area.visual?.drawing?.strokes.map((stroke,index)=><Line key={index}
+        points={stroke.points.map((n,i)=>i%2===0?left+n*width:top+n*height)}
+        stroke={stroke.color} strokeWidth={stroke.width*Math.min(width,height)} lineCap="round" lineJoin="round" />)}
+    </Group>
+  }
+
+  if (preset === 'surface-inscription' || preset === 'surface-color') return <Group ref={groupRef} listening={false}>
+    {area.cells.map(cell => {
+      const point = cellTopLeft(cell, map)
+      return <Group key={cellKey(cell)} x={point.x} y={point.y} clipX={0} clipY={0} clipWidth={grid} clipHeight={grid}>
+        <Rect width={grid} height={grid} fill={area.color} opacity={preset === 'surface-color' ? 0.72 : 0.14} />
+        {preset === 'surface-inscription' && <Text x={grid * 0.07} y={grid * 0.07} width={grid * 0.86} height={grid * 0.86}
+          text={area.label} fill={area.color} fontSize={Math.max(5, grid * 0.14)}
+          align="center" verticalAlign="middle" wrap="char" ellipsis
+          shadowColor="#000000" shadowBlur={1} shadowOffsetY={1} />}
+      </Group>
+    })}
+  </Group>
 
   return (
     <Group ref={groupRef} listening={false} clipFunc={preset === 'web' || persistentAreaUnobstructedCells(area) !== area.cells ? context => {
@@ -1525,7 +1647,7 @@ export function Dnd5eCoreSpellAreaOverlay({
           )
         })}
       </Group>}
-      {area.cells.length > 0 && namedPresentation && namedPersistentAreaImage ? (
+      {preset === 'bonfire' ? <BurningAreaCells cells={area.cells} map={map} /> : area.cells.length > 0 && namedPresentation && namedPersistentAreaImage ? (
         <Dnd5eNamedPersistentAreaOverlay
           area={area}
           map={map}
@@ -1653,6 +1775,7 @@ const ZoomStableCoreSpellAreaOverlay = memo(Dnd5eCoreSpellAreaOverlay)
 
 export function Dnd5ePluginAreaOverlays({
   map,
+  renderPass = 'ground',
   isDM,
   onVisibilityToggle,
   onAreaClick,
@@ -1661,6 +1784,7 @@ export function Dnd5ePluginAreaOverlays({
   onPersistentVisualReady,
 }: {
   map: BattleMap
+  renderPass?: 'ground' | 'object-surface'
   isDM: boolean
   onVisibilityToggle?: (areaId: string) => void
   onAreaClick?: (areaId: string) => void
@@ -1673,10 +1797,41 @@ export function Dnd5ePluginAreaOverlays({
   ) => void
   onPersistentVisualReady?: (areaId: string) => void
 }) {
-  return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
+  const surfaceGeometry=useMapGeometryStore(state=>state.maps.find(geometry=>geometry.mapId===map.id))
+  const surfaceCharacters=useCharacterStore(state=>state.characters)
+  return <>{(map.dnd5ePluginAreas ?? []).filter(area => !area.lightingOnly).map((savedArea) => {
+    const objectSurface = (savedArea.visual?.horizontalSurface?.entityId ?? savedArea.visual?.verticalSurface?.entityId)?.startsWith('surface-object:') === true ||
+      savedArea.visual?.horizontalSurface?.fragments?.some(fragment=>fragment.entityId.startsWith('surface-object:')) === true ||
+      savedArea.visual?.verticalSurface?.fragments?.some(fragment=>fragment.surface.entityId.startsWith('surface-object:')) === true
+    if (objectSurface !== (renderPass === 'object-surface')) return null
+    const area=projectAttachedSurfaceArea(savedArea,map,surfaceGeometry,surfaceCharacters)
+    if(!area)return null
     const preset = dnd5ePersistentAreaRenderPreset(area)
     const namedPresentation = dnd5eNamedPersistentAreaPresentation(preset)
-    const overlay = preset === 'alarm'
+    const circularEntity = area.entityProfile && !area.entityProfile.invisible && area.circularGeometry && area.anchorCell
+    const hasWallSurface = area.wallSurfaceSections != null || area.blocking?.freezesOnColdSpell === true
+    const overlay = area.lighting?.kind==='light' && area.lighting.emission==='rectangle-volume'
+      ? <RectangularLightVisual area={area} map={map}/>
+      : hasWallSurface ? <WaterWallSurfaceVisual area={area} map={map} /> : area.circularGeometry?.innerRadiusFeet != null && area.anchorCell
+      ? <Group listening={false} name="persistent-annular-area" clipFunc={context=>{
+          context.beginPath()
+          for(const cell of area.cells)context.rect((map.gridOffsetX??0)+cell.col*map.gridSize,(map.gridOffsetY??0)+cell.row*map.gridSize,map.gridSize,map.gridSize)
+        }}>
+          <Ring x={(map.gridOffsetX??0)+(area.anchorCell.col+.5)*map.gridSize}
+            y={(map.gridOffsetY??0)+(area.anchorCell.row+.5)*map.gridSize}
+            innerRadius={area.circularGeometry.innerRadiusFeet/(map.feetPerCell??5)*map.gridSize}
+            outerRadius={area.circularGeometry.radiusFeet/(map.feetPerCell??5)*map.gridSize}
+            fill={area.color} opacity={0.65} stroke={area.color} strokeWidth={1.5} />
+        </Group>
+      : circularEntity
+      ? <Group listening={false} name="persistent-circular-entity">
+          <Circle x={(map.gridOffsetX ?? 0) + (area.anchorCell!.col + 0.5) * map.gridSize}
+            y={(map.gridOffsetY ?? 0) + (area.anchorCell!.row + 0.5) * map.gridSize}
+            radius={area.circularGeometry!.radiusFeet / Math.max(1, map.feetPerCell ?? 5) * map.gridSize}
+            fill="#77736c" stroke="#ddd6c8" strokeWidth={2}
+            shadowColor="#171612" shadowBlur={4} shadowOffsetY={3} />
+        </Group>
+      : preset === 'alarm'
       ? <AlarmAreaVisual area={area} map={map} />
       : area.coreSpellId === 'tiny-hut'
       ? <TinyHutVisual area={area} map={map} />
@@ -1688,9 +1843,11 @@ export function Dnd5ePluginAreaOverlays({
       ? <ReverseGravityArea area={area} map={map} />
       : area.coreSpellId === 'move-earth'
       ? <Dnd5eMoveEarthAreaOverlay area={area} map={map} />
+      : preset === 'cloud-text'
+      ? <CloudTextArea area={area} map={map} />
       : preset === 'toxic-cloud'
       ? <ZoomStableToxicCloudAreaOverlay area={area} map={map} />
-      : CORE_AREA_VISUALS[preset] || namedPresentation
+      : CORE_AREA_VISUALS[preset] || namedPresentation || preset === 'surface-inscription' || preset === 'surface-color' || preset === 'surface-drawing'
         ? <ZoomStableCoreSpellAreaOverlay
             area={area}
             map={map}
@@ -1716,6 +1873,7 @@ export function Dnd5ePluginAreaOverlays({
     return <Group
       key={area.id}
       name={`dnd5e-plugin-area dnd5e-plugin-area-${preset || 'static'}`}
+      clipFunc={persistentGasVisualClip(area,map)}
       ref={(node) => registerEffectTokenAreaOverlay?.(
         area.id,
         area.anchorMode === 'effect-token' ? area.anchorTokenId : undefined,
@@ -1724,8 +1882,8 @@ export function Dnd5ePluginAreaOverlays({
       )}
       x={renderOffset.x}
       y={renderOffset.y}
-      onClick={(isDM || area.coreSpellId === 'rope-trick') && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
-      onTap={(isDM || area.coreSpellId === 'rope-trick') && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
+      onClick={(isDM || area.coreSpellId === 'rope-trick' || area.terrainClearing || area.illusionRecognition) && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
+      onTap={(isDM || area.coreSpellId === 'rope-trick' || area.terrainClearing || area.illusionRecognition) && onAreaClick ? (event) => { event.cancelBubble = true; onAreaClick(area.id) } : undefined}
     >
       {area.coreSpellId !== 'rope-trick' && overlay}
       {area.coreSpellId === 'web' && <WebBurningCells area={area} map={map} />}
@@ -1746,18 +1904,18 @@ export function Dnd5ePluginAreaOverlays({
         const point = cellTopLeft(area.cells[0], map)
         return <RopeTrickVisual x={point.x} y={point.y} size={map.gridSize} />
       })()}
-      {area.coreSpellId !== 'symbol' && (isDM || area.coreSpellId === 'rope-trick') && onAreaClick && area.cells.map((cell) => { const point = cellTopLeft(cell, map); return <Rect key={`persistent-area-hit:${area.id}:${cellKey(cell)}`} x={point.x} y={point.y} width={map.gridSize} height={map.gridSize} fill="rgba(255,255,255,0.001)" /> })}
-      {isDM && area.coreSpellId === 'spike-growth' && center && onVisibilityToggle && <Group
+      {area.coreSpellId !== 'symbol' && (isDM || area.coreSpellId === 'rope-trick' || area.terrainClearing || area.illusionRecognition) && onAreaClick && (hasWallSurface ? <WaterWallSurfaceVisual area={area} map={map} hitOnly /> : area.cells.map((cell) => { const point = cellTopLeft(cell, map); return <Rect key={`persistent-area-hit:${area.id}:${cellKey(cell)}`} x={point.x} y={point.y} width={map.gridSize} height={map.gridSize} fill="rgba(255,255,255,0.001)" /> }))}
+      {isDM && (area.coreSpellId === 'spike-growth' || area.effectGroup?.effectId === 'additional-spike-growth') && center && onVisibilityToggle && <Group
         x={center.x}
         y={center.y}
         onClick={(event) => { event.cancelBubble = true; onVisibilityToggle(area.id) }}
         onTap={(event) => { event.cancelBubble = true; onVisibilityToggle(area.id) }}
       >
         <Rect x={-34} y={-13} width={68} height={26} cornerRadius={8} fill="rgba(2,6,23,0.88)" stroke={area.hiddenFromPlayers ? '#f59e0b' : '#22c55e'} strokeWidth={1.5} />
-        <Text x={-31} y={-5} width={62} align="center" text={area.hiddenFromPlayers ? '仅 DM' : '已揭示'} fill="#f8fafc" fontSize={11} />
+        <Text x={-31} y={-5} width={62} align="center" text={area.hiddenFromPlayers ? area.visualRecognition ? '按角色揭示' : '仅 DM' : '已揭示'} fill="#f8fafc" fontSize={11} />
       </Group>}
     </Group>
-  })}<TeleportationCircleDestinations map={map} /></>
+  })}{renderPass === 'ground' && <TeleportationCircleDestinations map={map} />}</>
 }
 
 
@@ -1832,43 +1990,17 @@ export function TerrainElevationContours({
   geometry?: MapGeometryState
   inv: number
 }) {
-  const regions = (geometry?.obstacles ?? []).filter((obstacle) =>
-    obstacle.terrainRegion === true || (obstacle.terrainElevationFeet ?? 0) !== 0,
-  )
-  return <Group listening={false}>{regions.map((region) => {
-    const elevationFeet = region.terrainElevationFeet ?? 0
-    const labelAnchor = region.points.reduce<{
-      point: MapGeometryPoint
-      lengthSquared: number
-    }>((longest, point, index) => {
-      const next = region.points[(index + 1) % region.points.length]
-      const lengthSquared = (next.x - point.x) ** 2 + (next.y - point.y) ** 2
-      return lengthSquared > longest.lengthSquared
-        ? {
-            point: { x: (point.x + next.x) / 2, y: (point.y + next.y) / 2 },
-            lengthSquared,
-          }
-        : longest
-    }, { point: region.points[0] ?? { x: 0, y: 0 }, lengthSquared: -1 }).point
+  const contours = useMemo(() => terrainElevationContours(geometry), [geometry])
+  return <Group name="terrain-elevation-contours" listening={false}>{contours.map((contour, index) => {
+    const {elevationFeet, anchor: labelAnchor}=contour
     const color = elevationFeet < 0 ? '#a5f3fc' : '#fff1bb'
     const label = `${elevationFeet > 0 ? '+' : ''}${elevationFeet} 尺`
     return (
-      <Group key={`terrain-contour:${region.id}`}>
-        <Line
-          points={geometryEntityPoints(region)}
-          closed
-          stroke="#020617"
-          strokeWidth={7 * inv}
-          lineJoin="round"
-        />
-        <Line
-          points={geometryEntityPoints(region)}
-          closed
-          stroke={color}
-          strokeWidth={3 * inv}
-          lineJoin="round"
-          opacity={1}
-        />
+      <Group key={`terrain-contour:${index}`}>
+        {contour.edges.map((edge,i)=><Group key={i}>
+          <Line points={[edge.a.x,edge.a.y,edge.b.x,edge.b.y]} stroke="#020617" strokeWidth={7 * inv} lineJoin="round" />
+          <Line points={[edge.a.x,edge.a.y,edge.b.x,edge.b.y]} stroke={color} strokeWidth={3 * inv} lineJoin="round" />
+        </Group>)}
         <Group x={labelAnchor.x} y={labelAnchor.y}>
           <Rect
             x={-30 * inv}

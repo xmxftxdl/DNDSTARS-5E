@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createEmptyMapGeometry } from '../../lib/mapGeometry'
+import { createEmptyMapGeometry, normalizeMapGeometry } from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import {
   dnd5eMapInteractionCanOpenDoorDirectly,
@@ -43,6 +43,34 @@ const bookshelf: SceneInteractionPoint = {
 }
 
 describe('D&D 5e map interaction transaction', () => {
+  it.each(['open','close'] as const)('enforces persisted structure door authorization for %s independently of locks',operation=>{
+    const scene=structuredClone(geometry)
+    scene.doors[0]={...scene.doors[0],secret:false,state:operation==='open'?'closed':'open'}
+    scene.structureLifetimes=[{id:'temple',casterId:'caster',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:['door'],
+      doorAccess:{authorizedCreatureIds:['char','unlinked-monster']}}]
+    const restored=normalizeMapGeometry(JSON.parse(JSON.stringify(scene)))!
+    expect(restored.structureLifetimes![0].doorAccess).toEqual({authorizedCreatureIds:['char','unlinked-monster']})
+    const request={map,geometry:restored,actor,payload:{doorId:'door',operation,method:'interact' as const}}
+    for(const who of [{...actor,characterId:'caster'},actor,{...actor,id:'unlinked-monster',characterId:undefined,type:'enemy' as const}]){
+      expect(prepareDnd5eMapInteraction({...request,actor:who}).ok).toBe(true)
+    }
+    // An unauthorized character cannot borrow an authorized token ID or bypass with a key.
+    expect(prepareDnd5eMapInteraction({...request,actor:{...actor,id:'unlinked-monster',characterId:'outsider'},hasMatchingKey:true}))
+      .toEqual({ok:false,reason:'structure-door-not-authorized'})
+    for(const invalid of [{authorizedCreatureIds:['char','char']},{authorizedCreatureIds:[' ']},{authorizedCreatureIds:[],allowEveryone:true}]){
+      expect(normalizeMapGeometry({...scene,structureLifetimes:[{...scene.structureLifetimes[0],doorAccess:invalid}]})).toBeUndefined()
+    }
+  })
+  it('rejects a scene mechanism across a wall or outside vertical reach using current authority geometry', () => {
+    const blocked=createEmptyMapGeometry(map.id,1)
+    blocked.walls.push({id:'barrier',kind:'wall',label:'Barrier',points:[{x:25,y:75},{x:75,y:75}],
+      blocksVision:true,blocksMovement:true,blocksLineOfEffect:true,baseHeightFeet:0,heightFeet:10,createdAt:1})
+    const input={map,actor,interactionPoints:[bookshelf],payload:{operation:'interact-point' as const,interactionPointId:bookshelf.id}}
+    expect(prepareDnd5eMapInteraction({...input,geometry:blocked})).toEqual({ok:false,reason:'interaction-point-out-of-reach'})
+    expect(prepareDnd5eMapInteraction({...input,geometry:createEmptyMapGeometry(map.id,1),actor:{...actor,elevationFeet:10}})).toEqual({ok:false,reason:'interaction-point-out-of-reach'})
+    expect(prepareDnd5eMapInteraction({...input,geometry:createEmptyMapGeometry(map.id,1),actor:{...actor,elevationFeet:5}}).ok).toBe(true)
+    expect(prepareDnd5eMapInteraction(input).ok).toBe(true)
+  })
   it('can close the imported open door from the reported position beside its swung leaf', () => {
     const scene = { ...map, width: 3600, height: 3150, gridSize: 150 }
     const door = { ...geometry.doors[0], secret: false, state: 'open' as const,

@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Verification output is not UI source. Watching growing logs causes full reloads. */
+@source not "../.codex-logs";
+@source not "../.codex-temp";
+@source not "../docs/verification";
+@source not "../test-results";
 
 /* PDF.js visual page with a selectable, layout-preserving text layer. */
 .pdf-original-page .textLayer {

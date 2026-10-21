@@ -13751,7 +13751,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the drider has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         },
         {
           "name": "Web Walker",
@@ -13961,7 +13962,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the drow has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         }
       ],
       "actions": [
@@ -14465,7 +14467,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the duergar has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         }
       ],
       "actions": [
@@ -25329,7 +25332,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the kobold has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         },
         {
           "name": "Pack Tactics",
@@ -35838,7 +35842,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the specter has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         }
       ],
       "actions": [
@@ -39917,9 +39922,12 @@
           "automation": "headless",
           "rule": {
             "kind": "regeneration",
+            "suppressedInSunlight": true,
             "amount": 10,
             "requiresPositiveHp": true,
-            "suppressedByDamageTypes": [],
+            "suppressedByDamageTypes": [
+              "radiant"
+            ],
             "diesAtZeroWhenSuppressed": false
           }
         },
@@ -39932,6 +39940,11 @@
           "name": "Vampire Weaknesses",
           "description": "The vampire has the following flaws:\nForbiddance. The vampire can't enter a residence without an invitation from one of the occupants.\nHarmed by Running Water. The vampire takes 20 acid damage when it ends its turn in running water.\nStake to the Heart. The vampire is destroyed if a piercing weapon made of wood is driven into its heart while it is incapacitated in its resting place.\nSunlight Hypersensitivity. The vampire takes 20 radiant damage when it starts its turn in sunlight. While in sunlight, it has disadvantage on attack rolls and ability checks.",
           "automation": "dm-adjudication"
+        ,
+          "rule": {
+            "kind": "sunlight-hypersensitivity",
+            "radiantDamageAtTurnStart": 20
+          }
         }
       ],
       "actions": [
@@ -40108,9 +40121,12 @@
           "automation": "headless",
           "rule": {
             "kind": "regeneration",
+            "suppressedInSunlight": true,
             "amount": 20,
             "requiresPositiveHp": true,
-            "suppressedByDamageTypes": [],
+            "suppressedByDamageTypes": [
+              "radiant"
+            ],
             "diesAtZeroWhenSuppressed": false
           }
         },
@@ -40123,6 +40139,11 @@
           "name": "Vampire Weaknesses",
           "description": "The vampire has the following flaws:\nForbiddance. The vampire can't enter a residence without an invitation from one of the occupants.\nHarmed by Running Water. The vampire takes 20 acid damage if it ends its turn in running water.\nStake to the Heart. If a piercing weapon made of wood is driven into the vampire's heart while the vampire is incapacitated in its resting place, the vampire is paralyzed until the stake is removed.\nSunlight Hypersensitivity. The vampire takes 20 radiant damage when it starts its turn in sunlight. While in sunlight, it has disadvantage on attack rolls and ability checks.",
           "automation": "dm-adjudication"
+        ,
+          "rule": {
+            "kind": "sunlight-hypersensitivity",
+            "radiantDamageAtTurnStart": 20
+          }
         }
       ],
       "actions": [
@@ -40310,9 +40331,12 @@
           "automation": "headless",
           "rule": {
             "kind": "regeneration",
+            "suppressedInSunlight": true,
             "amount": 20,
             "requiresPositiveHp": true,
-            "suppressedByDamageTypes": [],
+            "suppressedByDamageTypes": [
+              "radiant"
+            ],
             "diesAtZeroWhenSuppressed": false
           }
         },
@@ -40325,6 +40349,11 @@
           "name": "Vampire Weaknesses",
           "description": "The vampire has the following flaws:\nForbiddance. The vampire can't enter a residence without an invitation from one of the occupants.\nHarmed by Running Water. The vampire takes 20 acid damage if it ends its turn in running water.\nStake to the Heart. If a piercing weapon made of wood is driven into the vampire's heart while the vampire is incapacitated in its resting place, the vampire is paralyzed until the stake is removed.\nSunlight Hypersensitivity. The vampire takes 20 radiant damage when it starts its turn in sunlight. While in sunlight, it has disadvantage on attack rolls and ability checks.",
           "automation": "dm-adjudication"
+        ,
+          "rule": {
+            "kind": "sunlight-hypersensitivity",
+            "radiantDamageAtTurnStart": 20
+          }
         }
       ],
       "actions": [],
@@ -40467,9 +40496,12 @@
           "automation": "headless",
           "rule": {
             "kind": "regeneration",
+            "suppressedInSunlight": true,
             "amount": 20,
             "requiresPositiveHp": true,
-            "suppressedByDamageTypes": [],
+            "suppressedByDamageTypes": [
+              "radiant"
+            ],
             "diesAtZeroWhenSuppressed": false
           }
         },
@@ -40482,6 +40514,11 @@
           "name": "Vampire Weaknesses",
           "description": "The vampire has the following flaws:\nForbiddance. The vampire can't enter a residence without an invitation from one of the occupants.\nHarmed by Running Water. The vampire takes 20 acid damage if it ends its turn in running water.\nStake to the Heart. If a piercing weapon made of wood is driven into the vampire's heart while the vampire is incapacitated in its resting place, the vampire is paralyzed until the stake is removed.\nSunlight Hypersensitivity. The vampire takes 20 radiant damage when it starts its turn in sunlight. While in sunlight, it has disadvantage on attack rolls and ability checks.",
           "automation": "dm-adjudication"
+        ,
+          "rule": {
+            "kind": "sunlight-hypersensitivity",
+            "radiantDamageAtTurnStart": 20
+          }
         }
       ],
       "actions": [
@@ -43776,7 +43813,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the wight has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         }
       ],
       "actions": [
@@ -44390,7 +44428,8 @@
         {
           "name": "Sunlight Sensitivity",
           "description": "While in sunlight, the wraith has disadvantage on attack rolls, as well as on Wisdom (Perception) checks that rely on sight.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": { "kind": "sunlight-sensitivity" }
         }
       ],
       "actions": [

@@ -7,6 +7,7 @@ import type {
 } from './headlessCombatEngine'
 import { dnd5ePluginFeatureDefinition } from './pluginApi'
 import { resolveDnd5eRollMode } from './rollMode'
+import { effectiveDnd5eActiveEffects, removeDnd5eActiveEffectsByIds, projectDnd5eActiveEffectState, type Dnd5eActiveEffectInstance } from './activeEffects'
 
 export type Dnd5eNextD20RollKind =
   | 'attack'
@@ -21,9 +22,11 @@ export interface Dnd5eNextD20AdvantageCarrier {
   subclassIds?: Partial<Record<Dnd5eClassId, string>>
   pluginFeatureIds?: readonly string[]
   classState: {
+    activeEffects?: readonly Dnd5eActiveEffectInstance[]
     nextD20Advantage?: {
       featureId: string
       rollKinds: readonly Dnd5eNextD20RollKind[]
+      expiresAfterTurnKey?: string
     }
   }
 }
@@ -40,6 +43,7 @@ export function dnd5eNextD20AdvantageApplies(
   actor: Dnd5eNextD20AdvantageCarrier,
   rollKind: Dnd5eNextD20RollKind,
 ): boolean {
+  if (effectiveDnd5eActiveEffects(actor.classState.activeEffects).some(effect => effect.modifiers?.nextD20AdvantageRollKinds?.includes(rollKind))) return true
   const marker = actor.classState.nextD20Advantage
   if (
     !marker ||
@@ -86,6 +90,18 @@ export function dnd5eDeathSavingThrowMode(
   }).mode
 }
 
+/** Run before start-of-turn saves, but never expire a grant armed in this same turn. */
+export function expireDnd5eNextD20AdvantageAtTurnStart(
+  actor: Dnd5eCombatant,
+  turnKey: string,
+  events: Dnd5eCombatEvent[],
+): void {
+  const marker = actor.classState.nextD20Advantage
+  if (!marker?.expiresAfterTurnKey || marker.expiresAfterTurnKey === turnKey) return
+  actor.classState.nextD20Advantage = undefined
+  events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'next-d20-advantage', active: false })
+}
+
 function resolvedRollOwner(event: Dnd5eCombatEvent): {
   actorId: string
   rollKind: Dnd5eNextD20RollKind
@@ -94,9 +110,11 @@ function resolvedRollOwner(event: Dnd5eCombatEvent): {
     return { actorId: event.actorId, rollKind: 'attack' }
   }
   if (event.type === 'ability-check-resolved') {
+    if (event.automatic) return undefined
     return { actorId: event.actorId, rollKind: 'ability-check' }
   }
   if (event.type === 'saving-throw-resolved') {
+    if (event.automaticOutcome) return undefined
     return { actorId: event.targetId, rollKind: 'saving-throw' }
   }
   if (event.type === 'concentration-resolved') {
@@ -116,17 +134,29 @@ export function consumeDnd5eNextD20Advantages(
 ): void {
   const consumedActorIds = new Set<string>()
   for (const event of resolvedEvents) {
-    const resolved = resolvedRollOwner(event)
-    if (!resolved || consumedActorIds.has(resolved.actorId)) continue
-    const actor: Dnd5eCombatant | undefined = state.combatants[resolved.actorId]
-    if (!actor || !dnd5eNextD20AdvantageApplies(actor, resolved.rollKind)) continue
-    actor.classState.nextD20Advantage = undefined
-    consumedActorIds.add(actor.id)
-    outputEvents.push({
-      type: 'class-state-changed',
-      actorId: actor.id,
-      stateKey: 'next-d20-advantage',
-      active: false,
-    })
+    const owners = event.type === 'opposed-ability-check-resolved'
+      ? [{ actorId: event.actorId, rollKind: 'ability-check' as const }, { actorId: event.targetId, rollKind: 'ability-check' as const }]
+      : [resolvedRollOwner(event)]
+    for (const resolved of owners) {
+      if (!resolved || consumedActorIds.has(resolved.actorId)) continue
+      const actor: Dnd5eCombatant | undefined = state.combatants[resolved.actorId]
+      if (!actor || !dnd5eNextD20AdvantageApplies(actor, resolved.rollKind)) continue
+      if (actor.classState.nextD20Advantage?.rollKinds.includes(resolved.rollKind)) actor.classState.nextD20Advantage = undefined
+      const effects = effectiveDnd5eActiveEffects(actor.classState.activeEffects).filter(effect => effect.modifiers?.nextD20AdvantageRollKinds?.includes(resolved.rollKind))
+      if (effects.length) {
+        const removed = removeDnd5eActiveEffectsByIds({ effects: actor.classState.activeEffects ?? [], ids: effects.map(effect => effect.id), allowProtectedLifecycle: true })
+        const projection = projectDnd5eActiveEffectState(removed.effects)
+        actor.classState.activeEffects = projection.activeEffects
+        actor.conditions = projection.conditions
+        for (const effect of effects) outputEvents.push({ type: 'active-effect-removed', targetId: actor.id, effectId: effect.id, definitionId: effect.definitionId, reason: 'consumed' })
+      }
+      consumedActorIds.add(actor.id)
+      outputEvents.push({
+        type: 'class-state-changed',
+        actorId: actor.id,
+        stateKey: 'next-d20-advantage',
+        active: false,
+      })
+    }
   }
 }

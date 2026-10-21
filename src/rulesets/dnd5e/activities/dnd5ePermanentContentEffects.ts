@@ -46,14 +46,27 @@ export function dnd5ePermanentContentEffectProjectionV1(
       if (modifier.kind === 'armor-class' && modifier.mode === 'add') {
         const value = constantValue(modifier.value)
         if (value != null) staticModifiers.armorClassBonus = Number(staticModifiers.armorClassBonus ?? 0) + value
+      } else if (modifier.kind === 'ability-check' && modifier.mode === 'add' &&
+        modifier.value.kind === 'reference' && modifier.value.reference.kind === 'actor-ability-modifier' &&
+        !modifier.excludedSkills?.includes(modifier.skill)) {
+        staticModifiers.skillCheckAbilityBonuses = [...(staticModifiers.skillCheckAbilityBonuses as unknown[] ?? []),
+          {skill:modifier.skill,ability:modifier.ability,bonusAbility:modifier.value.reference.ability}]
       } else if (modifier.kind === 'speed' && modifier.mode === 'add') {
         const value = constantValue(modifier.value)
         if (value != null) staticModifiers.speedBonusFeet = Number(staticModifiers.speedBonusFeet ?? 0) + value
       } else if (modifier.kind === 'saving-throw' && modifier.mode === 'add' && !modifier.ability && modifier.value) {
         const value = constantValue(modifier.value)
         if (value != null) staticModifiers.savingThrowBonus = Number(staticModifiers.savingThrowBonus ?? 0) + value
+      } else if (modifier.kind === 'darkvision-concealment') {
+        staticModifiers.invisibleToDarkvision = true
       } else if (modifier.kind === 'darkvision') {
-        staticModifiers.darkvisionRangeFeet = Math.max(Number(staticModifiers.darkvisionRangeFeet ?? 0), modifier.rangeFeet)
+        if (modifier.ifAbsent && modifier.existingRangeSource === 'race') {
+          staticModifiers.darkvisionRacialFallbackFeet = Math.max(Number(staticModifiers.darkvisionRacialFallbackFeet ?? 0), modifier.rangeFeet)
+          if (modifier.existingBonusFeet) staticModifiers.darkvisionRacialBonusFeet = Number(staticModifiers.darkvisionRacialBonusFeet ?? 0) + modifier.existingBonusFeet
+        } else if (modifier.ifAbsent) {
+          staticModifiers.darkvisionIfAbsentFeet = Math.max(Number(staticModifiers.darkvisionIfAbsentFeet ?? 0), modifier.rangeFeet)
+          if (modifier.existingBonusFeet) staticModifiers.darkvisionExistingBonusFeet = Number(staticModifiers.darkvisionExistingBonusFeet ?? 0) + modifier.existingBonusFeet
+        } else staticModifiers.darkvisionRangeFeet = Math.max(Number(staticModifiers.darkvisionRangeFeet ?? 0), modifier.rangeFeet)
       } else if (modifier.kind === 'damage-resistance') {
         staticModifiers.damageResistances = appendUnique(
           staticModifiers.damageResistances as typeof modifier.damageType[] | undefined,
@@ -69,10 +82,13 @@ export function dnd5ePermanentContentEffectProjectionV1(
           staticModifiers.conditionImmunities as string[] | undefined,
           modifier.condition,
         )
+      } else if (modifier.kind === 'maximize-healing-dice' && modifier.whenOwnedCompanionWithin) {
+        const rules = (staticModifiers.maximizeHealingDiceNearCompanion ?? []) as unknown[]
+        staticModifiers.maximizeHealingDiceNearCompanion = [...rules, structuredClone(modifier.whenOwnedCompanionWithin)]
       } else if (modifier.kind === 'character-capability') {
         if (modifier.capability === 'naturalOneReroll') naturalOneReroll = modifier.value === true
-        else staticModifiers[modifier.capability] = Array.isArray(modifier.value)
-          ? [...modifier.value]
+        else staticModifiers[modifier.capability] = modifier.value != null && typeof modifier.value === 'object'
+          ? structuredClone(modifier.value)
           : modifier.value
       } else if (modifier.kind === 'racial-saving-throw-advantage') {
         for (const condition of modifier.conditions ?? []) {

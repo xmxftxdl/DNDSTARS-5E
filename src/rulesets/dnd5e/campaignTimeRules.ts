@@ -1,7 +1,18 @@
+import { dnd5eExhaustionState, dnd5eSourcedExhaustionLevel, adjustDnd5eOrdinaryExhaustion } from './sourcedExhaustion'
+import {dnd5eTempleCampaignHealingBonus,type TempleCampaignHealingContext} from './templeCampaignHealing'
+import {dnd5eNativeMonsterBreathing} from './monsterBreathing'
+import { campaignUnappliedEffectMinutes, characterCombatClockKey } from '../../../shared/combat-round-credits.mjs'
+import { dnd5eConcentrationDefenseBonus } from './concentrationDefense'
 import type { CampaignRestFeatureD20Roll, SharedCampaignTimeState } from '../../lib/campaignTime'
+import { dnd5eLinkedEffectLifetimeEnded, type Dnd5eEffectLifetimePeer } from './linkedEffectLifetimes'
+import { settleDnd5eEndedSpellMaterialEscrows } from './spellMaterialEscrow'
+import { recordDnd5eTimedAwakening } from './awakeningEvents'
+import { reconcileDnd5eDreamContactRoster } from './dreamContact'
 import { campaignDawnsCrossed, canBenefitFromLongRest } from '../../lib/campaignTime'
 import { restoreClassResources } from '../../lib/classResources'
 import type { Character } from '../../types/character'
+import { planDnd5eExpiredRestCompletions } from './restCompletion'
+import { recordDnd5eRestActivityWindow } from './restActivityWindows'
 import {
   applyDnd5eShortRestResourceFeatures,
   dnd5eSelfSavingThrowAuraBonus,
@@ -9,6 +20,7 @@ import {
 import {
   resolveDnd5eAttunementAfterShortRest,
   expireDnd5eInventoryItemsAtWorldMinute,
+  expireDnd5eSourceBoundInventoryRoster,
   normalizeDnd5eInventory,
   restoreDnd5eInventoryResources,
 } from './items'
@@ -24,11 +36,13 @@ import {
 import { dnd5eStoredD20ReplacementFeaturesForCharacter } from './pluginApi'
 import {
   dnd5eActiveHitPointMaximumBonus,
+  dnd5eActiveEnvironmentalCapabilities,
   dnd5eActiveSavingThrowAdvantages,
   dnd5eActiveSavingThrowBonus,
   dnd5eActiveSavingThrowDisadvantages,
   createDnd5eMechanicalEffect,
   effectiveDnd5eActiveEffects,
+  reconcileDnd5eEffectCompletionRequirements,
   projectDnd5eActiveEffectState,
   removeDnd5eActiveEffectsByIds,
   removeDnd5eActiveEffectsForEvent,
@@ -132,14 +146,29 @@ function applyDawn(character: Character, dawns: number): Character {
   return next
 }
 
-export function applyDnd5eShortRestBenefits(character: Character): Character {
+export function applyDnd5eShortRestBenefits(character: Character, completionWorldMinute?: number): Character {
+  if (dnd5eRestBenefitsPrevented(character)) return character
+  return resolveDnd5eAttunementAfterShortRest(applyDnd5eGrantedShortRestBenefits(character, completionWorldMinute))
+}
+
+export function dnd5eRestBenefitsPrevented(character: Character): boolean {
+  return effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects)
+    .some(effect => effect.modifiers?.preventRestBenefits === true)
+}
+
+/** Grants recovery benefits without inventing time spent on a separate attunement activity.
+ * Call only after the granting effect's full completion has been established by Host.
+ * This function neither advances the campaign clock nor spends Hit Dice automatically.
+ */
+export function applyDnd5eGrantedShortRestBenefits(character: Character, completionWorldMinute?: number): Character {
+  if (dnd5eRestBenefitsPrevented(character)) return character
   const remainingEffects = removeDnd5eActiveEffectsForEvent({
     effects: character.dnd5eCombatState?.activeEffects,
     trigger: 'short-rest-complete',
   }).effects
   const remainingAbilityReductions = character.dnd5eCombatState?.abilityScoreReductionLedger
     ?.filter((entry) => entry.recovery !== 'short-or-long-rest')
-  return resolveDnd5eAttunementAfterShortRest(restoreDnd5eInventoryResources(
+  const restored = restoreDnd5eInventoryResources(
     applyDnd5eShortRestResourceFeatures(restoreClassResources({
       ...character,
       dnd5eCombatState: character.dnd5eCombatState ? {
@@ -153,12 +182,19 @@ export function applyDnd5eShortRestBenefits(character: Character): Character {
       } : undefined,
     }, 'short-rest')),
     'short-rest',
-  ))
+  )
+  return completionWorldMinute == null ? restored : recordDnd5eRestActivityWindow(restored, 'short-rest-complete', completionWorldMinute)
 }
 
 export interface Dnd5eCampaignTimeReconcileContext {
+  /** Authoritative game clock used for Host-stamped phase deadlines. */
+  worldSecond?: number
   /** Map-authoritative elevation at the start of this clock interval. */
   airborne?: boolean
+  /** Host scene at the start of a stationary time advance. Never supplied by a player action. */
+  templeHealing?: TempleCampaignHealingContext
+  cannotRegainHitPoints?: boolean
+  intrinsicBreathing?: { canBreatheWater?: boolean; doesNotNeedAir?: boolean }
 }
 
 function dnd5eBoundedEffectRemainingRounds(
@@ -180,7 +216,7 @@ export function dnd5eCampaignTimeControlledDescentDistanceFeet(
   character: Character,
   elapsedMinutes: number,
 ): number {
-  const elapsedRounds = Math.max(0, Math.floor(elapsedMinutes)) * 10
+  const elapsedRounds = Math.max(0, Math.floor(elapsedMinutes * 10))
   if (elapsedRounds < 1) return 0
   let maximumDistanceFeet = 0
   for (const effect of effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects)) {
@@ -222,9 +258,47 @@ export function advanceDnd5eCampaignTimedActiveEffects(
   elapsedMinutes: number,
   context: Dnd5eCampaignTimeReconcileContext = {},
 ): Character {
-  const elapsedRounds = Math.max(0, Math.floor(elapsedMinutes)) * 10
-  if (elapsedRounds < 1) return character
-  const effects = character.dnd5eCombatState?.activeEffects ?? []
+  let advanced = advanceTimedActiveEffects(character, elapsedMinutes, context)
+  const liveEffectIds = new Set((advanced.dnd5eCombatState?.activeEffects ?? []).map(effect => effect.id))
+  let reductionLedger = normalizeDnd5eHitPointMaximumReductionLedger(advanced.dnd5eCombatState?.hitPointMaximumReductionLedger)
+  const endedOwners = new Set(reductionLedger?.entries.flatMap(entry =>
+    entry.recovery === 'effect-removal' && entry.sourceEffectId && !liveEffectIds.has(entry.sourceEffectId)
+      ? [entry.sourceEffectId] : []) ?? [])
+  for (const effectId of endedOwners) {
+    const restored = recoverDnd5eHitPointMaximumReductionsForEffect(reductionLedger, effectId)
+    reductionLedger = restored.ledger
+    if (restored.maximum != null) advanced = { ...advanced, maxHp: restored.maximum,
+      currentHp: Math.min(advanced.currentHp, restored.maximum + dnd5eActiveHitPointMaximumBonus(advanced.dnd5eCombatState?.activeEffects)),
+      dnd5eCombatState: { ...advanced.dnd5eCombatState, hitPointMaximumReductionLedger: reductionLedger } }
+  }
+  const effectiveMaximum = advanced.maxHp + dnd5eActiveHitPointMaximumBonus(advanced.dnd5eCombatState?.activeEffects)
+  if (advanced.currentHp > effectiveMaximum) advanced = { ...advanced, currentHp: effectiveMaximum }
+  const temporarySource = advanced.dnd5eCombatState?.temporaryHitPointsSource
+  if (temporarySource?.effectDefinitionId && !(advanced.dnd5eCombatState?.activeEffects ?? []).some(effect => {
+    const prefix = temporarySource.effectDefinitionId!
+    return effect.source.actorId === temporarySource.actorId && [effect.definitionId, effect.stackingKey].some(value =>
+      value === prefix || value?.startsWith(`${prefix}:`) || value?.includes(`:${prefix}:`))
+  })) advanced = { ...advanced, tempHp: 0, dnd5eCombatState: { ...advanced.dnd5eCombatState, temporaryHitPointsSource: undefined } }
+
+  return recordDnd5eTimedAwakening(character, settleDnd5eEndedSpellMaterialEscrows(advanced,
+    new Set((advanced.dnd5eCombatState?.activeEffects ?? []).map(effect => effect.id)),
+  ).character, elapsedMinutes)
+}
+
+function advanceTimedActiveEffects(
+  character: Character,
+  elapsedMinutes: number,
+  context: Dnd5eCampaignTimeReconcileContext = {},
+): Character {
+  const elapsedRounds = Math.max(0, Math.floor(elapsedMinutes * 10))
+  const phaseDeadline = (effect: Dnd5eActiveEffectInstance) =>
+    effect.modifiers?.planarPhase?.plane === 'ethereal' && Number.isSafeInteger(effect.explorationExpiresAtWorldSecond) &&
+      context.worldSecond != null ? effect.explorationExpiresAtWorldSecond : undefined
+  if (elapsedRounds < 1 && !(character.dnd5eCombatState?.activeEffects ?? []).some(effect => {
+    const deadline = phaseDeadline(effect)
+    return deadline != null && context.worldSecond! >= deadline
+  })) return character
+  const effects = reconcileDnd5eEffectCompletionRequirements(character.dnd5eCombatState?.activeEffects ?? [])
   const priorConcentrationRounds = character.dnd5eCombatState?.concentrationRoundsRemaining
   const advancedConcentrationRounds = priorConcentrationRounds == null
     ? undefined
@@ -234,9 +308,36 @@ export function advanceDnd5eCampaignTimedActiveEffects(
   const expiredIds: string[] = []
   const completedConcentrationSourceIds = new Set<string>()
   const effectiveEffectIds = new Set(effectiveDnd5eActiveEffects(effects).map((effect) => effect.id))
+  const breathing = character.dnd5eCombatState?.submergedBreathing?.collapsed
+    ? context.intrinsicBreathing ?? { canBreatheWater:
+      dnd5eNativeMonsterBreathing(character.dnd5eCombatState?.wildShapeFormId).canBreatheWater === true ||
+      migrateCharacterToDnd5e(character).canBreatheWater === true }
+    : undefined
+  const breathingCapabilities = breathing ? dnd5eActiveEnvironmentalCapabilities(effects, breathing) : undefined
+  const suffocationBlockedRounds = character.dnd5eCombatState?.submergedBreathing?.collapsed &&
+    !breathing?.doesNotNeedAir && !breathingCapabilities?.canBreatheWater && !breathingCapabilities?.doesNotNeedAir
+    ? Math.max(0,...effects.filter(effect=>effectiveEffectIds.has(effect.id)&&effect.modifiers?.submerged===true)
+      .map(effect=>dnd5eBoundedEffectRemainingRounds(effect)??elapsedRounds)) : 0
+  const healingBlockedRounds = context.cannotRegainHitPoints || (character.currentHp === 0 && (character.deathSaveFailures ?? 0) >= 3)
+    ? elapsedRounds : Math.max(0, ...effects.filter(effect => effectiveEffectIds.has(effect.id) &&
+      (effect.modifiers?.preventHealing === true || effect.definitionId === 'srd-5.1:spell:chill-touch:no-healing'))
+      .map(effect => dnd5eBoundedEffectRemainingRounds(effect) ?? elapsedRounds), suffocationBlockedRounds)
   let periodicHealing = 0
   let bodyRestored = false
   const advanced = effects.map((effect) => {
+    const deadline = phaseDeadline(effect)
+    if (deadline != null) {
+      if (context.worldSecond! >= deadline) expiredIds.push(effect.id)
+      return effect
+    }
+    if (elapsedRounds < 1) return effect
+    // Campaign jumps currently contain no participant-continuity evidence.
+    // Do not let an unverified interval shorten a preparation that can later
+    // complete at a combat boundary and mint an Activity entitlement.
+    if (effect.completionGrant) {
+      expiredIds.push(effect.id)
+      return effect
+    }
     const boundedRemainingRounds = effect.duration.type === 'rounds' ||
       (effect.duration.type === 'concentration' && effect.duration.remainingRounds != null)
       ? effect.duration.remainingRounds ?? elapsedRounds
@@ -245,7 +346,10 @@ export function advanceDnd5eCampaignTimedActiveEffects(
       ? Math.min(elapsedRounds, boundedRemainingRounds)
       : 0
     if (effect.periodicHealing && activeElapsedRounds > 0) {
-      periodicHealing += effect.periodicHealing.amount * activeElapsedRounds
+      periodicHealing += effect.periodicHealing.amount * Math.max(0, activeElapsedRounds - healingBlockedRounds)
+      if (context.templeHealing && effect.source.kind === 'spell' && effect.periodicHealing.amount > 0) {
+        periodicHealing += dnd5eTempleCampaignHealingBonus(context.templeHealing, effect.source.spellLevel ?? 0, activeElapsedRounds, healingBlockedRounds)
+      }
     }
     const bodyRoundsRemaining = effect.bodyRestoration?.roundsRemaining
     const nextBodyRoundsRemaining = bodyRoundsRemaining == null
@@ -259,6 +363,12 @@ export function advanceDnd5eCampaignTimedActiveEffects(
       : nextBodyRoundsRemaining === 0
         ? undefined
         : { ...effect.bodyRestoration!, roundsRemaining: nextBodyRoundsRemaining }
+    // Exploration advances have elapsed whole rounds; a next-turn boundary
+    // cannot keep a one-turn gate alive indefinitely outside initiative.
+    if (effect.duration.type === 'until-turn-boundary') {
+      expiredIds.push(effect.id)
+      return effect
+    }
     if (effect.duration.type === 'rounds') {
       const remainingRounds = effect.duration.remainingRounds - elapsedRounds
       if (remainingRounds < 1) expiredIds.push(effect.id)
@@ -288,7 +398,7 @@ export function advanceDnd5eCampaignTimedActiveEffects(
     }
     return bodyRoundsRemaining == null ? effect : { ...effect, bodyRestoration }
   })
-  const removedExpired = removeDnd5eActiveEffectsByIds({ effects: advanced, ids: expiredIds }).effects
+  const removedExpired = removeDnd5eActiveEffectsByIds({ effects: advanced, ids: expiredIds, allowProtectedLifecycle: true }).effects
   const afterEffects = effects.flatMap((effect) => {
     if (!expiredIds.includes(effect.id)) return []
     const restriction = effect.afterEffectEnds
@@ -337,7 +447,13 @@ export function advanceDnd5eCampaignTimedActiveEffects(
       return { ...effect, suspendedBy: suspendedBy?.length ? suspendedBy : undefined }
     },
   )
-  const projection = projectDnd5eActiveEffectState(remaining)
+  const restCompletions = planDnd5eExpiredRestCompletions({targetId:character.id,effects,expiredEffectIds:expiredIds})
+  const healedCurrentHp = periodicHealing > 0
+    ? Math.min(character.maxHp + dnd5eActiveHitPointMaximumBonus(effects), character.currentHp + periodicHealing)
+    : character.currentHp
+  const recoveredFromZero = character.currentHp === 0 && healedCurrentHp > 0
+  const projection = projectDnd5eActiveEffectState([...remaining,...restCompletions.lockouts].filter(effect =>
+    !(recoveredFromZero && effect.standardCondition === 'unconscious' && effect.source.rulesId === 'zero-hit-points')))
   const expiredConcentrationSources = new Set(effects.flatMap((effect) =>
     expiredIds.includes(effect.id) && effect.duration.type === 'concentration'
       ? [effect.duration.sourceActorId]
@@ -360,14 +476,10 @@ export function advanceDnd5eCampaignTimedActiveEffects(
     Object.entries(priorConcentrationSources).filter(([sourceId]) =>
       !expiredConcentrationSources.has(sourceId)),
   )
-  return {
+  const result: Character = {
     ...character,
-    currentHp: periodicHealing > 0
-      ? Math.min(
-          character.maxHp + dnd5eActiveHitPointMaximumBonus(effects),
-          character.currentHp + periodicHealing,
-        )
-      : character.currentHp,
+    currentHp: healedCurrentHp,
+    ...(recoveredFromZero ? { deathSaveSuccesses: 0, deathSaveFailures: 0, deathSaveStable: false } : {}),
     // `conditions` is the compatibility projection of ActiveEffects. Keeping
     // the expired label here would make the shared-state validator reject the
     // otherwise-correct effect removal.
@@ -375,6 +487,7 @@ export function advanceDnd5eCampaignTimedActiveEffects(
     ...(concentrationEnded ? { concentrating: false } : {}),
     dnd5eCombatState: {
       ...character.dnd5eCombatState,
+      ...(periodicHealing > 0 && character.dnd5eCombatState?.wildShapeFormId ? { wildShapeCurrentHp: healedCurrentHp } : {}),
       ...(concentrationSummaryExpired &&
         character.dnd5eCombatState?.wildShapePermanentAfterConcentrationCompletes === true
         ? {
@@ -409,10 +522,17 @@ export function advanceDnd5eCampaignTimedActiveEffects(
         concentrationSpellLevel: undefined,
         concentrationTargetIds: undefined,
         concentrationRoundsRemaining: undefined,
+        concentrationStartedTurnKey: undefined,
+        concentrationTickOn: undefined,
+        concentrationLastTickTurnKey: undefined,
         huntersMarkTargetId: undefined,
       } : {}),
     },
   }
+  if (!restCompletions.completed.length) return result
+  const sourceMinute=character.dnd5eWorldTimeAppliedMinute
+  const completionMinute=sourceMinute == null ? undefined : sourceMinute + Math.ceil(Math.max(...restCompletions.completed.map(effect=>effect.duration.type==='rounds'?effect.duration.remainingRounds:0))/10)
+  return applyDnd5eGrantedShortRestBenefits(result,completionMinute)
 }
 
 /**
@@ -544,8 +664,11 @@ function dnd5eCampaignRepeatSaveModifier(character: Character, ability: keyof Ch
     (proficient ? rules.proficiencyBonus(Math.max(1, Math.min(20, snapshot.level))) : 0) +
     (snapshot.savingThrowEquipmentBonus ?? 0) +
     (snapshot.savingThrowPluginBonus ?? 0) +
+    dnd5eConcentrationDefenseBonus(snapshot.pluginFeatureIds, snapshot.concentrating ? snapshot.classState.concentrationSpellId : undefined, 'savingThrows') +
     dnd5eSelfSavingThrowAuraBonus({ ...character, abilities: snapshot.abilities }) +
-    dnd5eActiveSavingThrowBonus(character.dnd5eCombatState?.activeEffects, ability) +
+    dnd5eActiveSavingThrowBonus(character.dnd5eCombatState?.activeEffects, ability, {
+      proficiencyBonus: rules.proficiencyBonus(snapshot.level), savingThrowProficiencies: snapshot.savingThrowProficiencies,
+    }) +
     (character.dnd5eCombatState?.resurrectionPenalty?.value ?? 0)
 }
 
@@ -720,13 +843,27 @@ export function applyDnd5eLongRestBenefits(
   completionWorldMinute: number,
   restFeatureD20Rolls: readonly CampaignRestFeatureD20Roll[] = [],
 ): Character {
+  if (dnd5eRestBenefitsPrevented(character)) return character
+  // Own-source rest expiry must precede healing: otherwise an effect-owned
+  // maximum debit is restored only in the later roster pass, after HP healed.
+  const effects = character.dnd5eCombatState?.activeEffects ?? []
+  const ownSourceExpiryIds = effects.filter(effect =>
+    (effect.source.characterId ?? effect.source.actorId) === character.id &&
+    effect.breakOn?.includes('source-long-rest-complete') &&
+    effect.source.lastLongRestWorldMinute !== undefined &&
+    completionWorldMinute > (effect.source.lastLongRestWorldMinute ?? -1),
+  ).map(effect => effect.id)
   const remainingEffects = removeDnd5eActiveEffectsForEvent({
-    effects: character.dnd5eCombatState?.activeEffects,
+    effects: removeDnd5eActiveEffectsByIds({ effects, ids: ownSourceExpiryIds, allowProtectedLifecycle: true }).effects,
     trigger: 'long-rest-complete',
   }).effects.filter((effect) => !(
     effect.standardCondition === 'unconscious' &&
     effect.source.rulesId === 'zero-hit-points'
   ))
+  // Settle ledgers owned by removed effects before choosing the healing cap.
+  character = advanceDnd5eCampaignTimedActiveEffects({ ...character,
+    dnd5eCombatState: { ...character.dnd5eCombatState, activeEffects: remainingEffects },
+  }, 0)
   const recoveredConditions = (character.conditions ?? []).filter((condition) =>
     dnd5eStandardConditionId(condition) !== 'unconscious')
   const gainsTranquility = dnd5eCharacterClassLevel(character, 'monk') >= 11 &&
@@ -753,9 +890,13 @@ export function applyDnd5eLongRestBenefits(
     'long-rest',
   )
   const restoredMaximum = maximumReductionRecovery.maximum ?? character.maxHp
-  const exhaustionLevel = character.rulesetId === 'dnd5e-2014-srd-5.1'
-    ? Math.max(0, Math.floor(character.exhaustionLevel ?? 0) - 1)
-    : character.exhaustionLevel
+  const sourcedExhaustion = character.rulesetId === 'dnd5e-2014-srd-5.1' && character.dnd5eCombatState?.sourcedExhaustion
+    ? adjustDnd5eOrdinaryExhaustion(dnd5eExhaustionState(character.dnd5eCombatState.sourcedExhaustion, character.exhaustionLevel), -1)
+    : undefined
+  const exhaustionLevel = sourcedExhaustion ? dnd5eSourcedExhaustionLevel(sourcedExhaustion)
+    : character.rulesetId === 'dnd5e-2014-srd-5.1'
+      ? Math.max(0, Math.floor(character.exhaustionLevel ?? 0) - 1)
+      : character.exhaustionLevel
   const storedD20ByFeatureId = Object.fromEntries(
     dnd5eStoredD20ReplacementFeaturesForCharacter(character).map(({ feature, count }) => {
       const authoritative = restFeatureD20Rolls.find((entry) =>
@@ -786,6 +927,7 @@ export function applyDnd5eLongRestBenefits(
     concentrating: false,
     dnd5eLastLongRestWorldMinute: completionWorldMinute,
     dnd5eCombatState:
+      sourcedExhaustion ||
       gainsTranquility ||
       divineInterventionCooldownDays ||
       maximumReductionRecovery.ledger ||
@@ -793,6 +935,7 @@ export function applyDnd5eLongRestBenefits(
       remainingEffects.length > 0 ||
       Object.keys(storedD20ByFeatureId).length > 0
       ? {
+          ...(sourcedExhaustion ? { sourcedExhaustion } : {}),
           ...(gainsTranquility ? { tranquilityActive: true } : {}),
           ...(divineInterventionCooldownDays ? { divineInterventionCooldownDays } : {}),
           ...(maximumReductionRecovery.ledger
@@ -809,9 +952,10 @@ export function applyDnd5eLongRestBenefits(
         }
       : undefined,
   }, 'long-rest'), 'long-rest')
-  return divineInterventionCooldownDays
+  const result = divineInterventionCooldownDays
     ? advanceDnd5eDivineInterventionCalendarDays(restored, 0)
     : restored
+  return recordDnd5eRestActivityWindow(result, 'long-rest-complete', completionWorldMinute)
 }
 
 /**
@@ -823,6 +967,7 @@ export function reconcileDnd5eCharacterCampaignTime(
   clock: SharedCampaignTimeState,
   context: Dnd5eCampaignTimeReconcileContext = {},
 ): Dnd5eCampaignTimeReconcileResult {
+  context = { ...context, worldSecond: clock.worldMinute * 60 + (clock.worldSecondRemainder ?? 0) }
   if (character.rulesetId !== 'dnd5e-2014-srd-5.1') {
     return { character, changed: false, dawnsApplied: 0, longRestsApplied: 0, longRestsBlocked: 0 }
   }
@@ -836,9 +981,12 @@ export function reconcileDnd5eCharacterCampaignTime(
   }
   if (!Number.isSafeInteger(appliedMinute) || appliedMinute! < 0) {
     const calendar = reconcileDnd5eCalendarEffects(character, clock.worldMinute, clock.worldMinute)
+    // Existing absolute deadlines remain authoritative on first hydration,
+    // without aging legacy effects by an unknown amount of campaign history.
+    const advanced = advanceDnd5eCampaignTimedActiveEffects(calendar.character, 0, context)
     return {
       character: {
-        ...expireDnd5eInventoryItemsAtWorldMinute(calendar.character, clock.worldMinute),
+        ...expireDnd5eInventoryItemsAtWorldMinute(advanced, clock.worldMinute),
         dnd5eWorldTimeAppliedMinute: clock.worldMinute,
       },
       changed: true,
@@ -849,9 +997,10 @@ export function reconcileDnd5eCharacterCampaignTime(
   }
   if (appliedMinute === clock.worldMinute) {
     const calendar = reconcileDnd5eCalendarEffects(character, appliedMinute!, clock.worldMinute)
+    const advanced = advanceDnd5eCampaignTimedActiveEffects(calendar.character, 0, context)
     return {
-      character: calendar.character,
-      changed: calendar.changed,
+      character: advanced,
+      changed: calendar.changed || advanced !== calendar.character,
       dawnsApplied: 0,
       longRestsApplied: 0,
       longRestsBlocked: 0,
@@ -873,12 +1022,13 @@ export function reconcileDnd5eCharacterCampaignTime(
     const isRestBeneficiary = advance.beneficiaryCharacterIds == null ||
       advance.beneficiaryCharacterIds.includes(character.id)
     if (advance.kind === 'short-rest' && isRestBeneficiary) {
-      next = applyDnd5eShortRestBenefits(next)
+      next = applyDnd5eShortRestBenefits(next, advance.toWorldMinute)
     }
     if (advance.kind === 'long-rest' && isRestBeneficiary) {
       if (
-        advance.ignoreLongRestCooldown === true ||
-        canBenefitFromLongRest(next.dnd5eLastLongRestWorldMinute, advance.toWorldMinute)
+        !dnd5eRestBenefitsPrevented(next) && (
+          advance.ignoreLongRestCooldown === true ||
+          canBenefitFromLongRest(next.dnd5eLastLongRestWorldMinute, advance.toWorldMinute))
       ) {
         next = applyDnd5eLongRestBenefits(
           next,
@@ -899,11 +1049,12 @@ export function reconcileDnd5eCharacterCampaignTime(
       dawnsApplied += dawns
     }
   }
+  const effectMinutes = campaignUnappliedEffectMinutes(clock, appliedMinute!, characterCombatClockKey(character.id))
   const timedMaximumReduction = advanceDnd5eHitPointMaximumReductionDurations(
     normalizeDnd5eHitPointMaximumReductionLedger(
       next.dnd5eCombatState?.hitPointMaximumReductionLedger,
     ),
-    Math.max(0, clock.worldMinute - appliedMinute!) * 10,
+    Math.round(effectMinutes * 10),
   )
   if (timedMaximumReduction.maximum != null) {
     next = {
@@ -918,7 +1069,7 @@ export function reconcileDnd5eCharacterCampaignTime(
   }
   next = advanceDnd5eCampaignTimedActiveEffects(
     next,
-    Math.max(0, clock.worldMinute - appliedMinute!),
+    effectMinutes,
     context,
   )
   const calendar = reconcileDnd5eCalendarEffects(next, appliedMinute!, clock.worldMinute)
@@ -934,4 +1085,60 @@ export function reconcileDnd5eCharacterCampaignTime(
     longRestsApplied,
     longRestsBlocked,
   }
+}
+
+
+/** Reconcile source-owned lifetimes across the complete authoritative character roster. */
+export function reconcileDnd5eSourceEffectLifecycles(characters: readonly Character[], externalPeers: readonly Dnd5eEffectLifetimePeer[] = []): Character[] {
+  let reconciled = characters.map(bearer => {
+    const effects = bearer.dnd5eCombatState?.activeEffects ?? []
+    const expired = effects.filter(effect => {
+      const sourceId = effect.source.characterId ?? effect.source.actorId
+      if (!sourceId) return false
+      const candidates = characters.filter(character => character.id === sourceId)
+      if (candidates.length !== 1) return false
+      const source = candidates[0]
+      if (effect.breakOn?.includes('source-dies') && source.currentHp <= 0 && (source.deathSaveFailures ?? 0) >= 3) return true
+      const marker = effect.source.lastLongRestWorldMinute
+      return effect.breakOn?.includes('source-long-rest-complete') === true && marker !== undefined &&
+        source.dnd5eLastLongRestWorldMinute != null && source.dnd5eLastLongRestWorldMinute > (marker ?? -1)
+    })
+    if (!expired.length) return bearer
+    const remaining = removeDnd5eActiveEffectsByIds({effects,ids:expired.map(effect => effect.id),allowProtectedLifecycle:true}).effects
+    const projection = projectDnd5eActiveEffectState(remaining)
+    return advanceDnd5eCampaignTimedActiveEffects({...bearer, conditions:projection.conditions,
+      dnd5eCombatState:{...bearer.dnd5eCombatState,activeEffects:projection.activeEffects}},0)
+  })
+  const limit = reconciled.reduce((sum, bearer) => sum + (bearer.dnd5eCombatState?.activeEffects?.length ?? 0), 0)
+  for (let pass = 0; pass <= limit; pass++) {
+    const peers = reconciled.map(bearer => ({ actorId: bearer.id, characterId: bearer.id,
+      dead: bearer.currentHp <= 0 && (bearer.deathSaveFailures ?? 0) >= 3,
+      effects: bearer.dnd5eCombatState?.activeEffects ?? [] }))
+    const allPeers = [...peers, ...externalPeers.filter(peer => !peer.characterId || !peers.some(local => local.characterId === peer.characterId))]
+    let changed = false
+    reconciled = reconciled.map((bearer, index) => {
+      const effects = bearer.dnd5eCombatState?.activeEffects ?? []
+      const expired = effects.filter(effect => dnd5eLinkedEffectLifetimeEnded(effect, peers[index].dead, allPeers))
+      if (!expired.length) return bearer
+      changed = true
+      const remaining = removeDnd5eActiveEffectsByIds({ effects, ids: expired.map(effect => effect.id), allowProtectedLifecycle: true }).effects
+      const projection = projectDnd5eActiveEffectState(remaining)
+      return advanceDnd5eCampaignTimedActiveEffects({ ...bearer, conditions: projection.conditions,
+        dnd5eCombatState: { ...bearer.dnd5eCombatState, activeEffects: projection.activeEffects } }, 0)
+    })
+    if (!changed) break
+  }
+  return reconciled
+}
+
+/** The roster pass runs after all individual rests, so iteration order cannot change expiry. */
+export function reconcileDnd5eCampaignRosterSourceEffects(results: readonly Dnd5eCampaignTimeReconcileResult[]): Dnd5eCampaignTimeReconcileResult[] {
+  const characters = reconcileDnd5eSourceEffectLifecycles(results.map(result => result.character))
+  // Collect only after every character's clock/source expiry has settled. A
+  // transferred stack still belongs to its original source, not its holder.
+  const cleaned = reconcileDnd5eDreamContactRoster(expireDnd5eSourceBoundInventoryRoster(characters))
+  return results.map((result,index) => {
+    const character = cleaned[index]
+    return character === result.character ? result : {...result,character,changed:true}
+  })
 }

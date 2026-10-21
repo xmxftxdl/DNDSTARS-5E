@@ -1,7 +1,13 @@
 import type { ClassResourceDefinition } from '../../../lib/classDefinitionTypes'
 import type { AbilityKey } from '../../../lib/dnd'
 import type { Character } from '../../../types/character'
+import { dnd5eCoreRaceMechanics } from '../coreRaceMechanics'
 import { dnd5eCharacterBuildFeatureIdsV1 } from '../buildChoices'
+import { cloneDnd5eIndependentSpellGrants, cloneDnd5eFeatureClassRequirements } from '../independentSpellGrants'
+import { cloneDnd5eFeatureChoiceRequirements } from '../featureChoiceRequirements'
+import { cloneDnd5eKnownSpellRequirements, dnd5eCharacterLearnedSpellIds } from '../featureSpellRequirements'
+import { cloneDnd5eFeatureEligibility, evaluateDnd5eFeatureEligibility } from '../featureEligibility'
+import { cloneDnd5eFeatureRuleCapabilities } from '../featureRuleCapabilities'
 import {
   DND5E_SRD_AUDITED_SPELL_PACKAGE_ID,
   dnd5eSrdAuditedFullContentDefinitionsV1,
@@ -9,7 +15,7 @@ import {
   dnd5eSrdAuditedSpellDefinitionV1,
 } from '../activities/dnd5eSrdAuditedSpellActivities'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from '../classLevels'
-import type { Dnd5eClassId } from '../classes'
+import { availableDnd5eClassDefinitions, dnd5eAllClassChoiceGroups, dnd5eClassChoiceOptionAvailable, type Dnd5eClassId } from '../classes'
 import {
   declarativeSubclassResourceDieSidesV1,
   type DeclarativeSubclassAbilityV1,
@@ -40,7 +46,7 @@ import {
   dnd5eBaseArmorProficiencies,
   dnd5eBaseSpellcastingCapabilityV1,
 } from '../characterCapabilities'
-import { declarativeClassGrantedFeatureIdsV1 } from '../declarativeClass'
+import { declarativeClassGrantedFeatureIdsV1, registeredDeclarativeClassesV1 } from '../declarativeClass'
 import { dnd5eCharacterBuildProficienciesV1 } from '../buildChoices'
 import {
   contentDefinitionRegistryRevision,
@@ -65,6 +71,32 @@ const {
   items: pluginItems,
   monsters: pluginMonsters,
 } = dnd5ePluginRegistryStore
+
+export type Dnd5ePluginContentNameCategory = 'class' | 'subclass' | 'race' | 'background' | 'feat' | 'feature' | 'spell' | 'item' | 'monster'
+export interface Dnd5ePluginContentName {
+  category: Dnd5ePluginContentNameCategory
+  id: string
+  ownerPluginId: string
+  name: string
+}
+
+/** Navigation inventories need names, not cloned executable rules or images. */
+export function registeredDnd5ePluginContentNames(): readonly Dnd5ePluginContentName[] {
+  const result: Dnd5ePluginContentName[] = []
+  const add = (category: Dnd5ePluginContentNameCategory, entries: Iterable<{ id: string; ownerPluginId: string; name: string }>) => {
+    for (const { id, ownerPluginId, name } of entries) result.push({ category, id, ownerPluginId, name })
+  }
+  add('class', registeredDeclarativeClassesV1().map(entry => ({ id: entry.id, ownerPluginId: entry.ownerPluginId, name: entry.definition.name })))
+  add('subclass', pluginSubclasses.values())
+  add('race', pluginRaces.values())
+  add('background', pluginBackgrounds.values())
+  add('feat', pluginFeats.values())
+  add('feature', pluginFeatures.values())
+  add('spell', pluginSpells.values())
+  add('item', pluginItems.values())
+  add('monster', pluginMonsters.values())
+  return result
+}
 
 let cachedContentDefinitionRevision = -1
 let cachedDefinitionsByPackage = new Map<string, readonly RegisteredContentDefinition[]>()
@@ -104,6 +136,7 @@ function cloneRegisteredStaticModifiers(
 ): Dnd5ePluginStaticCombatModifiers | undefined {
   return value ? {
     ...value,
+    naturalWeapons: value.naturalWeapons?.map(weapon => ({ ...weapon })),
     damageResistances: value.damageResistances ? [...value.damageResistances] : undefined,
     damageImmunities: value.damageImmunities ? [...value.damageImmunities] : undefined,
     conditionImmunities: value.conditionImmunities ? [...value.conditionImmunities] : undefined,
@@ -148,6 +181,13 @@ function unifiedLegacyAutomation(
   fallback: Dnd5ePluginAutomationLevel | undefined,
 ): Dnd5ePluginAutomationLevel | undefined {
   const declared = payloadRecord(definition)?.automation
+  // Activities replace the legacy recipe; their combined capability includes
+  // unresolved/manual branches. The old payload remains source metadata.
+  if (definition?.activities?.length && payloadRecord(definition)?.explicitActivityImplementation === true) {
+    if (definition.automation.level === 'full') return 'full'
+    if (definition.automation.level === 'assisted') return 'partial'
+    return 'manual'
+  }
   if (declared === 'full' || declared === 'partial' || declared === 'manual') return declared
   if (!definition?.activities?.length && !definition?.effects?.length) return fallback
   if (definition.automation.level === 'full') return 'full'
@@ -201,6 +241,16 @@ function cloneRegisteredFeature(feature: RegisteredDnd5ePluginFeature): Register
   const payloadAction = payload?.action
   return {
     ...feature,
+    resources: feature.resources?.map(resource => ({...resource})),
+    spellGrants: cloneDnd5eIndependentSpellGrants(definition ? payload?.spellGrants : feature.spellGrants, feature.id),
+    classRequirements: cloneDnd5eFeatureClassRequirements(definition ? payload?.classRequirements : feature.classRequirements, feature.id),
+    classChoiceRequirements: cloneDnd5eFeatureChoiceRequirements(definition ? payload?.classChoiceRequirements : feature.classChoiceRequirements, feature.id),
+    requiredKnownSpellIds: cloneDnd5eKnownSpellRequirements(definition ? payload?.requiredKnownSpellIds : feature.requiredKnownSpellIds, feature.id),
+    eligibility: cloneDnd5eFeatureEligibility(definition ? payload?.eligibility : feature.eligibility, feature.id),
+    ruleCapabilities: cloneDnd5eFeatureRuleCapabilities(definition
+      ? payload?.ruleCapabilities ?? (feature.sourceSubclassId && Array.isArray(payload?.ruleCapabilityIds)
+          ? payload.ruleCapabilityIds.map(id => ({ id, classId: feature.sourceClassId })) : undefined)
+      : feature.ruleCapabilities, feature.id),
     automation: unifiedLegacyAutomation(definition, feature.automation) ?? feature.automation,
     action: clonePluginFeatureAction(
       payloadAction && typeof payloadAction === 'object'
@@ -210,7 +260,9 @@ function cloneRegisteredFeature(feature: RegisteredDnd5ePluginFeature): Register
     declarativeAbility: payloadAbility && typeof payloadAbility === 'object'
       ? structuredClone(payloadAbility as DeclarativeSubclassAbilityV1)
       : feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
-    automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+    automationReasons: definition?.activities?.length && payload?.explicitActivityImplementation === true
+      ? [...definition.automation.limitations]
+      : feature.automationReasons ? [...feature.automationReasons] : undefined,
     staticModifiers: cloneRegisteredStaticModifiers(
       definition ? projected.staticModifiers : feature.staticModifiers,
     ),
@@ -221,9 +273,59 @@ function cloneRegisteredFeature(feature: RegisteredDnd5ePluginFeature): Register
 }
 
 export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginFeature[] {
-  return [...pluginFeatures.values()]
-    .map(cloneRegisteredFeature)
-    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+  return runtimeDnd5ePluginFeatures().map(editableFeatureSnapshot)
+}
+
+interface RuntimeFeatureCacheEntry {
+  registryRevision: number
+  contentRevision: number
+  value: RegisteredDnd5ePluginFeature
+}
+const runtimeFeatureCache = new WeakMap<RegisteredDnd5ePluginFeature, RuntimeFeatureCacheEntry>()
+let runtimeFeatureListRevision = -1
+let runtimeFeatureListContentRevision = -1
+let runtimeFeatureList: readonly RegisteredDnd5ePluginFeature[] = []
+
+function freezeFeatureData(value: unknown): void {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return
+  for (const child of Object.values(value)) freezeFeatureData(child)
+  Object.freeze(value)
+}
+
+function editableFeatureSnapshot(feature: RegisteredDnd5ePluginFeature): RegisteredDnd5ePluginFeature {
+  return {
+    ...structuredClone({ ...feature, isAvailable: undefined }),
+    ...(feature.isAvailable ? { isAvailable: feature.isAvailable } : {}),
+  }
+}
+
+function runtimeFeatureSnapshot(feature: RegisteredDnd5ePluginFeature): RegisteredDnd5ePluginFeature {
+  const registryRevision = dnd5ePluginRegistryStore.revision
+  const contentRevision = contentDefinitionRegistryRevision()
+  const cached = runtimeFeatureCache.get(feature)
+  if (cached?.registryRevision === registryRevision && cached.contentRevision === contentRevision) return cached.value
+  const projected = cloneRegisteredFeature(feature)
+  // Preserve the one executable predicate separately; all remaining feature
+  // fields are data. Copy before freezing so public editable views stay safe.
+  const value = editableFeatureSnapshot(projected)
+  freezeFeatureData(value)
+  if (dnd5ePluginRegistryStore.plugins.has(feature.ownerPluginId)) {
+    runtimeFeatureCache.set(feature, { registryRevision, contentRevision, value })
+  }
+  return value
+}
+
+/** Host-only immutable read view. Public catalog getters still return editable copies. */
+export function runtimeDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginFeature[] {
+  const revision = dnd5ePluginRegistryStore.revision
+  const contentRevision = contentDefinitionRegistryRevision()
+  if (revision !== runtimeFeatureListRevision || contentRevision !== runtimeFeatureListContentRevision || runtimeFeatureList.length !== pluginFeatures.size) {
+    runtimeFeatureList = Object.freeze([...pluginFeatures.values()].map(runtimeFeatureSnapshot)
+      .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN')))
+    runtimeFeatureListRevision = revision
+    runtimeFeatureListContentRevision = contentRevision
+  }
+  return runtimeFeatureList
 }
 
 export function registeredDnd5ePluginResources(): readonly RegisteredDnd5ePluginResource[] {
@@ -334,7 +436,7 @@ export function dnd5ePluginClassResourceDefinitions(character: Character): reado
       key: resource.id,
       label: resource.label,
       shortLabel: resource.shortLabel,
-      resetOn: resource.resetOn,
+      resetOn: resource.resetOn, restoreOnCombatStart: resource.restoreOnCombatStart, restRecovery: resource.restRecovery, combatStartRecovery: resource.combatStartRecovery, initialCurrent: resource.initialCurrent,
       isAvailable: (candidate: Character) =>
         dnd5eCharacterClassLevel(candidate, resource.classId) >= (resource.minimumLevel ?? 1) &&
         (!resource.subclassId || selectedDnd5eSubclassId(candidate, resource.classId) === resource.subclassId),
@@ -350,19 +452,26 @@ export function dnd5ePluginClassResourceDefinitions(character: Character): reado
 }
 
 export function dnd5ePluginFeatResourceDefinitions(character: Character): readonly ClassResourceDefinition[] {
-  return [...pluginFeats.values()]
+  const featureResources: ClassResourceDefinition[] = [...pluginFeatures.values()]
+    .flatMap(feature => (feature.resources ?? []).map(resource => ({
+      key: resource.id, label: resource.label, shortLabel: resource.shortLabel,
+      resetOn: resource.resetOn, restoreOnCombatStart: resource.restoreOnCombatStart, restRecovery: resource.restRecovery, combatStartRecovery: resource.combatStartRecovery, initialCurrent: resource.initialCurrent, stacking: resource.stacking,
+      isAvailable: (candidate: Character) => dnd5eCharacterHasPluginFeature(candidate, feature.id),
+      max: () => resource.maximum,
+    })))
+  return [...featureResources, ...[...pluginFeats.values()]
     .filter((feat) => character.dnd5eFeatIds?.includes(feat.id) === true)
     .flatMap((feat) => (feat.resources ?? []).map((resource) => ({
       key: resource.id,
       label: resource.label,
       shortLabel: resource.shortLabel,
-      resetOn: resource.resetOn,
+      resetOn: resource.resetOn, restoreOnCombatStart: resource.restoreOnCombatStart, restRecovery: resource.restRecovery, combatStartRecovery: resource.combatStartRecovery, initialCurrent: resource.initialCurrent,
       stacking: resource.stacking,
       isAvailable: (candidate: Character) =>
         candidate.dnd5eFeatIds?.includes(feat.id) === true &&
         dnd5ePluginFeatAvailableForCharacter(feat, candidate),
       max: () => resource.maximum,
-    })))
+    })))]
 }
 
 export function registeredDnd5ePluginRaces(): readonly RegisteredDnd5ePluginRace[] {
@@ -412,6 +521,7 @@ function cloneRegisteredFeat(feat: RegisteredDnd5ePluginFeat): RegisteredDnd5ePl
       abilityScores: feat.prerequisite.abilityScores ? { ...feat.prerequisite.abilityScores } : undefined,
       anyAbilityScores: feat.prerequisite.anyAbilityScores ? { ...feat.prerequisite.anyAbilityScores } : undefined,
       raceIds: feat.prerequisite.raceIds ? [...feat.prerequisite.raceIds] : undefined,
+      raceSizes: feat.prerequisite.raceSizes ? [...feat.prerequisite.raceSizes] : undefined,
       armorProficiencies: feat.prerequisite.armorProficiencies
         ? [...feat.prerequisite.armorProficiencies]
         : undefined,
@@ -459,12 +569,16 @@ export function dnd5ePluginFeatPrerequisiteFailure(
     character.abilities[ability as AbilityKey] >= (score ?? 0))) {
     return `需要满足其一：${anyAbilityScores.map(([ability, score]) => `${ability.toUpperCase()} ${score}`).join('／')}`
   }
-  if (prerequisite?.raceIds?.length) {
+  if (prerequisite?.raceIds?.length || prerequisite?.raceSizes?.length) {
     const identities = new Set([character.dnd5eRaceId, character.race].filter(
       (value): value is string => typeof value === 'string' && value.length > 0,
     ))
-    if (!prerequisite.raceIds.some((raceId) => identities.has(raceId))) {
-      return `需要种族：${prerequisite.raceIds.join('／')}`
+    const race = dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+    const coreRace = dnd5eCoreRaceMechanics(character.race, race?.coreRaceMechanicsId ?? character.dnd5eRaceId)
+    const size = race?.size ?? coreRace?.size
+    if (!prerequisite.raceIds?.some((raceId) => identities.has(raceId) || coreRace?.id === raceId) &&
+      !(size && prerequisite.raceSizes?.includes(size))) {
+      return `需要种族：${[...(prerequisite.raceIds ?? []), ...(prerequisite.raceSizes ?? []).map(size => size === 'small' ? '小型种族' : '中型种族')].join('／')}`
     }
   }
   if (prerequisite?.armorProficiencies?.length) {
@@ -632,8 +746,10 @@ function runtimeGrantedActivityRecordV1(featureId: string): {
       .find((candidate): candidate is Dnd5eActivityDefinitionV1 =>
         typeof candidate === 'object' && candidate != null &&
         'id' in candidate && candidate.id === activityId) as Dnd5eActivityDefinitionV1 | undefined
+    const restControl = activity?.invocation?.kind === 'triggered' &&
+      ['long-rest-complete', 'short-rest-complete', 'long-rest-started', 'short-rest-started'].includes(activity.invocation.event)
     if (!activity || activity.authorityBinding ||
-      (activity.invocation != null && activity.invocation.kind !== 'active')) return undefined
+      (activity.invocation != null && activity.invocation.kind !== 'active' && !restControl)) return undefined
     const activityAutomation = dnd5eActivityAutomationAnalysisV1(activity).capability.level
     if (
       activityAutomation !== 'full' &&
@@ -654,7 +770,7 @@ export function dnd5ePluginGrantedActivityDefinitionV1(
 
 export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5ePluginFeature | undefined {
   const feature = pluginFeatures.get(featureId)
-  if (feature) return cloneRegisteredFeature(feature)
+  if (feature) return editableFeatureSnapshot(runtimeFeatureSnapshot(feature))
 
   const record = runtimeGrantedActivityRecordV1(featureId)
   if (record) {
@@ -681,10 +797,66 @@ export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5e
   return undefined
 }
 
+const checkingFeatureEligibility = new WeakMap<Character, Set<string>>()
+
 export function dnd5ePluginFeatureAvailableForCharacter(
   feature: RegisteredDnd5ePluginFeature,
   character: Character,
 ): boolean {
+  const checking = checkingFeatureEligibility.get(character) ?? new Set<string>()
+  if (checking.has(feature.id)) return false
+  checkingFeatureEligibility.set(character, checking)
+  checking.add(feature.id)
+  try { return pluginFeatureAvailableForCharacter(feature, character) }
+  finally {
+    checking.delete(feature.id)
+    if (!checking.size) checkingFeatureEligibility.delete(character)
+  }
+}
+
+function pluginFeatureAvailableForCharacter(
+  feature: RegisteredDnd5ePluginFeature,
+  character: Character,
+): boolean {
+  if (feature.classRequirements?.some(requirement => dnd5eCharacterClassLevel(character, requirement.classId) < requirement.minimumLevel)) return false
+  const knowsSpell = (spellId: string) => {
+    const learned = dnd5eCharacterLearnedSpellIds(character)
+    return learned.has(spellId) || runtimeDnd5ePluginFeatures().some(provider =>
+      provider.id !== feature.id && provider.spellGrants?.some(grant => grant.spellId === spellId && grant.mode === 'cantrip') &&
+      dnd5eCharacterHasPluginFeature(character, provider.id))
+  }
+  if (feature.requiredKnownSpellIds?.some(spellId => !knowsSpell(spellId))) return false
+  if (feature.eligibility && !evaluateDnd5eFeatureEligibility(feature.eligibility, leaf => {
+    if (leaf.kind === 'known-spell') return knowsSpell(leaf.spellId)
+    if (leaf.kind === 'feature') return dnd5eCharacterHasPluginFeature(character,
+      leaf.featureId.includes(':') ? leaf.featureId : `${feature.ownerPluginId}:${leaf.featureId}`)
+    if (leaf.kind === 'class-level') return dnd5eCharacterClassLevel(character, leaf.classId) >= leaf.minimumLevel
+    if (leaf.kind === 'rule-capability') {
+      const native = availableDnd5eClassDefinitions().some(definition => {
+        if (leaf.classId && definition.id !== leaf.classId) return false
+        const level = dnd5eCharacterClassLevel(character, definition.id)
+        if (level < 1) return false
+        return dnd5eAllClassChoiceGroups(definition).some(group => level >= group.level && group.options.some(option =>
+          option.ruleCapabilityIds?.includes(leaf.capabilityId) &&
+          character.dnd5eClassChoices?.classes?.[definition.id]?.selections?.[group.id]?.includes(option.id) &&
+          dnd5eClassChoiceOptionAvailable({ ...character, level }, definition.id, option)))
+      })
+      return native || runtimeDnd5ePluginFeatures().some(provider => provider.id !== feature.id &&
+        provider.ruleCapabilities?.some(capability => capability.id === leaf.capabilityId &&
+          (!leaf.classId || capability.classId === leaf.classId) &&
+          (!capability.classId || dnd5eCharacterClassLevel(character, capability.classId) > 0)) &&
+        dnd5eCharacterHasPluginFeature(character, provider.id))
+    }
+    const selected = character.dnd5eClassChoices?.classes?.[leaf.classId]?.selections?.[leaf.groupId]
+      ?? (leaf.classId === 'fighter' ? character.dnd5eClassChoices?.fighter?.extensionChoices?.[leaf.groupId] : undefined)
+    return dnd5eCharacterClassLevel(character, leaf.classId) > 0 && Array.isArray(selected) && leaf.anyOf.some(option => selected.includes(option))
+  })) return false
+  if (feature.classChoiceRequirements?.some(requirement => {
+    if (dnd5eCharacterClassLevel(character, requirement.classId) < 1) return true
+    const selected = character.dnd5eClassChoices?.classes?.[requirement.classId]?.selections?.[requirement.groupId]
+      ?? (requirement.classId === 'fighter' ? character.dnd5eClassChoices?.fighter?.extensionChoices?.[requirement.groupId] : undefined)
+    return !Array.isArray(selected) || !requirement.anyOf.some(option => selected.includes(option))
+  })) return false
   const grantedByBuildChoice = dnd5eCharacterBuildFeatureIdsV1(character).includes(feature.id)
   if (grantedByBuildChoice) return true
   if (feature.sourceFeatId) {
@@ -714,7 +886,8 @@ export function dnd5ePluginFeatureAvailableForCharacter(
 }
 
 export function dnd5eCharacterHasPluginFeature(character: Character, featureId: string): boolean {
-  const feature = dnd5ePluginFeatureDefinition(featureId)
+  const registered = pluginFeatures.get(featureId)
+  const feature = registered ? runtimeFeatureSnapshot(registered) : dnd5ePluginFeatureDefinition(featureId)
   if (!feature || !dnd5ePluginFeatureAvailableForCharacter(feature, character)) return false
   if (feature.grantedBySubclass === true) return true
   if (feature.grantedByFeat === true) {
@@ -730,9 +903,10 @@ export function dnd5eCharacterHasPluginFeature(character: Character, featureId: 
 /** Closed boolean capability projection shared by equipment and spell-component authorities. */
 export function dnd5ePluginBooleanStaticModifierForCharacter(
   character: Character,
-  key: 'allowNonLightTwoWeaponFighting' | 'ignoreOccupiedHandsForSomaticComponents',
+  key: 'allowNonLightTwoWeaponFighting' | 'ignoreOccupiedHandsForSomaticComponents' | 'swimSpeedEqualsWalking' | 'canBreatheWater',
 ): boolean {
-  return registeredDnd5ePluginFeatures().some((feature) =>
+  if (dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)?.staticModifiers?.[key] === true) return true
+  return runtimeDnd5ePluginFeatures().some((feature) =>
     feature.automation !== 'manual' && feature.staticModifiers?.[key] === true &&
     dnd5eCharacterHasPluginFeature(character, feature.id)
   )

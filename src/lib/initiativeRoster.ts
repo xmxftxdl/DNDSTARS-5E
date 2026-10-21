@@ -1,4 +1,10 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
+import type { Token } from '../store/maps'
+
+/** Objects can be attack targets, but do not retain creature initiative slots. */
+export function initiativeCreatureTokenIds(tokens: readonly Token[]): Set<string> {
+  return new Set(tokens.filter(token => token.type !== 'obstacle').map(token => token.id))
+}
 
 export interface InitiativeRosterPruneResult {
   order: InitiativeEntry[]

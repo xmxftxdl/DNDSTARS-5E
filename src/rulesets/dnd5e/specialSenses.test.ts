@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { dnd5eHasSpecialSenseInRange, dnd5eTremorsenseDetects, normalizeDnd5eSpecialSenses } from './specialSenses'
 
 describe('D&D 5e special senses', () => {
+  it('does not invent a special sense at zero distance',()=>{
+    expect(dnd5eHasSpecialSenseInRange(undefined,'truesight',0)).toBe(false)
+    expect(dnd5eHasSpecialSenseInRange([],'blindsight',0)).toBe(false)
+    expect(dnd5eHasSpecialSenseInRange([{kind:'truesight',rangeFeet:0}],'truesight',0)).toBe(false)
+    expect(dnd5eHasSpecialSenseInRange([{kind:'truesight',rangeFeet:10}],'truesight',0)).toBe(true)
+  })
   it('normalizes Chinese and English SRD monster senses', () => {
     expect(normalizeDnd5eSpecialSenses([
       { name: '盲视', distanceFeet: 60 },

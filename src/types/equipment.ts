@@ -46,7 +46,16 @@ export interface EquipmentItem {
         kind: 'weapon'
         category: 'simple' | 'martial'
         mode: 'melee' | 'ranged'
-        damage: { count: number; sides: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
+        damage: { count: number; sides: number; type: import('../rulesets/dnd5e/damageTypes').Dnd5eDamageType }
+        /** The item itself grants proficiency while used (including temporary spell weapons). */
+        grantsProficiency?: boolean
+        advantageAgainstUnlitTargets?: boolean
+        vanishesAfterRelease?: boolean
+        consumesQuantityOnAttack?: boolean
+        usesSourceSpellcastingAbility?: boolean
+        /** Host projection from the generating inventory entry. */
+        sourceSpellcastingModifier?: number
+        slingRangeFeet?: { normal: number; long: number }
         attackAbility: 'str' | 'dex' | 'finesse'
         /** 武器本体是否为魔法武器；临时法术附魔不写回装备。 */
         magical?: boolean
@@ -58,6 +67,8 @@ export interface EquipmentItem {
       }
     | {
         kind: 'armor'
+        /** Intrinsic magic; temporary bindings remain on effects. */
+        magical?: boolean
         category: 'light' | 'medium' | 'heavy'
         baseArmorClass: number
         dexterityBonus: 'full' | 'max-2' | 'none'

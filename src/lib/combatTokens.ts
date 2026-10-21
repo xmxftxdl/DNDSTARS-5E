@@ -1,3 +1,4 @@
+import { dnd5eCharacterRageDeathDeferralActive, dnd5eCharacterCanActAtZeroHitPoints } from '../rulesets/dnd5e/pluginApi'
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
@@ -9,7 +10,7 @@ import {
 import { getDnd5eSrdMonster } from '../rulesets/dnd5e/monsters'
 import { dnd5eCombatTokenSide } from './opportunityAttacks'
 
-export { pruneInitiativeForToken, pruneInitiativeForValidTokens } from './initiativeRoster'
+export { initiativeCreatureTokenIds, pruneInitiativeForToken, pruneInitiativeForValidTokens } from './initiativeRoster'
 
 export interface TokenPresentationHitPoints {
   hp: number
@@ -82,7 +83,7 @@ export function isTokenDefeated(
   characters: Character[],
   hp?: { hp: number; max: number; temp?: number },
 ): boolean {
-  if (hp != null) return hp.hp <= 0
+  if (hp != null) return hp.hp <= 0 && !(token.characterId && characters.some(ch => ch.id === token.characterId && dnd5eCharacterCanActAtZeroHitPoints(ch)))
   return !isTokenAlive(token, characters)
 }
 
@@ -90,7 +91,7 @@ export function isTokenAlive(token: Token, characters: Character[]): boolean {
   if (token.dnd5eSimulacrum) return (token.hp ?? token.dnd5eSimulacrum.maximumHitPoints) > 0
   if (token.characterId) {
     const ch = characters.find((c) => c.id === token.characterId)
-    if (ch) return ch.currentHp > 0
+    if (ch) return ch.currentHp > 0 || dnd5eCharacterCanActAtZeroHitPoints(ch)
     if (token.maxHp != null) {
       return (token.hp ?? token.maxHp) > 0
     }
@@ -139,7 +140,7 @@ function isTokenFinallyDefeated(token: Token, characters: Character[]): boolean 
     ? characters.find((candidate) => candidate.id === token.characterId)
     : undefined
   if (token.type === 'player' && character && character.currentHp === 0) {
-    return Math.max(0, character.deathSaveFailures ?? 0) >= 3
+    return Math.max(0, character.deathSaveFailures ?? 0) >= 3 && !dnd5eCharacterRageDeathDeferralActive(character)
   }
   // Regeneration / Undead Fortitude pending means the creature is at 0 HP but not
   // yet finally destroyed — combat must wait for that save or start-of-turn resolve.
@@ -177,6 +178,8 @@ export interface CombatOutcome {
 }
 
 export interface CombatOutcomeOptions {
+  combatId?: string
+  delayedSummons?: readonly import('../rulesets/dnd5e/activities/dnd5eDelayedSummonQueue').Dnd5eDelayedSummonEntry[]
   /** 仅统计本场先攻中的 Token，避免地图上未参战的角色阻止战斗结束。 */
   participantTokenIds?: readonly string[]
 }
@@ -197,7 +200,10 @@ export function checkCombatOutcome(
   const enemies = combatTokens.filter((t) => getTokenCombatSide(t) === 'enemy')
   const playerCharacters = combatTokens.filter((token) => token.type === 'player' && !!token.characterId)
 
-  if (enemies.length > 0 && enemies.every((t) => isTokenFinallyDefeated(t, characters))) {
+  const enemyArrivalPending = !!options.combatId && options.delayedSummons?.some(entry =>
+    entry.combatId === options.combatId && entry.status === 'pending' &&
+    entry.request.handoffs.summons.some(summon => summon.side === 'enemy' && summon.count > 0))
+  if (!enemyArrivalPending && enemies.length > 0 && enemies.every((t) => isTokenFinallyDefeated(t, characters))) {
     return {
       ended: true,
       winner: 'ally',
@@ -209,7 +215,7 @@ export function checkCombatOutcome(
     playerCharacters.length > 0 &&
     playerCharacters.every((token) => {
       const character = characters.find((candidate) => candidate.id === token.characterId)
-      return !!character && character.currentHp <= 0
+      return !!character && character.currentHp <= 0 && !dnd5eCharacterCanActAtZeroHitPoints(character)
     })
   ) {
     return {

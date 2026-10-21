@@ -71,6 +71,7 @@ export interface Dnd5eCustomMonsterTraitDraft {
   requiresPositiveHp: boolean
   excludedOnCritical: boolean
   diesAtZeroWhenSuppressed: boolean
+  suppressedInSunlight?: true
   keenSense: 'smell' | 'hearing' | 'sight'
   keenSenseSkillKey: string
   keenSenseCheckBonus: number
@@ -176,6 +177,7 @@ export interface Dnd5eCustomMonsterSkillDraft {
 }
 
 export interface Dnd5eCustomMonsterSenseDraft {
+  blindBeyond?: boolean
   id: string
   name: string
   distanceFeet?: number
@@ -267,6 +269,7 @@ export interface Dnd5eCustomMonsterDraft {
   englishName: string
   size: Dnd5eMonsterSize
   creatureType: string
+  bodyPartPresence?: Record<string, boolean>
   alignment: string
   armorClass: number
   armorClassNote: string
@@ -1096,6 +1099,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
             requiresPositiveHp: trait.requiresPositiveHp,
             suppressedByDamageTypes: [...new Set(trait.damageTypes)],
             diesAtZeroWhenSuppressed: trait.diesAtZeroWhenSuppressed,
+            ...(trait.suppressedInSunlight ? { suppressedInSunlight: true as const } : {}),
           }
         : trait.ruleKind === 'swarm'
           ? { kind: 'swarm' as const, cannotRegainHitPoints: true as const, cannotGainTemporaryHitPoints: true as const }
@@ -1439,6 +1443,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     source: 'DM 自定义',
     size: draft.size,
     creatureType: draft.creatureType.trim(),
+    bodyPartPresence: draft.bodyPartPresence ? { ...draft.bodyPartPresence } : undefined,
     alignment: draft.alignment.trim(),
     armorClass: {
       value: Math.trunc(draft.armorClass),
@@ -1472,6 +1477,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     senses: [
       ...draft.senses.filter((sense) => sense.name.trim()).map((sense) => ({
         name: sense.name.trim(),
+        ...(sense.blindBeyond === true ? { blindBeyond: true } : {}),
         ...(Number.isFinite(sense.distanceFeet) ? { distanceFeet: Math.max(0, Math.trunc(sense.distanceFeet!)) } : {}),
       })),
       ...traits.flatMap((trait) =>
@@ -1506,7 +1512,9 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
         candidate.application === grant.application) === index),
     passivePerception: Math.trunc(draft.passivePerception),
     languages: draft.languages.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean),
-    challenge: { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
+    challenge: draft.challengeRating.trim() === '—'
+      ? { rating: '—' }
+      : { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
     legendaryResistanceUses: Math.max(0, Math.min(99, Math.trunc(draft.legendaryResistanceUses))),
     legendaryActionPoints: Math.max(0, Math.min(99, Math.trunc(draft.legendaryActionPoints))),
     lairInitiative: Math.max(0, Math.min(99, Math.trunc(draft.lairInitiative))),
@@ -1726,6 +1734,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     englishName: monster.englishName,
     size: monster.size,
     creatureType: monster.creatureType,
+    bodyPartPresence: monster.bodyPartPresence ? { ...monster.bodyPartPresence } : undefined,
     alignment: monster.alignment,
     armorClass: monster.armorClass.value,
     armorClassNote: monster.armorClass.note ?? '',
@@ -1766,7 +1775,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     passivePerception: monster.passivePerception,
     languages: monster.languages.join('、'),
     challengeRating: monster.challenge.rating,
-    xp: monster.challenge.xp,
+    xp: monster.challenge.xp ?? 0,
     description: monster.description,
     portrait: monster.portrait,
     tokenPortrait: monster.tokenPortrait,
@@ -1913,6 +1922,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       requiresPositiveHp: trait.rule?.kind === 'regeneration' ? trait.rule.requiresPositiveHp : true,
       excludedOnCritical: trait.rule?.kind === 'undead-fortitude' ? trait.rule.excludedOnCritical : true,
       diesAtZeroWhenSuppressed: trait.rule?.kind === 'regeneration' ? trait.rule.diesAtZeroWhenSuppressed : true,
+      ...(trait.rule?.kind === 'regeneration' && trait.rule.suppressedInSunlight ? { suppressedInSunlight: true as const } : {}),
       keenSense: trait.rule?.kind === 'keen-sense' ? trait.rule.sense : 'smell',
       keenSenseSkillKey: trait.rule?.kind === 'keen-sense' ? trait.rule.skillKey : 'perception',
       keenSenseCheckBonus: trait.rule?.kind === 'keen-sense' ? trait.rule.checkBonus : 4,

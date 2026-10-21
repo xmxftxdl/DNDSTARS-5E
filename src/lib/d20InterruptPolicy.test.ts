@@ -8,6 +8,19 @@ import {
 } from './d20InterruptPolicy'
 
 describe('d20 interrupt policy', () => {
+  it('offers explicit bonus-die choices outside combat even for total-only checks', () => {
+    for (const outcome of ['success', 'failure', 'unknown'] as const) {
+      const input = {
+        visibility: 'public' as const, outcome, combatActive: false,
+        eligibleEnemyModifiers: [{ characterId: 'hero', featureId: 'boon-mark',
+          featureLabel: '检定祝福', modifierKind: 'adjust-d20' as const,
+          direction: 'add' as const, dieSides: 6 }],
+      }
+      expect(shouldOpenD20RollConfirmation({ ...input, forceOpen: true })).toBe(true)
+      expect(shouldOpenD20RollConfirmation(input)).toBe(false)
+    }
+  })
+
   it('settles public d20 rolls immediately when nobody can modify an enemy result', () => {
     expect(shouldOpenD20RollConfirmation({
       visibility: 'public',

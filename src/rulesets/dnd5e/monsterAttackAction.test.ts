@@ -1,3 +1,7 @@
+import './activeEffects'
+import { dnd5eCreatureFormAttackSelection } from './creatureFormMultiattackContinuation'
+import {resolveDnd5eHeadlessAction,dnd5eHeadlessTurnKey} from './headlessCombatEngine'
+import { prepareDnd5eRandomTargetMonsterAttack } from './randomMonsterAttackTargets'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
@@ -15,12 +19,17 @@ import {
   prepareDnd5eMonsterAttack,
   previewDnd5eMonsterAttack,
   dnd5ePreparedMonsterAttackIsAutomaticCritical,
+  dnd5ePreparedMonsterAttackAutomaticallyHits,
+  dnd5ePreparedMonsterAttackModeResolution,
   dnd5ePreparedMonsterTraitDamageDefinitions,
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
 import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
+import {preparedDnd5eMonsterAttackEffectContext} from './monsterAttackAction'
+import {projectDnd5eMonsterAttackPreparation,refreshDnd5eMonsterAttackOccurrence} from './monsterAttackAction'
+import {dnd5eRollDiceRecipes} from './rollDiceModifiers'
 
 function character(): Character {
   return { id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 40, currentHp: 40, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -31,6 +40,149 @@ function token(patch: Partial<Token>): Token {
 }
 
 describe('SRD monster map action adapter', () => {
+  it('uses the area owner reaction consistently for a monster weapon preview and settlement', () => {
+    const hero = character(), monster = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const goblin = token({ id: 'goblin', poolId: monster.id, x: 5, y: 5 })
+    const target = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 15, y: 5 })
+    const map: BattleMap = { id: 'hawk-monster', name: 'Test', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [goblin, target],
+      dnd5ePluginAreas: [{ id: 'hawk', pluginId: 'test', featureId: 'totem', label: 'Hawk', color: '#fff',
+        sourceTokenId: target.id, sourceCharacterId: hero.id, cells: [{ col: 1, row: 0 }], createdRound: 1, expiresAfterRound: 10,
+        includeSelf: true, relation: 'any', attackAdvantageReaction: 'area-source' }] }
+    const prepared = prepareDnd5eMonsterAttack({ combatId: map.id, map, characters: [hero],
+      initiativeOrder: [goblin, target].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })),
+      actorTokenId: goblin.id, targetTokenId: target.id, actionIndex: monster.actions.findIndex(a => a.attack?.mode === 'melee') })
+    expect(prepared.ok).toBe(true); if (!prepared.ok) return
+    const attack = prepared.prepared, use = { areaId: 'hawk', sourceId: target.id }
+    const context = { state: attack.state, targetId: target.id, use }
+    const mode = dnd5ePreparedMonsterAttackModeResolution(attack, 0, false, context)
+    expect(mode.mode).toBe('advantage')
+    expect(dnd5ePreparedMonsterAttackModeResolution(attack, 0, true, context).mode).toBe('normal')
+    expect(previewDnd5eMonsterAttack(attack, 0, 2, 18, false, undefined, undefined, undefined, mode.mode).roll.d20).toBe(18)
+    const result = resolvePreparedDnd5eMonsterAttack({ prepared: attack, rolls: [{ d20: 2, d20Second: 18,
+      areaAttackAdvantageReaction: use, damageRolls: attack.attacks[0].attack.damage.map(d => Array(d.count).fill(1)) }] })
+    expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
+    expect(result.result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 18, hit: true }))
+    expect(result.result.state.combatants[target.id].turn.reactionAvailable).toBe(false)
+    expect(dnd5ePreparedMonsterAttackModeResolution(attack, 0, false, { ...context, use: { ...use, areaId: 'forged' } }).mode).toBe('normal')
+  })
+
+  it.each([true, false])('prepares and settles a beast attack with source-conditioned advantage (in range: %s)', inRange => {
+    const hero = character(), monster = getDnd5eSrdMonster('srd-5.1:brown-bear')!
+    const source = token({ id: 'source', poolId: 'srd-5.1:goblin', x: inRange ? 20 : 70 })
+    const bear = token({ id: 'bear', poolId: monster.id, dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({
+      definitionId: 'test:source-link', label: 'Link', targetId: 'bear', source: { kind: 'spell', actorId: source.id },
+      modifiers: { sourceProximityAttackAdvantage: { rangeFeet: 5, requiresMutualSight: true, requiresSourceSeeTarget: true } },
+    })] } })
+    const target = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 10 })
+    const map: BattleMap = { id: 'source-link', name: 'Test', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [bear, source, target] }
+    const prepared = prepareDnd5eMonsterAttack({ combatId: map.id, map, characters: [hero],
+      initiativeOrder: [bear, source, target].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })),
+      actorTokenId: bear.id, targetTokenId: target.id, actionIndex: monster.actions.findIndex(a => a.attack?.mode === 'melee') })
+    expect(prepared.ok).toBe(true); if (!prepared.ok) throw new Error(prepared.reason)
+    expect(prepared.prepared.attackModes[0]).toBe(inRange ? 'advantage' : 'normal')
+    const result = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared, rolls: [{ targetId: target.id,
+      d20: 2, d20Second: inRange ? 19 : undefined,
+      damageRolls: inRange ? prepared.prepared.attacks[0].attack.damage.map(d => Array(d.count).fill(1)) : [] }] })
+    expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+    expect(result.result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved',
+      rollMode: inRange ? 'advantage' : 'normal', d20: inRange ? 19 : 2, hit: inRange }))
+  })
+  it('previews source-specific criticals on the actual monster attack target', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const goblin = token({ id: 'goblin', poolId: monster.id })
+    const target = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 10 })
+    const map: BattleMap = { id: 'target-crit', name: 'Test', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [goblin, target] }
+    const prepared = prepareDnd5eMonsterAttack({ combatId: map.id, map, characters: [hero],
+      initiativeOrder: [goblin, target].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })),
+      actorTokenId: goblin.id, targetTokenId: target.id, actionIndex: monster.actions.findIndex(a => a.attack?.mode === 'melee') })
+    expect(prepared.ok).toBe(true); if (!prepared.ok) return
+    prepared.prepared.attacks[0].targetArmorClass = 30
+    const effect = createDnd5eMechanicalEffect({ definitionId: 'mark', label: 'Mark', targetId: target.id,
+      source: { kind: 'feature', actorId: goblin.id }, modifiers: { attacksBySourceCriticalThreshold: 19 } })
+    prepared.prepared.state.combatants[target.id].classState.activeEffects = [effect]
+    expect(previewDnd5eMonsterAttack(prepared.prepared, 0, 19)).toMatchObject({ hit: true, critical: true })
+    effect.source.actorId = 'another-attacker'
+    expect(previewDnd5eMonsterAttack(prepared.prepared, 0, 19)).toMatchObject({ hit: false, critical: false })
+  })
+  it.each(['melee', 'ranged'] as const)('applies incoming weapon delivery filters to monster %s preview and settlement', delivery => {
+    const effect = createDnd5eMechanicalEffect({ definitionId: 'test:wind', label: 'Synthetic wind', targetId: 'hero-token',
+      source: { kind: 'spell' }, modifiers: { weaponAttacksAgainstTarget: [{ mode: 'disadvantage', delivery: 'ranged' }] } })
+    const hero = { ...character(), dnd5eCombatState: { activeEffects: [effect] } }
+    const monster = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const goblin = token({ id: 'goblin', poolId: monster.id })
+    const target = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: delivery === 'ranged' ? 60 : 10 })
+    const map: BattleMap = { id: 'incoming-wind', name: 'Test', width: 150, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [goblin, target] }
+    const prepared = prepareDnd5eMonsterAttack({ combatId: map.id, map, characters: [hero],
+      initiativeOrder: [goblin, target].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })),
+      actorTokenId: goblin.id, targetTokenId: target.id, actionIndex: monster.actions.findIndex(a => a.attack?.mode === delivery) })
+    expect(prepared.ok).toBe(true); if (!prepared.ok) return
+    expect(prepared.prepared.attackModes[0]).toBe(delivery === 'ranged' ? 'disadvantage' : 'normal')
+    const result = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared, rolls: [{ targetId: target.id,
+      mode: 'normal', d20: 18, d20Second: delivery === 'ranged' ? 2 : undefined,
+      damageRolls: prepared.prepared.attacks[0].attack.damage.map(d => Array(d.count).fill(1)) }] })
+    expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+    expect(result.result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: delivery === 'ranged' ? 2 : 18 }))
+  })
+  it.each([false,true])('preserves independent mandatory dice through staged and full multiattack settlement (one shot: %s)',(oneShot)=>{
+    const hero=character(),monster=getDnd5eSrdMonster('srd-5.1:brown-bear')!
+    const bear=token({id:'bear',poolId:monster.id,dnd5eCombatState:{activeEffects:[createDnd5eMechanicalEffect({id:'penalty',definitionId:'penalty',label:'Penalty',targetId:'bear',source:{kind:'plugin'},
+      breakOn:oneShot?['makes-weapon-attack']:undefined,
+      modifiers:{rollDiceModifiers:[{count:1,sides:6,direction:'subtract',appliesTo:['attack']}]}})]}})
+    const target=token({id:'hero-token',type:'player',characterId:hero.id,x:10})
+    const map:BattleMap={id:'dice',name:'Test',width:100,height:100,gridSize:10,feetPerCell:5,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[bear,target]}
+    const prepared=prepareDnd5eMonsterAttack({combatId:'dice',map,characters:[hero],initiativeOrder:[bear,target].map((t,i)=>({tokenId:t.id,label:t.label,emoji:'',color:'',roll:20-i})),actorTokenId:bear.id,targetTokenId:target.id,actionIndex:monster.actions.findIndex(a=>a.id==='multiattack')})
+    expect(prepared.ok).toBe(true)
+    if(!prepared.ok)return
+    const attack=prepared.prepared,transactionId='monster-dice'
+    const dice=(occurrence:number,value:number)=>Object.fromEntries(dnd5eRollDiceRecipes(preparedDnd5eMonsterAttackEffectContext(attack,transactionId,occurrence)).map(recipe=>[recipe.id,[value]]))
+    const first=dice(0,6),effectRollDice={...first,...(oneShot?{}:dice(1,1))}
+    const d20=attack.attacks[0].targetArmorClass-attack.attacks[0].attack.toHit+3
+    expect(previewDnd5eMonsterAttack(attack,0,d20,undefined,false,undefined,undefined,undefined,undefined,{transactionId,occurrence:0,rolls:effectRollDice}).hit).toBe(false)
+    const prefix=resolvePreparedDnd5eMonsterAttack({prepared:attack,transactionId,effectRollDice:first,settleAttackCount:1,rolls:[{d20,damageRolls:[]}]})
+    expect(prefix.result.ok,JSON.stringify(prefix.result)).toBe(true)
+    for(const index of [1,1]) expect(previewDnd5eMonsterAttack(attack,index,d20,undefined,false,undefined,undefined,undefined,undefined,{transactionId,occurrence:index,rolls:effectRollDice,
+      effects:prefix.result.state.combatants.bear.classState.activeEffects}).hit).toBe(true)
+    const rolls=[{d20,damageRolls:[]},{d20,damageRolls:[[2,3]]}]
+    const full=resolvePreparedDnd5eMonsterAttack({prepared:attack,transactionId,effectRollDice,rolls})
+    expect(full.result.ok,JSON.stringify(full.result)).toBe(true)
+    expect(full.result.events.filter(event=>event.type==='attack-resolved').map(event=>event.hit)).toEqual([false,true])
+    expect(full.result.transaction?.rollLedger.entries.filter(entry=>entry.sourceId==='penalty')).toHaveLength(oneShot?1:2)
+    expect(resolvePreparedDnd5eMonsterAttack({prepared:attack,transactionId,effectRollDice:first,rolls}).result.ok).toBe(oneShot)
+    if(oneShot) expect(resolvePreparedDnd5eMonsterAttack({prepared:attack,transactionId,effectRollDice:{...first,...dice(1,1)},rolls}).result.ok).toBe(false)
+    expect(resolvePreparedDnd5eMonsterAttack({prepared:attack,transactionId:'next',effectRollDice,rolls}).result.ok).toBe(false)
+    expect(attack.state.combatants[target.id].currentHp).toBe(40)
+    const changed=structuredClone(attack.state)
+    changed.combatants.bear.classState.activeEffects=[...(changed.combatants.bear.classState.activeEffects??[]),createDnd5eConditionEffect({condition:'restrained',targetId:'bear',source:{kind:'plugin'}})]
+    changed.combatants.bear.conditions=['restrained']
+    changed.combatants[target.id].classState.activeEffects=[createDnd5eMechanicalEffect({id:'armor',definitionId:'armor',label:'Armor',targetId:target.id,source:{kind:'plugin'},modifiers:{armorClassBonus:3}})]
+    const untouched=structuredClone(changed)
+    const refreshed=refreshDnd5eMonsterAttackOccurrence(attack,changed,1)
+    expect(refreshed.ok,JSON.stringify(refreshed)).toBe(true)
+    if(refreshed.ok) {
+      expect(refreshed.prepared.attacks[1].targetArmorClass).toBe(attack.attacks[1].targetArmorClass+3)
+      expect(refreshed.prepared.attackModes[1]).toBe('disadvantage')
+      expect(refreshed.prepared.attacks[1].sequenceIndex).toBe(attack.attacks[1].sequenceIndex)
+    }
+    expect(changed).toEqual(untouched)
+    changed.combatants[target.id].position={x:100,y:0}
+    expect(projectDnd5eMonsterAttackPreparation(attack,changed).map.tokens.find(token=>token.id===target.id)?.x).toBe(100)
+    expect(refreshDnd5eMonsterAttackOccurrence(attack,changed,1).ok).toBe(false)
+  })
+  it('prepares only the first multiattack roll with a one-shot weapon penalty', () => {
+    const hero = character(), monster = getDnd5eSrdMonster('srd-5.1:brown-bear')!
+    const bear = token({ id: 'bear', poolId: monster.id, dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({ definitionId: 'test:chilled', label: 'Chilled', targetId: 'bear', source: { kind: 'spell' }, duration: { type: 'permanent' }, modifiers: { weaponAttackRollDisadvantage: true }, breakOn: ['makes-weapon-attack'] })] } })
+    const target = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 10 })
+    const map: BattleMap = { id: 'weapon-penalty', name: 'Test', width: 100, height: 100, gridSize: 10, feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [bear, target] }
+    const prepared = prepareDnd5eMonsterAttack({ combatId: 'weapon-penalty', map, characters: [hero], initiativeOrder: [bear, target].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20-i })), actorTokenId: bear.id, targetTokenId: target.id, actionIndex: monster.actions.findIndex(a => a.id === 'multiattack') })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw new Error(prepared.reason)
+    expect(prepared.prepared.attackModes).toEqual(['disadvantage', 'normal'])
+  })
   afterEach(() => {
     setDnd5eRoomMonsterCatalog([])
     setMapGeometryRuntime([])
@@ -278,6 +430,16 @@ describe('SRD monster map action adapter', () => {
     expect(swimmingAttack.ok).toBe(true)
     if (!swimmingAttack.ok) return
     expect(swimmingAttack.prepared.attackModes[0]).toBe('normal')
+    setMapGeometryRuntime([])
+    for(const [creature,mode] of [[wolf,'disadvantage'],[shark,'normal']] as const){
+      const submerged={...creature,dnd5eCombatState:{activeEffects:[createDnd5eMechanicalEffect({
+        definitionId:'local-submersion',label:'Submerged',targetId:creature.id,source:{kind:'spell',actorId:'caster'},modifiers:{submerged:true},
+      })]}}
+      const localAttack=prepareDnd5eMonsterAttack({combatId:'combat',map:{...map,tokens:[submerged,heroToken]},characters:[hero],
+        initiativeOrder,actorTokenId:creature.id,targetTokenId:heroToken.id})
+      expect(localAttack.ok,localAttack.ok?undefined:localAttack.reason).toBe(true)
+      if(localAttack.ok)expect(localAttack.prepared.attackModes[0]).toBe(mode)
+    }
   })
 
   it('blocks ordinary monster projectiles across Wind Wall but exempts a giant thrown rock', () => {
@@ -322,6 +484,23 @@ describe('SRD monster map action adapter', () => {
       })),
       actorTokenId: giant.id, targetTokenId: heroToken.id, actionIndex: giantRangedIndex,
     }).ok).toBe(true)
+  })
+
+  it.each([false, true])('uses area trajectory disadvantage for monster weapons (removed=%s)', removed => {
+    const hero = character(), heroToken = token({ id: 'hero', x: 105, y: 5, type: 'player', characterId: hero.id })
+    const monster = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const goblin = token({ id: 'goblin', x: 5, y: 5, poolId: monster.id })
+    const map: BattleMap = { id: 'test-area-attack', name: 'Test', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [goblin, heroToken], dnd5ePluginAreas: removed ? [] : [{
+        id: 'test-area', pluginId: 'test.area', featureId: 'wind', label: 'Wind', color: '#ffffff', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+        slotLevel: 1, sourceSpellSaveDc: 12, createdRound: 1, expiresAfterRound: 11, anchorMode: 'fixed', cells: [{ col: 5, row: 0 }],
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 }, blocking: { rangedWeaponAttackDisadvantage: 'occupancy' },
+      }] }
+    const prepared = prepareDnd5eMonsterAttack({ combatId: 'test', map, characters: [hero],
+      initiativeOrder: [goblin, heroToken].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+      actorTokenId: goblin.id, targetTokenId: heroToken.id, actionIndex: monster.actions.findIndex(entry => entry.attack?.mode === 'ranged') })
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+    if (prepared.ok) expect(prepared.prepared.attackModes[0]).toBe(removed ? 'normal' : 'disadvantage')
   })
 
   it('applies defender-linked creature-type disadvantage to prepared and committed monster attacks', () => {
@@ -1207,6 +1386,16 @@ describe('SRD monster map action adapter', () => {
     expect(linkedAttack.prepared.targetAttackMode).toBe('normal')
     expect(linkedAttack.prepared.attackModes).toEqual(['advantage'])
     expect(previewDnd5eMonsterAttack(linkedAttack.prepared, 0, 2, 18).roll.d20).toBe(18)
+    const automaticAttack = { ...linkedAttack.prepared, attacks: linkedAttack.prepared.attacks.map(entry => ({ ...entry,
+      attack: { ...entry.attack, onHitEffects: entry.attack.onHitEffects?.map(effect => effect.kind === 'source-linked-condition'
+        ? { ...effect, relation: { ...effect.relation, attackAutomaticallyHitsLinkedTarget: true } } : effect) } })) }
+    expect(dnd5ePreparedMonsterAttackAutomaticallyHits(linkedAttack.prepared, 0)).toBe(false)
+    expect(dnd5ePreparedMonsterAttackAutomaticallyHits(automaticAttack, 0)).toBe(true)
+    expect(previewDnd5eMonsterAttack(automaticAttack, 0, 1, 1).hit).toBe(true)
+    const unlinkedAttack = { ...automaticAttack, attacks: automaticAttack.attacks.map(entry => ({ ...entry, targetToken: otherTarget })) }
+    expect(dnd5ePreparedMonsterAttackAutomaticallyHits(unlinkedAttack, 0)).toBe(false)
+    expect(previewDnd5eMonsterAttack(unlinkedAttack, 0, 1, 1).hit).toBe(false)
+
 
     expect(prepareDnd5eMonsterAttack({
       combatId: 'ankheg-linked-target-combat',
@@ -1785,9 +1974,11 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(33)
   })
 
-  it('prepares the owlbear multiattack and returns one authoritative map application', () => {
+  it.each([false,true])('prepares the owlbear multiattack and returns one authoritative map application (effect dice: %s)', (dynamicDice) => {
     const hero = character()
     const owlbear = token({ id: 'owlbear', label: '枭熊', poolId: 'srd-5.1:owlbear', hp: 59, maxHp: 59 })
+    if(dynamicDice) owlbear.dnd5eCombatState={activeEffects:[createDnd5eMechanicalEffect({id:'continued-penalty',definitionId:'continued-penalty',label:'Penalty',targetId:owlbear.id,source:{kind:'plugin'},
+      modifiers:{rollDiceModifiers:[{count:1,sides:6,direction:'subtract',appliesTo:['attack']}]}})]}
     const heroToken = token({ id: 'hero-token', label: hero.name, type: 'player', characterId: hero.id, hp: 40, maxHp: 40 })
     const map: BattleMap = { id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [owlbear, heroToken] }
     const prepared = prepareDnd5eMonsterAttack({
@@ -1808,9 +1999,12 @@ describe('SRD monster map action adapter', () => {
     expect(prepared.prepared.action.id).toBe('multiattack')
     expect(prepared.prepared.attacks.map((entry) => entry.id)).toEqual(['beak', 'claws'])
     expect(previewDnd5eMonsterAttack(prepared.prepared, 0, 10).hit).toBe(true)
+    const dice=(attack:typeof prepared.prepared,id:string,occurrence:number,value:number)=>Object.fromEntries(dnd5eRollDiceRecipes(preparedDnd5eMonsterAttackEffectContext(attack,id,occurrence)).map(recipe=>[recipe.id,[value]]))
+    const firstDice=dice(prepared.prepared,'first-request',0,1)
 
     const firstOccurrence = resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,
+      transactionId:'first-request',effectRollDice:firstDice,
       rolls: [
         { d20: 10, damageRolls: [[5]] },
       ],
@@ -1859,6 +2053,7 @@ describe('SRD monster map action adapter', () => {
     if (!continued.ok) return
     const continuedResult = resolvePreparedDnd5eMonsterAttack({
       prepared: continued.prepared,
+      transactionId:'second-request',effectRollDice:dice(continued.prepared,'second-request',0,2),
       rolls: [{ d20: 10, damageRolls: [[4, 4]] }],
       multiattackContinuation: {
         schemaVersion: 1,
@@ -1871,12 +2066,18 @@ describe('SRD monster map action adapter', () => {
       continuedResult.result.ok ? undefined : continuedResult.result.reason,
     ).toBe(true)
     expect(continuedResult.application?.characters[0].currentHp).toBe(17)
+    if(dynamicDice) {
+      expect(continuedResult.result.transaction?.rollLedger.entries.filter(entry=>entry.sourceId==='continued-penalty').map(entry=>entry.dice.values)).toEqual([[2]])
+      expect(resolvePreparedDnd5eMonsterAttack({prepared:continued.prepared,transactionId:'second-request',effectRollDice:firstDice,
+        rolls:[{d20:10,damageRolls:[[4,4]]}],multiattackContinuation:{schemaVersion:1,parentActionId:'multiattack',occurrenceIndex:1}}).result.ok).toBe(false)
+    }
     expect(continuedResult.application?.map.tokens.find((entry) =>
       entry.id === owlbear.id)?.dnd5eCombatState?.monsterMultiattackContinuation)
       .toBeUndefined()
 
     const resolved = resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,
+      transactionId:'whole-request',effectRollDice:{...dice(prepared.prepared,'whole-request',0,1),...dice(prepared.prepared,'whole-request',1,2)},
       rolls: [
         { d20: 10, damageRolls: [[5]] },
         { d20: 10, damageRolls: [[4, 4]] },
@@ -2668,4 +2869,353 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === goblin.id)?.hp).toBe(0)
   })
+})
+
+
+it('settles a perceived-hostile monster attack on a same-side creature outside initiative', () => {
+  const monster = getDnd5eSrdMonster('srd-5.1:goblin')!
+  const effect = createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies', targetId: 'goblin',
+    source: { kind: 'spell' }, modifiers: { perceiveVisibleCreaturesAsHostile: true, randomVisibleCreatureTargets: true } })
+  const goblin = token({ id: 'goblin', poolId: monster.id, dnd5eCombatState: { activeEffects: [effect] } })
+  const ally = token({ id: 'ally', poolId: monster.id, x: 10, hp: 30, maxHp: 30 })
+  const map: BattleMap = { id: 'enemies-monster', name: 'Test', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [goblin, ally] }
+  const input = { combatId: map.id, map, characters: [],
+    initiativeOrder: [{ tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 }],
+    actorTokenId: goblin.id, targetTokenId: ally.id, actionIndex: monster.actions.findIndex(a => a.attack?.mode === 'melee') }
+  const prepared = prepareDnd5eMonsterAttack(input)
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  const result = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared, rolls: [{ targetId: ally.id,
+    mode: prepared.prepared.attackModes[0], d20: 19, d20Second: 19,
+    damageRolls: prepared.prepared.attacks[0].attack.damage.map(d => Array(d.count).fill(1)) }] })
+  expect(result.result.ok, JSON.stringify(result.result)).toBe(true)
+  expect(result.result.state.combatants.ally.currentHp).toBeLessThan(30)
+  expect(result.result.state.initiativeOrder).toEqual(['goblin'])
+  expect(result.result.state.combatants.ally.controller).toBe(result.result.state.combatants.goblin.controller)
+  expect(ally.hp).toBe(30)
+  effect.suspendedBy = ['antimagic-test']
+  expect(prepareDnd5eMonsterAttack(input)).toMatchObject({ ok: false, reason: 'invalid-target' })
+})
+
+
+it.each([false, true])('randomizes each monster weapon occurrence (multiattack: %s)', multi => {
+  const monster = getDnd5eSrdMonster('srd-5.1:brown-bear')!
+  const effect = createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies', targetId: 'bear',
+    source: { kind: 'spell' }, modifiers: { perceiveVisibleCreaturesAsHostile: true, randomVisibleCreatureTargets: true } })
+  const bear = token({ id: 'bear', poolId: monster.id, dnd5eCombatState: { activeEffects: [effect] } })
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', x: 10, hp: 100, maxHp: 100 })
+  const enemy = token({ id: 'enemy', type: 'player', x: 0, y: 10, hp: 100, maxHp: 100 })
+  const hidden = token({ id: 'hidden', x: 10, y: 10, dnd5eCombatState: { activeEffects: [createDnd5eConditionEffect({
+    condition: 'invisible', targetId: 'hidden', source: { kind: 'dm' } })] } })
+  const map: BattleMap = { id: 'random-monster', name: 'Test', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [bear, ally, enemy, hidden, token({ id: 'far', x: 180 })] }
+  let choices = 0
+  const input = { combatId: map.id, map, characters: [],
+    initiativeOrder: [{ tokenId: bear.id, label: bear.label, emoji: '', color: '', roll: 20 }], actorTokenId: bear.id,
+    targetTokenId: enemy.id, actionIndex: monster.actions.findIndex(a => multi ? a.kind === 'multiattack' : a.attack?.mode === 'melee'),
+    chooseRandomTarget: (index: number, ids: readonly string[]) => {
+      expect([...ids].sort()).toEqual(['ally', 'enemy']); choices++; return index % 2 === 0 ? 'ally' : 'enemy'
+    } }
+  const prepared = prepareDnd5eRandomTargetMonsterAttack(input)
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(choices).toBe(multi ? 2 : 1)
+  expect(prepared.prepared.attacks.map(a => a.targetToken.id)).toEqual(multi ? ['ally', 'enemy'] : ['ally'])
+  const result = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared,
+    rolls: prepared.prepared.attacks.map(a => ({ targetId: a.targetToken.id, mode: a.targetAttackMode,
+      d20: 19, d20Second: 19, damageRolls: a.attack.damage.map(d => Array(d.count).fill(1)) })) })
+  expect(result.result.ok, JSON.stringify(result.result)).toBe(true)
+  expect(result.result.state.combatants.ally.currentHp).toBeLessThan(100)
+  if (multi) expect(result.result.state.combatants.enemy.currentHp).toBeLessThan(100)
+  expect(result.result.state.initiativeOrder).toEqual(['bear'])
+  expect(prepareDnd5eRandomTargetMonsterAttack({ ...input, chooseRandomTarget: () => 'far' })).toMatchObject({ ok: false, reason: 'random-target-unavailable' })
+  const repeated = prepareDnd5eRandomTargetMonsterAttack({ ...input, chooseRandomTarget: () => 'ally' })
+  expect(repeated.ok).toBe(true)
+  if (repeated.ok) expect(repeated.prepared.attacks.map(a => a.targetToken.id)).toEqual(multi ? ['ally', 'ally'] : ['ally'])
+  effect.suspendedBy = ['antimagic-test']
+  const suspended = prepareDnd5eRandomTargetMonsterAttack({ ...input, chooseRandomTarget: () => { throw Error('Must not randomize') } })
+  expect(suspended.ok).toBe(true)
+  if (suspended.ok) expect(suspended.prepared.attacks.every(a => a.targetToken.id === 'enemy')).toBe(true)
+})
+
+
+it('randomizes player Wild Shape attacks using the retained character effect', () => {
+  const effect = createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies', targetId: 'druid-token',
+    source: { kind: 'spell' }, modifiers: { randomVisibleCreatureTargets: true, perceiveVisibleCreaturesAsHostile: true } })
+  const druid: Character = { ...character(), id: 'druid', charClass: '德鲁伊', level: 2,
+    rulesetId: 'dnd5e-2014-srd-5.1', currentHp: 30, maxHp: 30,
+    dnd5eClassChoices: { classes: { druid: { selections: { 'wild-shape-known-forms': ['srd-5.1:wolf'] } } } },
+    dnd5eCombatState: { activeEffects: [effect], wildShapeFormId: 'srd-5.1:wolf', wildShapeCurrentHp: 11, wildShapeRoundsRemaining: 600,
+      wildShapeOriginalCurrentHp: 30, wildShapeOriginalMaxHp: 30, wildShapeOriginalArmorClass: 16,
+      wildShapeOriginalSpeed: 30, wildShapeOriginalAbilities: character().abilities,
+      wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 0, cha: 0 } } }
+  const actor = token({ id: 'druid-token', type: 'player', characterId: 'druid', hp: 11, maxHp: 11 })
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', dnd5eSide: 'player', x: 10, hp: 40, maxHp: 40 })
+  const enemy = token({ id: 'enemy', poolId: 'srd-5.1:goblin', y: 10, hp: 40, maxHp: 40 })
+  const map: BattleMap = { id: 'wildshape-random', name: 'Test', width: 100, height: 100, gridSize: 10,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actor, ally, enemy] }
+  const prepared = prepareDnd5eRandomTargetMonsterAttack({ combatId: map.id, map, characters: [druid],
+    initiativeOrder: [{ tokenId: actor.id, label: actor.label, emoji: '', color: '', roll: 20 }],
+    actorTokenId: actor.id, targetTokenId: enemy.id, actionIndex: 0,
+    chooseRandomTarget: (_, ids) => { expect([...ids].sort()).toEqual(['ally', 'enemy']); return 'ally' } })
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(prepared.prepared.monster.id).toBe('srd-5.1:wolf')
+  const resolved = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared,
+    rolls: [{ targetId: 'ally', d20: 19, d20Second: 19, damageRolls: prepared.prepared.attacks[0].attack.damage.map(d => Array(d.count).fill(1)) }] })
+  expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+  expect(resolved.result.state.combatants.ally.currentHp).toBeLessThan(40)
+  expect(resolved.application?.characters[0].dnd5eCombatState?.wildShapeFormId).toBe('srd-5.1:wolf')
+  expect(resolved.result.state.initiativeOrder).toEqual(['druid-token'])
+  expect(druid.currentHp).toBe(30)
+})
+
+it.each([false, true])('randomizes a readied monster attack at trigger time and rejects a second execution (bound target: %s)', (boundTarget) => {
+  const multi = false
+  const monster = getDnd5eSrdMonster('srd-5.1:brown-bear')!
+  const effect = createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies', targetId: 'bear',
+    source: { kind: 'spell' }, modifiers: { perceiveVisibleCreaturesAsHostile: true, randomVisibleCreatureTargets: true } })
+  const bear = token({ id: 'bear', poolId: monster.id, dnd5eCombatState: { activeEffects: [effect] } })
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', x: 10, hp: 100, maxHp: 100 })
+  const enemy = token({ id: 'enemy', type: 'player', x: 0, y: 10, hp: 100, maxHp: 100 })
+  const hidden = token({ id: 'hidden', x: 10, y: 10, dnd5eCombatState: { activeEffects: [createDnd5eConditionEffect({
+    condition: 'invisible', targetId: 'hidden', source: { kind: 'dm' } })] } })
+  const map: BattleMap = { id: 'random-monster', name: 'Test', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [bear, ally, enemy, hidden, token({ id: 'far', x: 180 })] }
+  bear.dnd5eCombatState!.readiedAction = {trigger:'creature moves',actionKind:'attack',preparedTurnKey:'random-monster:1:bear', ...(boundTarget ? { targetId: enemy.id } : {})}
+  const economy = createDnd5eTurnEconomyCounts('random-monster:1:bear',30)
+  economy.action.current=0
+  let choices = 0
+  const input = { combatId: map.id, map, characters: [],
+    initiativeOrder: [{ tokenId: bear.id, label: bear.label, emoji: '', color: '', roll: 20 },{tokenId:enemy.id,label:enemy.label,emoji:'',color:'',roll:10}], currentInitiativeIndex:1, actorTokenId: bear.id,
+    readiedAttack: true as const, turnEconomy: economy,
+    targetTokenId: enemy.id, actionIndex: monster.actions.findIndex(a => multi ? a.kind === 'multiattack' : a.attack?.mode === 'melee'),
+    chooseRandomTarget: (index: number, ids: readonly string[]) => {
+      expect([...ids].sort()).toEqual(['ally', 'enemy']); choices++; return index % 2 === 0 ? 'ally' : 'enemy'
+    } }
+  const originalMap = JSON.stringify(map)
+  const prepared = prepareDnd5eRandomTargetMonsterAttack(input)
+  expect(JSON.stringify(map)).toBe(originalMap)
+  const unaffectedMap = { ...map, tokens: map.tokens.map(t => t.id === bear.id
+    ? { ...t, dnd5eCombatState: { ...t.dnd5eCombatState, activeEffects: [] } } : t) }
+  const unaffected = prepareDnd5eRandomTargetMonsterAttack({ ...input, map: unaffectedMap,
+    chooseRandomTarget: () => { throw Error('unaffected ready must not draw a target') } })
+  expect(unaffected.ok).toBe(true)
+  if (unaffected.ok) expect(unaffected.prepared.targetToken.id).toBe(enemy.id)
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(choices).toBe(multi ? 2 : 1)
+  expect(prepared.prepared.attacks.map(a => a.targetToken.id)).toEqual(multi ? ['ally', 'enemy'] : ['ally'])
+  const result = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared,
+    rolls: prepared.prepared.attacks.map(a => ({ targetId: a.targetToken.id, mode: a.targetAttackMode,
+      d20: 19, d20Second: 19, damageRolls: a.attack.damage.map(d => Array(d.count).fill(1)) })) })
+  expect(result.result.ok, JSON.stringify(result.result)).toBe(true)
+  expect(result.result.state.combatants.ally.currentHp).toBeLessThan(100)
+  if (multi) expect(result.result.state.combatants.enemy.currentHp).toBeLessThan(100)
+  expect(result.result.state.initiativeOrder).toEqual(['bear','enemy'])
+  expect(result.result.state.initiativeIndex).toBe(1)
+  expect(result.result.state.combatants.bear.turn.reactionAvailable).toBe(false)
+  expect(result.result.state.combatants.bear.turn.actionAvailable).toBe(false)
+  expect(result.result.state.combatants.bear.classState.readiedAction).toBeUndefined()
+  expect(result.result.events.filter(e=>e.type==='turn-resource-spent'&&e.actorId==='bear'&&e.resource==='reaction')).toHaveLength(1)
+  expect(result.result.events.filter(e=>e.type==='turn-resource-spent'&&e.actorId==='bear'&&e.resource==='action')).toHaveLength(0)
+  expect(result.application).toBeDefined()
+  const saved=JSON.parse(JSON.stringify(result.application!.map)) as BattleMap
+  expect(prepareDnd5eRandomTargetMonsterAttack({...input,map:saved})).toMatchObject({ok:false,reason:'invalid-action'})
+})
+
+it.each([false, true])('randomizes a composite weapon and targeted special independently and settles both (hit: %s)', hit => {
+  const monster = getDnd5eSrdMonster('srd-5.1:mummy')!
+  const actor = token({ id: 'mummy', poolId: monster.id, dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({
+    definitionId: 'test:enemies', label: 'Enemies', targetId: 'mummy', source: { kind: 'spell' },
+    modifiers: { perceiveVisibleCreaturesAsHostile: true, randomVisibleCreatureTargets: true },
+  })] } })
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', x: 10, hp: 100, maxHp: 100 })
+  const enemy = token({ id: 'enemy', type: 'player', y: 10, hp: 100, maxHp: 100 })
+  const map: BattleMap = { id: 'random-composite', name: 'Test', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [actor, ally, enemy] }
+  const draws: string[][] = []
+  const prepared = prepareDnd5eRandomTargetMonsterAttack({ combatId: map.id, map, characters: [],
+    initiativeOrder: [actor, enemy].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })),
+    actorTokenId: actor.id, targetTokenId: enemy.id, actionIndex: monster.actions.findIndex(a => a.id === 'multiattack'),
+    chooseRandomTarget: (i, ids) => { draws.push([...ids]); return i === 0 ? ally.id : enemy.id },
+  })
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(draws).toHaveLength(2)
+  for (const pool of draws) expect(pool.sort()).toEqual(['ally', 'enemy'])
+  expect(prepared.prepared.targetOccurrences.map(t => t.targetId)).toEqual(['ally', 'enemy'])
+  const children = prepared.prepared.compositeRuntime!.children
+  const steps = children.map(child => {
+    const targetId = prepared.prepared.targetOccurrences[child.sequenceIndex].targetId
+    if (child.kind === 'weapon') {
+      const attack = prepared.prepared.attacks.find(a => a.sequenceIndex === child.sequenceIndex)!
+      return { kind: 'weapon' as const, actionId: child.action.id, roll: { targetId, d20: hit ? 19 : 1,
+        damageRolls: hit ? attack.attack.damage.map(d => Array(d.count).fill(1)) : [],
+        onHitEffectRolls: hit ? attack.attack.onHitEffects?.map(e => ({ effectId: e.id, d20: 20 })) : undefined } }
+    }
+    return { kind: 'special' as const, actionId: child.action.id, targetId, d20: 1 }
+  })
+  const resolved = resolvePreparedDnd5eMonsterAttack({ prepared: prepared.prepared, rolls: [], compositeSteps: steps })
+  expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+  const weaponTarget = steps.find(s => s.kind === 'weapon')!.roll!.targetId
+  const specialTarget = steps.find(s => s.kind === 'special')!.targetId!
+  expect(resolved.result.state.combatants[weaponTarget].currentHp < 100).toBe(hit)
+  expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', targetId: weaponTarget, hit }))
+  expect(resolved.result.state.combatants[specialTarget].conditions).toContain('frightened')
+  expect(resolved.result.state.combatants.mummy.turn.actionAvailable).toBe(false)
+  expect(resolved.result.state.combatants.ally.controller).toBe('dm')
+})
+
+it.each([1, 20, undefined])('preserves a Shield casting attempt across staged monster multiattack: %s', d20 => {
+  const monster = getDnd5eSrdMonster('srd-5.1:brown-bear')!
+  const bear = token({ id: 'bear', poolId: monster.id })
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: 'mage',
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  const target = token({ id: 'mage', poolId: 'srd-5.1:mage', dnd5eSide: 'player', x: 10, hp: 40, maxHp: 40,
+    dnd5eCombatState: { activeEffects: [pain], monsterSpellSlots: { 1: { current: 2, max: 2 } } } })
+  const map: BattleMap = { id: 'pain-multiattack', name: 'Test', width: 100, height: 100, gridSize: 10,
+    feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [bear, target] }
+  const ready = prepareDnd5eMonsterAttack({ combatId: map.id, map, characters: [],
+    initiativeOrder: [bear, target].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })),
+    actorTokenId: bear.id, targetTokenId: target.id, actionIndex: monster.actions.findIndex(a => a.id === 'multiattack') })
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const prepared = ready.prepared
+  const rolls = prepared.attacks.map(entry => ({
+    d20: entry.targetArmorClass + 1 - entry.attack.toHit,
+    damageRolls: d20 === 20 ? [] : entry.attack.damage.map(damage => Array.from({ length: damage.count }, () => 1)),
+  }))
+  const shieldSpellcastingSavingThrows = d20 == null ? undefined : { mage: [{ effectId: pain.id, d20 }] }
+  const prefix = resolvePreparedDnd5eMonsterAttack({ prepared, rolls: rolls.slice(0, 1), settleAttackCount: 1, shieldSpellcastingSavingThrows })
+  const full = resolvePreparedDnd5eMonsterAttack({ prepared, rolls, shieldSpellcastingSavingThrows })
+  expect(prefix.result.ok, prefix.result.ok ? '' : prefix.result.reason).toBe(d20 != null)
+  expect(full.result.ok, full.result.ok ? '' : full.result.reason).toBe(d20 != null)
+  if (!full.result.ok) { expect(full.application).toBeUndefined(); return }
+  expect(full.result.events.filter(e => e.type === 'spell-cast' && e.spellId === 'shield')).toHaveLength(1)
+  expect(full.result.events.filter(e => e.type === 'saving-throw-resolved' && e.targetId === 'mage')).toHaveLength(1)
+  expect(full.result.state.combatants.mage.classState.monsterSpellSlots?.[1].current).toBe(1)
+  expect(full.result.state.combatants.mage.currentHp).toBe(d20 === 20 ? 40 : 40 - prepared.attacks.reduce((total, entry) =>
+    total + entry.attack.damage.reduce((sum, damage) => sum + damage.count + damage.bonus, 0), 0))
+})
+
+it.each(['srd-5.1:wolf','srd-5.1:brown-bear'])('requires one ward receipt for a retained-character form attack: %s',formId=>{
+  const druid: Character = { ...character(), id: 'druid', charClass: '德鲁伊', level: 8,
+    rulesetId: 'dnd5e-2014-srd-5.1', currentHp: 30, maxHp: 30,
+    dnd5eClassChoices: { classes: { druid: { selections: { 'wild-shape-known-forms': [formId] } } } },
+    dnd5eCombatState: { wildShapeFormId: formId, wildShapeCurrentHp: 11, wildShapeRoundsRemaining: 600,
+      wildShapeOriginalCurrentHp: 30, wildShapeOriginalMaxHp: 30, wildShapeOriginalArmorClass: 16,
+      wildShapeOriginalSpeed: 30, wildShapeOriginalAbilities: character().abilities,
+      wildShapeOriginalSavingThrowBonuses: { str: 3, dex: 2, con: 2, int: 0, wis: 0, cha: 0 } } }
+  const actor = token({ id: 'druid-token', type: 'player', characterId: 'druid', hp: 11, maxHp: 11 })
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', dnd5eSide: 'enemy', x: 10, hp: 40, maxHp: 40 })
+  const enemy = token({ id: 'enemy', poolId: 'srd-5.1:goblin', y: 10, hp: 40, maxHp: 40 })
+  const map: BattleMap = { id: 'wildshape-random', name: 'Test', width: 100, height: 100, gridSize: 10,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actor, ally, enemy] }
+  const prepared=prepareDnd5eMonsterAttack({combatId:map.id,map,characters:[druid],
+    initiativeOrder:[{tokenId:actor.id,label:actor.label,emoji:'',color:'',roll:20},
+      {tokenId:ally.id,label:ally.label,emoji:'',color:'',roll:10}],
+    actorTokenId:actor.id,targetTokenId:enemy.id,actionIndex:0})
+  expect(prepared.ok,JSON.stringify(prepared)).toBe(true)
+  if(!prepared.ok)throw Error(prepared.reason)
+  const baseline=prepared.prepared
+  const effect=createDnd5eMechanicalEffect({definitionId:'ward',label:'Ward',targetId:enemy.id,source:{kind:'plugin',actorId:enemy.id},
+    attackAttemptWard:{ability:'cha',dc:17,frequency:'once-per-turn',onFailure:'cannot-target-this-turn'}})
+  baseline.state.combatants[enemy.id].classState.activeEffects=[effect]
+  if (formId === 'srd-5.1:brown-bear') {
+    const prefix = resolvePreparedDnd5eMonsterAttack({prepared:baseline,settleAttackCount:1,
+      rolls:[{targetId:ally.id,d20:19,damageRolls:baseline.attacks[0].attack.damage.map(d=>Array(d.count).fill(1))}]})
+    expect(prefix.result.ok,JSON.stringify(prefix.result)).toBe(true)
+    if (!prefix.result.ok || !prefix.application) throw Error('Missing shape prefix application')
+    const restored = JSON.parse(JSON.stringify(prefix.application)) as typeof prefix.application
+    const restoredDruid = restored.characters.find(c=>c.id===druid.id)!
+    const turnKey = dnd5eHeadlessTurnKey(prefix.result.state,actor.id)
+    const selection = dnd5eCreatureFormAttackSelection(restoredDruid,0,turnKey)
+    expect(selection.multiattackContinuation?.occurrenceIndex).toBe(1)
+    expect(dnd5eCreatureFormAttackSelection(restoredDruid,0,turnKey+'-stale').multiattackContinuation).toBeUndefined()
+    const economy=spendDnd5eTurnResource(createDnd5eTurnEconomyCounts(turnKey,30),'action').economy
+    const next=prepareDnd5eMonsterAttack({combatId:map.id,map:restored.map,characters:restored.characters,
+      initiativeOrder:[{tokenId:actor.id,label:actor.label,emoji:'',color:'',roll:20},
+      {tokenId:ally.id,label:ally.label,emoji:'',color:'',roll:10}],
+      actorTokenId:actor.id,targetTokenId:ally.id,actionIndex:selection.actionIndex,
+      multiattackContinuation:selection.multiattackContinuation,turnEconomy:economy})
+    expect(next.ok,JSON.stringify(next)).toBe(true)
+    if(!next.ok)throw Error(next.reason)
+    const completed=resolvePreparedDnd5eMonsterAttack({prepared:next.prepared,
+      multiattackContinuation:selection.multiattackContinuation,
+      rolls:next.prepared.attacks.map(a=>({d20:19,damageRolls:a.attack.damage.map(d=>Array(d.count).fill(1))}))})
+    expect(completed.result.ok).toBe(true)
+    expect(completed.result.state.combatants[actor.id].classState.monsterMultiattackContinuation).toBeUndefined()
+    expect(completed.result.events.filter(e=>e.type==='turn-resource-spent'&&e.resource==='action')).toHaveLength(0)
+  }
+  const rolls=baseline.attacks.map(a=>({d20:19,d20Second:19,damageRolls:a.attack.damage.map(d=>Array(d.count).fill(1))}))
+  expect(resolvePreparedDnd5eMonsterAttack({prepared:baseline,rolls}).result.ok).toBe(false)
+  for(const d20 of [1,20]){
+    const checked=resolveDnd5eHeadlessAction(baseline.state,{type:'attack-ward-attempt',actorId:actor.id,targetId:enemy.id,
+      turnKey:dnd5eHeadlessTurnKey(baseline.state,actor.id),saves:[{effectId:effect.id,targetId:actor.id,d20}]})
+    expect(checked.ok).toBe(true)
+    const resolved=resolvePreparedDnd5eMonsterAttack({prepared:{...baseline,state:checked.state},rolls})
+    expect(resolved.result.ok,JSON.stringify(resolved.result)).toBe(d20===20)
+    expect(resolved.result.state.combatants[actor.id].turn.actionAvailable).toBe(d20===1)
+    expect(resolved.result.events.filter(e=>e.type==='saving-throw-resolved'&&e.ability==='cha')).toHaveLength(0)
+    if(d20===1)expect(resolved.result.state.combatants[enemy.id].currentHp).toBe(40)
+    else {
+      expect(resolved.result.state.combatants[enemy.id].currentHp).toBeLessThan(40)
+      expect(resolved.application?.characters[0].dnd5eCombatState?.wildShapeFormId).toBe(formId)
+      expect(resolved.result.events.filter(e=>e.type==='attack-resolved')).toHaveLength(baseline.attacks.length)
+    }
+  }
+})
+
+
+it.each(['owlbear','violet-fungus'])('preserves a committed %s first hit when a later target ward fails, then permits retargeting the remaining attack', slug => {
+  const hero = character()
+  const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+  const nextActionId=slug==='violet-fungus'?'rotting-touch':'claws'
+  const nextDamage=slug==='violet-fungus'?[[4]]:[[4,4]]
+  const actor = token({id:'ward-sequence-actor',poolId:monster.id,hp:59,maxHp:59})
+  const first = token({id:'ward-sequence-first',type:'player',characterId:hero.id,x:10,hp:40,maxHp:40})
+  const warded = token({id:'ward-sequence-warded',poolId:'srd-5.1:goblin',dnd5eSide:'player',y:10,hp:40,maxHp:40})
+  const effect = createDnd5eMechanicalEffect({definitionId:'ward',label:'Ward',targetId:warded.id,
+    source:{kind:'plugin',actorId:warded.id},attackAttemptWard:{ability:'cha',dc:17,frequency:'once-per-turn',onFailure:'cannot-target-this-turn'}})
+  warded.dnd5eCombatState={activeEffects:[effect]}
+  const map:BattleMap={id:'ward-sequence-map',name:'Test',width:100,height:100,gridSize:10,feetPerCell:5,
+    gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[actor,first,warded]}
+  const prepared=prepareDnd5eMonsterAttack({combatId:map.id,map,characters:[hero],
+    initiativeOrder:[{tokenId:actor.id,label:actor.label,emoji:'',color:'',roll:20},
+      {tokenId:warded.id,label:warded.label,emoji:'',color:'',roll:10}],
+    actorTokenId:actor.id,targetTokenId:first.id,actionIndex:monster.actions.findIndex(a=>a.id==='multiattack'),
+    ...(slug==='violet-fungus'?{randomRepeatRoll:2}:{})})
+  expect(prepared.ok).toBe(true)
+  if(!prepared.ok)throw Error(prepared.reason)
+  const prefix=resolvePreparedDnd5eMonsterAttack({prepared:prepared.prepared,settleAttackCount:1,
+    rolls:[{d20:19,damageRolls:[[5]]}]})
+  expect(prefix.result.ok).toBe(true)
+  if(!prefix.result.ok)throw Error(prefix.result.reason)
+  const saved=JSON.parse(JSON.stringify(prefix.result.state)) as typeof prefix.result.state
+  const hpAfterFirst=saved.combatants[first.id].currentHp
+  expect(hpAfterFirst).toBeLessThan(40)
+  const continuation={schemaVersion:1 as const,parentActionId:'multiattack',occurrenceIndex:1}
+  const checked=resolveDnd5eHeadlessAction(saved,{type:'attack-ward-attempt',actorId:actor.id,targetId:warded.id,
+    turnKey:dnd5eHeadlessTurnKey(saved,actor.id),saves:[{effectId:effect.id,targetId:actor.id,d20:1}]})
+  expect(checked.ok, JSON.stringify(checked)).toBe(true)
+  expect(checked.state.combatants[first.id].currentHp).toBe(hpAfterFirst)
+  expect(checked.state.combatants[actor.id].turn.actionAvailable).toBe(false)
+  expect(checked.state.combatants[actor.id].classState.monsterMultiattackContinuation?.nextOccurrenceIndex).toBe(1)
+  expect(checked.state.combatants[actor.id].classState.monsterMultiattackContinuation?.sequenceActionIds).toHaveLength(2)
+  const denied=resolveDnd5eHeadlessAction(checked.state,{type:'monster-action',actorId:actor.id,actionId:nextActionId,
+    multiattackContinuation:continuation,rolls:[{targetId:warded.id,d20:19,damageRolls:nextDamage}]})
+  expect(denied.ok).toBe(false)
+  expect(denied.state.combatants[first.id].currentHp).toBe(hpAfterFirst)
+  expect(denied.state.combatants[warded.id].currentHp).toBe(40)
+  expect(denied.state.combatants[actor.id].classState.monsterMultiattackContinuation?.nextOccurrenceIndex).toBe(1)
+  const retargeted=resolveDnd5eHeadlessAction(JSON.parse(JSON.stringify(denied.state)),{type:'monster-action',
+    actorId:actor.id,actionId:nextActionId,multiattackContinuation:continuation,
+    rolls:[{targetId:first.id,d20:19,damageRolls:nextDamage}]})
+  expect(retargeted.ok, JSON.stringify(retargeted)).toBe(true)
+  expect(retargeted.state.combatants[first.id].currentHp).toBeLessThan(hpAfterFirst)
+  expect(retargeted.state.combatants[warded.id].currentHp).toBe(40)
+  expect(retargeted.state.combatants[actor.id].classState.monsterMultiattackContinuation).toBeUndefined()
+  expect(retargeted.events.filter(e=>e.type==='turn-resource-spent'&&e.resource==='action')).toHaveLength(0)
 })

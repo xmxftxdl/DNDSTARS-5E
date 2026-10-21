@@ -1,6 +1,11 @@
+import { createDnd5eMapHostilityView } from './mapPerceivedHostility'
+import { dnd5eMonsterWithSceneHeldWeapon, dnd5eHeldHeavyWeaponDisadvantage } from './companionHeldWeapon'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { mapGeometryOrdinaryProjectileBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import {dnd5eRollDiceRecipes,resolveDnd5eRollDiceModifiers} from './rollDiceModifiers'
+import {dnd5eRollDiceOccurrenceId} from './rollDiceTransaction'
+import { mapGeometryOrdinaryProjectileBlocked, mapGeometryRangedWeaponAttackDisadvantage, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
+import { dnd5eSummonAutomaticTargets } from './summonAutomaticTargets'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -8,7 +13,9 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
+import { dnd5eActiveSubmerged } from './activeEffects'
 import {
+  dnd5eAreaAttackAdvantageCandidates,
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackDisadvantageReasons,
   dnd5eAttackerIsUnseenForAttack,
@@ -19,6 +26,7 @@ import {
   dnd5eEffectiveSizeRank,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
+  dnd5eSourceProximityAttackAdvantage,
   dnd5eRageAllyProtectionDisadvantage,
   dnd5eRageAllyMeleeAdvantage,
   dnd5eSourceMarkedAttackDisadvantage,
@@ -121,6 +129,7 @@ export type Dnd5eMonsterAttackRejectStage =
   | 'attack-sequence'
 
 export interface PreparedDnd5eMonsterAttack {
+  readiedAttack?: true
   map: BattleMap
   characters: readonly Character[]
   characterIdByCombatantId: Record<string, string>
@@ -227,6 +236,7 @@ export function prepareDnd5eMonsterAttack(input: {
   initiativeOrder: readonly InitiativeEntry[]
   actorTokenId: string
   targetTokenId: string
+  readiedAttack?: true
   /** Exact target for each concrete runtime occurrence; one entry is legacy. */
   targetTokenIds?: readonly string[]
   actionIndex?: number
@@ -256,8 +266,16 @@ export function prepareDnd5eMonsterAttack(input: {
     ? actorToken.poolId
     : actorCharacter?.dnd5eCombatState?.wildShapeFormId
   if (!actorToken || !statBlockId) return { ok: false, reason: 'invalid-actor' }
-  const monster = getDnd5eSrdMonster(statBlockId)
+  const monster = dnd5eMonsterWithSceneHeldWeapon(getDnd5eSrdMonster(statBlockId), actorToken, input.map, input.characters)
   if (!monster) return { ok: false, reason: 'invalid-stat-block' }
+  const ready = actorToken.dnd5eCombatState?.readiedAction
+  if (input.readiedAttack && (!ready || ready.actionKind !== 'attack' || ready.targetId && ready.targetId !== input.targetTokenId ||
+    input.resourceKind && input.resourceKind !== 'action' || input.multiattackContinuation)) return { ok: false, reason: 'invalid-action' }
+  if (input.readiedAttack && actorToken.dnd5eGroveGuardian &&
+    !dnd5eSummonAutomaticTargets(input.map, actorToken, input.characters)?.targets.some(target => target.id === input.targetTokenId)) {
+    return { ok: false, reason: 'invalid-target' }
+  }
+  const summonTargets = input.readiedAttack ? undefined : dnd5eSummonAutomaticTargets(input.map, actorToken, input.characters)
   const berserkTarget = actorToken.dnd5eCombatState?.monsterBerserk === true
     ? selectDnd5eMonsterPreferredTarget({
         map: input.map,
@@ -266,12 +284,13 @@ export function prepareDnd5eMonsterAttack(input: {
         characters: input.characters,
       })
     : undefined
+  const perceivesHostile = createDnd5eMapHostilityView({ ...input, actorToken })
   const targetToken = input.map.tokens.find((token) => token.id === input.targetTokenId && token.id !== actorToken.id && token.type !== 'obstacle')
   if (
     !targetToken ||
-    (berserkTarget
+    (!input.readiedAttack && (summonTargets ? !summonTargets.targets.some(candidate => candidate.id === targetToken.id) : berserkTarget
       ? targetToken.id !== berserkTarget.id
-      : !areOpposedCombatTokens(actorToken, targetToken))
+      : !perceivesHostile(targetToken)))
   ) return { ok: false, reason: 'invalid-target' }
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
@@ -279,6 +298,7 @@ export function prepareDnd5eMonsterAttack(input: {
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
+    additionalCreatureTokenIds: [...new Set([input.targetTokenId, ...(input.targetTokenIds ?? [])])],
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const target = snapshot.state.combatants[targetToken.id]
@@ -286,7 +306,7 @@ export function prepareDnd5eMonsterAttack(input: {
   if (actorIndex < 0 || !actorCombatant || !target) {
     return { ok: false, reason: 'combatant-missing' }
   }
-  snapshot.state.initiativeIndex = input.resourceKind === 'legendary-action'
+  snapshot.state.initiativeIndex = input.readiedAttack || input.resourceKind === 'legendary-action'
     ? Math.max(
         0,
         Math.min(
@@ -348,7 +368,7 @@ export function prepareDnd5eMonsterAttack(input: {
   // Current monster panels expose Multiattack and its child weapon actions as
   // separate buttons; clicking a child (for example Ape Fist) must execute one
   // attack instead of silently upgrading it to the parent's full sequence.
-  const multiattack = input.actionIndex == null &&
+  const multiattack = !input.readiedAttack && input.actionIndex == null &&
     resourceKind === 'action' && !input.multiattackContinuation &&
     indexedAction.kind === 'weapon-attack'
     ? monster.actions.find((action) => {
@@ -461,7 +481,8 @@ export function prepareDnd5eMonsterAttack(input: {
         actorCombatant.classState.monsterActionUsesByActionId,
     })
   ) return { ok: false, reason: 'invalid-action', stage: 'action-resource' }
-  const summonedRepeatedAttackCount = action.kind === 'weapon-attack'
+  if (input.readiedAttack && action.kind !== 'weapon-attack') return { ok: false, reason: 'invalid-action' }
+  const summonedRepeatedAttackCount = !input.readiedAttack && action.kind === 'weapon-attack'
     ? Math.max(1, Math.min(10, Math.floor(actorCombatant.summonedAttacksPerAction ?? 1)))
     : 1
   const attackIds = action.kind === 'multiattack'
@@ -522,9 +543,9 @@ export function prepareDnd5eMonsterAttack(input: {
         token.id === targetId &&
         token.id !== actorToken.id &&
         token.type !== 'obstacle' &&
-        (berserkTarget
+        (input.readiedAttack ? token.id === input.targetTokenId : summonTargets ? summonTargets.targets.some(entry => entry.id === token.id) : berserkTarget
           ? token.id === berserkTarget.id
-          : areOpposedCombatTokens(actorToken, token)))
+          : perceivesHostile(token)))
       return candidate ? [candidate] : []
     },
   )
@@ -689,7 +710,7 @@ export function prepareDnd5eMonsterAttack(input: {
         dnd5eEffectiveSizeRank(snapshot.state.combatants[entry.targetToken.id]),
       ),
     }))) return { ok: false, reason: 'projectile-blocked-by-wind-wall' }
-  const environment = mapGeometryRuntimeForMap(input.map.id)?.environment
+  const environment = dnd5eActiveSubmerged(actorCombatant.classState.activeEffects) ? 'underwater' : mapGeometryRuntimeForMap(input.map.id)?.environment
   const underwaterAttacks = attacks.map(({ id, name, attack, distanceFeet: attackDistance }) => {
     const usesRangedAttack = attack.mode === 'ranged'
     return dnd5eUnderwaterWeaponAttack({
@@ -911,14 +932,16 @@ export function prepareDnd5eMonsterAttack(input: {
       ['prone', '倒地'].includes(condition.toLowerCase()))
     const attackAbility = dnd5eMonsterWeaponAttackAbility(monster, attack)
     const genericAttackRollEffect = dnd5eActiveAttackRollFlags(
-      actorCombatant.classState.activeEffects,
+      actorCombatant.classState.activeEffects?.filter(effect => attackIndex === 0 || !effect.breakOn?.includes('makes-weapon-attack')),
       attackAbility,
+      'weapon',
     )
     const targetLinkedAttackRollEffect = dnd5eActiveTargetLinkedAttackRollFlags(
       attackTarget.classState.activeEffects,
       actorCombatant.id,
       actorCombatant.creatureType,
       snapshot.state,
+      { category: 'weapon', delivery: attack.mode === 'ranged' ? 'ranged' : 'melee' },
     )
     const packTactics = dnd5eMonsterPackTacticsApplies({
       monster,
@@ -954,6 +977,7 @@ export function prepareDnd5eMonsterAttack(input: {
         { active: advantageAllowed && !!attackTarget.classState.stunnedByActorId, reason: '目标处于震慑状态' },
         { active: advantageAllowed && dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, attackTargetToken.id), reason: '目标看不见攻击者' },
         { active: advantageAllowed && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, attackTarget), reason: '协助动作' },
+        { active: advantageAllowed && dnd5eSourceProximityAttackAdvantage(snapshot.state, actorCombatant, attackTarget), reason: '链接来源的距离与视线提供攻击优势' },
         { active: advantageAllowed && dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, attackTarget), reason: '规则效果提供攻击优势' },
         { active: advantageAllowed && dnd5eNextD20AdvantageApplies(actorCombatant, 'attack'), reason: '下一次 d20 攻击优势' },
         { active: advantageAllowed && targetProne && attackDistance <= 5, reason: '目标倒地且攻击者在 5 尺内' },
@@ -965,6 +989,8 @@ export function prepareDnd5eMonsterAttack(input: {
           .map((reason) => ({ active: advantageAllowed, reason })),
       ],
       disadvantage: [
+        { active: dnd5eHeldHeavyWeaponDisadvantage(actorToken, entry.id, dnd5eEffectiveSizeRank(actorCombatant)), reason: '小型或微型生物使用重型武器' },
+        { active: actorCombatant.wearingUnproficientArmor, reason: '穿着不熟练的护甲' },
         ...dnd5eAttackDisadvantageReasons(snapshot.state, actorToken.id, attackTargetToken.id)
           .map((reason) => ({ active: true, reason })),
         { active: actorCombatant.classState.monsterDamageAversionActive === true, reason: '怪物伤害回避状态' },
@@ -974,7 +1000,7 @@ export function prepareDnd5eMonsterAttack(input: {
         { active: dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, attackTargetToken.id), reason: '攻击者看不见目标' },
         { active: actorProne, reason: '攻击者处于倒地状态' },
         { active: targetProne && attackDistance > 5, reason: '目标倒地且攻击距离超过 5 尺' },
-        { active: dnd5eSourceMarkedAttackDisadvantage(actorCombatant, attackTarget), reason: '攻击受到标记类能力限制' },
+        { active: dnd5eSourceMarkedAttackDisadvantage(actorCombatant, attackTarget, snapshot.state), reason: '攻击受到标记类能力限制' },
         ...genericAttackRollEffect.disadvantageReasons
           .map((reason) => ({ active: true, reason })),
         ...targetLinkedAttackRollEffect.disadvantageReasons
@@ -1008,6 +1034,11 @@ export function prepareDnd5eMonsterAttack(input: {
         { active: usesRangedAttack && rangedThreatened, reason: '远程攻击者 5 尺内有敌人' },
         { active: usesRangedAttack && attackDistance > (attack.rangeFeet?.normal ?? 0), reason: '远程攻击超过常规射程' },
         { active: underwaterAttacks[attackIndex]?.disadvantage === true, reason: '水下武器攻击限制' },
+        { active: usesRangedAttack && mapGeometryRangedWeaponAttackDisadvantage({ geometry, map: input.map,
+          from: actorToken, to: entry.targetToken,
+          fromHeightFeet: dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(actorCombatant)),
+          toHeightFeet: dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(snapshot.state.combatants[entry.targetToken.id])),
+        }), reason: '远程武器攻击轨迹受到区域干扰' },
       ],
     })
     const targetAttackMode = targetAttackModeResolution.mode
@@ -1041,6 +1072,7 @@ export function prepareDnd5eMonsterAttack(input: {
   return {
     ok: true,
     prepared: {
+      readiedAttack: input.readiedAttack,
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
@@ -1077,6 +1109,41 @@ export function prepareDnd5eMonsterAttack(input: {
   }
 }
 
+/** Project a speculative Host state into map/character inputs without publishing it. */
+export function projectDnd5eMonsterAttackPreparation(prepared:PreparedDnd5eMonsterAttack,state:Dnd5eHeadlessCombatState):PreparedDnd5eMonsterAttack {
+  const projectedState=structuredClone(state)
+  const projection=planDnd5eMapResultApplication({state:projectedState,map:prepared.map,characters:prepared.characters,characterIdByCombatantId:prepared.characterIdByCombatantId})
+  return {...prepared,state:projectedState,map:projection.map,characters:projection.characters,
+    actorToken:projection.map.tokens.find(token=>token.id===prepared.actorToken.id)!,
+    targetToken:projection.map.tokens.find(token=>token.id===prepared.targetToken.id)!}
+}
+
+/** Reuse the single-child preparation rules after earlier composite children have resolved. */
+export function refreshDnd5eMonsterAttackOccurrence(prepared:PreparedDnd5eMonsterAttack,state:Dnd5eHeadlessCombatState,index:number) {
+  const entry=prepared.attacks[index]
+  if(!entry)return {ok:false as const,reason:'attack-sequence' as const}
+  const projected=projectDnd5eMonsterAttackPreparation(prepared,state)
+  const fresh=prepareDnd5eMonsterAttack({combatId:state.combatId,round:state.round,map:projected.map,characters:projected.characters,
+    initiativeOrder:state.initiativeOrder.map(id=>({tokenId:id,label:state.combatants[id].name,emoji:'',color:'',roll:state.combatants[id].initiative})),
+    readiedAttack:prepared.readiedAttack,currentInitiativeIndex:state.initiativeIndex,actorTokenId:prepared.actorToken.id,targetTokenId:entry.targetToken.id,
+    actionIndex:prepared.monster.actions.findIndex(action=>action.id===entry.id)})
+  if(!fresh.ok)return fresh
+  const replacement=fresh.prepared.attacks[0]
+  if(!replacement)return {ok:false as const,reason:'attack-sequence' as const}
+  return {ok:true as const,prepared:{...projected,
+    blessed:fresh.prepared.blessed,baned:fresh.prepared.baned,sizeDamageD4Mode:fresh.prepared.sizeDamageD4Mode,
+    attacks:prepared.attacks.map((attack,i)=>i===index?{...replacement,sequenceIndex:entry.sequenceIndex}:attack),
+    attackModes:prepared.attackModes.map((mode,i)=>i===index?fresh.prepared.attackModes[0]:mode),
+    attackModeResolutions:prepared.attackModeResolutions?.map((mode,i)=>i===index?(fresh.prepared.attackModeResolutions?.[0]??mode):mode),
+  }}
+}
+
+export function preparedDnd5eMonsterAttackEffectContext(prepared: PreparedDnd5eMonsterAttack, transactionId:string, occurrence:number) {
+  const actor=prepared.state.combatants[prepared.actorToken.id]
+  return {actorId:actor.id,effects:actor.classState.activeEffects,kind:'attack' as const,
+    eventId:dnd5eRollDiceOccurrenceId(transactionId,actor.id,'attack',occurrence)}
+}
+
 export function previewDnd5eMonsterAttack(
   prepared: PreparedDnd5eMonsterAttack,
   attackIndex: number,
@@ -1087,6 +1154,7 @@ export function previewDnd5eMonsterAttack(
   baneRoll?: number,
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
   finalMode?: PreparedDnd5eMonsterAttack['targetAttackMode'],
+  effectDice?: {transactionId:string;occurrence:number;rolls:Readonly<Record<string,readonly number[]>>;effects?:Parameters<typeof dnd5eRollDiceRecipes>[0]['effects']},
 ) {
   const definition = prepared.attacks[attackIndex]
   if (!definition) throw new RangeError('monster attack index is out of range')
@@ -1098,17 +1166,26 @@ export function previewDnd5eMonsterAttack(
   const baseAttack = rules.resolveAttack({
       rolls,
       mode,
-      modifier: definition.attack.toHit + (blessRoll ?? 0) - (baneRoll ?? 0),
+      modifier: definition.attack.toHit + (blessRoll ?? 0) - (baneRoll ?? 0) + (effectDice ? (()=>{
+        const context={...preparedDnd5eMonsterAttackEffectContext(prepared,effectDice.transactionId,effectDice.occurrence),
+          ...(Object.hasOwn(effectDice,'effects')?{effects:effectDice.effects}:{})}
+        const rolls=Object.fromEntries(dnd5eRollDiceRecipes(context).filter(recipe=>Object.hasOwn(effectDice.rolls,recipe.id)).map(recipe=>[recipe.id,effectDice.rolls[recipe.id]]))
+        return resolveDnd5eRollDiceModifiers(context,rolls).modifier
+      })() : 0),
       targetAc: definition.targetArmorClass,
     })
   const adjustedAttack = previewDnd5ePostD20AdjustedAttack({
     state: prepared.state,
     affectedId: prepared.actorToken.id,
+    targetId: definition.targetToken.id,
+    attackMode: definition.attack.mode === 'ranged' ? 'ranged' : 'melee',
     targetAc: definition.targetArmorClass,
     resolution: baseAttack,
     use: postD20Adjustment,
   })
   const resolved = resolveDnd5eAttackOutcome({
+    sourceId: prepared.actorToken.id,
+    targetEffects: prepared.state.combatants[definition.targetToken.id]?.classState.activeEffects,
     attack: adjustedAttack,
     criticalThreshold: definition.attack.criticalThreshold,
     automaticCritical: dnd5ePreparedMonsterAttackIsAutomaticCritical(
@@ -1116,16 +1193,7 @@ export function previewDnd5eMonsterAttack(
       attackIndex,
     ),
   })
-  const sourceLinkedEffect = definition.attack.onHitEffects?.find((effect) =>
-    effect.kind === 'source-linked-condition')
-  const automaticallyHits =
-    sourceLinkedEffect?.kind === 'source-linked-condition' &&
-    sourceLinkedEffect.relation.attackAutomaticallyHitsLinkedTarget === true &&
-    sourceLinkedRelationTargetIds(
-      prepared.state,
-      prepared.actorToken.id,
-      sourceLinkedEffect.relation.slotGroup,
-    ).includes(definition.targetToken.id)
+  const automaticallyHits = dnd5ePreparedMonsterAttackAutomaticallyHits(prepared, attackIndex)
   return automaticallyHits
     ? { ...resolved, hit: true, critical: false }
     : resolved
@@ -1149,7 +1217,8 @@ export function dnd5ePreparedMonsterTraitDamageDefinitions(
       usedTurnKeys:
         usedTurnKeys ?? prepared.monsterAttackTraitContext.usedTurnKeys,
     },
-  )
+  ).filter(trait => trait.traitId !== 'dive-damage' || usedTurnKeys?.['monster-trait:dive-damage'] !==
+    (definition.monsterAttackTraitContext.turnKey ?? prepared.monsterAttackTraitContext.turnKey))
 }
 
 export function dnd5eMonsterAttackModeWithProtection(
@@ -1157,6 +1226,20 @@ export function dnd5eMonsterAttackModeWithProtection(
   protectedAttack: boolean,
 ): PreparedDnd5eMonsterAttack['targetAttackMode'] {
   return protectedAttack ? imposeDnd5eRollDisadvantage(mode, 'protection').mode : mode
+}
+
+export function dnd5ePreparedMonsterAttackAutomaticallyHits(prepared: PreparedDnd5eMonsterAttack, attackIndex: number): boolean {
+  const definition = prepared.attacks[attackIndex]
+  if (!definition) return false
+  const sourceLinkedEffect = definition.attack.onHitEffects?.find((effect) =>
+    effect.kind === 'source-linked-condition')
+  return sourceLinkedEffect?.kind === 'source-linked-condition' &&
+    sourceLinkedEffect.relation.attackAutomaticallyHitsLinkedTarget === true &&
+    sourceLinkedRelationTargetIds(
+      prepared.state,
+      prepared.actorToken.id,
+      sourceLinkedEffect.relation.slotGroup,
+    ).includes(definition.targetToken.id)
 }
 
 export function dnd5ePreparedMonsterAttackMode(
@@ -1196,6 +1279,7 @@ export function dnd5ePreparedMonsterAttackModeResolution(
   prepared: Pick<PreparedDnd5eMonsterAttack, 'targetAttackMode' | 'attackModes' | 'attackModeResolutions' | 'viciousMockeryAttackDisadvantage'>,
   attackIndex: number,
   protectedAttack = false,
+  areaReaction?: { state: Dnd5eHeadlessCombatState; targetId: string; use: { areaId: string; sourceId: string } },
 ): Dnd5eRollModeResolution {
   const stored = prepared.attackModeResolutions?.[attackIndex]
   const base = stored ?? resolveDnd5eRollMode({
@@ -1203,7 +1287,12 @@ export function dnd5ePreparedMonsterAttackModeResolution(
     disadvantage: [{ active: (prepared.attackModes[attackIndex] ?? prepared.targetAttackMode) === 'disadvantage', reason: 'Headless 攻击上下文判定' }],
   })
   return resolveDnd5eRollMode({
-    advantage: base.advantageReasons.map((reason) => ({ active: true, reason })),
+    advantage: [...base.advantageReasons.map((reason) => ({ active: true, reason })), {
+      active: !!areaReaction && !dnd5ePreventsAttackAdvantage(areaReaction.state.combatants[areaReaction.targetId]) &&
+        dnd5eAreaAttackAdvantageCandidates(areaReaction.state, areaReaction.targetId).some(candidate =>
+          candidate.areaId === areaReaction.use.areaId && candidate.sourceId === areaReaction.use.sourceId),
+      reason: '区域来源者消耗反应授予优势',
+    }],
     disadvantage: [
       ...base.disadvantageReasons.map((reason) => ({ active: true, reason })),
       { active: prepared.viciousMockeryAttackDisadvantage && attackIndex === 0, reason: '恶毒嘲笑' },
@@ -1237,6 +1326,10 @@ export function prepareDnd5eMonsterAfterHitMechanics(
 }
 
 export function resolvePreparedDnd5eMonsterAttack(input: {
+  savingThrowCounterattacks?: Dnd5eAction['savingThrowCounterattacks']
+  shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
+  transactionId?: string
+  effectRollDice?: Readonly<Record<string,readonly number[]>>
   prepared: PreparedDnd5eMonsterAttack
   rolls: readonly (Omit<Dnd5eMonsterActionRoll, 'targetId'> & { targetId?: string })[]
   mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
@@ -1266,7 +1359,10 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
       prepared.targetToken.id,
   }))
   const action: Dnd5eAction = {
-    ...(prepared.compositeRuntime
+    ...(prepared.readiedAttack
+      ? { type: 'trigger-readied-action' as const, actorId: prepared.actorToken.id,
+          weaponExecution: { actionId: prepared.resourceAction.id, rolls: weaponRolls, mechanicRolls: input.mechanicRolls } }
+      : prepared.compositeRuntime
       ? {
           type: 'monster-multiattack-composite',
           schemaVersion: 1,
@@ -1289,15 +1385,18 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
           rolls: weaponRolls,
         }),
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
+    effectRollDice:input.effectRollDice,
     attackDecoyRolls: input.attackDecoyRolls,
     optionalBonusDice: input.optionalBonusDice,
     damageMitigationInterrupts: input.damageMitigationInterrupts,
+    shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows,
+    savingThrowCounterattacks: input.savingThrowCounterattacks,
   }
   const fallPreview = input.airborneFallDamageRollsByCombatantId == null
-    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action)
+    ? previewDnd5eUnsupportedAirborneFalls(prepared.state, action,{transactionId:input.transactionId})
     : undefined
   const airborneFalls = fallPreview?.ok ? fallPreview.falls : undefined
-  const result = resolveDnd5eHeadlessAction(prepared.state, action)
+  const result = resolveDnd5eHeadlessAction(prepared.state, action,{transactionId:input.transactionId})
   if (!result.ok) return { result, airborneFalls }
   return {
     result,

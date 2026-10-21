@@ -32,6 +32,7 @@ export interface FighterSubclassChoiceOption {
   id: string
   name: string
   summary: string
+  description?: string
 }
 
 export interface FighterSubclassChoiceGroup {

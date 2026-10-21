@@ -1,5 +1,26 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Character } from '../types/character'
+import {applyDnd5eLongRestBenefits} from '../rulesets/dnd5e/campaignTimeRules'
+import {dnd5eSourcedExhaustionLevel,removeDnd5eSourcedExhaustion} from '../rulesets/dnd5e/sourcedExhaustion'
+
+it('normalizes a saved character using the source ledger instead of a stale scalar',async()=>{
+ const {normalizeCharacter}=await import('./characters')
+ const original={...testCharacter(),exhaustionLevel:0,dnd5eCombatState:{sourcedExhaustion:{schemaVersion:1 as const,baseLevel:1,sources:[{sourceId:'area',levels:2}]}}}
+ const restored=normalizeCharacter(JSON.parse(JSON.stringify(original)))
+ expect(restored.exhaustionLevel).toBe(3)
+ expect(restored.dnd5eCombatState?.sourcedExhaustion).toEqual(original.dnd5eCombatState.sourcedExhaustion)
+ expect(original.exhaustionLevel).toBe(0)
+})
+
+it('persists exhaustion recovery without losing removable sources on a long rest',()=>{
+ const actor={...testCharacter(),exhaustionLevel:3,dnd5eCombatState:{sourcedExhaustion:{schemaVersion:1 as const,baseLevel:1,sources:[{sourceId:'area-a',levels:1},{sourceId:'area-b',levels:1}]}}}
+ const rested=applyDnd5eLongRestBenefits(actor,480)
+ expect(rested.exhaustionLevel).toBe(2)
+ const ledger=JSON.parse(JSON.stringify(rested.dnd5eCombatState!.sourcedExhaustion))
+ expect(ledger.baseLevel).toBe(0)
+ expect(dnd5eSourcedExhaustionLevel(removeDnd5eSourcedExhaustion(ledger,'area-a'))).toBe(1)
+ expect(actor.dnd5eCombatState.sourcedExhaustion.baseLevel).toBe(1)
+})
 
 function testCharacter(): Character {
   return {

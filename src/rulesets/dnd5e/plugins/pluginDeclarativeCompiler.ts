@@ -370,7 +370,7 @@ export function createDeclarativeFeatureResolver(input: {
       }
       activityChoices[choice.id] = selected
     }
-    const turnKey = `${state.combatId}:${state.round}:${state.turnSlotId ?? actor.id}`
+    const turnKey = `${state.combatId}:${state.round}:${state.initiativeSlotIds?.[state.initiativeIndex] ?? state.turnSlotId ?? state.initiativeOrder[state.initiativeIndex] ?? actor.id}`
     const oncePerTurn = predicates?.oncePerTurn === true || ability.limits?.oncePerTurn === true
     if (
       oncePerTurn &&
@@ -484,6 +484,7 @@ export function createDeclarativeFeatureResolver(input: {
         if (success) successfulSaveTargetIds.add(target.id)
         context.events.push({
           type: 'saving-throw-resolved',
+          sourceId: context.actor.id,
           targetId: target.id,
           ability: saveAbility,
           d20,
@@ -584,7 +585,11 @@ export function createDeclarativeFeatureResolver(input: {
             } else damageType = 'force'
             if (!damageType) return context.fail('invalid-plugin-action')
             const savingThrowMultiplier = saved && effect.when == null && savingThrow?.onSuccess === 'half' ? 0.5 : 1
-            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier * savingThrowMultiplier)), damageType)
+            const rollBonus = declaration.kind === 'damage' && supplied?.values.length
+              ? context.claimDamageRollBonus?.(target.id, effect.rollId,
+                ability.trigger.kind === 'after-attack-hit' && !savingThrow, damageType) ?? 0
+              : 0
+            context.dealDamage(target.id, Math.max(0, Math.floor((rolled + rollBonus) * multiplier * savingThrowMultiplier)), damageType, undefined, { sharesParentAttack: ability.trigger.kind === 'after-attack-hit' && !savingThrow })
           } else context.heal(target.id, Math.max(0, rolled))
         } else if (effect.kind === 'temporary-hit-points') {
           const roll = effect.rollId
@@ -630,6 +635,7 @@ export function createDeclarativeFeatureResolver(input: {
       actor.classState.nextD20Advantage = {
         featureId: input.featureId,
         rollKinds: [...ability.mechanic.rollKinds],
+        ...(ability.mechanic.expiresAt === 'next-turn-start' ? { expiresAfterTurnKey: turnKey } : {}),
       }
       context.events.push({
         type: 'class-state-changed',

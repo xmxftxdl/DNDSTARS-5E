@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { BattleMap } from '../store/maps'
 import type { Character } from '../types/character'
+import { normalizeCharacter } from '../store/characters'
 import type { SharedCombatState, SharedPlayerActionAckState } from './sharedCombatTypes'
 import { publishPlayerActionAckWithSnapshots } from './playerActionAckPublish'
 
@@ -17,6 +18,44 @@ function makeAck(status: SharedPlayerActionAckState['status']): SharedPlayerActi
 }
 
 describe('publishPlayerActionAckWithSnapshots', () => {
+  it('commits rest receipts, effects and the checked clock at their frozen revisions', async () => {
+    const campaignTime = { schemaVersion: 2 as const, worldMinute: 480, displayMode: 'campaign-day' as const, displayMinuteOffset: 0, timers: [], advances: [], updatedAt: 123 }
+    const receipt = { schemaVersion: 1 as const, characterId: 'hero', eventId: 'rest:long-rest-complete:480', event: 'long-rest-complete' as const, completedWorldMinute: 480, receipts: { '["test.rest","bless"]': 'used' as const } }
+    const character = normalizeCharacter({ id: 'hero', dnd5eRestActivityWindow: receipt })
+    const commitSharedResources = vi.fn(async () => ({ revisions: { characters: 5, maps: 8, 'campaign-time': 10 } }))
+    const saveSharedResource = vi.fn(), publishAck = vi.fn()
+    await publishPlayerActionAckWithSnapshots({ ack: makeAck('accepted'), snapshots: { characters: [character], maps: [], updatedAt: 123, campaignTime }, expectedRevisions: { characters: 4, maps: 7, 'campaign-time': 9 }, commitSharedResources, saveSharedResource, publishAck })
+    expect(commitSharedResources).toHaveBeenCalledTimes(1)
+    expect(commitSharedResources).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ name: 'characters', expectedRevision: 4, data: expect.objectContaining({ characters: [character] }) }),
+      expect.objectContaining({ name: 'maps', expectedRevision: 7 }),
+      { name: 'campaign-time', expectedRevision: 9, data: campaignTime },
+      { name: 'player-action-ack', data: makeAck('accepted') },
+    ]), expect.anything())
+    expect(saveSharedResource).not.toHaveBeenCalled()
+    expect(publishAck).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['combat', 'campaign-time', 'characters', 'maps', 'map-geometry', 'scene-orchestration'])('does not rebase a settlement after a frozen %s conflict', async (resource) => {
+    const commitSharedResources = vi.fn(async () => { throw Error(`shared-state-transaction-conflict:${resource}`) })
+    const loadSharedResource = vi.fn(async () => null), saveSharedResource = vi.fn(), publishAck = vi.fn()
+    await expect(publishPlayerActionAckWithSnapshots({ ack: makeAck('accepted'), snapshots: { characters: [], maps: [], updatedAt: 123 }, expectedRevisions: { combat: 3, 'campaign-time': 4, characters: 5, maps: 6, 'map-geometry': 7, 'scene-orchestration': 8 }, commitSharedResources, loadSharedResource, saveSharedResource, publishAck })).rejects.toThrow(`conflict:${resource}`)
+    expect(commitSharedResources).toHaveBeenCalledTimes(1)
+    expect(loadSharedResource).toHaveBeenCalledWith('player-action-ack')
+    expect(saveSharedResource).not.toHaveBeenCalled()
+    expect(publishAck).not.toHaveBeenCalled()
+    expect(commitSharedResources).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      readRevisions: { combat: 3, 'campaign-time': 4, 'map-geometry': 7, 'scene-orchestration': 8 },
+    }))
+  })
+
+  it('refuses sequential writes when a caller requires a frozen authority snapshot', async () => {
+    const saveSharedResource = vi.fn(), publishAck = vi.fn()
+    await expect(publishPlayerActionAckWithSnapshots({ ack: makeAck('accepted'), expectedRevisions: { characters: 1 }, saveSharedResource, publishAck })).rejects.toThrow('authoritative-atomic-commit-required')
+    expect(saveSharedResource).not.toHaveBeenCalled()
+    expect(publishAck).not.toHaveBeenCalled()
+  })
+
   it('saves accepted authoritative snapshots before publishing the ack', async () => {
     const calls: string[] = []
     const character = { id: 'char-1' } as Character

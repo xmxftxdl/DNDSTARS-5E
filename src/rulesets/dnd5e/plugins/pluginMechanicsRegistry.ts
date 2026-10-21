@@ -1,3 +1,4 @@
+import { dnd5eActivityHasInventoryExchangeRitualProfile } from '../activities/dnd5eInventoryExchangeProfile'
 import {
   AUTOMATION_PHASES,
   type AutomationCapability,
@@ -25,6 +26,7 @@ import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../damageTypes'
 import { DND5E_STANDARD_CONDITIONS, DND5E_STANDARD_CONDITION_IDS } from '../conditions'
 
 export type Dnd5eMechanicHandlerComponentV1 =
+  | 'casting-constraint:target-proximity'
   | `activation:${Dnd5eActivityDefinitionV1['activation']['kind']}`
   | `invocation:${'active' | 'triggered'}`
   | `target:${Dnd5eActivityDefinitionV1['target']['kind']}`
@@ -33,9 +35,10 @@ export type Dnd5eMechanicHandlerComponentV1 =
   | `predicate:${Dnd5ePredicateV1['kind']}`
   | `trigger:${Dnd5eTriggerEventV1}`
   | `operation:${Dnd5eActivityOperationV1['kind']}`
+  | 'summon-timing:source-next-turn-start'
   | `effect-modifier:${Dnd5eEffectModifierV1['kind']}`
   | `effect-duration:${NonNullable<Dnd5eActivityDefinitionV1['effects']>[number]['duration']['kind']}`
-  | `effect-lifecycle:${'break-on' | 'escape-check' | 'escape-saving-throw' | 'on-damage-condition' | 'after-effect-ends' | 'periodic-damage' | 'periodic-healing' | 'body-restoration' | 'calendar-repeat-save' | 'movement-repeat-save' | 'planar-banishment'}`
+  | `effect-lifecycle:${'break-on' | 'escape-check' | 'escape-saving-throw' | 'on-damage-condition' | 'after-effect-ends' | 'periodic-damage' | 'periodic-healing' | 'body-restoration' | 'calendar-repeat-save' | 'movement-repeat-save' | 'planar-banishment' | 'undead-creation-protection'}`
   | `mechanic:${string}`
   | `authority:${NonNullable<Dnd5eActivityDefinitionV1['authorityBinding']>['execution']}`
 
@@ -279,6 +282,7 @@ function addComponent(
 function activityComponents(activity: Dnd5eActivityDefinitionV1): readonly Dnd5eMechanicHandlerComponentV1[] {
   const result: Dnd5eMechanicHandlerComponentV1[] = []
   addComponent(result, `activation:${activity.activation.kind}`)
+  if (activity.castingConstraints) addComponent(result, 'casting-constraint:target-proximity')
   addComponent(result, `invocation:${activity.invocation?.kind ?? 'active'}`)
   if (activity.invocation?.kind === 'triggered') addComponent(result, `trigger:${activity.invocation.event}`)
   addComponent(result, `target:${activity.target.kind}`)
@@ -301,6 +305,7 @@ function activityComponents(activity: Dnd5eActivityDefinitionV1): readonly Dnd5e
         : `mechanic:${operation.handlerId}`)
     }
     else addComponent(result, `operation:${operation.kind}`)
+    if (operation.kind === 'summon' && operation.timing === 'source-next-turn-start') addComponent(result, 'summon-timing:source-next-turn-start')
     if (operation.kind !== 'apply-effect') continue
     const effect = effectById.get(operation.effectId)
     if (!effect) continue
@@ -321,6 +326,7 @@ function activityComponents(activity: Dnd5eActivityDefinitionV1): readonly Dnd5e
     if (effect.calendarRepeatSave) addComponent(result, 'effect-lifecycle:calendar-repeat-save')
     if (effect.repeatSaveAfterMovement) addComponent(result, 'effect-lifecycle:movement-repeat-save')
     if (effect.planarBanishment) addComponent(result, 'effect-lifecycle:planar-banishment')
+    if (effect.undeadCreationProtection) addComponent(result, 'effect-lifecycle:undead-creation-protection')
   }
   if (activity.authorityBinding) addComponent(result, `authority:${activity.authorityBinding.execution}`)
   return result
@@ -334,6 +340,7 @@ function componentFallbackPhases(component: Dnd5eMechanicHandlerComponentV1): re
   if (component.startsWith('consumption:')) return ['cost']
   if (component.startsWith('predicate:')) return ['eligibility']
   if (component.startsWith('trigger:')) return ['interrupt', 'persistence']
+  if (component.startsWith('summon-timing:')) return ['effects', 'duration', 'persistence']
   if (component === 'operation:damage') return ['damage']
   if (component === 'operation:healing' || component === 'operation:temporary-hit-points' || component === 'operation:revive') return ['healing']
   if (component === 'operation:resource') return ['cost']
@@ -360,8 +367,22 @@ export function dnd5eActivityAutomationAnalysisV1(
   const handlerIds = new Set<string>()
   const legacyAdapterHandlerIds = new Set<string>()
   const manualPhases = new Set<AutomationPhase>()
+  // Registered proposal handlers do not prove that the map-write boundary applies them.
+  const runtimeLimitations = new Set<string>()
+  for (const outcome of activity.outcomes) for (const operation of outcome.operations) {
+    if (['modify-map-object-lock', 'enchant-map-object-light'].includes(operation.kind) ||
+      (operation.kind === 'create-persistent-area' && (
+        operation.mappedObjectEnchantment != null || operation.blocking?.suppressesMappedBarriers === true
+      )) || (activity.id === 'spell:true-polymorph' && operation.kind === 'summon' &&
+        operation.persistAfterConcentrationCompletes === true)) {
+      runtimeLimitations.add(`地图写入边界尚未执行物体操作：${operation.kind}（${operation.id}）；处理器注册不代表效果已自动结算。`)
+      manualPhases.add('effects')
+      manualPhases.add('persistence')
+    }
+  }
   for (const component of requiredComponents) {
-    const registrations = [...(handlers.get(component)?.values() ?? [])]
+    const registrations = component === 'operation:exchange-inventory-items' && !dnd5eActivityHasInventoryExchangeRitualProfile(activity)
+      ? [] : [...(handlers.get(component)?.values() ?? [])]
     if (component === 'operation:manual-adjudication' || registrations.length === 0) {
       missingComponents.push(component)
       componentFallbackPhases(component).forEach((phase) => manualPhases.add(phase))
@@ -380,6 +401,7 @@ export function dnd5eActivityAutomationAnalysisV1(
   const limitations = [
     ...missing.map((component) => `未注册 Host handler：${component}`),
     ...(hasManualBoundary ? ['Activity 包含显式 DM 裁定 operation。'] : []),
+    ...runtimeLimitations,
   ]
   const level: AutomationCapability['level'] = limitations.length === 0
     ? 'full'
@@ -430,6 +452,7 @@ export function dnd5eEffectAutomationAnalysisV1(
   if (effect.calendarRepeatSave) addComponent(components, 'effect-lifecycle:calendar-repeat-save')
   if (effect.repeatSaveAfterMovement) addComponent(components, 'effect-lifecycle:movement-repeat-save')
   if (effect.planarBanishment) addComponent(components, 'effect-lifecycle:planar-banishment')
+  if (effect.undeadCreationProtection) addComponent(components, 'effect-lifecycle:undead-creation-protection')
   const missing = components.filter((component) => !(handlers.get(component)?.size))
   if (missing.length === 0) return {
     schemaVersion: 1,
@@ -498,6 +521,8 @@ for (const kind of ['action', 'bonus-action', 'reaction', 'free', 'movement', 'm
   registerCore(`activation:${kind}`, ['eligibility', 'cost', 'persistence'])
 }
 registerCore('invocation:active', ['eligibility', 'persistence'])
+registerCore('casting-constraint:target-proximity', ['targeting', 'eligibility', 'persistence'])
+registerCore('summon-timing:source-next-turn-start', ['effects', 'duration', 'persistence'])
 registerCore('invocation:triggered', ['eligibility', 'interrupt', 'persistence'])
 for (const kind of ['self', 'creature', 'area'] as const) registerCore(`target:${kind}`, ['targeting'])
 registerCore('check:attack-roll', ['attack-roll'])
@@ -509,43 +534,48 @@ for (const kind of ['action-economy', 'spell-slot', 'resource', 'item-charge', '
   registerCore(`consumption:${kind}`, ['cost'])
 }
 for (const kind of [
-  'minimum-level', 'class-level', 'hp-percentage', 'hp-value', 'ability-score', 'condition',
-  'illumination', 'airborne-state', 'target-relation', 'target-identity', 'owned-companion', 'can-hear-source', 'active-effect', 'distance', 'resource',
+  'ethereal-access', 'combat-active', 'turn-owner', 'rage-state', 'minimum-level', 'class-level', 'hp-percentage', 'hp-value', 'ability-score', 'condition',
+  'illumination', 'airborne-state', 'target-relation', 'target-identity', 'owned-companion', 'can-hear-source', 'shared-language', 'can-understand-source-language', 'can-speak', 'active-effect', 'distance', 'resource',
   'resource-capacity', 'once-per-turn', 'event-source', 'activity-definition', 'weapon-property',
-  'attack-proficiency', 'attack-weapon', 'attack-origin', 'attack-hands', 'attack-mode', 'attack-result', 'attack-outcome', 'damage-type', 'damage-event', 'size-rank', 'creature-type', 'movement-distance', 'movement-property',
+  'attack-weapon-category',
+  'skill-proficiency', 'attack-proficiency', 'attack-category', 'attack-delivery', 'attack-weapon', 'attack-origin', 'attack-hands', 'attack-mode', 'attack-magical', 'attack-result', 'attack-outcome', 'damage-type', 'damage-event', 'size-rank', 'creature-type', 'movement-distance', 'movement-source-distance', 'initial-space-exit', 'initial-space-melee-crossing', 'movement-property',
   'spell-used', 'skill-used', 'action-economy-available', 'armor-equipped', 'armor-proficiency', 'held-item', 'free-hands',
   'spellcasting-capability', 'choice',
 ] as const) registerCore(`predicate:${kind}`, ['eligibility'])
 for (const event of DND5E_TRIGGER_EVENT_IDS_V1) registerCore(`trigger:${event}`, ['interrupt', 'persistence'])
 for (const kind of [
-  'damage', 'healing', 'temporary-hit-points', 'revive', 'stabilize', 'instant-death', 'stand-up', 'apply-standard-condition', 'apply-effect',
-  'remove-standard-condition', 'remove-effect', 'remove-effects-by-tag', 'adjust-exhaustion',
-  'lower-ability-score', 'recover-ability-score', 'recover-hit-point-maximum', 'resource', 'move', 'set-directional-command', 'summon', 'duplicate-creature', 'dispel-area',
-  'relocate-granting-area',
-  'reshape-granting-area',
-  'set-granting-area-senses',
+  'read-damage-traits', 'detect-planar-portal', 'reveal-target-location', 'reaction-follow', 'secondary-weapon-damage', 'damage', 'healing', 'temporary-hit-points', 'revive', 'stabilize', 'instant-death', 'stand-up', 'apply-standard-condition', 'apply-effect',
+  'remove-standard-condition', 'remove-effect', 'remove-effects-by-tag', 'adjust-exhaustion', 'narrative-prompt', 'recognize-granting-disguise',
+  'lower-ability-score', 'recover-ability-score', 'recover-hit-point-maximum', 'reduce-hit-point-maximum', 'transfer-hit-point-maximum', 'resource', 'move', 'set-directional-command', 'summon', 'duplicate-creature', 'dispel-area',
+  'relocate-granting-area', 'dismiss-owned-summon', 'dismiss-owned-temporary-summons',
+  'reshape-granting-area', 'shrink-granting-area',
+  'change-granting-area-mode', 'set-granting-area-senses',
   'detonate-granting-area',
-  'transform-creature', 'grant-extra-turns', 'grant-inventory-item', 'establish-spell-authority', 'identify-inventory-item', 'purify-inventory-item', 'break-inventory-item-attunement',
-  'transition-spell-authority',
-  'emit-sound', 'open-communication', 'modify-map-object-lock', 'enchant-map-object-light',
-  'purify-map-consumables',
-  'command-owned-companion', 'grant-weapon-attack', 'grant-basic-action', 'create-persistent-area', 'invoke-activity',
+  'dismiss-granting-area',
+  'transform-creature', 'grant-extra-turns', 'grant-inventory-item', 'alter-inventory-item', 'exchange-inventory-items', 'establish-spell-authority', 'identify-inventory-item', 'purify-inventory-item', 'break-inventory-item-attunement',
+  'transition-spell-authority', 'restore-original-alignment', 'convert-map-inventory-item', 'protect-map-remains',
+  'emit-sound', 'open-communication', 'modify-map-object-lock', 'enchant-map-object-light', 'enchant-map-weapon', 'control-map-flame', 'control-map-water', 'ignite-area-fuel', 'extinguish-area-flames', 'launch-map-object', 'transfer-loose-earth',
+  'purify-map-consumables', 'affect-persistent-entity',
+  'wither-map-vegetation',
+  'command-owned-companion', 'end-owned-companion-control', 'grant-weapon-attack', 'grant-basic-action', 'create-persistent-area', 'invoke-activity',
 ] as const) registerCore(`operation:${kind}`, componentFallbackPhases(`operation:${kind}`))
 for (const kind of ['instantaneous', 'rounds', 'save-ends', 'concentration', 'permanent'] as const) {
   registerCore(`effect-duration:${kind}`, kind === 'instantaneous' ? ['effects'] : ['effects', 'duration', 'persistence'])
 }
 for (const kind of [
-  'armor-class', 'attacks-against-source-armor-class', 'speed', 'attack-roll', 'attacks-against-target', 'cannot-be-surprised-while-conscious', 'attack-target-lock', 'ability-check', 'perception-target-lock', 'skill-check-bonus-aura', 'minimum-ability-check-d20', 'weapon-damage-roll', 'weapon-damage-multiplier', 'weapon-enchantment', 'weapon-damage-replacement', 'movement-boundary-save', 'saving-throw', 'death-saving-throw', 'maximize-healing-dice',
-  'saving-throw-proficiency', 'damage-resistance', 'conditional-damage-resistance', 'damage-immunity', 'damage-vulnerability',
+  'weapon-attacks-against-target',
+  'armor-class', 'attacks-against-source-armor-class', 'attacks-by-source-critical-threshold', 'speed', 'attack-roll', 'weapon-attack-roll', 'attacks-against-target', 'cannot-be-surprised-while-conscious', 'perceive-visible-creatures-as-hostile', 'mandatory-opportunity-attacks', 'random-visible-creature-targets', 'prevent-movement-opportunity-attacks', 'speed-after-own-turn-weapon-attack', 'attack-target-lock', 'ability-check', 'perception-target-lock', 'skill-check-bonus-aura', 'minimum-ability-check-d20', 'weapon-damage-roll', 'weapon-damage-multiplier', 'weapon-enchantment', 'armor-enchantment', 'weapon-damage-replacement', 'movement-boundary-save', 'saving-throw', 'death-saving-throw', 'maximize-healing-dice',
+  'optional-bonus-die', 'roll-dice', 'healing-prevention', 'saving-throw-proficiency', 'equipment-proficiency', 'attack-action-minimum', 'own-turn-attack-action-bonus', 'skill-expertise', 'damage-resistance', 'suppress-damage-resistance', 'conditional-damage-resistance', 'damage-immunity', 'damage-vulnerability',
+  'next-source-or-ally-attack-vulnerability',
   'condition-immunity', 'condition-immunity-by-source-creature-type', 'saving-throw-advantage-by-source-creature-type', 'condition-immunity-by-source-magic', 'attacks-against-target-by-creature-type', 'character-capability', 'racial-saving-throw-advantage',
-  'prohibit-reaction', 'prevent-actions', 'forced-flee-from-source',
-  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'swim-speed', 'truesight', 'spell-targeting-immunity',
-  'flight-speed', 'magically-held-aloft', 'safe-fall', 'controlled-descent', 'automatic-escape', 'ignore-magical-speed-reductions', 'action-restriction', 'see-invisible', 'emitted-light', 'language-capability', 'language-restriction', 'attack-decoys', 'planar-phase', 'tracking-capability', 'environmental-capability',
+  'prohibit-reaction', 'prevent-actions', 'prevent-rest-benefits', 'forced-flee-from-source',
+  'maximum-attacks-per-turn', 'restricted-extra-action', 'darkvision', 'climb-speed', 'swim-speed', 'truesight', 'sight-range-limit', 'spell-targeting-immunity',
+  'flight-speed', 'flight-speed-limit', 'magically-held-aloft', 'safe-fall', 'controlled-descent', 'automatic-escape', 'ignore-magical-speed-reductions', 'action-restriction', 'see-invisible', 'darkvision-concealment', 'emitted-light', 'language-capability', 'language-restriction', 'attack-decoys', 'planar-phase', 'solid-material-traversal', 'tracking-capability', 'source-location-awareness', 'environmental-capability',
   'hit-point-maximum',
   'spell-save-disadvantage-aura', 'spell-action-as-bonus-action', 'attack-profile',
-  'damage-reduction', 'on-hit-bonus-damage', 'attack-roll-reroll', 'death-prevention',
+  'damage-reduction', 'on-hit-bonus-damage', 'attack-roll-reroll', 'death-prevention', 'revival-prevention', 'next-d20-advantage',
 ] as const) registerCore(`effect-modifier:${kind}`, ['effects', 'persistence'])
-for (const kind of ['break-on', 'escape-check', 'escape-saving-throw', 'on-damage-condition', 'after-effect-ends', 'periodic-damage', 'periodic-healing', 'body-restoration', 'calendar-repeat-save', 'movement-repeat-save', 'planar-banishment'] as const) {
+for (const kind of ['break-on', 'escape-check', 'escape-saving-throw', 'on-damage-condition', 'after-effect-ends', 'periodic-damage', 'periodic-healing', 'body-restoration', 'calendar-repeat-save', 'movement-repeat-save', 'planar-banishment', 'undead-creation-protection'] as const) {
   registerCore(`effect-lifecycle:${kind}`, ['duration', 'persistence'])
 }
 for (const execution of ['plugin-headless-action', 'headless-event-engine'] as const) {
@@ -787,27 +817,36 @@ registerDnd5eMechanicOperationHandlerV1({
       options: [
         { value: 'magic', label: '魔法存在与学派' },
         { value: 'planar-creatures', label: '异界/亡灵生物' },
+        { value: 'undead-presence', label: '亡灵存在（不揭示身份）' },
         { value: 'poison-disease', label: '毒素、毒性生物与疾病' },
       ],
     },
     { key: 'range-feet', label: '范围（尺）', kind: 'number', required: true, defaultValue: 30, minimum: 5, maximum: 10_000, integer: true },
     { key: 'duration-rounds', label: '持续轮数', kind: 'number', required: true, defaultValue: 100, minimum: 1, maximum: 14_400, integer: true },
+    { key: 'duration-mode', label: '持续方式', kind: 'select', defaultValue: 'concentration', options: [
+      { value: 'concentration', label: '专注' },
+      { value: 'source-turn-end', label: '至来源回合结束' },
+    ] },
   ],
   resolve({ operation, target }) {
     const mode = String(operation.parameters?.mode ?? 'magic')
     const rangeFeet = Math.floor(Number(operation.parameters?.['range-feet'] ?? 30))
     const durationRounds = Math.floor(Number(operation.parameters?.['duration-rounds'] ?? 100))
-    if (!['magic', 'planar-creatures', 'poison-disease'].includes(mode)) {
+    if (!['magic', 'planar-creatures', 'poison-disease', 'undead-presence'].includes(mode)) {
       throw new Error('unsupported persistent detection mode')
     }
+    const durationMode = String(operation.parameters?.['duration-mode'] ?? 'concentration')
+    if (!['concentration', 'source-turn-end'].includes(durationMode)) throw new Error('unsupported detection duration')
     return [{
       kind: 'apply-effect', operationId: operation.id, targetId: target.id,
       effectId: `persistent-detection:${operation.id}`, name: operation.id,
       grantedActivities: mode === 'magic' ? ['spell:detect-magic:reveal-auras'] : undefined,
-      duration: { kind: 'concentration', maximumRounds: durationRounds },
+      duration: durationMode === 'concentration'
+        ? { kind: 'concentration', maximumRounds: durationRounds }
+        : { kind: 'rounds', rounds: durationRounds, expiresAt: 'source-turn-end' },
       conditions: [], modifierGroups: [],
       extensionCondition: `persistent-detection:${mode}:${rangeFeet}`,
-      magical: true, concentration: true, stacking: 'replace',
+      magical: true, concentration: durationMode === 'concentration', stacking: 'replace',
     }]
   },
 })
@@ -901,3 +940,5 @@ registerDnd5eMechanicOperationHandlerV1({
     }]
   },
 })
+
+

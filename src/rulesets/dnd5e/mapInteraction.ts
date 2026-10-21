@@ -1,5 +1,9 @@
 import type { BattleMap, Token } from '../../store/maps'
+import type {FortressServantPosition} from './fortressServantMove'
 import {
+  mapGeometryLineOfEffectBlocked,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
   mapGeometryDoorLockState,
   mapGeometryDoorLeafPoints,
   mapGeometryDoorOpenState,
@@ -36,6 +40,16 @@ export type Dnd5eMapInteractionMethod =
   | 'scene-point'
 
 export type Dnd5eMapInteractionPayload =
+  | { operation: 'fortress-door'; servantTokenId: string; doorId: string; doorOperation: 'open' | 'close' }
+  | { operation: 'fortress-feast'; structureId: string; guests: number; expectedWorldDay: number }
+  | { operation: 'fortress-command'; structureId: string; servantNumbers: number[]; instruction: string }
+  | { operation: 'fortress-pickup'; servantTokenId: string; objectTokenId: string; expectedReceiptId: string; expectedQuantity: number; approach?: boolean }
+  | { operation: 'fortress-drop'; servantTokenId: string; carriedObjectId: string; expectedPickupReceipt: string; movement?: {destination:FortressServantPosition;expectedPosition:FortressServantPosition} }
+  | { operation: 'fortress-move'; servantTokenId: string; movement: {destination:FortressServantPosition;expectedPosition:FortressServantPosition} }
+  | { operation: 'grove-password'; areaId: string; spokenPassword: string }
+  | { operation: 'pickup-item'; objectTokenId: string; expectedReceiptId: string; expectedQuantity: number }
+  | { operation: 'drop-item'; instanceId: string; expectedInventoryRevision: number }
+  | { operation: 'clear-terrain'; areaId: string; cells: readonly { col: number; row: number }[] }
   | { operation: 'teleportation-circle'; areaId: string }
   | { operation: 'rope-trick'; areaId: string; transition: 'enter' | 'leave' }
   | {
@@ -143,6 +157,7 @@ function withinPointReach(map: BattleMap, actor: Token, point: SceneInteractionP
 
 function prepareSceneInteractionPoint(input: {
   map: BattleMap
+  geometry?: MapGeometryState
   actor: Token
   payload: Extract<Dnd5eMapInteractionPayload, { operation: 'interact-point' }>
   interactionPoints?: readonly SceneInteractionPoint[]
@@ -153,6 +168,13 @@ function prepareSceneInteractionPoint(input: {
   }
   if (!finiteMapPoint(input.map, point)) return { ok: false, reason: 'invalid-interaction-point' }
   if (!withinPointReach(input.map, input.actor, point)) {
+    return { ok: false, reason: 'interaction-point-out-of-reach' }
+  }
+  const actorElevation = mapGeometryTokenElevation(input.geometry, input.actor)
+  const pointElevation = mapGeometryTerrainElevationAtPoint(input.geometry, point)
+  if (Math.abs(actorElevation - pointElevation) > point.interactionRadiusFeet ||
+    mapGeometryLineOfEffectBlocked({ map: input.map, geometry: input.geometry, from: input.actor, to: point,
+      fromElevationFeet: actorElevation, toElevationFeet: pointElevation })) {
     return { ok: false, reason: 'interaction-point-out-of-reach' }
   }
   if (!point.check) return { ok: false, reason: 'interaction-point-check-unavailable' }
@@ -246,10 +268,21 @@ export function prepareDnd5eMapInteraction(input: {
   round?: number
 }): PrepareDnd5eMapInteractionResult {
   const payload = input.payload
+  if (payload.operation === 'grove-password') return { ok: false, reason: 'grove-password-requires-authority' }
+  if (payload.operation === 'fortress-feast') return { ok: false, reason: 'fortress-feast-requires-authority' }
+  if (payload.operation === 'fortress-command') return { ok: false, reason: 'fortress-command-requires-authority' }
+  if (payload.operation === 'fortress-pickup') return { ok: false, reason: 'fortress-pickup-requires-authority' }
+  if (payload.operation === 'fortress-drop') return { ok: false, reason: 'fortress-drop-requires-authority' }
+  if (payload.operation === 'fortress-move') return { ok: false, reason: 'fortress-move-requires-authority' }
+  if (payload.operation === 'fortress-door') return { ok: false, reason: 'fortress-door-requires-authority' }
+  if (payload.operation === 'pickup-item') return { ok: false, reason: 'pickup-requires-authority' }
+  if (payload.operation === 'drop-item') return { ok: false, reason: 'drop-requires-authority' }
+  if (payload.operation === 'clear-terrain') return { ok: false, reason: 'terrain-clearing-requires-authority' }
   if (payload.operation === 'rope-trick' || payload.operation === 'teleportation-circle') return { ok: false, reason: 'portal-requires-authority' }
   if (payload.operation === 'interact-point') {
     return prepareSceneInteractionPoint({
       map: input.map,
+      geometry: input.geometry,
       actor: input.actor,
       payload,
       interactionPoints: input.interactionPoints,
@@ -266,6 +299,16 @@ export function prepareDnd5eMapInteraction(input: {
   const door = input.geometry?.doors.find((candidate) => candidate.id === payload.doorId)
   if (!door) return { ok: false, reason: 'door-not-found' }
   if (!withinInteractionReach(input.map, input.actor, door)) return { ok: false, reason: 'door-out-of-reach' }
+  const structure = input.geometry?.structureLifetimes?.find(record => record.entityIds.includes(door.id))
+  if (structure?.templeWard && payload.operation === 'break') {
+    return { ok: false, reason: 'temple-force-door-indestructible' }
+  }
+  if (structure?.doorAccess && (payload.operation === 'open' || payload.operation === 'close')) {
+    const creatureId = input.actor.characterId ?? input.actor.id
+    if (creatureId !== structure.casterId && !structure.doorAccess.authorizedCreatureIds.includes(creatureId)) {
+      return { ok: false, reason: 'structure-door-not-authorized' }
+    }
+  }
   if (payload.spokenPassword != null && (
     payload.method !== 'password' || !payload.spokenPassword.trim() ||
     payload.spokenPassword.normalize('NFKC').trim().length > 120

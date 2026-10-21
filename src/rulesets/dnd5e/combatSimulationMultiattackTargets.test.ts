@@ -121,6 +121,184 @@ function attackRollTexts(
 }
 
 describe('D&D 5e simulation monster Multiattack occurrence targets', () => {
+  it('moves then opens the commanded door in each independent simulation trial', () => {
+    const monster = getDnd5eSrdMonster('srd-5.1:skeleton')!, owner = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const hero = inertHero('door-observer', 'Observer')
+    const helper = monsterToken(monster, { dnd5eSummon: { schemaVersion: 1, pluginId: 'test', featureId: 'summon',
+      sourceCharacterId: 'owner', sourceTokenId: 'owner-token', createdRound: 1, expiresAfterRound: 600,
+      side: 'enemy', commandPolicy: 'persistent-order' },
+      dnd5eCombatState: { companionCommand: { schemaVersion: 1, sourceOwnerId: 'owner-token', sourceFeatureId: 'summon',
+        command: 'use-object', issuedRound: 1, persistentOrder: true, movementDestination: { mapId: 'door-command', x: 175, y: 25 },
+        objectInteraction: { mapId: 'door-command', doorId: 'door', operation: 'open' } } } })
+    const map = battleMap('door-command', [helper, monsterToken(owner, { id: 'owner-token', x: 25, y: 75 }), heroToken(hero, 225)])
+    const geometry = createEmptyMapGeometry(map.id)
+    geometry.doors.push({ id: 'door', kind: 'door', secret: false, label: 'Door', points: [{ x: 200, y: 0 }, { x: 200, y: 50 }], state: 'closed',
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true, baseHeightFeet: 0, heightFeet: 10, createdAt: 1 })
+    const before = structuredClone({ map, geometry })
+    const result = simulateDnd5eCombats({ characters: [hero], monsters: [{ monsterId: monster.id, count: 1 }, { monsterId: owner.id, count: 1 }],
+      trials: 3, seed: 2, maxRounds: 1, battlefield: { map, geometry } })
+    const turn = firstMonsterTurn(result, monster)!
+    expect(turn, JSON.stringify(result.decisionLog)).toMatchObject({ actionName: '物件交互', actorPositionAfter: { x: 175, y: 25 },
+      outcome: { executed: true, headlessTransactions: 2 } })
+    expect(result.actionUsage.find(entry => entry.actionId === 'companion:object')?.uses).toBe(3)
+    expect({ map, geometry }).toEqual(before)
+  })
+  it.each([true, false])('executes a Hide order after movement only behind cover=%s', covered => {
+    const monster = getDnd5eSrdMonster('srd-5.1:skeleton')!, owner = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const hero = inertHero('hide-observer', 'Observer')
+    const helper = monsterToken(monster, { dnd5eSummon: { schemaVersion: 1, pluginId: 'test', featureId: 'summon',
+      sourceCharacterId: 'owner', sourceTokenId: 'owner-token', createdRound: 1, expiresAfterRound: 600,
+      side: 'enemy', commandPolicy: 'persistent-order' },
+      dnd5eCombatState: { companionCommand: { schemaVersion: 1, sourceOwnerId: 'owner-token', sourceFeatureId: 'summon',
+        command: 'hide', issuedRound: 1, persistentOrder: true, movementDestination: { mapId: 'hide-command', x: 175, y: 25 } } } })
+    const map = battleMap('hide-command', [helper, monsterToken(owner, { id: 'owner-token', x: 25, y: 75 }), heroToken(hero, 225)])
+    const geometry = createEmptyMapGeometry(map.id)
+    if (covered) geometry.walls.push({ id: 'screen', kind: 'wall', label: 'Screen',
+      points: [{ x: 200, y: 0 }, { x: 200, y: 100 }], blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 20, createdAt: 1 })
+    const result = simulateDnd5eCombats({ characters: [hero], monsters: [{ monsterId: monster.id, count: 1 }, { monsterId: owner.id, count: 1 }],
+      trials: 1, seed: 2, maxRounds: 1, battlefield: { map, geometry } })
+    const turn = firstMonsterTurn(result, monster)!
+    expect(turn.actorPositionAfter).toEqual({ x: 175, y: 25 })
+    expect(turn.outcome.executed).toBe(covered)
+    expect(turn.executionSteps.filter(step => step.text === `${monster.name}消耗动作`)).toHaveLength(covered ? 1 : 0)
+    if (covered) {
+      expect(turn.actionName).toBe('躲藏')
+      expect(turn.outcome.headlessTransactions).toBe(2)
+      expect(result.actionUsage.find(entry => entry.actionId === 'companion:hide')?.uses).toBe(1)
+    }
+  })
+  it.each([true, false])('reports commanded cliff shove success=%s and spends one action', success => {
+    const base = getDnd5eSrdMonster('srd-5.1:skeleton')!
+    const monster = { ...base, abilities: { ...base.abilities, str: success ? 30 : 1, dex: 30 } }
+    const owner = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const hero = inertHero('cliff-target', 'Cliff Target')
+    hero.abilities = { ...hero.abilities, str: success ? 1 : 30, dex: success ? 1 : 30 }
+    const helper = monsterToken(monster, { x: 175, elevationFeet: 40,
+      dnd5eSummon: { schemaVersion: 1, pluginId: 'test', featureId: 'summon', sourceCharacterId: 'owner',
+        sourceTokenId: 'owner-token', createdRound: 1, expiresAfterRound: 600, side: 'enemy', commandPolicy: 'persistent-order' },
+      dnd5eCombatState: { companionCommand: { schemaVersion: 1, sourceOwnerId: 'owner-token', sourceFeatureId: 'summon',
+        command: 'attack', attackKind: 'shove-push', attackTargetId: `${hero.id}-token`, issuedRound: 1, persistentOrder: true } } })
+    const map = { ...battleMap('commanded-cliff', [helper,
+      monsterToken(owner, { id: 'owner-token', x: 25, y: 75, elevationFeet: 40 }),
+      { ...heroToken(hero, 225), elevationFeet: 40 }]), width: 350 }
+    const geometry = { ...createEmptyMapGeometry(map.id), obstacles: [{
+      id: 'platform', kind: 'obstacle' as const, label: 'Platform',
+      points: [{ x: 0, y: 0 }, { x: 250, y: 0 }, { x: 250, y: 100 }, { x: 0, y: 100 }],
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 40, terrainRegion: true,
+      cover: 'none' as const, blocksMovement: false, blocksVision: false, blocksLineOfEffect: false, createdAt: 1,
+    }] }
+    setDnd5eRoomMonsterCatalog([monster])
+    const result = simulateDnd5eCombats({ characters: [hero], customMonsters: [monster],
+      monsters: [{ monsterId: monster.id, count: 1 }, { monsterId: owner.id, count: 1 }],
+      trials: 1, seed: 2, maxRounds: 1, battlefield: { map, geometry } })
+    const turn = firstMonsterTurn(result, monster)!
+    expect(turn, JSON.stringify(result.decisionLog)).toMatchObject({ actionName: '推开', outcome: { executed: true, headlessTransactions: 1 } })
+    expect(turn.executionSteps.filter(step => step.text.includes('坠落 40 尺'))).toHaveLength(success ? 1 : 0)
+    expect(turn.executionSteps.filter(step => step.text === `${monster.name}消耗动作`)).toHaveLength(1)
+    if (success) expect(turn.outcome.damage).toBeGreaterThan(0)
+    else expect(turn.outcome.damage).toBe(0)
+    expect(turn.outcome.targetHpBefore! - turn.outcome.targetHpAfter!).toBe(turn.outcome.damage)
+    expect(result.actionUsage.find(entry => entry.actorName === monster.name && entry.actionName === '推开')?.averageDamage).toBe(turn.outcome.damage)
+  })
+  it.each(['grapple','shove-prone','shove-push'] as const)('executes commanded %s after movement through simulation and worker',async attackKind=>{
+    const monster=getDnd5eSrdMonster('srd-5.1:skeleton')!,owner=getDnd5eSrdMonster('srd-5.1:goblin')!
+    const hero=inertHero('special-target','Special Target')
+    const helper=monsterToken(monster,{dnd5eSummon:{schemaVersion:1,pluginId:'test',featureId:'summon',sourceCharacterId:'owner',
+      sourceTokenId:'owner-token',createdRound:1,expiresAfterRound:600,side:'enemy',commandPolicy:'persistent-order'},
+      dnd5eCombatState:{companionCommand:{schemaVersion:1,sourceOwnerId:'owner-token',sourceFeatureId:'summon',command:'attack',
+        attackKind,attackTargetId:`${hero.id}-token`,issuedRound:1,persistentOrder:true,movementDestination:{mapId:'special-command',x:175,y:25}}}})
+    const map=battleMap('special-command',[helper,monsterToken(owner,{id:'owner-token',x:25,y:75}),heroToken(hero,225)])
+    if(attackKind==='shove-push')expect(planDnd5eMonsterTurn(map,helper,[hero]).commandedSpecialAttack).toBeUndefined()
+    map.width=350
+    const before=structuredClone(map)
+    const request:Parameters<typeof simulateDnd5eCombats>[0]={characters:[hero],monsters:[{monsterId:monster.id,count:1},{monsterId:owner.id,count:1}],
+      trials:1,seed:31415926,maxRounds:1,battlefield:{map,geometry:createEmptyMapGeometry(map.id)}}
+    const result=simulateDnd5eCombats(request),turn=firstMonsterTurn(result,monster)!
+    expect(turn,JSON.stringify(result.decisionLog)).toMatchObject({actionName:{grapple:'擒抱','shove-prone':'击倒','shove-push':'推开'}[attackKind],outcome:{executed:true}})
+    expect(turn.actorPositionAfter).toEqual({x:175,y:25})
+    expect(turn.executionSteps.filter(step=>step.text===`${monster.name}消耗动作`)).toHaveLength(1)
+    expect(turn.outcome.headlessTransactions).toBeGreaterThanOrEqual(2)
+    expect(map).toEqual(before)
+    let resolveResult!:(value:typeof result)=>void,rejectResult!:(error:Error)=>void
+    const completed=new Promise<typeof result>((resolve,reject)=>{resolveResult=resolve;rejectResult=reject})
+    const workerScope={onmessage:null as ((event:MessageEvent)=>void)|null,postMessage:(message:{status:string;result?:typeof result;error?:string})=>{
+      if(message.status==='completed'&&message.result)resolveResult(structuredClone(message.result))
+      if(message.status==='failed')rejectResult(new Error(message.error))}}
+    vi.stubGlobal('self',workerScope)
+    try{
+      vi.resetModules()
+      await import('../../workers/dnd5eCombatSimulation.worker')
+      workerScope.onmessage!({data:{id:18,request:structuredClone(request)}} as MessageEvent)
+      expect(firstMonsterTurn(await completed,monster)).toEqual(turn)
+    }finally{vi.unstubAllGlobals()}
+  })
+  it.each([
+    ['dash',175],['disengage',175],['dodge',175],['help',175],
+    ['dash',25],['disengage',25],['dodge',25],['dash',475],
+  ] as const)('executes saved %s companion order at x=%i and spends one real Headless action', async (command,destinationX) => {
+    const monster=getDnd5eSrdMonster('srd-5.1:skeleton')!
+    const owner=getDnd5eSrdMonster('srd-5.1:goblin')!
+    const hero=inertHero('command-target','Command Target')
+    const helper=monsterToken(monster,{
+      dnd5eSummon:{schemaVersion:1,pluginId:'test',featureId:'summon',sourceCharacterId:'owner',
+        sourceTokenId:'owner-token',createdRound:1,expiresAfterRound:600,side:'enemy',commandPolicy:'persistent-order'},
+      dnd5eCombatState:{companionCommand:{schemaVersion:1,sourceOwnerId:'owner-token',sourceFeatureId:'summon',
+        command,helpTargetId:`${hero.id}-token`,helpKind:'attack',issuedRound:1,persistentOrder:true,
+        movementDestination:{mapId:'simulation-moving-order',x:destinationX,y:25}}},
+    })
+    const map={...battleMap('simulation-moving-order',[helper,monsterToken(owner,{id:'owner-token',x:25,y:75}),heroToken(hero,destinationX===475?525:225)]),width:750}
+    const request:Parameters<typeof simulateDnd5eCombats>[0]={characters:[hero],monsters:[{monsterId:monster.id,count:1},{monsterId:owner.id,count:1}],
+      trials:1,seed:31415926,maxRounds:1,battlefield:{map,geometry:createEmptyMapGeometry(map.id)}}
+    const result=simulateDnd5eCombats(request)
+    const turn=firstMonsterTurn(result,monster)!
+    expect(turn,JSON.stringify(result.decisionLog)).toMatchObject({actionName:{dash:'疾走',disengage:'撤离',dodge:'闪避',help:'协助'}[command],outcome:{executed:true}})
+    expect(turn.executionSteps.filter(step=>step.text===`${monster.name}消耗动作`)).toHaveLength(1)
+    expect(turn.actorPositionAfter).toEqual({x:destinationX,y:25})
+    expect(attackRollTexts(turn)).toEqual([])
+    expect(turn.outcome.headlessTransactions).toBeGreaterThanOrEqual(destinationX===25?1:2)
+    if(command==='disengage'&&destinationX===175){
+      let resolveResult!:(value:typeof result)=>void, rejectResult!:(error:Error)=>void
+      const completed=new Promise<typeof result>((resolve,reject)=>{resolveResult=resolve;rejectResult=reject})
+      const workerScope={onmessage:null as ((event:MessageEvent)=>void)|null,
+        postMessage:(message:{status:string;result?:typeof result;error?:string})=>{
+          if(message.status==='completed'&&message.result)resolveResult(structuredClone(message.result))
+          if(message.status==='failed')rejectResult(new Error(message.error))
+        }}
+      vi.stubGlobal('self',workerScope)
+      try{
+        vi.resetModules()
+        await import('../../workers/dnd5eCombatSimulation.worker')
+        workerScope.onmessage!({data:{id:17,request:structuredClone(request)}} as MessageEvent)
+        expect(firstMonsterTurn(await completed,monster)).toEqual(turn)
+      }finally{vi.unstubAllGlobals()}
+    }
+  })
+  it.each(['persistent-order', 'turn-order'] as const)('executes a saved %s Help command and honors its lifetime in simulation', policy => {
+    const monster = getDnd5eSrdMonster('srd-5.1:dretch')!
+    const owner = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const hero = inertHero('help-target', 'Help Target')
+    const helper = monsterToken(monster, {
+      dnd5eSummon: { schemaVersion: 1, pluginId: 'test', featureId: 'summon', sourceCharacterId: 'owner',
+        sourceTokenId: 'owner-token', createdRound: 1, expiresAfterRound: 600, side: 'enemy', commandPolicy: policy },
+      dnd5eCombatState: { companionCommand: { schemaVersion: 1, sourceOwnerId: 'owner-token', sourceFeatureId: 'summon',
+        command: 'help', helpTargetId: `${hero.id}-token`, helpKind: 'attack', issuedRound: 1, persistentOrder: policy === 'persistent-order' } },
+    })
+    const map = battleMap('simulation-help-command', [helper, monsterToken(owner, { id: 'owner-token', x: 25, y: 75 }), heroToken(hero, 75)])
+    const before = structuredClone(map)
+    const result = simulateDnd5eCombats({ characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }, { monsterId: owner.id, count: 1 }], trials: 1, seed: 31415926,
+      maxRounds: 2, battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 } })
+    const first = firstMonsterTurn(result, monster)
+    expect(first, JSON.stringify(result.decisionLog)).toMatchObject({ actionName: '协助', outcome: { executed: true } })
+    expect(first!.outcome.headlessTransactions).toBeGreaterThan(0)
+    expect(attackRollTexts(first!)).toEqual([])
+    const helpTurns = result.decisionLog.filter(turn => turn.actorName === monster.name && turn.actionName === '协助')
+    // A single Help action is a completed task, not an indefinite standing order.
+    expect(helpTurns).toHaveLength(1)
+    expect(map).toEqual(before)
+  })
   it('carries the Tyrannosaurus Bite and Tail target allocation into Headless resolution', () => {
     const monster = getDnd5eSrdMonster('srd-5.1:tyrannosaurus-rex')!
     const first = inertHero('split-target-a', 'Split Target A')

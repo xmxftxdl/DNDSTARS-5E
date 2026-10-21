@@ -56,6 +56,9 @@ interface MapGeometryStoreState {
   clearMap: (mapId: string) => void
   duplicateEntity: (mapId: string, entityId: string, offset?: number) => string | undefined
   replaceMap: (mapId: string, geometry: MapGeometryState) => boolean
+  /** Stage a Host result for the enclosing atomic transaction; never publish separately. */
+  applyAuthorityMapReplacement: (mapId: string, geometry: MapGeometryState) => boolean
+  applyAuthorityMapReplacements: (geometries: readonly MapGeometryState[]) => boolean
   expireTimedLights: (worldMinute: number) => number
   undo: (mapId: string) => void
   redo: (mapId: string) => void
@@ -499,6 +502,24 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           return { maps, selectedEntityId: null, ...pushHistory(state, mapId, current) }
         })
         publish(get())
+        return true
+      },
+      applyAuthorityMapReplacement: (mapId, geometry) => {
+        if(geometry.mapId!==mapId)return false
+        return get().applyAuthorityMapReplacements([geometry])
+      },
+      applyAuthorityMapReplacements: (geometries) => {
+        const normalized=geometries.map(geometry=>normalizeMapGeometry(geometry))
+        if(normalized.some(geometry=>!geometry||mapGeometryRelationshipIssues(geometry).length>0))return false
+        const replacements=normalized as MapGeometryState[]
+        const ids=new Set(replacements.map(geometry=>geometry.mapId))
+        if(ids.size!==replacements.length)return false
+        if(!replacements.length)return true
+        set(state=>{
+          const maps=[...state.maps.filter(map=>!ids.has(map.mapId)),...replacements.map(snapshot)]
+          setMapGeometryRuntime(maps)
+          return {maps,selectedEntityId:null}
+        })
         return true
       },
       undo: (mapId) => {

@@ -1,3 +1,5 @@
+import { planDnd5eDisadvantageNegation, type DisadvantageNegationRoll } from '../../rulesets/dnd5e/disadvantageNegation'
+import { dnd5eSpellcastingSaveRequirements, previewDnd5eSpellcastingSaves, type Dnd5eSpellcastingSavingThrowRoll } from '../../rulesets/dnd5e/headlessCombatEngine'
 import type {
   BardicInspirationRollType,
   DmAdjudicationInterruptResponse,
@@ -27,6 +29,8 @@ import {
   type Dnd5eSpellTargetSavingThrowRoll,
 } from '../../rulesets/dnd5e'
 import { resolveDnd5eRollMode } from '../../rulesets/dnd5e/rollMode'
+import {dnd5eRollDiceRecipes,resolveDnd5eRollDiceModifiers} from '../../rulesets/dnd5e/rollDiceModifiers'
+import {dnd5eRollDiceOccurrenceId} from '../../rulesets/dnd5e/rollDiceTransaction'
 import { combatPresentationSavingThrowAbilityLabel } from '../../lib/combatPresentation'
 import {
   resolveDnd5eSavingThrowInterrupts,
@@ -35,15 +39,20 @@ import {
 } from './dnd5eRollInterruptPipeline'
 
 export async function settleDnd5eConcentrationChecks(input: {
+  chooseDisadvantageNegation?: (request: { character: Character; roll: DisadvantageNegationRoll; transactionId: string }) => Promise<string | undefined>
   result: Extract<Dnd5eActionResult, { ok: true }>
   /** State immediately before a non-action authority adjustment changed support. */
   priorState?: Dnd5eHeadlessCombatState
   rollUnsupportedAirborneFalls?: (falls: readonly Dnd5eUnsupportedAirborneFallPreview[], map: BattleMap) => Promise<Readonly<Record<string, readonly number[]>>>
+  settleMountedBalance?: (prepared: { state: Dnd5eHeadlessCombatState; map: BattleMap; characters: readonly Character[]; characterIdByCombatantId: Record<string,string> }, result: Dnd5eActionResult) => Promise<{ result: Dnd5eActionResult }>
   map: BattleMap
+  /** Cross-scene continuations retain remote participants in the result while
+   * projecting only this scene. The caller must also persist the remote changes. */
+  preserveOffMapParticipants?: boolean
   characters: readonly Character[]
   priorApplication?: Pick<
     Dnd5eMapResultPlan,
-    'changedTokenIds' | 'changedCharacterIds' | 'tokenPatches' | 'characterPatches' | 'geometry'
+    'changedTokenIds' | 'changedCharacterIds' | 'tokenPatches' | 'characterPatches' | 'geometry' | 'spentReactions'
   >
   characterIdByCombatantId: Readonly<Record<string, string>>
   rollD20: (
@@ -51,6 +60,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     targetName: string,
     context?: Dnd5eD20RollInterruptContext,
   ) => Promise<number>
+  runEffectEndSavingThrow?: <T>(key: string, run: () => Promise<T>) => Promise<T>
   rollD4: (label: string, targetName: string, context?: { rollerTokenId?: string; rollerCharacterId?: string }) => Promise<number>
   rollDice: (count: number, sides: number, label: string, targetName: string, context?: { rollerTokenId?: string; rollerCharacterId?: string }) => Promise<number[]>
   requestSavingThrowReroll?: (input: {
@@ -60,7 +70,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     total: number
     dc: number
     mode: 'normal' | 'advantage' | 'disadvantage'
-  }) => Promise<{ d20: number; d20Second?: number } | undefined>
+  }) => Promise<{ d20: number; d20Second?: number; resourceKey?: string } | undefined>
   requestBardicInspiration?: (input: {
     target?: Character
     targetName: string
@@ -124,6 +134,8 @@ export async function settleDnd5eConcentrationChecks(input: {
   }>
 }): Promise<{ result: Extract<Dnd5eActionResult, { ok: true }>; application: Dnd5eMapResultPlan }> {
   let state = input.result.state
+  let transaction = input.result.transaction
+  const followupId = input.result.transaction?.id ?? crypto.randomUUID()
   let map = input.map
   const events = [...input.result.events]
   const collectFallRolls = async (falls: readonly Dnd5eUnsupportedAirborneFallPreview[]) => {
@@ -147,9 +159,20 @@ export async function settleDnd5eConcentrationChecks(input: {
     return rolls
   }
   if (input.priorState) {
+    if (input.settleMountedBalance) {
+      const mounted = await input.settleMountedBalance({ state: input.priorState, map,
+        characters: input.characters, characterIdByCombatantId: { ...input.characterIdByCombatantId } }, input.result)
+      if (!mounted.result.ok) throw new Error(`mounted-balance:${mounted.result.reason}`)
+      state = mounted.result.state
+      events.splice(0, events.length, ...mounted.result.events)
+    }
+    // Derived solely from authoritative result events, never a player-provided claim.
+    const forcedMovementTargetIds=events.flatMap(event=>event.type==='moved' && event.movementKind==='forced' &&
+      event.toElevationFeet!=null && event.fromElevationFeet!=null && event.toElevationFeet!==event.fromElevationFeet ? [event.actorId] : [])
     const falls = previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
       input.priorState,
       state,
+      forcedMovementTargetIds,
     )
     if (falls.length > 0) {
       const fallDamageRollsByCombatantId = await collectFallRolls(falls)
@@ -157,6 +180,7 @@ export async function settleDnd5eConcentrationChecks(input: {
         input.priorState,
         state,
         fallDamageRollsByCombatantId,
+        forcedMovementTargetIds,
       )
       if (!fallen.ok) throw new Error(`unsupported-airborne-fall:${fallen.reason}`)
       state = fallen.state
@@ -166,18 +190,24 @@ export async function settleDnd5eConcentrationChecks(input: {
   const resolveWithUnsupportedAirborneFalls = async (
     source: typeof state,
     action: Dnd5eAction,
+    transactionId?: string,
   ) => {
-    const preview = previewDnd5eUnsupportedAirborneFalls(source, action)
+    const settleMounted = async (result: Dnd5eActionResult) => input.settleMountedBalance
+      ? (await input.settleMountedBalance({ state: source, map: input.map, characters: input.characters,
+          characterIdByCombatantId: { ...input.characterIdByCombatantId } }, result)).result
+      : result
+    const preview = previewDnd5eUnsupportedAirborneFalls(source, action,{transactionId})
     if (!preview.ok || preview.falls.length === 0) {
-      return resolveDnd5eHeadlessAction(source, action)
+      return settleMounted(resolveDnd5eHeadlessAction(source, action,{transactionId}))
     }
     const airborneFallDamageRollsByCombatantId = await collectFallRolls(preview.falls)
-    return resolveDnd5eHeadlessAction(source, {
+    return settleMounted(resolveDnd5eHeadlessAction(source, {
       ...action,
       airborneFallDamageRollsByCombatantId,
-    })
+    },{transactionId}))
   }
   const resolveSavingThrowInterrupts = (request: {
+    effectDiceModifier?: number
     combatant: Dnd5eCombatant
     targetName: string
     ability: import('../../lib/dnd').AbilityKey
@@ -314,7 +344,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
           blessRoll: interrupted.blessRoll,
           baneRoll: interrupted.baneRoll,
-          rerollD20: interrupted.rerollD20,
+          rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20,
           rerollD20Second: interrupted.rerollD20Second,
           bardicInspirationRoll: interrupted.bardicInspirationRoll,
           darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
@@ -420,7 +450,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       blessRoll: interrupted.blessRoll, baneRoll: interrupted.baneRoll,
       bardicInspirationRoll: interrupted.bardicInspirationRoll,
       darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
-      rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
       optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
       dc: check.dc,
     })
@@ -453,7 +483,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       blessRoll: interrupted.blessRoll, baneRoll: interrupted.baneRoll,
       bardicInspirationRoll: interrupted.bardicInspirationRoll,
       darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
-      rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
       optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
     })
     if (!resolved.ok) continue
@@ -488,7 +518,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       blessRoll: interrupted.blessRoll, baneRoll: interrupted.baneRoll,
       halflingLuckyD20: interrupted.halflingLuckyD20,
       halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
-      rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
       bardicInspirationRoll: interrupted.bardicInspirationRoll,
       darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
       optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
@@ -520,7 +550,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       blessRoll: interrupted.blessRoll, baneRoll: interrupted.baneRoll,
       halflingLuckyD20: interrupted.halflingLuckyD20,
       halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
-      rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
       bardicInspirationRoll: interrupted.bardicInspirationRoll,
       darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
       optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
@@ -532,7 +562,7 @@ export async function settleDnd5eConcentrationChecks(input: {
   const pendingDamageEffectSaves = input.result.events.filter((event) =>
     event.type === 'active-effect-save-required' && event.timing === 'takes-damage',
   )
-  for (const check of pendingDamageEffectSaves) {
+  for (const [checkIndex, check] of pendingDamageEffectSaves.entries()) {
     if (check.type !== 'active-effect-save-required') continue
     const combatant = state.combatants[check.targetId]
     const effect = combatant?.classState.activeEffects?.find((candidate) => candidate.id === check.effectId)
@@ -567,50 +597,89 @@ export async function settleDnd5eConcentrationChecks(input: {
       blessRoll: interrupted.blessRoll, baneRoll: interrupted.baneRoll,
       halflingLuckyD20: interrupted.halflingLuckyD20,
       halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
-      rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
       bardicInspirationRoll: interrupted.bardicInspirationRoll,
       darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
       optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
-    })
+    }, JSON.stringify([followupId, 'damage-effect-save', checkIndex, combatant.id, check.effectId]))
     if (!resolved.ok) continue
     state = resolved.state
     events.push(...resolved.events)
   }
-  const pending = input.result.events.filter((event) => event.type === 'concentration-check-required')
-  for (const check of pending) {
-    const combatant = state.combatants[check.targetId]
+  const pending = input.result.events.filter((event) => event.type === 'concentration-check-required').filter(event => !event.settled)
+  for (const [checkIndex,check] of pending.entries()) {
+    let combatant = state.combatants[check.targetId]
     if (!combatant?.concentrating) continue
     const targetName = input.map.tokens.find((token) => token.id === check.targetId)?.label ?? combatant.name
     const baseMode = dnd5eSavingThrowMode(combatant, 'con', { effectVisible: true })
-    const mode = resolveDnd5eRollMode({
+    let mode = resolveDnd5eRollMode({
       requestedMode: baseMode,
       disadvantage: [{
         active: combatant.classState.concentrationCheckDisadvantagePendingSourceId != null,
         reason: 'concentration-check-disadvantage',
       }],
     }).mode
+    const checkTransactionId=JSON.stringify([followupId,'concentration',checkIndex,check.targetId])
+    let disadvantageNegation: { rollId: string; transactionId: string } | undefined
+    const characterId = input.characterIdByCombatantId[combatant.id]
+    const originalCharacter = input.characters.find(character => character.id === characterId)
+    if (mode === 'disadvantage' && originalCharacter && input.chooseDisadvantageNegation) {
+      const character = { ...originalCharacter, classResources: structuredClone(combatant.classResources) }
+      const roll: DisadvantageNegationRoll = { rollId: checkTransactionId,
+        characterId: character.id, kind: 'saving-throw', phase: 'before-roll', mode }
+      const featureId = await input.chooseDisadvantageNegation({ character, roll, transactionId: checkTransactionId })
+      if (featureId) {
+        const plan = planDnd5eDisadvantageNegation(character, roll, featureId)
+        if (!plan || combatant.classState.disadvantageNegationReceipts?.[roll.rollId]) throw Error('concentration-negation-choice-unavailable')
+        state = structuredClone(state)
+        combatant = state.combatants[check.targetId]
+        combatant.classResources = structuredClone(plan.character.classResources ?? {})
+        combatant.classState.disadvantageNegationReceipts = { ...combatant.classState.disadvantageNegationReceipts,
+          [roll.rollId]: { rollId: roll.rollId, transactionId: checkTransactionId, kind: 'saving-throw', featureId } }
+        disadvantageNegation = { rollId: roll.rollId, transactionId: checkTransactionId }
+        mode = 'normal'
+      }
+    }
+    const effectContext={actorId:combatant.id,effects:combatant.classState.activeEffects,kind:'concentration-save' as const,
+      eventId:dnd5eRollDiceOccurrenceId(checkTransactionId,combatant.id,'concentration-save',0)}
+    const effectRollDice:Record<string,readonly number[]>={}
+    for(const recipe of dnd5eRollDiceRecipes(effectContext)) effectRollDice[recipe.id]=await input.rollDice(
+      recipe.count,recipe.sides,`专注豁免·${recipe.direction==='add'?'加值':'减值'}`,targetName,{rollerTokenId:combatant.id})
+    const effectDiceModifier=resolveDnd5eRollDiceModifiers(effectContext,effectRollDice).modifier
     const interrupted = await resolveSavingThrowInterrupts({
       combatant,
       targetName,
       ability: 'con',
+      effectDiceModifier,
       dc: check.dc,
       mode,
       label: `专注·体质豁免 DC ${check.dc}`,
     })
     const resolved = await resolveWithUnsupportedAirborneFalls(state, {
       type: 'concentration-save', actorId: check.targetId,
+      disadvantageNegation,
+      effectRollDice,
       d20: interrupted.d20, d20Second: interrupted.d20Second,
       halflingLuckyD20: interrupted.halflingLuckyD20,
       halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
       blessRoll: interrupted.blessRoll,
       baneRoll: interrupted.baneRoll,
-      rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20, rerollD20Second: interrupted.rerollD20Second,
       bardicInspirationRoll: interrupted.bardicInspirationRoll,
       darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
       optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
       dc: check.dc,
-    })
-    if (!resolved.ok) continue
+    },checkTransactionId)
+    if (!resolved.ok) throw new Error(`concentration-settlement:${resolved.reason}`)
+    if(resolved.transaction) {
+      const parent=transaction ?? {...resolved.transaction,rollLedger:{entries:[]}}
+      const entries=new Map(parent.rollLedger.entries.map(entry=>[entry.id,entry]))
+      for(const entry of resolved.transaction.rollLedger.entries) {
+        const id=JSON.stringify([checkTransactionId,entry.id])
+        entries.set(id,{...entry,id})
+      }
+      transaction={...parent,rollLedger:{...parent.rollLedger,entries:[...entries.values()]}}
+    }
     state = resolved.state
     events.push(...resolved.events)
   }
@@ -664,7 +733,7 @@ export async function settleDnd5eConcentrationChecks(input: {
           halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
           blessRoll: interrupted.blessRoll,
           baneRoll: interrupted.baneRoll,
-          rerollD20: interrupted.rerollD20,
+          rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20,
           rerollD20Second: interrupted.rerollD20Second,
           bardicInspirationRoll: interrupted.bardicInspirationRoll,
           darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
@@ -735,13 +804,23 @@ export async function settleDnd5eConcentrationChecks(input: {
         itemName: rebukeOption.itemName,
       })
       if (!accepted) continue
+      const spellcastingSavingThrows: Dnd5eSpellcastingSavingThrowRoll[] = []
+      for (const requirement of dnd5eSpellcastingSaveRequirements(state, reactor.id)) {
+        const saved = await resolveSavingThrowInterrupts({ combatant: reactor, targetName: reactorCharacter.name,
+          ability: requirement.ability, dc: requirement.dc, mode: requirement.mode,
+          label: `${requirement.effect.label} · 施法前豁免` })
+        spellcastingSavingThrows.push({ ...saved, effectId: requirement.effect.id, targetId: reactor.id,
+          optionalBonusDice: saved.optionalBonusDieUse ? [saved.optionalBonusDieUse] : undefined })
+      }
+      const castingAllowed = previewDnd5eSpellcastingSaves(state, reactor.id, spellcastingSavingThrows)
+      if (castingAllowed == null) continue
       const mode = dnd5eSavingThrowMode(damageSource, 'dex', {
         effectVisible: true,
         sourceCreatureType: reactor.creatureType,
         sourceIsSpell: true,
       })
       const sourceName = input.map.tokens.find((token) => token.id === damageSource.id)?.label ?? damageSource.name
-      const interrupted = await resolveSavingThrowInterrupts({
+      const interrupted = !castingAllowed ? undefined : await resolveSavingThrowInterrupts({
         combatant: damageSource,
         targetName: sourceName,
         ability: 'dex',
@@ -749,27 +828,28 @@ export async function settleDnd5eConcentrationChecks(input: {
         mode,
         label: '炼狱叱喝·敏捷豁免',
       })
-      const effectRolls = await input.rollDice(
+      const effectRolls = !castingAllowed ? [] : await input.rollDice(
         rebukeOption.slotLevel + 1,
         10,
         '炼狱叱喝·火焰伤害',
         sourceName, { rollerTokenId: reactor.id },
       )
       const reaction = await resolveWithUnsupportedAirborneFalls(state, {
+        spellcastingSavingThrows,
         type: 'hellish-rebuke', actorId: reactor.id, targetId: damageSource.id,
         racialInnate: rebukeOption.racialInnate,
         slotLevel: rebukeOption.slotLevel, triggerDamageAmount: damageEvent.amount,
-        savingThrowD20: interrupted.d20,
-        savingThrowD20Second: interrupted.d20Second,
-        savingThrowBlessRoll: interrupted.blessRoll,
-        savingThrowBaneRoll: interrupted.baneRoll,
-        halflingLuckyD20: interrupted.halflingLuckyD20,
-        halflingLuckyD20Second: interrupted.halflingLuckyD20Second,
-        bardicInspirationRoll: interrupted.bardicInspirationRoll,
-        darkOnesOwnLuckRoll: interrupted.darkOnesOwnLuckRoll,
-        rerollD20: interrupted.rerollD20,
-        rerollD20Second: interrupted.rerollD20Second,
-        optionalBonusDice: interrupted.optionalBonusDieUse ? [interrupted.optionalBonusDieUse] : undefined,
+        savingThrowD20: interrupted?.d20 ?? 0,
+        savingThrowD20Second: interrupted?.d20Second,
+        savingThrowBlessRoll: interrupted?.blessRoll,
+        savingThrowBaneRoll: interrupted?.baneRoll,
+        halflingLuckyD20: interrupted?.halflingLuckyD20,
+        halflingLuckyD20Second: interrupted?.halflingLuckyD20Second,
+        bardicInspirationRoll: interrupted?.bardicInspirationRoll,
+        darkOnesOwnLuckRoll: interrupted?.darkOnesOwnLuckRoll,
+        rerollResourceKey: interrupted?.rerollResourceKey, rerollD20: interrupted?.rerollD20,
+        rerollD20Second: interrupted?.rerollD20Second,
+        optionalBonusDice: interrupted?.optionalBonusDieUse ? [interrupted?.optionalBonusDieUse] : undefined,
         effectRolls,
       })
       if (!reaction.ok) continue
@@ -844,6 +924,36 @@ export async function settleDnd5eConcentrationChecks(input: {
       events.push(...nested.result.events.slice(triggered.events.length))
     }
   }
+  // Scan persisted obligations as well as fresh events, so a restored snapshot can resume.
+  const endingSaves = Object.values(state.combatants).flatMap(actor =>
+    (actor.classState.activeEffects ?? []).filter(effect => effect.pendingEndSavingThrow)
+      .map(effect => ({actorId: actor.id, effectId: effect.id})))
+  for (const pending of endingSaves) {
+    const combatant = state.combatants[pending.actorId]
+    const effect = combatant?.classState.activeEffects?.find(effect => effect.id === pending.effectId)
+    const save = effect?.pendingEndSavingThrow
+    if (!combatant || !effect || !save) continue
+    const runEndingSave = () => resolveSavingThrowInterrupts({combatant,
+      targetName: map.tokens.find(token => token.id === combatant.id)?.label ?? combatant.name,
+      ability: save.ability, dc: save.dc,
+      mode: dnd5eSavingThrowMode(combatant, save.ability, {sourceIsSpell:false}),
+      label: `${effect.label} · ${combatPresentationSavingThrowAbilityLabel(save.ability)} DC ${save.dc}`})
+    const endingSaveKey = JSON.stringify(['effect-end-save',map.id,combatant.id,effect.id,effect.appliedAt])
+    const interrupted = input.runEffectEndSavingThrow
+      ? await input.runEffectEndSavingThrow(endingSaveKey,runEndingSave) : await runEndingSave()
+    const resolved = await resolveWithUnsupportedAirborneFalls(state, {
+      type:'active-effect-end-save',actorId:combatant.id,effectId:effect.id,
+      d20:interrupted.d20,d20Second:interrupted.d20Second,
+      blessRoll:interrupted.blessRoll,baneRoll:interrupted.baneRoll,
+      halflingLuckyD20:interrupted.halflingLuckyD20,halflingLuckyD20Second:interrupted.halflingLuckyD20Second,
+      rerollResourceKey: interrupted.rerollResourceKey, rerollD20: interrupted.rerollD20,rerollD20Second:interrupted.rerollD20Second,
+      bardicInspirationRoll:interrupted.bardicInspirationRoll,darkOnesOwnLuckRoll:interrupted.darkOnesOwnLuckRoll,
+      optionalBonusDice:interrupted.optionalBonusDieUse?[interrupted.optionalBonusDieUse]:undefined,
+    }, JSON.stringify([followupId,'effect-end-save',combatant.id,effect.id]))
+    if (!resolved.ok) throw new Error(`Effect ending save failed: ${resolved.reason}`)
+    state=resolved.state
+    events.push(...resolved.events)
+  }
   map = markDnd5eSummonsDamaged(
     map,
     new Set(events.flatMap((event) =>
@@ -856,21 +966,52 @@ export async function settleDnd5eConcentrationChecks(input: {
   // concentration while silently losing its persistent area or summon.
   const result: Extract<Dnd5eActionResult, { ok: true }> = {
     ...input.result,
+    transaction,
     ok: true,
     state,
     events,
   }
+  const projectedState = input.preserveOffMapParticipants ? structuredClone(state) : state
+  if (input.preserveOffMapParticipants) {
+    const ids = new Set(map.tokens.map(token => token.id))
+    projectedState.combatants = Object.fromEntries(Object.entries(projectedState.combatants).filter(([id]) => ids.has(id)))
+  }
   const application = planDnd5eMapResultApplication({
-    state,
+    state: projectedState,
     map,
     characters: input.characters,
     characterIdByCombatantId: input.characterIdByCombatantId,
     events,
   })
+  // A trigger handoff has already moved its staged map. The planner compares
+  // against that map and may produce no delta, but publication still starts
+  // from input.map. Retain the actual final movement as a patch for that commit.
+  for (const id of new Set(events.flatMap(event => event.type === 'moved' ? [event.actorId] : []))) {
+    const before = input.map.tokens.find(token => token.id === id)
+    const after = application.map.tokens.find(token => token.id === id)
+    if (!before || !after || (before.x === after.x && before.y === after.y &&
+      before.elevationFeet === after.elevationFeet && before.dnd5eTraversalMode === after.dnd5eTraversalMode)) continue
+    application.tokenPatches = { ...application.tokenPatches, [id]: {
+      ...application.tokenPatches?.[id], x: after.x, y: after.y,
+      elevationFeet: after.elevationFeet, dnd5eTraversalMode: after.dnd5eTraversalMode,
+    } }
+    if (!application.changedTokenIds.includes(id)) application.changedTokenIds = [...application.changedTokenIds, id]
+  }
+  if (input.preserveOffMapParticipants) result.state = { ...state,
+    combatants: { ...state.combatants, ...projectedState.combatants } }
+  // A continuation can receive only its new events. Retain earlier spending
+  // only while the final authority state still says that reaction is consumed.
+  const spentReactionIds = [...new Set([
+    ...(application.spentReactions?.tokenIds ?? []),
+    ...(input.priorApplication?.spentReactions?.round === state.round
+      ? input.priorApplication.spentReactions.tokenIds : []),
+  ])].filter(id => projectedState.combatants[id]?.turn.reactionAvailable === false &&
+    application.map.tokens.some(token => token.id === id))
   return {
     result,
     application: {
       ...application,
+      spentReactions: spentReactionIds.length ? { round: state.round, tokenIds: spentReactionIds } : undefined,
       // Sunburst also edits scene darkness, which the entity planner cannot rebuild.
       geometry: application.geometry ?? input.priorApplication?.geometry,
       // The follow-up planner compares against the already-materialized map and
@@ -881,11 +1022,13 @@ export async function settleDnd5eConcentrationChecks(input: {
       // actually changed.
       tokenPatches: {
         ...(input.priorApplication?.tokenPatches ?? {}),
-        ...(application.tokenPatches ?? {}),
+        ...Object.fromEntries(Object.entries(application.tokenPatches ?? {}).map(([id, patch]) =>
+          [id, { ...input.priorApplication?.tokenPatches?.[id], ...patch }])),
       },
       characterPatches: {
         ...(input.priorApplication?.characterPatches ?? {}),
-        ...(application.characterPatches ?? {}),
+        ...Object.fromEntries(Object.entries(application.characterPatches ?? {}).map(([id, patch]) =>
+          [id, { ...input.priorApplication?.characterPatches?.[id], ...patch }])),
       },
       changedTokenIds: [...new Set([
         ...(input.priorApplication?.changedTokenIds ?? []),
@@ -898,3 +1041,4 @@ export async function settleDnd5eConcentrationChecks(input: {
     },
   }
 }
+

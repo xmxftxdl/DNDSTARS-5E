@@ -90,6 +90,12 @@ export function validateAndNormalizeDnd5ePluginItemHeadlessProtocol(input: {
         !finiteInteger(use.effect.amount, 1, 9) ||
         use.effect.selection !== 'selected-expended-slot'
       ) throw new Error(`Invalid plugin spell-slot recovery item: ${itemId}`)
+    } else if (use.effect.kind === 'remove-active-effects') {
+      if (use.targeting?.kind !== 'creature' || !Array.isArray(use.effect.stackingKeys) ||
+        use.effect.stackingKeys.length < 1 || use.effect.stackingKeys.length > 32 ||
+        use.effect.stackingKeys.some((key) => typeof key !== 'string' || !key.trim() || key.length > 256)) {
+        throw new Error(`Invalid plugin item effect removal: ${itemId}`)
+      }
     } else if (use.effect.kind === 'stabilize') {
       if (use.targeting?.kind !== 'creature') throw new Error(`Stabilization requires a creature target: ${itemId}`)
     } else if (use.effect.kind === 'active-effect') {

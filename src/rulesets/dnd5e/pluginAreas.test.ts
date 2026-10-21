@@ -1,5 +1,10 @@
+import { dnd5ePersistentAreaRemainingTargetBudget } from './persistentAreaTriggerBudget'
+import { truncateTokenMovementTrace } from '../../lib/tokenMovementAnimation'
+import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { resolveDnd5ePersistentAreaTrigger, dnd5eDirectedCombatantPairKey } from './headlessCombatEngine'
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
+import { migrateMapsState } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
 import {
@@ -30,7 +35,7 @@ import {
   prepareDnd5ePersistentAreaTrigger,
   resolvePreparedDnd5ePersistentAreaTrigger,
 } from './pluginAreaTransactions'
-import { createDnd5eMechanicalEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 
 const area = (patch: Partial<Dnd5ePluginArea> = {}): Dnd5ePluginArea => ({
   id: 'area-1', pluginId: 'com.example.area', featureId: 'com.example.area:mist', label: '迷雾', color: '#8b5cf6',
@@ -46,7 +51,187 @@ const character = (patch: Partial<Character> = {}): Character => ({
   visibleToPlayers: true, ...patch,
 })
 
+it('disperses imported smoke after reload only for explicit susceptibility and intersecting strong wind', () => {
+  const wind = area({id:'wind', strongWind:true, cells:[{col:1,row:1}],
+    vertical:{mode:'volume',baseElevationFeet:0,heightFeet:10}})
+  const smoke = area({id:'smoke', dispersedByStrongWind:true, obscuration:{kind:'heavy'},
+    vertical:{mode:'volume',baseElevationFeet:0,heightFeet:10}})
+  const ordinary = {...smoke,id:'ordinary',dispersedByStrongWind:false}
+  const high = {...smoke,id:'high',vertical:{mode:'volume' as const,baseElevationFeet:20,heightFeet:10}}
+  const far = {...smoke,id:'far',cells:[{col:8,row:8}]}
+  const map:BattleMap = {id:'imported-smoke',name:'Smoke',width:500,height:500,gridSize:50,
+    gridOffsetX:0,gridOffsetY:0,feetPerCell:5,showGrid:true,
+    tokens:[{id:'caster-token',characterId:'caster',label:'Caster',x:25,y:25,type:'player',size:1,color:'#fff',emoji:''}],
+    dnd5ePluginAreas:[wind,smoke,ordinary,high,far]}
+  const restored=migrateMapsState(JSON.parse(JSON.stringify({maps:[map],selectedId:map.id}))).maps[0]
+  expect(restored.dnd5ePluginAreas?.find(a=>a.id==='smoke')?.dispersedByStrongWind).toBe(true)
+  expect(reconcileDnd5ePluginAreasOnMap(restored,[character()],1).dnd5ePluginAreas?.map(a=>a.id))
+    .toEqual(['wind','ordinary','high','far'])
+  const calm={...restored,dnd5ePluginAreas:restored.dnd5ePluginAreas?.filter(a=>a.id!=='wind')}
+  expect(reconcileDnd5ePluginAreasOnMap(calm,[character()],1).dnd5ePluginAreas?.map(a=>a.id))
+    .toEqual(['smoke','ordinary','high','far'])
+})
+
+it('preserves cloud lettering through reload and clears it on expiry, lost concentration or overlapping high wind',()=>{
+ const cloud=area({id:'writing',label:'北门集合',visual:{preset:'cloud-text'},anchorMode:'fixed',
+  concentrationId:'sky-writing',dispersedByStrongWind:true,createdWorldMinute:100,expiresAtWorldMinute:160,
+  expiresAfterRound:600,vertical:{mode:'volume',baseElevationFeet:50,heightFeet:5}})
+ const caster=character({concentrating:true,dnd5eCombatState:{concentrationSpellId:'sky-writing'}})
+ const map:BattleMap={id:'sky',name:'Sky',width:500,height:500,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,feetPerCell:5,
+  tokens:[{id:'caster-token',characterId:'caster',label:'Caster',x:25,y:25,type:'player',size:1,color:'#fff',emoji:''}],dnd5ePluginAreas:[cloud]}
+ const restored=migrateMapsState(JSON.parse(JSON.stringify({maps:[map],selectedId:map.id}))).maps[0]
+ expect(restored.dnd5ePluginAreas?.[0]).toMatchObject({label:'北门集合',visual:{preset:'cloud-text'},anchorMode:'fixed'})
+ expect(expireDnd5ePluginAreasAtWorldMinute(restored,159).dnd5ePluginAreas).toHaveLength(1)
+ expect(expireDnd5ePluginAreasAtWorldMinute(restored,160).dnd5ePluginAreas).toHaveLength(0)
+ expect(reconcileDnd5ePluginAreasOnMap(restored,[character({concentrating:false})],1).dnd5ePluginAreas).toHaveLength(0)
+ const wind=area({id:'wind',strongWind:true,expiresAfterRound:600,vertical:{mode:'volume',baseElevationFeet:0,heightFeet:10}})
+ expect(reconcileDnd5ePluginAreasOnMap({...restored,dnd5ePluginAreas:[cloud,wind]},[caster],1).dnd5ePluginAreas?.map(a=>a.id)).toContain('writing')
+ const result=reconcileDnd5ePluginAreasAndConcentrationOnMap({...restored,dnd5ePluginAreas:[cloud,{...wind,vertical:cloud.vertical}]},[caster],1)
+ expect(result.map.dnd5ePluginAreas?.map(a=>a.id)).not.toContain('writing')
+ expect(result.characters[0].concentrating).toBe(false)
+})
+
+it.each([[6, 0], [10, 0], [18, 4], [20, 5]])('settles source CHA %i area damage without dice after map reload', (cha, expected) => {
+  const source: Token = { id: 'caster-token', characterId: 'caster', label: 'Caster', x: 25, y: 25,
+    size: 1, color: '#fff', emoji: '', type: 'player', hp: 10, maxHp: 10 }
+  const target: Token = { ...source, id: 'target', characterId: 'victim', x: 75, y: 75, label: 'Target' }
+  const pulse = area({ relation: 'any', includeSelf: false, triggers: [{ id: 'pulse', label: 'Pulse',
+    timing: 'turn-start', oncePerTurn: true, requiresSourceLineOfEffect: true, damage: { count: 0, sides: 6, type: 'poison',
+      modifierFormula: { schemaVersion: 1, terms: [{ kind: 'ability-modifier', ability: 'cha' }] } } }] })
+  const map: BattleMap = JSON.parse(JSON.stringify({ id: 'source-damage', name: 'Source damage', width: 500, height: 500,
+    gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+    tokens: [source, target], dnd5ePluginAreas: [pulse] }))
+  const characters = [character({ abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha } }),
+    character({ id: 'victim', abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 30 } })]
+  const candidates = collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1,
+    targetTokenId: target.id, turnKey: 'turn-1' })
+  expect(candidates).toHaveLength(1)
+  const prepared = prepareDnd5ePersistentAreaTrigger({ combatId: map.id, round: 1, map, characters,
+    initiativeOrder: map.tokens.map(t => ({ tokenId: t.id, roll: 10, label: t.label, emoji: '', color: '#fff', slotId: t.id })),
+    candidate: candidates[0] })
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error('prepare failed')
+  const resolved = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, damageRolls: [] })
+  expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+  expect(resolved.application?.characters.find(c => c.id === 'victim')?.currentHp).toBe(10 - expected)
+  expect(characters[1].currentHp).toBe(10)
+  const blockedState = structuredClone(prepared.prepared.state)
+  blockedState.lineOfEffectBlockedByCombatantPair = { [dnd5eDirectedCombatantPairKey(source.id, target.id)]: true }
+  expect(resolveDnd5ePersistentAreaTrigger(blockedState, { areaId: pulse.id, sourceId: source.id,
+    targetId: target.id, trigger: candidates[0].trigger, damageRolls: [] })).toMatchObject({ ok: false, reason: 'invalid-target' })
+  const geometry = createEmptyMapGeometry(map.id, 1)
+  for (const [blocksVision, blocksLineOfEffect] of [[false, true], [true, false], [true, true]]) {
+    geometry.walls = [{ id: 'wall', kind: 'wall', label: 'Wall', points: [{ x: 50, y: 0 }, { x: 50, y: 150 }],
+      blocksVision, blocksMovement: blocksLineOfEffect, blocksLineOfEffect, baseHeightFeet: 0, heightFeet: 20, createdAt: 1 }]
+    setMapGeometryRuntime([geometry])
+    try {
+      expect(collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1,
+        targetTokenId: target.id, turnKey: 'turn-1' })).toHaveLength(blocksLineOfEffect ? 0 : 1)
+      const stale = prepareDnd5ePersistentAreaTrigger({ combatId: map.id, round: 1, map, characters,
+        initiativeOrder: map.tokens.map(t => ({ tokenId: t.id, roll: 10, label: t.label, emoji: '', color: '#fff', slotId: t.id })),
+        candidate: candidates[0] })
+      expect(stale.ok).toBe(!blocksLineOfEffect)
+    } finally { setMapGeometryRuntime([]) }
+  }
+
+  const recorded = { ...map, dnd5ePluginAreas: recordDnd5ePersistentAreaTrigger(map.dnd5ePluginAreas, candidates[0], 1, expected) }
+  expect(collectDnd5ePersistentAreaTriggers({ map: recorded, timing: 'turn-start', round: 1,
+    targetTokenId: target.id, turnKey: 'turn-1' })).toHaveLength(0)
+  expect(collectDnd5ePersistentAreaTriggers({ map: recorded, timing: 'turn-start', round: 1,
+    targetTokenId: target.id, turnKey: 'turn-2' })).toHaveLength(1)
+})
+
+it('collects and settles a persistent-area wave beyond 256 creatures without truncation', async () => {
+  const targets: Token[] = Array.from({ length: 300 }, (_, index) => ({
+    id: `target-${index}`, characterId: `character-${index}`, label: `Target ${index}`,
+    x: 75, y: 75, size: 1, color: '#fff', emoji: '', type: 'player', hp: 10, maxHp: 10,
+  }))
+  const source: Token = { ...targets[0], id: 'caster-token', characterId: 'caster', x: 25, y: 25 }
+  const pulse = area({ relation: 'any', includeSelf: false, triggers: [{
+    id: 'large-pulse', label: 'Large pulse', timing: 'on-create', oncePerTurn: true,
+    savingThrow: { ability: 'con', dc: 12, onSuccess: 'half' }, damage: { count: 1, sides: 6, type: 'radiant' },
+  }] })
+  const map: BattleMap = { id: 'large-wave', name: 'Large wave', width: 500, height: 500,
+    gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+    tokens: [source, ...targets], dnd5ePluginAreas: [pulse] }
+  const characters = [character(), ...targets.map(t => character({ id: t.characterId! }))]
+  const candidates = collectDnd5ePersistentAreaTriggers({ map, timing: 'on-create', round: 1, turnKey: '1:caster-token' })
+  expect(candidates.map(c => c.targetToken.id)).toEqual(targets.map(t => t.id))
+  const saves = await collectDnd5ePersistentAreaSavingThrowWaveResults({ candidates,
+    resolve: async candidate => ({ targetId: candidate.targetToken.id, d20: 1 }) })
+  expect(saves.size).toBe(300)
+  let damageRequests = 0
+  const damage = createDnd5ePersistentAreaDamageRollCoordinator(async () => { damageRequests++; return [4] })
+  for (const candidate of candidates) {
+    expect(await damage({ areaId: pulse.id, triggerId: candidate.trigger.id, timing: candidate.trigger.timing,
+      rollerTokenId: source.id, count: 1, sides: 6, label: 'Pulse', targetName: candidate.targetToken.label })).toEqual([4])
+  }
+  expect(damageRequests).toBe(1)
+  // Exercise the actual Host map transaction on both sides of the old reported limit.
+  for (const index of [255, 256, 299]) {
+    const candidate = candidates[index]
+    const prepared = prepareDnd5ePersistentAreaTrigger({ combatId: 'large-wave', round: 1,
+      map, characters, initiativeOrder: map.tokens.map(t => ({ tokenId: t.id, roll: 10,
+        label: t.label, emoji: '', color: '#fff', slotId: `slot-${t.id}` })), candidate })
+    expect(prepared.ok, JSON.stringify(prepared.ok ? null : prepared)).toBe(true)
+    if (!prepared.ok) throw Error('prepare failed')
+    const result = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, d20: 1, damageRolls: [4] })
+    expect(result.result.ok).toBe(true)
+    expect(result.application?.characters.find(c => c.id === targets[index].characterId)?.currentHp).toBe(6)
+  }
+  expect(characters.every(c => c.currentHp === 10)).toBe(true)
+}, 30_000)
+
 describe('D&D 5e plugin persistent areas', () => {
+  it.each(['incapacitated', 'stunned', 'paralyzed', 'unconscious', 'petrified'])('ends a source-bound area on %s for player and monster sources', condition => {
+    const dependent = area({ sourceIncapacitatedBehavior: 'remove-area', permanent: true })
+    const independent = area({ id: 'independent', permanent: true })
+    const token: Token = { id: 'caster-token', label: 'caster', x: 75, y: 75, color: '#fff', emoji: 'C', size: 1, type: 'enemy', dnd5eCombatState: { conditions: [condition] } }
+    const sources = [character({ conditions: [condition] })]
+    expect(reconcileDnd5ePluginAreas([dependent, independent], sources, 2)).toEqual([independent])
+    expect(reconcileDnd5ePluginAreas([dependent, independent], [], 2, [token])).toEqual([independent])
+    // Linked player sheets win over stale Token projections.
+    expect(reconcileDnd5ePluginAreas([dependent], [character()], 2, [token])).toEqual([dependent])
+    expect(sources[0].conditions).toEqual([condition])
+  })
+
+  it('removes incapacitated-source areas and their projection, but preserves unrelated areas and Tokens', () => {
+    const stun = createDnd5eConditionEffect({ condition: 'stunned', targetId: 'caster-token', source: { kind: 'feature', actorId: 'other' }, duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end' } })
+    const dependent = area({ sourceIncapacitatedBehavior: 'remove-area', permanent: true, anchorMode: 'effect-token', anchorTokenId: 'projection' })
+    const projection: Token = { id: 'projection', label: 'projection', x: 75, y: 75, size: 1, color: '#fff', emoji: 'P', type: 'obstacle', dnd5eSpellEffect: { schemaVersion: 1, spellId: 'test-aura', sourceCharacterId: 'caster', sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 3 } }
+    const unrelated: Token = { ...projection, id: 'unrelated', dnd5eSpellEffect: undefined }
+    const map: BattleMap = { id: 'incapacity-map', name: 'Map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [projection, unrelated], dnd5ePluginAreas: [dependent, area({ id: 'independent' })] }
+    const result = reconcileDnd5ePluginAreasOnMap(map, [character({ dnd5eCombatState: { activeEffects: [stun] } })], 2)
+    expect(result.dnd5ePluginAreas?.map(entry => entry.id)).toEqual(['independent'])
+    expect(result.tokens.map(entry => entry.id)).toEqual(['unrelated'])
+    expect(map.tokens).toHaveLength(2)
+    expect(reconcileDnd5ePluginAreas([dependent], [character({ conditions: ['restrained', 'deafened'] })], 2)).toEqual([dependent])
+    expect(reconcileDnd5ePluginAreas([dependent], [], 2)).toEqual([dependent])
+    expect(reconcileDnd5ePluginAreas([dependent], [character({ dnd5eCombatState: { stunnedByActorId: 'other' } })], 2)).toEqual([])
+  })
+  it('records declined trigger opportunities without consuming the total use limit', () => {
+    const target: Token = { id: 'target', label: 'target', x: 75, y: 75, color: '#fff', emoji: 'T', size: 1, type: 'enemy' }
+    const optionalArea = area({ relation: 'any', includeSelf: true, triggers: [{ id: 'heal', label: 'heal', timing: 'turn-start', oncePerTurn: true, sourceMayDecline: true, maximumTotalUses: 1, healing: { amount: 1 } }] })
+    const map: BattleMap = { id: 'decline-map', name: 'map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [target], dnd5ePluginAreas: [optionalArea] }
+    const waveMap = { ...map, tokens: [target, { ...target, id: 'second-target' }],
+      dnd5ePluginAreas: [{ ...optionalArea, triggers: optionalArea.triggers!.map(trigger => ({ ...trigger, timing: 'on-create' as const })) }] }
+    expect(collectDnd5ePersistentAreaTriggers({ map: waveMap, timing: 'on-create', round: 1, turnKey: 'turn-1' })).toHaveLength(2)
+    const first = collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1, targetTokenId: target.id, turnKey: 'turn-1' })[0]
+    expect(first).toBeDefined()
+    const declinedMap = { ...map, dnd5ePluginAreas: recordDnd5ePersistentAreaTrigger(map.dnd5ePluginAreas, first, 1, 0, undefined, true) }
+    expect(collectDnd5ePersistentAreaTriggers({ map: declinedMap, timing: 'turn-start', round: 1, targetTokenId: target.id, turnKey: 'turn-1' })).toHaveLength(0)
+    const next = collectDnd5ePersistentAreaTriggers({ map: declinedMap, timing: 'turn-start', round: 1, targetTokenId: target.id, turnKey: 'turn-2' })
+    expect(next).toHaveLength(1)
+    const usedMap = { ...map, dnd5ePluginAreas: recordDnd5ePersistentAreaTrigger(declinedMap.dnd5ePluginAreas, next[0], 1) }
+    expect(collectDnd5ePersistentAreaTriggers({ map: usedMap, timing: 'turn-start', round: 2, targetTokenId: target.id, turnKey: 'turn-3' })).toHaveLength(0)
+  })
+  it('filters excluded creature types before collecting a healing trigger', () => {
+    const target: Token = { id: 'target', label: 'target', x: 75, y: 75, color: '#fff', emoji: 'T', size: 1, type: 'enemy', creatureTypes: ['不死生物'] }
+    const healingArea = area({ relation: 'any', includeSelf: true, triggers: [{ id: 'heal', label: 'heal', timing: 'turn-start', healing: { amount: 0, dice: { count: 1, sides: 6 } }, excludedCreatureTypes: ['construct', 'undead'] }] })
+    const map: BattleMap = { id: 'filter-map', name: 'map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [target], dnd5ePluginAreas: [healingArea] }
+    expect(collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1, targetTokenId: target.id })).toHaveLength(0)
+    expect(collectDnd5ePersistentAreaTriggers({ map: { ...map, tokens: [{ ...target, creatureTypes: ['野兽'] }] }, timing: 'turn-start', round: 1, targetTokenId: target.id })).toHaveLength(1)
+  })
   it.each([true, false])('only clears the ended spell from character and monster targets (explicit id: %s)', (explicitId) => {
     const linkedEffect = (spellId: string, sourceActorId = 'caster-token') => createDnd5eMechanicalEffect({
       id: `${spellId}:${sourceActorId}`, definitionId: `spell:${spellId}`, label: spellId, targetId: 'target',
@@ -223,6 +408,12 @@ describe('D&D 5e plugin persistent areas', () => {
 
     expect(dnd5ePersistentAreaSavingThrowWaveCandidates(candidates, candidates[0]!))
       .toEqual(candidates)
+    const optionalCandidates = candidates.map(candidate => ({ ...candidate, trigger: { ...candidate.trigger, sourceMayDecline: true } }))
+    expect(dnd5ePersistentAreaSavingThrowWaveCandidates(optionalCandidates, optionalCandidates[0]!)).toEqual([])
+    let optionalRolls = 0
+    await collectDnd5ePersistentAreaSavingThrowWaveResults({ candidates: optionalCandidates,
+      resolve: async () => { optionalRolls++; return true } })
+    expect(optionalRolls).toBe(0)
     expect(dnd5ePersistentAreaSavingThrowWaveCandidates([
       { ...candidates[0]!, trigger: { ...trigger, timing: 'on-enter' } },
     ], { ...candidates[0]!, trigger: { ...trigger, timing: 'on-enter' } })).toEqual([])
@@ -582,8 +773,8 @@ describe('D&D 5e plugin persistent areas', () => {
       movement: {
         token: moving,
         to: { x: 25, y: 25 },
-        path: [{ x: 25, y: 25 }, { x: 25, y: 25 }],
-        pathElevationsFeet: [20, 5],
+        ...truncateTokenMovementTrace({ path: [{ x: 25, y: 25 }, { x: 25, y: 25 }],
+          pathElevationsFeet: [20, 5], finalPosition: { x: 25, y: 25 }, finalElevationFeet: 5 }),
       },
     })
     expect(descended).toHaveLength(1)
@@ -1796,6 +1987,27 @@ describe('D&D 5e plugin persistent areas', () => {
     })).toHaveLength(1)
   })
 
+  it('keeps first entry and ending a turn independent while preventing repeated entry on that turn', () => {
+    const source = { id: 'caster-token', label: 'caster', x: 25, y: 125, color: '#fff', emoji: 'C', size: 1, type: 'player' as const, characterId: 'caster' }
+    const target = { id: 'target-token', label: 'target', x: 25, y: 25, color: '#fff', emoji: 'T', size: 1, type: 'enemy' as const }
+    const hazard = area({ cells: [{ col: 1, row: 0 }], triggers: [
+      { id: 'entry', label: 'First entry', timing: 'on-enter', oncePerTurn: true, damage: { count: 1, sides: 8, modifier: 0, type: 'fire' } },
+      { id: 'end', label: 'End turn', timing: 'turn-end', oncePerTurn: true, damage: { count: 1, sides: 8, modifier: 0, type: 'fire' } },
+    ] })
+    const map = { id: 'map', name: 'map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [source, target], dnd5ePluginAreas: [hazard] }
+    const movement = { token: target, to: { x: 75, y: 25 } }
+    const entry = collectDnd5ePersistentAreaTriggers({ map, timing: 'on-enter', round: 2, turnKey: '2:target-token', movement })
+    expect(entry).toHaveLength(1)
+    const recorded = { ...map, dnd5ePluginAreas: recordDnd5ePersistentAreaTrigger(map.dnd5ePluginAreas, entry[0]!, 2) }
+    expect(collectDnd5ePersistentAreaTriggers({ map: recorded, timing: 'on-enter', round: 2, turnKey: '2:target-token', movement })).toHaveLength(0)
+    const inside = { ...recorded, tokens: [source, { ...target, x: 75 }] }
+    const end = collectDnd5ePersistentAreaTriggers({ map: inside, timing: 'turn-end', round: 2, turnKey: '2:target-token', targetTokenId: target.id })
+    expect(end).toHaveLength(1)
+    const completed = { ...inside, dnd5ePluginAreas: recordDnd5ePersistentAreaTrigger(inside.dnd5ePluginAreas, end[0]!, 2) }
+    expect(collectDnd5ePersistentAreaTriggers({ map: completed, timing: 'turn-end', round: 2, turnKey: '2:target-token', targetTokenId: target.id })).toHaveLength(0)
+    expect(collectDnd5ePersistentAreaTriggers({ map: completed, timing: 'on-enter', round: 2, turnKey: '2:other-token', movement })).toHaveLength(1)
+  })
+
   it('removes a persistent area only after its authoritative damage pool is exhausted', () => {
     const source = {
       id: 'caster-token', label: 'caster', x: 25, y: 125, color: '#fff', emoji: 'C', size: 1,
@@ -2013,4 +2225,241 @@ describe('D&D 5e plugin persistent areas', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((token) => token.id === 'npc-token')?.hp).toBe(6)
   })
+})
+
+it.each([99, 100, undefined])('uses the Host clock for companion-conditioned area healing: %s', worldMinute => {
+  const owner: Token = { id: 'caster-token', characterId: 'caster', label: 'Owner', x: 75, y: 75,
+    color: '', emoji: '', size: 1, type: 'player', hp: 1, maxHp: 30 }
+  const companion: Token = { ...owner, id: 'pet', characterId: undefined, type: 'npc', hp: 1,
+    dnd5eSummon: { schemaVersion: 1, pluginId: 'test.companion', featureId: 'summon', sourceTokenId: owner.id,
+      sourceCharacterId: 'caster', createdRound: 1, expiresAfterRound: 10, side: 'player', persistent: true,
+      bondKey: 'familiar', dismissAtWorldMinute: 100 } }
+  const healingArea = area({ relation: 'any', includeSelf: true,
+    triggers: [{ id: 'heal', label: 'Heal', timing: 'turn-start', healing: { amount: 2, dice: { count: 1, sides: 6 } } }] })
+  const map: BattleMap = { id: 'timed-heal', name: 'Heal', width: 500, height: 500, gridSize: 50,
+    gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true, tokens: [owner, companion], dnd5ePluginAreas: [healingArea] }
+  const hero = character({ currentHp: 1, maxHp: 30, dnd5eCombatState: { activeEffects: [createDnd5eMechanicalEffect({
+    definitionId: 'near-companion', label: 'Near companion', source: { kind: 'plugin' }, targetId: 'caster',
+    modifiers: { maximizeHealingDiceNearCompanion: [{ maximumDistanceFeet: 100, bondKey: 'familiar' }] } })] } })
+  const candidates = collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1,
+    targetTokenId: owner.id, turnKey: 'turn-1' })
+  expect(candidates).toHaveLength(1)
+  const prepared = prepareDnd5ePersistentAreaTrigger({ combatId: map.id, round: 1, map, characters: [hero], worldMinute,
+    initiativeOrder: [{ tokenId: owner.id, label: owner.label, emoji: '', color: '', roll: 10 }], candidate: candidates[0] })
+  expect(prepared.ok).toBe(true)
+  if (!prepared.ok) throw Error('prepare failed')
+  const settled = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, healingRolls: [1] })
+  expect(settled.result.ok).toBe(true)
+  expect(settled.application?.characters[0].currentHp).toBe(worldMinute === 99 ? 9 : 4)
+})
+
+it.each([
+  { mode: 'nearest-outside-area', appliesOn: 'always' },
+  { mode: 'push-from-source', distanceFeet: 10, appliesOn: 'always' },
+] as const)('persists grapple removal and its event when an area moves a target beyond reach: %j', forcedMovement => {
+  const source: Token = { id: 'caster-token', characterId: 'caster', label: 'Caster', x: 125, y: 175,
+    size: 1, color: '#fff', emoji: '', type: 'player', hp: 10, maxHp: 10 }
+  const target: Token = { ...source, id: 'target', characterId: undefined, type: 'enemy', x: 125, y: 125 }
+  const hazard = area({ relation: 'any', includeSelf: false,
+    cells: Array.from({ length: 9 }, (_, i) => ({ col: 1 + i % 3, row: 1 + Math.floor(i / 3) })),
+    triggers: [{ id: 'eject', label: 'Eject', timing: 'turn-start',
+      forcedMovement }] })
+  const map: BattleMap = { id: 'eject-grapple', name: 'Eject grapple', width: 250, height: 250,
+    gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+    tokens: [source, target], dnd5ePluginAreas: [hazard] }
+  const candidates = collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1,
+    targetTokenId: target.id, turnKey: 'turn-1' })
+  const prepared = prepareDnd5ePersistentAreaTrigger({ combatId: map.id, round: 1, map,
+    characters: [character()], initiativeOrder: map.tokens.map(t => ({ tokenId: t.id, roll: 10,
+      label: t.label, emoji: '', color: '#fff', slotId: t.id })), candidate: candidates[0] })
+  if (!prepared.ok) throw Error('Preparation failed')
+  const grapple = createDnd5eConditionEffect({ id: 'ejection-grapple', condition: 'grappled',
+    source: { kind: 'feature', actorId: source.id, rulesId: 'basic-action:grapple' }, targetId: target.id, duration: { type: 'permanent' },
+    relation: { schemaVersion: 1, kind: 'grapple', sourceActorId: source.id, sourceActionId: 'basic-action:grapple',
+      slotGroup: 'free-hand', maxDistanceFeet: 5, movement: 'drag-target', endsOnSourceIncapacitated: true } })
+  prepared.prepared.state.combatants.target.classState.activeEffects = [grapple]
+  prepared.prepared.state.combatants.target.conditions = ['grappled']
+  const before = structuredClone(prepared.prepared)
+  const settled = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared })
+  expect(settled.result.ok).toBe(true)
+  expect(settled.result.events.filter(e => e.type === 'moved')).toHaveLength(1)
+  expect(settled.result.events.filter(e => e.type === 'active-effect-removed' && e.targetId === target.id))
+    .toEqual([expect.objectContaining({ reason: 'out-of-range' })])
+  expect(settled.result.state.combatants.target.conditions).not.toContain('grappled')
+  expect(settled.application?.map.tokens.find(t => t.id === target.id)?.dnd5eCombatState?.activeEffects ?? []).toEqual([])
+  expect(prepared.prepared).toEqual(before)
+})
+
+it.each(['大型', '超大型', '巨型'] as const)('uses Host size to skip automatic save dice and retain receipts after reload: %s', creatureSize => {
+  const source: Token = { id: 'caster-token', characterId: 'caster', label: 'Caster', x: 25, y: 25, size: 1, color: '#fff', emoji: '', type: 'player', hp: 10, maxHp: 10 }
+  const target: Token = { id: 'target', label: 'Target', x: 75, y: 75, size: 1, creatureSize, color: '#fff', emoji: '', type: 'enemy', hp: 20, maxHp: 20 }
+  const trigger: Dnd5ePersistentAreaTriggerSnapshot = { id: 'size-save', label: 'Size save', timing: 'turn-start', oncePerTurn: true,
+    forcedMovement: { mode: 'nearest-outside-area', appliesOn: 'successful-save' },
+    savingThrow: { ability: 'str', dc: 18, onSuccess: 'none', automaticSuccessMinimumSizeRank: 4 },
+    condition: { condition: 'restrained', duration: { expiresAt: 'target-turn-end' } } }
+  const hazard = area({ relation: 'any', includeSelf: false, triggers: [trigger] })
+  const map: BattleMap = JSON.parse(JSON.stringify({ id: 'size-save-map', name: 'Size saves', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+    tokens: [source, target], dnd5ePluginAreas: [hazard] }))
+  const candidates = collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-start', round: 1, targetTokenId: target.id, turnKey: 'turn-1' })
+  expect(candidates).toHaveLength(1)
+  const prepared = prepareDnd5ePersistentAreaTrigger({ combatId: map.id, round: 1, map, characters: [character()],
+    initiativeOrder: map.tokens.map(t => ({ tokenId: t.id, roll: 10, label: t.label, emoji: '', color: '#fff', slotId: t.id })), candidate: candidates[0] })
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error('Preparation failed')
+  const automatic = creatureSize !== '大型'
+  expect(prepared.prepared.save == null).toBe(automatic)
+  const before = structuredClone(prepared.prepared.state)
+  const result = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, ...(automatic ? {} : { d20: 1 }) })
+  expect(result.result.ok, JSON.stringify(result.result)).toBe(true)
+  expect(result.result.events).toContainEqual(expect.objectContaining({ type: 'saving-throw-resolved', success: automatic, ...(automatic ? { automaticOutcome: 'size-rule-success', d20: 0 } : {}) }))
+  expect(result.result.state.combatants.target.conditions.includes('restrained')).toBe(!automatic)
+  const movedToken = result.application?.map.tokens.find(token => token.id === target.id)
+  expect(movedToken && (movedToken.x !== target.x || movedToken.y !== target.y)).toBe(automatic)
+  expect(result.result.events.filter(event => event.type === 'moved')).toHaveLength(automatic ? 1 : 0)
+  if (automatic) expect(result.result.state.combatants.target.turn.movementRemaining).toBe(before.combatants.target.turn.movementRemaining)
+  if (!automatic) {
+    const passed = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, d20: 20 })
+    expect(passed.result.ok).toBe(true)
+    expect(passed.result.events).toContainEqual(expect.objectContaining({ type: 'moved', actorId: target.id, movementKind: 'forced' }))
+    expect(passed.result.state.combatants.target.turn.movementRemaining).toBe(before.combatants.target.turn.movementRemaining)
+  }
+  expect(result.result.events).toContainEqual(expect.objectContaining({ type: 'persistent-area-triggered', saveSuccess: automatic }))
+  expect(prepared.prepared.state).toEqual(before)
+  const saved = recordDnd5ePersistentAreaTrigger(map.dnd5ePluginAreas, candidates[0], 1, 0, automatic)
+  const reloaded = JSON.parse(JSON.stringify({ ...map, dnd5ePluginAreas: saved })) as BattleMap
+  expect(collectDnd5ePersistentAreaTriggers({ map: reloaded, timing: 'turn-start', round: 1, targetTokenId: target.id, turnKey: 'turn-1' })).toHaveLength(0)
+  if (!automatic) expect(resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared }).result.ok).toBe(false)
+  if (automatic) {
+    const blocked = structuredClone(prepared.prepared)
+    blocked.candidate.area.cells = Array.from({ length: 100 }, (_, i) => ({ col: i % 10, row: Math.floor(i / 10) }))
+    const blockedBefore = structuredClone(blocked)
+    const rejected = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: blocked })
+    expect(rejected.result.ok).toBe(false)
+    expect(rejected.application).toBeUndefined()
+    expect(rejected.result.state).toEqual(blocked.state)
+    expect(blocked).toEqual(blockedBefore)
+    const changed = structuredClone(prepared.prepared)
+    changed.state.combatants.target.sizeRank = 3
+    expect(resolvePreparedDnd5ePersistentAreaTrigger({ prepared: changed }).result.ok).toBe(false)
+    const suppliedLowDie = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, d20: 1 })
+    expect(suppliedLowDie.result.ok).toBe(true)
+    expect(suppliedLowDie.result.events).toContainEqual(expect.objectContaining({ type: 'saving-throw-resolved', automaticOutcome: 'size-rule-success', d20: 0 }))
+  }
+})
+
+
+it('restores source-end triggers without firing them at target end or source start', () => {
+  const roots = area({ triggers: [{ id: 'roots', label: 'Roots', timing: 'source-turn-end',
+    savingThrow: { ability: 'str', dc: 15, onSuccess: 'none' },
+    condition: { condition: 'restrained', duration: { expiresAt: 'permanent' }, endsWithArea: true },
+    oncePerTurn: true,
+  }] })
+  const map: BattleMap = { id: 'roots-map', name: 'Roots', width: 500, height: 500,
+    gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+    tokens: [{ id: 'target', label: 'Target', x: 75, y: 75, type: 'enemy', size: 1, color: '#fff', emoji: '' }],
+    dnd5ePluginAreas: [roots] }
+  const restored = migrateMapsState(JSON.parse(JSON.stringify({ maps: [map], selectedId: map.id }))).maps[0]
+  expect(restored.dnd5ePluginAreas?.[0].triggers?.[0].timing).toBe('source-turn-end')
+  const collect = (timing: Dnd5ePersistentAreaTriggerSnapshot['timing']) => collectDnd5ePersistentAreaTriggers({
+    map: restored, timing, round: 2, areaId: roots.id, turnKey: '2:caster-token',
+  })
+  expect(collect('turn-end')).toHaveLength(0)
+  expect(collect('source-turn-start')).toHaveLength(0)
+  expect(collect('source-turn-end').map(candidate => candidate.targetToken.id)).toEqual(['target'])
+})
+
+
+it('offers all source-end choices, spends one shared turn budget and rejects stale prepared candidates', () => {
+  const roots = area({ triggers: [{ id: 'roots', label: 'Roots', timing: 'source-turn-end',
+    savingThrow: { ability: 'str', dc: 15, onSuccess: 'none' },
+    condition: { condition: 'restrained', duration: { expiresAt: 'permanent' }, endsWithArea: true },
+    sourceChoosesTargets: true, maximumTargetsPerTurn: 1, oncePerTurn: true, requiresTargetGrounded: true,
+  }] })
+  const map: BattleMap = { id: 'roots-budget', name: 'Roots', width: 500, height: 500,
+    gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+    tokens: ['one', 'two'].map(id => ({ id, label: id, x: 75, y: 75,
+      type: 'enemy' as const, size: 1, color: '#fff', emoji: '' })), dnd5ePluginAreas: [roots] }
+  const collect = (current: BattleMap, turnKey?: string) => collectDnd5ePersistentAreaTriggers({
+    map: current, timing: 'source-turn-end', round: 2, areaId: roots.id, turnKey,
+  })
+  const choices = collect(map, '2:caster')
+  expect(choices.map(candidate => candidate.targetToken.id)).toEqual(['one', 'two'])
+  expect(collect(map)).toHaveLength(0)
+  expect(collect({ ...map, tokens: map.tokens.map(token => token.id === 'two' ? { ...token, elevationFeet: 5 } : token) }, '2:caster').map(candidate => candidate.targetToken.id)).toEqual(['one'])
+  const spent = { ...roots, triggerReceipts: [{ triggerId: 'roots', targetTokenId: 'one',
+    round: 2, turnKey: '2:caster', transactionId: 'roots:first', savingThrowSucceeded: true }] }
+  const current = { ...map, dnd5ePluginAreas: [spent] }
+  expect(collect(current, '2:caster')).toHaveLength(0)
+  expect(collect(current, '2:caster:extra-turn')).toHaveLength(2)
+  expect(prepareDnd5ePersistentAreaTrigger({ combatId: 'roots', round: 2, map: current,
+    characters: [], initiativeOrder: [], candidate: choices[1] })).toEqual({
+    ok: false, reason: 'persistent-area-exhausted',
+  })
+  const restored = migrateMapsState(JSON.parse(JSON.stringify({ maps: [current], selectedId: current.id }))).maps[0]
+  expect(collect(restored, '2:caster')).toHaveLength(0)
+  expect(collect(restored, '3:caster')).toHaveLength(2)
+})
+
+
+it('combines lifetime and source-turn budgets by frequency group without counting declines', () => {
+  const trigger: Dnd5ePersistentAreaTriggerSnapshot = { id: 'roots', label: 'Roots', timing: 'source-turn-end',
+    sourceChoosesTargets: true, maximumTargetsPerTurn: 1, maximumTotalUses: 2, oncePerTurn: true,
+    frequencyGroupId: 'shared-roots', savingThrow: { ability: 'str', dc: 15, onSuccess: 'none' } }
+  const receipts = [
+    { triggerId: 'unrelated', targetTokenId: 'one', round: 1, turnKey: '1:caster', transactionId: 'unrelated' },
+    { triggerId: 'shared-roots', targetTokenId: 'one', round: 1, turnKey: '1:caster', transactionId: 'declined', declined: true },
+    { triggerId: 'shared-roots', targetTokenId: 'two', round: 1, turnKey: '1:caster', transactionId: 'used' },
+  ]
+  expect(dnd5ePersistentAreaRemainingTargetBudget(area({ triggerReceipts: receipts }), trigger, '1:caster')).toBe(0)
+  expect(dnd5ePersistentAreaRemainingTargetBudget(area({ triggerReceipts: receipts }), trigger, '2:caster')).toBe(1)
+  expect(dnd5ePersistentAreaRemainingTargetBudget(area({ triggerReceipts: [...receipts,
+    { triggerId: 'shared-roots', targetTokenId: 'one', round: 2, turnKey: '2:caster', transactionId: 'used-again' },
+  ] }), trigger, '3:caster')).toBe(0)
+})
+
+
+it('uses mapped trees inside the cube, reaches nearby enemies outside, and does not multiply overlapping trees', () => {
+ const trees = area({cells:[{col:4,row:4}], relation:'any', includeSelf:true,
+  vertical:{mode:'volume',baseElevationFeet:0,heightFeet:60},
+  triggers:[{id:'trees',label:'Trees',timing:'source-turn-start',proximityObjectKind:'tree',proximityFeet:10,
+    targetRelation:'enemy',oncePerTurn:true,savingThrow:{ability:'dex',dc:15,onSuccess:'none'},damage:{count:4,sides:6,type:'slashing'}}]})
+ const tree:Token={id:'tree',label:'Tree',type:'obstacle',x:225,y:225,size:1,color:'',emoji:'',dnd5eObjectState:{schemaVersion:1,naturalFeature:'tree'}}
+ const enemy:Token={id:'enemy',label:'Enemy',type:'enemy',x:325,y:225,size:1,color:'',emoji:''}
+ const caster:Token={...enemy,id:'caster-token',type:'player',characterId:'caster',x:25,y:25}
+ const ally:Token={...enemy,id:'ally',type:'player'}
+ const map:BattleMap={id:'tree-proximity',name:'Tree',width:1000,height:1000,gridSize:50,gridOffsetX:0,gridOffsetY:0,feetPerCell:5,showGrid:true,
+  tokens:[caster,tree,{...tree,id:'second-tree'},enemy,ally,{...enemy,id:'far',x:375},{...enemy,id:'high',elevationFeet:30}],dnd5ePluginAreas:[trees]}
+ const collect=(m:BattleMap)=>collectDnd5ePersistentAreaTriggers({map:m,timing:'source-turn-start',round:2,turnKey:'2:caster-token'})
+ const restored=migrateMapsState(JSON.parse(JSON.stringify({maps:[map]}))).maps[0]
+ expect(collect(restored).map(c=>c.targetToken.id)).toEqual(['enemy'])
+ const stale=collect(restored)[0]
+ const noTrees={...restored,tokens:restored.tokens.filter(t=>t.type!=='obstacle')}
+ expect(collect(noTrees)).toHaveLength(0)
+ expect(prepareDnd5ePersistentAreaTrigger({combatId:'tree',round:2,map:noTrees,characters:[],initiativeOrder:[],candidate:stale})).toEqual({ok:false,reason:'invalid-target'})
+ expect(collect({...map,tokens:map.tokens.map(t=>t.type==='obstacle'?{...t,x:325}:t)})).toHaveLength(0)
+ expect(collect({...map,tokens:map.tokens.map(t=>t.type==='obstacle'?{...t,dnd5eObjectState:{schemaVersion:1,vegetation:'living'}}:t)})).toHaveLength(0)
+})
+
+
+it('limits Nature terrain to enemy feet on mapped undergrowth inside the cube and restores after reload', () => {
+ const nature=area({cells:[{col:4,row:4},{col:5,row:4}],relation:'any',includeSelf:true,
+  vertical:{mode:'volume',baseElevationFeet:0,heightFeet:60},movementCostMultiplier:2,
+  movementGroundCover:{feature:'undergrowth',relation:'enemy'}})
+ const enemy:Token={id:'enemy',label:'Enemy',type:'enemy',x:225,y:225,size:1,color:'',emoji:''}
+ const grass:Token={...enemy,id:'grass',type:'obstacle',dnd5eObjectState:{schemaVersion:1,naturalFeature:'undergrowth'}}
+ const caster:Token={...enemy,id:'caster-token',type:'player',x:25,y:25}
+ const map:BattleMap={id:'nature-grass',name:'Grass',width:1000,height:1000,gridSize:50,gridOffsetX:0,gridOffsetY:0,feetPerCell:5,showGrid:true,
+  tokens:[caster,grass,enemy],dnd5ePluginAreas:[nature]}
+ const cost=(m:BattleMap,t:Token=enemy,position={x:t.x,y:t.y})=>dnd5ePersistentAreaDifficultTerrainMultiplierAt({map:m,token:t,position})
+ const restored=migrateMapsState(JSON.parse(JSON.stringify({maps:[map]}))).maps[0]
+ expect(cost(restored)).toBe(2)
+ expect(cost(restored,{...enemy,type:'player'})).toBe(1)
+ expect(cost(restored,{...enemy,elevationFeet:5})).toBe(1)
+ expect(cost(restored,enemy,{x:275,y:225})).toBe(1)
+ expect(cost({...restored,tokens:restored.tokens.filter(t=>t.id!=='grass')})).toBe(1)
+ expect(cost({...restored,tokens:restored.tokens.map(t=>t.id==='grass'?{...t,elevationFeet:5}:t)})).toBe(1)
+ expect(cost({...restored,dnd5ePluginAreas:[{...nature,vertical:{mode:'volume',baseElevationFeet:5,heightFeet:60}}]})).toBe(1)
+ expect(cost({...restored,dnd5ePluginAreas:[]})).toBe(1)
+ const corrupt=migrateMapsState(JSON.parse(JSON.stringify({maps:[{...map,dnd5ePluginAreas:[{...nature,movementGroundCover:{feature:'unknown',relation:'enemy'}}]}]}))).maps[0]
+ expect(cost(corrupt)).toBe(1)
 })

@@ -260,3 +260,32 @@ describe('SRD monster Healing Touch', () => {
     expect(plan.targetTokenId).toBe('ally')
   })
 })
+
+it.each([false, true])('maximizes Healing Touch dice without changing the bonus or use cost: %s', suspended => {
+  const deva = combatant('deva', 20, { statBlockId: 'srd-5.1:deva',
+    classState: { monsterActionUsesByActionId: { 'healing-touch': { current: 3, max: 3 } } } })
+  const ally = combatant('ally', 10, { currentHp: 1, position: { x: 5, y: 0 } })
+  ally.classState.activeEffects = [{ ...createDnd5eMechanicalEffect({ definitionId: 'maximum', label: 'Maximum',
+    source: { kind: 'plugin' }, targetId: ally.id, modifiers: { maximizeHealingDice: true } }),
+    ...(suspended ? { suspendedBy: ['antimagic'] } : {}) }]
+  const state = startDnd5eHeadlessCombat('maximum-touch', [deva, ally])
+  state.distanceFeetByCombatantPair = { ['ally\u0000deva']: 5 }
+  const result = resolveDnd5eHeadlessAction(state, { type: 'monster-special-action', actorId: 'deva', actionId: 'healing-touch',
+    targetId: 'ally', damageRolls: [1, 1, 1, 1] })
+  expect(result.ok, JSON.stringify(result)).toBe(true)
+  expect(result.state.combatants.ally.currentHp).toBe(suspended ? 7 : 35)
+  expect(result.state.combatants.deva.classState.monsterActionUsesByActionId?.['healing-touch'].current).toBe(2)
+})
+
+it('maximizes the unicorn legendary self-healing and pays all three points', () => {
+  const unicorn = combatant('unicorn', 10, { statBlockId: 'srd-5.1:unicorn', currentHp: 1,
+    classState: { monsterLegendaryActionPoints: 3 } })
+  unicorn.classState.activeEffects = [createDnd5eMechanicalEffect({ definitionId: 'maximum', label: 'Maximum',
+    source: { kind: 'plugin' }, targetId: unicorn.id, modifiers: { maximizeHealingDice: true } })]
+  const state = startDnd5eHeadlessCombat('maximum-self', [unicorn, combatant('other', 20, { controller: 'player' })])
+  const result = resolveDnd5eHeadlessAction(state, { type: 'monster-legendary-special-action', actorId: 'unicorn',
+    actionId: 'heal-self-costs-3-actions', damageRolls: [1, 1] })
+  expect(result.ok, JSON.stringify(result)).toBe(true)
+  expect(result.state.combatants.unicorn.currentHp).toBe(19)
+  expect(result.state.combatants.unicorn.classState.monsterLegendaryActionPoints).toBe(0)
+})

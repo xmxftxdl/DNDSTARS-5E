@@ -9,6 +9,9 @@ import {
   syncCharacterClassResources,
 } from './classResources'
 import { registerDnd5eRulesPlugin } from '../rulesets/dnd5e/pluginApi'
+import { recoverDnd5eCombatStartResources } from '../rulesets/dnd5e/combatStartResources'
+import { migrateCharacterToDnd5e, createCombatantFromDnd5eCharacter } from '../rulesets/dnd5e/character'
+import { restoreDnd5eCombatShortRestResources } from '../rulesets/dnd5e/combatRestResources'
 
 function character(patch: Partial<Character> = {}): Character {
   return {
@@ -22,6 +25,86 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e class resources', () => {
+  it.each(['feature', 'feat'] as const)('carries conditional %s rest recovery into character and combat paths', kind => {
+    const pluginId = `test.partial-rest-${kind}`
+    const resourceId = `${pluginId}:surges`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: pluginId, name: 'Synthetic partial rest', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+      setup(api) {
+        const definition = { id: 'option', name: 'Option', summary: 'Test', description: 'Test', automation: 'full' as const,
+          resources: [{ id: 'surges', label: 'Surges', maximum: 5, resetOn: 'long-rest' as const,
+            restRecovery: {
+              'short-rest': { mode: 'restore' as const, amount: 1, onlyWhenEmpty: true },
+              'long-rest': { mode: 'set' as const, amount: 1 },
+            },
+          }],
+        }
+        if (kind === 'feature') api.registerFeature(definition)
+        else api.registerFeat(definition)
+      },
+    })
+    try {
+      for (const balance of [0, 2, 5]) {
+        const source = character({
+          ...(kind === 'feature' ? { dnd5ePluginFeatureIds: [`${pluginId}:option`] } : { dnd5eFeatIds: [`${pluginId}:option`] }),
+          classResources: { [resourceId]: { current: balance, max: 5 } },
+        })
+        const expected = balance === 0 ? 1 : balance
+        expect(restoreClassResources(source, 'short-rest').classResources?.[resourceId].current).toBe(expected)
+        expect(restoreClassResources(source, 'long-rest').classResources?.[resourceId].current).toBe(1)
+        const snapshot = createCombatantFromDnd5eCharacter({ character: migrateCharacterToDnd5e(source), controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 } })
+        const reloaded = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot
+        restoreDnd5eCombatShortRestResources(reloaded, [])
+        expect(reloaded.classResources[resourceId].current).toBe(expected)
+        expect(snapshot.classResources[resourceId].current).toBe(balance)
+        expect(source.classResources?.[resourceId].current).toBe(balance)
+      }
+    } finally { dispose() }
+  })
+  it.each(['feature', 'feat'] as const)('restores owned %s combat resources only at the explicit combat-start boundary', kind => {
+    const pluginId = `test.combat-rest-${kind}`
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: pluginId, name: 'Synthetic combat recovery', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+      setup(api) {
+        const definition = { id: 'options', name: 'Options', summary: 'Test', description: 'Test',
+          automation: 'full' as const,
+          resources: [...(['combat', 'short-rest', 'long-rest'] as const).map(resetOn => ({
+            id: resetOn, label: resetOn, maximum: 2, resetOn,
+          })), { id: 'combined', label: 'Combined', maximum: 1, resetOn: 'short-rest' as const, restoreOnCombatStart: true }],
+        }
+        if (kind === 'feature') api.registerFeature(definition)
+        else api.registerFeat(definition)
+      },
+    })
+    try {
+      const key = `${pluginId}:combat`
+      const owned = character(kind === 'feature'
+        ? { dnd5ePluginFeatureIds: [`${pluginId}:options`] }
+        : { dnd5eFeatIds: [`${pluginId}:options`] })
+      let spent = syncCharacterClassResources(owned)
+      for (const cadence of ['combat', 'short-rest', 'long-rest']) {
+        spent = spendClassResource(spent, `${pluginId}:${cadence}`, 2)!
+      }
+      const combinedKey = `${pluginId}:combined`
+      spent = spendClassResource(spent, combinedKey, 1)!
+      const recovered = recoverDnd5eCombatStartResources(spent)
+      expect(recovered.classResources?.[key]).toEqual({ current: 2, max: 2 })
+      expect(recovered.classResources?.[combinedKey].current).toBe(1)
+      for (const rest of ['short-rest', 'long-rest'] as const) {
+        expect(restoreClassResources(spent, rest).classResources?.[combinedKey].current).toBe(1)
+      }
+      expect(recovered.classResources?.[`${pluginId}:short-rest`].current).toBe(0)
+      expect(recovered.classResources?.[`${pluginId}:long-rest`].current).toBe(0)
+      expect(spent.classResources?.[key].current).toBe(0)
+      const spentAgain = spendClassResource(recovered, key, 2)!
+      const reloaded = syncCharacterClassResources(JSON.parse(JSON.stringify(spentAgain)))
+      expect(reloaded.classResources?.[key].current).toBe(0)
+      expect(recoverDnd5eCombatStartResources(reloaded).classResources?.[key].current).toBe(2)
+      expect(recoverDnd5eCombatStartResources(character()).classResources?.[key]).toBeUndefined()
+    } finally { dispose() }
+  })
   it('presents persisted built-in resource ids with Chinese labels', () => {
     const fighter = character()
     expect(classResourceDisplayLabel(fighter, 'fighterSecondWind')).toBe('回气')
@@ -71,13 +154,16 @@ describe('D&D 5e class resources', () => {
       id: 'test-class', classNames: ['测试职业'], matchesClassName: (name) => name === '测试职业',
       resources: [{
         key: 'com.example:test-charge', label: '测试充能', isAvailable: () => true,
-        max: (candidate) => candidate.level, resetOn: 'long-rest',
+        max: (candidate) => candidate.level, resetOn: 'long-rest', initialCurrent: 1,
       }],
     }
     const unregister = registerClassDefinition(definition)
     try {
       const synced = syncCharacterClassResources(character({ charClass: '测试职业', level: 3 }))
-      expect(synced.classResources?.['com.example:test-charge']).toEqual({ current: 3, max: 3 })
+      expect(synced.classResources?.['com.example:test-charge']).toEqual({ current: 1, max: 3 })
+      expect(getClassResource(character({ charClass: '测试职业', level: 3 }), 'com.example:test-charge')?.current).toBe(1)
+      const spent = spendClassResource(synced, 'com.example:test-charge', 1)!
+      expect(syncCharacterClassResources({ ...spent, level: 5 }).classResources?.['com.example:test-charge']).toEqual({ current: 0, max: 5 })
     } finally {
       unregister()
     }

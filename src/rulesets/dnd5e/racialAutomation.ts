@@ -4,12 +4,10 @@ import type { Character } from '../../types/character'
 import type { Dnd5eDamageType } from './damageTypes'
 import { dnd5ePluginRaceDefinition } from './pluginApi'
 import { dnd5eCharacterBuildSpellGrantsV1 } from './buildChoices'
+import { runtimeDnd5ePluginFeatures as registeredDnd5ePluginFeatures, dnd5eCharacterHasPluginFeature } from './plugins/pluginContentCatalog'
+import { DND5E_RACIAL_RESOURCE_KEYS, DND5E_RACIAL_STATIC_RESOURCES } from './racialResourceCatalog'
+export { DND5E_RACIAL_RESOURCE_KEYS } from './racialResourceCatalog'
 
-export const DND5E_RACIAL_RESOURCE_KEYS = {
-  dragonbornBreath: 'dnd5e-racial-dragonborn-breath',
-  relentlessEndurance: 'dnd5e-racial-half-orc-relentless-endurance',
-  innateSpell: (spellId: string) => `dnd5e-racial-spell-${spellId}`,
-} as const
 
 export type Dnd5eDragonbornAncestryId =
   | 'black'
@@ -53,9 +51,10 @@ export interface Dnd5eRacialInnateSpellGrant {
   minimumLevel: number
   ability: AbilityKey
   castAtLevel: number
-  resetOn: 'at-will' | 'long-rest'
+  resetOn: 'at-will' | 'short-rest' | 'long-rest'
   /** Ordinary learned spells still require V/S/M; racial innate spells omit this flag. */
   requiresComponents?: boolean
+  targetRestriction?: 'self'
 }
 
 export interface Dnd5eRacialRulesSnapshot {
@@ -135,21 +134,25 @@ export function dnd5eRacialRulesForCharacter(
  * execution mode.
  */
 export function dnd5eIndependentSpellRulesForCharacter(
-  character: RacialCharacterIdentity & Pick<Character, 'dnd5eContentChoices'>,
+  character: RacialCharacterIdentity & Pick<Character, 'dnd5eContentChoices'> & Partial<Character>,
 ): Dnd5eRacialRulesSnapshot {
   const racial = dnd5eRacialRulesForCharacter(character)
   const known = new Set(racial.innateSpells.map((grant) => grant.spellId))
-  const buildSpells = dnd5eCharacterBuildSpellGrantsV1(character).flatMap((grant) => {
+  const featureGrants = registeredDnd5ePluginFeatures().flatMap(feature =>
+    feature.spellGrants?.length && character.level >= (feature.minimumLevel ?? 1) && dnd5eCharacterHasPluginFeature(character as Character, feature.id)
+      ? feature.spellGrants : [])
+  const buildSpells = [...dnd5eCharacterBuildSpellGrantsV1(character), ...featureGrants].flatMap((grant) => {
     if (known.has(grant.spellId) || !grant.ability) return []
-    if (grant.mode !== 'cantrip' && grant.mode !== 'once-per-long-rest') return []
+    if (grant.mode !== 'cantrip' && grant.mode !== 'at-will' && grant.mode !== 'once-per-long-rest' && grant.mode !== 'once-per-short-rest') return []
     known.add(grant.spellId)
     return [{
       spellId: grant.spellId,
       minimumLevel: 1,
       ability: grant.ability,
       castAtLevel: grant.mode === 'cantrip' ? 0 : grant.castAtLevel ?? 1,
-      resetOn: grant.mode === 'cantrip' ? 'at-will' as const : 'long-rest' as const,
+      resetOn: grant.mode === 'cantrip' || grant.mode === 'at-will' ? 'at-will' as const : grant.mode === 'once-per-short-rest' ? 'short-rest' as const : 'long-rest' as const,
       requiresComponents: true,
+      ...(grant.targetRestriction ? { targetRestriction: grant.targetRestriction } : {}),
     }]
   })
   return {
@@ -174,7 +177,7 @@ export function dnd5eRacialResourceDefinitions(
   if (rules.dragonbornAncestry) {
     definitions.push({
       key: DND5E_RACIAL_RESOURCE_KEYS.dragonbornBreath,
-      label: '龙裔吐息',
+      label: DND5E_RACIAL_STATIC_RESOURCES.dragonbornBreath.name,
       shortLabel: '吐息',
       isAvailable: () => true,
       max: () => 1,
@@ -184,7 +187,7 @@ export function dnd5eRacialResourceDefinitions(
   if (rules.halfOrcRelentlessEndurance) {
     definitions.push({
       key: DND5E_RACIAL_RESOURCE_KEYS.relentlessEndurance,
-      label: '顽强',
+      label: DND5E_RACIAL_STATIC_RESOURCES.relentlessEndurance.name,
       shortLabel: '顽强',
       isAvailable: () => true,
       max: () => 1,
@@ -199,7 +202,7 @@ export function dnd5eRacialResourceDefinitions(
       shortLabel: spell.spellId,
       isAvailable: () => true,
       max: () => 1,
-      resetOn: 'long-rest',
+      resetOn: spell.resetOn,
     })
   }
   return definitions

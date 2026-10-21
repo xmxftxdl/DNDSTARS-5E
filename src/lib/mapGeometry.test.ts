@@ -1030,3 +1030,45 @@ describe('map geometry', () => {
     })).toBe(false)
   })
 })
+
+it('checks exact points without borrowing visible token corners or target eye height', async () => {
+  const { mapGeometryCanSeePoint } = await import('./mapGeometry')
+  const g = createEmptyMapGeometry(map.id)
+  g.vision = { enabled: true, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }
+  g.walls.push({ id: 'screen', kind: 'wall', label: 'Screen', points: [{ x: 100, y: 0 }, { x: 100, y: 52 }], blocksVision: true, blocksMovement: false, blocksLineOfEffect: false, baseHeightFeet: 0, heightFeet: 10, createdAt: 1 })
+  const viewer = token('viewer', 50, 50)
+  const point = { x: 150, y: 50, elevationFeet: 0 }
+  expect(mapGeometryCanSeeToken({ map, geometry: g, viewer, target: token('target', point.x, point.y) })).toBe(true)
+  expect(mapGeometryCanSeePoint({ map, geometry: g, viewer, point })).toBe(false)
+  g.walls[0].heightFeet = 1.5
+  g.walls[0].points[1].y = 500
+  expect(mapGeometryCanSeeToken({ map, geometry: g, viewer, target: token('target', point.x, point.y) })).toBe(true)
+  expect(mapGeometryCanSeePoint({ map, geometry: g, viewer, point })).toBe(false)
+})
+
+it('checks point illumination, exact sense range and blindness even with dynamic vision disabled', async () => {
+  const { mapGeometryCanSeePoint } = await import('./mapGeometry')
+  const g = createEmptyMapGeometry(map.id)
+  g.vision = { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'darkness' }
+  const viewer = token('viewer', 25, 25)
+  const point = { x: 125, y: 25, elevationFeet: 0 }
+  const canSee = (patch: Partial<Token> = {}, viewerBlinded = false) => mapGeometryCanSeePoint({ map, geometry: g, viewer: { ...viewer, ...patch }, point, viewerBlinded })
+  expect(canSee()).toBe(false)
+  expect(canSee({ darkvisionRangeFeet: 10 })).toBe(true)
+  expect(canSee({ darkvisionRangeFeet: 9 })).toBe(false)
+  expect(canSee({ darkvisionRangeFeet: 10 }, true)).toBe(false)
+  expect(canSee({ blindsightRangeFeet: 10 }, true)).toBe(true)
+  expect(canSee({ tremorsenseRangeFeet: 60 })).toBe(false)
+})
+
+it('requires a darkness-piercing sense for magical darkness at the exact point', async () => {
+  const { mapGeometryCanSeePoint } = await import('./mapGeometry')
+  const g = createEmptyMapGeometry(map.id)
+  g.darknessFog = { ...createEmptyMapFog(map.id, 1), shapes: [{ id: 'dark', kind: 'rect', operation: 'cover', createdAt: 1, x: 100, y: 0, width: 100, height: 100 }] }
+  const point = { x: 125, y: 25, elevationFeet: 0 }, viewer = token('viewer', 25, 25)
+  const canSee = (patch: Partial<Token>) => mapGeometryCanSeePoint({ map, geometry: g, viewer: { ...viewer, ...patch }, point })
+  expect(canSee({ darkvisionRangeFeet: 60 })).toBe(false)
+  expect(canSee({ magicalDarknessSightRangeFeet: 10 })).toBe(true)
+  expect(canSee({ truesightRangeFeet: 10 })).toBe(true)
+  expect(canSee({ truesightRangeFeet: 9 })).toBe(false)
+})

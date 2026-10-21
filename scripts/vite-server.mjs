@@ -151,7 +151,7 @@ const server = await createServer({
     host,
     port,
     strictPort,
-    watch: { ignored: ['**/.codex-temp/**'] },
+    watch: { ignored: ['**/.codex-temp/**', '**/.codex-logs/**'] },
   },
 })
 

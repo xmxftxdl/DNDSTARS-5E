@@ -40,3 +40,6 @@ __pycache__/
 *.njsproj
 *.sln
 *.sw?
+
+# Local automation diagnostics and temporary fixtures
+.codex-logs/

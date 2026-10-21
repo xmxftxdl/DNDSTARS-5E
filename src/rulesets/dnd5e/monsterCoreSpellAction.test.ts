@@ -1,7 +1,9 @@
+import { registerDnd5eRulesPlugin } from './pluginApi'
+import { prepareDnd5eRandomTargetMonsterSpell, dnd5eMonsterSpellIntentWithPreparedTargets } from './randomMonsterSpellTargets'
 import { planDnd5eMapResultApplication } from './mapBridge'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
-import type { BattleMap, Token } from '../../store/maps'
+import type { BattleMap, Token, Dnd5ePluginArea } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   dnd5eAvailableMonsterSpellSlotLevels,
@@ -28,6 +30,7 @@ import { getDnd5eSrdCombatSpell } from './spells'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import {
   dnd5eCombatantPairKey,
+  dnd5eHeadlessTurnKey,
   resolveDnd5eHeadlessAction,
 } from './headlessCombatEngine'
 
@@ -80,6 +83,35 @@ function character(): Character {
   }
 }
 
+it.each([1, 20, undefined])('passes monster missile Shield casting saves through the map adapter: %s', d20 => {
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: 'defender',
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  const caster = token({ id: 'caster', poolId: 'srd-5.1:mage',
+    dnd5eCombatState: { monsterSpellSlots: { 1: { current: 1, max: 1 } } } })
+  const defender = token({ id: 'defender', x: 35, poolId: 'srd-5.1:mage', dnd5eSide: 'player',
+    dnd5eCombatState: { activeEffects: [pain], monsterSpellSlots: { 1: { current: 1, max: 1 } } } })
+  const map = battleMap([caster, defender])
+  const ready = prepareDnd5eMonsterCoreSpell({ combatId: 'pain-shield', map, characters: [],
+    initiativeOrder: initiative(map.tokens), actorTokenId: caster.id, targetTokenIds: [defender.id],
+    spellId: 'magic-missile', slotLevel: 1 })
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const resolved = resolvePreparedDnd5eMonsterCoreSpell({ prepared: ready.prepared,
+    shieldSpellcastingSavingThrows: d20 == null ? undefined : { defender: [{ effectId: pain.id, d20 }] },
+    resolution: { projectileTargetIds: ['defender', 'defender', 'defender'], effectRolls: [[4], [3], [2]] } })
+  expect(resolved.result.ok).toBe(d20 != null)
+  if (d20 == null) {
+    expect(resolved.application).toBeUndefined()
+    expect(resolved.result.state.combatants.defender.classState.monsterSpellSlots?.[1].current).toBe(1)
+    expect(resolved.result.state.combatants.caster.classState.monsterSpellSlots?.[1].current).toBe(1)
+    return
+  }
+  expect(resolved.result.state.combatants.defender.currentHp).toBe(d20 === 20 ? 40 : 28)
+  expect(resolved.result.state.combatants.defender.classState.monsterSpellSlots?.[1].current).toBe(0)
+  expect(resolved.result.state.combatants.caster.classState.monsterSpellSlots?.[1].current).toBe(0)
+  expect(defender.dnd5eCombatState?.monsterSpellSlots?.[1].current).toBe(1)
+})
+
 function battleMap(tokens: Token[]): BattleMap {
   return {
     id: 'map',
@@ -106,6 +138,60 @@ function initiative(tokens: readonly Token[]) {
 }
 
 describe('monster core spell map action', () => {
+  it.each([true, false])('forwards a marked target counter through monster spell settlement (hit=%s)', hit => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'test.spell-counter', name: 'Counter', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0' },
+      setup(api) { api.registerDeclarativeSubclass({ schemaVersion: 1, id: 'hunter', name: 'Hunter',
+        classId: 'ranger', summary: 'Synthetic', abilities: [{
+          schemaVersion: 1, id: 'counter', name: 'Counter', description: 'Synthetic', level: 15,
+          trigger: { kind: 'before-saving-throw' }, cost: { economy: 'reaction' },
+          targeting: { kind: 'self' }, effects: [], automation: 'full',
+          mechanic: { kind: 'saving-throw-weapon-counterattack', markEffectDefinitionId: 'prey' },
+        }] }) },
+    })
+    try {
+      const mage = token({ id: 'mage', poolId: 'srd-5.1:mage', hp: 50, maxHp: 50,
+        dnd5eCombatState: { monsterSpellSlots: { 3: { current: 1, max: 1 } } } })
+      const hunterToken = token({ id: 'hunter', type: 'player', characterId: 'hero', x: 55 })
+      const map = battleMap([mage, hunterToken])
+      const ready = prepareDnd5eMonsterCoreSpell({ combatId: 'spell-counter', map, characters: [character()],
+        initiativeOrder: initiative(map.tokens), actorTokenId: mage.id, targetTokenIds: [hunterToken.id],
+        spellId: 'fireball', slotLevel: 3, areaTargetCell: { col: 5, row: 0 } })
+      expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+      if (!ready.ok) throw Error('counter spell preparation failed')
+      const hunter = ready.prepared.state.combatants.hunter
+      hunter.classId = 'ranger'; hunter.classLevels = { ranger: 15 }; hunter.level = 15
+      hunter.subclassIds = { ranger: 'test.spell-counter:hunter' }
+      hunter.pluginFeatureIds = ['test.spell-counter:hunter.counter']
+      const mark = createDnd5eMechanicalEffect({ definitionId: 'prey', label: 'Prey', targetId: 'hunter',
+        source: { kind: 'plugin', actorId: 'hunter', pluginId: 'test.spell-counter' },
+        modifiers: { onHitBonusDamage: { count: 1, sides: 6, bonus: 0, damageType: 'inherit-primary',
+          appliesTo: 'all-weapon-attacks', doubleDiceOnCritical: true, oncePerTurn: true,
+          consumeEffectOnHit: false, boundTargetId: 'mage' } } })
+      hunter.classState.activeEffects = [mark]
+      const before = structuredClone(ready.prepared.state)
+      const settled = resolvePreparedDnd5eMonsterCoreSpell({ prepared: ready.prepared,
+        savingThrowCounterattacks: [{ targetId: 'hunter', sourceId: 'mage', ability: 'dex',
+          occurrence: 0, featureId: 'test.spell-counter:hunter.counter', attack: {
+            type: 'attack', actorId: 'hunter', targetId: 'mage', attackModifier: 20, d20: hit ? 18 : 1,
+            damage: { count: 1, sides: 6, bonus: 0, rolls: hit ? [2] : [], type: 'piercing' },
+            classDamageContext: { mode: 'ranged', weaponId: 'bow', finesse: false, strengthBased: false,
+              weaponDamageSides: 6, damageType: 'piercing', adjacentEnemyOfTarget: false },
+            classDamageRolls: hit ? [{ source: 'activity-effect-rider', rollId: `activity-on-hit:${mark.id}`, rolls: [4] }] : [],
+          } }],
+        resolution: { targetSavingThrows: [{ targetId: 'hunter', d20: hit ? 0 : 1 }],
+          effectRolls: [Array(8).fill(2)] },
+      })
+      expect(settled.result.ok, settled.result.ok ? '' : settled.result.reason).toBe(true)
+      expect(ready.prepared.state).toEqual(before)
+      expect(settled.application).toBeDefined()
+      expect(settled.result.state.combatants.mage.currentHp).toBe(hit ? 44 : 50)
+      expect(settled.result.state.combatants.hunter.currentHp).toBe(before.combatants.hunter.currentHp - (hit ? 8 : 16))
+      expect(settled.result.state.combatants.hunter.turn.reactionAvailable).toBe(false)
+      expect(settled.result.state.combatants.mage.classState.monsterSpellSlots?.[3].current).toBe(0)
+    } finally { dispose() }
+  })
   afterEach(() => setMapGeometryRuntime([]))
 
   it('prepares and resolves a listed SRD spell through the authoritative map snapshot', () => {
@@ -1827,4 +1913,325 @@ it('uses the same deferred resource timing for an automated monster area spell',
   expect(cast.createdAreaId).toBeTruthy()
   expect(cast.result.state.combatants[drow.id].classState.slowSpellGate).toBeUndefined()
   expect(cast.result.state.combatants[drow.id].classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
+})
+
+
+it.each([{spellId:'fire-bolt',delay:false},{spellId:'magic-missile',delay:false},{spellId:'fire-bolt',delay:true},{spellId:'magic-missile',delay:true}])('randomizes actual monster $spellId targets and damage (delay=$delay)', ({spellId,delay}) => {
+  const effect = createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies', targetId: 'mage',
+    source: { kind: 'spell' }, modifiers: { perceiveVisibleCreaturesAsHostile: true, randomVisibleCreatureTargets: true } })
+  const mage = token({ id: 'mage', poolId: 'srd-5.1:mage', dnd5eCombatState: { activeEffects: [effect] } })
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', x: 35 })
+  const enemy = token({ id: 'enemy', type: 'player', x: 45 })
+  const hidden = token({ id: 'hidden', x: 55, dnd5eCombatState: { activeEffects: [createDnd5eConditionEffect({
+    condition: 'invisible', targetId: 'hidden', source: { kind: 'dm' } })] } })
+  const map = battleMap([mage, ally, enemy, hidden, token({ id: 'far', x: 1000 })])
+  const projectiles = spellId === 'magic-missile'
+  let choices = 0
+  const input = { combatId: 'monster-random-spell', map, characters: [], initiativeOrder: initiative([mage]),
+    actorTokenId: mage.id, targetTokenIds: ['enemy'], spellId, slotLevel: projectiles ? 1 : 0,
+    projectileTargetIds: projectiles ? ['enemy', 'enemy', 'enemy'] : undefined,
+    chooseRandomTarget: (occurrence: number, ids: readonly string[]) => {
+      expect([...ids].sort()).toEqual(['ally', 'enemy']); choices++; return occurrence === 1 ? 'enemy' : 'ally'
+    } }
+  let prepared = prepareDnd5eRandomTargetMonsterSpell(input)
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(choices).toBe(projectiles ? 3 : 1)
+  if (delay) {
+    const ready = prepared.prepared
+    ready.state.combatants.mage.classState.activeEffects!.push(createDnd5eMechanicalEffect({
+      definitionId: 'test:slow', label: 'Slow', targetId: 'mage', source: { kind: 'spell' },
+      modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 } } }))
+    const intent = dnd5eMonsterSpellIntentWithPreparedTargets({ spellId, spellName: spellId, slotLevel: input.slotLevel,
+      targetTokenIds: input.targetTokenIds, projectileTargetIds: input.projectileTargetIds,
+      effect: ready.spell.effect, diceCount: ready.diceCount, diceSides: ready.spell.dice.sides, castingTime: ready.spell.castingTime }, ready)
+    const deferred = resolveDnd5eHeadlessAction(ready.state, { type: 'check-slow-spell', actorId: 'mage',
+      requestId: 'delayed-random', spellId, spellName: spellId, slotLevel: input.slotLevel, d20: 20,
+      intent: { kind: 'monster-core', spell: intent } })
+    expect(deferred.ok).toBe(true)
+    expect(deferred.state.combatants.ally.currentHp).toBe(40)
+    const state = JSON.parse(JSON.stringify(deferred.state)) as typeof deferred.state
+    state.round += 1
+    state.combatants.mage.turn.actionAvailable = true
+    const saved = planDnd5eMapResultApplication({ state, map, characters: [], characterIdByCombatantId: ready.characterIdByCombatantId })
+    const invalidMap = JSON.parse(JSON.stringify(saved.map)) as BattleMap
+    invalidMap.tokens.find(t => t.id === 'ally')!.x = 1000
+    expect(prepareDnd5eRandomTargetMonsterSpell({ ...input, map: invalidMap, round: state.round,
+      chooseRandomTarget: () => { throw Error('Invalid saved target must not reroll') } })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
+    prepared = prepareDnd5eRandomTargetMonsterSpell({ ...input, map: JSON.parse(JSON.stringify(saved.map)), round: state.round,
+      chooseRandomTarget: () => { throw Error('Delayed completion must not reroll targets') } })
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+    if (!prepared.ok) throw Error(prepared.reason)
+    expect(prepared.prepared.targetTokens.map(t => t.id)).toEqual(projectiles ? ['ally', 'enemy'] : ['ally'])
+  }
+  const initialSlot = prepared.prepared.state.combatants.mage.classState.monsterSpellSlots?.['1']?.current
+  const resolved = resolvePreparedDnd5eMonsterCoreSpell({ prepared: prepared.prepared, resolution: projectiles
+    ? { projectileTargetIds: prepared.prepared.randomizedProjectileTargetIds, effectRolls: [[1], [2], [3]] }
+    : { d20: 19, d20Second: 19, effectRolls: [[5, 6]] } })
+  expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+  expect(resolved.result.state.combatants.ally.currentHp).toBe(projectiles ? 34 : 29)
+  if (projectiles) expect(resolved.result.state.combatants.enemy.currentHp).toBe(37)
+  expect(resolved.result.state.combatants.mage.classState.monsterSpellSlots?.['1']?.current).toBe(initialSlot! - (projectiles ? 1 : 0))
+  expect(resolved.result.state.initiativeOrder).toEqual(['mage'])
+  expect(ally.hp).toBe(40)
+  effect.suspendedBy = ['antimagic-test']
+  const suspended = prepareDnd5eRandomTargetMonsterSpell({ ...input, chooseRandomTarget: () => { throw Error('Must not randomize') } })
+  expect(suspended.ok).toBe(true)
+  if (suspended.ok) expect(suspended.prepared.targetTokens.map(t => t.id)).toEqual(['enemy'])
+})
+
+  it.each([1,20])('checks a monster casting save before Magic Missile effects: %s', d20 => {
+    const pain=createDnd5eMechanicalEffect({definitionId:'pain',label:'Pain',targetId:'mage',source:{kind:'spell',actorId:'hero-token'},spellcastingSave:{ability:'con',dc:18}})
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: {
+        monsterSpellSlots: { 1: { current: 1, max: 1 } }, activeEffects:[pain],
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: '英雄',
+      type: 'player',
+      characterId: 'hero',
+      x: 35,
+    })
+    const map = battleMap([mage, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'magic-missile-map',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'magic-missile',
+      slotLevel: 1,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      spellcastingSavingThrows:[{effectId:pain.id,d20}],
+      resolution: {
+        projectileTargetIds: [heroToken.id, heroToken.id, heroToken.id],
+        effectRolls: d20 === 20 ? [[4], [3], [2]] : [],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0].currentHp).toBe(d20===20?28:40)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id)
+      ?.dnd5eCombatState?.monsterSpellSlots?.['1'].current).toBe(0)
+  })
+
+
+it.each(['thunderwave', 'darkness'] as const)('does not produce map effects after prevented %s casting', spellId => {
+  const id = 'prevented-caster'
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: id,
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  const caster = token({ id, poolId: spellId === 'thunderwave' ? 'srd-5.1:druid' : 'srd-5.1:drow',
+    dnd5eCombatState: { activeEffects: [pain], monsterSpellSlots: { 1: { current: 1, max: 1 } } } })
+  const hero = token({ id: 'hero-token', type: 'player', characterId: 'hero', x: 25, y: 5 })
+  const map = battleMap([caster, hero])
+  const ready = prepareDnd5eMonsterCoreSpell({ combatId: 'prevented-area', map, characters: [character()],
+    initiativeOrder: initiative(map.tokens), actorTokenId: id, targetTokenIds: spellId === 'thunderwave' ? [hero.id] : [],
+    areaTargetCell: spellId === 'thunderwave' ? { col: 2, row: 0 } : { col: 3, row: 3 },
+    spellId, slotLevel: spellId === 'thunderwave' ? 1 : 2 })
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const result = resolvePreparedDnd5eMonsterCoreSpell({ prepared: ready.prepared,
+    spellcastingSavingThrows: [{ effectId: pain.id, d20: 1 }], resolution: { effectRolls: [] } })
+  expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+  if (!result.result.ok) return
+  expect(result.result.events).toContainEqual({ type: 'spellcasting-prevented', actorId: id })
+  expect(result.application?.map.tokens.find(t => t.id === hero.id)).toMatchObject({ x: 25, y: 5 })
+  expect(result.application?.characters[0].currentHp).toBe(40)
+  expect(result.application?.map.dnd5ePluginAreas ?? []).toHaveLength(0)
+  expect(result.createdAreaId).toBeUndefined()
+  expect(result.airborneFalls ?? []).toHaveLength(0)
+})
+it.each([1, 20, undefined])('checks pain once when a monster starts a delayed spell: %s', d20 => {
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: 'drow',
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  const slow = createDnd5eMechanicalEffect({ definitionId: 'slow', label: 'Slow', targetId: 'drow',
+    source: { kind: 'spell' }, modifiers: { actionSpellDelay: { dieSides: 20, delayMinimum: 11 } } })
+  const drow = token({ id: 'drow', poolId: 'srd-5.1:drow', dnd5eCombatState: { activeEffects: [pain, slow] } })
+  const map = battleMap([drow])
+  const prepare = (map: BattleMap, round: number) => prepareDnd5eMonsterCoreSpell({ combatId: 'pain-delayed', round,
+    map, characters: [], initiativeOrder: initiative(map.tokens), actorTokenId: 'drow', targetTokenIds: [],
+    spellId: 'darkness', slotLevel: 2, areaTargetCell: { col: 3, row: 3 } })
+  const ready = prepare(map, 1)
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok) return
+  const result = resolvePreparedDnd5eMonsterCoreSpell({ prepared: ready.prepared,
+    spellcastingSavingThrows: d20 == null ? undefined : [{ effectId: pain.id, d20 }],
+    resolution: { effectRolls: [], slowSpellDelayD20: 20, slowSpellIntent: {
+      spellId: 'darkness', spellName: 'Darkness', slotLevel: 2, targetTokenIds: [], effect: 'persistent-area',
+      diceCount: 0, diceSides: 4, castingTime: 'action', areaTargetCell: { col: 3, row: 3 } } } })
+  expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(d20 != null)
+  if (!result.result.ok) {
+    expect(result.result.state.combatants.drow.classState.monsterSpellUsesBySpellId?.darkness.current).toBe(1)
+    return
+  }
+  expect(result.result.state.combatants.drow.classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
+  expect(result.result.state.combatants.drow.turn.actionAvailable).toBe(false)
+  expect(result.result.state.combatants.drow.classState.slowDelayedMonsterSpell != null).toBe(d20 === 20)
+  expect(result.result.events.filter(e => e.type === 'saving-throw-resolved')).toHaveLength(1)
+  expect(result.application?.map.dnd5ePluginAreas ?? []).toHaveLength(0)
+  if (d20 !== 20) return
+  const resumed = prepare(JSON.parse(JSON.stringify(result.application!.map)), 2)
+  expect(resumed.ok, resumed.ok ? '' : resumed.reason).toBe(true)
+  if (!resumed.ok) return
+  const completed = resolvePreparedDnd5eMonsterCoreSpell({ prepared: resumed.prepared,
+    resolution: { effectRolls: [], completeSlowSpell: true } })
+  expect(completed.result.ok, completed.result.ok ? '' : completed.result.reason).toBe(true)
+  expect(completed.result.events.filter(e => e.type === 'saving-throw-resolved')).toHaveLength(0)
+  expect(completed.result.state.combatants.drow.classState.monsterSpellUsesBySpellId?.darkness.current).toBe(0)
+  expect(completed.createdAreaId).toBeTruthy()
+})
+it.each([false,true])('freezes water with a monster cold area, empty=%s',empty=>{
+ const mage=token({id:'mage',poolId:'srd-5.1:mage',x:25,y:225,dnd5eCombatState:{monsterSpellSlots:{5:{current:1,max:1}}}})
+ const hero=token({id:'hero-token',type:'player',characterId:'hero',x:425,y:225})
+ const map:BattleMap={...battleMap(empty?[mage]:[mage,hero]),width:1000,height:1000,gridSize:50,feetPerCell:5,dnd5ePluginAreas:[{
+  id:'water',pluginId:'test.water',featureId:'water',label:'Water',color:'#0ff',sourceCharacterId:'other',sourceTokenId:'other',
+  slotLevel:3,sourceSpellSaveDc:15,createdRound:1,expiresAfterRound:101,anchorMode:'fixed',anchorCell:{col:4,row:4},
+  cells:[{col:4,row:3},{col:4,row:4},{col:4,row:5}],rectGeometry:{lengthFeet:10,widthFeet:1,gridAligned:false,direction:{dc:0,dr:1}},
+  vertical:{mode:'volume',baseElevationFeet:0,heightFeet:10},blocking:{freezesOnColdSpell:true}}]}
+ if(!empty)expect(prepareDnd5eMonsterCoreSpell({combatId:'water-cone',map,characters:[character()],initiativeOrder:initiative(map.tokens),actorTokenId:'mage',targetTokenIds:[],spellId:'cone-of-cold',slotLevel:5,areaTargetCell:{col:8,row:4}})).toMatchObject({ok:false,reason:'invalid-target'})
+ const ready=prepareDnd5eMonsterCoreSpell({combatId:'water-cone',map,characters:[character()],initiativeOrder:initiative(map.tokens),
+  actorTokenId:'mage',targetTokenIds:empty?[]:[hero.id],spellId:'cone-of-cold',slotLevel:5,areaTargetCell:{col:8,row:4}})
+ expect(ready.ok,ready.ok?'':ready.reason).toBe(true)
+ if(!ready.ok)return
+ const result=resolvePreparedDnd5eMonsterCoreSpell({prepared:ready.prepared,resolution:{targetSavingThrows:empty?[]:[{targetId:hero.id,d20:1}],effectRolls:[Array(8).fill(1)]}})
+ expect(result.result.ok,result.result.ok?'':result.result.reason).toBe(true)
+ expect(result.application!.characters[0].currentHp).toBe(empty?40:32)
+ expect(result.application!.map.dnd5ePluginAreas!.filter(a=>a.linkedParentAreaId==='water')).toHaveLength(4)
+ expect(result.application!.map.tokens.find(t=>t.id==='mage')!.dnd5eCombatState!.monsterSpellSlots!['5'].current).toBe(0)
+})
+
+it.each(['bolt','ball-before','ball-after'] as const)('monster map cast respects water damage path: %s',mode=>{
+ const mage=token({id:'mage',poolId:'srd-5.1:mage',x:25,y:525,dnd5eCombatState:{monsterSpellSlots:{3:{current:1,max:1}}}})
+ const hero=token({id:'hero-token',type:'player',characterId:'hero',x:275,y:225})
+ const wall:Dnd5ePluginArea={id:'wall',pluginId:'test.wall',featureId:'wall',label:'Wall',color:'#0ff',sourceCharacterId:'owner',sourceTokenId:'actor',slotLevel:3,sourceSpellSaveDc:15,createdRound:1,expiresAfterRound:101,anchorMode:'fixed',anchorCell:{col:4,row:4},cells:Array.from({length:7},(_,i)=>({col:4,row:1+i})),rectGeometry:{widthFeet:1,lengthFeet:30,gridAligned:false,direction:{dc:0,dr:1}},vertical:{mode:'volume',baseElevationFeet:0,heightFeet:10},blocking:{halvedDamageTypes:['fire']}}
+
+ const map:BattleMap={...battleMap([mage,hero]),width:1000,height:1000,gridSize:50,feetPerCell:5,dnd5ePluginAreas:[wall]}
+ const bolt=mode==='bolt',areaTargetCell=bolt?undefined:{col:mode==='ball-after'?6:2,row:4}
+ const prepared=prepareDnd5eMonsterCoreSpell({combatId:'monster-water-path',map,characters:[character()],initiativeOrder:initiative(map.tokens),actorTokenId:mage.id,targetTokenIds:[hero.id],spellId:bolt?'fire-bolt':'fireball',slotLevel:bolt?0:3,areaTargetCell})
+ expect(prepared.ok,prepared.ok?'':prepared.reason).toBe(true)
+ if(!prepared.ok)return
+ const result=resolvePreparedDnd5eMonsterCoreSpell({prepared:prepared.prepared,resolution:bolt?{d20:15,effectRolls:[[6,7]]}:{targetSavingThrows:[{targetId:hero.id,d20:1}],effectRolls:[Array(8).fill(3)]}})
+ expect(result.result.ok,result.result.ok?'':result.result.reason).toBe(true)
+ expect(result.application?.characters[0].currentHp).toBe(40-(bolt?6:mode==='ball-before'?12:24))
+})
+
+
+it('authorizes legendary cantrip ward saves without a reaction or premature legendary point cost', () => {
+  const lich=token({id:'ward-lich',poolId:'srd-5.1:lich',dnd5eCombatState:{monsterLegendaryActionPoints:3}})
+  const hero=token({id:'ward-hero',type:'player',characterId:'hero',x:35})
+  const map=battleMap([hero,lich])
+  const ready=prepareDnd5eMonsterCoreSpell({combatId:'legendary-spell-ward',map,characters:[character()],
+    initiativeOrder:initiative(map.tokens),currentInitiativeIndex:0,actorTokenId:lich.id,targetTokenIds:[hero.id],
+    spellId:'ray-of-frost',slotLevel:0,legendaryActionId:'cantrip'})
+  expect(ready.ok,ready.ok?undefined:ready.reason).toBe(true);if(!ready.ok)throw Error(ready.reason)
+  const state=ready.prepared.state
+  state.combatants[lich.id].turn.reactionAvailable=false
+  const effect=createDnd5eMechanicalEffect({definitionId:'ward',label:'Ward',targetId:hero.id,source:{kind:'plugin',actorId:hero.id},
+    attackAttemptWard:{ability:'cha',dc:17,frequency:'once-per-turn',onFailure:'cannot-target-this-turn'}})
+  state.combatants[hero.id].classState.activeEffects=[effect]
+  const attempt={type:'attack-ward-attempt' as const,actorId:lich.id,targetId:hero.id,
+    turnKey:dnd5eHeadlessTurnKey(state,lich.id),legendaryActionId:'cantrip',legendarySpell:{spellId:'ray-of-frost',slotLevel:0},
+    saves:[{effectId:effect.id,targetId:lich.id,d20:1}]}
+  for(const patch of [{legendaryActionId:undefined},{legendaryActionId:'forged'},
+    {legendarySpell:{spellId:'acid-arrow',slotLevel:2}},{legendarySpell:{spellId:'ray-of-frost',slotLevel:1}},
+    {legendarySpell:{spellId:'mage-hand',slotLevel:0}},{deflectMissilesReturn:true as const}]) {
+    expect(resolveDnd5eHeadlessAction(state,{...attempt,...patch}).ok).toBe(false)
+  }
+  const exhausted=structuredClone(state);exhausted.combatants[lich.id].classState.monsterLegendaryActionPoints=0
+  expect(resolveDnd5eHeadlessAction(exhausted,attempt)).toMatchObject({ok:false,reason:'class-resource-unavailable'})
+  const ownTurn=structuredClone(state);ownTurn.initiativeIndex=1
+  expect(resolveDnd5eHeadlessAction(ownTurn,{...attempt,turnKey:dnd5eHeadlessTurnKey(ownTurn,lich.id)}).ok).toBe(false)
+  for(const d20 of [1,20]) {
+    const checked=resolveDnd5eHeadlessAction(state,{...attempt,saves:[{...attempt.saves[0],d20}]})
+    expect(checked.ok,checked.ok?undefined:checked.reason).toBe(true)
+    expect(checked.state.combatants[lich.id].classState.monsterLegendaryActionPoints).toBe(3)
+    expect(checked.state.combatants[lich.id].turn.reactionAvailable).toBe(false)
+    const resolved=resolvePreparedDnd5eMonsterCoreSpell({prepared:{...ready.prepared,state:checked.state},
+      resolution:{d20:18,effectRolls:[[2,2,2,2]]}}).result
+    expect(resolved.ok,resolved.ok?undefined:resolved.reason).toBe(d20===20)
+    expect(resolved.state.combatants[hero.id].currentHp).toBe(d20===20?32:40)
+    expect(resolved.state.combatants[lich.id].classState.monsterLegendaryActionPoints).toBe(d20===20?2:3)
+    expect(resolved.state.combatants[lich.id].turn.reactionAvailable).toBe(false)
+    expect(resolved.state.combatants[lich.id].turn.actionAvailable).toBe(true)
+  }
+})
+
+it('requires authoritative ward receipts before monster spell attack costs and leaves non-attack magic missile unaffected', () => {
+  const mage=token({id:'ward-mage',poolId:'srd-5.1:mage',dnd5eCombatState:{monsterSpellSlots:{1:{current:2,max:2}}}})
+  const hero=token({id:'ward-hero',type:'player',characterId:'hero',x:35})
+  const map=battleMap([mage,hero])
+  const effect=createDnd5eMechanicalEffect({definitionId:'ward',label:'Ward',targetId:hero.id,source:{kind:'plugin',actorId:hero.id},
+    attackAttemptWard:{ability:'cha',dc:17,frequency:'once-per-turn',onFailure:'cannot-target-this-turn'}})
+  const ready=prepareDnd5eMonsterCoreSpell({combatId:'monster-ward',map,characters:[character()],initiativeOrder:initiative(map.tokens),
+    actorTokenId:mage.id,targetTokenIds:[hero.id],spellId:'fire-bolt',slotLevel:0})
+  expect(ready.ok).toBe(true);if(!ready.ok)throw Error(ready.reason)
+  ready.prepared.state.combatants[hero.id].classState.activeEffects=[effect]
+  const cast=(state:typeof ready.prepared.state)=>resolvePreparedDnd5eMonsterCoreSpell({prepared:{...ready.prepared,state},resolution:{d20:18,effectRolls:[[5,6]]}})
+  const missing=cast(ready.prepared.state)
+  expect(missing.result.ok).toBe(false)
+  expect(missing.result.state.combatants[mage.id].turn.actionAvailable).toBe(true)
+  expect(missing.result.state.combatants[hero.id].currentHp).toBe(40)
+  for(const d20 of [1,20]){
+    const checked=resolveDnd5eHeadlessAction(ready.prepared.state,{type:'attack-ward-attempt',actorId:mage.id,targetId:hero.id,
+      turnKey:dnd5eHeadlessTurnKey(ready.prepared.state,mage.id),saves:[{effectId:effect.id,targetId:mage.id,d20}]})
+    expect(checked.ok).toBe(true)
+    const resolved=cast(checked.state)
+    expect(resolved.result.ok).toBe(d20===20)
+    expect(resolved.result.state.combatants[hero.id].currentHp).toBe(d20===20?29:40)
+    expect(resolved.result.state.combatants[mage.id].turn.actionAvailable).toBe(d20===1)
+    expect(resolved.result.events.filter(e=>e.type==='saving-throw-resolved'&&e.ability==='cha')).toHaveLength(0)
+  }
+  const missile=prepareDnd5eMonsterCoreSpell({combatId:'monster-ward',map,characters:[character()],initiativeOrder:initiative(map.tokens),
+    actorTokenId:mage.id,targetTokenIds:[hero.id],spellId:'magic-missile',slotLevel:1})
+  expect(missile.ok).toBe(true);if(!missile.ok)throw Error(missile.reason)
+  missile.prepared.state.combatants[hero.id].classState.activeEffects=[effect]
+  const resolved=resolvePreparedDnd5eMonsterCoreSpell({prepared:missile.prepared,resolution:{projectileTargetIds:[hero.id,hero.id,hero.id],effectRolls:[[2],[2],[2]]}})
+  expect(resolved.result.ok,resolved.result.ok?undefined:resolved.result.reason).toBe(true)
+  expect(resolved.result.state.combatants[hero.id].currentHp).toBeLessThan(40)
+})
+
+
+it.each([1, 20])('does not materialize a monster area canceled by source interruption (save=%s)', savingThrowD20 => {
+  const featureId = 'test.map-interruption:watcher.interrupt'
+  const usesId = 'test.map-interruption:decl-watcher-interrupt-uses'
+  const dispose = registerDnd5eRulesPlugin({ manifest: { id: 'test.map-interruption', name: 'Map interruption', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+    api.registerDeclarativeSubclass({ schemaVersion: 1, id: 'watcher', classId: 'ranger', name: 'Watcher', summary: 'Synthetic', abilities: [{
+      schemaVersion: 1, id: 'interrupt', name: 'Interrupt', description: 'Synthetic', level: 11,
+      trigger: { kind: 'before-spell-effect' }, cost: { economy: 'reaction', uses: 1 }, targeting: { kind: 'self' },
+      limits: { uses: { kind: 'fixed', value: 1 }, reset: 'short-rest' }, effects: [],
+      mechanic: { kind: 'source-action-interruption', events: ['spell-cast', 'teleport'], rangeFeet: 60, saveAbility: 'wis', dcAbility: 'wis' }, automation: 'full',
+    }] })
+  } })
+  try {
+    const caster = token({ id: 'drow-interrupted', poolId: 'srd-5.1:drow' })
+    const hero = token({ id: 'hero-token', type: 'player', characterId: 'hero', x: 25, y: 5 })
+    const map = battleMap([caster, hero])
+    const ready = prepareDnd5eMonsterCoreSpell({ combatId: 'interrupted-area', map, characters: [character()],
+      initiativeOrder: initiative(map.tokens), actorTokenId: caster.id, targetTokenIds: [],
+      areaTargetCell: { col: 3, row: 3 }, spellId: 'darkness', slotLevel: 2 })
+    expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+    if (!ready.ok) return
+    // This adapter test supplies an already-authorized reactor snapshot; import/learning is tested separately.
+    const watcher = ready.prepared.state.combatants[hero.id]
+    Object.assign(watcher, { classId: 'ranger', level: 11, classLevels: { ranger: 11 },
+      subclassIds: { ranger: 'test.map-interruption:watcher' }, pluginFeatureIds: [featureId],
+      abilities: { ...watcher.abilities, wis: 18 }, proficiencyBonus: 4,
+      classResources: { [usesId]: { current: 1, max: 1 } } })
+    const result = resolvePreparedDnd5eMonsterCoreSpell({ prepared: ready.prepared, resolution: { effectRolls: [] },
+      sourceActionInterruptionReaction: { actorId: hero.id, featureId, savingThrowD20 } })
+    expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(true)
+    expect(result.application?.map.dnd5ePluginAreas ?? []).toHaveLength(savingThrowD20 === 1 ? 0 : 1)
+    expect(Boolean(result.createdAreaId)).toBe(savingThrowD20 === 20)
+    expect(result.result.state.combatants[hero.id].classResources[usesId].current).toBe(0)
+    expect(result.result.state.combatants[caster.id].turn.actionAvailable).toBe(false)
+  } finally { dispose() }
 })

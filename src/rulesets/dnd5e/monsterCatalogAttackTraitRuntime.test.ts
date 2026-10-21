@@ -8,6 +8,10 @@ import {
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
 import { createDnd5eMechanicalEffect } from './activeEffects'
+import {createEmptyMapGeometry} from '../../lib/mapGeometry'
+import {prepareDnd5eTempleForcedMovement} from './templeMovementSettlement'
+import {createDnd5eMapCombatSnapshot,planDnd5eMapResultApplication} from './mapBridge'
+import type {BattleMap} from '../../store/maps'
 import {
   getDnd5eSrdMonster,
   setDnd5eRoomMonsterCatalog,
@@ -117,6 +121,36 @@ function setDistance(
 
 describe('SRD precision attack traits in the Headless runtime', () => {
   afterEach(() => setDnd5eRoomMonsterCatalog([]))
+
+  it.each([true,false])('commits Minotaur Charge damage and temple entry together (allowed %s)',async allowed=>{
+    const monster=getDnd5eSrdMonster('srd-5.1:minotaur')!
+    const map:BattleMap={id:'temple-charge',name:'Temple',width:500,height:500,gridSize:5,feetPerCell:5,gridOffsetX:0,gridOffsetY:0,showGrid:true,
+      tokens:[{id:'actor',poolId:monster.id,label:'Minotaur',type:'enemy',x:0,y:25,size:1,color:'',emoji:''},
+        {id:'target',poolId:'srd-5.1:imp',label:'Imp',type:'enemy',x:15,y:25,size:1,color:'',emoji:'',hp:200,maxHp:200}]}
+    const geometry=createEmptyMapGeometry(map.id)
+    geometry.structureLifetimes=[{id:'temple',casterId:'builder',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:[],replacementGroup:'temple-of-the-gods',
+      objectBoundary:{points:[{x:20,y:0},{x:50,y:0},{x:50,y:50},{x:20,y:50}],bottomFeet:0,topFeet:20},
+      templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}]
+    const snapshot=createDnd5eMapCombatSnapshot({map,geometry,characters:[],combatId:map.id,worldMinute:100,
+      initiativeOrder:map.tokens.map((token,index)=>({tokenId:token.id,label:token.label,roll:20-index,color:'',emoji:''}))})
+    const moved=resolveDnd5eHeadlessAction(snapshot.state,{type:'move',actorId:'actor',to:{x:10,y:25},distance:10})
+    expect(moved.ok).toBe(true);if(!moved.ok)throw Error(moved.reason)
+    const entry=await prepareDnd5eTempleForcedMovement({state:moved.state,map,targetId:'target',to:{x:25,y:25},distanceFeet:10,
+      isCurrent:()=>true,roll:async()=>({d20:allowed?20:1,d20Second:allowed?20:1})})
+    expect(entry.ok).toBe(true);if(!entry.ok)throw Error(entry.reason)
+    const hit=resolveDnd5eHeadlessAction(entry.state,{type:'monster-action',actorId:'actor',actionId:'gore',rolls:[{
+      targetId:'target',d20:15,damageRolls:weaponDamageRolls(monster,'gore'),traitDamageRolls:[{traitId:'charge-damage',rolls:[4,5]}],
+      onHitEffectRolls:[{effectId:'charge:gore:forced-movement',d20:1,forcedMovement:{targetId:'target',to:{x:entry.allowed?25:15,y:25},distanceFeet:entry.allowed?10:0}}]}]})
+    expect(hit.ok,hit.ok?'':hit.reason).toBe(true);if(!hit.ok)throw Error(hit.reason)
+    expect(hit.state.combatants.target.currentHp).toBeLessThan(200)
+    expect(hit.state.combatants.target.position).toEqual({x:allowed?25:15,y:25})
+    expect(hit.state.combatants.target.conditions).toContain('prone')
+    const applied=planDnd5eMapResultApplication({state:hit.state,map,characters:[],characterIdByCombatantId:snapshot.characterIdByCombatantId,events:[...entry.events,...hit.events]})
+    const saved=JSON.parse(JSON.stringify(applied.map)).tokens.find((token:any)=>token.id==='target')
+    expect(saved.x).toBe(allowed?25:15)
+    expect(saved.hp).toBeLessThan(200)
+    expect(saved.dnd5eCombatState?.activeEffects?.some((effect:any)=>effect.definitionId==='temple-of-the-gods:entry-denied')??false).toBe(!allowed)
+  })
 
   it.each([
     ['boar', 20, 'tusk'],

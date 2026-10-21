@@ -1,3 +1,4 @@
+import type { Dnd5eOwnedCompanionMapContext } from '../../rulesets/dnd5e/ownedCompanionProximity'
 import type { CombatTransaction } from '../../lib/combatTransaction'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import {
@@ -5,6 +6,8 @@ import {
   normalizeDnd5eInventory,
 } from '../../rulesets/dnd5e/items'
 import type { Character } from '../../types/character'
+import type { Token } from '../../store/maps'
+import { dnd5eInventoryEntryUseAction } from '../../rulesets/dnd5e/items'
 import type { Dnd5eInventoryMutationFailure } from '../../types/inventory'
 
 export type Dnd5eAuthoritativeItemUseResult =
@@ -13,6 +16,7 @@ export type Dnd5eAuthoritativeItemUseResult =
       characters: Character[]
       source: Character
       target: Character
+      targetTokenPatch?: Pick<Token, 'dnd5eCombatState'>
       healingRolled?: number
       healingApplied?: number
       spellSlotLevel?: number
@@ -36,18 +40,27 @@ export function resolveDnd5eAuthoritativeItemUse(input: {
   characters: readonly Character[]
   sourceCharacterId: string
   targetCharacterId?: string
+  /** Authoritative map target; never taken from the player's effect payload. */
+  targetToken?: Token
   instanceId: string
   useActionId?: string
   healingRolls?: number[]
   spellSlotLevel?: number
+  healingContext?: Dnd5eOwnedCompanionMapContext
   turnEconomy?: Dnd5eTurnEconomyCounts
   transaction: CombatTransaction
 }): Dnd5eAuthoritativeItemUseResult {
   const source = input.characters.find((character) => character.id === input.sourceCharacterId)
   if (!source) return { ok: false, reason: 'character-not-found', transaction: input.transaction }
   const inventory = normalizeDnd5eInventory(source)
-  if (!inventory.entries.some((entry) => entry.instanceId === input.instanceId)) {
+  const entry = inventory.entries.find((entry) => entry.instanceId === input.instanceId)
+  if (!entry) {
     return { ok: false, reason: 'item-not-found', transaction: input.transaction }
+  }
+  const removal = dnd5eInventoryEntryUseAction(entry, input.useActionId)?.effect.kind === 'remove-active-effects'
+  const unlinkedTarget = removal && input.targetToken && !input.targetToken.characterId ? input.targetToken : undefined
+  if (unlinkedTarget?.type === 'obstacle' || (removal && input.targetToken?.characterId && input.targetToken.characterId !== input.targetCharacterId)) {
+    return { ok: false, reason: 'invalid-target', transaction: input.transaction }
   }
   const targetCharacterId = input.targetCharacterId ?? source.id
   if (!input.characters.some((character) => character.id === targetCharacterId)) {
@@ -64,8 +77,13 @@ export function resolveDnd5eAuthoritativeItemUse(input: {
     receiptId: input.transaction.id,
     expectedInventoryRevision: inventory.revision ?? 0,
   }, {
+    healingContext: input.healingContext,
     turnEconomy: input.turnEconomy,
     transaction: input.transaction,
+    effectRemovalTarget: unlinkedTarget ? {
+      activeEffects: unlinkedTarget.dnd5eCombatState?.activeEffects,
+      conditions: unlinkedTarget.dnd5eCombatState?.conditions ?? [],
+    } : undefined,
   })
   if (!result.ok) {
     return {
@@ -84,6 +102,9 @@ export function resolveDnd5eAuthoritativeItemUse(input: {
     characters: result.characters,
     source: nextSource,
     target: nextTarget,
+    targetTokenPatch: unlinkedTarget && result.effectRemovalTargetProjection ? {
+      dnd5eCombatState: { ...unlinkedTarget.dnd5eCombatState, ...result.effectRemovalTargetProjection },
+    } : undefined,
     healingRolled: result.healingRolled,
     healingApplied: result.healingApplied,
     spellSlotLevel: result.spellSlotLevel,

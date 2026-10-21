@@ -106,7 +106,7 @@ export default function D20RollConfirmationOverlay({
         ? onContinue()
         : playerCharacter
           ? (() => {
-              // Once a reroll was committed, a timeout must never replace it
+              // Once a choice was committed, a timeout must never replace it
               // with a character-level decline. Non-owner policies are settled
               // by the Host; owner-choice policies retain the original die.
               const contribution = d20RollConfirmationTimeoutContribution({

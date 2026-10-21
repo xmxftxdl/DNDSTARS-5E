@@ -9,6 +9,7 @@ export function additionalCombatLogDetails(event: Dnd5eCombatEvent, name: (id:st
   const outcome = (success: boolean) => success ? '成功' : '失败'
   const dice = (text: string) => hideDice ? '' : `｜${text}`
   switch(event.type) {
+    case 'activity-narrative-prompt': return [`${name(event.actorId)}｜${event.prompt}`]
     case 'halfling-lucky-rerolled': return [`${name(event.actorId)}｜幸运触发：第 ${event.dieIndex + 1} 颗骰子掷出 1，重新投掷${hideDice ? '' : `｜1 → ${event.reroll}`}`]
     case 'savage-attacks-applied': return [`${name(event.actorId)} → ${name(event.targetId)}｜凶蛮攻击：重击追加一颗武器伤害骰${hideDice ? '' : `｜结果 ${event.roll}`}${event.damageType ? `｜${DND5E_DAMAGE_TYPE_LABELS[event.damageType]}伤害` : ''}`]
     case 'relentless-endurance-triggered': return [`${name(event.actorId)}｜坚韧不屈：生命值降至 0 时触发，改为保留 1 点生命值`]
@@ -16,7 +17,7 @@ export function additionalCombatLogDetails(event: Dnd5eCombatEvent, name: (id:st
     case 'condition-attempted': return event.prevented ? [`${name(event.actorId)} → ${name(event.targetId)}｜尝试施加${dnd5eConditionLabel(event.condition)}，被防护或免疫阻止`] : []
     case 'teleportation-blocked-by-area': return [`${name(event.actorId)}｜${event.spellId}的传送被所在区域阻止，未发生位移`]
     case 'creature-revived': return [`${name(event.actorId)} → ${name(event.targetId)}｜复活完成，恢复 ${event.hitPoints} 点生命值${event.penalty ? `｜复活惩罚 ${event.penalty}` : ''}${event.casterStrained ? '｜施法者承受复活负担' : ''}`]
-    case 'hit-point-maximum-reduced': return [`${name(event.sourceId)} → ${name(event.targetId)}｜生命值上限降低 ${event.appliedAmount}：${event.maximumBefore} → ${event.maximumAfter}｜${event.recovery === 'long-rest' ? '长休后恢复' : '需高等复原术或其他恢复魔法'}`]
+    case 'hit-point-maximum-reduced': return [`${name(event.sourceId)} → ${name(event.targetId)}｜生命值上限降低 ${event.appliedAmount}：${event.maximumBefore} → ${event.maximumAfter}｜${event.recovery === 'long-rest' ? '长休后恢复' : event.recovery === 'effect-removal' ? '关联效果结束后恢复' : '需高等复原术或其他恢复魔法'}`]
     case 'ability-score-reduced': return [`${name(event.sourceId)} → ${name(event.targetId)}｜${abilities[event.ability]}降低 ${event.amount}：${event.scoreBefore} → ${event.scoreAfter}`]
     case 'armor-corroded': return [`${name(event.sourceId)} → ${name(event.targetId)}｜护甲腐蚀，护甲等级降至 ${event.armorClassAfter}${event.destroyed ? '｜护甲已损毁' : ''}`]
     case 'divine-intervention-resolved': return [`${name(event.actorId)}｜神圣干预${event.automatic ? '（自动成功）' : hideDice ? '' : `｜百分骰 ${event.d100 ?? '未记录'}`}｜${event.success ? '回应成功' : '未获得回应'}${event.cooldownDays ? `｜${event.cooldownDays} 天后可再次使用` : ''}`]
@@ -47,7 +48,7 @@ export function additionalCombatLogDetails(event: Dnd5eCombatEvent, name: (id:st
     case 'command-turn-resolved': return [`${name(event.actorId)}｜执行命令：${{'approach':'靠近','drop':'放下','flee':'逃离','grovel':'趴下','halt':'停下','other':'其他命令'}[event.mode]}｜放下物品 ${targets(event.droppedItemIds)}${event.endedTurn ? '｜回合结束' : ''}`]
     case 'creatures-sensed': return [`${name(event.actorId)}｜感知到生物：${targets(event.targetIds)}`]
     case 'creature-types-sensed': return [`${name(event.actorId)}｜感知生物类型：${event.creatureTypes.join('、')}｜持续 ${event.durationRounds} 回合`]
-    case 'communication-opened': return [`${name(event.actorId)} → ${name(event.targetId)}｜魔法低语已送达${event.allowsImmediateReply ? '，目标可立即回复' : ''}`]
+    case 'communication-opened': return [`${name(event.actorId)} → ${name(event.targetId)}｜${event.medium==='telepathy'?'心灵沟通已建立':'魔法低语已送达'}${event.allowsImmediateReply ? '，目标可立即回复' : ''}`]
     case 'draconic-presence-save-required': return [`${name(event.targetId)}｜受到 ${name(event.sourceId)} 的龙威${event.mode === 'awe' ? '震慑' : '恐惧'}影响，等待豁免${dice(`难度 ${event.dc}`)}`]
     case 'undead-fortitude-save-required': return [`${name(event.targetId)}｜亡灵坚韧：受到 ${event.damage} 点伤害后等待豁免${dice(`难度 ${event.dc}`)}`]
     case 'monster-on-hit-save-required': return [`${name(event.sourceId)} → ${name(event.targetId)}｜攻击命中触发${event.condition === 'disease' ? '疾病' : dnd5eConditionLabel(event.condition)}判定，等待${abilities[event.ability]}豁免${dice(`难度 ${event.dc}`)}`]

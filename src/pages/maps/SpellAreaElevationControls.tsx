@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react'
 import type { Dnd5eSpellTargetingSession } from '../../application/combat/spells/SpellTargetingContracts'
 import { dnd5eAreaRequiresGround } from '../../rulesets/dnd5e/verticalCombatGeometry'
+import { verticalSurfaceTargetingActivity } from './verticalSurfaceTargeting'
 
 export function SpellAreaElevationControls({ targeting, setTargeting, previewNames, onResetPreview }: {
   targeting: Dnd5eSpellTargetingSession
@@ -9,6 +10,13 @@ export function SpellAreaElevationControls({ targeting, setTargeting, previewNam
   onResetPreview: () => void
 }) {
   return <>
+              {verticalSurfaceTargetingActivity(targeting) && <label className="flex items-center gap-2 text-xs text-violet-100">作用表面
+                <select aria-label="作用表面" value={targeting.surfaceTargetMode??'horizontal'} className="rounded bg-void-900 px-2 py-1"
+                  onChange={event=>{const mode=event.target.value==='vertical'?'vertical':'horizontal';setTargeting(current=>current?{...current,surfaceTargetMode:mode,verticalSurface:undefined,verticalSurfacePreviewCells:undefined,areaTargetSelected:false,areaTargetCell:undefined,areaTargetCells:[],targetTokenIds:[]}:null);onResetPreview()}}>
+                  <option value="horizontal">地面／顶面</option><option value="vertical">墙面</option>
+                </select>
+                {targeting.surfaceTargetMode==='vertical'&&<span>{targeting.areaTargetSelected?'墙面已选定':'点击要改变的墙边；高度为图案底部'}</span>}
+              </label>}
               {targeting.area && !dnd5eAreaRequiresGround(targeting.spellId) && !(targeting.area.origin === 'self' && targeting.area.shape === 'circle') ? (
                 <label className="flex items-center gap-2 text-xs text-violet-100">
                   {targeting.area.origin === 'self' ? '瞄准高度' : '落点高度'}（尺）
@@ -31,6 +39,7 @@ export function SpellAreaElevationControls({ targeting, setTargeting, previewNam
                 <button type="button" className="rounded bg-white/10 px-2 py-1 text-xs" onClick={() => {
                   setTargeting((current) => current ? { ...current,
                     areaTargetSelected: false, areaTargetCell: undefined, areaTargetCells: [],
+                    verticalSurface:undefined,verticalSurfacePreviewCells:undefined,
                     targetTokenIds: [], sculptedTargetIds: [], carefulTargetIds: [], heightenedTargetId: undefined,
                     sculpting: false, carefulSelecting: false, heightenedSelecting: false,
                   } : null)

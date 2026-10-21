@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as sharedServerCore from '../../scripts/shared-server-core.mjs'
+import { subclassChoicePoliciesFromPackage } from '../../shared/subclass-choice-policy.mjs'
 import { parseCombatPresentationEvent } from './combatPresentation'
 import { SCENE_WEATHER_KINDS } from './sceneWeather'
 import {
@@ -239,6 +240,34 @@ describe('server-authoritative player exploration movement', () => {
     })
   })
 
+  it.each(['on-enter', 'on-move-distance', 'on-area-move-impact'])('delegates %s hazards to Host without revealing hidden areas or committing movement', timing => {
+    const state = { ...mapsState, maps: [{ ...mapsState.maps[0], dnd5ePluginAreas: [{
+      id: 'hidden-trap', hiddenFromPlayers: true, cells: [{ col: 2, row: 1 }], triggers: [{ timing }],
+    }] }] }
+    const before = JSON.stringify(state)
+    const result = sharedServerCore.mutatePlayerExplorationMoveState(state,
+      move({ x: 50, y: 50 }, { x: 100, y: 50 }), 10, member, { combatActive: false, characterState })
+    expect(result).toEqual({ ok: false, changed: false, status: 409, error: 'exploration-move-requires-area-authority' })
+    expect(JSON.stringify(state)).toBe(before)
+    expect(JSON.stringify(result)).not.toContain('hidden-trap')
+  })
+
+  it('delegates temple geometry to Host without committing direct exploration movement', () => {
+    const before=JSON.stringify(mapsState)
+    const geometryState={maps:[{mapId:mapsState.maps[0].id,structureLifetimes:[{
+      id:'hidden-temple',templeWard:{hostileCreatureTypes:['fiend'],saveDc:18},
+    }]}]}
+    const result=sharedServerCore.mutatePlayerExplorationMoveState(mapsState,
+      move({x:50,y:50},{x:100,y:50}),10,member,{combatActive:false,characterState,geometryState})
+    expect(result).toEqual({ok:false,changed:false,status:409,error:'exploration-move-requires-temple-authority'})
+    expect(JSON.stringify(result)).not.toContain('hidden-temple')
+    expect(JSON.stringify(mapsState)).toBe(before)
+    const otherMap=sharedServerCore.mutatePlayerExplorationMoveState(mapsState,
+      move({x:50,y:50},{x:100,y:50}),10,member,{combatActive:false,characterState,
+        geometryState:{maps:[{...geometryState.maps[0],mapId:'another-map'}]}})
+    expect(otherMap.ok).toBe(true)
+  })
+
   it('rejects stale coordinates, active combat, and a different player owner', () => {
     expect(sharedServerCore.mutatePlayerExplorationMoveState(
       mapsState, move({ x: 50, y: 50 }, { x: 100, y: 50 }), 10, member,
@@ -362,7 +391,7 @@ describe('member-specific shared state projections', () => {
     expect(projected.characters[0]).not.toHaveProperty('dmNotes')
     expect(projected.characters[2]).not.toHaveProperty('notes')
     expect(projected.characters[2]).not.toHaveProperty('backstory')
-    expect(projected.characters[2]).not.toHaveProperty('equipment')
+    expect(projected.characters[2].equipment).toEqual({})
   })
 
   it('does not disclose unidentified item templates or Headless effects to their player owner', () => {
@@ -1585,14 +1614,33 @@ describe('map geometry player projection', () => {
       .map((token: { id: string }) => token.id)).toContain('target')
     expect(project({ obscuration: { kind: 'heavy' } }).map((token: { id: string }) => token.id))
       .not.toContain('target')
+    expect(project({ obscuration: { kind: 'heavy', scope: 'source-token' } })
+      .map((token: { id: string }) => token.id)).toContain('target')
+    expect(project({ sourceTokenId: 'target', obscuration: { kind: 'heavy', scope: 'source-token' } })
+      .map((token: { id: string }) => token.id)).not.toContain('target')
     expect(project({ obscuration: { kind: 'heavy' } }, { type: 'player', characterId: 'other-player' })
       .map((token: { id: string }) => token.id)).not.toContain('target')
+    const reducedLight = { anchorMode: 'source-token', sourceTokenId: 'target',
+      lighting: { kind: 'reduce-light', radiusFeet: 10, spellLevel: 4 } }
+    expect(project(reducedLight).map((token: { id: string }) => token.id)).toContain('target')
+    openGeometry.maps[0].vision.ambientLight = 'dim'
+    expect(project(reducedLight).map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({}).map((token: { id: string }) => token.id)).toContain('target')
+    expect(project(reducedLight, { lightSource: { enabled: true, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#ffffff' } })
+      .map((token: { id: string }) => token.id)).toContain('target')
+    openGeometry.maps[0].vision.ambientLight = 'bright'
     openGeometry.maps[0].vision.enabled = false
     expect(project({ obscuration: { kind: 'heavy' } }).map((token: { id: string }) => token.id)).not.toContain('target')
     expect(project({ obscuration: { kind: 'heavy' } }, { type: 'player', characterId: 'other-player' })
       .map((token: { id: string }) => token.id)).not.toContain('target')
     expect(project({ obscuration: { kind: 'heavy', sourceCanSeeThrough: true } })
       .map((token: { id: string }) => token.id)).toContain('target')
+    expect(project({ obscuration: { kind: 'heavy' }, obscurationExcludedTokenIds: ['hero'] })
+      .map((token: { id: string }) => token.id)).toContain('target')
+    expect(project({ obscuration: { kind: 'heavy' }, obscurationExcludedTokenIds: ['target'] })
+      .map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({ obscuration: { kind: 'heavy' }, obscurationExcludedTokenIds: ['hero'], blocking: { vision: true } })
+      .map((token: { id: string }) => token.id)).not.toContain('target')
   })
 
   it('uses the same height-aware magical darkness rules as the client mask', () => {
@@ -1817,7 +1865,9 @@ describe('map geometry player projection', () => {
           blocksVision: false,
           blocksMovement: false,
           blocksLineOfEffect: false,
-          points: [{ x: 5, y: 5 }, { x: 35, y: 5 }, { x: 35, y: 35 }, { x: 5, y: 35 }],
+          // Keep the lamp near the edge: the downward ray clears the platform
+          // before crossing the low wall. A wide platform correctly occludes it.
+          points: [{ x: 5, y: 5 }, { x: 25, y: 5 }, { x: 25, y: 35 }, { x: 5, y: 35 }],
           terrainElevationFeet: 20,
           heightFeet: 0,
         }],
@@ -1848,6 +1898,12 @@ describe('map geometry player projection', () => {
     }, elevatedLightGeometry, 'character-1')
 
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id)).toContain('target')
+    const widePlatform = structuredClone(elevatedLightGeometry)
+    widePlatform.maps[0].obstacles[0].points[1].x = 35
+    widePlatform.maps[0].obstacles[0].points[2].x = 35
+    const shadowed = sharedServerCore.projectMapsForPlayer({maps:[{id:'map-1',width:120,height:60,gridSize:10,feetPerCell:5,
+      tokens:[{id:'hero',type:'player',characterId:'character-1',x:80,y:20},{id:'target',type:'enemy',x:70,y:20}]}]},widePlatform,'character-1')
+    expect(shadowed.maps[0].tokens.map((token: {id:string})=>token.id)).not.toContain('target')
   })
 
   it('projects the controlled player token even when the client character store has not loaded yet', () => {
@@ -2725,6 +2781,89 @@ describe('map geometry player projection', () => {
     expect(JSON.stringify(projected)).not.toContain('assassin')
   })
 
+  it('retains an owned hidden commanded summon without granting its vision or exposing other summons', () => {
+    const summon = { sourceCharacterId: 'character-1', sourceTokenId: 'hero', side: 'player', commandPolicy: 'persistent-order' }
+    const hidden = { type: 'enemy', x: 30, y: 20, dnd5eCombatState: { hiddenCheckTotal: 30 } }
+    const maps = { maps: [{ id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5, tokens: [
+      { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+      { ...hidden, id: 'owned', dnd5eSummon: summon },
+      { ...hidden, id: 'released', dnd5eSummon: { ...summon, controlEnded: true } },
+      { ...hidden, id: 'other-owner', dnd5eSummon: { ...summon, sourceCharacterId: 'character-2' } },
+      { ...hidden, id: 'hostile', dnd5eSummon: { ...summon, side: 'enemy' } },
+      { ...hidden, id: 'dm-only', visibilityMode: 'dm-only', dnd5eSummon: summon },
+      { ...hidden, id: 'uncontrolled', dnd5eSummon: { ...summon, commandPolicy: undefined } },
+      { id: 'unseen', type: 'enemy', x: 90, y: 20 },
+    ] }] }
+    const before = structuredClone(maps)
+    const projected = sharedServerCore.projectMapsForPlayer(maps, geometry, 'character-1', {
+      characters: [{ id: 'character-1', passivePerception: 10 }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'owned'])
+    expect(projected.maps[0].tokens[1]).toMatchObject({ dnd5eCombatState: { hiddenCheckTotal: 30 } })
+    expect(maps).toEqual(before)
+  })
+
+  it('retains only the caster\'s hidden grove guardian with a live authoritative boundary', () => {
+    const guardian = { sourceTokenId: 'hero', boundaryAreaId: 'boundary', castId: 'cast' }
+    const hidden = { type: 'enemy', x: 30, y: 20, dnd5eCombatState: { hiddenCheckTotal: 30 } }
+    const maps = { maps: [{ id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      dnd5ePluginAreas: [{ id: 'boundary', sourceTokenId: 'hero', effectGroup: { castId: 'cast', effectId: 'guardians' } }],
+      tokens: [
+        { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+        { ...hidden, id: 'owned', dnd5eGroveGuardian: guardian },
+        { ...hidden, id: 'expired', dnd5eGroveGuardian: { ...guardian, boundaryAreaId: 'removed' } },
+        { ...hidden, id: 'wrong-cast', dnd5eGroveGuardian: { ...guardian, castId: 'other' } },
+        { ...hidden, id: 'wrong-owner', dnd5eGroveGuardian: { ...guardian, sourceTokenId: 'other' } },
+        { ...hidden, id: 'hint-only', dnd5eGroveControl: guardian },
+        { ...hidden, id: 'dm-only', visibilityMode: 'dm-only', dnd5eGroveGuardian: guardian },
+        { id: 'unseen', type: 'enemy', x: 90, y: 20 },
+      ] }] }
+    const before = structuredClone(maps)
+    const projected = sharedServerCore.projectMapsForPlayer(maps, geometry, 'character-1', {
+      characters: [{ id: 'character-1', passivePerception: 10 }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'owned'])
+    expect(projected.maps[0].tokens[1]).toMatchObject({ dnd5eCombatState: { hiddenCheckTotal: 30 } })
+    expect(projected.maps[0].tokens[1]).not.toHaveProperty('dnd5eGroveGuardian')
+    expect(maps).toEqual(before)
+  })
+  it('retains invisible fortress servant controls only for a live authorized commander without granting vision',()=>{
+    const binding={schemaVersion:1,mapId:'map-1',structureId:'keep'}
+    const servant={id:'servant',type:'obstacle',label:'Servant',size:1,x:90,y:20,hp:1,
+      dnd5eObjectState:{schemaVersion:1,structureBinding:binding},dnd5eCombatState:{conditions:['invisible']}}
+    const maps={maps:[{id:'map-1',width:100,height:100,gridSize:10,feetPerCell:5,tokens:[
+      {id:'hero',type:'player',characterId:'character-1',x:10,y:20},servant,
+      {...servant,id:'unlisted'}, {id:'unseen-enemy',type:'enemy',x:95,y:20}]}]}
+    const record={id:'keep',casterId:'character-1',createdWorldMinute:0,expiresWorldMinute:200,replacementGroup:'mighty-fortress',
+      fortressServices:{authorizedCreatureIds:[] as string[],servants:[{number:1,tokenId:'servant'}]}}
+    const scene={...geometry,maps:geometry.maps.map((map:any)=>({...map,structureLifetimes:[record]}))}
+    const characters={characters:[{id:'character-1',passivePerception:10}]}
+    const project=(g=scene,minute=100)=>sharedServerCore.projectMapsForPlayer(maps,g,'character-1',characters,null,null,minute)
+    expect(project().maps[0].tokens.map((token:any)=>token.id)).toEqual(['hero','servant'])
+    expect(project().maps[0].tokens[1]).toMatchObject({hp:1,dnd5eObjectState:{structureBinding:binding}})
+    expect(project(scene,200).maps[0].tokens.map((token:any)=>token.id)).toEqual(['hero'])
+    const other=structuredClone(scene);other.maps[0].structureLifetimes[0].casterId='other'
+    expect(project(other).maps[0].tokens.map((token:any)=>token.id)).toEqual(['hero'])
+    other.maps[0].structureLifetimes[0].fortressServices.authorizedCreatureIds.push('character-1')
+    expect(project(other).maps[0].tokens.map((token:any)=>token.id)).toEqual(['hero','servant'])
+  })
+
+  it('subtracts a partial building from grove fog in authoritative player visibility', () => {
+    const map = { id: 'map-1', width: 300, height: 300, gridSize: 50, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, tokens: [
+        { id: 'hero', type: 'player', characterId: 'character-1', x: 25, y: 25 },
+        { id: 'inside-building', type: 'enemy', x: 60, y: 25 },
+        { id: 'inside-fog', type: 'enemy', x: 125, y: 25 },
+      ], dnd5ePluginAreas: [{ id: 'fog', cells: [{ col: 1, row: 0 }, { col: 2, row: 0 }], obscuration: { kind: 'heavy' },
+        vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 },
+        groveVolume: { minX: 0, minY: 0, widthPixels: 300, baseElevationFeet: 0, heightFeet: 30,
+          excludedStructures: [{ points: [{ x: 0, y: 0 }, { x: 70, y: 0 }, { x: 70, y: 50 }, { x: 0, y: 50 }], baseElevationFeet: 0, heightFeet: 20 }] } }] }
+    const projected = sharedServerCore.projectMapsForPlayer({ maps: [map] }, undefined, 'character-1', {
+      characters: [{ id: 'character-1', passivePerception: 10 }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'inside-building'])
+  })
+
   it('lets tremorsense locate a hidden grounded creature without exposing its identity', () => {
     const projected = sharedServerCore.projectMapsForPlayer({
       maps: [{
@@ -3586,6 +3725,15 @@ describe('combat interrupt atomic mutation', () => {
 
   it('validates bounded persistent-area vertical snapshots at the server boundary', () => {
     const area = { label: 'Area', createdRound: 1, expiresAfterRound: 2 }
+    const sphere = (baseElevationFeet: unknown, shape: string | undefined = 'sphere') => validateSharedStateShape('maps', {
+      maps: [{id:'map',tokens:[],dnd5ePluginAreas:[{...area,vertical:{mode:'volume',baseElevationFeet,heightFeet:20,...(shape?{shape}:{})}}]}],
+    })
+    expect(sphere(-7.5)).toEqual({ok:true})
+    // Continuous water/surface placement preserves finite fractional elevations.
+    for(const elevation of [-1000, 0.25, 10000]) expect(sphere(elevation)).toEqual({ok:true})
+    for(const elevation of [-1000.5,10000.5,'-7.5',NaN,Infinity]) expect(sphere(elevation)).toMatchObject({ok:false})
+    expect(sphere(0.5,'')).toEqual({ok:true})
+
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...area, vertical: { mode: 'ground' } }] }],
     })).toEqual({ ok: true })
@@ -3712,13 +3860,13 @@ describe('combat interrupt atomic mutation', () => {
       operation: 'rolling', mapId: 'map-1', id: 'confirm',
     }, 205, 'dm')
     expect(rolling).toMatchObject({
-      ok: true, changed: true, next: { interrupts: [{ status: 'rolling', expiresAt: 10_205 }] },
+      ok: true, changed: true, next: { interrupts: [{ status: 'rolling', expiresAt: 120_205 }] },
     })
     const rolled = mutateCombatInterruptQueue(rolling.next, {
       operation: 'roll-options', mapId: 'map-1', id: 'confirm',
       rollOptions: { contributionId: contribution.id, values: [7, 18] },
     }, 210, 'dm')
-    expect(rolled.next.interrupts[0]).toMatchObject({ status: 'rolling', expiresAt: 10_210 })
+    expect(rolled.next.interrupts[0]).toMatchObject({ status: 'pending', expiresAt: 10_210 })
     const response = {
       decision: 'continue', finalValue: 18, acceptedContributionId: contribution.id,
       choiceReroll: {
@@ -3882,7 +4030,7 @@ describe('combat interrupt atomic mutation', () => {
     })
   })
 
-  it('accepts only a Host-declared d20 adjustment intent and validates the Host die on settlement', () => {
+  it.each([false, true])('accepts only a Host-declared d20 adjustment intent and validates its amount (fixed=%s)', fixed => {
     const queue = {
       mapId: 'map-1', revision: 1, updatedAt: 100,
       interrupts: [{
@@ -3892,7 +4040,7 @@ describe('combat interrupt atomic mutation', () => {
           originalValue: 20,
           eligibleModifiers: [{
             characterId: 'support', featureId: 'test.plugin:feature', featureLabel: '结果干预',
-            modifierKind: 'adjust-d20', sourceTokenId: 'support-token', dieSides: 6,
+            modifierKind: 'adjust-d20', sourceTokenId: 'support-token', ...(fixed ? { fixedAmount: 10 } : { dieSides: 6 }),
             direction: 'subtract',
           }],
         },
@@ -3910,7 +4058,7 @@ describe('combat interrupt atomic mutation', () => {
       operation: 'answer', mapId: 'map-1', id: 'confirm', response: {
         decision: 'continue', finalValue: 20, acceptedContributionId: 'confirm:support',
         adjustment: {
-          sourceId: 'support-token', featureId: 'test.plugin:feature', direction: 'subtract', roll: 4,
+          sourceId: 'support-token', featureId: 'test.plugin:feature', direction: 'subtract', roll: fixed ? 10 : 4,
         },
       },
     }
@@ -3920,6 +4068,14 @@ describe('combat interrupt atomic mutation', () => {
       ...settlement,
       response: { ...settlement.response, adjustment: { ...settlement.response.adjustment, roll: 7 } },
     }, 220, 'dm')).toMatchObject({ ok: false, status: 409, error: 'roll-adjustment-conflict' })
+    if (fixed) {
+      for (const roll of [0, 1, 9, 11, 100, 10.5]) expect(mutateCombatInterruptQueue(contributed.next, {
+        ...settlement, response: { ...settlement.response, adjustment: { ...settlement.response.adjustment, roll } },
+      }, 220, 'dm')).toMatchObject({ ok: false, error: 'roll-adjustment-conflict' })
+      const ambiguous = structuredClone(contributed.next) as typeof queue
+      Object.assign(ambiguous.interrupts[0].payload.eligibleModifiers[0], { dieSides: 20 })
+      expect(mutateCombatInterruptQueue(ambiguous, settlement, 220, 'dm')).toMatchObject({ ok: false, error: 'roll-adjustment-conflict' })
+    }
   })
 
   it('rejects an eligible roll modifier submitted through a different player identity', () => {
@@ -4198,6 +4354,93 @@ describe('player character aggregate authority', () => {
     expect(ended.result).toMatchObject({ endedSpellId: 'bless', targetIds: [] })
   })
 
+  it('consumes only material reservations bound to effects removed by the concentration command', () => {
+    const initial = structuredClone(current)
+    const actor = initial.characters[0] as any
+    actor.dnd5eCombatState.activeEffects = [...actor.dnd5eCombatState.activeEffects ?? [], {
+      ...activeEffect, id: 'material-lifetime:cast', definitionId: 'material-lifetime',
+      duration: { type: 'concentration', sourceActorId: actor.id, concentrationId: 'bless' },
+    }]
+    actor.dnd5eInventory = { schemaVersion: 3, revision: 4, entries: [], spellMaterialEscrows: [
+      { id: 'cast', sourceSpellId: 'bless', sourceEffectId: 'material-lifetime:cast', status: 'reserved', entries: [{ instanceId: 'blood', quantity: 1 }] },
+      { id: 'other', sourceSpellId: 'other-spell', sourceEffectId: 'other-effect', status: 'reserved', entries: [{ instanceId: 'other', quantity: 1 }] },
+    ] }
+    const command = { commandId: 'end-with-material', type: 'end-concentration', characterId: actor.id }
+    const ended = sharedServerCore.applyPlayerCharacterCommand(initial, command, { memberId: 'member-a', accountId: 'account-a' }, { now: 30 })
+    expect(ended.ok).toBe(true)
+    expect(ended.next.characters[0].dnd5eInventory).toMatchObject({ revision: 5, spellMaterialEscrows: [
+      { id: 'cast', status: 'consumed', entries: [] }, { id: 'other', status: 'reserved', entries: [{ instanceId: 'other', quantity: 1 }] },
+    ] })
+    const replay = sharedServerCore.applyPlayerCharacterCommand(ended.next, command, { memberId: 'member-a', accountId: 'account-a' }, { now: 40 })
+    expect(replay.next.characters[0].dnd5eInventory).toEqual(ended.next.characters[0].dnd5eInventory)
+    expect(actor.dnd5eInventory.revision).toBe(4)
+  })
+
+  it('persists an ending save when a player ends concentration and does not duplicate it on retry', () => {
+    const endingEffect={...activeEffect,id:'transform',definitionId:'transform',kind:'mechanical',standardCondition:undefined,
+      source:{kind:'spell',actorId:'hero-token',rulesId:'bless'},duration:{type:'concentration',sourceActorId:'hero-token',concentrationId:'bless'},
+      endSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1},modifiers:{savingThrowProficiencies:['con']}}
+    const input={...current,characters:current.characters.map((c:any,i:number)=>i===0?{...c,dnd5eCombatState:{...c.dnd5eCombatState,activeEffects:[endingEffect]}}:c)}
+    const command={commandId:'end-save-server',type:'end-concentration',characterId:'hero-a'}
+    const member={memberId:'member-a',accountId:'account-a'}
+    const options={combatActive:true,now:31,concentrationSourceActorIds:['hero-token']}
+    const ended=sharedServerCore.applyPlayerCharacterCommand(input,command,member,options)
+    expect(ended.ok).toBe(true)
+    const effects=ended.next.characters[0].dnd5eCombatState.activeEffects
+    expect(effects).toHaveLength(1)
+    expect(effects[0]).toMatchObject({id:'end-save:transform',pendingEndSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1}})
+    expect(effects[0].modifiers).toBeUndefined()
+    const reloaded=JSON.parse(JSON.stringify(ended.next))
+    const retried=sharedServerCore.applyPlayerCharacterCommand(reloaded,{...command,commandId:'end-save-server-retry'},member,options)
+    expect(retried.next.characters[0].dnd5eCombatState.activeEffects).toEqual(effects)
+  })
+
+  it('clears concentration-bound temporary HP atomically with the ending save', () => {
+    const endingEffect={...activeEffect,id:'transform',definitionId:'transform',kind:'mechanical',standardCondition:undefined,
+      source:{kind:'spell',actorId:'hero-token',rulesId:'bless'},duration:{type:'concentration',sourceActorId:'hero-token',concentrationId:'bless'},
+      endSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1},modifiers:{savingThrowProficiencies:['con']}}
+    const input={...current,characters:current.characters.map((c:any,i:number)=>i===0?{...c,tempHp:37,dnd5eCombatState:{...c.dnd5eCombatState,activeEffects:[endingEffect],temporaryHitPointsSource:{actorId:'hero-token',rulesId:'bless',effectDefinitionId:'transform'}}}:c)}
+    const command={commandId:'end-save-server',type:'end-concentration',characterId:'hero-a'}
+    const member={memberId:'member-a',accountId:'account-a'}
+    const options={combatActive:true,now:31,concentrationSourceActorIds:['hero-token']}
+    const ended=sharedServerCore.applyPlayerCharacterCommand(input,command,member,options)
+    expect(ended.ok).toBe(true)
+    expect(ended.next.characters[0].tempHp).toBe(0)
+    expect(ended.next.characters[0].dnd5eCombatState.temporaryHitPointsSource).toBeUndefined()
+    const effects=ended.next.characters[0].dnd5eCombatState.activeEffects
+    expect(effects).toHaveLength(1)
+    expect(effects[0]).toMatchObject({id:'end-save:transform',pendingEndSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1}})
+    expect(effects[0].modifiers).toBeUndefined()
+    const reloaded=JSON.parse(JSON.stringify(ended.next))
+    const retried=sharedServerCore.applyPlayerCharacterCommand(reloaded,{...command,commandId:'end-save-server-retry'},member,options)
+    expect(retried.next.characters[0].dnd5eCombatState.activeEffects).toEqual(effects)
+  })
+
+  it.each(['replacement', 'other-source', 'retained-effect'])('preserves %s temporary HP when ending concentration', (mode) => {
+    const endingEffect={...activeEffect,id:'transform',definitionId:'transform',kind:'mechanical',standardCondition:undefined,
+      source:{kind:'spell',actorId:'hero-token',rulesId:'bless'},duration:{type:'concentration',sourceActorId:'hero-token',concentrationId:'bless'},
+      endSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1},modifiers:{savingThrowProficiencies:['con']}}
+    const input={...current,characters:current.characters.map((c:any,i:number)=>i===0?{...c,tempHp:37,dnd5eCombatState:{...c.dnd5eCombatState,activeEffects:[endingEffect],temporaryHitPointsSource:{actorId:'hero-token',rulesId:'bless',effectDefinitionId:'transform'}}}:c)}
+    const holder=input.characters[0] as any
+    if(mode==='replacement') holder.dnd5eCombatState.temporaryHitPointsSource=undefined
+    if(mode==='other-source') holder.dnd5eCombatState.temporaryHitPointsSource.actorId='another-caster'
+    if(mode==='retained-effect') holder.dnd5eCombatState.activeEffects.push({...endingEffect,id:'surviving-effect',endSavingThrow:undefined,duration:{type:'permanent'}})
+    const command={commandId:'end-save-server',type:'end-concentration',characterId:'hero-a'}
+    const member={memberId:'member-a',accountId:'account-a'}
+    const options={combatActive:true,now:31,concentrationSourceActorIds:['hero-token']}
+    const ended=sharedServerCore.applyPlayerCharacterCommand(input,command,member,options)
+    expect(ended.ok).toBe(true)
+    expect(ended.next.characters[0].tempHp).toBe(37)
+
+    const effects=ended.next.characters[0].dnd5eCombatState.activeEffects
+    expect(effects.filter((e:any)=>e.pendingEndSavingThrow)).toHaveLength(1)
+    expect(effects.find((e:any)=>e.pendingEndSavingThrow)).toMatchObject({id:'end-save:transform',pendingEndSavingThrow:{ability:'con',dc:15,exhaustionOnFailure:1}})
+    expect(effects.find((e:any)=>e.pendingEndSavingThrow).modifiers).toBeUndefined()
+    const reloaded=JSON.parse(JSON.stringify(ended.next))
+    const retried=sharedServerCore.applyPlayerCharacterCommand(reloaded,{...command,commandId:'end-save-server-retry'},member,options)
+    expect(retried.next.characters[0].dnd5eCombatState.activeEffects).toEqual(effects)
+  })
+
   it('ends the caster-linked concentration effects on every character aggregate', () => {
     const bless = {
       ...activeEffect,
@@ -4297,6 +4540,112 @@ describe('player character aggregate authority', () => {
     expect(cleaned.next.maps[0].tokens[1]).toMatchObject({ size: 1, hp: 31, maxHp: 40 })
   })
 
+  it('restores animated corpses once at their current location when server concentration ends', () => {
+    const body = { id: 'body', label: 'Body', x: 25, y: 25, hp: 0, maxHp: 12, elevationFeet: 0 }
+    const summon = { schemaVersion: 1, pluginId: 'test', featureId: 'animate', sourceCharacterId: 'hero-a',
+      sourceTokenId: 'wizard-token', createdRound: 1, expiresAfterRound: 600, side: 'player', concentrationId: 'animate', animatedCorpse: body }
+    const maps = { maps: [{ id: 'map', tokens: [
+      { id: 'wizard-token', characterId: 'hero-a' },
+      { id: 'summon', x: 125, y: 175, elevationFeet: 20, hp: 13, dnd5eSummon: summon },
+      { id: 'other', x: 225, y: 25, hp: 13, dnd5eSummon: { ...summon, sourceCharacterId: 'hero-b', sourceTokenId: 'other-caster' } },
+    ] }] }
+    const before = structuredClone(maps)
+    const cleaned = sharedServerCore.removeCharacterConcentrationEffectsFromMaps(maps, 'hero-a', 'animate')
+    expect(cleaned.changed).toBe(true)
+    expect(cleaned.next.maps[0].tokens[1]).toEqual({ ...body, x: 125, y: 175, elevationFeet: 20 })
+    expect(cleaned.next.maps[0].tokens[2]).toEqual(maps.maps[0].tokens[2])
+    expect(maps).toEqual(before)
+    const again = sharedServerCore.removeCharacterConcentrationEffectsFromMaps(JSON.parse(JSON.stringify(cleaned.next)), 'hero-a', 'animate')
+    expect(again.changed).toBe(false)
+    expect(again.next.maps[0].tokens).toHaveLength(3)
+  })
+
+  it('accepts spherical plugin auras and local darkness suppression without accepting arbitrary modes', () => {
+    const area={label:'Synthetic sphere',createdRound:1,expiresAfterRound:1,permanent:true,
+      vertical:{mode:'volume',baseElevationFeet:-5,heightFeet:10,anchorOffsetFeet:-5,shape:'sphere'},
+      sourceAbilityCheckRules:[{mode:'advantage',ability:'cha',skill:'intimidation'}]}
+    const validate=(value:unknown)=>validateSharedStateShape('maps',{maps:[{id:'map',tokens:[],dnd5ePluginAreas:[value]}]})
+    expect(validate(area)).toEqual({ok:true})
+    expect(validate({...area,vertical:{...area.vertical,shape:'arbitrary'}})).toMatchObject({ok:false,reason:'invalid-dnd5e-plugin-area'})
+    expect(validate({...area,vertical:{...area.vertical,heightFeet:0}})).toMatchObject({ok:false})
+    const lighting={kind:'magical-darkness',radiusFeet:60,spellLevel:8,suppressesMagicalLightThroughLevel:8,lightSuppressionScope:'within-area'}
+    expect(validate({...area,lighting})).toEqual({ok:true})
+    expect(validate({...area,lighting:{...lighting,lightSuppressionScope:'global'}})).toMatchObject({ok:false,reason:'invalid-dnd5e-plugin-area'})
+    expect(validate({...area,lighting:{...lighting,run:'eval()'}})).toMatchObject({ok:false})
+    const reduction={kind:'reduce-light',radiusFeet:10,spellLevel:4}
+    expect(validate({...area,lighting:reduction,obscuration:{kind:'heavy',scope:'source-token'}})).toEqual({ok:true})
+    for(const patch of [{radiusFeet:0},{radiusFeet:1001},{radiusFeet:1.5},{spellLevel:10},{suppressesMagicalLightThroughLevel:9}]){
+      expect(validate({...area,lighting:{...reduction,...patch}})).toMatchObject({ok:false,reason:'invalid-dnd5e-plugin-area'})
+    }
+  })
+
+  it('projects darkvision concealment per observer, lighting and alternative senses', () => {
+    for (const [ambient, senses, concealed] of [
+      ['darkness', {}, true], ['bright', {}, false], ['dim', {}, false],
+      ['darkness', {blindsightRangeFeet:60}, false], ['darkness', {truesightRangeFeet:60}, false],
+      ['darkness', {darknessSightRangeFeet:60}, false],
+      ['darkness', {dnd5eCombatState:{activeEffects:[{modifiers:{seeInvisible:true}}]}}, false],
+    ] as const) {
+      const wallless={schemaVersion:1,updatedAt:1,maps:[{mapId:'map-1',walls:[],doors:[],windows:[],obstacles:[],updatedAt:1,vision:{enabled:true,defaultRangeFeet:60,ambientLight:ambient,sharePartyVision:false}}]}
+      const projected=sharedServerCore.projectMapsForPlayer({maps:[{
+        id:'map-1',width:100,height:100,gridSize:10,feetPerCell:5,tokens:[
+          {id:'hero',type:'player',characterId:'character-1',x:10,y:20,darkvisionRangeFeet:60,...senses},
+          {id:'hidden',type:'enemy',label:'Secret creature',hp:40,x:30,y:20,dnd5eCombatState:{activeEffects:[{id:'conceal',modifiers:{invisibleToDarkvision:true}}]}},
+        ],
+      }]},wallless,'character-1',{characters:[{id:'character-1'}]})
+      const target=projected.maps[0].tokens.find((token:{id:string})=>token.id==='hidden')
+      expect(target,JSON.stringify({ambient,senses})).toBeDefined()
+      if(!target)throw new Error('Missing concealment target')
+      expect('perceptionVisibility' in target && target.perceptionVisibility==='detected-unseen',JSON.stringify({ambient,senses})).toBe(concealed)
+      if(concealed)expect(JSON.stringify(target)).not.toContain('Secret creature')
+    }
+  })
+  it('combines party observers without leaking a concealed target through a darkvision-only member', () => {
+    for(const [sharePartyVision, alternativeRange, suspended, concealed] of [
+      [false,60,false,true],[true,60,false,false],[true,1,false,true],[false,0,true,false],
+    ] as const){
+      const maps={maps:[{id:'map-1',width:100,height:100,gridSize:10,feetPerCell:5,tokens:[
+        {id:'hero',type:'player',characterId:'character-1',x:10,y:20,darkvisionRangeFeet:60},
+        {id:'ally',type:'player',characterId:'character-2',x:10,y:30,darkvisionRangeFeet:60,truesightRangeFeet:alternativeRange},
+        {id:'hidden',type:'enemy',label:'Secret creature',x:40,y:20,dnd5eCombatState:{activeEffects:[{id:'conceal',suspendedBy:suspended?['antimagic']:[],modifiers:{invisibleToDarkvision:true}}]}},
+      ]}]}
+      const geometry={schemaVersion:1,updatedAt:1,maps:[{mapId:'map-1',walls:[],doors:[],windows:[],obstacles:[],updatedAt:1,vision:{enabled:true,defaultRangeFeet:60,ambientLight:'darkness',sharePartyVision}}]}
+      const result=sharedServerCore.projectMapsForPlayer(maps,geometry,'character-1',{characters:[{id:'character-1'},{id:'character-2'}]})
+      const target=result.maps[0].tokens.find((token:{id:string})=>token.id==='hidden')
+      expect(target).toBeDefined()
+      if(!target)throw new Error('Missing concealment target')
+      expect('perceptionVisibility' in target && target.perceptionVisibility==='detected-unseen').toBe(concealed)
+    }
+  })
+  it.each(['legacy', 'minutes'] as const)('preserves %s uncontrolled linger on server concentration cleanup', mode => {
+    const summon = { schemaVersion: 1, pluginId: 'test', featureId: 'summon', sourceCharacterId: 'hero-a',
+      sourceTokenId: 'wizard-token', createdRound: 1, expiresAfterRound: 600, side: 'enemy',
+      controlEnded: true, concentrationId: 'summon',
+      ...(mode === 'legacy' ? { controlSave: { ability: 'cha', dc: 15, lingerDieSides: 6 } }
+        : { uncontrolledLinger: { count: 3, sides: 6, unit: 'minute' } }),
+    }
+    const maps = { maps: [{ id: 'map', tokens: [{ id: 'wizard-token', characterId: 'hero-a' },
+      { id: 'summon', hp: 10, dnd5eSummon: summon }] }] }
+    const before = structuredClone(maps)
+    expect(() => sharedServerCore.removeCharacterConcentrationEffectsFromMaps(maps, 'hero-a', 'summon'))
+      .toThrow('summon-time-unavailable')
+    expect(maps).toEqual(before)
+    const cleaned = sharedServerCore.removeCharacterConcentrationEffectsFromMaps(maps, 'hero-a', 'summon', [], {
+      round: 599, lingerRollsByTokenId: { summon: mode === 'legacy' ? [4] : [2, 3, 4] },
+    })
+    expect(cleaned.next.maps[0].tokens[1].dnd5eSummon).toMatchObject({ concentrationId: undefined,
+      dismissAtRound: mode === 'legacy' ? 600 : 689, lingerRoll: mode === 'legacy' ? 4 : 9 })
+    const again = sharedServerCore.removeCharacterConcentrationEffectsFromMaps(JSON.parse(JSON.stringify(cleaned.next)), 'hero-a', 'summon')
+    expect(again.changed).toBe(false)
+    expect(again.next).toEqual(JSON.parse(JSON.stringify(cleaned.next)))
+    expect(sharedServerCore.removeCharacterConcentrationEffectsFromMaps(maps, 'hero-a', 'summon', [], { round: 601 })
+      .next.maps[0].tokens).toHaveLength(1)
+    const defeated = structuredClone(maps)
+    defeated.maps[0].tokens[1].hp = 0
+    expect(sharedServerCore.removeCharacterConcentrationEffectsFromMaps(defeated, 'hero-a', 'summon', [], { round: 2 })
+      .next.maps[0].tokens).toHaveLength(1)
+    expect(maps).toEqual(before)
+  })
   it('removes only the map effects sustained by the ending character and rebuilds condition projection', () => {
     const weird = {
       schemaVersion: 1,
@@ -5094,6 +5443,61 @@ describe('server-authoritative mobile character commands', () => {
     commandId: `command-${type}`, type, ...extra,
   })
 
+  it('does not let spell preparation rewrite imported subclass environment choices', () => {
+    const key = 'local.storm:herald/storm-aura-environment'
+    const character = { ...levelOne(), charClass: '野蛮人', level: 5,
+      dnd5eClassLevels: { barbarian: 5 },
+      dnd5eClassChoices: { classes: { barbarian: { subclass: 'local.storm:herald', selections: { [key]: ['desert'] } } } } }
+    const state = { characters: [character], selectedId: character.id, updatedAt: 1 }
+    for (const prepared of [true, false]) {
+      const result = sharedServerCore.applyPlayerCharacterCommand(state, command('spell-preparation', {
+        characterId: character.id, classId: 'barbarian', selectionKey: key,
+        spellId: prepared ? 'tundra' : 'desert', prepared,
+      }), member)
+      expect(result).toMatchObject({ ok: false, error: 'invalid-spell-preparation-selection' })
+    }
+    expect(character.dnd5eClassChoices.classes.barbarian.selections[key]).toEqual(['desert'])
+    const wizard = { ...levelOne(), charClass: '法师', dnd5eClassLevels: { wizard: 1 },
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'wizard-spellbook': ['shield'], 'spell-prepared': [] } } } } }
+    const accepted = sharedServerCore.applyPlayerCharacterCommand({ ...state, characters: [wizard] }, command('spell-preparation', {
+      characterId: wizard.id, classId: 'wizard', selectionKey: 'spell-prepared', spellId: 'shield', prepared: true,
+    }), member)
+    expect(accepted.ok).toBe(true)
+    expect(accepted.next.characters[0].dnd5eClassChoices.classes.wizard.selections['spell-prepared']).toEqual(['shield'])
+  })
+
+  it.each([true, false])('locks legacy imported choices under own-class replacement policy %s', (replaceOnClassLevelGain) => {
+    const subclassId='local.storm:herald',key=`${subclassId}/environment`
+    const policies=subclassChoicePoliciesFromPackage({manifest:{id:'local.storm'},content:{subclasses:[{
+      id:'herald',classId:'barbarian',choiceGroups:[{id:'environment',replaceOnClassLevelGain,maxSelections:1,
+        options:[{id:'desert'},{id:'sea'},{id:'tundra'}]}],
+    }]}})
+    expect(policies).toHaveLength(1)
+    expect(subclassChoicePoliciesFromPackage({format:'dndstars5e-unified-content',manifest:{id:'local.storm'},definitions:[{
+      kind:'subclass',payload:{id:'herald',classId:'barbarian',choiceGroups:[{id:'environment',replaceOnClassLevelGain,maxSelections:1,
+        options:[{id:'desert'},{id:'sea'},{id:'tundra'}]}]},
+    }]})).toEqual(policies)
+    const base={...levelOne(),level:5,dnd5eClassLevels:{barbarian:5},
+      dnd5eClassChoices:{classes:{barbarian:{subclass:subclassId,selections:{[key]:['desert']}}}}}
+    const state={characters:[base],selectedId:base.id}
+    for(const choices of [undefined,{classes:{}},{classes:{barbarian:{subclass:subclassId,selections:{[key]:['sea']}}}}]){
+      const result=mergePlayerCharactersStateForAuthority(state,{characters:[{...base,dnd5eClassChoices:choices}]},member.memberId,{subclassChoicePolicies:policies})
+      expect(result.characters[0]).toMatchObject({dnd5eClassChoices:{classes:{barbarian:{selections:{[key]:['desert']}}}}})
+    }
+    const snapshot=(c:typeof base)=>({level:c.level,dnd5eClassLevels:c.dnd5eClassLevels,abilities:c.abilities,
+      skills:c.skills,dnd5eClassChoices:c.dnd5eClassChoices,hitPointMaximumMode:c.hitPointMaximumMode,maxHp:c.maxHp})
+    for(const selection of [['desert'],['sea'],['invalid'],['sea','tundra'],[]]){
+      const next={...base,level:6,dnd5eClassLevels:{barbarian:6},maxHp:base.maxHp+8,currentHp:base.currentHp+8,
+        dnd5eClassChoices:{classes:{barbarian:{subclass:subclassId,selections:{[key]:selection}}}}}
+      const receipt={schemaVersion:1,id:'own-class-choice',classId:'barbarian',fromLevel:5,toLevel:6,fromClassLevel:5,toClassLevel:6,
+        completedBy:'player',decision:{schemaVersion:1,classId:'barbarian',levelsGained:1,hitPointMethod:'fixed',hitPointRolls:[],asiChoices:[],classChoiceSelections:{[key]:selection}},before:snapshot(base),after:snapshot(next)}
+      const result=sharedServerCore.applyPlayerCharacterCommand(state,command('level-up',{characterId:base.id,character:{...next,dnd5eLevelAdvancements:[receipt]}}),member,{subclassChoicePolicies:policies})
+      expect(result.ok,JSON.stringify(result)).toBe(selection.length===1&&(selection[0]==='desert'||(replaceOnClassLevelGain&&selection[0]==='sea')))
+      if(result.ok)expect(result.next.characters[0].dnd5eClassChoices.classes.barbarian.selections[key]).toEqual(selection)
+    }
+    expect(base.dnd5eClassChoices.classes.barbarian.selections[key]).toEqual(['desert'])
+  })
+
   it('creates once and rejects forged final ability values', () => {
     const created = sharedServerCore.applyPlayerCharacterCommand(
       { characters: [] }, command('create', { character: levelOne() }), member,
@@ -5156,7 +5560,7 @@ describe('server-authoritative mobile character commands', () => {
     expect(healed).toMatchObject({ ok: true, result: { roll: 7, healing: 8, currentHp: 10 } })
     expect(healed.next.characters[0].hitPointDice[0].current).toBe(0)
 
-    const snapshot = (character: ReturnType<typeof levelOne> & Record<string, unknown>) => ({
+    const snapshot = (character: Omit<ReturnType<typeof levelOne>, 'dnd5eClassChoices'> & { dnd5eClassChoices?: unknown } & Record<string, unknown>) => ({
       level: character.level, dnd5eClassLevels: character.dnd5eClassLevels,
       abilities: character.abilities, skills: character.skills,
       dnd5eClassChoices: character.dnd5eClassChoices,
@@ -5177,6 +5581,29 @@ describe('server-authoritative mobile character commands', () => {
     )
     expect(advanced).toMatchObject({ ok: true, changed: true })
     expect(advanced.next.characters[0]).toMatchObject({ level: 2, dnd5eClassLevels: { fighter: 2 }, maxHp: 18 })
+
+    const environmentKey = 'local.test:storm/storm-aura-environment'
+    const priorChoices = { classes: { barbarian: { subclass: 'local.test:storm', selections: { [environmentKey]: ['desert'] } } } }
+    const currentWithEnvironment = { ...levelOne(), dnd5eClassChoices: priorChoices }
+    for (const nextChoices of [
+      { classes: { barbarian: { ...priorChoices.classes.barbarian, selections: { [environmentKey]: ['sea'] } } } },
+      { classes: {} },
+    ]) {
+      const forged = { ...upgraded, dnd5eClassChoices: nextChoices }
+      expect(sharedServerCore.applyPlayerCharacterCommand(
+        { characters: [currentWithEnvironment], selectedId: base.id },
+        command('level-up', { characterId: base.id, character: { ...forged, dnd5eLevelAdvancements: [{
+          ...receipt, before: snapshot(currentWithEnvironment), after: snapshot(forged),
+        }] } }), member,
+      )).toMatchObject({ ok: false, error: 'invalid-class-choice-transition' })
+    }
+    const preserved = { ...upgraded, dnd5eClassChoices: priorChoices }
+    expect(sharedServerCore.applyPlayerCharacterCommand(
+      { characters: [currentWithEnvironment], selectedId: base.id },
+      command('level-up', { characterId: base.id, character: { ...preserved, dnd5eLevelAdvancements: [{
+        ...receipt, before: snapshot(currentWithEnvironment), after: snapshot(preserved),
+      }] } }), member,
+    )).toMatchObject({ ok: true })
 
     const forgedHitPoints = {
       ...upgraded,

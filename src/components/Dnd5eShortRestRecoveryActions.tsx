@@ -1,3 +1,6 @@
+import { requestShortRestRecovery } from '../lib/shortRestRecoveryClient'
+import { getRoomSession } from '../lib/roomSession'
+import { useMapStore } from '../store/maps'
 import { useMemo, useState } from 'react'
 import { Dices, LoaderCircle, Sparkles } from 'lucide-react'
 import type { CampaignTimeAdvance } from '../lib/campaignTime'
@@ -31,6 +34,12 @@ export default function Dnd5eShortRestRecoveryActions({
   advance,
   characterId,
 }: Dnd5eShortRestRecoveryActionsProps) {
+  const maps = useMapStore(state => state.maps)
+  const mapId = useMapStore(state => state.selectedId)
+  const map = maps.find(row => row.id === mapId)
+  const [restTokenId, setRestTokenId] = useState('')
+  const restTokens = map?.tokens.filter(token => token.type === 'player' && token.characterId === characterId) ?? []
+  const restToken = restTokens.length === 1 ? restTokens[0] : restTokens.find(token => token.id === restTokenId)
   const characters = useCharacterStore((state) => state.characters)
   const character = characters.find((candidate) => candidate.id === characterId)
   const [busy, setBusy] = useState<string>()
@@ -89,6 +98,22 @@ export default function Dnd5eShortRestRecoveryActions({
     if (!latest || !pool || pool.current < 1 || latest.currentHp >= latest.maxHp) return
     setBusy(`hit-die:${poolIndex}`)
     setError('')
+    if (getRoomSession()?.role === 'player') {
+      try {
+        if (!map || !restToken) throw Error('请先打开角色所在地图；有多个角色标记时，请选择本次短休的标记。')
+        const receipt = await requestShortRestRecovery({ advanceId: advance.id, characterId,
+          mapId: map.id, tokenId: restToken.id, poolIndex, expectedPoolCurrent: pool.current,
+          ...(useSongOfRest && !songOfRestUsed && songOfRestBard ? { songOfRestBardId: songOfRestBard.character.id } : {}),
+        })
+        await Promise.all([latestState.loadShared(), useMapStore.getState().loadShared()])
+        if (receipt.command.songOfRestBardId) { setSongOfRestUsed(true); setUseSongOfRest(false) }
+        setHitDieResult(`DM 已结算：生命骰与体质恢复 ${receipt.hitDiceHealing} 点` +
+          (receipt.command.songOfRestBardId ? `；休憩曲恢复 ${receipt.songOfRestHealing} 点` : '') +
+          `，实际恢复 ${receipt.healingApplied} 点。`)
+      } catch (cause) { setError(cause instanceof Error ? cause.message : '短休请求失败，请重试。') }
+      finally { setBusy(undefined) }
+      return
+    }
     const previous = structuredClone(latest)
     const dieRoll = rollDie(pool.sides)
     const applySong = useSongOfRest && !songOfRestUsed && songOfRestBard != null
@@ -181,6 +206,11 @@ export default function Dnd5eShortRestRecoveryActions({
           {busy === `hit-die:${index}` ? <LoaderCircle className="h-4 w-4 animate-spin" /> : `投掷 1d${pool.sides}`}
         </button>
       </div>)}
+      {getRoomSession()?.role === 'player' && <p className="text-[11px] text-slate-400">短休位置：{map?.name ?? '请先打开地图'}{restToken ? ` · ${restToken.label}` : ''}</p>}
+      {restTokens.length > 1 && <select aria-label="短休角色标记" value={restTokenId} onChange={event => setRestTokenId(event.target.value)} disabled={busy != null} className="rounded bg-slate-900 p-2 text-xs">
+        <option value="">选择本次短休的角色标记</option>
+        {restTokens.map(token => <option key={token.id} value={token.id}>{token.label}（{Math.round(token.x)}, {Math.round(token.y)}）</option>)}
+      </select>}
       {hitDice.length === 0 && <p className="text-xs text-slate-500">当前角色没有可用的生命骰池。</p>}
       {songOfRestBard && !songOfRestUsed && <label className="flex items-start gap-2 rounded-xl border border-violet-400/15 bg-violet-500/[0.055] px-3 py-2 text-[11px] text-slate-300">
         <input type="checkbox" checked={useSongOfRest} onChange={(event) => setUseSongOfRest(event.target.checked)} className="mt-0.5" />

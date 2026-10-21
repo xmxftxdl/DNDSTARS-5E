@@ -10,6 +10,7 @@ import { auditDnd5eMonsterHeadlessCoverage } from './monsterHeadlessCoverage'
 import { getDnd5eSrdMonster } from './monsters'
 import { planDnd5eMonsterTurn } from './monsterTurnPlanner'
 import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eMapCombatSnapshot } from './mapBridge'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -80,7 +81,7 @@ describe('reviewed SRD structured special-action batch', () => {
     }
     expect(getDnd5eSrdMonster('srd-5.1:vrock')?.actions
       .find((action) => action.id === 'stunning-screech')?.usage).toEqual({
-        kind: 'recharge', dieSides: 6, minimum: 6,
+        kind: 'per-day', max: 1,
       })
   })
 
@@ -196,6 +197,27 @@ describe('reviewed SRD structured special-action batch', () => {
       expect(result.state.combatants.vrock.classState.monsterRechargeReadyByActionId)
         .toEqual({ 'stunning-screech': true })
     }
+  })
+
+  it('spends Stunning Screech once per day even when a stale recharge flag is present', () => {
+    const vrock = token({ id: 'vrock', poolId: 'srd-5.1:vrock',
+      dnd5eCombatState: { monsterRechargeReadyByActionId: { 'stunning-screech': true } } })
+    const hero = token({ id: 'hero', poolId: 'srd-5.1:bandit', dnd5eSide: 'player', x: 15 })
+    const state = createDnd5eMapCombatSnapshot({ combatId: 'vrock-daily-screech', map: map([vrock, hero]), characters: [],
+      initiativeOrder: [vrock, hero].map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })) }).state
+    const action = { type: 'monster-area-action' as const, actorId: 'vrock', actionId: 'stunning-screech',
+      resolution: { schemaVersion: 1 as const, targetIds: ['hero'], targetSavingThrows: [{ targetId: 'hero', d20: 20 }], damageRolls: [] } }
+    const first = resolveDnd5eHeadlessAction(state, action)
+    expect(first.ok, JSON.stringify(first)).toBe(true)
+    expect(first.state.combatants.vrock.classState.monsterActionUsesByActionId?.['stunning-screech']).toEqual({ current: 0, max: 1 })
+    const restored = JSON.parse(JSON.stringify(first.state))
+    restored.combatants.vrock.turn.actionAvailable = true
+    restored.combatants.vrock.classState.monsterRechargeReadyByActionId['stunning-screech'] = true
+    const second = resolveDnd5eHeadlessAction(restored, action)
+    expect(second.ok).toBe(false)
+    expect(second.state.combatants.vrock.turn.actionAvailable).toBe(true)
+    expect(second.state.combatants.vrock.classState.monsterActionUsesByActionId?.['stunning-screech'].current).toBe(0)
+    expect(getDnd5eSrdMonster('srd-5.1:vrock')?.actions.find(a => a.id === 'spores')?.usage).toEqual({ kind: 'recharge', dieSides: 6, minimum: 6 })
   })
 
   it('spends Lich legendary points and grants source-specific immunity on a success', () => {

@@ -1,9 +1,11 @@
+import { transferDnd5eFollowingSensors } from './sensorTargetTransfer'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import { cellKey, cellToPixel, mapCellExtent, occupiedCells, pixelToCell, tokenOccupiedCellsAt, tokenCenterForAnchorCell } from '../../lib/gridCombat'
 import { dnd5ePersistentAreaTeleportationBlocker, mapGeometryPlacementBlocked, mapGeometryRuntimeForMap, mapGeometryTerrainElevationAtPoint } from '../../lib/mapGeometry'
 import { dnd5ePersistentAreaAffectsTokenVerticallyAt } from './persistentAreaGeometry'
 
 export interface TeleportationCircleExit {
+  elevationFeet?: number
   mapId: string
   x: number
   y: number
@@ -19,8 +21,9 @@ export function normalizeTeleportationCircleExit(value: unknown): TeleportationC
   if (!value || typeof value !== 'object') return undefined
   const v = value as TeleportationCircleExit
   if (typeof v.mapId !== 'string' || !v.mapId.trim() || !Number.isFinite(v.x) || !Number.isFinite(v.y) ||
+    (v.elevationFeet != null && !Number.isFinite(v.elevationFeet)) ||
     (v.expiresAt != null && (!Number.isFinite(v.expiresAt) || v.expiresAt <= 0))) return undefined
-  return { mapId: v.mapId, x: v.x, y: v.y, ...(v.expiresAt == null ? {} : { expiresAt: v.expiresAt }),
+  return { mapId: v.mapId, x: v.x, y: v.y, ...(v.elevationFeet == null ? {} : {elevationFeet:v.elevationFeet}), ...(v.expiresAt == null ? {} : { expiresAt: v.expiresAt }),
     ...(v.exploration === true ? { exploration: true } : {}),
     ...(typeof v.closesBeforeTokenId === 'string' ? { closesBeforeTokenId: v.closesBeforeTokenId } : {}),
     ...(Number.isInteger(v.closesBeforeRound) ? { closesBeforeRound: v.closesBeforeRound } : {}),
@@ -100,7 +103,7 @@ export function teleportationCircleLanding(map: BattleMap, token: Token, exit: T
   for (const p of candidates) {
     const cells = tokenOccupiedCellsAt(token, map, p)
     if (cells.some(c => c.col < 0 || c.row < 0 || c.col >= extent.cols || c.row >= extent.rows || occupied.has(cellKey(c)))) continue
-    const elevationFeet = mapGeometryTerrainElevationAtPoint(geometry, p)
+    const elevationFeet = Math.max(mapGeometryTerrainElevationAtPoint(geometry, p), exit.elevationFeet ?? -Infinity)
     if (dnd5ePersistentAreaTeleportationBlocker({ geometry, map, token,
       from: { x: -1e6, y: -1e6 }, to: p, toElevationFeet: elevationFeet })) continue
     if (mapGeometryPlacementBlocked({ geometry, map, token, at: p, elevationFeet }).blocked) continue
@@ -122,7 +125,8 @@ export function travelThroughTeleportationCircle(maps: readonly BattleMap[], sou
   const position = teleportationCircleLanding(destination, token, exit)
   if (!position) return undefined
   const moved = { ...token, ...position, movementAnimation: undefined, teleportationArrivalMapId: destination.id }
-  return maps.map(m => m.id === destination.id
+  const transferred = maps.map(m => m.id === destination.id
     ? { ...m, tokens: [...m.tokens.filter(t => t.id !== token.id), moved] }
     : m.id === source.id ? { ...m, tokens: m.tokens.filter(t => t.id !== token.id) } : m)
+  return transferDnd5eFollowingSensors(transferred, source.id, destination.id, moved)
 }

@@ -46,6 +46,7 @@ export function dnd5eMonsterMultiattackChildIsCompositeSupported(
   action: Dnd5eMonsterAction | undefined,
 ): boolean {
   if (!action) return false
+  if (action.kind === 'other' && action.innateSpellStep) return true
   if (action.kind === 'weapon-attack') return action.attack != null
   if (action.kind !== 'other' || !action.rule) return false
   return action.rule.kind === 'area-saving-throw' ||

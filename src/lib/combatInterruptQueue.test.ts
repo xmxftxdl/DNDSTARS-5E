@@ -9,12 +9,26 @@ import {
   findCombatTransactionLock,
   isCombatInterruptExpired,
   markCombatInterruptRolling,
+  recordCombatInterruptRollOptions,
   upsertCombatInterrupt,
   rollbackCombatInterrupt,
   waitCombatInterruptForDm,
 } from './combatInterruptQueue'
 
 describe('combatInterruptQueue', () => {
+  it('resumes an owner decision only after reroll dice are published', () => {
+    const request = createCombatInterrupt({ id: 'choice', mapId: 'map', kind: 'roll-confirmation', now: 0, timeoutPolicy: 'rollback',
+      payload: { eligibleModifiers: [{ characterId: 'hero', featureId: 'free', featureLabel: 'Free', modifierKind: 'choice-reroll' }] } })
+    request.contributions = [{ id: 'use', kind: 'choice-reroll', characterId: 'hero', characterName: 'Hero', featureId: 'free', featureLabel: 'Free', decision: 'use', createdAt: 0 }]
+    const rolling = markCombatInterruptRolling(upsertCombatInterrupt(null, request, 0), 'choice', undefined, 1)!
+    expect(isCombatInterruptExpired(rolling.interrupts[0], 20_000)).toBe(false)
+    const ready = recordCombatInterruptRollOptions(rolling, 'choice', { contributionId: 'use', values: [12, 5] }, 20_000)!
+    expect(ready.interrupts[0].status).toBe('pending')
+    expect(ready.interrupts[0].expiresAt).toBe(30_000)
+    expect(isCombatInterruptExpired(ready.interrupts[0], 30_001)).toBe(true)
+    const replay = recordCombatInterruptRollOptions(ready, 'choice', { contributionId: 'use', values: [12, 5] }, 25_000)!
+    expect(replay.interrupts[0].expiresAt).toBe(30_000)
+  })
   it('upserts requests and keeps the newest copy by id', () => {
     const first = createCombatInterrupt({
       id: 'i1',
@@ -101,9 +115,9 @@ describe('combatInterruptQueue', () => {
     )!
     const active = findCombatInterrupt(rolling, request.id)!
 
-    expect(active).toMatchObject({ status: 'rolling', expiresAt: 10_120 })
-    expect(isCombatInterruptExpired(active, 10_119)).toBe(false)
-    expect(isCombatInterruptExpired(active, 10_120)).toBe(true)
+    expect(active).toMatchObject({ status: 'rolling', expiresAt: 120_120 })
+    expect(isCombatInterruptExpired(active, 120_119)).toBe(false)
+    expect(isCombatInterruptExpired(active, 120_120)).toBe(true)
     expect(isCombatInterruptExpired({
       ...active,
       payload: { ...active.payload, rollOptions: { contributionId: 'choice', values: [7, 18] } },

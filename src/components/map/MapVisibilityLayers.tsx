@@ -1,3 +1,9 @@
+import { persistentAreaGroundLightPolygons, persistentAreaLightReductionPolygons } from './persistentAreaLightPresentation'
+import { projectControlledFlameLight } from '../../../shared/controlled-flame-state.mjs'
+import { mapGeometryConcealedFlamePolygon } from '../../lib/mapGeometry'
+import { rectangularLightFootprint } from '../../lib/rectangularLightOrigin'
+import { rectangularLightHasClippedCells } from '../../../shared/clipped-prism-origin.mjs'
+import { ContinuousSpellLightMask } from './ContinuousSpellLightMask'
 import { Circle, Group, Line, Rect } from 'react-konva'
 import type { BattleMap, Token } from '../../store/maps'
 import {
@@ -213,6 +219,7 @@ export function LightingLayer({
   const visionSourceIds = new Set(visionSourceTokenIds)
   const viewers = map.tokens.filter((token) => visionSourceIds.has(token.id))
   const spellLighting = mapGeometrySpellLightingSources(map, geometry)
+  const lightReductions = persistentAreaLightReductionPolygons(map, geometry)
   const spellDarkness = spellLighting.filter((source) => source.kind === 'magical-darkness')
   const magicalDarkness = (geometry?.obstacles ?? []).filter((obstacle) =>
     obstacle.magicalDarkness === true &&
@@ -229,7 +236,7 @@ export function LightingLayer({
   const hasDarknessFog = !!darknessFog && (darknessFog.filled || darknessFog.shapes.length > 0)
   if (!mapLightingShouldRender(
     ambientLight,
-    magicalDarkness.length > 0 || spellDarkness.length > 0 || hasDarknessFog,
+    magicalDarkness.length > 0 || spellDarkness.length > 0 || hasDarknessFog || lightReductions.length > 0,
   )) return null
   const opacity = mapLightingAmbientOpacity(ambientLight, isDM)
   const viewerProfiles = viewers.map((viewer) => ({
@@ -281,14 +288,16 @@ export function LightingLayer({
   const sources = [
     ...map.tokens.filter((token) => campaignLightIsActive(token.lightSource, worldMinute)).map((token) => ({
       id: `token:${token.id}`,
+      light: token.lightSource,
       point: { x: token.x, y: token.y },
       elevationFeet: mapGeometryTokenElevation(geometry, token),
       brightRadiusFeet: token.lightSource!.brightRadiusFeet,
       dimRadiusFeet: token.lightSource!.dimRadiusFeet,
       color: token.lightSource!.color,
     })),
-    ...(geometry?.lights ?? []).filter((light) => campaignLightIsActive(light, worldMinute)).map((light) => ({
+    ...(geometry?.lights ?? []).map(light => projectControlledFlameLight(light, worldMinute)).filter((light) => campaignLightIsActive(light, worldMinute)).map((light) => ({
       id: `scene:${light.id}`,
+      light,
       point: light.points[0],
       elevationFeet: mapGeometryAbsoluteElevationAtPoint(geometry, light.points[0], light.elevationFeet),
       brightRadiusFeet: light.brightRadiusFeet,
@@ -297,6 +306,7 @@ export function LightingLayer({
     })),
     ...spellLighting.filter((source) => source.kind === 'light').map((source) => ({
       id: source.id,
+      light: { sourceKind: 'spell' },
       point: source.point,
       elevationFeet: source.elevationFeet,
       brightRadiusFeet: source.brightRadiusFeet,
@@ -304,18 +314,39 @@ export function LightingLayer({
       color: source.color,
     })),
   ]
-  const sourcePolygons = sources.map((source) => ({
-    ...source,
-    brightPolygon: mapGeometryLightPolygon({
+  const sourcePolygons = sources.flatMap((source) => {
+    const extended = spellLighting.find(candidate => candidate.id === source.id && candidate.kind === 'light' && candidate.emissionArea)
+    if (extended?.kind === 'light' && extended.emissionArea && (
+      rectangularLightHasClippedCells(map, extended.emissionArea) ||
+      geometry?.walls.length || geometry?.doors.length || geometry?.windows?.length || geometry?.obstacles.length ||
+      map.dnd5ePluginAreas?.some(area => area.id !== extended.areaId && (area.blocking?.vision || area.obscuration?.kind === 'heavy'))
+    )) return []
+    // Use the continuous surface on the flat, unobstructed plane. Terrain and
+    // occlusion need a separate projection rather than filling through blockers.
+    if (extended?.kind === 'light' && extended.emissionArea &&
+      !(geometry?.walls.length || geometry?.doors.length || geometry?.windows?.length || geometry?.obstacles.length)) {
+      const brightPolygon = rectangularLightFootprint(map, extended.emissionArea, extended.brightRadiusFeet)
+      const dimPolygon = rectangularLightFootprint(map, extended.emissionArea, extended.brightRadiusFeet + extended.dimRadiusFeet)
+      if (brightPolygon && dimPolygon) return [{ ...source, parentSourceId: source.id, brightPolygon, dimPolygon }]
+    }
+    const areaSource = spellLighting.find(candidate => candidate.id === source.id && candidate.kind === 'light' && candidate.areaOnly)
+    if (areaSource) return persistentAreaGroundLightPolygons({ map, geometry, source: areaSource }).map((polygon, index) => ({
+      ...source, id: `${source.id}:cell:${index}`, parentSourceId: source.id,
+      brightPolygon: areaSource.kind === 'light' && areaSource.structureVolume?.illumination === 'dim' ? [] : polygon, dimPolygon: polygon,
+    }))
+    return [{
+    ...source, parentSourceId: source.id,
+    brightPolygon: mapGeometryConcealedFlamePolygon({ map, geometry, light: source.light, source: { ...source.point, elevationFeet: source.elevationFeet }, viewers: isDM ? undefined : viewers, polygon: mapGeometryLightPolygon({
       geometry, map, source: source.point, radiusFeet: source.brightRadiusFeet,
       elevationFeet: source.elevationFeet,
-    }),
-    dimPolygon: mapGeometryLightPolygon({
+    }) }),
+    dimPolygon: mapGeometryConcealedFlamePolygon({ map, geometry, light: source.light, source: { ...source.point, elevationFeet: source.elevationFeet }, viewers: isDM ? undefined : viewers, polygon: mapGeometryLightPolygon({
       geometry, map, source: source.point,
       radiusFeet: source.brightRadiusFeet + source.dimRadiusFeet,
       elevationFeet: source.elevationFeet,
-    }),
-  }))
+    }) }),
+  }]
+  })
   return (
     <Group name="map-lighting-content" listening={false}>
       <Group listening={false}>
@@ -324,6 +355,9 @@ export function LightingLayer({
           source.dimPolygon.length >= 3 ? <Line key={`light-dim:${source.id}`} points={source.dimPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" opacity={0.52} globalCompositeOperation="destination-out" listening={false} /> : null,
           source.brightPolygon.length >= 3 ? <Line key={`light-bright:${source.id}`} points={source.brightPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" globalCompositeOperation="destination-out" listening={false} /> : null,
         ])}
+        {ambientLight !== 'bright' && <ContinuousSpellLightMask map={map} geometry={geometry}
+          sources={spellLighting.filter(source => source.kind === 'light' && source.emissionArea &&
+            !sourcePolygons.some(polygon => polygon.parentSourceId === source.id))}/>} 
         {ambientLight !== 'bright' && darkvisionPolygons.map(({ id, polygon }) => (
           <Line
             key={`darkvision:${id}`}
@@ -379,6 +413,33 @@ export function LightingLayer({
           /> : null,
         ])}
       </Group>
+      {lightReductions.length > 0 && <Group listening={false} clipFunc={context => {
+        context.beginPath()
+        for (const polygon of lightReductions) {
+          context.moveTo(polygon[0].x, polygon[0].y)
+          for (const point of polygon.slice(1)) context.lineTo(point.x, point.y)
+          context.closePath()
+        }
+      }}>
+        <Rect width={map.width} height={map.height} fill="#02030a" opacity={isDM ? 0.12 : 0.3} listening={false} />
+        {ambientLight !== 'bright' && <Group listening={false} clipFunc={context => {
+          // Brightly lit portions become dim; enhanced senses also retain perception.
+          for (const polygon of [...sourcePolygons.map(source => source.brightPolygon),
+            ...darkvisionPolygons.map(entry => entry.polygon), ...darknessSightPolygons.map(entry => entry.polygon)]) {
+            if (polygon.length < 3) continue
+            context.beginPath()
+            context.rect(0, 0, map.width, map.height)
+            context.moveTo(polygon[0].x, polygon[0].y)
+            for (const point of polygon.slice(1)) context.lineTo(point.x, point.y)
+            context.closePath()
+            context.clip('evenodd')
+          }
+          context.beginPath()
+          context.rect(0, 0, map.width, map.height)
+        }}>
+          <Rect width={map.width} height={map.height} fill="#02030a" opacity={isDM ? 0.15 : 0.95} listening={false} />
+        </Group>}
+      </Group>}
       {(magicalDarkness.length > 0 || spellDarkness.length > 0 || hasDarknessFog) && <Group listening={false}>
         {hasDarknessFog && <Group listening={false} opacity={isDM ? Math.max(0.15, Math.min(0.8, darknessFog.opacity * 0.55)) : 0.97}
           ref={(node) => { node?.cache({ x: 0, y: 0, width: map.width, height: map.height, pixelRatio: 1 }) }}>
@@ -398,8 +459,27 @@ export function LightingLayer({
           />
         ))}
         {spellDarkness.map((source) => (
+          <Group key={`magical-darkness-top:${source.id}`} listening={false} clipFunc={(context) => {
+            // Clip each eligible light out of this darkness only. Sequential
+            // inverse clips form a union of holes, including overlapping lights.
+            if (source.lightSuppressionScope === 'within-area') {
+              for (const light of spellLighting) {
+                if (light.kind !== 'light' || light.spellLevel <= (source.suppressesMagicalLightThroughLevel ?? 9)) continue
+                for (const { dimPolygon: polygon } of sourcePolygons.filter(candidate => candidate.parentSourceId === light.id)) {
+                if (polygon.length < 3) continue
+                context.beginPath()
+                context.rect(0, 0, map.width, map.height)
+                context.moveTo(polygon[0].x, polygon[0].y)
+                for (const point of polygon.slice(1)) context.lineTo(point.x, point.y)
+                context.closePath()
+                context.clip('evenodd')
+                }
+              }
+            }
+            context.beginPath()
+            context.rect(0, 0, map.width, map.height)
+          }}>
           <Circle
-            key={`magical-darkness-top:${source.id}`}
             x={source.point.x}
             y={source.point.y}
             radius={source.radiusFeet / Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)}
@@ -409,6 +489,7 @@ export function LightingLayer({
             opacity={isDM ? 0.22 : 0.97}
             listening={false}
           />
+          </Group>
         ))}
         {magicalDarknessSightPolygons.map(({ id, polygon }) => (
           <Line

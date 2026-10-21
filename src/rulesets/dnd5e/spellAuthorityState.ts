@@ -25,6 +25,7 @@ export type Dnd5eSpellAuthorityRecordKindV1 =
   | 'terrain-merge'
   | 'simulacrum-companion'
   | 'recall-sanctuary'
+  | 'benefit-history'
 
 export interface Dnd5eSpellBodySnapshotV1 {
   name: string
@@ -126,7 +127,45 @@ export interface Dnd5eRecallSanctuaryAuthorityRecordV1 {
  * combat action. New record kinds remain closed unions so imported JSON cannot
  * smuggle callbacks or arbitrary runtime objects through this boundary.
  */
+export interface Dnd5eBenefitHistoryAuthorityRecordV1 {
+  schemaVersion: 1
+  id: string
+  kind: 'benefit-history'
+  sourceActorId: string
+  subjectActorId: string
+  sourceActivityId: string
+  createdWorldMinute: number
+  sourcePackageId: string
+  benefitKey: string
+  benefitScope?: 'package' | 'ruleset'
+  renewal?: import('./benefitHistoryRenewal').Dnd5eBenefitRenewalRecord
+}
+
+/** Package-scoped lifetime benefit identity, independent of caster and temporary effects. */
+export function dnd5eBenefitHistoryRecordId(packageId: string, benefitKey: string, scope?: 'package' | 'ruleset'): string {
+  return `benefit-history:${JSON.stringify([scope === 'ruleset' ? 'ruleset:dnd5e-2014-srd-5.1' : packageId, benefitKey])}`
+}
+
+/** Shared declarations also recognize older package records with the same declared key. */
+export function dnd5eMatchingBenefitHistoryRecords(records: Record<string, Dnd5eSpellAuthorityRecordV1> | undefined,
+  packageId: string, benefitKey: string, scope?: 'package' | 'ruleset'): Dnd5eBenefitHistoryAuthorityRecordV1[] {
+  return Object.values(records ?? {}).filter((record): record is Dnd5eBenefitHistoryAuthorityRecordV1 =>
+    record.kind === 'benefit-history' && record.benefitKey === benefitKey &&
+    (scope === 'ruleset' || record.benefitScope === 'ruleset' || record.sourcePackageId === packageId))
+}
+
+/** Replace superseded history atomically while retaining unrelated benefits. Shared history cannot be downgraded. */
+export function dnd5eStoreBenefitHistoryRecord(records: Record<string, Dnd5eSpellAuthorityRecordV1> | undefined,
+  record: Dnd5eBenefitHistoryAuthorityRecordV1): Record<string, Dnd5eSpellAuthorityRecordV1> {
+  const matches = dnd5eMatchingBenefitHistoryRecords(records, record.sourcePackageId, record.benefitKey, record.benefitScope)
+  const scope = record.benefitScope === 'ruleset' || matches.some(previous => previous.benefitScope === 'ruleset') ? 'ruleset' : record.benefitScope
+  const id = dnd5eBenefitHistoryRecordId(record.sourcePackageId, record.benefitKey, scope)
+  const obsolete = new Set(matches.map(previous => previous.id))
+  return {...Object.fromEntries(Object.entries(records ?? {}).filter(([key]) => !obsolete.has(key))), [id]: {...record, id, benefitScope:scope}}
+}
+
 export type Dnd5eSpellAuthorityRecordV1 =
+  | Dnd5eBenefitHistoryAuthorityRecordV1
   | Dnd5eCloneReceptacleAuthorityRecordV1
   | Dnd5eLinkedPlanarObjectAuthorityRecordV1
   | Dnd5eSoulVesselAuthorityRecordV1

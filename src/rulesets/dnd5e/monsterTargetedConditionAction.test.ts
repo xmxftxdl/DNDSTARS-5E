@@ -1,7 +1,8 @@
+import { prepareDnd5eRandomTargetMonsterSpecial } from './randomMonsterSpecialTargets'
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { createDnd5eMechanicalEffect } from './activeEffects'
+import { createDnd5eMechanicalEffect, createDnd5eConditionEffect } from './activeEffects'
 import {
   prepareDnd5eMonsterSpecialAction,
   resolvePreparedDnd5eMonsterSpecialAction,
@@ -130,4 +131,60 @@ describe('Headless targeted monster condition actions', () => {
       resolved.result.state.combatants[testScene.succubus.id]?.turn.actionAvailable,
     ).toBe(false)
   })
+})
+
+
+it('randomizes a monster Charm to a visible qualifying same-side noninitiative creature', () => {
+  const test = scene(false)
+  const random = createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies', targetId: test.succubus.id,
+    source: { kind: 'spell' }, modifiers: { randomVisibleCreatureTargets: true, perceiveVisibleCreaturesAsHostile: true } })
+  test.succubus.dnd5eCombatState = { activeEffects: [random] }
+  const ally = token({ id: 'ally', poolId: 'srd-5.1:goblin', x: 25 })
+  const invalid = token({ id: 'invalid', poolId: 'srd-5.1:brown-bear', x: 35 })
+  const far = token({ id: 'far', poolId: 'srd-5.1:goblin', x: 1000 })
+  test.map.tokens.push(ally, invalid, far)
+  const input = { combatId: 'random-charm', map: test.map, characters: test.characters, initiativeOrder: test.initiativeOrder,
+    actorTokenId: test.succubus.id, targetTokenId: test.hero.id, actionId: 'charm',
+    chooseRandomTarget: (ids: readonly string[]) => { expect([...ids].sort()).toEqual(['ally', 'hero-token']); return 'ally' } }
+  const prepared = prepareDnd5eRandomTargetMonsterSpecial(input)
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  const resolved = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared, savingThrow: { d20: 1, d20Second: 1 } })
+  expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+  expect(resolved.result.state.combatants.ally.conditions).toContain('charmed')
+  expect(resolved.result.state.combatants['hero-token'].conditions).not.toContain('charmed')
+  expect(resolved.result.state.initiativeOrder).toEqual(test.initiativeOrder.map(t => t.tokenId))
+  expect(resolved.result.state.combatants.succubus.turn.actionAvailable).toBe(false)
+  random.suspendedBy = ['antimagic-test']
+  const normal = prepareDnd5eRandomTargetMonsterSpecial({ ...input, chooseRandomTarget: () => { throw Error('Must not randomize') } })
+  expect(normal.ok).toBe(true)
+  if (normal.ok) expect(normal.prepared.targetToken?.id).toBe(test.hero.id)
+})
+
+
+it('keeps target consent local when randomizing Draining Kiss and settles qualifying damage', () => {
+  const test = scene(false)
+  test.succubus.dnd5eCombatState = { activeEffects: [createDnd5eMechanicalEffect({ definitionId: 'test:enemies', label: 'Enemies',
+    targetId: test.succubus.id, source: { kind: 'spell' }, modifiers: { randomVisibleCreatureTargets: true } })] }
+  const charmed = token({ id: 'charmed', poolId: 'srd-5.1:goblin', x: 5, y: 15,
+    dnd5eCombatState: { activeEffects: [createDnd5eConditionEffect({ condition: 'charmed', targetId: 'charmed',
+      source: { kind: 'monster', actorId: test.succubus.id } })] } })
+  const unwilling = token({ id: 'unwilling', poolId: 'srd-5.1:goblin', x: 15, y: 15 })
+  test.map.tokens.push(charmed, unwilling)
+  const prepared = prepareDnd5eRandomTargetMonsterSpecial({ combatId: 'random-kiss', map: test.map, characters: test.characters,
+    initiativeOrder: test.initiativeOrder, actorTokenId: test.succubus.id, targetTokenId: test.hero.id,
+    targetWilling: true, actionId: 'draining-kiss', chooseRandomTarget: ids => {
+      expect([...ids].sort()).toEqual(['charmed', 'hero-token']); return 'charmed'
+    } })
+  expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+  if (!prepared.ok) throw Error(prepared.reason)
+  expect(prepared.prepared.targetWilling).toBeUndefined()
+  const rule = prepared.prepared.action.rule
+  if (rule?.kind !== 'saving-throw-damage-and-max-hp-reduction') throw Error('Wrong rule')
+  const settled = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared, savingThrow: { d20: 1, d20Second: 1 },
+    damageRolls: Array(rule.damage.count).fill(1) })
+  expect(settled.result.ok, JSON.stringify(settled.result)).toBe(true)
+  expect(settled.result.state.combatants.charmed.currentHp).toBeLessThan(40)
+  expect(settled.result.state.combatants.charmed.maxHp).toBeLessThan(40)
+  expect(settled.result.state.combatants['hero-token'].currentHp).toBe(40)
 })

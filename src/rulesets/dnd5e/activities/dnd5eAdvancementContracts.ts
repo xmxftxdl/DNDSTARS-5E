@@ -25,9 +25,11 @@ export type Dnd5eBuildGrantV1 =
   | {
       kind: 'spell'
       spellId: string
-      mode: 'cantrip' | 'known' | 'once-per-long-rest' | 'ritual-book'
+      mode: 'cantrip' | 'at-will' | 'known' | 'once-per-long-rest' | 'once-per-short-rest' | 'ritual-book'
       ability?: AbilityKey
       castAtLevel?: number
+      /** Restricts this grant, not the underlying spell or other casting sources. */
+      targetRestriction?: 'self'
     }
   | { kind: 'feature'; featureId: string }
   | { kind: 'tag'; key: string; value: string }
@@ -39,6 +41,8 @@ export interface Dnd5eBuildChoiceOptionV1 {
   grants: readonly Dnd5eBuildGrantV1[]
   /** All requirements must match selections made in earlier groups. */
   requires?: readonly { advancementId: string; optionIds: readonly string[] }[]
+  /** Checks permanent training before this content's grants are applied. All clauses must match. */
+  requiresSavingThrowProficiency?: readonly { ability: AbilityKey; proficient: boolean }[]
 }
 
 export type Dnd5eAdvancementDefinitionV1 =
@@ -117,6 +121,8 @@ export type Dnd5eAdvancementDefinitionV1 =
       description?: string
       count: number
       options: readonly Dnd5eBuildChoiceOptionV1[]
+      /** One optional named tag, e.g. a campaign-specific language. */
+      customTag?: { key: string; label: string }
     }
   | {
       schemaVersion: typeof DND5E_ADVANCEMENT_SCHEMA_VERSION
@@ -127,7 +133,7 @@ export type Dnd5eAdvancementDefinitionV1 =
       label: string
       description?: string
       count: number
-      mode: 'cantrip' | 'known' | 'once-per-long-rest' | 'ritual-book'
+      mode: 'cantrip' | 'at-will' | 'known' | 'once-per-long-rest' | 'once-per-short-rest' | 'ritual-book'
       levels: readonly number[]
       castAtLevel?: number
       /** Optional stable-id allowlist, used for ritual-only or curated choices. */
@@ -152,7 +158,7 @@ export type Dnd5eAdvancementDefinitionV1 =
 const ADVANCEMENT_ID = /^[a-z0-9][a-z0-9._:-]{0,159}$/
 const ABILITIES = new Set<AbilityKey>(['str', 'dex', 'con', 'int', 'wis', 'cha'])
 const PROFICIENCY_CATEGORIES = new Set(['skill', 'tool', 'weapon', 'armor', 'saving-throw'])
-const SPELL_GRANT_MODES = new Set(['cantrip', 'known', 'once-per-long-rest', 'ritual-book'])
+const SPELL_GRANT_MODES = new Set(['cantrip', 'at-will', 'known', 'once-per-long-rest', 'once-per-short-rest', 'ritual-book'])
 
 function validText(value: unknown, maximum = 240): value is string {
   return typeof value === 'string' && !!value.trim() && value.length <= maximum
@@ -173,8 +179,16 @@ function validateBuildGrant(grant: Dnd5eBuildGrantV1, label: string): readonly s
     if (!PROFICIENCY_CATEGORIES.has(grant.category)) errors.push(`${label}.category is invalid`)
     if (!validText(grant.id, 160)) errors.push(`${label}.id is invalid`)
   } else if (grant.kind === 'spell') {
+    if (grant.targetRestriction != null && grant.targetRestriction !== 'self') errors.push(`${label}.targetRestriction is invalid`)
+    if (grant.targetRestriction != null && !['cantrip', 'at-will', 'once-per-long-rest', 'once-per-short-rest'].includes(grant.mode)) errors.push(`${label}.targetRestriction requires independent casting`)
     if (!validText(grant.spellId, 160)) errors.push(`${label}.spellId is invalid`)
     if (!SPELL_GRANT_MODES.has(grant.mode)) errors.push(`${label}.mode is invalid`)
+    if (['at-will', 'once-per-long-rest', 'once-per-short-rest'].includes(grant.mode)) {
+      if (!grant.ability) errors.push(`${label}.ability is required for independent casting`)
+      if (!Number.isInteger(grant.castAtLevel) || (grant.castAtLevel ?? 0) < 1 || (grant.castAtLevel ?? 10) > 9) {
+        errors.push(`${label}.castAtLevel must specify the levelled spell casting level`)
+      }
+    }
     if (grant.ability != null && !ABILITIES.has(grant.ability)) errors.push(`${label}.ability is invalid`)
     if (grant.castAtLevel != null && (
       !Number.isInteger(grant.castAtLevel) || grant.castAtLevel < 0 || grant.castAtLevel > 9
@@ -251,14 +265,17 @@ export function validateDnd5eAdvancementDefinitionV1(
       errors.push(...validateBuildGrant(grant, `advancement.grants[${index}]`))
     })
   } else if (advancement.kind === 'select') {
+    if (advancement.customTag != null && (
+      !ADVANCEMENT_ID.test(advancement.customTag.key) || !validText(advancement.customTag.label, 160)
+    )) errors.push('advancement customTag is invalid')
     if (!validText(advancement.label, 160)) errors.push('advancement selection label is invalid')
     if (advancement.description != null && !validText(advancement.description, 2_000)) {
       errors.push('advancement selection description is invalid')
     }
     if (
-      !advancement.options.length || advancement.options.length > 512 ||
+      (!advancement.options.length && !advancement.customTag) || advancement.options.length > 512 ||
       !Number.isInteger(advancement.count) || advancement.count < 1 ||
-      advancement.count > advancement.options.length ||
+      advancement.count > advancement.options.length + (advancement.customTag ? 1 : 0) ||
       new Set(advancement.options.map((option) => option.id)).size !== advancement.options.length
     ) errors.push('advancement selection options are invalid')
     advancement.options.forEach((option, optionIndex) => {
@@ -273,6 +290,14 @@ export function validateDnd5eAdvancementDefinitionV1(
       } else option.grants.forEach((grant, grantIndex) => {
         errors.push(...validateBuildGrant(grant, `advancement.options[${optionIndex}].grants[${grantIndex}]`))
       })
+      const saveRequirements = option.requiresSavingThrowProficiency
+      if (saveRequirements != null && (
+        !Array.isArray(saveRequirements) || saveRequirements.length < 1 || saveRequirements.length > 6 ||
+        saveRequirements.some(requirement => !requirement || !ABILITIES.has(requirement.ability) ||
+          typeof requirement.proficient !== 'boolean' ||
+          Object.keys(requirement).some(key => key !== 'ability' && key !== 'proficient')) ||
+        new Set(saveRequirements.map(requirement => requirement?.ability)).size !== saveRequirements.length
+      )) errors.push(`advancement.options[${optionIndex}].requiresSavingThrowProficiency is invalid`)
       option.requires?.forEach((requirement, requirementIndex) => {
         if (
           !ADVANCEMENT_ID.test(requirement.advancementId) || !requirement.optionIds.length ||

@@ -1,4 +1,13 @@
+import { dnd5eAttackActionSlot } from './attackActionSlot'
+import { dnd5eOrdinaryAttacksUsed } from './attackActionHistory'
+import { prepareDnd5eAttackTeleportDestination } from './attackTeleportDestination'
+import { resolveDnd5eAttackTeleportLanding, attackTeleportArrivalConsumedAction, type Dnd5eAttackTeleportArrival } from './attackTeleportLanding'
+import { dnd5eCharacterHasPluginFeature, dnd5ePluginFeaturesAvailableForCharacter } from './pluginApi'
+import { dnd5eDeclarativeAttackIntentDefinition } from './pluginApi'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import {resolveDnd5eRollDiceModifiers} from './rollDiceModifiers'
+import {dnd5eRollDiceOccurrenceId} from './rollDiceTransaction'
+import { dnd5eEffectiveCharacterMovementProfile } from './characterMovement'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
@@ -8,8 +17,12 @@ import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
+import { dnd5eActiveAttackRollFlags, dnd5eActiveTargetLinkedAttackRollFlags } from './activeEffects'
+import { dnd5eAreaAttackAdvantageCandidates, dnd5eCombatantCanSee, dnd5eCanActAtZeroHitPoints, dnd5eSavingThrowCounterattackOptions, type Dnd5eAction } from './headlessCombatEngine'
 import {
   dnd5eMonkMartialArtsEligible,
+  dnd5eUnarmedAttackProfiles,
+  dnd5eMonkWeapon,
   dnd5eOffHandWeaponAttackProfile,
   dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
@@ -36,6 +49,7 @@ import {
   dnd5eAttackDisadvantageReasons,
   dnd5eAttackerIsUnseenForAttack,
   dnd5ePendingAllyAttackAdvantage,
+  dnd5eSourceProximityAttackAdvantage,
   dnd5eSourceMarkedAttackDisadvantage,
   dnd5eRageAllyProtectionDisadvantage,
   dnd5eRageAllyMeleeAdvantage,
@@ -48,6 +62,8 @@ import {
   dnd5eIsFavoredEnemy,
   dnd5eSourceLinkedRelations,
   dnd5eWeaponClassDamageDefinitions,
+  dnd5eFirstOwnTurnWeaponAttackFeature,
+  dnd5eDistinctTargetBonusAttackFeatures,
   dnd5eEffectiveSizeRank,
   previewDnd5ePostD20AdjustedAttack,
   type Dnd5eActionResult,
@@ -74,6 +90,10 @@ import {
   type Dnd5eAirborneFallPreview,
 } from './airborneFallActionResolution'
 import {
+  previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
+  type Dnd5eCombatEvent,
+} from './headlessCombatEngine'
+import {
   applyDnd5eAttackCoverOverride,
   createDnd5eMapCombatSnapshot,
   dnd5eAttackCoverForPair,
@@ -84,13 +104,14 @@ import {
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetAttackAdvantageReasons, dnd5eTargetIsDodging } from './passiveDefenses'
-import { consumeDnd5eWeaponAmmunition } from './items'
-import { mapGeometryOrdinaryProjectileBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { consumeDnd5eWeaponAmmunition, releaseDnd5eTemporaryWeapon } from './items'
+import { mapGeometryOrdinaryProjectileBlocked, mapGeometryRangedWeaponAttackDisadvantage, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 import { dnd5eMartialSpellBonusAttackAvailable } from './martialSpellSynergy'
 import {
   dnd5eActiveAttackProfileRewrite,
   dnd5eActiveEnvironmentalCapabilities,
+  dnd5eActiveSubmerged,
   dnd5eActiveMagicWeaponBonus,
   dnd5eAvailableRestrictedExtraActionKinds,
 } from './activeEffects'
@@ -113,6 +134,7 @@ export type Dnd5eEquipmentAttackRejectReason =
   | 'projectile-blocked-by-wind-wall'
   | 'target-out-of-range'
   | 'attack-action-spent'
+  | 'class-resource-unavailable'
   | 'divine-smite-unavailable'
   | 'reckless-attack-unavailable'
   | 'frenzy-attack-unavailable'
@@ -123,6 +145,26 @@ export type Dnd5eEquipmentAttackRejectReason =
   | 'combatant-missing'
 
 export interface PreparedDnd5eEquipmentAttack {
+  attackTeleportPrelude?: {
+    originalState: Dnd5eHeadlessCombatState
+    map: BattleMap
+    characters: readonly Character[]
+    events: Dnd5eCombatEvent[]
+  }
+  attackActionTeleport?: {
+    preparationInput: Parameters<typeof prepareDnd5eEquipmentAttack>[0]
+    featureId: string
+    originalState: Dnd5eHeadlessCombatState
+    from: { x: number; y: number }
+    fromElevationFeet: number
+    distanceFeet: number
+    worldMinute?: number
+  }
+  disadvantageNegation?: { rollId: string; transactionId: string }
+  /** Host preparation only; commit recomputes against its scene. */
+  homingProjectileReached?: boolean
+  /** Host pre-roll choice, not part of the player request. */
+  areaAttackAdvantageReaction?: { areaId: string; sourceId: string }
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -139,9 +181,13 @@ export interface PreparedDnd5eEquipmentAttack {
   distanceFeet: number
   attackNumber: number
   attacksAllowed: number
+  /** Host ledger used to prepare this ordinary Attack-action attack. */
+  attackBudget?: Parameters<typeof dnd5eAttackActionSlot>[0]
   spendsAction: boolean
   spendsBonusAction: boolean
   countsTowardAttackAction: boolean
+  /** Prepared for embedding in the forcing save transaction, never a standalone attack. */
+  savingThrowCounterattackFeatureId?: string
   attackMode: 'normal' | 'advantage' | 'disadvantage'
   attackModeResolution?: Dnd5eRollModeResolution
   declarativeIntentFeatureIds: readonly string[]
@@ -149,7 +195,7 @@ export interface PreparedDnd5eEquipmentAttack {
   stunningStrike?: {
     saveDc: number
     saveModifier: number
-    saveMode: 'normal' | 'disadvantage'
+    saveMode: 'normal' | 'advantage' | 'disadvantage'
     blessed: boolean
     baned: boolean
   }
@@ -170,7 +216,26 @@ export interface PreparedDnd5eEquipmentAttack {
   baned: boolean
 }
 
+/** Reuse the actual weapon authority for each candidate, including long range and cover. */
+export function dnd5eVisibleEquipmentAttackTargets(input: Parameters<typeof prepareDnd5eEquipmentAttack>[0]): PreparedDnd5eEquipmentAttack[] {
+  return input.map.tokens.flatMap(token => {
+    const result = prepareDnd5eEquipmentAttack({ ...input, action: { ...input.action, targetTokenId: token.id } })
+    if (!result.ok || result.prepared.cover.blocksLineOfEffect ||
+      !dnd5eCombatantCanSee(result.prepared.state, result.prepared.actorToken.id, token.id)) return []
+    return [result.prepared]
+  })
+}
+
 export function prepareDnd5eEquipmentAttack(input: {
+  /** Host-only parent save checkpoint; absent from the player request schema. */
+  savingThrowCounterattack?: { state: Dnd5eHeadlessCombatState; featureId: string }
+  /** Host scene clock, never taken from the player action. */
+  worldMinute?: number
+  worldSecondRemainder?: number
+  /** Host-recomputed replacement-area occupants; does not grant initiative slots. */
+  additionalCreatureTokenIds?: readonly string[]
+  /** Host area replacement only: prepare equipment at the origin when there is no victim. */
+  replacementAreaOriginOnly?: true
   action: SharedPlayerActionState
   /** Trusted DM-host ruling supplied after the player request reaches authority. */
   dmCoverOverride?: Dnd5eAttackCoverSnapshot['cover']
@@ -189,7 +254,52 @@ export function prepareDnd5eEquipmentAttack(input: {
   const coverOverride = input.dmCoverOverride ?? requestedCoverOverride
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
-  if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  if (!actor || !actorToken) return { ok: false, reason: 'invalid-actor' }
+  const counter = input.savingThrowCounterattack
+  if (counter && (
+    !dnd5eSavingThrowCounterattackOptions(counter.state, actorToken.id, action.targetTokenId)
+      .some(option => option.featureId === counter.featureId) ||
+    action.dnd5eWeaponAttackOptions?.attackActionTeleport ||
+    action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId ||
+    action.dnd5eWeaponAttackOptions?.offHandAttack || action.dnd5eWeaponAttackOptions?.frenzyAttack ||
+    action.dnd5eWeaponAttackOptions?.hordeBreakerAttack || action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttack ||
+    action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttackId
+  )) return { ok: false, reason: 'class-resource-unavailable' }
+  const teleport = action.dnd5eWeaponAttackOptions?.attackActionTeleport
+  if (teleport != null) {
+    const feature = dnd5ePluginFeaturesAvailableForCharacter(actor).find(candidate =>
+      candidate.automation === 'full' && candidate.declarativeAbility?.mechanic?.kind === 'attack-action-teleport' &&
+      dnd5eCharacterHasPluginFeature(actor, candidate.id))
+    const mechanic = feature?.declarativeAbility?.mechanic
+    if (!feature || mechanic?.kind !== 'attack-action-teleport' || !action.combatId ||
+      input.initiativeOrder[action.initiativeIndex]?.tokenId !== actorToken.id)
+      return { ok: false, reason: 'class-resource-unavailable' }
+    const destination = prepareDnd5eAttackTeleportDestination({
+      map: input.map, actorTokenId: actorToken.id, characters: input.characters,
+      targetCell: teleport.targetCell, targetElevationFeet: teleport.elevationFeet,
+      rangeFeet: mechanic.rangeFeet, worldMinute: input.worldMinute,
+    })
+    if (!destination.ok) return { ok: false, reason: destination.reason === 'target-out-of-range' ? destination.reason : 'invalid-target' }
+    const movedMap = { ...input.map, tokens: input.map.tokens.map(token => token.id === actorToken.id
+      ? { ...token, ...destination.to, elevationFeet: destination.elevationFeet } : token) }
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, map: movedMap,
+      action: { ...action, dnd5eWeaponAttackOptions: { ...action.dnd5eWeaponAttackOptions, attackActionTeleport: undefined } } })
+    if (!prepared.ok) return prepared
+    if (!prepared.prepared.countsTowardAttackAction || prepared.prepared.spendsBonusAction ||
+      prepared.prepared.classDamageContext.spellAttack)
+      return { ok: false, reason: 'invalid-action' }
+    const original = createDnd5eMapCombatSnapshot({
+      worldMinute: input.worldMinute, worldSecondRemainder: input.worldSecondRemainder,
+      combatId: action.combatId, round: action.round,
+      turnSlotId: input.initiativeOrder[action.initiativeIndex]?.slotId,
+      map: input.map, characters: input.characters, initiativeOrder: input.initiativeOrder,
+      additionalCreatureTokenIds: [action.targetTokenId, ...input.additionalCreatureTokenIds ?? []],
+    })
+    return { ok: true, prepared: { ...prepared.prepared, action, map: input.map,
+      attackActionTeleport: { preparationInput: input, featureId: feature.id, originalState: original.state,
+        from: { x: actorToken.x, y: actorToken.y }, fromElevationFeet: original.state.combatants[actorToken.id]?.elevationFeet ?? 0,
+        distanceFeet: destination.distanceFeet, worldMinute: input.worldMinute } } }
+  }
   const declarativeIntentFeatureIds =
     action.dnd5eWeaponAttackOptions?.declarativeIntentFeatureIds ?? []
   if (
@@ -202,11 +312,15 @@ export function prepareDnd5eEquipmentAttack(input: {
   ) return { ok: false, reason: 'invalid-action' }
   if (!dnd5eClassDefinitionForCharacter(actor)) return { ok: false, reason: 'not-dnd5e-class' }
   const targetToken = input.map.tokens.find((token) => token.id === action.targetTokenId)
-  if (!targetToken || targetToken.id === actorToken.id || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
+  if (!targetToken || (targetToken.id === actorToken.id && !input.replacementAreaOriginOnly) || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
   const turnSlotId = input.initiativeOrder[action.initiativeIndex]?.slotId
   const turnKey = `${action.combatId ?? `map-${input.map.id}`}:${Math.max(1, action.round)}:${turnSlotId ?? actorToken.id}`
   const offHandAttack = action.dnd5eWeaponAttackOptions?.offHandAttack === true
   const activityWeaponAttackGrantId = action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId
+  const activityWeaponAttackGrant = activityWeaponAttackGrantId
+    ? actor.dnd5eCombatState?.activityWeaponAttackGrants?.[activityWeaponAttackGrantId]
+    : undefined
+  const grantOriginId = actor.dnd5eCombatState?.activityWeaponAttackGrants?.[activityWeaponAttackGrantId ?? '']?.targetRestriction?.originTargetId
   const activityWeaponAttackWeaponSlot = action.dnd5eWeaponAttackOptions?.activityWeaponAttackWeaponSlot ?? 'main-hand'
   if (
     !['main-hand', 'off-hand'].includes(activityWeaponAttackWeaponSlot) ||
@@ -226,12 +340,19 @@ export function prepareDnd5eEquipmentAttack(input: {
     return { ok: false, reason: 'invalid-action' }
   }
   const handSnapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
+    worldSecondRemainder: input.worldSecondRemainder,
     combatId: action.combatId ?? `map-${input.map.id}`,
     round: action.round,
+    turnSlotId,
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
+    additionalCreatureTokenIds: [...new Set([targetToken.id, ...(grantOriginId ? [grantOriginId] : []), ...input.additionalCreatureTokenIds ?? []])],
   })
+  const handActor = handSnapshot.state.combatants[actorToken.id]
+  if (!handActor || handActor.deathSaves.dead ||
+    (handActor.currentHp <= 0 && !dnd5eCanActAtZeroHitPoints(handActor))) return { ok: false, reason: 'invalid-actor' }
   const maintainedGrapples = dnd5eSourceLinkedRelations(
     handSnapshot.state,
     actorToken.id,
@@ -253,13 +374,19 @@ export function prepareDnd5eEquipmentAttack(input: {
   if ((offHandAttack || selectedWeaponSlot === 'offHand') && maintainedGrapples > 0) {
     return { ok: false, reason: 'off-hand-attack-unavailable' }
   }
-  const baseProfile = offHandAttack
+  const naturalWeaponId = action.dnd5eWeaponAttackOptions?.naturalWeaponId
+  const naturalProfile = naturalWeaponId == null ? undefined : dnd5eUnarmedAttackProfiles(actor,
+    handSnapshot.state.combatants[actorToken.id]?.pluginFeatureIds ?? []).find(profile => profile.weaponId === naturalWeaponId)
+  if (naturalWeaponId != null && (!naturalProfile || offHandAttack || shillelaghAbility != null || activityWeaponAttackGrantId != null)) {
+    return { ok: false, reason: 'no-weapon' }
+  }
+  const baseProfile = naturalProfile ?? (offHandAttack
     ? dnd5eOffHandWeaponAttackProfile(actor)
     : dnd5eWeaponAttackProfile(actor, {
         shillelaghAbility,
         forceOneHanded: maintainedGrapples > 0,
         weaponSlot: selectedWeaponSlot,
-      })
+      }))
   if (!baseProfile) return { ok: false, reason: 'no-weapon' }
   const attackProfileRewrite = dnd5eActiveAttackProfileRewrite(
     actor.dnd5eCombatState?.activeEffects,
@@ -269,13 +396,26 @@ export function prepareDnd5eEquipmentAttack(input: {
   let profile: Dnd5eWeaponAttackProfile = {
     ...baseProfile,
     reachFeet: (baseProfile.reachFeet ?? 0) + attackProfileRewrite.reachBonusFeet,
+
     damage: {
       ...baseProfile.damage,
       type: attackProfileRewrite.damageTypeOverride ?? baseProfile.damage.type,
     },
   }
+  if (action.dnd5eWeaponAttackOptions?.useSling) {
+    const sling = actor.equipment?.offHand
+    if (!profile.slingRangeFeet || !(sling?.baseEquipmentId ?? sling?.id)?.endsWith('dnd5e-sling')) return {ok:false,reason:'no-weapon'}
+    profile={...profile,rangeFeet:profile.slingRangeFeet,mode:'ranged'}
+  }
+  const thrownRequested = action.dnd5eWeaponAttackOptions?.thrownAttack === true
+  const canThrow = profile.properties.some(property => property === 'thrown' || property.includes('投掷')) && !!profile.rangeFeet
+  if (thrownRequested && !canThrow) return {ok:false,reason:'no-weapon'}
+  if (canThrow && (thrownRequested || tokenDistanceFeet(actorToken,targetToken) > (profile.reachFeet ?? 5))) {
+    profile = {...profile,mode:'ranged'}
+  }
+  profile.criticalThreshold = Math.min(baseProfile.criticalThreshold, dnd5eActiveAttackProfileRewrite(actor.dnd5eCombatState?.activeEffects, profile.mode, profile.weaponId).criticalThreshold ?? 20)
   const equippedWeapon = offHandAttack ? actor.equipment?.offHand : actor.equipment?.[selectedWeaponSlot]
-  const persistedDamageSource = dnd5eWeaponDamageSource(equippedWeapon) ??
+  const persistedDamageSource = naturalProfile ? { weaponId: naturalProfile.weaponId, magical: naturalProfile.magical } : dnd5eWeaponDamageSource(equippedWeapon) ??
     dnd5eVirtualWeaponDamageSource(profile.weaponId)
   if (!persistedDamageSource || persistedDamageSource.weaponId !== profile.weaponId) {
     return { ok: false, reason: 'no-weapon' }
@@ -301,27 +441,32 @@ export function prepareDnd5eEquipmentAttack(input: {
       ),
     })
   ) return { ok: false, reason: 'projectile-blocked-by-wind-wall' }
-  if (!consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
   if (
     offHandAttack && (
       input.attacksUsed < 1 || (input.turnEconomy?.bonusAction.current ?? 1) < 1 ||
       action.dnd5eWeaponAttackOptions?.frenzyAttack || action.dnd5eWeaponAttackOptions?.hordeBreakerAttack
     )
   ) return { ok: false, reason: 'off-hand-attack-unavailable' }
-  const distanceFeet = tokenDistanceFeet(actorToken, targetToken)
+  const redirectOrigin = activityWeaponAttackGrant?.reusedProjectileWeaponId === profile.weaponId &&
+    dnd5eActivityWeaponAttackGrantMatchesV1(activityWeaponAttackGrant, turnKey, {
+      weaponId:profile.weaponId,baseWeaponId:profile.baseWeaponId,mode:profile.mode,
+      weaponProperties:dnd5eWeaponPropertyIds(profile.properties),proficient:profile.proficient,
+    },activityWeaponAttackWeaponSlot)
+    ? input.map.tokens.find(token => token.id === grantOriginId) : undefined
+  const distanceFeet = tokenDistanceFeet(redirectOrigin ?? actorToken, targetToken)
   const extendedReachIntent = action.dnd5eWeaponAttackOptions?.declarativeIntentFeatureIds?.some((featureId) =>
     dnd5eDeclarativeCombatManeuverDefinition(featureId)?.mechanic.operation === 'extended-reach'
   ) === true
-  const effectiveRangeFeet = dnd5eWeaponRangeFeet(profile) +
+  const effectiveRangeFeet = (redirectOrigin ? activityWeaponAttackGrant!.targetRestriction!.maximumFeet : dnd5eWeaponRangeFeet(profile)) +
     (profile.mode === 'melee' && extendedReachIntent ? 5 : 0)
   if (distanceFeet > effectiveRangeFeet) return { ok: false, reason: 'target-out-of-range' }
   const underwater = dnd5eUnderwaterWeaponAttack({
-    environment: geometry?.environment,
+    environment: dnd5eActiveSubmerged(actor.dnd5eCombatState?.activeEffects) ? 'underwater' : geometry?.environment,
     weaponId: profile.weaponId,
     mode: profile.mode,
     distanceFeet,
     normalRangeFeet: profile.rangeFeet?.normal,
-    hasSwimmingSpeed: (actor.dnd5eMovementSpeeds?.swim ?? 0) > 0 ||
+    hasSwimmingSpeed: (dnd5eEffectiveCharacterMovementProfile(actor).swimSpeed ?? 0) > 0 ||
       dnd5eActiveEnvironmentalCapabilities(actor.dnd5eCombatState?.activeEffects)
         .ignoresUnderwaterAttackPenalty,
   })
@@ -348,9 +493,6 @@ export function prepareDnd5eEquipmentAttack(input: {
     action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttack === true ||
     action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttackId != null
   const genericBonusWeaponAttackId = action.dnd5eWeaponAttackOptions?.featureBonusWeaponAttackId
-  const activityWeaponAttackGrant = activityWeaponAttackGrantId
-    ? actor.dnd5eCombatState?.activityWeaponAttackGrants?.[activityWeaponAttackGrantId]
-    : undefined
   const activityWeaponAttackGranted = activityWeaponAttackGrantId != null &&
     dnd5eActivityWeaponAttackGrantMatchesV1(activityWeaponAttackGrant, turnKey, {
       weaponId: profile.weaponId,
@@ -359,6 +501,12 @@ export function prepareDnd5eEquipmentAttack(input: {
       weaponProperties: dnd5eWeaponPropertyIds(profile.properties),
       proficient: profile.proficient,
     }, activityWeaponAttackWeaponSlot)
+  if (!(activityWeaponAttackGranted && activityWeaponAttackGrant?.reusedProjectileWeaponId) &&
+    !consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
+  if (activityWeaponAttackGranted && activityWeaponAttackGrant?.projectileAttackSnapshot) {
+    const original = activityWeaponAttackGrant.projectileAttackSnapshot
+    profile = {...profile,attackModifier:original.attackModifier,damage:{...original.damage}}
+  }
   if (activityWeaponAttackGranted && activityWeaponAttackGrant?.damageDice) {
     profile = {
       ...profile,
@@ -394,9 +542,23 @@ export function prepareDnd5eEquipmentAttack(input: {
   if (
     activityWeaponAttackGrantId != null && (
       featureBonusWeaponAttack || frenzyAttack || offHandAttack || !activityWeaponAttackGranted ||
-      (input.turnEconomy?.bonusAction.current ?? 1) < 1
+      (activityWeaponAttackGrant?.economy === 'bonus-action' && (input.turnEconomy?.bonusAction.current ?? 1) < 1)
     )
   ) return { ok: false, reason: 'attack-action-spent' }
+  if (activityWeaponAttackGranted && activityWeaponAttackGrant?.targetRestriction) {
+    const restriction = activityWeaponAttackGrant.targetRestriction
+    const origin = input.map.tokens.find(token => token.id === restriction.originTargetId)
+    if (!origin || origin.id === targetToken.id || !Number.isFinite(restriction.maximumFeet) ||
+      restriction.maximumFeet <= 0 || tokenDistanceFeet(origin, targetToken) > restriction.maximumFeet) {
+      return {ok: false, reason: 'invalid-target'}
+    }
+  }
+  if (activityWeaponAttackGranted && activityWeaponAttackGrant?.requiredTargetId != null &&
+    activityWeaponAttackGrant.requiredTargetId !== targetToken.id) return { ok: false, reason: 'invalid-target' }
+  if (activityWeaponAttackGranted && activityWeaponAttackGrant?.attackResourceCost &&
+    (actor.classResources?.[activityWeaponAttackGrant.attackResourceCost.resourceId]?.current ?? 0) < activityWeaponAttackGrant.attackResourceCost.amount) {
+    return { ok: false, reason: 'class-resource-unavailable' }
+  }
   const barbarianSubclass = actor.dnd5eClassChoices?.classes?.barbarian?.subclass
   if (
     frenzyAttack && (
@@ -433,13 +595,36 @@ export function prepareDnd5eEquipmentAttack(input: {
     )
   ) return { ok: false, reason: 'stunning-strike-unavailable' }
   const foeSlayer = action.dnd5eWeaponAttackOptions?.foeSlayer
-  const specialAttack = frenzyAttack || hordeBreakerAttack || offHandAttack ||
+  const specialAttack = counter != null || frenzyAttack || hordeBreakerAttack || offHandAttack ||
     featureBonusWeaponAttack || activityWeaponAttackGranted
-  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(actor)
+  const attacksPerAction = dnd5eEffectiveAttacksPerAttackAction(actor, !action.combatId || input.initiativeOrder[action.initiativeIndex]?.tokenId === actorToken.id)
   const weaponAttacksPerAction = loadingWeapon ? 1 : attacksPerAction
-  const attacksAllowed = specialAttack ? 1 : weaponAttacksPerAction * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
-  if (!specialAttack && input.attacksUsed >= attacksAllowed) return { ok: false, reason: 'attack-action-spent' }
-  const spendsAction = !specialAttack && input.attacksUsed % weaponAttacksPerAction === 0
+  handSnapshot.state.initiativeIndex = action.initiativeIndex
+  const firstTurnWeaponFeature = action.combatId && !loadingWeapon
+    ? dnd5eFirstOwnTurnWeaponAttackFeature(handSnapshot.state, actorToken.id) : undefined
+  const attackBudget = {
+    attacksPerAction: weaponAttacksPerAction,
+    actionCount: Math.max(1, Math.floor(input.attackActionsAvailable ?? 1)),
+    attacksUsed: dnd5eOrdinaryAttacksUsed(handActor.classState.attackActionHistory, turnKey, input.attacksUsed),
+    extraWeaponAttacksPerAction: firstTurnWeaponFeature ? 1 : 0,
+    attackKind: !naturalProfile && equippedWeapon?.dnd5e?.kind === 'weapon' &&
+      equippedWeapon.dnd5e.usesSourceSpellcastingAbility !== true ? 'weapon' as const : 'replacement' as const,
+  }
+  const ordinarySlot = specialAttack ? undefined : dnd5eAttackActionSlot(attackBudget)
+  if (!specialAttack && !Number.isSafeInteger(attackBudget.attacksUsed)) return { ok: false, reason: 'attack-action-spent' }
+  const distinctTargetFeature = !specialAttack && !loadingWeapon && (!ordinarySlot || ordinarySlot.spendsAction) &&
+    (naturalProfile || equippedWeapon?.dnd5e?.kind !== 'weapon' || equippedWeapon.dnd5e.usesSourceSpellcastingAbility !== true)
+    ? dnd5eDistinctTargetBonusAttackFeatures(handSnapshot.state, actorToken.id, targetToken.id)[0] : undefined
+  const attackSlot = distinctTargetFeature
+    ? { attackNumber: input.attacksUsed + 1, attacksAllowed: input.attacksUsed + 1, spendsAction: false, weaponOnly: undefined }
+    : ordinarySlot
+  if (!specialAttack && !attackSlot) return { ok: false, reason: 'attack-action-spent' }
+  if (attackSlot?.weaponOnly && (
+    handActor.classState.firstOwnTurnWeaponAttack?.featureId !== firstTurnWeaponFeature?.featureId ||
+    handActor.classState.firstOwnTurnWeaponAttack?.turnKey !== turnKey
+  )) return { ok: false, reason: 'attack-action-spent' }
+  const attacksAllowed = attackSlot?.attacksAllowed ?? 1
+  const spendsAction = attackSlot?.spendsAction ?? false
   const restrictedWeaponAttackAvailable = dnd5eAvailableRestrictedExtraActionKinds({
     effects: actor.dnd5eCombatState?.activeEffects,
     usesByEffect: actor.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
@@ -452,12 +637,15 @@ export function prepareDnd5eEquipmentAttack(input: {
     return { ok: false, reason: 'attack-action-spent' }
   }
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
+    worldSecondRemainder: input.worldSecondRemainder,
     combatId: action.combatId ?? `map-${input.map.id}`,
     round: action.round,
     turnSlotId,
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
+    additionalCreatureTokenIds: [...new Set([targetToken.id, ...(grantOriginId ? [grantOriginId] : []), ...input.additionalCreatureTokenIds ?? []])],
   })
   const actorIndex = dnd5eRequestedInitiativeActorIndex(
     snapshot.state,
@@ -505,8 +693,15 @@ export function prepareDnd5eEquipmentAttack(input: {
     return !!combatant && combatant.currentHp > 0 && tokenDistanceFeet(token, targetToken) <= 5
   })
   const classDamageContext: Dnd5eWeaponClassDamageContext = {
+    distinctTargetBonusAttackFeatureId: distinctTargetFeature?.id,
+    firstOwnTurnWeaponAttackFeatureId: attackSlot?.weaponOnly ? firstTurnWeaponFeature?.featureId : undefined,
+    unarmedStrike: naturalProfile != null,
+    monkWeapon: !naturalProfile && equippedWeapon?.dnd5e?.kind === 'weapon' && dnd5eMonkWeapon(actor,equippedWeapon),
+    spellAttack:!naturalProfile && equippedWeapon?.dnd5e?.kind==='weapon' && equippedWeapon.dnd5e.usesSourceSpellcastingAbility===true,
+    spellDeliveredByWeapon:action.dnd5eWeaponAttackOptions?.useSling===true,
     weaponId: profile.weaponId,
     weaponBaseId: profile.baseWeaponId,
+    weaponCategory: !naturalProfile && equippedWeapon?.dnd5e?.kind === 'weapon' ? equippedWeapon.dnd5e.category : undefined,
     weaponProperties: [...dnd5eWeaponPropertyIds(profile.properties)],
     proficient: profile.proficient,
     handsUsed: profile.handsUsed,
@@ -547,8 +742,14 @@ export function prepareDnd5eEquipmentAttack(input: {
       dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
       tokenDistanceFeet(actorToken, candidate) <= 5
   })
+  const weaponRollEffects = dnd5eActiveAttackRollFlags(actorCombatant.classState.activeEffects, profile.attackAbility, classDamageContext.spellAttack ? 'spell' : 'weapon', classDamageContext.weaponCategory)
+  const targetRollEffects = dnd5eActiveTargetLinkedAttackRollFlags(target.classState.activeEffects, actorCombatant.id,
+    actorCombatant.creatureType, snapshot.state, { category: classDamageContext.spellAttack ? 'spell' : 'weapon', delivery: profile.mode })
   const attackModeResolution = resolveDnd5eRollMode({
     advantage: [
+      ...weaponRollEffects.advantageReasons.map(reason => ({ active: advantageAllowed, reason })),
+      ...targetRollEffects.advantageReasons.map(reason => ({ active: advantageAllowed, reason })),
+      { active: advantageAllowed && equippedWeapon?.dnd5e?.kind === 'weapon' && equippedWeapon.dnd5e.advantageAgainstUnlitTargets === true && target.illumination != null && target.illumination !== 'bright', reason: '武器对暗光目标具有优势' },
       ...dnd5eTargetAttackAdvantageReasons(target)
         .map((reason) => ({ active: advantageAllowed, reason })),
       { active: advantageAllowed && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target), reason: '协助动作' },
@@ -561,14 +762,23 @@ export function prepareDnd5eEquipmentAttack(input: {
       { active: advantageAllowed && dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id), reason: '目标看不见攻击者' },
       { active: advantageAllowed && targetProne && distanceFeet <= 5, reason: '目标倒地且攻击者在 5 尺内' },
       { active: advantageAllowed && dnd5ePendingAllyAttackAdvantage(actorCombatant, target), reason: '盟友能力提供攻击优势' },
+      { active: advantageAllowed && dnd5eSourceProximityAttackAdvantage(snapshot.state, actorCombatant, target), reason: '链接来源的距离与视线提供攻击优势' },
       { active: advantageAllowed && dnd5eRageAllyMeleeAdvantage(snapshot.state, actorCombatant, target, profile.mode === 'melee'), reason: '狂暴盟友能力提供近战优势' },
       { active: advantageAllowed && dnd5eOpeningAttackHasAdvantage(snapshot.state, actorCombatant, target), reason: '首击能力提供优势' },
       { active: advantageAllowed && mountedMeleeAdvantage, reason: '骑乘战斗：近战攻击更小的未骑乘目标' },
+      { active: advantageAllowed && activityWeaponAttackGranted && activityWeaponAttackGrant?.attackAdvantage === true, reason: '特殊武器攻击优势' },
     ],
     disadvantage: [
+      ...weaponRollEffects.disadvantageReasons.map(reason => ({ active: true, reason })),
+      ...targetRollEffects.disadvantageReasons.map(reason => ({ active: true, reason })),
       ...dnd5eAttackDisadvantageReasons(snapshot.state, actorToken.id, targetToken.id)
         .map((reason) => ({ active: true, reason })),
       { active: underwater.disadvantage, reason: '水下武器攻击限制' },
+      { active: profile.mode === 'ranged' && mapGeometryRangedWeaponAttackDisadvantage({ geometry, map: input.map,
+        from: actorToken, to: targetToken,
+        fromHeightFeet: dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(actorCombatant)),
+        toHeightFeet: dnd5eCreatureHeightFeetForSizeRank(dnd5eEffectiveSizeRank(target)),
+      }), reason: '远程武器攻击轨迹受到区域干扰' },
       { active: (actor.exhaustionLevel ?? 0) >= 3, reason: '3 级或更高力竭' },
       { active: dnd5eWearingUnproficientArmor(actor), reason: '穿着不熟练的护甲' },
       { active: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant), reason: '恶毒嘲笑' },
@@ -580,7 +790,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       { active: dnd5eTargetIsDodging(target), reason: '目标正在闪避' },
       { active: dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id), reason: '目标受朦胧术影响' },
       { active: dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id), reason: '攻击者看不见目标' },
-      { active: dnd5eSourceMarkedAttackDisadvantage(actorCombatant, target), reason: '攻击受到标记类能力限制' },
+      { active: dnd5eSourceMarkedAttackDisadvantage(actorCombatant, target, snapshot.state), reason: '攻击受到标记类能力限制' },
       { active: dnd5eRageAllyProtectionDisadvantage(snapshot.state, actorCombatant, target), reason: '目标受到盟友保护能力影响' },
     ],
   })
@@ -589,7 +799,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     ? {
         saveDc: 8 + rules.proficiencyBonus(actor.level) + rules.abilityModifier(actor.abilities.wis),
         saveModifier: target.savingThrowBonuses.con ?? rules.abilityModifier(target.abilities.con),
-        saveMode: target.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const,
+        saveMode: dnd5eSavingThrowMode(target, 'con', { condition: 'stunned' }),
       }
     : undefined
   const openingAttackRequirement =
@@ -605,7 +815,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
-      state: { ...snapshot.state, initiativeIndex: actorIndex },
+      state: counter ? structuredClone(counter.state) : { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
       actorToken,
       targetToken,
@@ -616,9 +826,12 @@ export function prepareDnd5eEquipmentAttack(input: {
       distanceFeet,
       attackNumber: specialAttack ? 1 : input.attacksUsed + 1,
       attacksAllowed,
+      attackBudget: specialAttack || distinctTargetFeature ? undefined : attackBudget,
       spendsAction,
-      spendsBonusAction: frenzyAttack || offHandAttack || featureBonusWeaponAttack || activityWeaponAttackGranted,
+      spendsBonusAction: frenzyAttack || offHandAttack || featureBonusWeaponAttack ||
+        (activityWeaponAttackGranted && activityWeaponAttackGrant?.economy === 'bonus-action'),
       countsTowardAttackAction: !specialAttack,
+      savingThrowCounterattackFeatureId: counter?.featureId,
       attackMode,
       attackModeResolution,
       declarativeIntentFeatureIds: [...declarativeIntentFeatureIds],
@@ -685,16 +898,33 @@ export function dnd5ePreparedEquipmentAttackModeResolution(
   const nextAttackAdvantageIntent = prepared.declarativeIntentFeatureIds.some((featureId) =>
     dnd5eDeclarativeCombatManeuverDefinition(featureId)?.mechanic.operation === 'next-attack-advantage'
   )
-  return resolveDnd5eRollMode({
+  const resolution = resolveDnd5eRollMode({
     advantage: [
       ...baseResolution.advantageReasons.map((reason) => ({ active: true, reason })),
       { active: nextAttackAdvantageIntent, reason: '战技令下一次攻击具有优势' },
+      { active: !!prepared.areaAttackAdvantageReaction && !dnd5ePreventsAttackAdvantage(prepared.state.combatants[prepared.targetToken.id]) &&
+        dnd5eAreaAttackAdvantageCandidates(prepared.state, prepared.targetToken.id).some(candidate =>
+          candidate.areaId === prepared.areaAttackAdvantageReaction?.areaId && candidate.sourceId === prepared.areaAttackAdvantageReaction?.sourceId),
+        reason: '区域来源者消耗反应授予优势' },
     ],
     disadvantage: [
       ...baseResolution.disadvantageReasons.map((reason) => ({ active: true, reason })),
       { active: protectedAttack, reason: '保护战斗风格' },
     ],
   })
+  const exchangesAdvantage = prepared.declarativeIntentFeatureIds.some(featureId =>
+    dnd5eDeclarativeAttackIntentDefinition(featureId)?.feature.declarativeAbility?.mechanic?.kind === 'advantage-for-extra-attack')
+  // Keep the original sources on the prepared transaction for Host eligibility.
+  // Only this attack's roll presentation loses advantage.
+  return prepared.disadvantageNegation && resolution.mode === 'disadvantage' || exchangesAdvantage && resolution.mode === 'advantage'
+    ? { mode: 'normal', advantageReasons: [], disadvantageReasons: [] }
+    : resolution
+}
+
+export function preparedDnd5eEquipmentAttackEffectContext(prepared: PreparedDnd5eEquipmentAttack) {
+  const actor=prepared.state.combatants[prepared.actorToken.id]
+  return {actorId:actor.id,effects:actor.classState.activeEffects,kind:'attack' as const,
+    eventId:dnd5eRollDiceOccurrenceId(prepared.action.id,actor.id,'attack',0)}
 }
 
 export function previewDnd5eEquipmentAttack(
@@ -706,6 +936,7 @@ export function previewDnd5eEquipmentAttack(
   baneRoll?: number,
   additionalAttackBonus = 0,
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse,
+  effectRollDice?: Readonly<Record<string,readonly number[]>>,
 ) {
   const mode = dnd5ePreparedEquipmentAttackMode(prepared, protectedAttack)
   const magicWeaponBonus = dnd5ePreparedEquipmentAttackMagicWeaponBonus(prepared)
@@ -715,13 +946,17 @@ export function previewDnd5eEquipmentAttack(
     mode,
     modifier: prepared.profile.attackModifier + magicWeaponBonus +
       prepared.foeSlayerAttackBonus + (blessRoll ?? 0) - (baneRoll ?? 0) +
-      additionalAttackBonus,
+      additionalAttackBonus + (effectRollDice ? resolveDnd5eRollDiceModifiers(preparedDnd5eEquipmentAttackEffectContext(prepared),effectRollDice).modifier : 0),
     targetAc: prepared.targetArmorClass,
   })
   return resolveDnd5eAttackOutcome({
+    sourceId: prepared.actorToken.id,
+    targetEffects: prepared.state.combatants[prepared.targetToken.id]?.classState.activeEffects,
     attack: previewDnd5ePostD20AdjustedAttack({
       state: prepared.state,
       affectedId: prepared.actorToken.id,
+      targetId: prepared.targetToken.id,
+      attackMode: prepared.profile.mode,
       targetAc: prepared.targetArmorClass,
       resolution: resolved,
       use: postD20Adjustment,
@@ -770,6 +1005,19 @@ export function dnd5ePreparedEquipmentAttackMagicWeaponBonus(
   )
 }
 
+/** Host snapshot for replacing an attack with an Activity, without an attack roll. */
+export function dnd5ePreparedEquipmentActivityWeaponDamage(
+  prepared: PreparedDnd5eEquipmentAttack,
+): import('./activities/dnd5eEquipmentWeaponDamage').Dnd5eEquipmentWeaponDamageSnapshot {
+  return {
+    homingReached: prepared.homingProjectileReached,
+    profile: { ...prepared.profile, damage: { ...prepared.profile.damage,
+      bonus: prepared.profile.damage.bonus + dnd5ePreparedEquipmentAttackMagicWeaponBonus(prepared),
+    } },
+    source: { ...prepared.damageSource },
+  }
+}
+
 export function dnd5eEquipmentClassDamageDefinitions(
   prepared: PreparedDnd5eEquipmentAttack,
   critical: boolean,
@@ -785,7 +1033,83 @@ export function dnd5eEquipmentClassDamageDefinitions(
   })
 }
 
+/** Resolve pre-attack landing without requesting or consuming an attack die.
+ * The returned preparation retains the original commit baseline until the attack finishes.
+ */
+export function resolvePreparedDnd5eEquipmentAttackLanding(input: {
+  prepared: PreparedDnd5eEquipmentAttack
+  arrival?: Dnd5eAttackTeleportArrival
+  airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
+}): {
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  airborneFalls?: readonly Dnd5eAirborneFallPreview[]
+  preparedAfterLanding?: PreparedDnd5eEquipmentAttack
+} {
+  const { prepared } = input
+  if (prepared.savingThrowCounterattackFeatureId) return {
+    result: { ok: false, state: prepared.state, events: [], reason: 'invalid-plugin-action' },
+  }
+  const teleport = prepared.attackActionTeleport
+  if (teleport) {
+    const actor = prepared.state.combatants[prepared.actorToken.id]
+    const feature = dnd5ePluginFeaturesAvailableForCharacter(prepared.actor).find(candidate =>
+      candidate.id === teleport.featureId && candidate.automation === 'full' &&
+      dnd5eCharacterHasPluginFeature(prepared.actor, candidate.id))
+    const mechanic = feature?.declarativeAbility?.mechanic
+    if (!actor?.pluginFeatureIds.includes(teleport.featureId) || mechanic?.kind !== 'attack-action-teleport' ||
+      !prepared.state.active || prepared.state.initiativeOrder[prepared.state.initiativeIndex] !== actor.id ||
+      !prepared.countsTowardAttackAction || prepared.spendsBonusAction)
+      return { result: { ok: false, reason: 'invalid-class-feature', state: structuredClone(teleport.originalState), events: [] } }
+    const requested = prepared.action.dnd5eWeaponAttackOptions?.attackActionTeleport
+    const destination = requested && prepareDnd5eAttackTeleportDestination({
+      map: prepared.map, actorTokenId: actor.id, characters: prepared.characters,
+      targetCell: requested.targetCell, targetElevationFeet: requested.elevationFeet,
+      rangeFeet: mechanic.rangeFeet, worldMinute: teleport.worldMinute,
+    })
+    if (!destination?.ok || destination.to.x !== actor.position.x || destination.to.y !== actor.position.y ||
+      destination.elevationFeet !== (actor.elevationFeet ?? 0))
+      return { result: { ok: false, reason: 'invalid-target', state: structuredClone(teleport.originalState), events: [] } }
+    {
+      const landing = resolveDnd5eAttackTeleportLanding({ includeSupportedDestination: true,
+        arrival: input.arrival, teleport, state: prepared.state, actorId: actor.id,
+        map: prepared.map, characters: prepared.characters,
+        characterIdByCombatantId: prepared.characterIdByCombatantId,
+        rolls: input.airborneFallDamageRollsByCombatantId })!
+      if (!landing.ok) return { result: landing.result, airborneFalls: landing.falls }
+      const precedingEvents = landing.events
+      const landingPlan = landing.plan
+      const request = teleport.preparationInput
+      const resumed = prepareDnd5eEquipmentAttack({ ...request, map: landingPlan.map, characters: landingPlan.characters,
+        action: { ...request.action, dnd5eWeaponAttackOptions: {
+          ...request.action.dnd5eWeaponAttackOptions, attackActionTeleport: undefined } } })
+      if (!resumed.ok || attackTeleportArrivalConsumedAction(input.arrival, actor.id)) {
+        // Landing can kill/incapacitate the attacker or put the target out of
+        // reach. Those real consequences must not disappear with the attack.
+        if (prepared.spendsAction) {
+          landing.state.combatants[actor.id].turn.actionAvailable = false
+          precedingEvents.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+        }
+        return { result: { ok: true, state: landing.state, events: precedingEvents },
+          application: planDnd5eMapResultApplication({ state: landing.state,
+            map: { ...prepared.map, dnd5ePluginAreas: landingPlan.map.dnd5ePluginAreas },
+            characters: landingPlan.characters, baselineCharacters: prepared.characters,
+            characterIdByCombatantId: prepared.characterIdByCombatantId, events: precedingEvents }) }
+      }
+      return { result: { ok: true, state: landing.state, events: precedingEvents },
+        preparedAfterLanding: { ...resumed.prepared, attackTeleportPrelude: {
+          originalState: teleport.originalState, map: prepared.map, characters: prepared.characters,
+          events: precedingEvents,
+        } } }
+
+    }
+  }
+  return { result: { ok: true, state: prepared.state, events: [] }, preparedAfterLanding: prepared }
+}
+
 export function resolvePreparedDnd5eEquipmentAttack(input: {
+  shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
+  effectRollDice?: Readonly<Record<string,readonly number[]>>
   prepared: PreparedDnd5eEquipmentAttack
   d20: number
   d20Second?: number
@@ -793,6 +1117,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   halflingLuckyD20Second?: number
   savageAttacksRoll?: number
   wholeWeaponDamageReroll?: Dnd5eWholeWeaponDamageRerollUse
+  missedWeaponAttackReroll?: { featureId: string; d20: number; dieIndex: 0 | 1; shieldSpellReaction?: boolean; grantedDieArmorClassRoll?: number }
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
@@ -804,6 +1129,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   postD20Adjustment?: Dnd5ePostD20AdjustmentUse
   attackRetargetInterrupt?: Dnd5eAttackRetargetInterruptUse
   mountedAttackRedirect?: Dnd5eMountedAttackRedirectUse
+  areaAttackAdvantageReaction?: { areaId: string; sourceId: string }
   protectionReactionActorId?: string
   tranquilitySave?: Dnd5eTranquilitySaveRoll
   shieldSpellReaction?: boolean
@@ -815,7 +1141,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   stunningStrikeSaveHalflingLuckyD20Second?: number
   stunningStrikeSaveBlessRoll?: number
   stunningStrikeSaveBaneRoll?: number
-  stunningStrikeSaveRerollD20?: number
+  stunningStrikeSaveRerollResourceKey?: string; stunningStrikeSaveRerollD20?: number
   stunningStrikeSaveRerollD20Second?: number
   stunningStrikeBardicInspirationRoll?: number
   stunningStrikeDarkOnesOwnLuckRoll?: number
@@ -838,8 +1164,90 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 } {
   const { prepared } = input
-  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
+  const prelude = prepared.attackTeleportPrelude
+  if (prepared.savingThrowCounterattackFeatureId) return {
+    result: { ok: false, state: prepared.state, events: [], reason: 'invalid-plugin-action' },
+  }
+  if (prelude) {
+    const continuation = resolvePreparedDnd5eEquipmentAttack({ ...input,
+      prepared: { ...prepared, attackTeleportPrelude: undefined } })
+    if (!continuation.result.ok) return { ...continuation,
+      result: { ...continuation.result, state: structuredClone(prelude.originalState), events: [] } }
+    const events = [...prelude.events, ...continuation.result.events]
+    return { ...continuation, result: { ...continuation.result, events },
+      application: planDnd5eMapResultApplication({ state: continuation.result.state,
+        // Keep the original token baseline for movement patches, but retain
+        // area changes and trigger receipts accumulated after arrival.
+        map: { ...prelude.map, dnd5ePluginAreas: (continuation.application?.map ?? prepared.map).dnd5ePluginAreas },
+        characters: continuation.application?.characters ?? prepared.characters, baselineCharacters: prelude.characters,
+        characterIdByCombatantId: prepared.characterIdByCombatantId, events }) }
+  }
+  const teleport = prepared.attackActionTeleport
+  if (teleport) {
+    const landing = resolvePreparedDnd5eEquipmentAttackLanding(input)
+    if (!landing.preparedAfterLanding) return landing
+    if (landing.preparedAfterLanding !== prepared) {
+      const fallIds = new Set(previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(
+        teleport.originalState, prepared.state, [prepared.actorToken.id]).flatMap(fall => [fall.combatantId,
+          ...(fall.collision ? [fall.collision.rollKey] : fall.collisionCandidates?.map(collision => collision.rollKey) ?? [])]))
+      const remaining = input.airborneFallDamageRollsByCombatantId && Object.fromEntries(
+        Object.entries(input.airborneFallDamageRollsByCombatantId).filter(([id]) => !fallIds.has(id)))
+      return resolvePreparedDnd5eEquipmentAttack({ ...input, prepared: landing.preparedAfterLanding,
+        airborneFallDamageRollsByCombatantId: remaining && Object.keys(remaining).length ? remaining : undefined })
+    }
+  }
+  const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, buildPreparedDnd5eEquipmentAttackAction(input), input.airborneFallDamageRollsByCombatantId, { transaction: input.transaction,transactionId:prepared.action.id })
+  if (!result.ok) return { result: teleport ? { ...result, state: structuredClone(teleport.originalState), events: [] } : result, airborneFalls }
+  if (teleport) {
+    // This is the pre-attack destination, before any resulting fall or reaction.
+    const destination = prepared.state.combatants[prepared.actorToken.id]
+    result.events = [{ type: 'teleported', actorId: prepared.actorToken.id,
+      spellId: teleport.featureId, from: { ...teleport.from }, to: { ...destination.position },
+      distanceFeet: teleport.distanceFeet, fromElevationFeet: teleport.fromElevationFeet,
+      toElevationFeet: destination.elevationFeet ?? 0 }, ...result.events]
+  }
+  const grantId = prepared.action.dnd5eWeaponAttackOptions?.activityWeaponAttackGrantId
+  const reusesProjectile = grantId && prepared.state.combatants[prepared.actorToken.id].classState.activityWeaponAttackGrants?.[grantId]?.reusedProjectileWeaponId === prepared.profile.weaponId
+  const ammunition = reusesProjectile ? {ok: true as const, character: prepared.actor, instanceId: undefined}
+    : consumeDnd5eWeaponAmmunition(prepared.actor, prepared.profile.weaponId)
+  const released = ammunition.ok && prepared.profile.mode === 'ranged' && prepared.profile.properties.some(property => property === 'thrown' || property.includes('投掷'))
+    ? releaseDnd5eTemporaryWeapon(ammunition.character,prepared.profile.weaponId) : ammunition.character
+  const characters = ammunition.ok
+    ? prepared.characters.map((character) => character.id === prepared.actor.id ? released : character)
+    : prepared.characters
+  const application = planDnd5eMapResultApplication({
+    state: result.state,
+    map: prepared.map,
+    characters,
+    characterIdByCombatantId: prepared.characterIdByCombatantId,
+    events: [...result.events],
+  })
+  if (ammunition.ok && ammunition.instanceId && !application.changedCharacterIds.includes(prepared.actor.id)) {
+    application.changedCharacterIds = [...application.changedCharacterIds, prepared.actor.id]
+  }
+  if (released !== prepared.actor) {
+    if (!application.changedCharacterIds.includes(prepared.actor.id)) application.changedCharacterIds=[...application.changedCharacterIds,prepared.actor.id]
+    const updated = application.characters.find(character => character.id === prepared.actor.id)!
+    application.characterPatches = {...application.characterPatches,[prepared.actor.id]:{
+      ...application.characterPatches?.[prepared.actor.id],dnd5eInventory:updated.dnd5eInventory,equipment:updated.equipment,
+    }}
+  }
+  return {
+    result,
+    application,
+    airborneFalls,
+  }
+}
+
+
+/** Build Host weapon dice/profile input without publishing state or spending ammunition. */
+export function buildPreparedDnd5eEquipmentAttackAction(
+  input: Parameters<typeof resolvePreparedDnd5eEquipmentAttack>[0],
+): Extract<Dnd5eAction, { type: 'attack' }> {
+  const { prepared } = input
+  return {
     type: 'attack',
+    effectRollDice:input.effectRollDice,
     attackDecoyRolls: input.attackDecoyRolls,
     actorId: prepared.actorToken.id,
     targetId: prepared.targetToken.id,
@@ -861,6 +1269,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     halflingLuckyD20Second: input.halflingLuckyD20Second,
     savageAttacksRoll: input.savageAttacksRoll,
     wholeWeaponDamageReroll: input.wholeWeaponDamageReroll,
+    missedWeaponAttackReroll: input.missedWeaponAttackReroll,
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
     bardicInspirationRoll: input.bardicInspirationRoll,
@@ -872,9 +1281,11 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     postD20Adjustment: input.postD20Adjustment,
     attackRetargetInterrupt: input.attackRetargetInterrupt,
     mountedAttackRedirect: input.mountedAttackRedirect,
+    areaAttackAdvantageReaction: input.areaAttackAdvantageReaction ?? prepared.areaAttackAdvantageReaction,
     protectionReactionActorId: input.protectionReactionActorId,
     tranquilitySave: input.tranquilitySave,
     shieldSpellReaction: input.shieldSpellReaction,
+    shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows,
     uncannyDodge: input.uncannyDodge,
     deflectMissilesD10: input.deflectMissilesD10,
     stunningStrikeSaveD20: input.stunningStrikeSaveD20,
@@ -883,7 +1294,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     stunningStrikeSaveHalflingLuckyD20Second: input.stunningStrikeSaveHalflingLuckyD20Second,
     stunningStrikeSaveBlessRoll: input.stunningStrikeSaveBlessRoll,
     stunningStrikeSaveBaneRoll: input.stunningStrikeSaveBaneRoll,
-    stunningStrikeSaveRerollD20: input.stunningStrikeSaveRerollD20,
+    stunningStrikeSaveRerollResourceKey: input.stunningStrikeSaveRerollResourceKey, stunningStrikeSaveRerollD20: input.stunningStrikeSaveRerollD20,
     stunningStrikeSaveRerollD20Second: input.stunningStrikeSaveRerollD20Second,
     stunningStrikeBardicInspirationRoll: input.stunningStrikeBardicInspirationRoll,
     stunningStrikeDarkOnesOwnLuckRoll: input.stunningStrikeDarkOnesOwnLuckRoll,
@@ -895,6 +1306,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     declarativeIntentPayloads: input.declarativeIntentPayloads,
     declarativeTargetReaction: input.declarativeTargetReaction,
     mode: prepared.attackMode,
+    disadvantageNegation: prepared.disadvantageNegation,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
     inventoryEffectRolls: input.inventoryEffectRolls,
@@ -906,25 +1318,5 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
       rolls: input.damageRolls,
       type: prepared.profile.damage.type,
     },
-  }, input.airborneFallDamageRollsByCombatantId, { transaction: input.transaction })
-  if (!result.ok) return { result, airborneFalls }
-  const ammunition = consumeDnd5eWeaponAmmunition(prepared.actor, prepared.profile.weaponId)
-  const characters = ammunition.ok
-    ? prepared.characters.map((character) => character.id === prepared.actor.id ? ammunition.character : character)
-    : prepared.characters
-  const application = planDnd5eMapResultApplication({
-    state: result.state,
-    map: prepared.map,
-    characters,
-    characterIdByCombatantId: prepared.characterIdByCombatantId,
-    events: [...result.events],
-  })
-  if (ammunition.ok && ammunition.instanceId && !application.changedCharacterIds.includes(prepared.actor.id)) {
-    application.changedCharacterIds = [...application.changedCharacterIds, prepared.actor.id]
-  }
-  return {
-    result,
-    application,
-    airborneFalls,
   }
 }

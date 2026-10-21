@@ -68,12 +68,16 @@ export function dnd5ePluginSpellTargetCapacity(
   spell: Pick<Dnd5eImportedSpell, 'level' | 'mechanics' | 'targeting'>,
   slotLevel: number,
   scaledActivityTargetCount?: number,
+  activityAllowDuplicateTargets?: boolean,
 ): { maximumTargets: number; allowDuplicateTargets: boolean } {
+  // An unlimited audited area selects every eligible occupant once. Legacy
+  // projectile metadata cannot impose a smaller target count on that area.
+  if(scaledActivityTargetCount===Number.POSITIVE_INFINITY)return {maximumTargets:Number.POSITIVE_INFINITY,allowDuplicateTargets:false}
   const upcast = dnd5eSpellUpcastTotals(spell.mechanics, slotLevel, spell.level)
   const base = Math.max(1, Math.min(256, spell.targeting?.maximumTargets ?? 1))
-  const allowDuplicateTargets = upcast.additionalProjectiles > 0
+  const allowDuplicateTargets = activityAllowDuplicateTargets ?? (upcast.additionalProjectiles > 0)
   const increment = upcast.additionalTargets + upcast.additionalProjectiles
-  const activityMaximum = !allowDuplicateTargets && scaledActivityTargetCount != null
+  const activityMaximum = (!allowDuplicateTargets || activityAllowDuplicateTargets != null) && scaledActivityTargetCount != null
     ? Math.max(1, Math.min(256, Math.floor(scaledActivityTargetCount)))
     : undefined
   return {

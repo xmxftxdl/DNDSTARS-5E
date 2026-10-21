@@ -50,6 +50,10 @@ export interface Dnd5eRulesPluginManifest {
   conflicts?: readonly string[]
   declaredCapabilities?: readonly Dnd5ePluginDeclaredCapability[]
   distributionPolicy?: Dnd5ePluginDistributionPolicy
+  /** Opt in to sharing spell display text with members of an ephemeral room. */
+  roomSpellText?: 'include'
+  /** Share display descriptions and summaries for all content, including nested subclass abilities. */
+  roomContentText?: 'include'
   contentCategory?: Dnd5ePluginContentCategory
 }
 

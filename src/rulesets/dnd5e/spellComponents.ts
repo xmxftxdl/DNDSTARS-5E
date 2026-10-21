@@ -1,8 +1,11 @@
 import type { Character } from '../../types/character'
 import type { EquipmentItem } from '../../types/equipment'
 import type { Dnd5eClassId } from './classes'
+import { effectiveDnd5eActiveEffects } from './activeEffects'
 import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
 import { dnd5ePluginBooleanStaticModifierForCharacter } from './pluginApi'
+import { dnd5eCharacterBuildTagsV1 } from './buildChoices'
+import { dnd5eWeaponProficient } from './equipment'
 import {
   dnd5eCoreSpellMaterialRequirement,
   dnd5eSpellMaterialConsumptionPlan,
@@ -92,6 +95,15 @@ function equipmentCanBeSpellcastingFocus(
   return !!classId && equipment?.spellcastingFocusClassIds?.includes(classId) === true
 }
 
+/** Permanent training applies to eligible held weapons, without enchanting or binding an item. */
+function trainedWeaponCanBeSpellcastingFocus(actor: Partial<Character> | undefined, equipment: EquipmentItem | undefined, classId?: Dnd5eClassId): boolean {
+  if (!actor || !classId || typeof actor.charClass !== 'string' || typeof actor.level !== 'number' || typeof actor.race !== 'string' ||
+    !dnd5eCharacterBuildTagsV1(actor, 'proficient-melee-weapon-focus').includes(classId)) return false
+  const weapon = equipment?.dnd5e
+  return !!equipment && weapon?.kind === 'weapon' && weapon.mode === 'melee' &&
+    (weapon.category === 'simple' || weapon.category === 'martial') && dnd5eWeaponProficient(actor as Character, equipment)
+}
+
 export interface Dnd5eHeldSpellcastingFocus {
   instanceId: string
   templateId: string
@@ -100,6 +112,7 @@ export interface Dnd5eHeldSpellcastingFocus {
 function inventoryEntryIsHeldSpellcastingFocus(
   candidate: NonNullable<Character['dnd5eInventory']>['entries'][number],
   classId: Dnd5eClassId,
+  actor?: Partial<Character>,
 ): boolean {
   return candidate.quantity > 0 &&
     candidate.identified !== false &&
@@ -107,7 +120,13 @@ function inventoryEntryIsHeldSpellcastingFocus(
     (candidate.equippedSlot === 'mainWeapon' || candidate.equippedSlot === 'offHand') &&
     (
       equipmentCanBeSpellcastingFocus(candidate.item.equipment, classId) ||
-      entryCanBeSpellcastingFocus(candidate.templateId, classId)
+      trainedWeaponCanBeSpellcastingFocus(actor, candidate.item.equipment, classId) ||
+      entryCanBeSpellcastingFocus(candidate.templateId, classId) ||
+      effectiveDnd5eActiveEffects(actor?.dnd5eCombatState?.activeEffects).some(effect => {
+        const binding = effect.modifiers?.weaponEnchantment
+        return binding?.inventoryInstanceId === candidate.instanceId &&
+          binding.ammunitionContainer !== true && binding.spellcastingFocusClassIds?.includes(classId) === true
+      })
     )
 }
 
@@ -119,28 +138,28 @@ function inventoryEntryIsHeldSpellcastingFocus(
  * source of that spell and therefore must not suppress class spell modifiers.
  */
 export function dnd5eHeldSpellcastingFocus(
-  actor: Pick<Character, 'dnd5eInventory'>,
+  actor: Pick<Character, 'dnd5eInventory' | 'dnd5eCombatState'> & Partial<Character>,
   classId?: Dnd5eClassId,
 ): Dnd5eHeldSpellcastingFocus | undefined {
   if (!classId) return undefined
   const entry = actor.dnd5eInventory?.entries.find((candidate) =>
-    inventoryEntryIsHeldSpellcastingFocus(candidate, classId),
+    inventoryEntryIsHeldSpellcastingFocus(candidate, classId, actor),
   )
   return entry ? { instanceId: entry.instanceId, templateId: entry.templateId } : undefined
 }
 
 export function dnd5eHeldSpellcastingFocusMatches(
-  actor: Pick<Character, 'dnd5eInventory'>,
+  actor: Pick<Character, 'dnd5eInventory' | 'dnd5eCombatState'> & Partial<Character>,
   instanceId: string | undefined,
   classId?: Dnd5eClassId,
 ): boolean {
   return instanceId != null && classId != null && actor.dnd5eInventory?.entries.some((candidate) =>
-    candidate.instanceId === instanceId && inventoryEntryIsHeldSpellcastingFocus(candidate, classId),
+    candidate.instanceId === instanceId && inventoryEntryIsHeldSpellcastingFocus(candidate, classId, actor),
   ) === true
 }
 
 export function dnd5eSpellComponentCheck(
-  actor: Pick<Character, 'conditions' | 'dnd5eInventory' | 'equipment'>,
+  actor: Pick<Character, 'conditions' | 'dnd5eInventory' | 'equipment' | 'dnd5eCombatState'> & Partial<Character>,
   requirements: Dnd5eSpellComponentRequirements,
   classId?: Dnd5eClassId,
 ): Dnd5eSpellComponentCheck {
@@ -159,7 +178,7 @@ export function dnd5eSpellComponentCheck(
     actor.equipment?.offHand,
   ]
   const hasHeldFocus = heldEquipment.some((equipment) =>
-    equipmentCanBeSpellcastingFocus(equipment, classId),
+    equipmentCanBeSpellcastingFocus(equipment, classId) || trainedWeaponCanBeSpellcastingFocus(actor, equipment, classId),
   ) || dnd5eHeldSpellcastingFocus(actor, classId) != null
   const hasComponentPouch = inventoryEntries.some((entry) =>
     entryTemplateKey(entry.templateId) === 'component-pouch',
@@ -170,14 +189,20 @@ export function dnd5eSpellComponentCheck(
     entryTemplateKey(entry.templateId) === 'holy-symbol',
   )
   const hasMaterialSubstitute = hasHeldFocus || hasHolySymbol || (hasComponentPouch && hasFreeHand)
-  const materialPlan = requirements.specificMaterial
+  const canSubstituteSpecificMaterial = requirements.specificMaterial?.allowFocusSubstitution === true &&
+    !materialUnavailable && requirements.specificMaterial.options.every(option => option.components.every(component =>
+      !component.consumed && !(component.minimumUnitValueGp! > 0) && !(component.minimumTotalValueGp! > 0) &&
+      !component.bindEffectId && !component.mustBeEquipped,
+    ))
+  const usesSubstitute = canSubstituteSpecificMaterial && hasMaterialSubstitute
+  const materialPlan = requirements.specificMaterial && !usesSubstitute
     ? dnd5eSpellMaterialConsumptionPlan(actor, requirements.specificMaterial)
     : undefined
   const somaticHandAvailable =
     dnd5ePluginBooleanStaticModifierForCharacter(
       actor as Character,
       'ignoreOccupiedHandsForSomaticComponents',
-    ) || hasFreeHand || (requirements.material && !requirements.specificMaterial && hasHeldFocus)
+    ) || hasFreeHand || (requirements.material && (!requirements.specificMaterial || canSubstituteSpecificMaterial) && hasHeldFocus)
   return {
     verbal: !requirements.verbal
       ? 'not-required'
@@ -192,7 +217,9 @@ export function dnd5eSpellComponentCheck(
     material: !requirements.material
       ? 'not-required'
       : requirements.specificMaterial
-        ? inventory == null || !materialPlan
+        ? usesSubstitute
+          ? 'focus-or-pouch'
+          : inventory == null || !materialPlan
           ? 'missing-specific-material'
           : !hasFreeHand
             ? 'specific-material-hands-occupied'

@@ -1,3 +1,34 @@
+import {normalizeDnd5ePendingMovementCompletions} from '../rulesets/dnd5e/pendingMovementCompletion'
+import { transferDnd5eFollowingSensors } from '../rulesets/dnd5e/sensorTargetTransfer'
+import { normalizeDnd5ePersistentAreaGroundCover } from '../rulesets/dnd5e/persistentAreaGroundCover'
+import {validWallSurfaceSections} from '../../shared/wall-surface-sections.mjs'
+import {normalizeMaterialVolumeTransformationReceipt} from '../rulesets/dnd5e/materialVolumeTransformation'
+import {normalizeMaterialFallVolumes,type MaterialFallVolume} from '../rulesets/dnd5e/fallingMaterialTransformation'
+import { referencedMapImageIds } from '../lib/mapImageReferences'
+import { useCharacterStore } from './characters'
+import { normalizeDnd5eLinkedTargetPresentation } from '../rulesets/dnd5e/linkedTargetPresentation'
+import { validDnd5eEntityMaterial } from '../rulesets/dnd5e/entityMaterial'
+import { playerObservationSelectedMap, resolvePlayerMapObservation } from '../lib/playerMapObservation'
+import { isStrongWindFlameReceiptId } from '../rulesets/dnd5e/strongWindFlameReceipt'
+import { validAreaVisualRecognition } from '../../shared/area-visual-recognition.mjs'
+import { normalizeDnd5eGroveAnnualCasting, type Dnd5eGroveAnnualCasting } from '../rulesets/dnd5e/druidGroveAnnualCasting'
+import { normalizeDnd5eCompanionCarriedObjects, removeDnd5eMapTokenPreservingPossessions, type Dnd5eCompanionCarriedObject } from '../rulesets/dnd5e/companionCarriedObjects'
+import { normalizeDnd5eGroveVolume, normalizeDnd5eGroveDispelTargets } from '../rulesets/dnd5e/druidGroveVolume'
+import { validTerrainClearing, validTerrainClearingProgress } from '../../shared/terrain-clearing.mjs'
+import { normalizeDnd5eMapPlane } from '../rulesets/dnd5e/mapPlane'
+import { normalizeDnd5eRecordedAlignment } from '../rulesets/dnd5e/alignmentRestoration'
+import { validDnd5eEntityDestructionTerrain } from '../rulesets/dnd5e/entityDestructionTerrain'
+import { normalizeDnd5eAbilityCheckRules } from '../rulesets/dnd5e/abilityCheckRules'
+import { dnd5ePersistentAreaAllModeTriggers, normalizeDnd5ePersistentAreaModeState, projectDnd5ePersistentAreaMode } from '../rulesets/dnd5e/persistentAreaModes'
+import { normalizeDnd5eTraversalMode, type Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
+import { validRestAreaSessionId } from '../../shared/rest-bound-areas.mjs'
+import { normalizeDeletedMapIds } from '../lib/mapDeletionHistory'
+import { normalizeDnd5ePersistentAreaSourceLimit, type Dnd5ePersistentAreaSourceLimit } from '../rulesets/dnd5e/persistentAreaSourceLimit'
+import { normalizeDnd5ePersistentRectGeometry, type Dnd5ePersistentRectGeometry } from '../rulesets/dnd5e/persistentAreaRectGeometry'
+import { normalizeDnd5eDelayedSummons } from '../rulesets/dnd5e/activities/dnd5eDelayedSummonQueue'
+import { normalizeDnd5eObjectFlightDepartures } from '../rulesets/dnd5e/mapObjectFlightDeparture'
+import { normalizeDnd5eActivityTurnClock } from '../rulesets/dnd5e/activities/dnd5eActivityTurnClock'
+import { isDnd5eSummonLingerPolicy, type Dnd5eSummonLingerPolicy } from '../rulesets/dnd5e/summonedControl'
 import { validStoneWallLayout } from '../rulesets/dnd5e/stoneWall'
 import { iceWallFromCells } from '../rulesets/dnd5e/wallObjectRules'
 import { normalizeStoneWallState } from '../rulesets/dnd5e/stoneWall'
@@ -23,6 +54,7 @@ import { dnd5eEncounterGridOffset, dnd5eEncounterRoster, type Dnd5eEncounterEntr
 import { putImage, deleteImage, pruneOrphanImages } from '../lib/imageStore'
 import {
   loadSharedResource,
+  getSharedResourceRevisionWatermark,
   saveSharedResourceWithResult,
   type SharedResourceSaveResult,
 } from '../composition/browserSharedRoomResources'
@@ -36,7 +68,11 @@ import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
 import type { Dnd5eMinorIllusionConfigV1 } from '../lib/sharedCombatTypes'
 import {
   applyDnd5eEffectiveVisionProfile,
+  projectDnd5eSourceVisionSensor,
+  resolveDnd5eVisionSensorSource,
   compileDnd5eEffectiveVisionProfile,
+  normalizeDnd5eProjectedCharacterVision,
+  type Dnd5eProjectedCharacterVision,
 } from '../../shared/dnd5e-vision-profile.mjs'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../application/combat/dnd5eCombatRules'
 import type { Dnd5eHitPointMaximumReductionLedger } from '../rulesets/dnd5e/hitPointMaximumReductions'
@@ -54,6 +90,7 @@ import {
 } from '../rulesets/dnd5e/monsterAutomation'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
+  effectiveDnd5eActiveEffects,
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
@@ -61,9 +98,11 @@ import {
   DND5E_PERSISTENT_AREA_DURATION_MAX_ROUNDS,
   normalizeDnd5ePersistentAreaLighting,
   normalizeDnd5ePersistentAreaBlocking,
+  normalizeDnd5eDirectionalMovementCost,
   normalizeDnd5ePersistentAreaGrantedActivity,
   normalizeDnd5ePersistentAreaOccupantModifiers,
   normalizeDnd5ePersistentAreaTurnLifecycle,
+  validDnd5ePersistentAreaSurfaceCloud,
   normalizeDnd5ePersistentAreaVerticalSnapshot,
   normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
@@ -387,6 +426,7 @@ export function mergePendingLocalTokenHitPointEdits(
 }
 
 export interface SharedMapsState {
+  deletedMapIds?: string[]
   maps: BattleMap[]
   selectedId: string | null
   updatedAt?: number
@@ -464,6 +504,7 @@ export async function saveMapsStateWithPendingHitPointRetry(input: {
       (shared.updatedAt ?? 0) + 1,
     )
     payload = {
+      deletedMapIds: normalizeDeletedMapIds(shared.deletedMapIds),
       maps: mergePendingLocalTokenHitPointEdits(shared.maps, updatedAt).map((map) => ({
         ...map,
         tokens: map.tokens.map(stripViewerControlProjection),
@@ -510,7 +551,9 @@ function tokenPatchUpdatesPersistentAreaAnchor(patch: Partial<Token>): boolean {
   )
 }
 
-function persistentAreaAnchoredToToken(area: Dnd5ePluginArea, tokenId: string): boolean {
+function persistentAreaAnchoredToToken(area: Dnd5ePluginArea, tokenId: string, map?: BattleMap): boolean {
+  if(area.sensorTarget && (area.sensorTarget.tokenId===tokenId || area.sensorTarget.characterId &&
+    map?.tokens.some(token=>token.id===tokenId&&token.characterId===area.sensorTarget?.characterId)))return true
   if (area.sourceFollower && area.sourceTokenId === tokenId) return true
   if (
     area.interposition &&
@@ -529,7 +572,7 @@ function persistentAreaAnchoredToToken(area: Dnd5ePluginArea, tokenId: string): 
  */
 function reconcilePersistentAreasAnchoredToToken(map: BattleMap, tokenId: string): BattleMap {
   const areas = map.dnd5ePluginAreas ?? []
-  const affectedAreas = areas.filter((area) => persistentAreaAnchoredToToken(area, tokenId))
+  const affectedAreas = areas.filter((area) => persistentAreaAnchoredToToken(area, tokenId,map))
   if (affectedAreas.length < 1) return map
   const reconciled = reconcileDnd5ePersistentAreaAnchors(map)
   const reconciledById = new Map((reconciled.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
@@ -545,7 +588,7 @@ function reconcilePersistentAreasAnchoredToToken(map: BattleMap, tokenId: string
       return reconciledToken ? [reconciledToken] : []
     }),
     dnd5ePluginAreas: areas.flatMap((area) => {
-      if (!persistentAreaAnchoredToToken(area, tokenId)) return [area]
+      if (!persistentAreaAnchoredToToken(area, tokenId,map)) return [area]
       const reconciledArea = reconciledById.get(area.id)
       return reconciledArea ? [reconciledArea] : []
     }),
@@ -686,6 +729,7 @@ export async function saveMapsStateWithTokenPatchRetry(input: {
     )
     if (!rebasedMaps) throw new Error('map-token-patch-target-missing-after-conflict')
     payload = {
+      deletedMapIds: normalizeDeletedMapIds(shared.deletedMapIds),
       maps: rebasedMaps.map((map) => ({
         ...map,
         tokens: map.tokens.map(stripViewerControlProjection),
@@ -714,6 +758,13 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
       // must never resurrect a cleared trap or erase a newly placed hazard.
       dnd5eItemAreas: sharedMap.dnd5eItemAreas,
       dnd5ePluginAreas: sharedMap.dnd5ePluginAreas,
+      dnd5eGroveAnnualCasting: sharedMap.dnd5eGroveAnnualCasting,
+      dnd5eGrovePasswordPrompts: sharedMap.dnd5eGrovePasswordPrompts,
+      dnd5eGroveDispelTargets: sharedMap.dnd5eGroveDispelTargets,
+      dnd5eDelayedSummons: sharedMap.dnd5eDelayedSummons,
+      dnd5ePendingMovementCompletions: sharedMap.dnd5ePendingMovementCompletions,
+      dnd5eObjectFlightDepartures: sharedMap.dnd5eObjectFlightDepartures,
+      dnd5eActivityTurnClock: sharedMap.dnd5eActivityTurnClock,
       tokens: [
         ...map.tokens.flatMap((token) => {
         const sharedToken = sharedTokenById.get(token.id)
@@ -731,6 +782,8 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           ...authoritativePosition,
           hp: sharedToken.hp,
           maxHp: sharedToken.maxHp,
+          // A stale player snapshot must not relight an authority-extinguished flame.
+          lightSource: sharedToken.lightSource,
           creatureTypes: sharedToken.creatureTypes,
           creatureSize: sharedToken.creatureSize,
           size: sharedToken.size,
@@ -741,6 +794,8 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           visualVariantId: sharedToken.visualVariantId,
           dnd5eCombatState: sharedToken.dnd5eCombatState,
           dnd5eSummon: sharedToken.dnd5eSummon,
+          dnd5eCarriedObjects: sharedToken.dnd5eCarriedObjects,
+          dnd5eNativeArmorRemoved: sharedToken.dnd5eNativeArmorRemoved,
           dnd5eSpellEffect: sharedToken.dnd5eSpellEffect,
           movementAnimation: localSharedMovementAnimation({
             local: token.movementAnimation,
@@ -775,20 +830,24 @@ function stripViewerControlProjection(token: Token): Omit<Token, 'viewerControll
 }
 
 async function persistMapsState(
-  state: Pick<MapState, 'maps' | 'selectedId'>,
+  state: Pick<MapState, 'maps' | 'selectedId' | 'deletedMapIds'>,
   options: { retryPendingHitPoints: boolean },
 ): Promise<void> {
   let maps = state.maps
+  let deletedMapIds = normalizeDeletedMapIds(state.deletedMapIds)
   if (isPlayerPort()) {
     const shared = await loadSharedResource<SharedMapsState>('maps')
-    if (shared?.maps) maps = mergePlayerTokenCombatFields(maps, shared.maps)
+    if (shared?.maps) {
+      maps = mergePlayerTokenCombatFields(maps, shared.maps)
+      deletedMapIds = normalizeDeletedMapIds(shared.deletedMapIds)
+    }
   }
   const persistedMaps = maps.map((map) => ({
     ...map,
     tokens: map.tokens.map(stripViewerControlProjection),
   }))
   const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
-  const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
+  const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, deletedMapIds, updatedAt }
   lastLocalMapsWriteAt = updatedAt
   const saved = await saveMapsStateWithPendingHitPointRetry({
     payload,
@@ -807,16 +866,16 @@ async function persistMapsState(
   lastSharedMapsSnapshot = JSON.stringify(saved.payload)
 }
 
-const enqueueLatestMapsPublish = createLatestMapsPublishPump(
+const enqueueLatestMapsPublish = createLatestMapsPublishPump<Pick<MapState, 'maps' | 'selectedId' | 'deletedMapIds'>>(
   persistMapsState,
   () => {
     const state = useMapStore.getState()
-    return { maps: state.maps, selectedId: state.selectedId }
+    return { maps: state.maps, selectedId: state.selectedId, deletedMapIds: state.deletedMapIds }
   },
 )
 
 function publishMapsState(
-  state: Pick<MapState, 'maps' | 'selectedId'>,
+  state: Pick<MapState, 'maps' | 'selectedId' | 'deletedMapIds'>,
   options: { retryPendingHitPoints?: boolean; requireSaved?: boolean } = {},
 ): Promise<void> {
   return enqueueLatestMapsPublish(state, options)
@@ -830,6 +889,20 @@ export interface EnemyPlacementOptions {
 
 export interface Token {
   id: string
+  dnd5eGroveRooting?: 'pending' | 'rooted' | 'unrooted'
+  /** Player display/selection hint; never sufficient for Host command authority. */
+  dnd5eGroveControl?: { schemaVersion: 1; castId: string; boundaryAreaId: string; sourceTokenId: string }
+  /** Host-only restoration record for an awakened grove tree. */
+  dnd5eGroveGuardian?: {
+    schemaVersion: 1
+    castId: string
+    boundaryAreaId: string
+    sourceTokenId: string
+    originalTree: Token
+  }
+  /** DM-authored current and original alignment facts for independent creatures. */
+  dnd5eAlignment?: string
+  dnd5eOriginalAlignment?: string
   label: string
   x: number // 画布坐标（图片像素）
   y: number
@@ -839,6 +912,8 @@ export interface Token {
   portrait?: string
   /** 仅供渲染投影使用：关联角色手动裁切后的地图 Token。 */
   tokenPortrait?: string
+  /** Viewer-specific projection; recomputed by room authority, never a source of vision. */
+  dnd5eLinkedProjectionVisible?: true
   /** 怪物/NPC 立绘存放于共享图片通道，地图状态只保存引用。 */
   portraitImageId?: string
   /** Square map-token crop for monsters; portraitImageId remains the legacy fallback. */
@@ -849,6 +924,10 @@ export interface Token {
   dnd5eSide?: Dnd5eTokenSide
   /** 玩家读取地图时由服务端临时投影；不会作为 DM 地图数据持久化。 */
   viewerControlled?: boolean
+  /** Server/client source-sensor projection, recomputed from the source. */
+  dnd5eSourceSightDisabled?: boolean
+  dnd5eSourceHearingDisabled?: boolean
+  dnd5eSourceSeeInvisible?: boolean
   /** Player-only projection explaining truths perceived through active truesight. */
   dnd5eTruesightPerception?: {
     ethereal?: true
@@ -888,6 +967,8 @@ export interface Token {
   /** 由声明式 Headless 事务创建的召唤物；Token 仍由 DM 操作，side 只表示战斗阵营。 */
   dnd5eSummon?: {
     schemaVersion: 1
+    /** Host-recorded spell provenance; independent of concentration and control. */
+    sourceSpellId?: string
     pluginId: string
     featureId: string
     sourceCharacterId: string
@@ -897,11 +978,24 @@ export interface Token {
     concentrationId?: string
     side: 'player' | 'enemy'
     persistent?: true
+    /** Permanent creature independent of its original creator presence. */
+    independentPersistent?: true
     persistAfterConcentrationCompletes?: true
     /** This controlled summon remains until its printed expiry, but becomes hostile if concentration ends. */
     becomesHostileAfterConcentrationEnds?: true
     /** True once the permanent creature is no longer commanded by the caster. */
     controlEnded?: true
+    controlSave?: {ability:'str'|'dex'|'con'|'int'|'wis'|'cha';dc:number;disadvantage?:boolean;lingerDieSides?:number}
+    requiredCreatureSubtype?:string
+    lingerRoll?:number
+    uncontrolledLinger?: Dnd5eSummonLingerPolicy
+    lingerRolls?: number[]
+    dismissAtWorldMinute?: number
+    bondKey?:string
+    bondEffectId?:string
+    understoodLanguage?:string
+    telepathyRangeFeet?:number
+    dismissed?:true
     createdWorldMinute?: number
     /** Animate Dead command authority ends at this campaign minute unless reasserted. */
     controlExpiresAtWorldMinute?: number
@@ -912,18 +1006,27 @@ export interface Token {
     weaponDamageBonus?: number
     savingThrowBonus?: number
     proficientSkillCheckBonus?: number
+    naturalWeaponAttacksMagical?: true
     weaponAttacksMagical?: true
     attacksPerAction?: number
     shareSelfSpellsRangeFeet?: number
+  shareSelfSpellsRequiresMounted?: boolean
+  creatureTypeOverride?: 'celestial' | 'fey' | 'fiend'
+  minimumIntelligence?: number
     cannotAttack?: true
     walkingSpeedFeet?: number
     dismissAfterDamageRounds?: number
+    sourceDeathBehavior?: 'die'
+    sourceDeathHandled?: true
     dismissAtRound?: number
     /**
      * Host snapshot of the mapped object replaced by True Polymorph. It is
      * restored at the creature's current position if the spell ends before
      * permanence; a completed one-hour concentration discards the snapshot.
      */
+    autonomousBehavior?: 'attack-nearest-visible' | 'attack-nearest-other-subtype' | 'protect-source'
+    commandPolicy?: 'persistent-order' | 'turn-order'
+    animatedCorpse?: Omit<Token,'dnd5eSummon'>
     truePolymorphOriginalObject?: {
       schemaVersion: 1
       id: string
@@ -983,6 +1086,10 @@ export interface Token {
     concentrationId?: string
     /** Adds this invisible/movable spell entity as a vision origin for its source character. */
     shareVisionWithSource?: true
+    visionFromSource?: true
+    hearingFromSource?: true
+    sensorSense?: 'sight' | 'hearing'
+    linkedTargetProjection?: { name: string; presentation: import('../rulesets/dnd5e/linkedTargetPresentation').Dnd5eLinkedTargetPresentation }
     /** Keep the authoritative drag hitbox while suppressing the ordinary Token portrait/body. */
     hiddenBody?: true
     /** Rendered only to the source character and DM; authority still retains the token. */
@@ -994,10 +1101,24 @@ export interface Token {
     /** Stable one-based position inside the authoritative decoy pool. */
     projectionIndex?: number
   }
+  /** Physical items held by a creature without a character inventory. */
+  dnd5eCarriedObjects?: Dnd5eCompanionCarriedObject[]
+  /** Host remembers that the statblock's original worn armor has been taken off. */
+  dnd5eNativeArmorRemoved?: true
   /** Host-owned lock state for an obstacle used as a container or other map object. */
   dnd5eObjectState?: Dnd5eMapObjectStateV1
   /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
   dnd5eCombatState?: {
+    raging?: boolean
+    rageAttackMark?: NonNullable<import('../types/character').Character['dnd5eCombatState']>['rageAttackMark']
+    rageAttackMarkUsedTurnKey?: string
+    companionCommand?: NonNullable<import('../types/character').Character['dnd5eCombatState']>['companionCommand']
+    readiedAction?: NonNullable<import('../types/character').Character['dnd5eCombatState']>['readiedAction']
+    summonAttackerIds?: string[]
+    summonAutonomousTurnKey?: string
+    summonSelfDefenseTurnKey?: string
+    disengagedTurnKey?: string
+    dodgingTurnKey?: string
     activityExtraTurnGroup?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnGroup']
     activityExtraTurnSuspension?: import('../application/combat/dnd5eCombatRules').Dnd5eCombatant['classState']['activityExtraTurnSuspension']
     slowSpellGate?: import('../rulesets/dnd5e/slowSpellGate').Dnd5eSlowSpellGate
@@ -1022,8 +1143,11 @@ export interface Token {
     attacksMadeThisTurn?: number
     /** Consecutive on-foot movement immediately preceding a possible running jump. */
     runningJumpApproachFeet?: number
+    jumpMovementProgress?: import('../rulesets/dnd5e/traversal').Dnd5eJumpMovementProgress
+    straightMovementStreak?: import('../rulesets/dnd5e/straightMovementStreak').Dnd5eStraightMovementStreak
+    withinReachMovementByAttacker?: Record<string, import('../rulesets/dnd5e/withinReachMovementProgress').Dnd5eWithinReachMovementProgress>
     temporaryHp?: number
-    undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
+    undeadFortitudePending?: { dc: number; damage: number; sourceId?: string; destroysBodyOnDeath?: boolean; destroysBodyPartOnDeath?: import('../rulesets/dnd5e/lethalBodyPart').Dnd5eLethalBodyPartDestruction }
     monsterOnHitSavePending?: {
       sourceId: string
       actionId: string
@@ -1048,6 +1172,7 @@ export interface Token {
       requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
+    activeEffectDamageSavePendingQueue?: Array<{ effectId: string; mode: 'normal' | 'advantage' }>
     activeEffectDamageSavePendingModes?: Record<string, 'normal' | 'advantage'>
     /** Authoritative death/body state retained for unlinked creatures. */
     deathRound?: number
@@ -1057,15 +1182,21 @@ export interface Token {
     /** Host-confirmed state of the soul for magic that requires it to be free and willing. */
     soulReturnStatus?: 'free-willing' | 'unwilling' | 'not-free'
     bodyPresent?: boolean
+    /** Host-authored anatomy, independent of subsequent injury or regeneration. */
+    bodyPartPresence?: Record<string, boolean>
     missingBodyParts?: string[]
     /** A missing essential body part or organ prevents revival that cannot restore parts. */
     vitalBodyPartsMissing?: boolean
     /** Universal d20 penalty from resurrection magic; recovers on long rests. */
     resurrectionPenalty?: { value: number; recoveryPerLongRest: number }
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
-    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
+    temporaryHitPointsSource?: { actorId: string; rulesId: string; effectDefinitionId?: string }
     /** Recoverable maximum-HP reductions for this unlinked creature. */
     hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
+    sourcedExhaustion?: import('../rulesets/dnd5e/sourcedExhaustion').Dnd5eSourcedExhaustion
+    submergedBreathing?: import('../rulesets/dnd5e/submergedBreathing').Dnd5eSubmergedBreathingState
+    submergedBreathingEffectDeadlines?: import('../../shared/submerged-breathing-state.mjs').SubmergedBreathingEffectDeadline[]
+    exhaustionBaseMaxHp?: number
     /** Ability reductions are reapplied from the immutable stat block after a map reload. */
     abilityScoreReductionLedger?: readonly {
       id: string
@@ -1078,11 +1209,22 @@ export interface Token {
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
     /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
+    firstOwnCombatTurn?: { combatId: string; turnKey: string }
+    firstOwnTurnWeaponAttack?: { featureId: string; turnKey: string }
+    attackActionHistory?: import('../rulesets/dnd5e/attackActionHistory').Dnd5eAttackActionHistory
     turnStartResolvedTurnKey?: string
+    deathSaveTurn?: import('../rulesets/dnd5e/deathSaveTurn').Dnd5eDeathSaveTurn
     /** Reckless is active until this creature's next authoritative turn start. */
     recklessAttackTurnKey?: string
     monsterReactiveAvailableTurnKey?: string
     monsterReactiveUsedTurnKey?: string
+    /** Host-owned conscious zero-HP turn, persisted for room reload. */
+    zeroHitPointExtraTurn?: {featureId: string; slotId: string; phase: 'pending' | 'active'}
+    interruptedTurnResume?: import('../rulesets/dnd5e/interruptedTurn').Dnd5eInterruptedTurnResume
+    movementStoppedTurnKey?: string
+    normalReactionSpentThisTurn?: boolean
+    specialOpportunityReactionUsed?: boolean
+    reactionAvailableBeforeSpecial?: boolean
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
     countercharmRoundsRemaining?: number
@@ -1104,7 +1246,12 @@ export interface Token {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    activityTriggerReceipts?: { combatId: string; ids: string[] }
     /** One-shot weapon attack credentials granted by unified Activities. */
+    recentCreatureSightings?: Record<string, import('../rulesets/dnd5e/recentCreatureSightings').Dnd5eCreatureSighting>
+    knownCreatureLocations?: Record<string, import('../rulesets/dnd5e/knownCreatureLocations').Dnd5eKnownCreatureLocation>
+    damageTraitReports?: Record<string, import('../rulesets/dnd5e/damageTraitReport').Dnd5eDamageTraitReceipt>
+    planarPortalReports?: Record<string, import('../rulesets/dnd5e/planarPortalReport').Dnd5ePlanarPortalReceipt>
     activityWeaponAttackGrants?: Record<string, Dnd5eActivityWeaponAttackGrantV1>
     declarativeAttackRetargetImmunityFeatureIds?: string[]
     declarativeWardPools?: Record<string, { current: number; max: number }>
@@ -1126,6 +1273,7 @@ export interface Token {
     pendingMonsterMechanicTriggers?: Record<string, Dnd5eMonsterMechanicTriggerSnapshot>
     monsterMechanicTriggerSequence?: number
     monsterMechanicMovementTurnKey?: string
+    monsterDiveMovement?: import('../rulesets/dnd5e/monsterDiveMovement').Dnd5eMonsterDiveMovement
     monsterMechanicMovementFeet?: number
     monsterMechanicMovementOrigin?: { x: number; y: number }
     monsterMechanicMovementLast?: { x: number; y: number }
@@ -1140,6 +1288,7 @@ export interface Token {
     nextD20Advantage?: {
       featureId: string
       rollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
+      expiresAfterTurnKey?: string
     }
     postSpellRandomTableCheck?: {
       featureId: string
@@ -1161,6 +1310,9 @@ export interface Token {
     concentrationTargetIds?: string[]
     concentrationRoundsRemaining?: number
     concentrationStartedTurnKey?: string
+    concentrationTickOn?: 'source-turn-start'
+    concentrationLastTickTurnKey?: string
+    lastGrantedShortRest?: { receiptId: string; completedWorldMinute?: number }
     lastCompletedConcentration?: {
       spellId: string
       completedRound?: number
@@ -1171,6 +1323,10 @@ export interface Token {
     wildShapeMode?: 'wild-shape' | 'polymorph' | 'true-polymorph' | 'animal-shapes' | 'shapechange'
     wildShapeSourceActorId?: string
     wildShapeSourceActivityId?: string
+    wildShapeConcentrationSpellId?: string
+    activityContinuations?: Record<string, import('../rulesets/dnd5e/activities/dnd5eActivityContinuation').Dnd5eActivityContinuationStateV1>
+    wildShapeRequiresConcentration?: boolean
+    wildShapeRetainsHitPoints?: boolean
     wildShapeMaximumChallengeRating?: number
     wildShapeMaximumSizeRank?: number
     shapechangeEquipmentDisposition?: 'drop' | 'merge' | 'wear'
@@ -1201,6 +1357,8 @@ export interface Token {
     wildShapeOriginalConditionImmunities?: string[]
     viciousMockeryAttackDisadvantage?: boolean
     helpedAttackSourceId?: string
+    helpedAbilityCheckSourceId?: string
+    helpedAbilityCheckSourceTurnKey?: string
     helpedAttackSourceTurnKey?: string
     shieldSpellActive?: boolean
     legendaryResistanceUses?: number
@@ -1244,23 +1402,39 @@ export interface Token {
     monsterThreatByTargetId?: Record<string, number>
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number
+    /** Original 10d10 pool; absent on legacy total-only saves. */
+    hurlThroughHellPendingRolls?: readonly number[]
     hurlThroughHellAppliedTurnKey?: string
   }
   obstacleKind?: string
   /** Token 底部相对地图地面的高度；用于墙体跨越、视线和效果线。 */
   elevationFeet?: number
+  /** Last accepted Host traversal; altitude and available speeds cannot identify flight. */
+  dnd5eTraversalMode?: Dnd5eTraversalMode
   /** 覆盖地图几何中的默认视野半径。 */
   visionRangeFeet?: number
   /** 2014 规则中的黑暗视觉距离；0 或缺失表示没有黑暗视觉。 */
   darkvisionRangeFeet?: number
   /** Room-scoped rules projection; stores only a resolved number, never source content. */
   dnd5eCharacterDarkvisionRangeFeet?: number
+  dnd5eCharacterDarkvisionIfAbsentFeet?: number
+  dnd5eCharacterDarkvisionExistingBonusFeet?: number
+  dnd5eCharacterDarkvisionRacialFallbackFeet?: number
+  dnd5eCharacterDarkvisionRacialBonusFeet?: number
+  dnd5eCharacterRacialDarkvisionRangeFeet?: number
+  dnd5eCharacterInvisibleToDarkvision?: boolean
+  dnd5eFormDarkvisionRangeFeet?: number
+  dnd5eFormRetainsDarkvision?: boolean
+  dnd5eBaseDarkvisionRangeFeet?: number
+  dnd5eProjectedDarkvisionRangeFeet?: number
+  dnd5eProjectedCharacterVision?: Dnd5eProjectedCharacterVision
   /** Sees normally in nonmagical darkness, such as Devil's Sight. */
   darknessSightRangeFeet?: number
   /** Sees normally through magical darkness, such as Devil's Sight. */
   magicalDarknessSightRangeFeet?: number
   /** 特殊感官由地图快照投影到 Headless；距离外仍按普通视线判定。 */
   blindsightRangeFeet?: number
+  blindBeyondBlindsight?: true
   tremorsenseRangeFeet?: number
   truesightRangeFeet?: number
   /** 魔鬼视界等明确能力；普通黑暗视觉不会设置此字段。 */
@@ -1273,6 +1447,9 @@ export interface Token {
     color: string
     /** The light counts as sunlight for rules that consume sunlight exposure. */
     sunlight?: true
+    flame?: boolean
+    flameProtected?: boolean
+  flameSize?: 'torch-or-smaller' | 'larger'
     sourceKind?: CampaignLightSourceKind
     startedAtWorldMinute?: number
     durationMinutes?: number
@@ -1281,7 +1458,11 @@ export interface Token {
   /** 玩家端可见性：动态视野、始终显示，或仅 DM 可见。 */
   visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
   /** 服务端安全投影：知道其位置，但尚未真正看见该生物。 */
+  /** Server-projected private location hint, not actual sight. */
+  sourceLocationKnown?: boolean
   perceptionVisibility?: 'detected-unseen'
+  /** Server-projected visibility of an otherwise invisible sensory effect. */
+  dnd5eSensorVisible?: boolean
   /** DM 权威路径；各端只按路径做本地插值，最终坐标仍以 x/y 为准。 */
   movementAnimation?: TokenMovementAnimation
   teleportationArrivalMapId?: string
@@ -1304,6 +1485,14 @@ type LegacyTokenSave = Omit<Partial<Token>, 'dnd5eCombatState'> & {
 }
 
 export interface BattleMap {
+  dnd5ePendingMovementCompletions?: import('../rulesets/dnd5e/pendingMovementCompletion').Dnd5ePendingMovementCompletion[]
+  /** DM-authored plane identity used for cross-map rules. Undefined is unknown. */
+  dnd5ePlane?: string
+  /** DM-authored adjacency for custom cosmologies; omitted leaves it undetermined. */
+  dnd5eEtherealAdjacent?: boolean
+  dnd5eActivityTurnClock?: import('../rulesets/dnd5e/activities/dnd5eActivityTurnClock').Dnd5eActivityTurnClock
+  dnd5eDelayedSummons?: import('../rulesets/dnd5e/activities/dnd5eDelayedSummonQueue').Dnd5eDelayedSummonEntry[]
+  dnd5eObjectFlightDepartures?: import('../rulesets/dnd5e/mapObjectFlightDeparture').Dnd5eObjectFlightDeparture[]
   id: string
   name: string
   width: number
@@ -1327,6 +1516,10 @@ export interface BattleMap {
   dnd5eItemAreas?: Dnd5eItemArea[]
   /** 由规则包声明、DM Headless 事务创建的持续范围实体。 */
   dnd5ePluginAreas?: Dnd5ePluginArea[]
+  /** Derived public interaction references, including non-rendered guardian regions. No rules authority. */
+  dnd5eGroveAnnualCasting?: Dnd5eGroveAnnualCasting[]
+  dnd5eGrovePasswordPrompts?: Array<{ areaId: string; castId: string; pluginId: string; sourceTokenId: string }>
+  dnd5eGroveDispelTargets?: import('../rulesets/dnd5e/druidGroveVolume').Dnd5eGroveDispelTarget[]
   /** 独立于 Konva 世界坐标的屏幕贴层；地图平移与缩放不会移动这些内容。 */
   viewportNotes?: MapViewportNote[]
   tokens: Token[]
@@ -1349,6 +1542,16 @@ export interface Dnd5eItemArea {
 }
 
 export interface Dnd5ePluginArea {
+  /** Host-derived downward columns for one-time falling material triggers. */
+  materialFallVolumes?: MaterialFallVolume[]
+  /** Host-owned reversible terrain snapshot; never accepted from casting declarations. */
+  materialTransformation?: import('../rulesets/dnd5e/materialVolumeTransformation').MaterialVolumeTransformationReceipt
+  /** Public targeting hint, never sufficient to authorize terrain restoration. */
+  materialTransformationAvailable?: true
+  /** Original Host template retained for later shape changes; absent on legacy saves. */
+  rectGeometry?: Dnd5ePersistentRectGeometry
+  circularGeometry?: { radiusFeet: number; innerRadiusFeet?: number }
+  shapeChangeReceipts?: string[]
   teleportationExit?: TeleportationCircleExit
   id: string
   pluginId: string
@@ -1372,10 +1575,14 @@ export interface Dnd5ePluginArea {
   cells: Array<{ col: number; row: number }>
   createdRound: number
   expiresAfterRound: number
+  /** Host scope of the initial free control, preserved across reloads. */
+  creationActivationScope?: { combatId: string; round: number; turnKey: string }
+  boundEffectGeneration?: number
   /** Exploration-time creation boundary captured from the authoritative campaign clock. */
   createdWorldMinute?: number
   /** Finite areas expire when the authoritative campaign clock reaches this minute. */
   expiresAtWorldMinute?: number
+  remainingExplorationSeconds?: number
   /** Until-dispelled areas ignore the synthetic combat-round expiry sentinel. */
   permanent?: true
   /** Host-owned mapped-object enchantment and its bounded open-text payload. */
@@ -1399,23 +1606,64 @@ export interface Dnd5ePluginArea {
   /** fixed 保持落点；source-token 跟随施法者；effect-token 跟随独立法术实体。 */
   anchorMode?: Dnd5ePersistentAreaAnchorMode
   anchorTokenId?: string
+  /** Logical area anchor minus the linked token's top-left footprint cell. */
+  anchorTokenOffsetCells?: { col: number; row: number }
   anchorCell?: { col: number; row: number }
   /** Authoritative vertical extent; absent preserves legacy unbounded-column behavior. */
   vertical?: Dnd5ePersistentAreaVerticalSnapshot
   movement?: Dnd5ePersistentAreaMovementDeclaration
+  movementContinuation?: { combatId: string; turnKey: string; round: number; remainingFeet: number; pendingActivityId?: string }
   /** Independent effect-token following and load contract. */
   sourceFollower?: Dnd5ePersistentAreaSourceFollower
+  /** Host-bound creature followed by an independent magical sensor. */
+  sensorTarget?: { tokenId: string; characterId?: string }
   /** Host-owned source-turn evolution; progress fields make retries idempotent. */
   lifecycle?: Dnd5ePersistentAreaTurnLifecycle
   lifecycleAdvances?: number
   lifecycleLastTurnKey?: string
+  linkedParentAreaId?: string
+  /** Retain cast lifetime after all spatial material has been consumed. */
+  geometryDepleted?: true
+  wallSurfaceSections?: import('../rulesets/dnd5e/wallSurfaceSections').Dnd5eWallSurfaceSection[]
   /** 区域内移动成本倍数；例如灵体卫士为 2。 */
+  modeState?: import('../rulesets/dnd5e/persistentAreaTypes').Dnd5ePersistentAreaModeState
+  directionalMovementCost?: import('../rulesets/dnd5e/persistentAreaTypes').Dnd5ePersistentAreaDirectionalMovementCost
   movementCostMultiplier?: number
+  terrainClearing?: import('../../shared/terrain-clearing.mjs').TerrainClearing
+  normalGroundTerrain?: true
+  terrainClearingProgress?: import('../../shared/terrain-clearing.mjs').TerrainClearingProgress[]
+  /** Live Host terrain contact requirement for this area's movement cost. */
+  movementRequiresGroundedSource?: boolean
+  movementGroundCover?: import('../rulesets/dnd5e/persistentAreaGroundCover').Dnd5ePersistentAreaGroundCover
+      movementExcludesSource?: boolean
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
   excludedTargetIds?: string[]
+  /** Host-selected viewers who can see through this area's obscuration only. */
+  obscurationExcludedTokenIds?: string[]
+  /** Wind Wall mechanics independent of a standalone spell's concentration contract. */
+  windBarrier?: boolean
+  /** Gust-like wind dispersal and exposed-flame extinction, without projectile blocking. */
+  extinguishesUnprotectedFlames?: 'torch-or-smaller'
+  endFlameExtinguishRadiusFeet?: number
+  /** Local exclusion; the original gas area remains intact. */
+  excludesWindDispersibleGas?: boolean
+  strongWind?: boolean
+  /** Imported fog, smoke or gas explicitly susceptible to strong wind. */
+  dispersedByStrongWind?: boolean
+  /** Several map areas may represent one independently removable spell effect. */
+  effectGroup?: { castId: string; effectId: string }
+  /** Host-only spoken Grove password digest; never project to players. */
+  grovePasswordDigest?: string
+  groveVolume?: import('../rulesets/dnd5e/druidGroveVolume').Dnd5eGroveVolume
+  /** Public interaction availability; not proof of password authorization. */
+  grovePasswordAvailable?: boolean
+  /** Creatures already present at creation; removed once observed outside the grove. */
+  groveInitialOccupantIds?: string[]
   /** 隐蔽区域只投影给来源角色与 DM，直到 DM 将其揭示。 */
   hiddenFromPlayers?: boolean
+  /** Host-only knowledge of disguised terrain; public projection reveals it per character. */
+  visualRecognition?: import('../../shared/area-visual-recognition.mjs').AreaVisualRecognition
   /** 与权威视线判定共享的声明式光照/魔法黑暗。 */
   lighting?: Dnd5ePersistentAreaLighting
   /** Permanent Hallow choices captured at cast time. */
@@ -1430,6 +1678,7 @@ export interface Dnd5ePluginArea {
   /** Non-light visibility volume, such as smoke, gas or underwater ink. */
   obscuration?: Dnd5ePersistentAreaObscuration
   /** Rules projected only while a creature occupies this area. */
+  ignitesUnattendedFuel?: true
   occupantModifiers?: Dnd5ePersistentAreaOccupantModifiers
   /** Physical blocking supplied by a wall-like area. */
   blocking?: Dnd5ePersistentAreaBlocking
@@ -1445,10 +1694,18 @@ export interface Dnd5ePluginArea {
   /** Host-projected weapon-hit rider for eligible creatures currently in this area. */
   weaponHitBonusDamage?: Dnd5ePersistentAreaWeaponHitBonusDamage
   /** Closed rules facts for a spell-created map entity such as Unseen Servant. */
+  /** Independent illusion: no AC/HP, automatic misses/saves and damage/condition immunity. */
+  projectionDefense?: 'untouchable-illusion'
+  illusionRecognition?: { dc: number; knownTokenIds: string[] }
   entityProfile?: {
+    material?: import('../rulesets/dnd5e/entityMaterial').Dnd5eEntityMaterial
+        /** Attacks fail regardless of roll total or natural 20. */
+        attacksAutomaticallyMiss?: true
+    supportsStanding?: true
+    destructionTerrain?: import('../rulesets/dnd5e/entityDestructionTerrain').Dnd5eEntityDestructionTerrain
     armorClass: number
     hitPoints: number
-    strength: number
+    strength?: number
     dexterity?: number
     cannotAttack: boolean
     invisible: boolean
@@ -1479,12 +1736,27 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
   /** Remove a fixed area as soon as its source Token leaves it. */
   sourceExitBehavior?: 'remove-area'
+  /** Host-derived rest session identity, persisted across reloads. */
+  restSessionId?: string
+  concealsFlameLightFromOutside?: true
+  /** Redacted player lighting geometry; never an interactive area. */
+  lightingOnly?: true
+  /** Anonymous Host projection of a hidden light source; contains no creature identity. */
+  lightingOrigin?: { x: number; y: number; elevationFeet: number }
+  /** Area owner may spend a reaction to grant one attack against an occupant advantage. */
+      sourceSlotSpellHealing?: { amount: number }
+      creatureDetectionAdvantage?: 'source-and-allies'
+      attackAdvantageReaction?: 'area-source'
+      sourceIncapacitatedBehavior?: 'remove-area'
+      /** Check modifiers owned by the area's source, only while this area exists. */
+      sourceAbilityCheckRules?: readonly import('../rulesets/dnd5e/abilityCheckRules').Dnd5eAbilityCheckRule[]
   /** Remove a source-anchored area if source movement encloses an affected creature. */
   sourceOverlapBehavior?: 'remove-area'
+  sourceLimit?: Dnd5ePersistentAreaSourceLimit
 }
 
 /** 地图存档 V17：规范化可选、受限的持久区域垂直快照。 */
-export const MAPS_PERSIST_VERSION = 20
+export const MAPS_PERSIST_VERSION = 21
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -1509,6 +1781,16 @@ function normalizeToken(raw: unknown): Token {
     ...t
   } = legacy
   const type = TOKEN_TYPES.includes(t.type as Token['type']) ? (t.type as Token['type']) : 'enemy'
+  const rawGroveGuardian = t.dnd5eGroveGuardian
+  const dnd5eGroveGuardian = rawGroveGuardian?.schemaVersion === 1 &&
+    [rawGroveGuardian.castId, rawGroveGuardian.boundaryAreaId, rawGroveGuardian.sourceTokenId].every(id => typeof id === 'string' && id.length > 0 && id.length <= 256) &&
+    rawGroveGuardian.originalTree?.type === 'obstacle' && rawGroveGuardian.originalTree.id === t.id &&
+    rawGroveGuardian.originalTree.dnd5eGroveGuardian == null &&
+    normalizeDnd5eMapObjectStateV1(rawGroveGuardian.originalTree.dnd5eObjectState)?.vegetation === 'living'
+    ? { schemaVersion: 1 as const, castId: rawGroveGuardian.castId, boundaryAreaId: rawGroveGuardian.boundaryAreaId,
+        sourceTokenId: rawGroveGuardian.sourceTokenId,
+        originalTree: normalizeToken({ ...rawGroveGuardian.originalTree, dnd5eGroveGuardian: undefined }) }
+    : undefined
   const preset = TOKEN_PRESETS[type]
   const rawSize = Number.isFinite(t.size) && (t.size as number) > 0 ? (t.size as number) : 1
   const creatureSize =
@@ -1559,6 +1841,7 @@ function normalizeToken(raw: unknown): Token {
     Number.isInteger(rawSummon.createdRound) && Number(rawSummon.createdRound) >= 0 &&
     Number.isInteger(rawSummon.expiresAfterRound) && Number(rawSummon.expiresAfterRound) >= Number(rawSummon.createdRound) &&
     Number(rawSummon.expiresAfterRound) - Number(rawSummon.createdRound) + 1 <= 14_400 &&
+    (rawSummon.sourceSpellId == null || (typeof rawSummon.sourceSpellId === 'string' && !!rawSummon.sourceSpellId.trim() && rawSummon.sourceSpellId.length <= 240)) &&
     (rawSummon.concentrationId == null || (typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId)) &&
     (rawSummon.persistent == null || rawSummon.persistent === true) &&
     (rawSummon.persistAfterConcentrationCompletes == null || rawSummon.persistAfterConcentrationCompletes === true) &&
@@ -1576,20 +1859,28 @@ function normalizeToken(raw: unknown): Token {
       typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId &&
       rawSummon.persistent !== true && rawSummon.persistAfterConcentrationCompletes !== true
     )) &&
-    (rawSummon.controlEnded !== true || rawSummon.concentrationId == null) &&
+    (rawSummon.controlEnded !== true || rawSummon.concentrationId == null || rawSummon.controlSave != null || isDnd5eSummonLingerPolicy(rawSummon.uncontrolledLinger) || rawSummon.commandPolicy === 'persistent-order' || rawSummon.commandPolicy === 'turn-order') &&
+    (rawSummon.controlSave == null || (['str','dex','con','int','wis','cha'].includes(rawSummon.controlSave.ability) && Number.isInteger(rawSummon.controlSave.dc) && rawSummon.controlSave.dc>0 && rawSummon.controlSave.dc<=100 && (rawSummon.controlSave.lingerDieSides==null || [4,6,8,10,12,20].includes(rawSummon.controlSave.lingerDieSides)))) &&
+    (rawSummon.uncontrolledLinger == null || isDnd5eSummonLingerPolicy(rawSummon.uncontrolledLinger)) &&
     (rawSummon.minimumMaximumHitPoints == null || (Number.isInteger(rawSummon.minimumMaximumHitPoints) && Number(rawSummon.minimumMaximumHitPoints) >= 1 && Number(rawSummon.minimumMaximumHitPoints) <= 1_000_000)) &&
     (rawSummon.maximumHitPointBonus == null || (Number.isInteger(rawSummon.maximumHitPointBonus) && Number(rawSummon.maximumHitPointBonus) >= 0 && Number(rawSummon.maximumHitPointBonus) <= 1_000_000)) &&
     (rawSummon.armorClassBonus == null || (Number.isInteger(rawSummon.armorClassBonus) && Number(rawSummon.armorClassBonus) >= 0 && Number(rawSummon.armorClassBonus) <= 1_000)) &&
-    (rawSummon.weaponAttackBonus == null || (Number.isInteger(rawSummon.weaponAttackBonus) && Number(rawSummon.weaponAttackBonus) >= 0 && Number(rawSummon.weaponAttackBonus) <= 1_000)) &&
-    (rawSummon.weaponDamageBonus == null || (Number.isInteger(rawSummon.weaponDamageBonus) && Number(rawSummon.weaponDamageBonus) >= 0 && Number(rawSummon.weaponDamageBonus) <= 1_000_000)) &&
+    (rawSummon.weaponAttackBonus == null || (Number.isInteger(rawSummon.weaponAttackBonus) && Math.abs(Number(rawSummon.weaponAttackBonus)) <= 1_000)) &&
+    (rawSummon.weaponDamageBonus == null || (Number.isInteger(rawSummon.weaponDamageBonus) && Math.abs(Number(rawSummon.weaponDamageBonus)) <= 1_000_000)) &&
     (rawSummon.savingThrowBonus == null || (Number.isInteger(rawSummon.savingThrowBonus) && Number(rawSummon.savingThrowBonus) >= 0 && Number(rawSummon.savingThrowBonus) <= 1_000)) &&
     (rawSummon.proficientSkillCheckBonus == null || (Number.isInteger(rawSummon.proficientSkillCheckBonus) && Number(rawSummon.proficientSkillCheckBonus) >= 0 && Number(rawSummon.proficientSkillCheckBonus) <= 1_000)) &&
+    (rawSummon.naturalWeaponAttacksMagical == null || rawSummon.naturalWeaponAttacksMagical === true) &&
     (rawSummon.weaponAttacksMagical == null || rawSummon.weaponAttacksMagical === true) &&
     (rawSummon.attacksPerAction == null || (Number.isInteger(rawSummon.attacksPerAction) && Number(rawSummon.attacksPerAction) >= 1 && Number(rawSummon.attacksPerAction) <= 10)) &&
+    (rawSummon.creatureTypeOverride == null || ['celestial','fey','fiend'].includes(rawSummon.creatureTypeOverride)) &&
+    (rawSummon.minimumIntelligence == null || (Number.isInteger(rawSummon.minimumIntelligence) && rawSummon.minimumIntelligence >= 1 && rawSummon.minimumIntelligence <= 30)) &&
+    (rawSummon.shareSelfSpellsRequiresMounted == null || (typeof rawSummon.shareSelfSpellsRequiresMounted === 'boolean' && rawSummon.shareSelfSpellsRangeFeet != null)) &&
     (rawSummon.shareSelfSpellsRangeFeet == null || (Number.isInteger(rawSummon.shareSelfSpellsRangeFeet) && Number(rawSummon.shareSelfSpellsRangeFeet) >= 5 && Number(rawSummon.shareSelfSpellsRangeFeet) <= 10_000)) &&
     (rawSummon.cannotAttack == null || rawSummon.cannotAttack === true) &&
     (rawSummon.walkingSpeedFeet == null || (Number.isInteger(rawSummon.walkingSpeedFeet) && Number(rawSummon.walkingSpeedFeet) >= 0 && Number(rawSummon.walkingSpeedFeet) <= 1_000)) &&
     (rawSummon.dismissAfterDamageRounds == null || (Number.isInteger(rawSummon.dismissAfterDamageRounds) && Number(rawSummon.dismissAfterDamageRounds) >= 1 && Number(rawSummon.dismissAfterDamageRounds) <= 10_000)) &&
+    (rawSummon.sourceDeathBehavior == null || rawSummon.sourceDeathBehavior === 'die') &&
+    (rawSummon.sourceDeathHandled == null || (rawSummon.sourceDeathBehavior === 'die' && rawSummon.sourceDeathHandled === true)) &&
     (rawSummon.dismissAtRound == null || (Number.isInteger(rawSummon.dismissAtRound) && Number(rawSummon.dismissAtRound) >= Number(rawSummon.createdRound) && Number(rawSummon.dismissAtRound) <= Number(rawSummon.expiresAfterRound))) &&
     (rawSummon.truePolymorphOriginalObject == null || truePolymorphOriginalObject != null) &&
     (rawSummon.side === 'player' || rawSummon.side === 'enemy')
@@ -1597,6 +1888,7 @@ function normalizeToken(raw: unknown): Token {
         schemaVersion: 1 as const,
         pluginId: rawSummon.pluginId,
         featureId: rawSummon.featureId,
+        sourceSpellId: typeof rawSummon.sourceSpellId === 'string' ? rawSummon.sourceSpellId : undefined,
         sourceCharacterId: rawSummon.sourceCharacterId,
         sourceTokenId: rawSummon.sourceTokenId,
         createdRound: rawSummon.createdRound,
@@ -1607,6 +1899,17 @@ function normalizeToken(raw: unknown): Token {
         persistAfterConcentrationCompletes: rawSummon.persistAfterConcentrationCompletes === true ? true as const : undefined,
         becomesHostileAfterConcentrationEnds: rawSummon.becomesHostileAfterConcentrationEnds === true ? true as const : undefined,
         controlEnded: rawSummon.controlEnded === true ? true as const : undefined,
+        controlSave:rawSummon.controlSave ? {...rawSummon.controlSave} : undefined,
+        requiredCreatureSubtype:typeof rawSummon.requiredCreatureSubtype==='string'?rawSummon.requiredCreatureSubtype:undefined,
+        lingerRoll:rawSummon.lingerRoll,
+        uncontrolledLinger: isDnd5eSummonLingerPolicy(rawSummon.uncontrolledLinger) ? { ...rawSummon.uncontrolledLinger } : undefined,
+        lingerRolls: Array.isArray(rawSummon.lingerRolls) ? [...rawSummon.lingerRolls] : undefined,
+        dismissAtWorldMinute: Number.isFinite(rawSummon.dismissAtWorldMinute) && Number(rawSummon.dismissAtWorldMinute) >= 0 ? rawSummon.dismissAtWorldMinute : undefined,
+        bondKey:typeof rawSummon.bondKey==='string' ? rawSummon.bondKey : undefined,
+        bondEffectId:typeof rawSummon.bondEffectId==='string' ? rawSummon.bondEffectId : undefined,
+        understoodLanguage:typeof rawSummon.understoodLanguage==='string' ? rawSummon.understoodLanguage : undefined,
+        telepathyRangeFeet:Number.isFinite(rawSummon.telepathyRangeFeet) ? rawSummon.telepathyRangeFeet : undefined,
+        dismissed:rawSummon.dismissed===true?true as const:undefined,
         createdWorldMinute: rawSummon.createdWorldMinute,
         controlExpiresAtWorldMinute: rawSummon.controlExpiresAtWorldMinute,
         minimumMaximumHitPoints: rawSummon.minimumMaximumHitPoints,
@@ -1616,13 +1919,23 @@ function normalizeToken(raw: unknown): Token {
         weaponDamageBonus: rawSummon.weaponDamageBonus,
         savingThrowBonus: rawSummon.savingThrowBonus,
         proficientSkillCheckBonus: rawSummon.proficientSkillCheckBonus,
+        naturalWeaponAttacksMagical: rawSummon.naturalWeaponAttacksMagical === true ? true as const : undefined,
         weaponAttacksMagical: rawSummon.weaponAttacksMagical === true ? true as const : undefined,
         attacksPerAction: rawSummon.attacksPerAction,
         shareSelfSpellsRangeFeet: rawSummon.shareSelfSpellsRangeFeet,
+      shareSelfSpellsRequiresMounted: rawSummon.shareSelfSpellsRequiresMounted,
+      creatureTypeOverride: rawSummon.creatureTypeOverride,
+      minimumIntelligence: rawSummon.minimumIntelligence,
         cannotAttack: rawSummon.cannotAttack === true ? true as const : undefined,
         walkingSpeedFeet: rawSummon.walkingSpeedFeet,
         dismissAfterDamageRounds: rawSummon.dismissAfterDamageRounds,
+        sourceDeathBehavior: rawSummon.sourceDeathBehavior,
+        sourceDeathHandled: rawSummon.sourceDeathHandled,
         dismissAtRound: rawSummon.dismissAtRound,
+        independentPersistent:rawSummon.independentPersistent===true && rawSummon.persistent===true ? true as const : undefined,
+        autonomousBehavior:(rawSummon.autonomousBehavior==='protect-source' || rawSummon.autonomousBehavior==='attack-nearest-visible' || rawSummon.autonomousBehavior==='attack-nearest-other-subtype' && typeof rawSummon.requiredCreatureSubtype==='string' && rawSummon.requiredCreatureSubtype.trim()) ? rawSummon.autonomousBehavior : undefined,
+        commandPolicy:rawSummon.commandPolicy==='persistent-order' || rawSummon.commandPolicy==='turn-order' ? rawSummon.commandPolicy : undefined,
+        animatedCorpse:rawSummon.animatedCorpse && typeof rawSummon.animatedCorpse.id==='string' ? normalizeToken({...rawSummon.animatedCorpse,dnd5eSummon:undefined}) : undefined,
         truePolymorphOriginalObject,
       }
     : undefined
@@ -1646,7 +1959,13 @@ function normalizeToken(raw: unknown): Token {
     (rawSpellEffect.concentrationId == null ||
       (typeof rawSpellEffect.concentrationId === 'string' && !!rawSpellEffect.concentrationId)) &&
     (rawSpellEffect.shareVisionWithSource == null || rawSpellEffect.shareVisionWithSource === true) &&
+    (rawSpellEffect.visionFromSource == null || rawSpellEffect.visionFromSource === true && rawSpellEffect.shareVisionWithSource === true) &&
+    (rawSpellEffect.sensorSense == null || ['sight', 'hearing'].includes(String(rawSpellEffect.sensorSense)) && rawSpellEffect.visionFromSource === true && rawSpellEffect.hearingFromSource === true) &&
+    (rawSpellEffect.hearingFromSource == null || rawSpellEffect.hearingFromSource === true && rawSpellEffect.visionFromSource === true) &&
     (rawSpellEffect.hiddenBody == null || rawSpellEffect.hiddenBody === true) &&
+    (rawSpellEffect.linkedTargetProjection == null ||
+      (typeof rawSpellEffect.linkedTargetProjection.name === 'string' && rawSpellEffect.linkedTargetProjection.name.length > 0 &&
+        rawSpellEffect.linkedTargetProjection.name.length <= 500 && normalizeDnd5eLinkedTargetPresentation(rawSpellEffect.linkedTargetProjection.presentation) != null)) &&
     (rawSpellEffect.visibleToSourceOnly == null || rawSpellEffect.visibleToSourceOnly === true) &&
     (rawSpellEffect.projectionKind == null || attackDecoyProjectionValid)
     ? {
@@ -1658,7 +1977,14 @@ function normalizeToken(raw: unknown): Token {
         expiresAfterRound: rawSpellEffect.expiresAfterRound,
         concentrationId: rawSpellEffect.concentrationId,
         shareVisionWithSource: rawSpellEffect.shareVisionWithSource === true ? true as const : undefined,
+        visionFromSource: rawSpellEffect.visionFromSource === true ? true as const : undefined,
+        sensorSense: rawSpellEffect.sensorSense === 'sight' || rawSpellEffect.sensorSense === 'hearing' ? rawSpellEffect.sensorSense : undefined,
+        hearingFromSource: rawSpellEffect.hearingFromSource === true ? true as const : undefined,
         hiddenBody: rawSpellEffect.hiddenBody === true ? true as const : undefined,
+        linkedTargetProjection: rawSpellEffect.linkedTargetProjection == null ? undefined : {
+          name: rawSpellEffect.linkedTargetProjection.name,
+          presentation: normalizeDnd5eLinkedTargetPresentation(rawSpellEffect.linkedTargetProjection.presentation)!,
+        },
         visibleToSourceOnly: rawSpellEffect.visibleToSourceOnly === true ? true as const : undefined,
         projectionKind: attackDecoyProjectionValid ? 'attack-decoy' as const : undefined,
         sourceEffectId: attackDecoyProjectionValid ? rawSpellEffect.sourceEffectId : undefined,
@@ -1765,15 +2091,34 @@ function normalizeToken(raw: unknown): Token {
     dnd5eSimulacrum,
     dnd5eSpellEffect,
     dnd5eObjectState,
+    dnd5eCarriedObjects: t.type === 'enemy' || (t.type === 'obstacle' && dnd5eObjectState?.structureBinding)
+      ? normalizeDnd5eCompanionCarriedObjects(t.dnd5eCarriedObjects) : undefined,
+    dnd5eNativeArmorRemoved: t.type === 'enemy' && t.dnd5eNativeArmorRemoved === true ? true : undefined,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
+    dnd5eTraversalMode: normalizeDnd5eTraversalMode(t.dnd5eTraversalMode),
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
+    dnd5eCharacterDarkvisionIfAbsentFeet: Number.isFinite(t.dnd5eCharacterDarkvisionIfAbsentFeet) ? Math.max(0, Math.min(10_000, t.dnd5eCharacterDarkvisionIfAbsentFeet as number)) : undefined,
+    dnd5eFormDarkvisionRangeFeet: Number.isFinite(t.dnd5eFormDarkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.dnd5eFormDarkvisionRangeFeet as number)) : undefined,
+    dnd5eFormRetainsDarkvision: typeof t.dnd5eFormRetainsDarkvision === 'boolean' ? t.dnd5eFormRetainsDarkvision : undefined,
+    dnd5eCharacterDarkvisionExistingBonusFeet: Number.isFinite(t.dnd5eCharacterDarkvisionExistingBonusFeet) ? Math.max(0, Math.min(10_000, t.dnd5eCharacterDarkvisionExistingBonusFeet as number)) : undefined,
+    dnd5eCharacterDarkvisionRacialFallbackFeet: Number.isFinite(t.dnd5eCharacterDarkvisionRacialFallbackFeet) ? Math.max(0, Math.min(10_000, t.dnd5eCharacterDarkvisionRacialFallbackFeet as number)) : undefined,
+    dnd5eCharacterDarkvisionRacialBonusFeet: Number.isFinite(t.dnd5eCharacterDarkvisionRacialBonusFeet) ? Math.max(0, Math.min(10_000, t.dnd5eCharacterDarkvisionRacialBonusFeet as number)) : undefined,
+    dnd5eCharacterRacialDarkvisionRangeFeet: Number.isFinite(t.dnd5eCharacterRacialDarkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.dnd5eCharacterRacialDarkvisionRangeFeet as number)) : undefined,
+    dnd5eCharacterInvisibleToDarkvision: t.dnd5eCharacterInvisibleToDarkvision === true,
+    dnd5eBaseDarkvisionRangeFeet: Number.isFinite(t.dnd5eBaseDarkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.dnd5eBaseDarkvisionRangeFeet as number)) : undefined,
+    dnd5eProjectedDarkvisionRangeFeet: Number.isFinite(t.dnd5eProjectedDarkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.dnd5eProjectedDarkvisionRangeFeet as number)) : undefined,
+    dnd5eProjectedCharacterVision: normalizeDnd5eProjectedCharacterVision(t.dnd5eProjectedCharacterVision),
+    dnd5eSourceSightDisabled: t.dnd5eSourceSightDisabled === true ? true : undefined,
+    dnd5eSourceHearingDisabled: t.dnd5eSourceHearingDisabled === true ? true : undefined,
+    dnd5eSourceSeeInvisible: t.dnd5eSourceSeeInvisible === true ? true : undefined,
     dnd5eCharacterDarkvisionRangeFeet: Number.isFinite(t.dnd5eCharacterDarkvisionRangeFeet)
       ? Math.max(0, Math.min(10_000, t.dnd5eCharacterDarkvisionRangeFeet as number))
       : undefined,
     darknessSightRangeFeet: Number.isFinite(t.darknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.darknessSightRangeFeet as number)) : undefined,
     magicalDarknessSightRangeFeet: Number.isFinite(t.magicalDarknessSightRangeFeet) ? Math.max(0, Math.min(10_000, t.magicalDarknessSightRangeFeet as number)) : undefined,
     blindsightRangeFeet: Number.isFinite(t.blindsightRangeFeet) ? Math.max(0, Math.min(10_000, t.blindsightRangeFeet as number)) : undefined,
+    blindBeyondBlindsight: t.blindBeyondBlindsight === true ? true : undefined,
     tremorsenseRangeFeet: Number.isFinite(t.tremorsenseRangeFeet) ? Math.max(0, Math.min(10_000, t.tremorsenseRangeFeet as number)) : undefined,
     truesightRangeFeet: Number.isFinite(t.truesightRangeFeet) ? Math.max(0, Math.min(10_000, t.truesightRangeFeet as number)) : undefined,
     canSeeMagicalDarkness: t.canSeeMagicalDarkness === true ? true : undefined,
@@ -1786,6 +2131,9 @@ function normalizeToken(raw: unknown): Token {
           dimRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.dimRadiusFeet)),
           color: /^#[0-9a-f]{6}$/i.test(t.lightSource.color) ? t.lightSource.color : '#fbbf24',
           ...(t.lightSource.sunlight === true ? { sunlight: true as const } : {}),
+          flame: typeof t.lightSource.flame === 'boolean' ? t.lightSource.flame : undefined,
+          flameProtected: typeof t.lightSource.flameProtected === 'boolean' ? t.lightSource.flameProtected : undefined,
+          flameSize: t.lightSource.flameSize === 'torch-or-smaller' || t.lightSource.flameSize === 'larger' ? t.lightSource.flameSize : undefined,
           sourceKind: ['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(t.lightSource.sourceKind))
             ? t.lightSource.sourceKind as CampaignLightSourceKind
             : undefined,
@@ -1803,8 +2151,17 @@ function normalizeToken(raw: unknown): Token {
     visibilityMode: t.visibilityMode === 'always' || t.visibilityMode === 'dm-only' || t.visibilityMode === 'line-of-sight'
       ? t.visibilityMode
       : undefined,
+    sourceLocationKnown: t.sourceLocationKnown === true ? true : undefined,
     perceptionVisibility: t.perceptionVisibility === 'detected-unseen' ? t.perceptionVisibility : undefined,
+    dnd5eSensorVisible: t.dnd5eSensorVisible === true ? true : undefined,
     movementAnimation: normalizeTokenMovementAnimation(t.movementAnimation),
+    dnd5eAlignment: normalizeDnd5eRecordedAlignment(t.dnd5eAlignment),
+    dnd5eOriginalAlignment: normalizeDnd5eRecordedAlignment(t.dnd5eOriginalAlignment),
+    dnd5eGroveGuardian,
+    dnd5eGroveControl: t.dnd5eGroveControl?.schemaVersion === 1 &&
+      [t.dnd5eGroveControl.castId, t.dnd5eGroveControl.boundaryAreaId, t.dnd5eGroveControl.sourceTokenId].every(id => typeof id === 'string' && id.length > 0 && id.length <= 256)
+      ? { schemaVersion: 1, castId: t.dnd5eGroveControl.castId, boundaryAreaId: t.dnd5eGroveControl.boundaryAreaId, sourceTokenId: t.dnd5eGroveControl.sourceTokenId } : undefined,
+    dnd5eGroveRooting: ['pending', 'rooted', 'unrooted'].includes(String(t.dnd5eGroveRooting)) ? t.dnd5eGroveRooting : undefined,
     teleportationArrivalMapId: typeof t.teleportationArrivalMapId === 'string' ? t.teleportationArrivalMapId : undefined,
     dnd5eWorldTimeAppliedMinute:
       Number.isSafeInteger(t.dnd5eWorldTimeAppliedMinute) && Number(t.dnd5eWorldTimeAppliedMinute) >= 0
@@ -1873,7 +2230,9 @@ function normalizeMap(raw: unknown): BattleMap {
           : []
         if (
           typeof area.id !== 'string' || !area.id || typeof area.pluginId !== 'string' || !area.pluginId ||
-          typeof area.featureId !== 'string' || !area.featureId || cells.length < 1 ||
+          typeof area.featureId !== 'string' || !area.featureId ||
+          (cells.length < 1 && !(area.geometryDepleted === true && Array.isArray(area.cells) && area.cells.length === 0 && !area.entityProfile)) ||
+          (area.geometryDepleted != null && (area.geometryDepleted !== true || cells.length !== 0)) ||
           !Number.isInteger(area.createdRound) || !Number.isInteger(area.expiresAfterRound) ||
           area.createdRound! < 0 || area.expiresAfterRound! < area.createdRound! ||
           area.expiresAfterRound! - area.createdRound! + 1 > (
@@ -1882,19 +2241,25 @@ function normalizeMap(raw: unknown): BattleMap {
               : 14_400
           )
         ) return []
+        const modeState = normalizeDnd5ePersistentAreaModeState(area.modeState)
+        const materialTransformation = area.materialTransformation == null ? undefined : normalizeMaterialVolumeTransformationReceipt(area.materialTransformation)
+        const materialFallVolumes = area.materialFallVolumes == null ? undefined : normalizeMaterialFallVolumes(area.materialFallVolumes)
+        if(area.materialFallVolumes!=null&&!materialFallVolumes)return []
+        if (area.materialTransformation != null && (!materialTransformation || materialTransformation.mapId !== m.id || area.permanent !== true)) return []
+        if (area.modeState != null && !modeState) return []
         const triggers = Array.isArray(area.triggers)
           ? area.triggers.flatMap((trigger) => {
               const normalized = normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)
               return normalized ? [normalized] : []
             })
           : []
-        const triggerIds = new Set(triggers.flatMap((trigger) => [
+        const triggerIds = new Set(dnd5ePersistentAreaAllModeTriggers({ triggers, modeState }).flatMap((trigger) => [
           trigger.id,
           ...(trigger.frequencyGroupId ? [trigger.frequencyGroupId] : []),
         ]))
         const triggerReceipts = Array.isArray(area.triggerReceipts)
           ? area.triggerReceipts.flatMap((receipt) =>
-              receipt && triggerIds.has(receipt.triggerId) && typeof receipt.targetTokenId === 'string' &&
+              receipt && (triggerIds.has(receipt.triggerId) || ((area.strongWind === true || area.coreSpellId === 'gust-of-wind') && isStrongWindFlameReceiptId(receipt.triggerId))) && typeof receipt.targetTokenId === 'string' &&
               receipt.targetTokenId && Number.isInteger(receipt.round) && receipt.round >= 0 &&
               (receipt.turnKey == null || (typeof receipt.turnKey === 'string' && !!receipt.turnKey && receipt.turnKey.length <= 160)) &&
               typeof receipt.transactionId === 'string' && receipt.transactionId
@@ -1903,6 +2268,7 @@ function normalizeMap(raw: unknown): BattleMap {
                     targetTokenId: receipt.targetTokenId,
                     round: receipt.round,
                     turnKey: receipt.turnKey,
+                    declined: receipt.declined === true || undefined,
                     transactionId: receipt.transactionId,
                     damage: Number.isInteger(receipt.damage) && receipt.damage! >= 0 && receipt.damage! <= 1_000_000
                       ? receipt.damage
@@ -1924,6 +2290,7 @@ function normalizeMap(raw: unknown): BattleMap {
         const createdWorldMinute = Number.isSafeInteger(area.createdWorldMinute) && Number(area.createdWorldMinute) >= 0
           ? Number(area.createdWorldMinute)
           : undefined
+        if(area.remainingExplorationSeconds != null && (!Number.isSafeInteger(area.remainingExplorationSeconds)||Number(area.remainingExplorationSeconds)<1||Number(area.remainingExplorationSeconds)>86400))return []
         const expiresAtWorldMinute = Number.isSafeInteger(area.expiresAtWorldMinute) &&
           createdWorldMinute != null && Number(area.expiresAtWorldMinute) > createdWorldMinute
           ? Number(area.expiresAtWorldMinute)
@@ -1970,12 +2337,34 @@ function normalizeMap(raw: unknown): BattleMap {
         const anchorCell = area.anchorCell && Number.isInteger(area.anchorCell.col) && Number.isInteger(area.anchorCell.row)
           ? { col: area.anchorCell.col, row: area.anchorCell.row }
           : { ...cells[0] }
+        if (area.linkedParentAreaId != null && (typeof area.linkedParentAreaId !== 'string' || !area.linkedParentAreaId.trim() || area.linkedParentAreaId.length>1024)) return []
+        if (area.movement?.surfaceCloud != null && !validDnd5ePersistentAreaSurfaceCloud(area.movement.surfaceCloud)) return []
+        if (area.movement?.allowVertical !== undefined && area.movement.allowVertical !== true) return []
+        if(area.movement?.descendOverLowerGround!==undefined && (area.movement.descendOverLowerGround!==true||area.movement.maximumBottomHeightAboveGroundFeet===undefined))return []
+        if(area.movement?.maximumBottomHeightAboveGroundFeet!==undefined &&
+          (area.movement.allowVertical!==true || !Number.isFinite(area.movement.maximumBottomHeightAboveGroundFeet) ||
+            area.movement.maximumBottomHeightAboveGroundFeet<0 || area.movement.maximumBottomHeightAboveGroundFeet>1000))return []
+        if (area.movement?.carryRestrainedTargets !== undefined && area.movement.carryRestrainedTargets !== true) return []
+        if(area.movement?.collectObjectsMaximumSizeRank!==undefined&&(!Number.isInteger(area.movement.collectObjectsMaximumSizeRank)||
+          area.movement.collectObjectsMaximumSizeRank<0||area.movement.collectObjectsMaximumSizeRank>5||area.movement.carryRestrainedTargets!==true))return []
+        if (area.movement?.carryRestrainedTargets && (anchorMode === 'source-token' || anchorMode === 'target-token' ||
+          area.sourceFollower || area.lifecycle?.translateAwayFromSourceFeet)) return []
+        if (area.movement?.maximumSourceDistanceBeforeMoveFeet != null && (!Number.isInteger(area.movement.maximumSourceDistanceBeforeMoveFeet) || area.movement.maximumSourceDistanceBeforeMoveFeet < 1 || area.movement.maximumSourceDistanceBeforeMoveFeet > 10_000)) return []
+        if (area.movement?.requiresVisibleDestination !== undefined && area.movement.requiresVisibleDestination !== true) return []
         const movement = area.movement &&
           (area.movement.economy === 'action' || area.movement.economy === 'bonus-action' || area.movement.economy === 'none') &&
           Number.isFinite(area.movement.maximumFeet) && area.movement.maximumFeet > 0 && area.movement.maximumFeet <= 1_000
           ? {
               economy: area.movement.economy,
+              ...(area.movement.requiresVisibleDestination === true ? { requiresVisibleDestination: true as const } : {}),
+              ...(area.movement.surfaceCloud ? {surfaceCloud:{...area.movement.surfaceCloud,materials:[...area.movement.surfaceCloud.materials]}} : {}),
+              ...(area.movement.allowVertical === true ? { allowVertical: true as const } : {}),
+              ...(area.movement.descendOverLowerGround===true?{descendOverLowerGround:true as const}:{}),
+              ...(area.movement.maximumBottomHeightAboveGroundFeet!==undefined ? {maximumBottomHeightAboveGroundFeet:area.movement.maximumBottomHeightAboveGroundFeet}:{}),
+              ...(area.movement.carryRestrainedTargets === true ? { carryRestrainedTargets: true as const } : {}),
+              ...(area.movement.collectObjectsMaximumSizeRank==null?{}:{collectObjectsMaximumSizeRank:area.movement.collectObjectsMaximumSizeRank}),
               maximumFeet: Math.floor(area.movement.maximumFeet),
+              ...(area.movement.maximumSourceDistanceBeforeMoveFeet != null ? { maximumSourceDistanceBeforeMoveFeet: area.movement.maximumSourceDistanceBeforeMoveFeet } : {}),
               ...(Number.isFinite(area.movement.maximumBarrierHeightFeet) &&
                 Number(area.movement.maximumBarrierHeightFeet) > 0 &&
                 Number(area.movement.maximumBarrierHeightFeet) <= 1_000
@@ -1996,6 +2385,8 @@ function normalizeMap(raw: unknown): BattleMap {
                 : {}),
             }
           : undefined
+        if (area.concealsFlameLightFromOutside != null && area.concealsFlameLightFromOutside !== true) return []
+        if (area.restSessionId != null && !validRestAreaSessionId(area.restSessionId)) return []
         const lighting = area.lighting ? normalizeDnd5ePersistentAreaLighting(area.lighting) : undefined
         if (area.lighting != null && !lighting) return []
         const hallow = area.hallow ? normalizeDnd5eHallowAreaState(area.hallow) : undefined
@@ -2012,6 +2403,10 @@ function normalizeMap(raw: unknown): BattleMap {
         const occupantModifiers = area.occupantModifiers
           ? normalizeDnd5ePersistentAreaOccupantModifiers(area.occupantModifiers)
           : undefined
+        if(area.sensorTarget!=null && (area.anchorMode!=='effect-token'||!area.anchorTokenId||area.sourceFollower||
+          typeof area.sensorTarget!=='object'||Array.isArray(area.sensorTarget)||
+          typeof area.sensorTarget.tokenId!=='string'||!area.sensorTarget.tokenId.trim()||area.sensorTarget.tokenId.length>256||
+          (area.sensorTarget.characterId!=null&&(typeof area.sensorTarget.characterId!=='string'||!area.sensorTarget.characterId.trim()||area.sensorTarget.characterId.length>256))))return []
         const sourceFollower = area.sourceFollower &&
           Number.isFinite(area.sourceFollower.stationaryWithinFeet) &&
           Number(area.sourceFollower.stationaryWithinFeet) > 0 &&
@@ -2033,6 +2428,11 @@ function normalizeMap(raw: unknown): BattleMap {
           ? normalizeDnd5ePersistentAreaTurnLifecycle(area.lifecycle)
           : undefined
         if (area.lifecycle != null && !lifecycle) return []
+        if (area.sourceSlotSpellHealing != null && ((typeof area.sourceSlotSpellHealing !== 'object' || Array.isArray(area.sourceSlotSpellHealing)) ||
+          Object.keys(area.sourceSlotSpellHealing).some(key => key !== 'amount') ||
+          !Number.isInteger(area.sourceSlotSpellHealing.amount) || Number(area.sourceSlotSpellHealing.amount) < 0 || Number(area.sourceSlotSpellHealing.amount) > 1000000)) return []
+        if (area.creatureDetectionAdvantage != null && area.creatureDetectionAdvantage !== 'source-and-allies') return []
+        if (area.attackAdvantageReaction != null && area.attackAdvantageReaction !== 'area-source') return []
         if (area.occupantModifiers != null && !occupantModifiers) return []
         const blocking = area.blocking
           ? normalizeDnd5ePersistentAreaBlocking(area.blocking)
@@ -2056,11 +2456,17 @@ function normalizeMap(raw: unknown): BattleMap {
         const entityProfile = area.entityProfile &&
           Number.isInteger(area.entityProfile.armorClass) && Number(area.entityProfile.armorClass) >= 1 && Number(area.entityProfile.armorClass) <= 40 &&
           Number.isInteger(area.entityProfile.hitPoints) && Number(area.entityProfile.hitPoints) >= 1 && Number(area.entityProfile.hitPoints) <= 1_000_000 &&
-          Number.isInteger(area.entityProfile.strength) && Number(area.entityProfile.strength) >= 1 && Number(area.entityProfile.strength) <= 30 &&
+          (area.entityProfile.strength == null || (Number.isInteger(area.entityProfile.strength) && Number(area.entityProfile.strength) >= 1 && Number(area.entityProfile.strength) <= 30)) &&
           typeof area.entityProfile.cannotAttack === 'boolean' && typeof area.entityProfile.invisible === 'boolean'
           ? { ...area.entityProfile }
           : undefined
         if (area.entityProfile != null && !entityProfile) return []
+        if (area.projectionDefense != null && (area.projectionDefense !== 'untouchable-illusion' ||
+          entityProfile || area.anchorMode !== 'effect-token' || !area.anchorTokenId)) return []
+        if (entityProfile?.attacksAutomaticallyMiss != null && entityProfile.attacksAutomaticallyMiss !== true) return []
+        if (entityProfile?.supportsStanding != null && entityProfile.supportsStanding !== true) return []
+        if (entityProfile?.material != null && !validDnd5eEntityMaterial(entityProfile.material)) return []
+        if (entityProfile?.destructionTerrain != null && !validDnd5eEntityDestructionTerrain(entityProfile.destructionTerrain)) return []
         const entityCurrentHitPoints = entityProfile
           ? area.entityCurrentHitPoints == null
             ? entityProfile.hitPoints
@@ -2115,6 +2521,22 @@ function normalizeMap(raw: unknown): BattleMap {
           ? normalizeDnd5ePersistentAreaVerticalSnapshot(area.vertical)
           : undefined
         if (area.vertical != null && !vertical) return []
+        if (area.visualRecognition != null && !validAreaVisualRecognition(area.visualRecognition)) return []
+        const rectGeometry = normalizeDnd5ePersistentRectGeometry(area.rectGeometry)
+        if (area.rectGeometry != null && !rectGeometry) return []
+        if ((rectGeometry?.pitchDegrees != null || rectGeometry?.rollDegrees != null) &&
+          (!area.anchorCell || vertical?.mode !== 'volume' || vertical.shape === 'sphere')) return []
+        if (lighting?.kind === 'light' && lighting.emission === 'rectangle-volume' &&
+          (!rectGeometry || rectGeometry.gridAligned || !area.anchorCell ||
+            vertical?.mode !== 'volume' || vertical.shape === 'sphere')) return []
+        const circularGeometry = area.circularGeometry != null && typeof area.circularGeometry === 'object' &&
+          !Array.isArray(area.circularGeometry) && Object.keys(area.circularGeometry).every(key => key === 'radiusFeet' || key === 'innerRadiusFeet') && Number.isFinite(area.circularGeometry.radiusFeet) &&
+          area.circularGeometry.radiusFeet > 0 && area.circularGeometry.radiusFeet <= 100_000
+          && (area.circularGeometry.innerRadiusFeet == null || (Number.isFinite(area.circularGeometry.innerRadiusFeet) &&
+            area.circularGeometry.innerRadiusFeet >= 0 && area.circularGeometry.innerRadiusFeet < area.circularGeometry.radiusFeet))
+          ? { radiusFeet: area.circularGeometry.radiusFeet, ...(area.circularGeometry.innerRadiusFeet != null ? {innerRadiusFeet:area.circularGeometry.innerRadiusFeet} : {}) } : undefined
+        if (area.circularGeometry != null && !circularGeometry) return []
+        if (area.wallSurfaceSections != null && !validWallSurfaceSections(area,area.wallSurfaceSections)) return []
         const normalizedVisual = area.visual
           ? normalizeDnd5ePersistentAreaVisual(area.visual)
           : undefined
@@ -2171,7 +2593,11 @@ function normalizeMap(raw: unknown): BattleMap {
           expiresAfterRound: area.expiresAfterRound!,
           createdWorldMinute,
           expiresAtWorldMinute,
+          remainingExplorationSeconds: area.remainingExplorationSeconds == null ? undefined : Number(area.remainingExplorationSeconds),
           permanent: area.permanent === true ? true : undefined,
+          ...(materialTransformation ? {materialTransformation} : {}),
+          ...(materialFallVolumes ? {materialFallVolumes} : {}),
+          ...(materialTransformation || area.materialTransformationAvailable === true ? {materialTransformationAvailable:true as const} : {}),
           magicMouth,
           minorIllusion,
           expiresAtSourceTurnEndAfterRound:
@@ -2188,30 +2614,78 @@ function normalizeMap(raw: unknown): BattleMap {
             } : undefined,
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
           anchorMode,
+          anchorTokenOffsetCells: area.anchorMode === 'effect-token' && area.anchorTokenOffsetCells &&
+            Number.isInteger(area.anchorTokenOffsetCells.col) && Number.isInteger(area.anchorTokenOffsetCells.row) &&
+            Math.abs(area.anchorTokenOffsetCells.col) <= 8 && Math.abs(area.anchorTokenOffsetCells.row) <= 8
+            ? { col: area.anchorTokenOffsetCells.col, row: area.anchorTokenOffsetCells.row } : undefined,
           anchorTokenId: typeof area.anchorTokenId === 'string' && area.anchorTokenId
             ? area.anchorTokenId
             : anchorMode === 'source-token' ? area.sourceTokenId : undefined,
           anchorCell,
           vertical,
+          rectGeometry,
+          circularGeometry,
+          wallSurfaceSections: area.wallSurfaceSections?.map(section=>({...section})),
+          shapeChangeReceipts: Array.isArray(area.shapeChangeReceipts) ? [...new Set(area.shapeChangeReceipts.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 512))].slice(-256) : undefined,
           movement,
           sourceFollower,
+          sensorTarget:area.sensorTarget?{tokenId:area.sensorTarget.tokenId,...(area.sensorTarget.characterId?{characterId:area.sensorTarget.characterId}:{})}:undefined,
           lifecycle,
+          linkedParentAreaId: area.linkedParentAreaId,
+          geometryDepleted: area.geometryDepleted,
           lifecycleAdvances: Number.isInteger(area.lifecycleAdvances) && Number(area.lifecycleAdvances) >= 0 && Number(area.lifecycleAdvances) <= 14_400
             ? Number(area.lifecycleAdvances)
             : undefined,
           lifecycleLastTurnKey: typeof area.lifecycleLastTurnKey === 'string' && area.lifecycleLastTurnKey.length <= 160
             ? area.lifecycleLastTurnKey
             : undefined,
-          movementCostMultiplier: Number.isFinite(area.movementCostMultiplier) &&
+          modeState,
+          directionalMovementCost: normalizeDnd5eDirectionalMovementCost(area.directionalMovementCost),
+          movementGroundCover: normalizeDnd5ePersistentAreaGroundCover(area.movementGroundCover),
+          movementCostMultiplier: (area.movementGroundCover == null || !!normalizeDnd5ePersistentAreaGroundCover(area.movementGroundCover)) && Number.isFinite(area.movementCostMultiplier) &&
             Number(area.movementCostMultiplier) >= 1 && Number(area.movementCostMultiplier) <= 10
             ? Number(area.movementCostMultiplier)
             : undefined,
+          normalGroundTerrain: area.normalGroundTerrain === true && vertical?.mode === 'ground' &&
+            (!anchorMode || anchorMode === 'fixed') ? true : undefined,
+          terrainClearing: validTerrainClearing(area.terrainClearing) && area.permanent === true &&
+            vertical?.mode === 'ground' && !area.concentrationId && (!anchorMode || anchorMode === 'fixed')
+              ? { ...area.terrainClearing } : undefined,
+          terrainClearingProgress: validTerrainClearing(area.terrainClearing) &&
+            validTerrainClearingProgress(area.terrainClearingProgress, cells)
+              ? area.terrainClearingProgress?.map(entry => ({ ...entry })) : undefined,
           relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
+          movementRequiresGroundedSource: area.movementRequiresGroundedSource === true,
+          movementExcludesSource: area.movementExcludesSource === true,
           includeSelf: area.includeSelf === true,
           excludedTargetIds: Array.isArray(area.excludedTargetIds)
             ? [...new Set(area.excludedTargetIds.filter((id): id is string => typeof id === 'string' && !!id))]
             : undefined,
+          obscurationExcludedTokenIds: Array.isArray(area.obscurationExcludedTokenIds)
+            ? [...new Set(area.obscurationExcludedTokenIds.filter((id): id is string => typeof id === 'string' && !!id && id.length <= 160))].slice(0, 512)
+            : undefined,
+          windBarrier: area.windBarrier === true,
+          excludesWindDispersibleGas: area.excludesWindDispersibleGas === true,
+          extinguishesUnprotectedFlames: area.extinguishesUnprotectedFlames === 'torch-or-smaller' ? 'torch-or-smaller' : undefined,
+          endFlameExtinguishRadiusFeet: Number.isInteger(area.endFlameExtinguishRadiusFeet) && Number(area.endFlameExtinguishRadiusFeet)>0 && Number(area.endFlameExtinguishRadiusFeet)<=1000 ? Number(area.endFlameExtinguishRadiusFeet) : undefined,
+          strongWind: area.strongWind === true,
+          dispersedByStrongWind: area.dispersedByStrongWind === true,
+          effectGroup: area.effectGroup && typeof area.effectGroup.castId === 'string' &&
+            area.effectGroup.castId.length > 0 && area.effectGroup.castId.length <= 160 &&
+            typeof area.effectGroup.effectId === 'string' && area.effectGroup.effectId.length > 0 && area.effectGroup.effectId.length <= 160
+            ? { castId: area.effectGroup.castId, effectId: area.effectGroup.effectId }
+            : undefined,
           hiddenFromPlayers: area.hiddenFromPlayers === true,
+          visualRecognition: validAreaVisualRecognition(area.visualRecognition)
+            ? { dc: area.visualRecognition.dc, knownTokenIds: [...area.visualRecognition.knownTokenIds],
+              ...(area.visualRecognition.skill ? { skill: area.visualRecognition.skill } : {}) } : undefined,
+          grovePasswordDigest: area.effectGroup && typeof area.grovePasswordDigest === 'string' && /^fnv1a32:[0-9a-f]{8}$/.test(area.grovePasswordDigest)
+            ? area.grovePasswordDigest : undefined,
+          grovePasswordAvailable: area.effectGroup && area.grovePasswordAvailable === true ? true : undefined,
+          groveVolume: area.effectGroup ? normalizeDnd5eGroveVolume(area.groveVolume) : undefined,
+          groveInitialOccupantIds: area.effectGroup?.effectId === 'guardians' && Array.isArray(area.groveInitialOccupantIds)
+            ? [...new Set(area.groveInitialOccupantIds.filter((id): id is string => typeof id === 'string' && !!id))]
+            : undefined,
           lighting,
           hallow,
           hallucinatoryTerrain,
@@ -2221,21 +2695,40 @@ function normalizeMap(raw: unknown): BattleMap {
             ? area.illuminationOverride
             : undefined,
           obscuration: area.obscuration &&
+            (area.obscuration.scope == null || area.obscuration.scope === 'source-token') &&
             (area.obscuration.kind === 'light' || area.obscuration.kind === 'heavy') &&
             (area.obscuration.sourceCanSeeThrough == null ||
               typeof area.obscuration.sourceCanSeeThrough === 'boolean')
             ? {
                 kind: area.obscuration.kind,
                 sourceCanSeeThrough: area.obscuration.sourceCanSeeThrough === true,
+                ...(area.obscuration.scope === 'source-token' ? { scope: 'source-token' as const } : {}),
               }
             : undefined,
+          ignitesUnattendedFuel: area.ignitesUnattendedFuel === true ? true : undefined,
           occupantModifiers,
           blocking,
           interposition,
           entityProfile,
+          projectionDefense: area.projectionDefense,
+          illusionRecognition: validAreaVisualRecognition(area.illusionRecognition)
+            ? { dc: area.illusionRecognition.dc, knownTokenIds: [...area.illusionRecognition.knownTokenIds] } : undefined,
+          creationActivationScope: area.creationActivationScope &&
+            typeof area.creationActivationScope.combatId === 'string' && area.creationActivationScope.combatId.length > 0 && area.creationActivationScope.combatId.length <= 200 &&
+            typeof area.creationActivationScope.turnKey === 'string' && area.creationActivationScope.turnKey.length > 0 && area.creationActivationScope.turnKey.length <= 200 &&
+            Number.isSafeInteger(area.creationActivationScope.round) && area.creationActivationScope.round >= 0
+            ? { combatId: area.creationActivationScope.combatId, round: area.creationActivationScope.round, turnKey: area.creationActivationScope.turnKey } : undefined,
+          movementContinuation: area.movementContinuation && typeof area.movementContinuation.combatId === 'string' &&
+            area.movementContinuation.combatId.length > 0 && area.movementContinuation.combatId.length <= 200 &&
+            typeof area.movementContinuation.turnKey === 'string' && area.movementContinuation.turnKey.length > 0 && area.movementContinuation.turnKey.length <= 200 &&
+            Number.isInteger(area.movementContinuation.round) && area.movementContinuation.round >= 0 &&
+            Number.isFinite(area.movementContinuation.remainingFeet) && area.movementContinuation.remainingFeet >= 0 && area.movementContinuation.remainingFeet <= 10000
+            ? { ...area.movementContinuation, pendingActivityId: typeof area.movementContinuation.pendingActivityId === 'string' && area.movementContinuation.pendingActivityId.length <= 200 ? area.movementContinuation.pendingActivityId : undefined } : undefined,
           entityCurrentHitPoints,
           weaponHitBonusDamage,
           grantedActivities: grantedActivities.length > 0 ? grantedActivities : undefined,
+          boundEffectGeneration: Number.isSafeInteger(area.boundEffectGeneration) && area.boundEffectGeneration! >= 0
+            ? area.boundEffectGeneration : undefined,
           grantedActivityUseReceipts: Array.isArray(area.grantedActivityUseReceipts)
             ? [...new Set(area.grantedActivityUseReceipts.filter((id): id is string =>
                 typeof id === 'string' && grantedActivities.some((grant) => grant.activityId === id),
@@ -2260,8 +2753,20 @@ function normalizeMap(raw: unknown): BattleMap {
           wallOfFireGeometry,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
+          lightingOnly: area.lightingOnly === true ? true : undefined,
+          lightingOrigin: area.lightingOnly === true && area.lightingOrigin &&
+            [area.lightingOrigin.x, area.lightingOrigin.y, area.lightingOrigin.elevationFeet].every(Number.isFinite)
+            ? { x: area.lightingOrigin.x, y: area.lightingOrigin.y, elevationFeet: area.lightingOrigin.elevationFeet } : undefined,
+          restSessionId: area.restSessionId,
+          concealsFlameLightFromOutside: area.concealsFlameLightFromOutside === true ? true : undefined,
           sourceExitBehavior: area.sourceExitBehavior === 'remove-area' ? 'remove-area' : undefined,
+          sourceAbilityCheckRules: normalizeDnd5eAbilityCheckRules(area.sourceAbilityCheckRules)?.slice(0, 32),
+          sourceSlotSpellHealing: area.sourceSlotSpellHealing ? { amount: Number(area.sourceSlotSpellHealing.amount) } : undefined,
+          creatureDetectionAdvantage: area.creatureDetectionAdvantage === 'source-and-allies' ? 'source-and-allies' : undefined,
+          attackAdvantageReaction: area.attackAdvantageReaction === 'area-source' ? 'area-source' : undefined,
+          sourceIncapacitatedBehavior: area.sourceIncapacitatedBehavior === 'remove-area' ? 'remove-area' : undefined,
           sourceOverlapBehavior: area.sourceOverlapBehavior === 'remove-area' ? 'remove-area' : undefined,
+          sourceLimit: normalizeDnd5ePersistentAreaSourceLimit(area.sourceLimit),
         } satisfies Dnd5ePluginArea]
       })
     : []
@@ -2269,6 +2774,8 @@ function normalizeMap(raw: unknown): BattleMap {
     ...m,
     id: typeof m.id === 'string' && m.id ? m.id : uid(),
     name: typeof m.name === 'string' ? m.name : '未命名地图',
+    dnd5ePlane: normalizeDnd5eMapPlane(m.dnd5ePlane),
+    dnd5eEtherealAdjacent: typeof m.dnd5eEtherealAdjacent === 'boolean' ? m.dnd5eEtherealAdjacent : undefined,
     width: Number.isFinite(m.width) ? (m.width as number) : 0,
     height: Number.isFinite(m.height) ? (m.height as number) : 0,
     gridSize: Number.isFinite(m.gridSize) && (m.gridSize as number) > 0 ? (m.gridSize as number) : 70,
@@ -2276,13 +2783,23 @@ function normalizeMap(raw: unknown): BattleMap {
     gridOffsetY: Number.isFinite(m.gridOffsetY) ? (m.gridOffsetY as number) : 0,
     showGrid: typeof m.showGrid === 'boolean' ? m.showGrid : true,
     dnd5eItemAreas,
-    dnd5ePluginAreas,
+    dnd5ePluginAreas: dnd5ePluginAreas.map(area => area.modeState ? projectDnd5ePersistentAreaMode(area, area.modeState) : area),
+    dnd5eGroveAnnualCasting: normalizeDnd5eGroveAnnualCasting(m.dnd5eGroveAnnualCasting),
+    dnd5eGrovePasswordPrompts: Array.isArray(m.dnd5eGrovePasswordPrompts) ? m.dnd5eGrovePasswordPrompts.slice(0, 1024)
+      .filter(p => p && ['areaId', 'castId', 'pluginId', 'sourceTokenId'].every(key => typeof p[key as keyof typeof p] === 'string' && p[key as keyof typeof p].length > 0 && p[key as keyof typeof p].length <= 256))
+      .map(p => ({ areaId: p.areaId, castId: p.castId, pluginId: p.pluginId, sourceTokenId: p.sourceTokenId })) : undefined,
+    dnd5eDelayedSummons: normalizeDnd5eDelayedSummons(m.dnd5eDelayedSummons),
+    dnd5ePendingMovementCompletions: normalizeDnd5ePendingMovementCompletions(m.dnd5ePendingMovementCompletions),
+    dnd5eObjectFlightDepartures: normalizeDnd5eObjectFlightDepartures(m.dnd5eObjectFlightDepartures),
+    dnd5eActivityTurnClock: normalizeDnd5eActivityTurnClock(m.dnd5eActivityTurnClock),
+    dnd5eGroveDispelTargets: normalizeDnd5eGroveDispelTargets(m.dnd5eGroveDispelTargets),
     viewportNotes: normalizeMapViewportNotes(m.viewportNotes),
     tokens,
   }
 }
 
 interface PersistedMapState {
+  deletedMapIds?: unknown
   maps?: unknown
   selectedId?: unknown
 }
@@ -2292,14 +2809,15 @@ interface PersistedMapState {
  * 单独导出以便 T13 在不挂载组件、不碰 localStorage 的前提下单测。
  * 任何旧 `stars-maps` blob 都应被这里规整为可直接渲染、不崩溃的当前 MapState。
  */
-export function migrateMapsState(persisted: unknown): Pick<MapState, 'maps' | 'selectedId'> {
+export function migrateMapsState(persisted: unknown): Pick<MapState, 'maps' | 'selectedId' | 'deletedMapIds'> {
   const p = (persisted ?? {}) as PersistedMapState
   const maps = Array.isArray(p.maps) ? p.maps.map(normalizeMap) : []
   const selectedId =
     typeof p.selectedId === 'string' && maps.some((m) => m.id === p.selectedId)
       ? (p.selectedId as string)
       : (maps[0]?.id ?? null)
-  return { maps, selectedId }
+  const deletedMapIds = normalizeDeletedMapIds(p.deletedMapIds)
+  return { maps, selectedId, ...(deletedMapIds.length ? { deletedMapIds } : {}) }
 }
 
 /**
@@ -2342,7 +2860,11 @@ function projectTokenEffectiveVision(
     (token.magicalDarknessSightRangeFeet ?? 0) === profile.magicalDarknessSightRangeFeet &&
     (token.blindsightRangeFeet ?? 0) === profile.blindsightRangeFeet &&
     (token.tremorsenseRangeFeet ?? 0) === profile.tremorsenseRangeFeet &&
-    (token.truesightRangeFeet ?? 0) === profile.truesightRangeFeet
+    (token.truesightRangeFeet ?? 0) === profile.truesightRangeFeet &&
+    JSON.stringify(token.dnd5eProjectedCharacterVision) === JSON.stringify(profile.projectedCharacterVision) &&
+    token.dnd5eBaseDarkvisionRangeFeet === profile.tokenBaseDarkvisionRangeFeet
+    && token.dnd5eFormDarkvisionRangeFeet === profile.formDarkvisionRangeFeet
+    && token.dnd5eFormRetainsDarkvision === profile.formRetainsDarkvision
   ) return token
   return applyDnd5eEffectiveVisionProfile(token, profile)
 }
@@ -2351,11 +2873,19 @@ function projectTokenEffectiveVision(
 export function projectCharacterTokenPresentations(
   tokens: Token[],
   characters: readonly CharacterTokenPresentation[],
+  roomTokens: readonly Token[] = tokens,
 ): Token[] {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
   const tokensById = new Map(tokens.map((token) => [token.id, token]))
   let changed = false
   const projected = tokens.map((token) => {
+    if (token.dnd5eSpellEffect?.visionFromSource) {
+      changed = true
+      return projectDnd5eSourceVisionSensor(token, {
+        sourceToken: resolveDnd5eVisionSensorSource(token, roomTokens),
+        character: charactersById.get(token.dnd5eSpellEffect.sourceCharacterId),
+      })
+    }
     if (
       token.dnd5eSpellEffect?.spellId === 'mirror-image' &&
       token.dnd5eSpellEffect.projectionKind === 'attack-decoy'
@@ -2445,7 +2975,24 @@ export function projectCharacterTokenPresentations(
       tokenPortrait,
     }
   })
-  return changed ? projected : tokens
+  const disguised = projected.map(token => {
+    const character = token.characterId ? charactersById.get(token.characterId) : undefined
+    const effects = character ? character.dnd5eCombatState?.activeEffects : token.dnd5eCombatState?.activeEffects
+    const effect = effectiveDnd5eActiveEffects(effects).filter(candidate => candidate.disguisedCreatureIdentity)
+      .sort((a, b) => b.appliedAt - a.appliedAt || a.id.localeCompare(b.id))[0]
+    const identity = effect?.disguisedCreatureIdentity
+    if (!identity) return token
+    const presentation = identity.presentation
+    const overrides = { label: identity.name, emoji: presentation?.emoji ?? token.emoji,
+      portrait: presentation?.tokenPortrait, tokenPortrait: presentation?.tokenPortrait,
+      portraitImageId: presentation?.tokenPortraitImageId, tokenPortraitImageId: presentation?.tokenPortraitImageId }
+    if (Object.entries(overrides).every(([key, value]) => token[key as keyof Token] === value)) return token
+    changed = true
+    // Presentation only: never replace physical size, creature data, ownership,
+    // hit points or the original map/character record with disguise statistics.
+    return { ...token, ...overrides }
+  })
+  return changed ? disguised : tokens
 }
 
 const TOKEN_PRESETS = {
@@ -2455,9 +3002,13 @@ const TOKEN_PRESETS = {
   obstacle: { color: '#94a3b8', emoji: '🪨' },
 }
 
+let localObservationPreference: { sensorId: string; view: 'body' | 'sensor' } | undefined
+
 interface MapState {
+  deletedMapIds?: string[]
   maps: BattleMap[]
   selectedId: string | null
+  viewObservation: (view: 'body' | 'sensor') => void
   loadShared: (options?: { force?: boolean }) => Promise<void>
   saveSharedNow: () => Promise<void>
   saveAuthorityTokenPatch: (
@@ -2490,6 +3041,14 @@ interface MapState {
       emoji: string
       type?: Token['type']
       dnd5eCharacterDarkvisionRangeFeet?: number
+      dnd5eCharacterDarkvisionIfAbsentFeet?: number
+      dnd5eCharacterDarkvisionExistingBonusFeet?: number
+      dnd5eCharacterDarkvisionRacialFallbackFeet?: number
+      dnd5eCharacterDarkvisionRacialBonusFeet?: number
+      dnd5eCharacterRacialDarkvisionRangeFeet?: number
+      dnd5eCharacterInvisibleToDarkvision?: boolean
+      dnd5eFormDarkvisionRangeFeet?: number
+      dnd5eFormRetainsDarkvision?: boolean
     },
   ) => void
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
@@ -2509,11 +3068,13 @@ export const useMapStore = create<MapState>()(
   persist(
     (set, get) => ({
       maps: [],
+      deletedMapIds: [],
       selectedId: null,
       loadShared: async (options) => {
         const shared = await loadSharedResource<SharedMapsState>('maps')
         if (!shared?.maps) {
-          if (canWriteSharedState()) publishMapsState(get())
+          // A null read can mean validation or transport failure, not an empty
+          // room. Never turn a failed read into a destructive replacement.
           return
         }
         // 单调 guard：丢弃 updatedAt 严格更旧的乱序/陈旧快照。
@@ -2521,7 +3082,10 @@ export const useMapStore = create<MapState>()(
         // 现在 DM 与玩家两端都走同一纯 guard（decideApply），相等时落内容 equality 短路。
         const roomKey = sharedMapsRoomKey()
         const incomingRevision = shared._sync?.revision
-        const lastAppliedRevision = lastAppliedMapsRevisionByRoom.get(roomKey)
+        // Atomic combat writes acknowledge revisions outside this store's publisher.
+        // A read started before that commit must not roll its effects back afterward.
+        const lastAppliedRevision = Math.max(lastAppliedMapsRevisionByRoom.get(roomKey) ?? -1,
+          getSharedResourceRevisionWatermark('maps'))
         if (!shouldApplySharedMapsSnapshot({
           incomingRevision,
           lastAppliedRevision,
@@ -2553,13 +3117,12 @@ export const useMapStore = create<MapState>()(
           lastSharedMapsSnapshot = decision.next.lastSnapshot
         }
         const protectedMaps = mergePendingLocalTokenHitPointEdits(shared.maps)
-        set({ maps: protectedMaps, selectedId: shared.selectedId ?? shared.maps[0]?.id ?? null })
+        const selectedId = shared.selectedId ?? shared.maps[0]?.id ?? null
+        if (resolvePlayerMapObservation(protectedMaps)?.id !== localObservationPreference?.sensorId) localObservationPreference = undefined
+        set({ maps: protectedMaps, selectedId: isPlayerPort() ? playerObservationSelectedMap(protectedMaps, selectedId, localObservationPreference) : selectedId,
+          deletedMapIds: normalizeDeletedMapIds(shared.deletedMapIds) })
         // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
-        if (isPlayerPort()) void pruneOrphanImages(shared.maps.flatMap((map) => [
-          map.id,
-          ...map.tokens.flatMap((token) => [token.portraitImageId, token.tokenPortraitImageId]
-            .filter((imageId): imageId is string => !!imageId)),
-        ]))
+        if (isPlayerPort()) void pruneOrphanImages(referencedMapImageIds(shared.maps, useCharacterStore.getState().characters))
       },
       saveSharedNow: () => publishMapsState(get(), { requireSaved: true }),
       saveAuthorityTokenPatch: async (mapId, tokenId, patch) => {
@@ -2600,6 +3163,13 @@ export const useMapStore = create<MapState>()(
         // areas are committed in one Store update so releasing MapCanvas's drag
         // preview cannot expose an older visible anchor.
         get().applyAuthorityMapUpdate(mapId, committedProjection)
+      },
+      viewObservation: (view) => {
+        if (!isPlayerPort()) return
+        const observation = resolvePlayerMapObservation(get().maps)
+        if (!observation) return
+        localObservationPreference = { sensorId: observation.id, view }
+        set({ selectedId: view === 'body' ? observation.bodyMapId : observation.remoteMapId })
       },
       select: (id) => {
         const selectedId = id && get().maps.some((map) => map.id === id) ? id : null
@@ -2649,6 +3219,8 @@ export const useMapStore = create<MapState>()(
           maps: s.maps.map((m) => {
             if (m.id !== id) return m
             const next = { ...m, ...patch }
+            if ('dnd5ePlane' in patch) next.dnd5ePlane = normalizeDnd5eMapPlane(patch.dnd5ePlane)
+            if ('dnd5eEtherealAdjacent' in patch) next.dnd5eEtherealAdjacent = typeof patch.dnd5eEtherealAdjacent === 'boolean' ? patch.dnd5eEtherealAdjacent : undefined
             const gridChanged =
               (patch.gridSize != null && patch.gridSize !== m.gridSize) ||
               (patch.gridOffsetX != null && patch.gridOffsetX !== m.gridOffsetX) ||
@@ -2664,7 +3236,8 @@ export const useMapStore = create<MapState>()(
 
       removeMap: (id) => {
         const removedMap = get().maps.find((map) => map.id === id)
-        void deleteImage(id)
+        if (!removedMap) return
+        const retainedImages = referencedMapImageIds(get().maps.filter(map => map.id !== id), useCharacterStore.getState().characters)
         const removedImageIds = new Set(removedMap?.tokens.flatMap((token) => [
           token.portraitImageId,
           token.tokenPortraitImageId,
@@ -2672,12 +3245,14 @@ export const useMapStore = create<MapState>()(
         for (const imageId of removedMap?.viewportNotes?.flatMap((note) => note.imageId ? [note.imageId] : []) ?? []) {
           removedImageIds.add(imageId)
         }
+        removedImageIds.add(id)
         for (const imageId of removedImageIds) {
-          void deleteImage(imageId)
+          if (!retainedImages.has(imageId)) void deleteImage(imageId)
         }
         set((s) => {
           const maps = s.maps.filter((m) => m.id !== id)
-          return { maps, selectedId: s.selectedId === id ? (maps[0]?.id ?? null) : s.selectedId }
+          return { maps, selectedId: s.selectedId === id ? (maps[0]?.id ?? null) : s.selectedId,
+            deletedMapIds: normalizeDeletedMapIds([...(s.deletedMapIds ?? []), id]) }
         })
         publishMapsState(get())
       },
@@ -2794,7 +3369,7 @@ export const useMapStore = create<MapState>()(
       },
       addCharacterToken: (
         mapId,
-        { characterId, name, emoji, type = 'player', dnd5eCharacterDarkvisionRangeFeet },
+        { characterId, name, emoji, type = 'player', dnd5eCharacterDarkvisionRangeFeet, dnd5eCharacterDarkvisionIfAbsentFeet, dnd5eCharacterDarkvisionExistingBonusFeet, dnd5eCharacterDarkvisionRacialFallbackFeet, dnd5eCharacterDarkvisionRacialBonusFeet, dnd5eCharacterRacialDarkvisionRangeFeet, dnd5eCharacterInvisibleToDarkvision, dnd5eFormDarkvisionRangeFeet, dnd5eFormRetainsDarkvision },
       ) => {
         const map = get().maps.find((m) => m.id === mapId)
         if (!map) return
@@ -2818,6 +3393,14 @@ export const useMapStore = create<MapState>()(
           type,
           characterId,
           dnd5eCharacterDarkvisionRangeFeet,
+          dnd5eCharacterDarkvisionIfAbsentFeet,
+          dnd5eCharacterDarkvisionExistingBonusFeet,
+          dnd5eCharacterDarkvisionRacialFallbackFeet,
+          dnd5eCharacterDarkvisionRacialBonusFeet,
+          dnd5eCharacterRacialDarkvisionRangeFeet,
+          dnd5eCharacterInvisibleToDarkvision,
+          dnd5eFormDarkvisionRangeFeet,
+          dnd5eFormRetainsDarkvision,
         }
         set((s) => ({
           maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
@@ -2881,6 +3464,10 @@ export const useMapStore = create<MapState>()(
       },
 
       removeToken: (mapId, tokenId) => {
+        const currentMap = get().maps.find((map) => map.id === mapId)
+        if (!currentMap) return
+        const nextMap = removeDnd5eMapTokenPreservingPossessions(currentMap, tokenId)
+        const retainedImages = referencedMapImageIds(get().maps.map(map => map.id === mapId ? nextMap : map), useCharacterStore.getState().characters)
         const removedToken = get().maps
           .find((map) => map.id === mapId)
           ?.tokens.find((token) => token.id === tokenId)
@@ -2888,11 +3475,11 @@ export const useMapStore = create<MapState>()(
           removedToken?.portraitImageId,
           removedToken?.tokenPortraitImageId,
         ].filter((candidate): candidate is string => !!candidate))) {
-          void deleteImage(imageId)
+          if (!retainedImages.has(imageId)) void deleteImage(imageId)
         }
         set((s) => ({
           maps: s.maps.map((m) =>
-            m.id === mapId ? { ...m, tokens: m.tokens.filter((t) => t.id !== tokenId) } : m,
+            m.id === mapId ? nextMap : m,
           ),
         }))
         publishMapsState(get())
@@ -2904,12 +3491,12 @@ export const useMapStore = create<MapState>()(
           if (!currentMap || !currentToken) return false
           const boundedPosition = clampTokenPositionToMap(position, currentToken, currentMap)
           set((state) => ({
-            maps: state.maps.map((map) => map.id === fromMapId ? {
+            maps: state.maps.map((map) => map.id === fromMapId ? reconcilePersistentAreasAnchoredToToken({
               ...map,
               tokens: map.tokens.map((token) => token.id === tokenId
                 ? { ...token, ...boundedPosition, movementAnimation: undefined }
                 : token),
-            } : map),
+            }, tokenId) : map),
           }))
           publishMapsState(get())
           return true
@@ -2921,11 +3508,11 @@ export const useMapStore = create<MapState>()(
         const boundedPosition = clampTokenPositionToMap(position, token, targetMap)
         const moved = { ...token, ...boundedPosition, movementAnimation: undefined }
         set((state) => ({
-          maps: state.maps.map((map) => map.id === fromMapId
+          maps: transferDnd5eFollowingSensors(state.maps.map((map) => map.id === fromMapId
             ? { ...map, tokens: map.tokens.filter((candidate) => candidate.id !== tokenId) }
             : map.id === toMapId
               ? { ...map, tokens: [...map.tokens, moved] }
-              : map),
+              : map), fromMapId, toMapId, moved),
           selectedId: toMapId,
         }))
         publishMapsState(get())
@@ -2940,3 +3527,5 @@ export const useMapStore = create<MapState>()(
     },
   ),
 )
+
+

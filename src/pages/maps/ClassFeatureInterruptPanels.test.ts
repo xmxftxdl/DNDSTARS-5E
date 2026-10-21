@@ -31,6 +31,27 @@ function render(overrides: Partial<Props> = {}) {
 }
 
 describe('职业与插件中断面板', () => {
+  it('renders multi-select options as checkboxes and leaves cancellation usable when a required selection is empty',()=>{
+    const html=render({pluginChoicePrompt:{id:'temple-access',payload:{pluginId:'plugin',featureId:'temple',featureName:'神庙术',prompt:'入口授权',audience:'actor',
+      options:[{id:'apply',label:'确认'},{id:'cancel',label:'取消'}],defaultOptionId:'cancel',
+      fields:[{id:'delegates',label:'获准开门的生物',kind:'multi-select',required:true,options:[{id:'hero',label:'Hero'},{id:'monster',label:'Monster'}]}]}}})
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2)
+    expect(html).toContain('role="group" aria-label="获准开门的生物"')
+    expect(html).toMatch(/data-testid="shared-plugin-choice-apply" disabled=""/)
+    expect(html).not.toMatch(/data-testid="shared-plugin-choice-cancel" disabled/)
+  })
+  it('renders required appearance input, disables submit until valid, and leaves cancellation enabled', () => {
+    const html = render({ pluginChoicePrompt: { id: 'appearance', payload: {
+      pluginId: 'plugin', featureId: 'flame', featureName: '控火', prompt: '影像', audience: 'actor',
+      options: [{ id: 'apply', label: '继续' }, { id: 'cancel', label: '取消' }], defaultOptionId: 'cancel',
+      fields: [{ id: 'shape', label: '影像描述', kind: 'text', required: true },
+        { id: 'color', label: '火焰颜色', kind: 'color', defaultValue: '#ffaa00' }],
+    } } })
+    expect(html).toContain('aria-label="影像描述"')
+    expect(html).toContain('type="color"')
+    expect(html).toMatch(/data-testid="shared-plugin-choice-apply" disabled=""/)
+    expect(html).not.toMatch(/data-testid="shared-plugin-choice-cancel" disabled/)
+  })
   it('没有待处理中断时不渲染对话框', () => {
     expect(render()).toBe('')
   })

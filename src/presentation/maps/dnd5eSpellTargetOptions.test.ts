@@ -12,6 +12,30 @@ const obstacle = { id: 'door', type: 'obstacle', label: 'Door' } as Token
 const tokens = [actor, ally, enemy, obstacle]
 
 describe('dnd5eMapSpellTargetOptions', () => {
+  it('offers only qualified reachable objects for animation, including the caster’s own carried object', () => {
+    const caster: Token = { ...actor, x: 25, y: 25, size: 1 }
+    const object: Token = { ...obstacle, x: 75, y: 25, size: 1,
+      dnd5eObjectState: { schemaVersion: 1, magical: false, wornOrCarried: false, attached: false,
+        animateObjects: { size: 'tiny', mobility: 'walk', damageType: 'bludgeoning' } } }
+    const map: BattleMap = { id: 'objects', name: 'Objects', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true, tokens: [] }
+    const qualified = { ...object, id: 'held', dnd5eObjectState: { ...object.dnd5eObjectState!, wornOrCarried: true, carrierTokenId: caster.id } }
+    const invalid: Token[] = [
+      { ...object, id: 'magical', dnd5eObjectState: { ...object.dnd5eObjectState!, magical: true } },
+      { ...object, id: 'attached', dnd5eObjectState: { ...object.dnd5eObjectState!, attached: true } },
+      { ...qualified, id: 'foreign', dnd5eObjectState: { ...qualified.dnd5eObjectState, carrierTokenId: 'another' } },
+      { ...object, id: 'high', elevationFeet: 100 },
+      { ...object, id: 'far', x: 425 },
+      { ...object, id: 'blocked' },
+      { ...object, id: 'unknown', dnd5eObjectState: undefined },
+    ]
+    const input = { tokens: [caster, object, qualified, ...invalid], actorToken: caster, map,
+      contract: { kind: 'object-animation' as const, sizes: ['tiny' as const], rangeFeet: 5 },
+      hasLineOfEffect: (_actor: Token, target: Token) => target.id !== 'blocked' }
+    expect(dnd5eMapSpellTargetOptions(input).map(token => token.id)).toEqual(['door', 'held'])
+    expect(dnd5eMapSpellTargetOptions({ ...input, actorToken: undefined })).toEqual([])
+    expect(dnd5eMapSpellTargetOptions({ ...input, contract: { ...input.contract, sizes: [] } })).toEqual([])
+  })
   it('only offers opposed creatures for an enemy-only spell such as Bane', () => {
     expect(dnd5eMapSpellTargetOptions({
       tokens,

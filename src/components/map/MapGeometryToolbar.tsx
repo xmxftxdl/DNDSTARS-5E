@@ -1,3 +1,8 @@
+import {ControlledWaterFields} from './ControlledWaterFields'
+import { isFlameLight, isFlameProtected } from '../../../shared/flame-light-concealment.mjs'
+import { MapGeometryDurabilityFields } from './MapGeometryDurabilityFields'
+import { MapMagicDetectionBarrierFields } from './MapMagicDetectionBarrierFields'
+import { ControlledFlameFields, controlledFlameBaseLightPatch } from './ControlledFlameFields'
 import { useRef, useState } from 'react'
 import {
   BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, Lightbulb, LockKeyhole,
@@ -81,6 +86,7 @@ const TOOL_LABELS: Record<MapGeometryTool, string> = {
 
 const WALL_MATERIAL_LABELS: Record<MapGeometryWallMaterial, string> = {
   stone: '石墙',
+  earth: '泥土实体',
   brick: '砖墙',
   wood: '木墙',
   metal: '金属墙',
@@ -713,6 +719,10 @@ export default function MapGeometryToolbar({
             value={selectedEntity.heightFeet}
             onChange={(heightFeet) => updateEntity(mapId, selectedEntity.id, { heightFeet })}
           />}
+          {selectedEntity.kind !== 'light' && !selectedTerrainRegion && <MapGeometryDurabilityFields
+            entity={selectedEntity} onChange={patch => updateEntity(mapId, selectedEntity.id, patch)} />}
+          {selectedEntity.kind !== 'light' && !selectedTerrainRegion && <MapMagicDetectionBarrierFields
+            entity={selectedEntity} onChange={patch => updateEntity(mapId, selectedEntity.id, patch)} />}
           {selectedEntity.kind === 'wall' && (
             <select
               value={selectedEntity.material ?? 'stone'}
@@ -944,6 +954,47 @@ export default function MapGeometryToolbar({
               </span>
             </>
           )}
+          {selectedEntity.kind === 'obstacle' && selectedTerrainRegion && <label className="flex items-center gap-2 text-xs">
+            局部天空
+            <select aria-label="局部天空" value={selectedEntity.skyExposure ?? ''}
+              disabled={selectedTerrainRegionLocked}
+              onChange={event=>updateEntity(mapId,selectedEntity.id,{skyExposure:event.target.value===''?undefined:event.target.value as 'open'|'covered'})}>
+              <option value="">沿用地图环境</option><option value="open">露天</option><option value="covered">封闭上空</option>
+            </select>
+          </label>}
+          {selectedEntity.kind === 'obstacle' && activeMap && <ControlledWaterFields body={selectedEntity}
+            feetPerPixel={(activeMap.feetPerCell??5)/activeMap.gridSize} onChange={patch=>updateEntity(mapId,selectedEntity.id,patch)} />}
+          {selectedEntity.kind === 'obstacle' && (
+                <select
+                  aria-label="地表材质"
+                  value={selectedEntity.surfaceMaterial ?? ''}
+                  onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                    surfaceMaterial: (event.target.value || undefined) as import('../../lib/mapGeometry').MapGeometrySurfaceMaterial | undefined,
+                  })}
+                  className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                  title="标记地表材质，供法术判断扬尘或地形变化；未标注时不自动推断。"
+                >
+                  <option value="">地表未标注</option>
+                  <option value="solid">坚实地面</option>
+                  <option value="sand">沙地</option>
+                  <option value="dust">尘土地面</option>
+                  <option value="loose-earth">松土</option>
+                  <option value="gravel">细碎砂砾</option>
+                  <option value="ice">冰面</option>
+                  <option value="snow">积雪</option>
+                  <option value="earth">泥土地面</option>
+                  <option value="mud">泥浆</option>
+                  <option value="quicksand">流沙</option>
+                  <option value="stone">石质地面</option>
+                </select>
+          )}
+          {selectedEntity.kind === 'obstacle' && selectedEntity.surfaceMaterial && (
+            <select aria-label="材质魔法性质" value={selectedEntity.materialMagic ?? ''}
+              onChange={event=>updateEntity(mapId,selectedEntity.id,{materialMagic:(event.target.value||undefined) as 'nonmagical'|'magical'|undefined})}
+              className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200">
+              <option value="">魔法性质未确认</option><option value="nonmagical">非魔法材质</option><option value="magical">魔法材质</option>
+            </select>
+          )}
           {selectedEntity.kind === 'obstacle' && (
             selectedTerrainRegion ? (
               <>
@@ -973,6 +1024,7 @@ export default function MapGeometryToolbar({
                   <option value="three-quarters">四分之三 +5 AC</option>
                   <option value="total">全身掩护</option>
                 </select>
+
                 <NumberField
                   label="地形倍率"
                   help="进入并经过区域时的移动消耗倍率。1 为正常，2 为困难地形，3 表示每走 1 尺消耗 3 尺移动力。"
@@ -1035,12 +1087,16 @@ export default function MapGeometryToolbar({
           )}
           {selectedEntity.kind === 'light' && (
             <>
+              <ControlledFlameFields light={selectedEntity} onChange={patch => updateEntity(mapId,selectedEntity.id,patch)} />
+              <label className="text-[10px] text-slate-300"><input type="checkbox" checked={isFlameLight(selectedEntity)} onChange={event => updateEntity(mapId, selectedEntity.id, { flame: event.target.checked })} /> 明火光源</label>
+              {isFlameLight(selectedEntity) && <label className="text-[10px] text-slate-300"><input type="checkbox" checked={isFlameProtected(selectedEntity)} onChange={event => updateEntity(mapId, selectedEntity.id, { flameProtected: event.target.checked })} /> 受保护火焰（强风有一半概率熄灭）</label>}
+              {isFlameLight(selectedEntity) && <label className="text-[10px] text-slate-300">火焰大小 <select aria-label="场景火焰大小" value={selectedEntity.flameSize ?? ''} onChange={event => updateEntity(mapId, selectedEntity.id, { flameSize: event.target.value === 'torch-or-smaller' ? 'torch-or-smaller' : event.target.value === 'larger' ? 'larger' : undefined })}><option value="">按光源类型</option><option value="torch-or-smaller">不大于火炬</option><option value="larger">大于火炬</option></select></label>}
               <select
                 value={CAMPAIGN_LIGHT_PRESETS.some((preset) => preset.id === selectedEntity.sourceKind) ? selectedEntity.sourceKind : 'permanent'}
                 onChange={(event) => updateEntity(
                   mapId,
                   selectedEntity.id,
-                  campaignLightPresetPatch(event.target.value as CampaignLightPreset['id'], worldMinute),
+                  controlledFlameBaseLightPatch(selectedEntity,campaignLightPresetPatch(event.target.value as CampaignLightPreset['id'], worldMinute)),
                 )}
                 className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
                 title="选择光源与燃烧时长"
@@ -1054,15 +1110,15 @@ export default function MapGeometryToolbar({
                   onChange={(event) => {
                     const preset = CAMPAIGN_LIGHT_PRESETS.find((entry) => entry.id === selectedEntity.sourceKind)
                     updateEntity(mapId, selectedEntity.id,
-                      event.target.checked && preset?.durationMinutes && campaignLightRemainingMinutes(selectedEntity, worldMinute) === 0
+                      controlledFlameBaseLightPatch(selectedEntity,event.target.checked && preset?.durationMinutes && campaignLightRemainingMinutes(selectedEntity, worldMinute) === 0
                         ? campaignLightPresetPatch(preset.id, worldMinute)
-                        : { enabled: event.target.checked })
+                        : { enabled: event.target.checked }))
                   }}
                 />
                 开启
               </label>
-              <NumberField label="明亮" min={0} value={selectedEntity.brightRadiusFeet} onChange={(brightRadiusFeet) => updateEntity(mapId, selectedEntity.id, { brightRadiusFeet })} />
-              <NumberField label="微光" min={0} value={selectedEntity.dimRadiusFeet} onChange={(dimRadiusFeet) => updateEntity(mapId, selectedEntity.id, { dimRadiusFeet })} />
+              <NumberField label="明亮" min={0} value={selectedEntity.brightRadiusFeet} onChange={(brightRadiusFeet) => updateEntity(mapId, selectedEntity.id, controlledFlameBaseLightPatch(selectedEntity,{ brightRadiusFeet }))} />
+              <NumberField label="微光" min={0} value={selectedEntity.dimRadiusFeet} onChange={(dimRadiusFeet) => updateEntity(mapId, selectedEntity.id, controlledFlameBaseLightPatch(selectedEntity,{ dimRadiusFeet }))} />
               <NumberField
                 label="离地"
                 min={0}
@@ -1078,7 +1134,7 @@ export default function MapGeometryToolbar({
               <input
                 type="color"
                 value={selectedEntity.color}
-                onChange={(event) => updateEntity(mapId, selectedEntity.id, { color: event.target.value })}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, controlledFlameBaseLightPatch(selectedEntity,{ color: event.target.value }))}
                 className="h-5 w-6 rounded border border-white/10 bg-transparent"
                 title="场景光源颜色"
               />
@@ -1203,6 +1259,9 @@ export default function MapGeometryToolbar({
           </label>
           {selectedToken.lightSource?.enabled && (
             <>
+              <label className="text-[10px] text-slate-300"><input type="checkbox" checked={isFlameLight(selectedToken.lightSource)} onChange={event => updateToken(mapId, selectedToken.id, { lightSource: { ...selectedToken.lightSource!, flame: event.target.checked } })} /> 明火光源</label>
+              {isFlameLight(selectedToken.lightSource) && <label className="text-[10px] text-slate-300"><input type="checkbox" checked={isFlameProtected(selectedToken.lightSource)} onChange={event => updateToken(mapId, selectedToken.id, { lightSource: { ...selectedToken.lightSource!, flameProtected: event.target.checked } })} /> 受保护火焰（强风有一半概率熄灭）</label>}
+              {isFlameLight(selectedToken.lightSource) && <label className="text-[10px] text-slate-300">火焰大小 <select aria-label="携带火焰大小" value={selectedToken.lightSource?.flameSize ?? ''} onChange={event => updateToken(mapId, selectedToken.id, { lightSource: { ...selectedToken.lightSource!, flameSize: event.target.value === 'torch-or-smaller' ? 'torch-or-smaller' : event.target.value === 'larger' ? 'larger' : undefined } })}><option value="">按光源类型</option><option value="torch-or-smaller">不大于火炬</option><option value="larger">大于火炬</option></select></label>}
               <select
                 value={CAMPAIGN_LIGHT_PRESETS.some((preset) => preset.id === selectedToken.lightSource?.sourceKind) ? selectedToken.lightSource.sourceKind : 'permanent'}
                 onChange={(event) => updateToken(mapId, selectedToken.id, {

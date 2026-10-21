@@ -22,7 +22,7 @@ function fixture(spellId: string, classId: 'wizard' | 'cleric' = 'wizard') {
   const action: SharedPlayerActionState = { id: 'request', type: 'dnd5e-spell-cast', mapId: 'map', combatId: 'gate-test',
     sourceMode: 'player', status: 'pending', actorTokenId: actor.id, characterId: 'character', round: 1,
     initiativeIndex: 0, seq: 1, updatedAt: 1, dnd5eSpellCast: { spellId, slotLevel: 1, targetTokenId: target.id } }
-  const check = (d20: number): Dnd5eAction => ({ type: 'check-slow-spell', actorId: actor.id,
+  const check = (d20: number): Extract<Dnd5eAction, { type: 'check-slow-spell' }> => ({ type: 'check-slow-spell', actorId: actor.id,
     requestId: action.id, spellId, spellName: spellId, slotLevel: 1, d20, intent: { kind: 'player', action } })
   return { state, check }
 }
@@ -92,4 +92,34 @@ describe('Slow gate across spell execution routes', () => {
       expect(cast.ok, cast.ok ? undefined : cast.reason).toBe(true)
     }
   })
+})
+
+it.each(['core', 'adjudicated', 'activity'] as const)('persists one casting save through the shared Slow gate: %s', route => {
+  for (const d20 of [1, 20]) {
+    const spellId = route === 'core' ? 'magic-missile' : route === 'adjudicated' ? 'custom-spell' : 'command'
+    const { state, check } = fixture(spellId, route === 'activity' ? 'cleric' : 'wizard')
+    const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: 'caster',
+      source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+    state.combatants.caster.classState.activeEffects!.push(pain)
+    const checked = resolveDnd5eHeadlessAction(state, { ...check(20), spellcastingSavingThrows: [{ effectId: pain.id, d20 }] })
+    expect(checked.ok, checked.ok ? '' : checked.reason).toBe(true)
+    if (!checked.ok) continue
+    expect(checked.events.filter(e => e.type === 'saving-throw-resolved')).toHaveLength(1)
+    expect(checked.state.combatants.caster.classState.slowSpellGate?.delayed).toBe(d20 === 20)
+    const resumed = JSON.parse(JSON.stringify(checked.state)) as typeof state
+    if (d20 === 20) {
+      resumed.round += 1
+      resumed.combatants.caster.turn.actionAvailable = true
+      resumed.combatants.caster.turn.bonusActionAvailable = true
+    }
+    const command = route === 'core' ? core : route === 'adjudicated' ? adjudicated : activity()
+    const result = resolveDnd5eHeadlessAction(resumed, command)
+    expect(result.ok, result.ok ? '' : result.reason).toBe(true)
+    if (!result.ok) continue
+    expect(result.events.filter(e => e.type === 'saving-throw-resolved' && e.targetId === 'caster')).toHaveLength(0)
+    expect(result.events.some(e => e.type === 'spellcasting-prevented')).toBe(d20 === 1)
+    expect(result.state.combatants.caster.classResources['dnd5e-spell-slot-1'].current).toBe(1)
+    expect(result.state.combatants.caster.classState.slowSpellGate).toBeUndefined()
+    if (d20 === 1) expect(result.state.combatants.target).toEqual(resumed.combatants.target)
+  }
 })

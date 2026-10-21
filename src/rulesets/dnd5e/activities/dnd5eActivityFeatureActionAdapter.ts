@@ -1,4 +1,6 @@
+import { dnd5eRestSpellSensorActivity } from './dnd5eRestSpellSensor'
 import type { Dnd5ePluginFeatureAction } from '../pluginApi'
+import { dnd5eActivityHasInventoryExchangeRitualProfile } from './dnd5eInventoryExchangeProfile'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import {
   dnd5eActivityHeadlessCompatibility,
@@ -15,7 +17,7 @@ export function dnd5ePluginFeatureActionFromActivityV1(
   activity: Dnd5eActivityDefinitionV1,
 ): Dnd5ePluginFeatureAction | undefined {
   if ((activity.consumption ?? []).some((consumption) =>
-    !['action-economy', 'resource', 'spell-slot', 'movement'].includes(consumption.kind))) {
+    !['action-economy', 'resource', 'spell-slot', 'movement', 'hit-die'].includes(consumption.kind))) {
     return undefined
   }
   if (!dnd5eActivityHeadlessCompatibility(activity, {
@@ -32,8 +34,16 @@ export function dnd5ePluginFeatureActionFromActivityV1(
           ? 'none' as const
           : activity.activation.kind === 'movement'
             ? 'none' as const
+          : dnd5eRestSpellSensorActivity(activity)
+            ? 'none' as const
+          : dnd5eActivityHasInventoryExchangeRitualProfile(activity)
+            ? 'none' as const
           : undefined
   if (!economy) return undefined
+  // The legacy targeting shell cannot express remote origins or ranges above
+  // 10,000 ft. Leave its coarse filter unset; the Activity still enforces its
+  // exact authoritative distance before any effect is committed.
+  const legacyRange=activity.target.kind==='creature' && !activity.target.effectOrigin && (activity.target.rangeFeet??0)<=10000 ? activity.target.rangeFeet : undefined
 
   const targeting = activity.target.kind === 'self'
     ? { kind: 'self' as const }
@@ -41,14 +51,15 @@ export function dnd5ePluginFeatureActionFromActivityV1(
       ? activity.target.count === 1
         ? {
             kind: 'single-creature' as const,
+            allowObjectAttack: activity.target.allowObjectAttack,
             relation: activity.target.relation,
-            rangeFeet: activity.target.rangeFeet,
+            rangeFeet: legacyRange,
             includeSelf: activity.target.includeSelf,
           }
         : {
             kind: 'multiple-creatures' as const,
             relation: activity.target.relation,
-            rangeFeet: activity.target.rangeFeet,
+            rangeFeet: legacyRange,
             maximumTargets: activity.target.count,
             includeSelf: activity.target.includeSelf,
           }

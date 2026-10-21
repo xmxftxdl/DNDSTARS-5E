@@ -239,6 +239,21 @@ describe('DM custom rules plugin builder', () => {
     expect(validateDnd5eCustomRulesPluginDraft(value)).toContain(
       '专长 幸运抉择 的选择重掷必须消耗该专长声明的资源。',
     )
+    // Explicitly free declarations are valid; dangling paid costs above remain invalid.
+    value.feats[0].declarativeAbility!.cost = { economy: 'none' }
+    value.feats[0].declarativeAbility!.mechanic = { kind: 'd20-choice-reroll', rollKinds: ['attack'], scopes: ['self-roll'],
+      additionalDice: 1, selection: 'highest', requiresAdvantage: true, attackAbilities: ['dex', 'int', 'wis', 'cha'] }
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
+    const parsed = parseDnd5eDeclarativeRulesPackageV1(
+      new TextEncoder().encode(buildDnd5eCustomRulesPluginPackageV1(value)).buffer as ArrayBuffer,
+    )
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromDeclarativePackageV1(parsed!))
+    try {
+      const installed = dnd5ePluginFeatDefinition(`${value.manifest.id}:lucky-choice`)
+      expect(installed?.declarativeAbility?.cost).toEqual({ economy: 'none' })
+      expect(installed?.resources ?? []).toEqual([])
+      expect(installed?.declarativeAbility?.mechanic).toEqual(value.feats[0].declarativeAbility!.mechanic)
+    } finally { dispose() }
   })
 
   it('serializes background, feature, spell and item forms into one installable package', () => {

@@ -1,3 +1,4 @@
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import {
@@ -49,6 +50,8 @@ describe('D&D 5e plugin Worker capability application', () => {
     })
     try {
       const actor = combatant('actor', 20, 'player', [featureId])
+      actor.pluginFeatureIds = []
+      actor.classState.activeEffects = ['selected', 'other'].map(id => createDnd5eMechanicalEffect({ id, definitionId: 'worker-receipt', label: 'Receipt', targetId: actor.id, source: { kind: 'feature', actorId: actor.id, pluginId }, grantedActivities: ['trip'], grantedActivitiesSingleUse: true, grantedActivityTargetIds: ['flyer'] }))
       const flyer = combatant('flyer', 10, 'dm')
       flyer.position = { x: 5, y: 0 }
       flyer.elevationFeet = 30
@@ -64,6 +67,7 @@ describe('D&D 5e plugin Worker capability application', () => {
         actorId: actor.id,
         targetId: flyer.id,
         distanceFeet: 5,
+        hostEntitlement: { kind: 'active-effect' as const, effectId: 'selected' },
       }
       const operations = [{
         kind: 'apply-standard-condition' as const,
@@ -105,6 +109,8 @@ describe('D&D 5e plugin Worker capability application', () => {
       })
       expect(settled.state.combatants.flyer.conditions).toContain('prone')
       expect(settled.state.combatants.actor.turn.actionAvailable).toBe(false)
+      expect(state.combatants.actor.classState.activeEffects?.map(effect => effect.id)).toEqual(['selected', 'other'])
+      expect(settled.state.combatants.actor.classState.activeEffects?.map(effect => effect.id)).toEqual(['other'])
     } finally {
       dispose()
     }

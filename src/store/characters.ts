@@ -1,6 +1,14 @@
+import { normalizeSubmergedBreathingEffectDeadlines } from '../../shared/submerged-breathing-state.mjs'
+import { reconcileDnd5eInventoryExchangeRitualActor } from '../rulesets/dnd5e/inventoryExchangeRitualState'
+import { normalizeDnd5eSourcedExhaustion, dnd5eSourcedExhaustionLevel } from '../rulesets/dnd5e/sourcedExhaustion'
+import { normalizeDnd5eSubmergedBreathing } from '../rulesets/dnd5e/submergedBreathing'
 import { create } from 'zustand'
+import { normalizeDnd5eRecordedAlignment } from '../rulesets/dnd5e/alignmentRestoration'
+import { normalizeDnd5eRestActivityWindow } from '../rulesets/dnd5e/restActivityWindows'
+import { normalizeDnd5eAwakeningEvents } from '../rulesets/dnd5e/awakeningEvents'
+import { normalizeDnd5eDreamContact, dnd5eDreamContactRosterKey } from '../rulesets/dnd5e/dreamContact'
 import { persist } from 'zustand/middleware'
-import { loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
+import { getSharedResourceRevisionWatermark, loadSharedResource, saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 import { isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { getAccountSession } from '../lib/accountSession'
@@ -35,9 +43,12 @@ import {
   applyDnd5eLongRestBenefits,
   applyDnd5eShortRestBenefits,
   reconcileDnd5eCharacterCampaignTime,
+  reconcileDnd5eSourceEffectLifecycles,
+  reconcileDnd5eCampaignRosterSourceEffects,
 } from '../rulesets/dnd5e/campaignTimeRules'
 import { canBenefitFromLongRest } from '../lib/campaignTime'
 import { useCampaignTimeStore } from './campaignTime'
+import {normalizeDnd5eRestStartActivityWindow} from '../rulesets/dnd5e/restStartActivityWindows'
 
 import type { Character, Dnd5eLevelAdvancementRecordV1 } from '../types/character'
 import type { LegacyCharacterSave } from '../types/legacyCharacter'
@@ -97,7 +108,11 @@ type PendingAuthorityCharacterPatch = {
 const pendingAuthorityCharacterPatches = new Map<string, PendingAuthorityCharacterPatch>()
 
 function characterFieldSnapshot(value: unknown): string | undefined {
-  return JSON.stringify(value)
+  // Object key order is not a state change. Validator projections can reorder
+  // effect/source fields; treating that echo as unacknowledged keeps replaying
+  // an old protected snapshot over subsequent legitimate effect changes.
+  return JSON.stringify(value, (_key, entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry)
 }
 
 function gcPendingAuthorityCharacterPatches(now: number = Date.now()): void {
@@ -948,7 +963,9 @@ function pendingAdvancementAcknowledged(
       JSON.stringify(character.dnd5eClassLevels ?? {}) === JSON.stringify(after.dnd5eClassLevels ?? {}) &&
       JSON.stringify(character.abilities) === JSON.stringify(after.abilities) &&
       JSON.stringify([...(character.skills ?? [])].sort()) === JSON.stringify([...(after.skills ?? [])].sort()) &&
+      (after.savingThrows == null || JSON.stringify([...character.savingThrows].sort()) === JSON.stringify([...after.savingThrows].sort())) &&
       JSON.stringify(character.dnd5eClassChoices ?? {}) === JSON.stringify(after.dnd5eClassChoices ?? {}) &&
+      JSON.stringify(character.dnd5eContentChoices ?? {}) === JSON.stringify(after.dnd5eContentChoices ?? {}) &&
       JSON.stringify([...(character.dnd5eFeatIds ?? [])].sort()) === JSON.stringify([...(after.dnd5eFeatIds ?? [])].sort()) &&
       character.hitPointMaximumMode === after.hitPointMaximumMode &&
       JSON.stringify(character.hitPointRolls ?? []) === JSON.stringify(after.hitPointRolls ?? []) &&
@@ -967,6 +984,7 @@ function advancementProjectionSnapshot(character: Character | undefined): string
     abilities: character.abilities,
     skills: [...(character.skills ?? [])].sort(),
     classChoices: character.dnd5eClassChoices ?? {},
+    contentChoices: character.dnd5eContentChoices ?? {},
     featIds: [...(character.dnd5eFeatIds ?? [])].sort(),
     hitPointMaximumMode: character.hitPointMaximumMode,
     hitPointRolls: character.hitPointRolls ?? [],
@@ -1088,8 +1106,10 @@ export function mergePendingLocalAdvancements(
         dnd5eClassLevels: after.dnd5eClassLevels ? { ...after.dnd5eClassLevels } : undefined,
         abilities: { ...after.abilities },
         skills: [...after.skills],
+        ...(after.savingThrows ? { savingThrows: [...after.savingThrows] } : {}),
         dnd5eClassChoices: after.dnd5eClassChoices ? structuredClone(after.dnd5eClassChoices) : undefined,
         dnd5eFeatIds: after.dnd5eFeatIds ? [...after.dnd5eFeatIds] : undefined,
+        dnd5eContentChoices: after.dnd5eContentChoices ? structuredClone(after.dnd5eContentChoices) : undefined,
         hitPointMaximumMode: after.hitPointMaximumMode,
         hitPointRolls: after.hitPointRolls ? [...after.hitPointRolls] : undefined,
         hitPointDice: after.hitPointDice ? after.hitPointDice.map((pool) => ({ ...pool })) : undefined,
@@ -1302,6 +1322,8 @@ export function mergePlayerWritableCharacter(local: Character, shared: Character
         }
       : undefined,
     equipment: shared.equipment ? { ...shared.equipment } : undefined,
+    dnd5eExposedSurfaces: shared.dnd5eExposedSurfaces?.map(surface => ({ ...surface })),
+    dnd5eExposedEnchantmentItems: shared.dnd5eExposedEnchantmentItems?.map(item => ({ ...item })),
     dnd5eInventory: shared.dnd5eInventory
       ? {
           ...shared.dnd5eInventory,
@@ -1443,12 +1465,31 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     skills: c.skills ?? [],
     conditions: c.conditions ?? [],
     backstory: typeof c.backstory === 'string' ? c.backstory : '',
+    dnd5eOriginalAlignment: normalizeDnd5eRecordedAlignment(c.dnd5eOriginalAlignment),
     experience: c.experience ?? 0,
     dnd5eExperienceAwards: experienceAwards,
+    dnd5eRestActivityWindow: normalizeDnd5eRestActivityWindow(c.dnd5eRestActivityWindow, c.id ?? ''),
+    dnd5eAwakeningEvents: normalizeDnd5eAwakeningEvents(c.dnd5eAwakeningEvents, c.id ?? ''),
+    dnd5eDreamContact: normalizeDnd5eDreamContact(c.dnd5eDreamContact, c.id ?? ''),
+    // Do not turn a corrupt receipt into an absent ledger: that would reopen
+    // a derived start window. The authority gate rejects preserved corruption.
+    dnd5eRestStartActivityWindow: normalizeDnd5eRestStartActivityWindow(c.dnd5eRestStartActivityWindow,c.id??'') ?? c.dnd5eRestStartActivityWindow,
     reputation: c.reputation ?? 0,
     classResources: c.classResources,
     equipment: c.equipment ?? defaultEquipmentForDnd5eCharacter({ charClass: c.charClass ?? '战士' }),
   } as Character
+  if (normalized.dnd5eCombatState?.sourcedExhaustion != null) {
+    const sourcedExhaustion = normalizeDnd5eSourcedExhaustion(normalized.dnd5eCombatState.sourcedExhaustion)
+    normalized.dnd5eCombatState = { ...normalized.dnd5eCombatState, sourcedExhaustion }
+    if (sourcedExhaustion) normalized.exhaustionLevel = dnd5eSourcedExhaustionLevel(sourcedExhaustion)
+  }
+  if (normalized.dnd5eCombatState?.submergedBreathingEffectDeadlines != null) {
+    normalized.dnd5eCombatState = { ...normalized.dnd5eCombatState, submergedBreathingEffectDeadlines: normalizeSubmergedBreathingEffectDeadlines(normalized.dnd5eCombatState.submergedBreathingEffectDeadlines) }
+  }
+  if (normalized.dnd5eCombatState?.submergedBreathing != null) {
+    normalized.dnd5eCombatState = { ...normalized.dnd5eCombatState,
+      submergedBreathing: normalizeDnd5eSubmergedBreathing(normalized.dnd5eCombatState.submergedBreathing) }
+  }
   normalized.dnd5eClassLevels = normalizeDnd5eClassLevels(normalized)
   normalized.level = dnd5eTotalCharacterLevel(normalized)
   normalized.equipment = normalizeDnd5eCharacterEquipment(normalized)
@@ -1471,7 +1512,7 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     state: normalized.dnd5eCombatState,
     conditions: normalized.conditions,
   })
-  return {
+  return reconcileDnd5eInventoryExchangeRitualActor({
     ...normalized,
     conditions: migratedEffects.conditions,
     dnd5eCombatState: {
@@ -1480,7 +1521,7 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
       activeEffects: migratedEffects.activeEffects,
     },
     dnd5eInventory: normalizedInventory,
-  }
+  })
 }
 
 function finalizeCharacter(input: LegacyCharacterSave): Character {
@@ -1556,6 +1597,7 @@ interface CharacterState {
     longRestsApplied: number
     longRestsBlocked: number
   }
+  waitForCampaignTimePublication: () => Promise<void>
   reconcileCampaignTimeAndSave: (clock: SharedCampaignTimeState, options?: {
     airborneCharacterIds?: ReadonlySet<string>
   }) => Promise<{
@@ -1571,7 +1613,18 @@ export const useCharacterStore = create<CharacterState>()(
     (set, get) => {
       const publishCharactersSnapshot = async (updatedAt: number = Date.now()) => {
         const seq = ++characterSaveSeq
-        const characters = get().characters
+        const roomKey = sharedCharactersRoomKey()
+        const shared = await loadSharedResource<SharedCharactersState>('characters')
+        if (roomKey !== sharedCharactersRoomKey()) throw new Error('characters-save-room-changed')
+        if (!shared && getSharedResourceRevisionWatermark('characters') > 0) {
+          throw new Error('characters-save-unreadable')
+        }
+        // A revision fetch can finish before loadShared applies the roster.
+        // Preserve remote identities missing from the local snapshot; only
+        // explicit deletion tombstones may remove them.
+        const characters = mergeCharactersForSharedSave(get().characters, shared?.characters, {
+          playerPort: isPlayerPort(),
+        })
         const selectedId = characters.some((ch) => ch.id === get().selectedId)
           ? get().selectedId
           : (characters[0]?.id ?? null)
@@ -1593,6 +1646,7 @@ export const useCharacterStore = create<CharacterState>()(
         if (seq !== characterSaveSeq) return updatedAt
         return updatedAt
       }
+      let campaignTimeReconcileSnapshotKey: string | null = null
       let campaignTimeReconcileAndSavePromise: Promise<{
         changed: boolean
         dawnsApplied: number
@@ -1606,6 +1660,7 @@ export const useCharacterStore = create<CharacterState>()(
         const save = async () => {
           const shared = await loadSharedResource<SharedCharactersState>('characters')
           if (seq !== characterSaveSeq) return
+          if (!shared && getSharedResourceRevisionWatermark('characters') > 0) return
           // Read the local winner only after the rebase fetch settles. Holding a
           // number-input spinner can apply several newer optimistic HP edits
           // during this await; capturing before it would publish an older HP at
@@ -1661,6 +1716,7 @@ export const useCharacterStore = create<CharacterState>()(
         loadShared: async (options) => {
           const shared = await loadSharedResource<SharedCharactersState>('characters')
           if (!shared?.characters) {
+            if (getSharedResourceRevisionWatermark('characters') > 0) return
             hydratedSharedCharactersRoomKey = sharedCharactersRoomKey()
             saveCharacters()
             return
@@ -2039,7 +2095,7 @@ export const useCharacterStore = create<CharacterState>()(
         },
         shortRestAll: () => {
           set((s) => ({
-            characters: s.characters.map(applyDnd5eShortRestBenefits),
+            characters: s.characters.map((character) => applyDnd5eShortRestBenefits(character)),
           }))
           saveCharacters()
         },
@@ -2053,10 +2109,10 @@ export const useCharacterStore = create<CharacterState>()(
           // 无房间的本地/测试模式保留同步入口；房间内永远等待服务端时间事务后再结算。
           const completionWorldMinute = useCampaignTimeStore.getState().state.worldMinute + 8 * 60
           set((state) => ({
-            characters: state.characters.map((character) =>
+            characters: reconcileDnd5eSourceEffectLifecycles(reconcileDnd5eSourceEffectLifecycles(state.characters).map((character) =>
               canBenefitFromLongRest(character.dnd5eLastLongRestWorldMinute, completionWorldMinute)
                 ? applyDnd5eLongRestBenefits(character, completionWorldMinute)
-                : character),
+                : character)),
           }))
           saveCharacters()
         },
@@ -2064,11 +2120,11 @@ export const useCharacterStore = create<CharacterState>()(
           let dawnsApplied = 0
           let longRestsApplied = 0
           let longRestsBlocked = 0
-          const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(
+          const results = reconcileDnd5eCampaignRosterSourceEffects(reconcileDnd5eSourceEffectLifecycles(get().characters).map((character) => reconcileDnd5eCharacterCampaignTime(
             character,
             clock,
             { airborne: options?.airborneCharacterIds?.has(character.id) === true },
-          ))
+          )))
           const changed = results.some((result) => result.changed)
           for (const result of results) {
             dawnsApplied += result.dawnsApplied
@@ -2079,16 +2135,28 @@ export const useCharacterStore = create<CharacterState>()(
           if (changed) saveCharacters()
           return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
         },
+        waitForCampaignTimePublication: async () => {
+          // Local elapsed-time state is visible before its shared PUT finishes.
+          // Consumers must not capture a transaction revision in that interval.
+          while (campaignTimeReconcileAndSavePromise) await campaignTimeReconcileAndSavePromise
+        },
         reconcileCampaignTimeAndSave: async (clock, options) => {
           // React can schedule several reconciliation effects for the same
           // atomic clock/character update. Every caller must join the active
           // operation; awaiting it and then starting another creates a herd of
           // stale full-snapshot PUTs that all conflict with the first winner.
-          if (campaignTimeReconcileAndSavePromise) return campaignTimeReconcileAndSavePromise
-          const localResults = get().characters.map((character) =>
+          const snapshotKey = JSON.stringify([clock, dnd5eDreamContactRosterKey(get().characters)])
+          if (campaignTimeReconcileAndSavePromise) {
+            if (campaignTimeReconcileSnapshotKey === snapshotKey) return campaignTimeReconcileAndSavePromise
+            // A later clock must not be acknowledged by an earlier save. After
+            // waiting, re-enter the gate so concurrent callers still coalesce.
+            await campaignTimeReconcileAndSavePromise
+            return get().reconcileCampaignTimeAndSave(clock, options)
+          }
+          const localResults = reconcileDnd5eCampaignRosterSourceEffects(reconcileDnd5eSourceEffectLifecycles(get().characters).map((character) =>
             reconcileDnd5eCharacterCampaignTime(character, clock, {
               airborne: options?.airborneCharacterIds?.has(character.id) === true,
-            }))
+            })))
           if (!localResults.some((result) => result.changed)) {
             // CampaignTimeSystem also reacts to ordinary character updates. A
             // long-cast transaction applies its completion-time character
@@ -2124,11 +2192,11 @@ export const useCharacterStore = create<CharacterState>()(
               let dawnsApplied = 0
               let longRestsApplied = 0
               let longRestsBlocked = 0
-              const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(
+              const results = reconcileDnd5eCampaignRosterSourceEffects(reconcileDnd5eSourceEffectLifecycles(get().characters).map((character) => reconcileDnd5eCharacterCampaignTime(
                 character,
                 clock,
                 { airborne: options?.airborneCharacterIds?.has(character.id) === true },
-              ))
+              )))
               const changed = results.some((result) => result.changed)
               for (const result of results) {
                 dawnsApplied += result.dawnsApplied
@@ -2151,11 +2219,13 @@ export const useCharacterStore = create<CharacterState>()(
             return { changed: false, dawnsApplied: 0, longRestsApplied: 0, longRestsBlocked: 0 }
           })()
           campaignTimeReconcileAndSavePromise = operation
+          campaignTimeReconcileSnapshotKey = snapshotKey
           try {
             return await operation
           } finally {
             if (campaignTimeReconcileAndSavePromise === operation) {
               campaignTimeReconcileAndSavePromise = null
+              campaignTimeReconcileSnapshotKey = null
             }
           }
         },

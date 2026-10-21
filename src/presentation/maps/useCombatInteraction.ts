@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import type { MapActivityTargetingActor } from './activityTargetingActor'
 import type { GridCell } from '../../lib/gridCombat'
 import type {
   Dnd5eWeaponAttackOptions,
+  Dnd5ePluginActionPayload,
 } from '../../lib/sharedCombatTypes'
 import type {
   Dnd5ePluginTargeting,
@@ -18,7 +20,9 @@ export interface Dnd5eItemAreaTargetingSession {
   targeting: Extract<Dnd5eInventoryTargeting, { kind: 'map-area' }>
 }
 
-export interface Dnd5ePluginAreaTargetingSession {
+export interface Dnd5ePluginAreaTargetingSession extends MapActivityTargetingActor {
+  targetAngleDegrees?: number
+  targetElevationFeet?: number
   source: 'plugin' | 'dragonborn-breath'
   characterId: string
   featureId: string
@@ -27,6 +31,7 @@ export interface Dnd5ePluginAreaTargetingSession {
   persistentAreaId?: string
   activeEffectId?: string
   activityChoices?: Record<string, string>
+  featurePayload?: Dnd5ePluginActionPayload['payload']
 }
 
 export interface Dnd5eItemCreatureTargetingSession {
@@ -37,7 +42,10 @@ export interface Dnd5eItemCreatureTargetingSession {
   targeting: Extract<Dnd5eInventoryTargeting, { kind: 'creature' }>
 }
 
-export interface Dnd5ePersistentAreaActivityTargetingSession {
+export interface Dnd5ePersistentAreaActivityTargetingSession extends MapActivityTargetingActor {
+  mappedObjectOriginTokenId?: string
+  targetTokenIds?: string[]
+  maximumTargets?: number
   characterId: string
   areaId?: string
   effectId?: string
@@ -54,7 +62,8 @@ export function useCombatInteraction() {
   const [dnd5eSpellTargeting, setDnd5eSpellTargeting] = useState<Dnd5eSpellTargetingSession | null>(null)
   const [dnd5eItemAreaTargeting, setDnd5eItemAreaTargeting] = useState<Dnd5eItemAreaTargetingSession | null>(null)
   const [dnd5ePluginAreaTargeting, setDnd5ePluginAreaTargeting] = useState<Dnd5ePluginAreaTargetingSession | null>(null)
-  const [dnd5eExtraActionTeleportTargeting, setDnd5eExtraActionTeleportTargeting] = useState<{ characterId: string } | null>(null)
+  const [dnd5eExtraActionTeleportTargeting, setDnd5eExtraActionTeleportTargeting] =
+    useState<{ characterId: string; attackOptions?: Dnd5eWeaponAttackOptions; elevationFeet?: number } | null>(null)
   const [dnd5eItemCreatureTargeting, setDnd5eItemCreatureTargeting] = useState<Dnd5eItemCreatureTargetingSession | null>(null)
   const [dnd5ePersistentAreaActivityTargeting, setDnd5ePersistentAreaActivityTargeting] =
     useState<Dnd5ePersistentAreaActivityTargetingSession | null>(null)

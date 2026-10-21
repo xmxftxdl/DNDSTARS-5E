@@ -60,11 +60,14 @@ function reportFeatureResources(
 ): CampaignRestRecoveryEntry[] {
   const definitions = classResourceDefinitions(after)
   return definitions.flatMap((definition) => {
-    if (!appliesOnRest(definition.resetOn, restKind)) return []
+    const recoveryRule = definition.restRecovery?.[restKind]
+    if (!recoveryRule && !appliesOnRest(definition.resetOn, restKind)) return []
     const previous = getClassResource(before, definition.key)
     const next = getClassResource(after, definition.key)
     if (!previous || !next) return []
-    const resetDetail = definition.resetOn === 'short-rest'
+    const resetDetail = recoveryRule
+      ? `${recoveryRule.onlyWhenEmpty ? '仅耗尽时：' : ''}${recoveryRule.mode === 'set' ? '调整为' : '恢复'} ${recoveryRule.amount} 次（不超过上限）`
+      : definition.resetOn === 'short-rest'
       ? '短休或长休恢复'
       : definition.resetOn === 'combat'
         ? '战斗／长休恢复'

@@ -65,6 +65,7 @@ export default function Dnd5eLegendaryActionWindow({
     ? spellSlotLevel
     : selectedSpell?.availableSlotLevels[0]
   const targetOptions = useMemo(() => {
+    if (action?.windowExecution === 'throw-placement') return targets.filter(target=>target.id!==actorTokenId)
     if (action?.windowExecution !== 'spell-selection') {
       return targets.filter((target) => target.id !== actorTokenId && target.type === 'player')
     }
@@ -77,6 +78,7 @@ export default function Dnd5eLegendaryActionWindow({
     ? targetTokenId
     : targetOptions[0]?.id ?? ''
   const requiresTarget = action?.windowExecution === 'targeted-attack' ||
+    action?.windowExecution === 'throw-placement' ||
     action?.windowExecution === 'area-action' ||
     (action?.windowExecution === 'spell-selection' &&
       selectedSpell?.automation === 'headless' && !selectedSpell.area)
@@ -272,7 +274,7 @@ export default function Dnd5eLegendaryActionWindow({
 
         {requiresTarget ? (
           <label className="mt-4 block text-xs font-semibold text-slate-400">
-            {action?.windowExecution === 'area-action'
+            {action?.windowExecution === 'throw-placement' ? '投掷目标（须由该怪物抓握）' : action?.windowExecution === 'area-action'
               ? '范围方向 / 锚点目标'
               : action?.windowExecution === 'spell-selection'
                 ? '法术目标'
@@ -322,6 +324,8 @@ export default function Dnd5eLegendaryActionWindow({
               ? '结算中…'
               : action?.windowExecution === 'dm-adjudication'
                 ? '交给 DM 裁定'
+                : action?.windowExecution === 'throw-placement'
+                  ? '选择投掷落点'
                 : action?.windowExecution === 'teleport-placement'
                   ? '选择传送落点'
                   : action?.windowExecution === 'spell-selection'

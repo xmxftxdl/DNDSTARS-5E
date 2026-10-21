@@ -1,4 +1,6 @@
 import { Circle, Group, Line, Rect, Text } from 'react-konva'
+import { projectControlledFlameLight } from '../../../shared/controlled-flame-state.mjs'
+import { geometryEntityDestroyed } from '../../../shared/map-geometry-durability.mjs'
 import Konva from 'konva'
 import type { BattleMap } from '../../store/maps'
 import {
@@ -21,6 +23,7 @@ import { geometryEntityPoints } from './mapCanvasGeometryUtils'
 
 const WALL_MATERIAL_STYLE: Record<MapGeometryWallMaterial, { color: string; dash?: number[] }> = {
   stone: { color: '#94a3b8' },
+  earth: { color: '#8b6f47' },
   brick: { color: '#c2410c', dash: [12, 2] },
   wood: { color: '#a16207', dash: [18, 4] },
   metal: { color: '#cbd5e1', dash: [4, 2] },
@@ -121,6 +124,7 @@ export function MapGeometryLayer({
   tool,
   selectedEntityId,
   inv,
+  worldMinute = 0,
   onSelect,
   onDelete,
   onPointsChange,
@@ -133,6 +137,7 @@ export function MapGeometryLayer({
   tool: MapGeometryTool
   selectedEntityId: string | null
   inv: number
+  worldMinute?: number
   onSelect?: (entityId: string | null) => void
   onDelete?: (entityId: string) => void
   onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
@@ -156,6 +161,7 @@ export function MapGeometryLayer({
   return (
     <Group listening={entityEditListening || matchingToolEditListening || doorInteractionMode}>
       {entities.map((entity) => {
+        if (!editMode && entity.kind !== 'light' && geometryEntityDestroyed(entity)) return null
         const selected = entity.id === selectedEntityId
         const isDraft = entity === draft
         const material = WALL_MATERIAL_STYLE[geometryWallMaterial(geometry, entity)]
@@ -186,10 +192,12 @@ export function MapGeometryLayer({
           else onSelect?.(entity.id)
         }
         if (entity.kind === 'light') {
+          const appearance = projectControlledFlameLight(entity, worldMinute)
+          const color = appearance.color
           const point = entity.points[0]
-          const outerRadius = (entity.brightRadiusFeet + entity.dimRadiusFeet) /
+          const outerRadius = (appearance.brightRadiusFeet + appearance.dimRadiusFeet) /
             Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)
-          const brightRadius = entity.brightRadiusFeet /
+          const brightRadius = appearance.brightRadiusFeet /
             Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)
           const lightEditListening = !isDraft && (
             entityEditListening || (editMode && tool === 'light')
@@ -203,7 +211,7 @@ export function MapGeometryLayer({
                 x={point.x}
                 y={point.y}
                 radius={6 * inv}
-                fill={entity.enabled ? color : '#64748b'}
+                fill={appearance.enabled ? color : '#64748b'}
                 stroke={selected ? '#fff' : '#111827'}
                 strokeWidth={2 * inv}
                 draggable={editMode && (tool === 'select' || tool === 'light') && selected && !isDraft}
@@ -379,6 +387,10 @@ export function MapGeometryLayer({
           <Line
             key={entity.id}
             {...common}
+            // Editor guides do not need fill/stroke alpha correction. With
+            // hundreds of fortress panels it allocates a full-stage buffer per
+            // polygon on every redraw and stalls Host interaction processing.
+            perfectDrawEnabled={false}
             closed
             fill={entity.kind === 'obstacle' && entity.magicalDarkness
               ? selected ? 'rgba(76,29,149,0.38)' : 'rgba(15,7,32,0.32)'

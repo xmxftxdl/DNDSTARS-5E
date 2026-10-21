@@ -1,3 +1,7 @@
+import { dnd5eCharacterWeaponAttackSlot } from '../../rulesets/dnd5e/characterWeaponAttackSlot'
+import { dnd5eCreatureFormAttackSelection } from '../../rulesets/dnd5e/creatureFormMultiattackContinuation'
+import { alternateResourceSpellHotbarSources } from './alternateResourceSpellHotbarSources'
+import { independentSpellHotbarSources } from './independentSpellHotbarSources'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Backpack, ChevronLeft, ChevronRight, LockKeyhole, PackageOpen, Sparkles, Swords, X } from 'lucide-react'
@@ -7,6 +11,8 @@ import { useSpellbookStore } from '../../store/spellbook'
 import { getClassResource } from '../../lib/classResources'
 import {
   FIGHTER_RESOURCE_KEYS,
+  dnd5eEffectiveAttacksPerAttackAction,
+  migrateCharacterToDnd5e,
   dnd5eAvailableSpellModifierIntents,
   dnd5eCharacterClassLevel,
   dnd5eClassDefinitionForCharacter,
@@ -41,6 +47,7 @@ import {
   resolveDnd5eSpellModifierIntents,
   toggleDnd5eSpellModifierIntent,
   dnd5eWeaponAttackProfile,
+  dnd5eUnarmedAttackProfiles,
   dnd5eWeaponPropertyIds,
   dnd5eActivityWeaponAttackGrantMatchesV1,
   fighterResourceState,
@@ -105,7 +112,7 @@ export function dnd5eHotbarActionRestrictionReason(
   }
   return entry.sourceKind === 'weapon' && restriction.prohibited.includes('attack')
     ? '当前形态禁止攻击。'
-    : entry.sourceKind === 'spell' && restriction.prohibited.includes('spellcasting')
+    : (entry.sourceKind === 'spell' || entry.command.kind === 'cast-independent-spell' || entry.command.kind === 'cast-resource-spell') && restriction.prohibited.includes('spellcasting')
       ? '当前形态禁止施法。'
       : entry.sourceKind === 'item' && restriction.prohibited.includes('object-interaction')
         ? '当前形态禁止使用或操作物品。'
@@ -135,12 +142,14 @@ const TARGETING_LABELS: Record<Dnd5eCombatActionTargeting, string> = {
 
 interface PlayerCombatHotbarProps {
   character: Character
+  mapArmorClassBonus?: number
   mapWeather?: import('../../rulesets/dnd5e/environmentRules').Dnd5eMapWeather
   mode?: 'combat' | 'exploration'
   canAct: boolean
   pending: boolean
   turnEconomy: {
     turnKey?: string
+    attacksUsed?: number
     usedOncePerTurnKeys?: readonly string[]
     action: { current: number; max?: number }
     bonusAction: { current: number; max?: number }
@@ -172,6 +181,7 @@ interface PlayerCombatHotbarProps {
   }[]
   persistentAreaActivityControls?: readonly {
     areaId?: string
+    areaMapId?: string
     effectId?: string
     featureId: string
     activityId: string
@@ -316,6 +326,7 @@ function readBackpackOpen(characterId: string): boolean {
 
 export default function PlayerCombatHotbar({
   character,
+  mapArmorClassBonus = 0,
   mapWeather,
   mode = 'combat',
   canAct,
@@ -409,7 +420,11 @@ export default function PlayerCombatHotbar({
         const combat = getDnd5eSrdCombatSpell(spellId)
         const pluginActivity = dnd5ePluginSpellActivity(dnd5ePluginSpellDefinition(entry.id))
         const imported = entry.imported
-        const baseCastingTime = spellEconomy(dnd5eSpellbookEntryCastingTime(entry))
+        const pluginDefinition = dnd5ePluginSpellDefinition(entry.id)
+        const combatLongCast = pluginActivity != null && pluginDefinition != null &&
+          ['minute', 'hour'].includes(pluginDefinition.castingTime.unit) &&
+          Number.isFinite(pluginDefinition.castingTime.value) && pluginDefinition.castingTime.value >= 1
+        const baseCastingTime = combatLongCast ? 'action' : spellEconomy(dnd5eSpellbookEntryCastingTime(entry))
         const classLevel = source.classLevel
         const classSelections = dnd5eEffectiveSpellSelections(character, source)
         const freeBaseCast = entry.level > 0
@@ -454,7 +469,7 @@ export default function PlayerCombatHotbar({
         const reactionTriggerOpen = castingTime === 'reaction' && triggeredReactionSpellIds.includes(spellId)
         const declaredCastingTime = dnd5eSpellbookEntryCastingTime(entry)
         const supportedCastingTime = (castingTime !== 'reaction' || reactionTriggerOpen) &&
-          (declaredCastingTime !== 'unsupported' || exploration)
+          (declaredCastingTime !== 'unsupported' || combatLongCast || exploration)
         spellSources.push({
           id: spellId,
           label: entry.name,
@@ -629,6 +644,8 @@ export default function PlayerCombatHotbar({
         command: { kind: 'use-fighter-feature', feature: 'action-surge' },
       })
     }
+    featureSources.unshift(...alternateResourceSpellHotbarSources({ character, entries: spellbookById, exploration, triggeredReactionSpellIds }))
+    featureSources.unshift(...independentSpellHotbarSources({ character, entries: spellbookById, exploration, triggeredReactionSpellIds }))
     featureSources.unshift(...sustainedControlSources)
     if (hunterMarkTransferAvailable) {
       featureSources.unshift({
@@ -673,6 +690,7 @@ export default function PlayerCombatHotbar({
       command: {
         kind: 'use-persistent-area-activity' as const,
         areaId: control.areaId,
+        areaMapId: control.areaMapId,
         effectId: control.effectId,
         featureId: control.featureId,
       },
@@ -697,6 +715,13 @@ export default function PlayerCombatHotbar({
     const turnKey = turnEconomy.turnKey ?? ''
     const mainWeaponId = character.equipment?.mainWeapon?.id
     const mainWeaponProfile = dnd5eWeaponAttackProfile(character)
+    featureSources.push(...dnd5eUnarmedAttackProfiles(character).map(profile => ({
+      id: `natural-weapon:${profile.weaponId}`, label: profile.weaponName,
+      description: `天生武器：1d${profile.damage.sides}；选择目标后由 Host 校验攻击。`,
+      icon: dnd5eClassFeatureActionIcon({ id: profile.weaponId, name: profile.weaponName, classId: primaryClassId }),
+      economy: 'action' as const, targeting: 'creature' as const,
+      command: { kind: 'select-weapon-target' as const, options: { naturalWeaponId: profile.weaponId } },
+    })))
     const activityWeaponProfiles = [
       ...(mainWeaponProfile ? [{ slot: 'main-hand' as const, profile: mainWeaponProfile }] : []),
       ...(() => {
@@ -736,13 +761,15 @@ export default function PlayerCombatHotbar({
     featureSources.push(...activityWeaponAttackGrants.map(({ grant, slot, profile }) => ({
       id: `activity-weapon-attack:${grant.grantId}:${slot}`,
       label: `${grant.label} · ${profile.weaponName}`,
-      description: '由统一 Activity 触发；点击后选择目标，Host 会重新校验当前主手武器、距离、命中与附赠动作。',
+      description: grant.economy === 'none'
+        ? '追加攻击，不消耗动作或附赠动作。选择目标后校验武器、距离和目标限制。'
+        : '消耗附赠动作进行追加攻击。选择目标后校验武器、距离和目标限制。',
       icon: dnd5eClassFeatureActionIcon({
         id: grant.sourceActivityId,
         name: grant.label,
         classId: primaryClassId,
       }),
-      economy: 'bonus-action' as const,
+      economy: grant.economy,
       targeting: 'creature' as const,
       command: {
         kind: 'select-weapon-target' as const,
@@ -947,6 +974,19 @@ export default function PlayerCombatHotbar({
       usesByEffect: character.dnd5eCombatState?.restrictedExtraActionUsesByEffect,
       turnKey: turnEconomy.turnKey,
     })
+    const attacksUsed = Math.max(0, Math.floor(turnEconomy.attacksUsed ?? 0))
+    const loadingLimited = mainWeaponProfile?.properties.some(property => property.includes('装填')) &&
+      migrateCharacterToDnd5e(character).ignoreLoadingWeaponProperty !== true
+    const attacksPerAction = loadingLimited ? 1 : dnd5eEffectiveAttacksPerAttackAction(character)
+    const weaponAttackSlot = dnd5eCharacterWeaponAttackSlot({
+      distinctTargetEligible: character.equipment?.mainWeapon?.dnd5e?.kind !== 'weapon' ||
+        character.equipment.mainWeapon.dnd5e.usesSourceSpellcastingAbility !== true,
+      character, turnKey: turnEconomy.turnKey, attacksUsed, attacksPerAction,
+      actionCount: Math.max(1, turnEconomy.action.max ?? 1), loadingLimited: !!loadingLimited,
+      extraWeaponEligible: character.equipment?.mainWeapon?.dnd5e?.kind === 'weapon' &&
+        character.equipment.mainWeapon.dnd5e.usesSourceSpellcastingAbility !== true,
+    })
+    const weaponAttackContinuation = weaponAttackSlot != null && !weaponAttackSlot.spendsAction
     const built = buildDnd5eCombatActionDescriptors({
       canAct: canAct || reactionOnly,
       pending,
@@ -954,22 +994,27 @@ export default function PlayerCombatHotbar({
       bonusActionRemaining,
       movementRemaining,
       restrictedExtraActionKinds,
+      weaponAttackContinuation,
       weaponLabel: mainWeaponProfile?.weaponName ?? character.equipment?.mainWeapon?.name,
       grappleEscapes,
+      canEscapeEffect: character.dnd5eCombatState?.activeEffects?.some(effect =>
+        !effect.suspendedBy?.length &&
+        (effect.escapeCheck?.economy === 'action' || effect.escapeSavingThrow?.economy === 'action')),
       spells: spellSources,
       features: featureSources,
       items: itemSources,
     })
     const creatureFormAttacks: Dnd5eCombatActionDescriptorV1[] = activeCreatureForm?.actions.flatMap((formAction, actionIndex) => {
       if (formAction.kind !== 'weapon-attack' && formAction.kind !== 'multiattack') return []
+      const formSelection = dnd5eCreatureFormAttackSelection(character, actionIndex, turnEconomy.turnKey)
       const enabled = !pending && canAct && (
-        actionRemaining > 0 || restrictedExtraActionKinds.includes('weapon-attack')
+        actionRemaining > 0 || !!formSelection.multiattackContinuation || restrictedExtraActionKinds.includes('weapon-attack')
       )
       return [{
         schemaVersion: 1,
         id: `creature-form:${activeCreatureForm.id}:attack:${actionIndex}`,
         sourceKind: 'weapon',
-        label: `${activeCreatureForm.name}：${formAction.name}`,
+        label: `${activeCreatureForm.name}：${formSelection.multiattackContinuation ? '继续' : ''}${formAction.name}`,
         description: formAction.description,
         icon: dnd5eSystemActionIcon(
           `creature-form:${activeCreatureForm.id}:${formAction.id}`,
@@ -1035,12 +1080,21 @@ export default function PlayerCombatHotbar({
           // 可执行的道具在探索状态下仍应沿用 use-item 权威链路。此前这里把药水等
           // 全部降级成“打开背包”，导致快捷槽只能查看，不能真正使用。
           if (entry.sourceKind === 'item') return entry
+          if (entry.id === 'system:other-actions') return {
+            ...entry,
+            description: '查看并尝试解除自己或附近生物身上的效果。',
+            enabled: !pending,
+            disabledReason: pending ? '正在等待上一动作结算。' : undefined,
+            command: { kind: 'open-panel' as const, panel: 'skills' as const },
+          }
           if (
             entry.sourceKind === 'feature' &&
             !entry.id.startsWith('feature:sustained-spell:') &&
             !entry.id.startsWith('feature:persistent-area-move:') &&
             !entry.id.startsWith('feature:persistent-area-activity:') &&
             entry.command.kind !== 'use-persistent-area-activity' &&
+            entry.command.kind !== 'cast-resource-spell' &&
+            entry.command.kind !== 'cast-independent-spell' &&
             entry.command.kind !== 'open-panel' &&
             entry.command.kind !== 'toggle-spell-modifier'
           ) return {
@@ -1086,6 +1140,7 @@ export default function PlayerCombatHotbar({
     creatureFormEquipmentUnavailable,
     shapechangeEquipmentDisposition,
     turnEconomy.action.max,
+    turnEconomy.attacksUsed,
     turnEconomy.turnKey,
     turnEconomy.usedOncePerTurnKeys,
     triggeredReactionSpellIds,
@@ -1712,7 +1767,7 @@ export default function PlayerCombatHotbar({
       </div>
     </section>
     {quickCharacterOpen && typeof document !== 'undefined' ? createPortal(
-      <PlayerQuickCharacterSheet character={character} onClose={() => setQuickCharacterOpen(false)} />,
+      <PlayerQuickCharacterSheet character={character} mapArmorClassBonus={mapArmorClassBonus} onClose={() => setQuickCharacterOpen(false)} />,
       document.body,
     ) : null}
     {backpackOpen && typeof document !== 'undefined' ? createPortal(
@@ -1891,7 +1946,9 @@ export default function PlayerCombatHotbar({
             )}
             className="mt-2 w-full rounded-xl border border-sky-300/25 bg-sky-500/10 px-4 py-2.5 text-sm font-bold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {`以 ${spellConfiguration.slotLevel} 环对物件施放（语音叙事）`}
+            {spellConfiguration.entry.command.spellId === 'disintegrate'
+              ? `以 ${spellConfiguration.slotLevel} 环对物件或神庙施放`
+              : `以 ${spellConfiguration.slotLevel} 环对物件施放（语音叙事）`}
           </button> : null}
         </section>
       </div>,

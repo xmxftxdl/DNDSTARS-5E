@@ -1,3 +1,4 @@
+import { dnd5eMonsterWithHeldWeapon } from '../../rulesets/dnd5e/companionHeldWeapon'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ChevronDown,
@@ -11,7 +12,8 @@ import {
   Sparkles,
   Swords,
 } from 'lucide-react'
-import type { Token } from '../../store/maps'
+import type { BattleMap, Token } from '../../store/maps'
+import type { Character } from '../../types/character'
 import { getEnemyTemplate } from '../../lib/enemyPool'
 import { getEnemyStatBlock, type MonsterAction } from '../../lib/enemyStatBlocks'
 import { getImage } from '../../lib/imageStore'
@@ -21,6 +23,7 @@ import type { D20RollMode } from '../../rulesets/contracts'
 import { dnd5eManualMonsterSpellOptions } from '../../lib/monsterManualSpell'
 import { dnd5eMonsterTokenEffectiveSpeed } from '../../application/combat/monsterMovementProjection'
 import { dnd5eMonsterMapSpeed, getDnd5eSrdMonster } from '../../rulesets/dnd5e/monsters'
+import { dnd5eMonsterShapechangeFormIds } from '../../rulesets/dnd5e/monsterAdvancedAbilities'
 import {
   dnd5eManualMonsterActionIndexById,
   dnd5eManualMonsterJumpMaximumFeet,
@@ -204,6 +207,7 @@ function ActionList({
       <h4 className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">{title}</h4>
       <div className="space-y-1.5">
         {actions.map((action, actionIndex) => {
+          if(action.id==='innate-spell-step')return null
           const recharge = action.usage?.kind === 'recharge'
             ? action.usage
             : undefined
@@ -353,6 +357,8 @@ function ActionList({
 
 export default function DmMonsterControlDock({
   monsters,
+  battleMap,
+  characters = [],
   currentTokenId,
   actionUsed,
   bonusActionUsed = false,
@@ -369,6 +375,7 @@ export default function DmMonsterControlDock({
   onSelectContinuation,
   onEscapeActiveEffect,
   onActivateReckless,
+  onShapechange,
   onSelectMovement,
   onCancelMovement,
   endTurnPending = false,
@@ -379,6 +386,8 @@ export default function DmMonsterControlDock({
   onFocusedTokenChange,
 }: {
   monsters: readonly Token[]
+  battleMap?: BattleMap
+  characters?: readonly Character[]
   currentTokenId?: string
   actionUsed: boolean
   bonusActionUsed?: boolean
@@ -423,6 +432,7 @@ export default function DmMonsterControlDock({
   ) => void
   onEscapeActiveEffect?: (token: Token, effectId: string) => void
   onActivateReckless?: (token: Token) => void
+  onShapechange?: (token: Token, formId: string) => void
   onSelectMovement?: (
     token: Token,
     kind: Dnd5eManualMonsterMovementKind,
@@ -444,14 +454,15 @@ export default function DmMonsterControlDock({
     [currentTokenId, focusedTokenId, internalSelectedTokenId, monsters],
   )
   const stats = selectedToken?.poolId ? getEnemyStatBlock(selectedToken.poolId) : undefined
-  const structuredMonster = selectedToken?.poolId ? getDnd5eSrdMonster(selectedToken.poolId) : undefined
+  const structuredMonster = dnd5eMonsterWithHeldWeapon(selectedToken?.poolId ? getDnd5eSrdMonster(selectedToken.poolId) : undefined, selectedToken)
   const template = selectedToken?.poolId ? getEnemyTemplate(selectedToken.poolId) : undefined
   const isCurrent = !!selectedToken && selectedToken.id === currentTokenId
   const canAct = isCurrent
   const movementLocked = !!selectedToken && isTokenMovementLocked(selectedToken)
   const escapeEffect = normalizeDnd5eActiveEffects(
     selectedToken?.dnd5eCombatState?.activeEffects,
-  ).find((effect) => effect.escapeCheck?.economy === 'action')
+  ).find((effect) => effect.escapeCheck?.economy === 'action' || effect.removal?.action?.economy === 'action' && !!effect.removal.action.abilityCheck)
+  const escapeEffectCheck = escapeEffect?.escapeCheck ?? escapeEffect?.removal?.action?.abilityCheck
   const maximumAttacksPerTurn = dnd5eActiveMaximumAttacksPerTurn(
     selectedToken?.dnd5eCombatState?.activeEffects,
   )
@@ -470,14 +481,15 @@ export default function DmMonsterControlDock({
   const hp = selectedToken?.hp ?? maxHp
   const hpPercent = Math.max(0, Math.min(100, maxHp > 0 ? hp / maxHp * 100 : 0))
   const effectiveArmorClass = stats
-    ? stats.ac + dnd5eActiveArmorClassBonus(selectedToken?.dnd5eCombatState?.activeEffects)
+    ? (selectedToken ? (battleMap ? dnd5eCompanionSceneWornArmor(selectedToken, structuredMonster, battleMap, characters)
+      : dnd5eCompanionWornArmor(selectedToken, structuredMonster))?.armorClass ?? stats.ac : stats.ac) + dnd5eActiveArmorClassBonus(selectedToken?.dnd5eCombatState?.activeEffects)
     : undefined
   const effectiveSpeedLabel = movementLocked
     ? '0 尺'
     : stats && isCurrent && movementMaximumFeet != null
     ? `${Math.max(0, Math.floor(movementMaximumFeet))} 尺`
     : structuredMonster && selectedToken
-      ? `${dnd5eMonsterTokenEffectiveSpeed(selectedToken, dnd5eMonsterMapSpeed(structuredMonster))} 尺`
+      ? `${dnd5eMonsterTokenEffectiveSpeed(selectedToken, Math.max(0, (selectedToken.dnd5eSummon?.walkingSpeedFeet ?? dnd5eMonsterMapSpeed(structuredMonster)) - (dnd5eCompanionWornArmor(selectedToken, structuredMonster)?.speedPenaltyFeet ?? 0)))} 尺`
       : stats?.speed
   const legendaryMaximum = stats?.legendaryActions?.length
     ? Math.max(0, stats.legendaryActionPoints ?? 3)
@@ -699,13 +711,28 @@ export default function DmMonsterControlDock({
               </section>
             ) : null}
 
-            {canAct && escapeEffect?.escapeCheck ? (
+            {selectedToken?.poolId && onShapechange && dnd5eMonsterShapechangeFormIds(selectedToken.poolId).length > 0 ? (
+              <section className="rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
+                <p className="mb-2 font-semibold">变换形态 · 动作</p>
+                <div className="flex flex-wrap gap-2">
+                  {dnd5eMonsterShapechangeFormIds(selectedToken.poolId).map(formId => (
+                    <button key={formId} type="button" data-testid={`monster-shapechange-${formId}`}
+                      disabled={!canAct || actionUsed || actionPending || turnStartPending}
+                      onClick={() => onShapechange(selectedToken, formId)}
+                      className="rounded-lg bg-violet-400/20 px-3 py-2 disabled:opacity-40">
+                      {getDnd5eSrdMonster(formId)?.name ?? formId}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            {canAct && escapeEffect && escapeEffectCheck ? (
               <section
                 data-testid="manual-monster-active-effect-escape"
                 className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-100"
               >
                 <p className="font-semibold">
-                  {escapeEffect.label || '受限状态'}使你无法正常移动；可以消耗一个动作尝试挣脱。
+                  可以消耗一个动作，按检定结果解除{escapeEffect.label || '当前效果'}。
                 </p>
                 <button
                   type="button"
@@ -715,7 +742,7 @@ export default function DmMonsterControlDock({
                   className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-200/25 bg-amber-300/15 px-2 py-1.5 text-[11px] font-semibold text-amber-50 hover:bg-amber-300/25 disabled:cursor-not-allowed disabled:opacity-35"
                 >
                   <Hand className="h-3.5 w-3.5" />
-                  挣脱{escapeEffect.label || '状态'}（{ABILITIES.find((ability) => ability.key === escapeEffect.escapeCheck?.ability)?.label ?? escapeEffect.escapeCheck.ability}检定 DC {escapeEffect.escapeCheck.dc}）
+                  挣脱{escapeEffect.label || '状态'}（{ABILITIES.find((ability) => ability.key === escapeEffectCheck.ability)?.label ?? escapeEffectCheck.ability}检定 DC {escapeEffectCheck.dc}）
                 </button>
               </section>
             ) : null}
@@ -1025,3 +1052,4 @@ export default function DmMonsterControlDock({
     </div>
   )
 }
+import { dnd5eCompanionWornArmor, dnd5eCompanionSceneWornArmor } from '../../rulesets/dnd5e/companionWornArmor'

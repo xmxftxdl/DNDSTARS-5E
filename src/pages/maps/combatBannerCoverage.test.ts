@@ -6,7 +6,7 @@ import {
 } from './combatBannerCoverage'
 
 const actionTypes: SharedPlayerActionState['type'][] = [
-  'end-turn', 'dnd5e-death-save', 'dnd5e-weapon-attack', 'dnd5e-fighter-feature',
+  'end-turn', 'dnd5e-death-save', 'dnd5e-weapon-attack', 'dnd5e-fighter-feature', 'dnd5e-short-rest-recovery',
   'dnd5e-class-feature', 'dnd5e-racial-action', 'dnd5e-plugin-action', 'dnd5e-item-use',
   'dnd5e-ability-check', 'dnd5e-spell-cast', 'dnd5e-spell-whisper-reply', 'dnd5e-persistent-area-move',
   'dnd5e-adjudicated-spell', 'dnd5e-map-interaction', 'move-token', 'disengage', 'dodge',

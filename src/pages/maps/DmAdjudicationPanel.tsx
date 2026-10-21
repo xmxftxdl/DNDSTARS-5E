@@ -414,7 +414,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                   </h3>
                   <p className="mt-1 text-xs text-slate-400">
                     {sharedDmAdjudicationPrompt.payload.casterName} · {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
-                      ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'on-area-move-impact': '区域移动撞击', 'turn-start': '回合开始', 'turn-end': '回合结束', 'source-turn-start': '来源回合开始', 'on-detonate': '区域引爆' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
+                      ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'on-area-move-impact': '区域移动撞击', 'turn-start': '回合开始', 'turn-end': '回合结束', 'source-turn-start': '来源回合开始', 'source-turn-end': '来源回合结束', 'on-detonate': '区域引爆' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
                       : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                         ? 'DM 权威地图事务'
                         : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
@@ -1179,6 +1179,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                             <option value="target-turn-start">目标回合开始</option>
                             <option value="source-turn-end">来源回合结束</option>
                             <option value="source-turn-start">来源回合开始</option>
+                            <option value="source-turn-end">来源回合结束</option>
                           </select>
                         </label>}
                         <label className="text-[11px] text-slate-400 sm:col-span-2">

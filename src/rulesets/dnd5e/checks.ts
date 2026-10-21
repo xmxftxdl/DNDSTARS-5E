@@ -1,3 +1,6 @@
+import { dnd5eImportedSkillAbilityBonus } from './skillAbilityBonuses'
+import {dnd5eActiveSkillCheckBonus, effectiveDnd5eActiveEffects} from './activeEffects'
+import { dnd5eImportedInitiativeBonus } from './initiativeModifiers'
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { D20RollMode, D20RollResult } from '../contracts'
 import type { Character } from '../../types/character'
@@ -28,7 +31,7 @@ function abilityScore(character: Pick<Character, 'abilities'>, ability: AbilityK
 }
 
 export function dnd5eSkillCheckProficiencyRank(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'skills' | 'dnd5eClassChoices' | 'dnd5eContentChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'skills' | 'dnd5eClassChoices' | 'dnd5eContentChoices' | 'dnd5eCombatState'>,
   skillKey: string,
 ): Dnd5eCheckProficiencyRank {
   const bardChoices = character.dnd5eClassChoices?.classes?.bard?.selections ?? {}
@@ -45,6 +48,7 @@ export function dnd5eSkillCheckProficiencyRank(
     ...(bardChoices.expertise ?? []),
     ...(rogueChoices.expertise ?? []),
     ...dnd5eCharacterBuildTagsV1(character, 'skill-expertise'),
+    ...effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects).flatMap(effect => effect.modifiers?.skillExpertise ?? []),
   ].includes(skillKey) ? 2 : 1
 }
 
@@ -67,7 +71,9 @@ export function dnd5eSkillCheckModifier(
 ): number {
   const skill = SKILLS.find((candidate) => candidate.key === skillKey)
   if (!skill) throw new RangeError(`Unknown D&D 5e skill: ${skillKey}`)
-  return dnd5eAbilityCheckModifier(character, skill.ability, dnd5eSkillCheckProficiencyRank(character, skillKey))
+  return dnd5eAbilityCheckModifier(character, skill.ability, dnd5eSkillCheckProficiencyRank(character, skillKey)) +
+    dnd5eActiveSkillCheckBonus(character.dnd5eCombatState?.activeEffects, skill.ability, skillKey) +
+    dnd5eImportedSkillAbilityBonus(character as Character, skill.ability, skillKey)
 }
 
 export function dnd5eAbilityCheckMode(
@@ -79,6 +85,7 @@ export function dnd5eAbilityCheckMode(
     initiative?: boolean
     ability?: AbilityKey
     skill?: string
+    sense?: 'hearing' | 'sight' | 'smell'
     perceivedTargetId?: string
     requestedMode?: D20RollMode
   } = {},
@@ -88,12 +95,12 @@ export function dnd5eAbilityCheckMode(
     ? dnd5eActiveStrengthRollFlags(effects)
     : { advantage: false, disadvantage: false }
   const advantage = (context.initiative === true && dnd5eCharacterClassLevel(character, 'barbarian') >= 7) ||
-    (context.ability != null && dnd5eActiveAbilityCheckAdvantages(effects).includes(context.ability)) ||
+    (context.ability != null && dnd5eActiveAbilityCheckAdvantages(effects, context).includes(context.ability)) ||
     (context.skill != null && dnd5eActiveSkillCheckAdvantages(effects).includes(context.skill)) ||
     strengthEffect.advantage
   const disadvantage = (character.exhaustionLevel ?? 0) >= 1 ||
     dnd5eConditionAbilityCheckDisadvantage(character) ||
-    (context.ability != null && dnd5eActiveAbilityCheckDisadvantages(effects).includes(context.ability)) ||
+    (context.ability != null && dnd5eActiveAbilityCheckDisadvantages(effects, context).includes(context.ability)) ||
     (context.skill != null && dnd5eActiveSkillCheckDisadvantages(effects).includes(context.skill)) ||
     (context.skill === 'perception' && dnd5eActivePerceptionDisadvantageApplies(
       effects,
@@ -161,13 +168,13 @@ export function resolveDnd5eAbilityCheck(input: {
 }
 
 export function dnd5eStoredCharacterInitiativeModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'dnd5eCombatState'>,
+  character: Character,
 ): number {
-  return dnd5eAbilityCheckModifier(character, 'dex') + Math.floor(character.initiativeBonus)
+  return dnd5eAbilityCheckModifier(character, 'dex') + Math.floor(character.initiativeBonus) + dnd5eImportedInitiativeBonus(character)
 }
 
 export function resolveDnd5eInitiative(input: {
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'exhaustionLevel' | 'dnd5eCombatState'>
+  character: Character
   rolls: readonly number[]
 }): Dnd5eAbilityCheckResult {
   return resolveDnd5eAbilityCheck({
@@ -175,6 +182,6 @@ export function resolveDnd5eInitiative(input: {
     ability: 'dex',
     rolls: input.rolls,
     initiative: true,
-    additionalModifier: Math.floor(input.character.initiativeBonus),
+    additionalModifier: Math.floor(input.character.initiativeBonus) + dnd5eImportedInitiativeBonus(input.character),
   })
 }

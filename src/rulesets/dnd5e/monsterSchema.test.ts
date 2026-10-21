@@ -1,8 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { DND5E_SRD_MONSTERS } from './monsters'
+import { buildDnd5eCustomMonster, dnd5eCustomMonsterDraftFromStatBlock } from './customMonsterWorkshop'
 import { dnd5eMonsterActionAutomation, validateDnd5eMonsterCatalog, validateDnd5eMonsterSchema } from './monsterSchema'
 
 describe('D&D 5e monster action schema', () => {
+  it('validates the structured blindness limit only on positive-range blindsight', () => {
+    const monster = structuredClone(DND5E_SRD_MONSTERS.find(entry => entry.slug === 'wolf')!)
+    monster.senses = [{ name: '盲视', distanceFeet: 60, blindBeyond: true }]
+    expect(validateDnd5eMonsterSchema(monster)).toEqual([])
+    const restored = buildDnd5eCustomMonster(dnd5eCustomMonsterDraftFromStatBlock(JSON.parse(JSON.stringify(monster))))
+    expect(restored.senses).toContainEqual({ name: '盲视', distanceFeet: 60, blindBeyond: true })
+    for (const sense of [
+      { name: '黑暗视觉', distanceFeet: 60, blindBeyond: true },
+      { name: '盲视', distanceFeet: 0, blindBeyond: true },
+      { name: '盲视', distanceFeet: 60, blindBeyond: 'true' },
+    ]) {
+      const invalid = { ...monster, senses: [sense] } as unknown as typeof monster
+      expect(validateDnd5eMonsterSchema(invalid)).toContainEqual(
+        expect.objectContaining({ message: '感官数据无效' }),
+      )
+    }
+  })
+
   it('keeps every current SRD monster action structurally valid', () => {
     expect(validateDnd5eMonsterCatalog(DND5E_SRD_MONSTERS)).toEqual([])
   })

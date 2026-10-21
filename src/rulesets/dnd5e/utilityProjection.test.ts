@@ -8,6 +8,7 @@ import {
   resolvePreparedDnd5eCoreSpellAreaMove,
 } from './coreSpellAreaAction'
 import { getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
+import {createEmptyMapGeometry} from '../../lib/mapGeometry'
 import { resolveDnd5eHeadlessAction } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot } from './mapBridge'
 import { registerDnd5eRulesPlugin } from './pluginApi'
@@ -308,6 +309,26 @@ describe('generic utility projection protocol', () => {
       snapshot.state.combatants[fixture.actorToken.id],
       snapshot.state.combatants[fixture.targetToken.id],
     )).toBe(true)
+  })
+
+  it('passes campaign time through sensor movement preparation and final settlement',()=>{
+    const fixture=mapWithProjection(),actor=character(),sensorArea=fixture.map.dnd5ePluginAreas![0]
+    sensorArea.anchorMode='effect-token';sensorArea.anchorTokenId='eye'
+    fixture.map.tokens.push(token({id:'eye',type:'obstacle',x:35,y:25,dnd5eSpellEffect:{schemaVersion:1,spellId:'arcane-eye',sourceCharacterId:actor.id,sourceTokenId:fixture.actorToken.id,
+      createdRound:1,expiresAfterRound:601,shareVisionWithSource:true}}))
+    const geometry=createEmptyMapGeometry(fixture.map.id)
+    geometry.structureLifetimes=[{id:'temple',casterId:'builder',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:[],replacementGroup:'temple-of-the-gods',siteKey:'site',
+      objectBoundary:{points:[{x:39,y:20},{x:41,y:20},{x:41,y:30},{x:39,y:30}],bottomFeet:0,topFeet:20},
+      templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}]
+    const action:SharedPlayerActionState={id:'move-eye',mapId:fixture.map.id,combatId:'eye-move',sourceMode:'player',status:'pending',type:'dnd5e-persistent-area-move',actorTokenId:fixture.actorToken.id,characterId:actor.id,
+      dnd5ePersistentAreaMove:{areaId:sensorArea.id,targetCell:{col:4,row:2}},round:1,initiativeIndex:0,seq:1,updatedAt:1}
+    const prepare=(worldMinute:number)=>prepareDnd5eCoreSpellAreaMove({action,map:fixture.map,characters:[actor],initiativeOrder:fixture.initiativeOrder,geometry,worldMinute,
+      turnEconomy:createDnd5eTurnEconomyCounts('eye-turn')})
+    expect(prepare(100)).toMatchObject({ok:false,reason:'movement-blocked'})
+    const expired=prepare(1440)
+    expect(expired.ok,expired.ok?undefined:expired.reason).toBe(true)
+    if(!expired.ok)return
+    expect(resolvePreparedDnd5eCoreSpellAreaMove({prepared:expired.prepared}).result.ok).toBe(true)
   })
 
   it('uses a bonus action to move the projection for an eligible owner', () => {

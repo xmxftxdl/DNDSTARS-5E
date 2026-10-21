@@ -1,10 +1,10 @@
+import { dnd5eCombatantSavingThrowEffectBonus } from '../../rulesets/dnd5e/concentrationDefense'
 import { createDiceCheckPreview, type DiceCheckPreview } from '../../presentation/maps/diceCheckOutcome'
 import { canBonusDieChangeFailure } from '../../lib/d20InterruptPolicy'
 import type { BardicInspirationRollType } from '../../lib/combatInterruptProtocol'
 import type { AbilityKey } from '../../lib/dnd'
 import {
   dnd5eCombatantHasConcentrationEffect,
-  dnd5eActiveSavingThrowBonus,
   dnd5eDarkOnesOwnLuckAvailable,
   dnd5eHeldBardicInspirationDie,
   dnd5eSavingThrowRerollFeature,
@@ -26,6 +26,9 @@ export interface Dnd5eD20RollInterruptContext {
 }
 
 export interface Dnd5eOptionalBonusDieInterruptRequest {
+  checkKey?: string
+  retainedOnly?: boolean
+  source?: { actorId: string; kind: 'saving-throw' | 'grapple-escape' }
   target?: Character
   combatant: Dnd5eCombatant
   rollKind: 'ability-check' | 'saving-throw'
@@ -45,6 +48,7 @@ export interface Dnd5eSavingThrowInterruptResult {
   bardicInspirationRoll?: number
   optionalBonusDieUse?: Dnd5eOptionalBonusDieUse
   darkOnesOwnLuckRoll?: number
+  rerollResourceKey?: string
   rerollD20?: number
   rerollD20Second?: number
   totalBeforeReroll: number
@@ -75,6 +79,7 @@ type SavingThrowMode = 'normal' | 'advantage' | 'disadvantage'
  * leave the choice to the owner before or after seeing the d20 result.
  */
 export async function resolveDnd5eAbilityCheckInterrupts(input: {
+  grappleSourceId?: string
   combatant: Dnd5eCombatant
   target?: Character
   targetName: string
@@ -177,6 +182,7 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
         target: input.target,
         combatant: input.combatant,
         rollKind: 'ability-check',
+        source: input.grappleSourceId ? { actorId: input.grappleSourceId, kind: 'grapple-escape' } : undefined,
         rollType: '属性检定',
         originalD20: halflingLuckyD20 ?? d20,
         total: runningTotal,
@@ -242,6 +248,9 @@ export async function resolveDnd5eAbilityCheckInterrupts(input: {
  * resource consumption and logging are validated atomically.
  */
 export async function resolveDnd5eSavingThrowInterrupts(input: {
+  sourceActorId?: string
+  /** Host-validated mandatory effect dice, collected before the d20. */
+  effectDiceModifier?: number
   state: Dnd5eHeadlessCombatState
   combatant: Dnd5eCombatant
   target?: Character
@@ -282,7 +291,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
     total: number
     dc: number
     mode: SavingThrowMode
-  }) => Promise<{ d20: number; d20Second?: number } | undefined>
+  }) => Promise<{ d20: number; d20Second?: number; resourceKey?: string } | undefined>
   secondRollLabel?: string
   halflingLuckyLabel?: string
   blessLabel?: string
@@ -293,7 +302,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
     checkPreview: createDiceCheckPreview('save', input.targetName, undefined, (first, second) => previewDnd5eSavingThrowRoll({
       rolls: input.mode === 'normal' ? [first] : [first, second ?? first], mode: input.mode,
       modifier: (input.combatant.savingThrowBonuses[input.ability] ?? Math.floor((input.combatant.abilities[input.ability] - 10) / 2)) +
-        dnd5eActiveSavingThrowBonus(input.combatant.classState.activeEffects, input.ability), dc: input.dc,
+        dnd5eCombatantSavingThrowEffectBonus(input.combatant, input.ability) + (input.effectDiceModifier ?? 0), dc: input.dc,
     }).success, input.mode),
     rollKind: 'saving-throw',
     rollerTokenId: input.combatant.id,
@@ -335,8 +344,8 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
     : undefined
   const modifier = (input.combatant.savingThrowBonuses[input.ability] ??
     Math.floor((input.combatant.abilities[input.ability] - 10) / 2)) +
-    dnd5eActiveSavingThrowBonus(input.combatant.classState.activeEffects, input.ability) +
-    (blessRoll ?? 0) - (baneRoll ?? 0)
+    dnd5eCombatantSavingThrowEffectBonus(input.combatant, input.ability) +
+    (blessRoll ?? 0) - (baneRoll ?? 0) + (input.effectDiceModifier ?? 0)
   const initial = previewDnd5eSavingThrowRoll({
     rolls: input.mode === 'normal'
       ? [halflingLuckyD20 ?? d20]
@@ -370,6 +379,7 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
         target: input.target,
         combatant: input.combatant,
         rollKind: 'saving-throw',
+        source: input.sourceActorId ? { actorId: input.sourceActorId, kind: 'saving-throw' } : undefined,
         rollType: '豁免',
         originalD20: halflingLuckyD20 ?? d20,
         total: runningTotal,
@@ -428,10 +438,11 @@ export async function resolveDnd5eSavingThrowInterrupts(input: {
     bardicInspirationRoll,
     optionalBonusDieUse,
     darkOnesOwnLuckRoll,
-    rerollD20: reroll?.d20,
+    rerollResourceKey: reroll?.resourceKey, rerollD20: reroll?.d20,
     rerollD20Second: reroll?.d20Second,
     totalBeforeReroll: runningTotal,
     successBeforeReroll,
     success: rerollPreview?.success ?? successBeforeReroll,
   }
 }
+

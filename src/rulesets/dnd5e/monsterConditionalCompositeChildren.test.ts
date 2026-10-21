@@ -1,6 +1,8 @@
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDnd5eCombatant,
+  previewDnd5eMonsterCompositePrefix,
   dnd5eCombatantPairKey,
   resolveDnd5eHeadlessAction,
   startDnd5eHeadlessCombat,
@@ -439,4 +441,57 @@ vi.mock('./monsterMultiattackConstraints', async importOriginal => {
   const original = await importOriginal<typeof import('./monsterMultiattackConstraints')>()
   const { monsterMechanicConstraints } = await import('./test-utils/monsterMechanicConstraints')
   return monsterMechanicConstraints(original)
+})
+
+
+it('replays a failed ward between composite weapon children without losing the earlier hit', () => {
+  const state=encounter('kraken',[{id:'first',x:5},{id:'warded',x:10},{id:'last',x:15}])
+  const ward=createDnd5eMechanicalEffect({definitionId:'audit-ward',label:'Ward',targetId:'warded',
+    source:{kind:'plugin',actorId:'warded'},attackAttemptWard:{ability:'cha',dc:17,frequency:'once-per-turn',onFailure:'cannot-target-this-turn'}})
+  state.combatants.warded.classState.activeEffects=[ward]
+  const command=(d20:number,targetId='warded')=>({
+    type:'monster-multiattack-composite' as const,schemaVersion:1 as const,actorId:'monster',actionId:'multiattack',steps:[
+      {kind:'weapon' as const,actionId:'tentacle',roll:relationHit('kraken','tentacle','first')},
+      {kind:'skip' as const,actionId:'tentacle',wardBlocked:{targetId,saves:[{effectId:ward.id,targetId:'monster',d20}]}},
+      {kind:'weapon' as const,actionId:'tentacle',roll:miss('last')},
+    ]})
+  const run=(d20:number,targetId='warded')=>resolveDnd5eHeadlessAction(state,command(d20,targetId))
+  const snapshot=JSON.stringify(state)
+  const prefix=previewDnd5eMonsterCompositePrefix(state,{...command(1),steps:command(1).steps.slice(0,2)},'ward-prefix-audit')
+  expect(prefix.ok).toBe(true)
+  expect(JSON.stringify(state)).toBe(snapshot)
+  const result=run(1)
+  expect(result.ok,result.ok?undefined:result.reason).toBe(true)
+  expect(result.state.combatants.first.currentHp).toBeLessThan(500)
+  expect(result.state.combatants.warded.currentHp).toBe(500)
+  expect(result.state.combatants.last.currentHp).toBe(500)
+  expect(result.state.combatants.warded.classState.activeEffects?.find(e=>e.id===ward.id)?.attackAttemptWardReceipts?.[0].success).toBe(false)
+  expect(result.events.filter(e=>e.type==='attack-resolved')).toHaveLength(2)
+  expect(result.events.filter(e=>e.type==='saving-throw-resolved'&&e.ability==='cha')).toHaveLength(1)
+  expect(result.events.filter(e=>e.type==='turn-resource-spent'&&e.resource==='action')).toHaveLength(1)
+  const allowedCommand = {...command(20),steps:command(20).steps.map(step=>step.kind==='skip'
+    ? {kind:'weapon' as const,actionId:'tentacle',roll:miss('warded'),wardSaves:step.wardBlocked.saves} : step)}
+  const allowed=resolveDnd5eHeadlessAction(state,allowedCommand)
+  expect(allowed.ok,allowed.ok?undefined:allowed.reason).toBe(true)
+  expect(allowed.events.filter(e=>e.type==='attack-resolved')).toHaveLength(3)
+  expect(allowed.events.filter(e=>e.type==='saving-throw-resolved'&&e.ability==='cha')).toHaveLength(1)
+  expect(allowed.state.combatants.first.currentHp).toBeLessThan(500)
+  expect(allowed.state.combatants.warded.classState.activeEffects?.find(e=>e.id===ward.id)?.attackAttemptWardReceipts?.[0].success).toBe(true)
+  const retargetCommand={...command(1),steps:command(1).steps.map(step=>step.kind==='skip'
+    ? {kind:'weapon' as const,actionId:'tentacle',roll:miss('last'),wardRetargets:[step.wardBlocked]}:step)}
+  const retargeted=resolveDnd5eHeadlessAction(state,retargetCommand)
+  expect(retargeted.ok,retargeted.ok?undefined:retargeted.reason).toBe(true)
+  expect(retargeted.state.combatants.first.currentHp).toBeLessThan(500)
+  expect(retargeted.events.filter(e=>e.type==='attack-resolved')).toHaveLength(3)
+  expect(retargeted.events.filter(e=>e.type==='saving-throw-resolved'&&e.ability==='cha')).toHaveLength(1)
+  expect(retargeted.state.combatants.warded.classState.activeEffects?.find(e=>e.id===ward.id)?.attackAttemptWardReceipts?.[0].success).toBe(false)
+  const forgedRetarget=resolveDnd5eHeadlessAction(state,{...retargetCommand,steps:retargetCommand.steps.map(step=>
+    'wardRetargets' in step?{...step,wardRetargets:[{targetId:'warded',saves:[{effectId:ward.id,targetId:'monster',d20:20}]}]}:step)})
+  expect(forgedRetarget.ok).toBe(false)
+  expect(forgedRetarget.state.combatants.first.currentHp).toBe(500)
+  for(const denied of [run(20),run(0),run(1,'last'),resolveDnd5eHeadlessAction(state,{...command(1),steps:command(1).steps.map(step=>step.kind==='skip'?{...step,wardBlocked:{targetId:'warded',saves:[]}}:step)})]){
+    expect(denied.ok).toBe(false)
+    expect(denied.state.combatants.first.currentHp).toBe(500)
+    expect(denied.state.combatants.monster.turn.actionAvailable).toBe(true)
+  }
 })

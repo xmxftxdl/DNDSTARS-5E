@@ -41,6 +41,94 @@ function grant(character: Character, templateId: string, quantity: number): Char
 }
 
 describe('D&D 5e structured spell materials', () => {
+  it('qualifies a priced physical melee weapon structurally and rechecks it without consuming it', () => {
+    const requirement = { label: 'Melee weapon worth 1sp', options: [{ label: 'Weapon', components: [{
+      tag: 'physical-melee-weapon', label: 'Weapon', minimumUnitValueGp: 0.1, consumed: false,
+    }] }] }
+    const character = grant(caster(), 'srd-5.1:equipment:dnd5e-club', 1)
+    const original = structuredClone(character)
+    const plan = dnd5eSpellMaterialConsumptionPlan(character, requirement)!
+    expect(plan.allocations).toEqual([expect.objectContaining({ instanceId: character.dnd5eInventory!.entries[0].instanceId,
+      quantity: 1, unitValueGp: 0.1, consumed: false })])
+    expect(applyDnd5eSpellMaterialConsumption(character, plan)).toMatchObject({ ok: true, consumed: false })
+    expect(character).toEqual(original)
+    for (const currency of ['cp', 'sp', 'ep', 'gp', 'pp'] as const) {
+      const changed = structuredClone(character)
+      changed.dnd5eInventory!.entries[0].item.cost = { amount: { cp: 10, sp: 1, ep: 0.2, gp: 0.1, pp: 0.01 }[currency], currency }
+      expect(dnd5eSpellMaterialConsumptionPlan(changed, requirement)).toBeDefined()
+    }
+    for (const mode of ['cheap', 'no-price', 'destroyed', 'ethereal', 'ranged', 'vanishing'] as const) {
+      const changed = structuredClone(character), entry = changed.dnd5eInventory!.entries[0]
+      if (mode === 'cheap') entry.item.cost = { amount: 9, currency: 'cp' }
+      if (mode === 'no-price') entry.item.cost = undefined
+      if (mode === 'destroyed') entry.condition = { destroyed: true }
+      if (mode === 'ethereal') entry.planarState = 'ethereal'
+      if (entry.item.equipment?.dnd5e?.kind === 'weapon') {
+        if (mode === 'ranged') entry.item.equipment.dnd5e.mode = 'ranged'
+        if (mode === 'vanishing') entry.item.equipment.dnd5e.vanishesAfterRelease = true
+      }
+      entry.item.spellcastingMaterial = { tags: ['physical-melee-weapon'], unitValueGp: 100 }
+      expect(dnd5eSpellMaterialConsumptionPlan(changed, requirement), mode).toBeUndefined()
+      expect(applyDnd5eSpellMaterialConsumption(changed, plan).ok, mode).toBe(false)
+    }
+  })
+  it('allocates a bound material only as a single unconsumed physical unit and rechecks it', () => {
+    const character = grant(caster(), 'srd-5.1:item:diamond-300gp', 1)
+    const requirement = structuredClone(dnd5eCoreSpellMaterialRequirement('revivify')!)
+    const component = requirement.options[0].components[0]
+    component.consumed = false
+    component.bindEffectId = 'material-controller'
+    const plan = dnd5eSpellMaterialConsumptionPlan(character, requirement)!
+    expect(plan.allocations[0].bindEffectId).toBe('material-controller')
+    expect(applyDnd5eSpellMaterialConsumption(character, plan)).toMatchObject({ ok: true, consumed: false })
+    const stacked = structuredClone(character)
+    stacked.dnd5eInventory!.entries[0].quantity = 2
+    expect(dnd5eSpellMaterialConsumptionPlan(stacked, requirement)).toBeUndefined()
+    expect(applyDnd5eSpellMaterialConsumption(stacked, plan).ok).toBe(false)
+    component.consumed = true
+    expect(dnd5eSpellMaterialConsumptionPlan(character, requirement)).toBeUndefined()
+  })
+  it.each(['destroyed', 'ethereal'] as const)('rejects %s materials at both preparation and settlement', mode => {
+    const character = grant(caster(), 'srd-5.1:item:diamond-300gp', 1)
+    const requirement = dnd5eCoreSpellMaterialRequirement('revivify')!
+    const plan = dnd5eSpellMaterialConsumptionPlan(character, requirement)!
+    expect(plan).toBeDefined()
+    const invalid = structuredClone(character)
+    if (mode === 'destroyed') invalid.dnd5eInventory!.entries[0].condition = { destroyed: true }
+    else invalid.dnd5eInventory!.entries[0].planarState = 'ethereal'
+    const original = structuredClone(invalid)
+    expect(dnd5eSpellMaterialConsumptionPlan(invalid, requirement)).toBeUndefined()
+    expect(applyDnd5eSpellMaterialConsumption(invalid, plan)).toMatchObject({ ok: false, reason: 'material-unavailable' })
+    expect(invalid).toEqual(original)
+  })
+  it('rejects expired or clock-unknown materials and rechecks expiry at settlement', () => {
+    const character = grant(caster(), 'srd-5.1:item:diamond-300gp', 1)
+    character.dnd5eInventory!.entries[0].expiresAtWorldMinute = 120
+    const requirement = dnd5eCoreSpellMaterialRequirement('revivify')!
+    expect(dnd5eSpellMaterialConsumptionPlan(character, requirement)).toBeUndefined()
+    character.dnd5eWorldTimeAppliedMinute = 119
+    const plan = dnd5eSpellMaterialConsumptionPlan(character, requirement)!
+    expect(plan).toBeDefined()
+    expect(applyDnd5eSpellMaterialConsumption(character, plan).ok).toBe(true)
+    for (const minute of [120, 121]) {
+      const expired = { ...character, dnd5eWorldTimeAppliedMinute: minute }
+      expect(dnd5eSpellMaterialConsumptionPlan(expired, requirement)).toBeUndefined()
+      expect(applyDnd5eSpellMaterialConsumption(expired, plan)).toMatchObject({ ok: false, reason: 'material-unavailable' })
+    }
+    expect(character.dnd5eInventory!.entries[0].quantity).toBe(1)
+  })
+  it('requires a real expiry for recipes that mandate freshness, including at commit', () => {
+    const character = grant(caster(), 'srd-5.1:item:diamond-300gp', 1)
+    character.dnd5eWorldTimeAppliedMinute = 30
+    const requirement = structuredClone(dnd5eCoreSpellMaterialRequirement('revivify')!)
+    requirement.options[0].components[0].requiresExpiry = true
+    expect(dnd5eSpellMaterialConsumptionPlan(character, requirement)).toBeUndefined()
+    character.dnd5eInventory!.entries[0].expiresAtWorldMinute = 40
+    const plan = dnd5eSpellMaterialConsumptionPlan(character, requirement)!
+    expect(plan.allocations[0].requiresExpiry).toBe(true)
+    delete character.dnd5eInventory!.entries[0].expiresAtWorldMinute
+    expect(applyDnd5eSpellMaterialConsumption(character, plan).ok).toBe(false)
+  })
   it('matches explicit ingredient tags and never accepts price alone', () => {
     const requirement = dnd5eCoreSpellMaterialRequirement('revivify')!
     const expensiveSword: Character = {

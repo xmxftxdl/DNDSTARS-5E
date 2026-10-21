@@ -1,3 +1,11 @@
+import { dnd5eCharacterRageDeathDeferralActive } from './pluginApi'
+import {dnd5eTempleEntryRequirements} from './templeEntry'
+import { dnd5eJumpLaunchPoint } from './jumpLaunchPoint'
+import { appendDnd5eSolidExitMovementTraces, settleDnd5eSolidMaterialExit, replayDnd5eSolidExitFeatherFallChoices, type Dnd5eSolidExitFeatherFallChoice } from './solidMaterialExitSettlement'
+import { mapForSolidMaterialTraversal, mapGeometryForSolidMaterialTraversal } from '../../lib/mapSolidMaterialTraversal'
+import { dnd5eHeadlessAreaTraversalModifiers } from './headlessAreaTraversal'
+import { dnd5ePersistentAreaDirectionalMovementCostAt } from './persistentAreaGeometry'
+import { dnd5ePathIsStraightLine } from './movementPathStraightness'
 import { createMapTokenOccupancy } from '../../lib/mapTokenOccupancy'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { isMovementLocked } from '../../lib/combatStatus'
@@ -27,7 +35,11 @@ import {
   dnd5eDeclarativeCreatureSpaceTraversalMinimumLargerSizeRanks,
   dnd5eGrappleDragExtraMovementFeet,
   resolveDnd5eHeadlessAction,
+  previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
+  resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange,
+  type Dnd5eUnsupportedAirborneFallPreview,
   type Dnd5eActionResult,
+  type Dnd5eCombatEvent,
   type Dnd5eHeadlessCombatState,
   type Dnd5eOpeningAttackSavingThrowRoll,
 } from './headlessCombatEngine'
@@ -44,6 +56,7 @@ import { dnd5eTurnMovementSpent } from './turnEconomy'
 import { dnd5eClimbingMovementCost, dnd5eRunningJumpBonusFeet } from './classes'
 import {
   dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveSolidMaterialTraversals,
   dnd5eActivePlanarPhase,
   dnd5eAvailableRestrictedExtraActionKinds,
   dnd5eActiveEnvironmentalCapabilities,
@@ -94,6 +107,7 @@ export interface Dnd5eMapMovementTrace {
 }
 
 export interface PreparedDnd5ePlayerMove {
+  jumpSegment?: 'continue' | 'finish'
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -136,23 +150,6 @@ export interface PreparedDnd5ePlayerMove {
   characterIdByCombatantId: Record<string, string>
 }
 
-function dnd5ePathIsStraightLine(points: readonly { x: number; y: number }[]): boolean {
-  if (points.length < 3) return points.length >= 2
-  const start = points[0]
-  const end = points.at(-1)!
-  const dx = end.x - start.x
-  const dy = end.y - start.y
-  const lengthSquared = dx * dx + dy * dy
-  if (lengthSquared <= 1e-8) return false
-  return points.slice(1, -1).every((point) => {
-    const px = point.x - start.x
-    const py = point.y - start.y
-    const cross = Math.abs(px * dy - py * dx)
-    const dot = px * dx + py * dy
-    return cross <= Math.max(1, Math.sqrt(lengthSquared)) * 1e-6 &&
-      dot >= -1e-6 && dot <= lengthSquared + 1e-6
-  })
-}
 
 const CREATURE_SIZE_RANK = {
   微型: 0,
@@ -222,7 +219,7 @@ export function prepareDnd5eExplorationMove(input: {
   if (
     !actor ||
     actor.rulesetId !== 'dnd5e-2014-srd-5.1' ||
-    actor.currentHp <= 0 ||
+    (actor.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(actor)) ||
     !actorToken
   ) return { ok: false, reason: 'invalid-actor' }
   if (isMovementLocked(actor.conditions)) return { ok: false, reason: 'movement-locked' }
@@ -233,8 +230,12 @@ export function prepareDnd5eExplorationMove(input: {
     initiativeD20: 10,
     position: { x: actorToken.x, y: actorToken.y },
   })
+  // Use the same collision view for free-drag segments and grid detours. The
+  // authoritative resolver still receives the original map for exit placement.
+  input = { ...input, map: mapForSolidMaterialTraversal(input.map,
+    dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects).flatMap(source => source.rule.materials)) }
   const environmentalCapabilities = dnd5eActiveEnvironmentalCapabilities(
-    actorCombatant.classState.activeEffects,
+    actorCombatant.classState.activeEffects, actorCombatant,
   )
   const planarPhase = dnd5eActivePlanarPhase(actorCombatant.classState.activeEffects)
   const ignoresMaterialCollision = planarPhase.plane === 'ethereal' &&
@@ -251,7 +252,8 @@ export function prepareDnd5eExplorationMove(input: {
     },
   }
 
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const geometry = mapGeometryForSolidMaterialTraversal(mapGeometryRuntimeForMap(input.map.id),
+    dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects).flatMap(source => source.rule.materials))
   const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
   const fromTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
   const heightAboveGround = Math.max(0, fromElevationFeet - fromTerrainElevationFeet)
@@ -273,10 +275,11 @@ export function prepareDnd5eExplorationMove(input: {
   const toElevationFeet = ignoresMaterialCollision
     ? fromElevationFeet
     : targetTerrainElevationFeet + heightAboveGround
-  // Free placement must not first travel to a grid centre: imported doorways
-  // and corridors need not align with that grid. Validate the actual segment
-  // before asking grid A* to find a detour. Sight is not movement permission.
-  if (!snapsToGrid && !ignoresMaterialCollision) {
+  // An off-grid origin must not first travel to an obstructed grid centre.
+  // Validate the actual segment while keeping the destination's snap setting.
+  const snappedOrigin = snapTokenToGridCenter(actorToken.x, actorToken.y, actorToken, input.map)
+  const offGridOrigin = Math.hypot(snappedOrigin.x - actorToken.x, snappedOrigin.y - actorToken.y) > 0.001
+  if ((!snapsToGrid || offGridOrigin) && !ignoresMaterialCollision) {
     const distance = Math.hypot(to.x - actorToken.x, to.y - actorToken.y)
     const steps = Math.max(1, Math.ceil(distance / Math.max(1, input.map.gridSize / 4)))
     if (steps < 4096) {
@@ -319,6 +322,8 @@ export function prepareDnd5eExplorationMove(input: {
     },
     geometry,
     token: actorGeometryToken,
+    passThroughSolidMaterials: dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects)
+      .flatMap(source => source.rule.materials),
     to,
     canClimb: false,
     canSwim: environmentalCapabilities.treatsLiquidSurfacesAsSolidGround,
@@ -340,11 +345,13 @@ export function prepareDnd5eExplorationMove(input: {
         }),
     allowOccupiedDestination: ignoresMaterialCollision || environmentalCapabilities.canOccupyCreatureSpaces,
     minimumPassageGapInches: environmentalCapabilities.minimumPassageGapInches,
+    ignoreDifficultTerrainMaterials: environmentalCapabilities.ignoredDifficultTerrainMaterials,
     ignoreDifficultTerrain: ignoresMaterialCollision || environmentalCapabilities.ignoresDifficultTerrain,
     additionalDifficultTerrainMultiplier: ignoresMaterialCollision
       ? undefined
       : (token, position) =>
           dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+    additionalMovementCostPerFoot: (token, from, to) => dnd5ePersistentAreaDirectionalMovementCostAt({ map: input.map, token, from, to }),
     additionalSpeedCostMultiplier: ignoresMaterialCollision
       ? undefined
       : (token, position) =>
@@ -424,6 +431,11 @@ export function prepareDnd5eExplorationMove(input: {
 }
 
 export function prepareDnd5ePlayerMove(input: {
+  jumpApproachCheckpoint?: true
+  /** Host checkpoint metadata, separate from the untrusted player action. */
+  jumpSegment?: 'continue' | 'finish'
+  worldMinute?: number
+  worldSecondRemainder?: number
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -436,11 +448,13 @@ export function prepareDnd5ePlayerMove(input: {
   const actorToken = input.map.tokens.find((token) =>
     token.id === action.actorTokenId && token.type === 'player' && token.characterId === action.characterId,
   )
-  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || actor.currentHp <= 0 || !actorToken) {
+  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || (actor.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(actor)) || !actorToken) {
     return { ok: false, reason: 'invalid-actor' }
   }
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: action.combatId ?? `map-${input.map.id}`,
+    worldMinute: input.worldMinute,
+    worldSecondRemainder: input.worldSecondRemainder,
     round: action.round,
     turnSlotId: input.initiativeOrder[action.initiativeIndex]?.slotId,
     map: input.map,
@@ -523,7 +537,7 @@ export function prepareDnd5ePlayerMove(input: {
     traversalMode !== 'fly'
   ) return { ok: false, reason: 'movement-blocked' }
   const environmentalCapabilities = dnd5eActiveEnvironmentalCapabilities(
-    actorCombatant.classState.activeEffects,
+    actorCombatant.classState.activeEffects, actorCombatant,
   )
   const planarPhase = dnd5eActivePlanarPhase(actorCombatant.classState.activeEffects)
   const ignoresMaterialCollision = planarPhase.plane === 'ethereal' &&
@@ -532,13 +546,18 @@ export function prepareDnd5ePlayerMove(input: {
     ? Math.max(-1_000, Math.min(10_000, Math.floor(action.targetElevationFeet!)))
     : fromElevationFeet
   const toGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, to)
-  const toElevationFeet = ignoresMaterialCollision && traversalMode !== 'fly'
+  const solidMaterials = dnd5eActiveSolidMaterialTraversals(actorCombatant.classState.activeEffects)
+    .flatMap(source => source.rule.materials)
+  const undergroundWalk = traversalMode === 'walk' && solidMaterials.length > 0 &&
+    Number.isFinite(action.targetElevationFeet) && requestedElevationFeet < toGroundElevationFeet
+  const toElevationFeet = undergroundWalk ? requestedElevationFeet : ignoresMaterialCollision && traversalMode !== 'fly'
     ? fromElevationFeet
     : traversalMode === 'walk' || traversalMode === 'swim'
     ? toGroundElevationFeet
     : traversalMode === 'climb' ? Math.max(toGroundElevationFeet, Number.isFinite(action.targetElevationFeet) ? requestedElevationFeet : toGroundElevationFeet) : requestedElevationFeet
   const path = findMapGeometryPath({
     geometry, map: pathfindingMap, token: actorGeometryToken, to,
+    passThroughSolidMaterials: solidMaterials,
     climbVerticalSurfaces: traversalMode === 'climb',
     canClimb: traversalMode === 'climb' || traversalMode === 'fly',
     canSwim: traversalMode === 'swim' || environmentalCapabilities.treatsLiquidSurfacesAsSolidGround,
@@ -565,6 +584,7 @@ export function prepareDnd5ePlayerMove(input: {
     })(),
     allowOccupiedDestination: ignoresMaterialCollision || environmentalCapabilities.canOccupyCreatureSpaces,
     minimumPassageGapInches: environmentalCapabilities.minimumPassageGapInches,
+    ignoreDifficultTerrainMaterials: environmentalCapabilities.ignoredDifficultTerrainMaterials,
     ignoreDifficultTerrain: ignoresMaterialCollision || usesLongJump || environmentalCapabilities.ignoresDifficultTerrain || (
       actorCombatant.ignoreDifficultTerrainWhileDashing === true &&
       actorCombatant.classState.dashedTurnKey === `${action.combatId ?? `map-${input.map.id}`}:${Math.max(1, action.round)}:${input.initiativeOrder[action.initiativeIndex]?.slotId ?? actorToken.id}`
@@ -574,6 +594,7 @@ export function prepareDnd5ePlayerMove(input: {
       : (token, position) => usesLongJump
         ? 1
         : dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+    additionalMovementCostPerFoot: (token, from, to) => dnd5ePersistentAreaDirectionalMovementCostAt({ map: input.map, token, from, to }),
     additionalSpeedCostMultiplier: ignoresMaterialCollision
       ? undefined
       : (token, position) =>
@@ -601,6 +622,8 @@ export function prepareDnd5ePlayerMove(input: {
         const expectedElevation = draggedElevationStart +
           (path.elevationsFeet[index] ?? sourceElevationStart) - sourceElevationStart
         const draggedSegment = findMapGeometryPath({
+          passThroughSolidMaterials: dnd5eActiveSolidMaterialTraversals(snapshot.state.combatants[draggedTarget.id]?.classState.activeEffects)
+            .flatMap(source => source.rule.materials),
           geometry,
           map: dragMap,
           token: draggedToken,
@@ -613,6 +636,7 @@ export function prepareDnd5ePlayerMove(input: {
           maximumTerrainStepFeet: traversalMode === 'fall' ? 10_000 : 10,
           additionalDifficultTerrainMultiplier: (token, position) =>
             dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+          additionalMovementCostPerFoot: (token, from, to) => dnd5ePersistentAreaDirectionalMovementCostAt({ map: input.map, token, from, to }),
           additionalSpeedCostMultiplier: (token, position) =>
             dnd5ePersistentAreaSpeedCostMultiplierAt({ map: input.map, token, position }),
         })
@@ -644,12 +668,18 @@ export function prepareDnd5ePlayerMove(input: {
   const runningJump = traversalMode === 'long-jump-running'
     ? dnd5eRunningJumpSegments({
         distanceFeet: path.distanceFeet,
-        approachFeetAlready: actorCombatant.classState.runningJumpApproachFeet,
+        approachFeetAlready: input.jumpSegment && actorCombatant.classState.jumpMovementProgress
+          ? actorCombatant.runningJumpMinimumApproachFeet ?? 10 : actorCombatant.classState.runningJumpApproachFeet,
         minimumApproachFeet: actorCombatant.runningJumpMinimumApproachFeet,
       })
     : undefined
-  if (runningJump && !runningJump.hasRunningStart) return { ok: false, reason: 'movement-blocked' }
+  if (runningJump && !runningJump.hasRunningStart) {
+    if(input.jumpSegment==='continue' && runningJump.jumpDistanceFeet===0)
+      return prepareDnd5ePlayerMove({...input,action:{...input.action,dnd5eTraversalMode:'walk'},jumpSegment:undefined,jumpApproachCheckpoint:true})
+    return { ok: false, reason: 'movement-blocked' }
+  }
   const jumpDistanceFeet = runningJump?.jumpDistanceFeet ?? path.distanceFeet
+  const jumpLaunch = dnd5eJumpLaunchPoint({path:path.points,elevationsFeet:path.elevationsFeet,approachFeet:runningJump?.approachFeetIncluded ?? 0,coordinateUnitsPerFoot:input.map.gridSize/(input.map.feetPerCell ?? 5)})
   const traversalProfile = {
     strengthScore: actorCombatant.abilities.str,
     strengthModifier: Math.floor((actorCombatant.abilities.str - 10) / 2),
@@ -666,12 +696,14 @@ export function prepareDnd5ePlayerMove(input: {
       dnd5eClimbingMovementCost(actor, 1),
     ),
     runningLongJumpBonusFeet: dnd5eRunningJumpBonusFeet(actor),
+    verticalJumpBonusFeet: jumpLaunch ? dnd5eHeadlessAreaTraversalModifiers(snapshot.state, actorCombatant, jumpLaunch).verticalJumpBonusFeet : 0,
     jumpDistanceMultiplier: dnd5eActiveJumpDistanceMultiplier(actorCombatant.classState.activeEffects),
     ignoreUnderwaterMovementPenalty: environmentalCapabilities.ignoresUnderwaterMovementPenalty,
   }
   const traversal = dnd5eTraversalMovementCost({
     distanceFeet: jumpDistanceFeet,
-    baseMovementCostFeet: path.movementCostFeet,
+    baseMovementCostFeet: input.jumpApproachCheckpoint || traversalMode === 'long-jump-running' || traversalMode === 'long-jump-standing'
+      ? path.unroundedMovementCostFeet ?? path.movementCostFeet : path.movementCostFeet,
     // Flight pays for absolute vertical change; walk/climb only charge ascent.
     elevationGainFeet: traversalMode === 'climb' ? 0 : traversalMode === 'fly'
       ? Math.abs(toElevationFeet - fromElevationFeet)
@@ -680,6 +712,12 @@ export function prepareDnd5ePlayerMove(input: {
     profile: traversalProfile,
   })
   if (!traversal.ok) return { ok: false, reason: 'movement-blocked' }
+  const jumpProgress = input.jumpSegment ? actorCombatant.classState.jumpMovementProgress : undefined
+  if (jumpProgress && !dnd5eTraversalMovementCost({
+    distanceFeet:jumpProgress.distanceFeet+jumpDistanceFeet,
+    elevationGainFeet:Math.max(0,toElevationFeet-jumpProgress.launchElevationFeet),
+    mode:traversalMode,profile:traversalProfile,
+  }).ok) return {ok:false,reason:'movement-blocked'}
   const locomotionCostFeet = traversal.movementCostFeet +
     (action.dnd5eCarefulMovement ? path.distanceFeet : 0) +
     (isProne && !standFromProne ? path.distanceFeet : 0)
@@ -728,6 +766,11 @@ export function prepareDnd5ePlayerMove(input: {
         },
       }]
     })
+  boundarySavingThrows.push(...dnd5eTempleEntryRequirements(snapshot.state,actorCombatant,to,toElevationFeet,[{...actorCombatant.position,elevationFeet:fromElevationFeet},...path.points.map((point,index)=>({...point,elevationFeet:path.elevationsFeet[index]??fromElevationFeet})),{...to,elevationFeet:toElevationFeet}]).filter(entry=>!entry.denied).map(entry=>({
+    effectId:entry.effectId,sourceActorId:entry.sourceActorId,sourceName:'神庙',requirement:{featureId:entry.effectId,ability:entry.ability,dc:entry.dc,
+      modifier:actorCombatant.savingThrowBonuses.cha??Math.floor((actorCombatant.abilities.cha-10)/2),mode:dnd5eSavingThrowMode(actorCombatant,'cha',{sourceIsSpell:true,sourceIsMagical:true}),
+      blessed:effectiveDnd5eActiveEffects(actorCombatant.classState.activeEffects).some(effect=>effect.source.rulesId==='bless'),
+      baned:effectiveDnd5eActiveEffects(actorCombatant.classState.activeEffects).some(effect=>effect.source.rulesId==='bane'),failureDamageMultiplier:1}})))
   const movementRepeatSavingThrows = dnd5eActiveMovementRepeatSaves(actorCombatant.classState.activeEffects)
     .flatMap((repeat) => {
       const source = snapshot.state.combatants[repeat.sourceActorId]
@@ -784,6 +827,7 @@ export function prepareDnd5ePlayerMove(input: {
       distanceFeet,
       movementCostFeet,
       ...(runningJump ? { jumpDistanceFeet } : {}),
+      jumpSegment: input.jumpSegment,
       toElevationFeet,
       toGroundElevationFeet,
       fallingDamageDice: fallingDamageDiceByCombatantId[actorToken.id] ?? 0,
@@ -799,7 +843,7 @@ export function prepareDnd5ePlayerMove(input: {
       ],
       path: path.points,
       pathElevationsFeet: path.elevationsFeet,
-      straightLine: dnd5ePathIsStraightLine(path.points),
+      straightLine: dnd5ePathIsStraightLine(path.points, path.elevationsFeet),
       standFromProne,
       standPreventedBy: isProne && cannotStand && action.dnd5eStandFromProne !== false
         ? 'hideous-laughter'
@@ -815,20 +859,117 @@ export function prepareDnd5ePlayerMove(input: {
   }
 }
 
+export function prepareDnd5eExplorationEntrySavingThrows(input:{prepared:PreparedDnd5eExplorationMove;map:BattleMap;characters:readonly Character[];worldMinute?:number}){
+ const snapshot=createDnd5eMapCombatSnapshot({combatId:`exploration:${input.map.id}`,worldMinute:input.worldMinute,map:input.map,characters:input.characters,initiativeOrder:[],
+  additionalCreatureTokenIds:input.map.tokens.filter(token=>token.type==='player'||token.type==='enemy').map(token=>token.id)})
+ snapshot.state.active=false
+ const actor=snapshot.state.combatants[input.prepared.actorToken.id]
+ if(!actor)return undefined
+ const route=[{...actor.position,elevationFeet:actor.elevationFeet??0},...input.prepared.path.map((point,index)=>({...point,elevationFeet:input.prepared.pathElevationsFeet[index]??0})),
+  {...input.prepared.to,elevationFeet:input.prepared.toElevationFeet}]
+ const entries=dnd5eTempleEntryRequirements(snapshot.state,actor,input.prepared.to,input.prepared.toElevationFeet,route)
+ const effects=effectiveDnd5eActiveEffects(actor.classState.activeEffects)
+ return {snapshot,actor,route,entries,boundarySavingThrows:entries.filter(entry=>!entry.denied).map(entry=>({effectId:entry.effectId,requirement:{featureId:entry.effectId,ability:entry.ability,dc:entry.dc,
+  modifier:actor.savingThrowBonuses.cha??Math.floor((actor.abilities.cha-10)/2),mode:dnd5eSavingThrowMode(actor,'cha',{sourceIsSpell:true,sourceIsMagical:true}),
+  blessed:effects.some(effect=>effect.source.rulesId==='bless'),baned:effects.some(effect=>effect.source.rulesId==='bane'),failureDamageMultiplier:1}}))}
+}
+
+/** Host-only exploration commit; preparation alone must never persist a solid-material move. */
+export function resolvePreparedDnd5eExplorationMove(input: {
+  worldMinute?:number
+  transactionId?:string
+  effectRollDice?:Readonly<Record<string,readonly number[]>>
+  boundarySavingThrows?:readonly (Dnd5eOpeningAttackSavingThrowRoll&{effectId:string})[]
+  prepared: PreparedDnd5eExplorationMove
+  deferSolidMaterialExit?: boolean
+  map: BattleMap
+  characters: readonly Character[]
+  solidExitFeatherFallChoices?: readonly Dnd5eSolidExitFeatherFallChoice[]
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): { ok: true; application: Dnd5eMapResultPlan; prepared: PreparedDnd5eExplorationMove; events: Dnd5eCombatEvent[];
+  state: Dnd5eHeadlessCombatState; characterIdByCombatantId: Readonly<Record<string, string>> } |
+  { ok: false; reason: string; solidExitReactionState?: Dnd5eHeadlessCombatState; airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[] } {
+  const entry=prepareDnd5eExplorationEntrySavingThrows(input)
+  if(!entry)return {ok:false,reason:'solid-traversal-actor-missing'}
+  const {snapshot}=entry
+  const entryEvents: Dnd5eCombatEvent[] = []
+  let actor=entry.actor
+  if(entry.entries.length||input.boundarySavingThrows?.length){
+    const result=resolveDnd5eHeadlessAction(snapshot.state,{type:'temple-entry-attempt',actorId:actor.id,to:input.prepared.to,toElevationFeet:input.prepared.toElevationFeet,
+      distance:1,hostMovementPath:entry.route,boundarySavingThrows:input.boundarySavingThrows,effectRollDice:input.effectRollDice},
+      {transactionId:input.transactionId})
+    if(!result.ok)return {ok:false,reason:result.reason}
+    entryEvents.push(...result.events)
+    snapshot.state=result.state;actor=result.state.combatants[actor.id]
+    if(result.movementBlocked)return {ok:true,state:result.state,events:entryEvents,characterIdByCombatantId:snapshot.characterIdByCombatantId,
+      prepared:{...input.prepared,to:actor.position,toElevationFeet:actor.elevationFeet??0,path:[actor.position],pathElevationsFeet:[actor.elevationFeet??0]},
+      application:planDnd5eMapResultApplication({state:result.state,map:input.map,characters:input.characters,characterIdByCombatantId:snapshot.characterIdByCombatantId,events:entryEvents})}
+  }
+  actor.position = { ...input.prepared.to }
+  actor.elevationFeet = input.prepared.toElevationFeet
+  if (input.deferSolidMaterialExit) return { ok: true, prepared: input.prepared, events: entryEvents,
+    state: snapshot.state, characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    application: planDnd5eMapResultApplication({ state: snapshot.state, map: input.map,
+      characters: input.characters, characterIdByCombatantId: snapshot.characterIdByCombatantId, events: entryEvents }) }
+  const exit = settleDnd5eSolidMaterialExit({ state: snapshot.state, map: input.map,
+    geometry: mapGeometryRuntimeForMap(input.map.id), actorId: actor.id })
+  if (!exit.ok) return exit
+  const pushedIds = exit.events.flatMap(event => event.type === 'moved' ? [event.actorId] : [])
+  const reactions = replayDnd5eSolidExitFeatherFallChoices(snapshot.state, exit.state, pushedIds, input.solidExitFeatherFallChoices)
+  if (!reactions.ok) return { ok: false, reason: 'invalid-reaction' }
+  exit.state = reactions.state
+  exit.events.push(...reactions.events)
+  const falls = pushedIds.length
+    ? previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(snapshot.state, exit.state, pushedIds) : []
+  if (falls.length) {
+    if (input.airborneFallDamageRollsByCombatantId == null) return { ok: false, reason: 'invalid-dice', airborneFalls: falls, solidExitReactionState: exit.state }
+    const landed = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(snapshot.state, exit.state,
+      input.airborneFallDamageRollsByCombatantId, pushedIds)
+    if (!landed.ok) return { ok: false, reason: landed.reason, airborneFalls: falls }
+    exit.state = landed.state
+    exit.events.push(...landed.events)
+  }
+  const moved = exit.state.combatants[actor.id]
+  entryEvents.push(...exit.events)
+  const trace = appendDnd5eSolidExitMovementTraces([{ tokenId: actor.id, to: input.prepared.to,
+    path: input.prepared.path, pathElevationsFeet: input.prepared.pathElevationsFeet }], exit.events)[0]
+  return { ok: true, state: exit.state, events: entryEvents, characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    prepared: { ...input.prepared, to: moved.position, toElevationFeet: moved.elevationFeet ?? 0,
+      path: trace.path, pathElevationsFeet: trace.pathElevationsFeet },
+    application: planDnd5eMapResultApplication({ state: exit.state, map: input.map, characters: input.characters,
+      characterIdByCombatantId: snapshot.characterIdByCombatantId, events: entryEvents }),
+  }
+}
+
 export function resolvePreparedDnd5ePlayerMove(input: {
+  transactionId?: string
+  effectRollDice?: Readonly<Record<string, readonly number[]>>
   prepared: PreparedDnd5ePlayerMove
+  deferMovementRepeatSavingThrows?: true
+  deferSolidMaterialExit?: boolean
+  solidExitFeatherFallChoices?: readonly Dnd5eSolidExitFeatherFallChoice[]
   boundarySavingThrows?: readonly (Dnd5eOpeningAttackSavingThrowRoll & { effectId: string })[]
   movementRepeatSavingThrows?: readonly (Dnd5eOpeningAttackSavingThrowRoll & { effectId: string })[]
   fallingDamageRolls?: readonly number[]
   fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; prepared?: PreparedDnd5ePlayerMove;
+  solidExitReactionState?: Dnd5eHeadlessCombatState;
+  airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[] } {
   const { prepared } = input
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  let settledPrepared = prepared
+  let result = resolveDnd5eHeadlessAction(prepared.state, {
+    effectRollDice: input.effectRollDice,
     type: 'move',
     actorId: prepared.actorToken.id,
     to: prepared.to,
     distance: prepared.distanceFeet,
+    hostMovementPath: [{...prepared.state.combatants[prepared.actorToken.id].position,elevationFeet:prepared.state.combatants[prepared.actorToken.id].elevationFeet??0},
+      ...prepared.path.map((point,index)=>({...point,elevationFeet:prepared.pathElevationsFeet[index]??prepared.actorToken.elevationFeet??0})),{...prepared.to,elevationFeet:prepared.toElevationFeet}],
     jumpDistance: prepared.jumpDistanceFeet,
+    jumpSegment: prepared.jumpSegment,
+    jumpPath: prepared.jumpDistanceFeet != null ? prepared.path : undefined,
+    jumpPathElevationsFeet: prepared.jumpDistanceFeet != null ? prepared.pathElevationsFeet : undefined,
     climbDistanceIncludesElevation: prepared.action.dnd5eTraversalMode === 'climb' ? true : undefined,
     straightLine: prepared.straightLine,
     movementCost: prepared.movementCostFeet,
@@ -842,9 +983,43 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     movementRepeatSavingThrows: input.movementRepeatSavingThrows,
     fallingDamageRolls: input.fallingDamageRolls,
     fallingDamageRollsByCombatantId: input.fallingDamageRollsByCombatantId,
-  })
+  }, { transactionId: input.transactionId }, {deferMovementRepeatSavingThrows:input.deferMovementRepeatSavingThrows})
   if (!result.ok) return { result }
-  const escapeEvents = prepared.automaticEscape?.removedEffects.flatMap((effect) => [
+  if (!result.movementBlocked && !input.deferSolidMaterialExit) {
+    const exit = settleDnd5eSolidMaterialExit({ state: result.state, map: prepared.map,
+      geometry: mapGeometryRuntimeForMap(prepared.map.id), actorId: prepared.actorToken.id })
+    if (!exit.ok) return { result: { ok: false, state: prepared.state, events: [], reason: 'invalid-target' } }
+    const pushedIds = exit.events.flatMap(event => event.type === 'moved' ? [event.actorId] : [])
+    const reactions = replayDnd5eSolidExitFeatherFallChoices(prepared.state, exit.state, pushedIds, input.solidExitFeatherFallChoices)
+    if (!reactions.ok) return { result: { ok: false, state: prepared.state, events: [], reason: 'invalid-target' } }
+    exit.state = reactions.state
+    exit.events.push(...reactions.events)
+    const falls = pushedIds.length
+      ? previewDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(prepared.state, exit.state, pushedIds) : []
+    if (falls.length) {
+      if (input.airborneFallDamageRollsByCombatantId == null) return {
+        result: { ok: false, state: prepared.state, events: [], reason: 'invalid-dice' }, airborneFalls: falls, solidExitReactionState: exit.state }
+      const landed = resolveDnd5eUnsupportedAirborneFallsAfterEnvironmentalChange(prepared.state, exit.state,
+        input.airborneFallDamageRollsByCombatantId, pushedIds)
+      if (!landed.ok) return { result: landed, airborneFalls: falls }
+      exit.state = landed.state
+      exit.events.push(...landed.events)
+    }
+    result = { ...result, state: exit.state, events: [...result.events, ...exit.events] }
+    if (exit.events.length) {
+      const movementTraces = appendDnd5eSolidExitMovementTraces(prepared.movementTraces, exit.events)
+      const trace = movementTraces.find(trace => trace.tokenId === prepared.actorToken.id)!
+      settledPrepared = { ...prepared, movementTraces, to: trace.to, path: trace.path,
+        pathElevationsFeet: trace.pathElevationsFeet, toElevationFeet: trace.pathElevationsFeet.at(-1) ?? prepared.toElevationFeet,
+        toGroundElevationFeet: exit.state.combatants[prepared.actorToken.id].groundElevationFeet ?? prepared.toGroundElevationFeet }
+    }
+  }
+  if (result.movementBlocked && prepared.automaticEscape) {
+    const actor = result.state.combatants[prepared.actorToken.id]
+    actor.classState.activeEffects = [...(actor.classState.activeEffects ?? []), ...prepared.automaticEscape.removedEffects]
+    actor.conditions = dnd5eConditionsFromActiveEffects(actor.classState.activeEffects)
+  }
+  const escapeEvents = (result.movementBlocked ? undefined : prepared.automaticEscape)?.removedEffects.flatMap((effect) => [
     {
       type: 'active-effect-removed' as const,
       targetId: prepared.actorToken.id,
@@ -863,6 +1038,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     : result
   return {
     result: resolvedResult,
+    prepared: settledPrepared,
     application: planDnd5eMapResultApplication({
       state: resolvedResult.state,
       map: prepared.map,
@@ -891,7 +1067,7 @@ export function resolveDnd5ePlayerDisengage(input: {
   const token = input.map.tokens.find((item) =>
     item.id === input.action.actorTokenId && item.characterId === input.action.characterId && item.type === 'player',
   )
-  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || actor.currentHp <= 0 || !token) {
+  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || (actor.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(actor)) || !token) {
     return { ok: false, reason: 'invalid-actor' }
   }
   const restrictedDisengageAvailable = dnd5eAvailableRestrictedExtraActionKinds({
@@ -947,7 +1123,7 @@ export function resolveDnd5ePlayerDodge(input: {
   const token = input.map.tokens.find((item) =>
     item.id === input.action.actorTokenId && item.characterId === input.action.characterId && item.type === 'player',
   )
-  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || actor.currentHp <= 0 || !token) {
+  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || (actor.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(actor)) || !token) {
     return { ok: false, reason: 'invalid-actor' }
   }
   if (input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
@@ -990,3 +1166,4 @@ export function resolveDnd5ePlayerDodge(input: {
     }),
   }
 }
+

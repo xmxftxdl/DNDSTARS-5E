@@ -1,8 +1,27 @@
 import weakenedIcon from './icons/condition-weakened.svg'
 import { describe, expect, it } from 'vitest'
-import { dnd5eTokenStatusMarkerStyle } from './dnd5eTokenStatusMarkerPresentation'
+import { dnd5eTokenStatusMarkerStyle, dnd5eTokenStatusMarkerTooltip } from './dnd5eTokenStatusMarkerPresentation'
+import { dnd5eTokenStatusMarkersFromActiveEffects } from '../../rulesets/dnd5e/tokenStatusMarkers'
 
 describe('D&D 5e Token status marker presentation', () => {
+  it('describes saved module dice and updates remaining duration without spell-name special cases', () => {
+    const saved = JSON.parse(JSON.stringify({id:'test:boon',label:'检定祝福',legacyCondition:'community.check-boon.boon-mark',
+      modifiers:{optionalBonusDie:{sides:6,appliesTo:['ability-check','saving-throw'],consumeOnUse:true}},
+      duration:{type:'rounds',remainingRounds:10,tickOn:'target-turn-end'}}))
+    const tooltip = () => dnd5eTokenStatusMarkerTooltip(dnd5eTokenStatusMarkersFromActiveEffects([saved])[0])
+    expect(tooltip().description).toContain('1d6')
+    expect(tooltip().description).toContain('属性／技能检定或豁免')
+    expect(tooltip().description).toContain('使用后移除此效果')
+    expect(tooltip().description).toContain('剩余 10 轮')
+    expect(tooltip().description).not.toContain('地图标注')
+    saved.duration.remainingRounds = 9
+    saved.modifiers.optionalBonusDie.sides = 8
+    expect(tooltip().description).toContain('剩余 9 轮')
+    expect(tooltip().description).toContain('1d8')
+    saved.modifiers.optionalBonusDie.consumeOnUse = false
+    expect(tooltip().description).toContain('持续期间每次对应检定均可选择使用')
+    expect(tooltip().description).not.toContain('使用后移除此效果')
+  })
   it('uses the Disguise Self artwork for the disguise marker', () => {
     expect(dnd5eTokenStatusMarkerStyle('disguised')).toMatchObject({
       glyph: '幻',

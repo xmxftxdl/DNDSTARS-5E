@@ -2,9 +2,11 @@ import type { BattleMap, Token } from '../../store/maps'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import { dnd5eMapTokenDistanceFeet } from '../../rulesets/dnd5e/verticalCombatGeometry'
 import type { Dnd5eSustainedSpellAttackDefinition } from '../../rulesets/dnd5e/spells'
+import { dnd5eAnimatedObjectSnapshot } from '../../rulesets/dnd5e/animatedObjectSnapshot'
 
 export type Dnd5eMapSpellTargetContract =
   | { kind: 'self' }
+  | { kind: 'object-animation'; sizes: readonly Parameters<typeof dnd5eAnimatedObjectSnapshot>[1][]; rangeFeet?: number }
   | {
       kind: 'creature'
       relation: 'ally' | 'enemy' | 'any'
@@ -46,6 +48,16 @@ export function dnd5eMapSpellTargetOptions(input: {
   /** Map geometry projection used to hide targets the caster cannot affect. */
   hasLineOfEffect?: (actorToken: Token, targetToken: Token) => boolean
 }): Token[] {
+  if (input.contract?.kind === 'object-animation') {
+    const { contract, actorToken, map } = input
+    if (!actorToken || !map || !contract.sizes.length) return []
+    return input.tokens.filter(token =>
+      !input.unavailableTokenIds?.has(token.id) &&
+      (input.eligibleTokenIds == null || input.eligibleTokenIds.has(token.id)) &&
+      contract.sizes.every(size => dnd5eAnimatedObjectSnapshot(token, size, actorToken.id)) &&
+      (!input.hasLineOfEffect || input.hasLineOfEffect(actorToken, token)) &&
+      (contract.rangeFeet == null || dnd5eMapTokenDistanceFeet({ map, left: actorToken, right: token }) <= contract.rangeFeet))
+  }
   const creatures = input.tokens.filter((token) =>
     token.type !== 'obstacle' &&
     !input.unavailableTokenIds?.has(token.id) &&

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import {
   prepareDnd5eMonsterEscapeActiveEffect,
@@ -187,6 +187,56 @@ describe('monster basic Headless actions', () => {
     expect(resolved.application?.changedTokenIds).toContain(goblin.id)
   })
 
+  it.each([1,20])('uses an action to remove a declared Athletics effect (roll=%s)', d20 => {
+    const restraint = createDnd5eMechanicalEffect({
+      id: 'web:restrained:goblin',
+      definitionId: 'test:binding', label: 'Binding',
+      targetId: 'goblin',
+      source: { kind: 'spell', actorId: 'hero-token', rulesId: 'web' },
+      modifiers: { speedPenaltyFeet: 10 },
+      removal: { action: { label: 'Remove binding', economy: 'action', maxDistanceFeet: 5, abilityCheck: { ability: 'str', skill: 'athletics', dc: 13 } } },
+    })
+    const goblin = token({
+      id: 'goblin',
+      label: '哥布林',
+      poolId: 'srd-5.1:goblin',
+      hp: 7,
+      maxHp: 7,
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [restraint] },
+    })
+    const hero = character()
+    const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 45 })
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 100, height: 50, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [goblin, heroToken],
+    }
+    const resolved = resolveDnd5eMonsterEscapeActiveEffect({
+      combatId: 'combat',
+      round: 1,
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: goblin.id,
+      effectId: restraint.id,
+      d20,
+      turnEconomy: createDnd5eTurnEconomyCounts('1:goblin', 30),
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result).toMatchObject({ ok: true })
+    if (!resolved.result.ok) return
+    expect(resolved.result.state.combatants[goblin.id].turn.actionAvailable).toBe(false)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({type:'ability-check-resolved',skill:'athletics',success:d20===20}))
+    expect((resolved.result.state.combatants[goblin.id].classState.activeEffects??[]).some(e=>e.id===restraint.id)).toBe(d20===1)
+    const mappedGoblin = resolved.application?.map.tokens.find((candidate) => candidate.id === goblin.id)
+    expect((mappedGoblin?.dnd5eCombatState?.activeEffects??[]).some(e=>e.id===restraint.id)).toBe(d20===1)
+    expect(resolved.application?.changedTokenIds).toContain(goblin.id)
+  })
+
   it('resolves a basic grapple escape as an opposed check with both roll modes', () => {
     const grapple = createDnd5eConditionEffect({
       id: 'basic-action:grapple:hero-token:goblin',
@@ -340,4 +390,34 @@ describe('monster basic Headless actions', () => {
     expect(resolved.result.state.combatants[heroToken.id].classState.activeEffects ?? []).toEqual([])
     expect(resolved.application?.changedCharacterIds).toContain(hero.id)
   })
+})
+
+
+it('prepares and projects a monster saving-throw escape without substituting an ability check', () => {
+  const hero = character()
+  const goblin = token({ id: 'goblin', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7,
+    dnd5eCombatState: { schemaVersion: 2, activeEffects: [
+      createDnd5eConditionEffect({ id: 'save-cage', condition: 'restrained', targetId: 'goblin', source: { kind: 'spell' },
+        duration: { type: 'permanent' }, escapeSavingThrow: { ability: 'wis', dc: 10, economy: 'action' } }),
+      createDnd5eMechanicalEffect({ id: 'penalty', definitionId: 'penalty', label: 'Penalty', targetId: 'goblin', source: { kind: 'spell' },
+        duration: { type: 'permanent' }, modifiers: { savingThrowDisadvantages: ['wis'] } })] } })
+  const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 45 })
+  const map: BattleMap = { id: 'map', name: 'Map', width: 100, height: 50, gridSize: 10,
+    gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [goblin, heroToken] }
+  const prepared = prepareDnd5eMonsterEscapeActiveEffect({ combatId: 'combat', map, characters: [hero], actorTokenId: goblin.id, effectId: 'save-cage',
+    initiativeOrder: [{ tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 }],
+    turnEconomy: createDnd5eTurnEconomyCounts('turn', 30) })
+  expect(prepared.ok).toBe(true)
+  if (!prepared.ok) return
+  expect(prepared.prepared).toMatchObject({ rollKind: 'saving-throw', rollMode: 'disadvantage', ability: 'wis', dc: 10 })
+  const before = JSON.stringify(prepared.prepared)
+  for (const success of [true, false]) {
+    const result = resolvePreparedDnd5eMonsterEscapeActiveEffect({ prepared: prepared.prepared, d20: 20, d20Second: success ? 20 : 1 })
+    expect(result.result.ok, JSON.stringify(result.result)).toBe(true)
+    expect(result.result.state.combatants.goblin.conditions.includes('restrained')).toBe(!success)
+    expect(result.result.state.combatants.goblin.turn.actionAvailable).toBe(false)
+    expect(result.application?.changedTokenIds).toContain(goblin.id)
+    expect(JSON.stringify(prepared.prepared)).toBe(before)
+  }
 })

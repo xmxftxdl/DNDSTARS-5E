@@ -5,6 +5,7 @@ import {
   type Dnd5eMapResultPlan,
 } from '../../rulesets/dnd5e/mapBridge'
 import { settleDnd5eMovementTracesSequentially } from '../combat/dnd5eCombatRules'
+import { truncateTokenMovementPath } from '../../lib/tokenMovementAnimation'
 
 type BattleMap = Parameters<typeof createDnd5eMapCombatSnapshot>[0]['map']
 type Token = BattleMap['tokens'][number]
@@ -63,6 +64,7 @@ export interface Dnd5eMovementHazardResult {
   map: BattleMap
   application: Dnd5eMapResultPlan
   finalPositionByCombatantId: Readonly<Record<string, { x: number; y: number }>>
+  completedPathsByCombatantId: Readonly<Record<string, readonly { x: number; y: number }[]>>
   logs: string[]
 }
 
@@ -75,6 +77,8 @@ interface MovementSettlementContext {
 }
 
 export async function coordinateDnd5eMovementHazards(input: {
+  initialApplication?: Dnd5eMovementHazardStepResult['application']
+  worldMinute?: number
   state: Dnd5eHeadlessCombatState
   map: BattleMap
   characters: readonly Character[]
@@ -91,13 +95,16 @@ export async function coordinateDnd5eMovementHazards(input: {
     movement: Dnd5eMovementHazardTrace
     carefulMovement: boolean
   }): Promise<Dnd5eMovementHazardStepResult>
+  /** Finalize the actual endpoint only after along-path hazards have stopped or completed movement. */
+  settleEndpoint?(settled: Dnd5eMovementHazardStepResult, movement: Dnd5eMovementHazardTrace): Promise<Dnd5eMovementHazardStepResult>
 }): Promise<Dnd5eMovementHazardResult> {
   const sourceTokens = new Map(input.map.tokens.map((token) => [token.id, token]))
+  const completedPathsByCombatantId: Record<string, Array<{ x: number; y: number }>> = {}
   const sequential = await settleDnd5eMovementTracesSequentially<MovementSettlementContext>({
     initialContext: {
       state: input.state,
-      map: input.map,
-      characters: [...input.characters],
+      map: input.initialApplication?.map ?? input.map,
+      characters: [...(input.initialApplication?.characters ?? input.characters)],
       characterIdByCombatantId: input.characterIdByCombatantId,
       logs: [],
     },
@@ -118,7 +125,7 @@ export async function coordinateDnd5eMovementHazards(input: {
             },
           }
         : context.state
-      const settled = await input.settleStep({
+      let settled = await input.settleStep({
         state: movementState,
         map: context.map,
         characters: context.characters,
@@ -127,6 +134,7 @@ export async function coordinateDnd5eMovementHazards(input: {
         movement,
         carefulMovement: movement.tokenId === input.carefulMovementActorId,
       })
+      const path = truncateTokenMovementPath(movement.path, settled.finalPosition)
       const map = settled.application.map
       const characters = settled.application.characters
       const projectedInitiativeOrder = projectInitiativeEntriesForHeadlessState(
@@ -134,28 +142,46 @@ export async function coordinateDnd5eMovementHazards(input: {
         settled.state,
       )
       const refreshed = createDnd5eMapCombatSnapshot({
+        worldMinute: input.worldMinute ?? settled.state.companionScene?.worldMinute ?? input.state.companionScene?.worldMinute,
         combatId: settled.state.combatId,
         round: settled.state.round,
         turnSlotId: settled.state.turnSlotId,
         map,
         characters,
         initiativeOrder: projectedInitiativeOrder,
+        additionalCreatureTokenIds: Object.keys(settled.state.combatants),
       })
+      // The committed movement projection may intentionally be below terrain.
+      // Snapshot construction clamps ordinary token heights to ground; retain
+      // the validated moved token height until the endpoint ejection settles.
+      const movedToken = map.tokens.find(entry => entry.id === movement.tokenId)
+      const refreshedMover = refreshed.state.combatants[movement.tokenId]
+      if (refreshedMover && movedToken?.elevationFeet != null && Number.isFinite(movedToken.elevationFeet)) {
+        refreshedMover.elevationFeet = movedToken.elevationFeet
+        refreshedMover.airborne = movedToken.elevationFeet > (refreshedMover.groundElevationFeet ?? 0) + 1e-4
+      }
       const activeSlotId = settled.state.initiativeSlotIds?.[settled.state.initiativeIndex]
       const activeActorId = settled.state.initiativeOrder[settled.state.initiativeIndex]
       const refreshedInitiativeIndex = activeSlotId
         ? refreshed.state.initiativeSlotIds?.indexOf(activeSlotId) ?? -1
         : refreshed.state.initiativeOrder.indexOf(activeActorId)
+      // Persistent area settlement can update its application while retaining
+      // the earlier Headless snapshot. Rebuild before endpoint effects so they
+      // observe actual stopping positions, damage, conditions and concentration.
+      settled = { ...settled, state: { ...refreshed.state,
+        active: settled.state.active,
+        initiativeIndex: refreshedInitiativeIndex >= 0 ? refreshedInitiativeIndex : refreshed.state.initiativeIndex },
+        map }
+      const last = path.at(-1)
+      if (!last || Math.hypot(last.x - settled.finalPosition.x, last.y - settled.finalPosition.y) > 0.01) {
+        path.push({ ...settled.finalPosition })
+      }
+      completedPathsByCombatantId[movement.tokenId] = path
       return {
         context: {
-          state: {
-            ...refreshed.state,
-            initiativeIndex: refreshedInitiativeIndex >= 0
-              ? refreshedInitiativeIndex
-              : refreshed.state.initiativeIndex,
-          },
-          map,
-          characters,
+          state: settled.state,
+          map: settled.application.map,
+          characters: settled.application.characters,
           characterIdByCombatantId: refreshed.characterIdByCombatantId,
           logs: [...context.logs, ...settled.logs],
         },
@@ -163,7 +189,29 @@ export async function coordinateDnd5eMovementHazards(input: {
       }
     },
   })
-  const { state, map, characters, logs } = sequential.context
+  let { state, map, characters, logs } = sequential.context
+  const finalPositionByCombatantId = { ...sequential.finalPositionByCombatantId }
+  // Finish all coupled voluntary traces before endpoint displacement. Otherwise
+  // the next carried trace can overwrite a group ejection from the previous one.
+  if (input.settleEndpoint) for (const movement of input.movements) {
+    if (!state.combatants[movement.tokenId] || !map.tokens.some(token => token.id === movement.tokenId)) continue
+    const settled = await input.settleEndpoint({ state, map, logs,
+      application: { map, characters, changedCharacterIds: [], changedTokenIds: [] },
+      finalPosition: state.combatants[movement.tokenId].position }, movement)
+    state = settled.state
+    map = settled.application.map
+    characters = settled.application.characters
+    logs = settled.logs
+    for (const trace of input.movements) {
+      const position = state.combatants[trace.tokenId]?.position
+      if (!position) continue
+      finalPositionByCombatantId[trace.tokenId] = { ...position }
+      const path = completedPathsByCombatantId[trace.tokenId] ?? []
+      const last = path.at(-1)
+      if (!last || Math.hypot(last.x - position.x, last.y - position.y) > 0.01) path.push({ ...position })
+      completedPathsByCombatantId[trace.tokenId] = path
+    }
+  }
   const changedCharacterIds = characters.flatMap((character) => {
     const before = input.characters.find((candidate) => candidate.id === character.id)
     return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
@@ -175,7 +223,8 @@ export async function coordinateDnd5eMovementHazards(input: {
   return {
     state,
     map,
-    finalPositionByCombatantId: sequential.finalPositionByCombatantId,
+    finalPositionByCombatantId,
+    completedPathsByCombatantId,
     logs,
     application: { map, characters, changedCharacterIds, changedTokenIds },
   }

@@ -7,6 +7,25 @@ import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { dnd5eSpellAuthorityResolutionContext } from '../../pages/maps/spellSettlementCoordinator'
+import { registerDnd5eRulesPlugin } from './pluginApi'
+
+it('allows qualified zero-HP rage termination and commits deferred death', () => {
+  let featureId=''
+  const dispose=registerDnd5eRulesPlugin({manifest:{id:'test.zero-class-action',name:'Zero HP',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+    featureId=api.registerFeature({id:'defer',name:'Defer',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{schemaVersion:1,id:'defer',name:'Defer',description:'Synthetic',level:1,trigger:{kind:'passive'},cost:{economy:'none'},targeting:{kind:'self'},effects:[],mechanic:{kind:'rage-death-deferral'},automation:'full'}})
+  }})
+  try {for(const owned of [true,false])for(const pending of [true,false]){
+    const actor=character('hero','野蛮人',{level:14,currentHp:0,deathSaveFailures:pending?3:0,dnd5ePluginFeatureIds:owned?[featureId]:[],dnd5eCombatState:{raging:true,rageTurnsRemaining:5,...(pending?{declarativeUsedTurnKeys:{'rage-deferred-death':'pending'}}:{})}})
+    const prepared=prepareDnd5eClassFeature(fixture(actor,{feature:'barbarian-rage',end:true}))
+    expect(prepared.ok).toBe(owned)
+    if(prepared.ok){
+      const resolved=resolvePreparedDnd5eClassFeature({prepared:prepared.prepared})
+      expect(resolved.result.ok).toBe(true)
+      expect(resolved.result.state.combatants['hero-token'].classState.raging).not.toBe(true)
+      expect(resolved.result.state.combatants['hero-token'].deathSaves.dead).toBe(pending)
+    }
+  }}finally{dispose()}
+})
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   const result: Character = {
@@ -77,6 +96,82 @@ function fixture(actor: Character, payload: Dnd5eClassFeaturePayload, allies: Ch
 }
 
 describe('D&D 5e generic class feature authority bridge', () => {
+  it('authorizes optional Flurry attacks by imported subclass level and distinct targets', () => {
+    const subclassId = 'test.flurry-extra:monk-path'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'test.flurry-extra', name: 'Flurry', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) { api.registerDeclarativeSubclass({
+        schemaVersion: 1, id: 'monk-path', classId: 'monk', name: 'Test path', summary: 'Synthetic',
+        abilities: [{ schemaVersion: 1, id: 'extra', name: 'Extra', description: 'Synthetic', level: 17,
+          trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], automation: 'full',
+          mechanic: { kind: 'flurry-extra-attacks', additionalAttacks: 3, distinctTargets: true },
+        }],
+      }) },
+    })
+    try {
+      for (const level of [16, 17]) for (const selectedSubclass of [subclassId, 'open-hand']) {
+        for (const count of [2, 3, 4, 5, 6]) for (const repeat of [false, true]) {
+          const monk = character('monk', '武僧', { level,
+            dnd5eClassLevels: { monk: level }, dnd5eClassChoices: { classes: { monk: { subclass: selectedSubclass } } },
+            classResources: { 'dnd5e-ki': { current: 2, max: level } },
+            dnd5eCombatState: { monkAttackActionTurnKey: 'combat:1:monk-token', monkMartialArtsTurnKey: 'combat:1:monk-token' },
+          })
+          const input = fixture(monk, { feature: 'monk-unarmed-bonus', mode: 'flurry', targetTokenIds: Array.from({ length: count }, (_, index) => `target-${repeat ? 0 : index}`) })
+          const enemy = input.map.tokens.find(entry => entry.id === 'enemy-token')!
+          input.map.tokens = [input.map.tokens[0], ...Array.from({ length: 6 }, (_, index) => ({ ...enemy, id: `target-${index}`, x: 75, y: 25, hp: 100, maxHp: 100 }))]
+          input.initiativeOrder = input.map.tokens.map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index }))
+          const prepared = prepareDnd5eClassFeature(input)
+          const allowed = count === 2 || (level === 17 && selectedSubclass === subclassId && count <= 5 && !repeat)
+          expect(prepared.ok, JSON.stringify({ level, selectedSubclass, count, repeat })).toBe(allowed)
+          if (!prepared.ok) continue
+          const result = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared, monkAttackRolls: Array.from({ length: count }, () => ({ d20: 1, damageRolls: [] })) })
+          expect(result.result.ok).toBe(true)
+          expect(result.result.events.filter(event => event.type === 'attack-resolved')).toHaveLength(count)
+          expect(result.application?.characters[0].classResources?.['dnd5e-ki'].current).toBe(1)
+          expect(result.result.state.combatants['monk-token'].turn.bonusActionAvailable).toBe(false)
+          expect(monk.classResources?.['dnd5e-ki'].current).toBe(2)
+        }
+      }
+    } finally { dispose() }
+  })
+
+  it('projects imported Flurry speed and disengagement through the map authority transaction', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'test.flurry-movement', name: 'Movement', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        featureId = api.registerFeature({
+          id: 'technique', name: 'Technique', summary: 'Synthetic', description: 'Synthetic', automation: 'full',
+          declarativeAbility: { schemaVersion: 1, id: 'technique', name: 'Technique', description: 'Synthetic', level: 3, trigger: { kind: 'passive' }, cost: { economy: 'none' }, targeting: { kind: 'self' }, effects: [], mechanic: { kind: 'attack-action-speed', triggerOn: 'flurry-of-blows', bonusFeet: 10, disengage: true }, automation: 'full' },
+        })
+      },
+    })
+    try {
+      for (const owned of [true, false]) for (const mode of ['flurry', 'martial-arts'] as const) {
+        const monk = character('monk', '武僧', {
+          level: 5, dnd5ePluginFeatureIds: owned ? [featureId] : [],
+          classResources: { 'dnd5e-ki': { current: 2, max: 5 } },
+          dnd5eCombatState: { monkAttackActionTurnKey: 'combat:1:monk-token', monkMartialArtsTurnKey: 'combat:1:monk-token' },
+        })
+        const input = fixture(monk, { feature: 'monk-unarmed-bonus', mode, targetTokenIds: Array.from({ length: mode === 'flurry' ? 2 : 1 }, () => 'enemy-token') })
+        const enemy = input.map.tokens.find(entry => entry.id === 'enemy-token')!
+        enemy.x = 75; enemy.y = 25
+        const prepared = prepareDnd5eClassFeature(input)
+        expect(prepared.ok).toBe(true)
+        if (!prepared.ok) throw new Error('Flurry preparation failed')
+        const before = prepared.prepared.state.combatants['monk-token'].turn.movementRemaining
+        const resolved = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared, monkAttackRolls: Array.from({ length: mode === 'flurry' ? 2 : 1 }, () => ({ d20: 1, damageRolls: [] })) })
+        expect(resolved.result.ok).toBe(true)
+        const enabled = owned && mode === 'flurry'
+        expect(resolved.result.state.combatants['monk-token'].turn.movementRemaining).toBe(before + (enabled ? 10 : 0))
+        expect(resolved.result.state.combatants['monk-token'].disengaged).toBe(enabled)
+        const saved = JSON.parse(JSON.stringify(resolved.application?.characters.find(entry => entry.id === 'monk')))
+        expect(saved.classResources['dnd5e-ki'].current).toBe(mode === 'flurry' ? 1 : 2)
+        expect((saved.dnd5eCombatState.activeEffects ?? []).some((effect: { definitionId: string }) => effect.definitionId === `${featureId}:flurry-speed`)).toBe(enabled)
+      }
+    } finally { dispose() }
+  })
+
   it('routes voluntary Polymorph concentration ending for a non-Druid caster', () => {
     const actor = character('wizard', '法师', {
       currentHp: 20,
@@ -729,6 +824,42 @@ describe('D&D 5e generic class feature authority bridge', () => {
     expect(outOfRange.prepared.headlessAction).toMatchObject({ type: 'paladin-divine-sense', targetIds: [] })
   })
 
+  it('previews and resolves a one-roll benefit only on the first Flurry attack', () => {
+    const packageId = 'test.flurry-next-roll'
+    const featureId = `${packageId}:fortune.benefit`
+    const dispose = registerDnd5eRulesPlugin({ manifest: { id: packageId, name: 'Synthetic', version: '1.0.0', apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+      api.registerDeclarativeSubclass({ schemaVersion: 1, id: 'fortune', classId: 'monk', name: 'Synthetic', summary: 'Synthetic',
+        abilities: [{ schemaVersion: 1, id: 'benefit', name: 'Benefit', description: 'Synthetic', level: 1, trigger: { kind: 'active-use' },
+          targeting: { kind: 'self' }, mechanic: { kind: 'next-d20-advantage', rollKinds: ['attack'] }, effects: [], automation: 'full' }] })
+    } })
+    try {
+      const monk = character('monk', '武僧', { level: 5,
+        abilities: { str: 10, dex: 16, con: 14, int: 10, wis: 16, cha: 8 },
+        dnd5eClassChoices: { classes: { monk: { subclass: `${packageId}:fortune` } } },
+        classResources: { 'dnd5e-ki': { current: 2, max: 5 } }, dnd5eCombatState: {
+          monkAttackActionTurnKey: 'combat:1:monk-token', monkMartialArtsTurnKey: 'combat:1:monk-token',
+          nextD20Advantage: { featureId, rollKinds: ['attack'] },
+        } })
+      const input = fixture(monk, { feature: 'monk-unarmed-bonus', mode: 'flurry', targetTokenIds: ['enemy-token', 'enemy-token'] })
+      const enemy = input.map.tokens.find(entry => entry.id === 'enemy-token')!
+      enemy.x = 75
+      enemy.y = 25
+      const prepared = prepareDnd5eClassFeature(input)
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) throw Error(prepared.reason)
+      expect(prepared.prepared.monkBonusAttack?.targets.map(target => target.attackMode)).toEqual(['advantage', 'normal'])
+      expect(previewDnd5eMonkBonusAttack(prepared.prepared, 0, 2, 18).hit).toBe(true)
+      expect(previewDnd5eMonkBonusAttack(prepared.prepared, 1, 2, 18).hit).toBe(false)
+      const result = resolvePreparedDnd5eClassFeature({ prepared: prepared.prepared,
+        monkAttackRolls: [{ d20: 2, d20Second: 18, damageRolls: [1] }, { d20: 2, damageRolls: [] }] })
+      expect(result.result.ok).toBe(true)
+      expect(result.result.events.filter(event => event.type === 'attack-resolved')).toMatchObject([
+        { d20: 18, hit: true }, { d20: 2, hit: false },
+      ])
+    } finally { dispose() }
+  })
+
   it('resolves Flurry of Blows as two authoritative unarmed attacks after the Attack action', () => {
     const monk = character('monk', '武僧', {
       level: 5,
@@ -901,7 +1032,7 @@ describe('D&D 5e generic class feature authority bridge', () => {
       },
     })
     expect(resolved.result.events).toContainEqual({
-      type: 'moved', actorId: 'enemy-token', from: { x: 75, y: 25 }, to: { x: 225, y: 25 }, distance: 15,
+      type: 'moved', actorId: 'enemy-token', from: { x: 75, y: 25 }, to: { x: 225, y: 25 }, distance: 15, straightDistanceFeet: 0,
     })
   })
 
@@ -1336,3 +1467,29 @@ describe('D&D 5e generic class feature authority bridge', () => {
     })
   })
 })
+
+it.each([1, 20, undefined])('passes Shield casting saves through Flurry of Blows: %s', d20 => {
+  const monk = character('monk', '武僧', { classResources: { 'dnd5e-ki': { current: 2, max: 6 } },
+    dnd5eCombatState: { monkAttackActionTurnKey: 'combat:1:monk-token', monkMartialArtsTurnKey: 'combat:1:monk-token' } })
+  const input = fixture(monk, { feature: 'monk-unarmed-bonus', mode: 'flurry', targetTokenIds: ['enemy-token', 'enemy-token'] })
+  const target = input.map.tokens.find(t => t.id === 'enemy-token')!
+  const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain', targetId: target.id,
+    source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+  Object.assign(target, { x: 75, y: 25, hp: 40, maxHp: 40, poolId: 'srd-5.1:mage',
+    dnd5eCombatState: { activeEffects: [pain], monsterSpellSlots: { 1: { current: 2, max: 2 } } } })
+  const ready = prepareDnd5eClassFeature(input)
+  expect(ready.ok, ready.ok ? '' : ready.reason).toBe(true)
+  if (!ready.ok || !ready.prepared.monkBonusAttack) return
+  const bonus = ready.prepared.monkBonusAttack
+  const result = resolvePreparedDnd5eClassFeature({ prepared: ready.prepared,
+    monkAttackRolls: bonus.targets.map(t => ({ d20: t.armorClass + 1 - bonus.profile.attackModifier,
+      damageRolls: d20 === 20 ? [] : Array.from({ length: bonus.profile.damage.count }, () => 1) })),
+    shieldSpellcastingSavingThrows: d20 == null ? undefined : { [target.id]: [{ effectId: pain.id, d20 }] } })
+  expect(result.result.ok, result.result.ok ? '' : result.result.reason).toBe(d20 != null)
+  if (!result.result.ok) { expect(result.application).toBeUndefined(); return }
+  expect(result.result.state.combatants[target.id].currentHp).toBe(d20 === 20 ? 40 : 40 - 2 * (bonus.profile.damage.count + bonus.profile.damage.bonus))
+  expect(result.result.state.combatants[target.id].classState.monsterSpellSlots?.[1].current).toBe(1)
+  expect(result.result.state.combatants['monk-token'].classResources['dnd5e-ki'].current).toBe(1)
+  expect(result.result.events.filter(e => e.type === 'spell-cast' && e.spellId === 'shield')).toHaveLength(1)
+})
+

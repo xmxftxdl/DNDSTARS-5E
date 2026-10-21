@@ -328,13 +328,12 @@ export default function Dnd5eLocalRulesAiImporter({
       <div className="flex items-start gap-3">
         <ClipboardPaste className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-amber-100">粘贴规则 → AI 转换 → DM 确认</h2>
+          <h2 className="font-semibold text-amber-100">粘贴规则生成草稿</h2>
           <p className="mt-1 text-xs leading-5 text-amber-100/60">
-            粘贴自然语言规则、表格文本或现成 JSON。JSON 可直接校验；其他文本由你配置的模型 API
-            转换为可编辑草稿。只有通过 Host 校验并由 DM 确认后才会启用，粘贴内容不会被当作代码执行。
+            粘贴规则或表格文本，由 AI 转为草稿；已有 JSON 可直接导入。
           </p>
           <label className="mt-4 block max-w-md">
-            <span className="mb-1.5 block text-xs font-semibold text-amber-100/75">AI 分析接口</span>
+            <span className="mb-1.5 block text-xs font-semibold text-amber-100/75">内容类型</span>
             <select
               data-testid="local-room-ai-target-kind"
               value={targetKind}
@@ -441,22 +440,9 @@ export default function Dnd5eLocalRulesAiImporter({
                   ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
                   : 'border-amber-400/20 bg-amber-500/10 text-amber-200'}`}
                 >
-                  {prepared ? 'Host 校验通过' : '等待 Host 校验'}
+                  {prepared ? '校验通过' : '等待校验'}
                 </span>
               </div>
-
-              {result && (
-                <div data-testid="local-room-ai-routing-result" className="mt-3 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-3 py-2 text-[10px] leading-4 text-sky-100/70">
-                  <strong className="text-sky-200">模型路由：</strong>
-                  {result.routing.fallback ? (
-                    result.routing.fallbackUsed
-                      ? <>Luna 结果未通过 Host，已升级到 <span className="text-sky-100">{result.model?.name ?? result.routing.fallback.displayName}</span> 并重新生成。</>
-                      : <><span className="text-sky-100">{result.model?.name ?? result.routing.primary.displayName}</span> 已通过 Host，未调用 Terra。</>
-                  ) : (
-                    <>当前使用单模型 <span className="text-sky-100">{result.model?.name ?? result.routing.primary.displayName}</span>；未发生付费升级重试。</>
-                  )}
-                </div>
-              )}
 
               {result && (result.draft.assumptions.length > 0 || result.draft.unsupported.length > 0) && (
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -516,7 +502,7 @@ export default function Dnd5eLocalRulesAiImporter({
                       ['法术', prepared.package.content.spells.length],
                       ['物品', prepared.package.content.items.length],
                       ['职业', prepared.package.content.classes?.length ?? 0],
-                      ['Headless 动作', prepared.package.content.headlessActions.length],
+                      ['自动化动作', prepared.package.content.headlessActions.length],
                       ['子职', prepared.package.content.subclasses.length],
                       ['怪物', prepared.package.content.monsters.length],
                     ].map(([label, count]) => (

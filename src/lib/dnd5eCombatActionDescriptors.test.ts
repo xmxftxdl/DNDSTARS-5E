@@ -52,6 +52,15 @@ describe('CombatActionDescriptorV1', () => {
     expect(descriptors.find((entry) => entry.id === 'system:end-turn')?.command).toEqual({ kind: 'end-turn' })
   })
 
+  it('keeps the feature panel accessible when actions are blocked without enabling actions', () => {
+    const descriptors = build({ canAct: false, actionRemaining: 0, pending: true })
+    expect(descriptors.find(entry => entry.id === 'feature:class-actions')).toMatchObject({
+      enabled: true, command: { kind: 'open-panel', panel: 'skills' },
+    })
+    expect(descriptors.find(entry => entry.id === 'system:dash')?.enabled).toBe(false)
+    expect(descriptors.find(entry => entry.id === 'system:end-turn')?.enabled).toBe(false)
+  })
+
   it('左键保留法术基础环位，不能把更高的可用法术位静默当成升环', () => {
     const [fireball] = build({
       spells: [{
@@ -146,11 +155,19 @@ describe('CombatActionDescriptorV1', () => {
     })
   })
 
+  it('allows only a pending weapon attack within an already spent attack action', () => {
+    const entries=build({actionRemaining:0,weaponAttackContinuation:true})
+    expect(entries.find(entry=>entry.id==='system:weapon-attack')?.enabled).toBe(true)
+    for(const id of ['system:dash','system:dodge'])expect(entries.find(entry=>entry.id===id)?.enabled).toBe(false)
+    for(const overrides of [{pending:true},{canAct:false}])expect(build({actionRemaining:0,weaponAttackContinuation:true,...overrides}).find(entry=>entry.id==='system:weapon-attack')?.enabled).toBe(false)
+    expect(build({actionRemaining:0,weaponAttackContinuation:false}).find(entry=>entry.id==='system:weapon-attack')?.enabled).toBe(false)
+  })
+
   it('根据行动经济和等待状态给出不可用原因', () => {
     const noAction = build({ actionRemaining: 0 })
     expect(noAction.find((entry) => entry.id === 'system:weapon-attack')).toMatchObject({ enabled: false, disabledReason: '本回合动作已用尽。' })
     const pending = build({ pending: true })
-    expect(pending.every((entry) => !entry.enabled)).toBe(true)
+    expect(pending.filter(entry => entry.command.kind !== 'open-panel').every((entry) => !entry.enabled)).toBe(true)
     expect(pending[0].disabledReason).toContain('等待 DM')
   })
 
@@ -331,5 +348,18 @@ describe('CombatActionDescriptorV1', () => {
     )
     expect(afterEscape.actionIds).toEqual(persistedWithoutEscape)
     expect(afterEscape.actionIds).not.toContain('system:escape-grapple:ankheg-token')
+  })
+
+  it('prioritizes escape-effect while available and removes it after escape', () => {
+    const descriptors = build({ canEscapeEffect: true })
+    expect(descriptors.find(entry => entry.id === 'system:escape-effect')).toMatchObject({
+      enabled: true, economy: 'action', command: { kind: 'escape-effect' },
+    })
+    const saved = { schemaVersion: 1 as const, actionIds: build().map(entry => entry.id).reverse(), activePage: 0 }
+    const during = reconcileDnd5eCombatHotbarPreference(saved, descriptors)
+    expect(during.actionIds[0]).toBe('system:escape-effect')
+    expect(reconcileDnd5eCombatHotbarPreference(during, build()).actionIds).toEqual(saved.actionIds)
+    expect(build({ canEscapeEffect: true, actionRemaining: 0 }).find(entry => entry.id === 'system:escape-effect')?.enabled).toBe(false)
+    expect(build({ canEscapeEffect: true, pending: true }).find(entry => entry.id === 'system:escape-effect')?.enabled).toBe(false)
   })
 })

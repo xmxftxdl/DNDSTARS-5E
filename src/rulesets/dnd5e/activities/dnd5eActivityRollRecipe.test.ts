@@ -37,6 +37,52 @@ function arcaneHandFist(): Dnd5eActivityDefinitionV1 {
 }
 
 describe('scaled Activity roll recipe', () => {
+  it('omits target-only damage on empty areas while preserving actor and global damage', () => {
+    const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'empty-area', name: 'Empty area',
+      activation: { kind: 'action' }, target: { kind: 'area', origin: 'point', relation: 'any', shape: 'rect', widthFeet: 5, lengthFeet: 5 },
+      automation: automationCapabilityFromLegacyStatus('full'),
+      outcomes: [{ id: 'damage', when: { kind: 'always' }, operations:
+        (['target', 'all-targets', 'actor', 'all-combatants'] as const).map(target => ({
+          id: target, kind: 'damage' as const, target, damageType: 'bludgeoning' as const,
+          amount: { kind: 'dice' as const, rollId: target, count: 1, sides: 6 },
+        })) }],
+    }
+    const ids = (targetCount?: number) => collectScaledDnd5eActivityFormulaRollDeclarationsV1(activity, { targetCount }).map(roll => roll.id).sort()
+    expect(ids(0)).toEqual(['actor', 'all-combatants'])
+    expect(ids(1)).toEqual(['actor', 'all-combatants', 'all-targets', 'target'])
+    expect(ids()).toEqual(ids(1))
+  })
+  it('collects maximum-HP dice but doubles only declared critical damage dice', () => {
+    const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'mixed-dice', name: 'Mixed dice',
+      activation: { kind: 'action' }, target: { kind: 'creature', relation: 'any', count: 1 },
+      automation: automationCapabilityFromLegacyStatus('full'),
+      checks: [{ id: 'attack', kind: 'attack-roll', rollId: 'attack', attackBonus: { kind: 'constant', value: 5 }, rollMode: 'normal', scope: 'per-target' }],
+      effects: [
+        { schemaVersion: 1, id: 'debit', name: 'Debit', duration: { kind: 'permanent' }, stacking: 'replace' },
+        { schemaVersion: 1, id: 'credit', name: 'Credit', duration: { kind: 'permanent' }, stacking: 'replace' },
+        { schemaVersion: 1, id: 'boost', name: 'Boost', duration: { kind: 'permanent' }, stacking: 'replace',
+          modifiers: [{ kind: 'hit-point-maximum', mode: 'add', value: { kind: 'dice', rollId: 'boost', count: 1, sides: 6 } }] },
+      ],
+      outcomes: [{ id: 'mixed', when: { kind: 'check', checkId: 'attack', result: 'success' }, operations: [
+        { id: 'damage', kind: 'damage', target: 'target', damageType: 'force', critical: 'double-dice', amount: { kind: 'dice', rollId: 'damage', count: 1, sides: 8 } },
+        { id: 'transfer', kind: 'transfer-hit-point-maximum', target: 'target', owningEffectId: 'debit', beneficiaryEffectId: 'credit', amount: { kind: 'dice', rollId: 'transfer', count: 2, sides: 4 } },
+        { id: 'boost', kind: 'apply-effect', target: 'target', effectId: 'boost' },
+      ] }],
+    }
+    expect(collectScaledDnd5eActivityFormulaRollDeclarationsV1(activity, { critical: true })).toEqual([
+      { id: 'damage', count: 2, sides: 8 }, { id: 'transfer', count: 2, sides: 4 }, { id: 'boost', count: 1, sides: 6 },
+    ])
+    const result = resolveDnd5eActivity({ activity, actor: actor('caster', 'player'), targets: [actor('target', 'dm')],
+      rolls: { 'attack:target': { values: [20] }, damage: { values: [7, 7] }, transfer: { values: [3, 4] }, boost: { values: [5] } } })
+    expect(result.ok, result.ok ? undefined : result.details.join('; ')).toBe(true)
+    if (result.ok) {
+      expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'deal-damage', amount: 14 }))
+      expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'transfer-hit-point-maximum', amount: 7 }))
+      expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'apply-effect', modifierGroups: expect.arrayContaining([
+        expect.objectContaining({ hitPointMaximumBonus: 5 }),
+      ]) }))
+    }
+  })
   it('captures every Arcane Hand object statistic and resolves HP from the caster maximum', () => {
     const caster = actor('caster', 'player')
     caster.maxHp = 162
@@ -181,4 +227,20 @@ describe('scaled Activity roll recipe', () => {
       }))
     }
   })
+})
+
+
+it('keeps attack success and critical recipes aligned with a Host-negated disadvantage roll', () => {
+  const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'luck-attack', name: 'Luck attack',
+    activation: { kind: 'action' }, target: { kind: 'creature', relation: 'any', count: 1 },
+    automation: automationCapabilityFromLegacyStatus('full'), outcomes: [],
+    checks: [{ id: 'attack', kind: 'attack-roll', rollId: 'attack', scope: 'per-target', rollMode: 'disadvantage', attackBonus: { kind: 'constant', value: 0 } }],
+  }
+  const input = { actor: actor('actor', 'player'), targets: [actor('target', 'dm')], targetIds: ['target'],
+    rolls: { 'attack:target': { values: [20] } }, hostRollMode: () => 'disadvantage' as const }
+  expect(dnd5eActivitySubmittedAttackRollIsCriticalV1(activity, input)).toBe(false)
+  expect(dnd5eActivitySubmittedAttackCheckSuccessKeysV1(activity, input).size).toBe(0)
+  const selected = { ...input, negatedRollIds: new Set(['attack:target']) }
+  expect(dnd5eActivitySubmittedAttackRollIsCriticalV1(activity, selected)).toBe(true)
+  expect([...dnd5eActivitySubmittedAttackCheckSuccessKeysV1(activity, selected)]).toEqual(['attack:target'])
 })

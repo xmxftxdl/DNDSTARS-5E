@@ -66,47 +66,14 @@ export function resolveDnd5eMonsterOpposedAbilityCheck(input: {
  * truncation; Headless independently verifies distance and straight-line
  * direction so a forged payload cannot move a target somewhere unrelated.
  */
-export function dnd5eMonsterForcedMovementPayloadIsValid(input: {
+export function dnd5eForcedMovementDirection(input: {
   source: { x: number; y: number }
   target: { x: number; y: number }
-  movement: Dnd5eMonsterForcedMovementPayload
   direction: Dnd5eMonsterForcedMovementDirection
-  maximumDistanceFeet: number
-  resisted: boolean
-  gridDistance?: {
-    cellUnits: number
-    feetPerCell: number
-    sourceFootprintCells?: number
-    targetFootprintCells?: number
-  }
-  coordinateUnitsPerFoot?: number
-}): boolean {
-  const { movement } = input
-  if (
-    !Number.isFinite(movement.to.x) ||
-    !Number.isFinite(movement.to.y) ||
-    !Number.isFinite(movement.distanceFeet) ||
-    movement.distanceFeet < 0 ||
-    movement.distanceFeet > input.maximumDistanceFeet
-  ) return false
-
-  const deltaX = movement.to.x - input.target.x
-  const deltaY = movement.to.y - input.target.y
-  const samePosition = deltaX === 0 && deltaY === 0
-  if (movement.distanceFeet === 0) {
-    return samePosition &&
-      movement.toElevationFeet == null &&
-      movement.toGroundElevationFeet == null &&
-      (movement.fallingDamageRolls?.length ?? 0) === 0
-  }
-  if (input.resisted || samePosition) return false
-
+  gridDistance?: { cellUnits: number; feetPerCell: number; sourceFootprintCells?: number; targetFootprintCells?: number }
+}): { x: number; y: number } {
   const grid = input.gridDistance
-  const usesGrid = !!grid &&
-    Number.isFinite(grid.cellUnits) &&
-    grid.cellUnits > 0 &&
-    Number.isFinite(grid.feetPerCell) &&
-    grid.feetPerCell > 0
+  const usesGrid = !!grid && Number.isFinite(grid.cellUnits) && grid.cellUnits > 0 && Number.isFinite(grid.feetPerCell) && grid.feetPerCell > 0
   const sourceFootprintCells = Math.max(
     1,
     Math.floor(grid?.sourceFootprintCells ?? 1),
@@ -149,6 +116,51 @@ export function dnd5eMonsterForcedMovementPayloadIsValid(input: {
   const expectedDirectionY = Math.sign(
     input.direction === 'toward-source' ? sourceDirectionY : -sourceDirectionY,
   )
+  return { x: expectedDirectionX, y: expectedDirectionY }
+}
+
+export function dnd5eMonsterForcedMovementPayloadIsValid(input: {
+  source: { x: number; y: number }
+  target: { x: number; y: number }
+  movement: Dnd5eMonsterForcedMovementPayload
+  direction: Dnd5eMonsterForcedMovementDirection
+  maximumDistanceFeet: number
+  resisted: boolean
+  gridDistance?: {
+    cellUnits: number
+    feetPerCell: number
+    sourceFootprintCells?: number
+    targetFootprintCells?: number
+  }
+  coordinateUnitsPerFoot?: number
+}): boolean {
+  const { movement } = input
+  if (
+    !Number.isFinite(movement.to.x) ||
+    !Number.isFinite(movement.to.y) ||
+    !Number.isFinite(movement.distanceFeet) ||
+    movement.distanceFeet < 0 ||
+    movement.distanceFeet > input.maximumDistanceFeet
+  ) return false
+
+  const deltaX = movement.to.x - input.target.x
+  const deltaY = movement.to.y - input.target.y
+  const samePosition = deltaX === 0 && deltaY === 0
+  if (movement.distanceFeet === 0) {
+    return samePosition &&
+      movement.toElevationFeet == null &&
+      movement.toGroundElevationFeet == null &&
+      (movement.fallingDamageRolls?.length ?? 0) === 0
+  }
+  if (input.resisted || samePosition) return false
+
+  const grid = input.gridDistance
+  const usesGrid = !!grid &&
+    Number.isFinite(grid.cellUnits) &&
+    grid.cellUnits > 0 &&
+    Number.isFinite(grid.feetPerCell) &&
+    grid.feetPerCell > 0
+  const { x: expectedDirectionX, y: expectedDirectionY } = dnd5eForcedMovementDirection(input)
   const movementDirectionX = Math.sign(deltaX)
   const movementDirectionY = Math.sign(deltaY)
   const directionMatches =

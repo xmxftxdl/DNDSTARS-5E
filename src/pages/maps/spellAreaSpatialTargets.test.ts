@@ -41,3 +41,15 @@ describe('spell area spatial preview', () => {
     expect(result.map((token) => token.id)).not.toContain('ground')
   })
 })
+
+it('previews the selected vertical extent independently of the planar dimensions', () => {
+  const run = (height: number) => spellAreaSpatialTargets({
+    targeting: { spellId: 'custom-box', areaTargetVolumeHeightFeet: height,
+      area: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, volumeHeightFeet: 50, minimumVolumeHeightFeet: 5 }
+    } as Dnd5eSpellTargetingSession,
+    map: { ...map, tokens: [ground, air] }, source, casterCell: { col: 0, row: 0 }, anchor: { col: 2, row: 0 }, rotation: 0,
+  }).map(t => t.id)
+  expect(run(5)).toEqual(['ground'])
+  expect(run(50)).toEqual(['ground', 'air'])
+  expect(run(55)).toEqual([])
+})

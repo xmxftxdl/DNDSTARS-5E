@@ -366,16 +366,26 @@ export function settleD20RollConfirmation(
     if (
       !eligible ||
       (eligible.rerollScope !== 'self-roll' && eligible.rerollScope !== 'attack-against-self') ||
-      !Array.isArray(eligible.resourceCosts) || eligible.resourceCosts.length < 1 ||
+      !Array.isArray(eligible.resourceCosts) ||
       eligible.resourceCosts.some((cost) =>
         !cost.resourceKey.trim() || !Number.isSafeInteger(cost.amount) || cost.amount < 1) ||
       ![1, 2].includes(eligible.additionalDice ?? 1)
     ) throw new Error('invalid-roll-confirmation-choice-reroll')
-    const rerollValues = (Array.isArray(choiceRerollValue) ? choiceRerollValue : [choiceRerollValue])
-      .map(Number)
+    const persistedOptions = interrupt.payload.rollOptions
+    if (persistedOptions && (persistedOptions.contributionId !== contribution.id || persistedOptions.values[0] !== originalValue)) {
+      throw new Error('roll-confirmation-reroll-checkpoint-mismatch')
+    }
+    const suppliedValues = choiceRerollValue == null ? undefined
+      : Array.isArray(choiceRerollValue) ? [...choiceRerollValue] : [choiceRerollValue]
+    const persistedValues = persistedOptions?.values.slice(1)
+    if (persistedValues && suppliedValues && (persistedValues.length !== suppliedValues.length ||
+      persistedValues.some((value, index) => value !== suppliedValues[index]))) {
+      throw new Error('roll-confirmation-reroll-checkpoint-mismatch')
+    }
+    const rerollValues = persistedValues ?? suppliedValues ?? []
     if (
       rerollValues.length !== (eligible.additionalDice ?? 1) ||
-      rerollValues.some((value) => !Number.isInteger(value) || value < 1 || value > 20)
+      rerollValues.some((value) => typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 20)
     ) throw new Error('invalid-roll-confirmation-choice-reroll')
     const values = [originalValue, ...rerollValues]
     const selectionPolicy = eligible.selectionPolicy ?? 'owner-chooses'
@@ -385,7 +395,8 @@ export function settleD20RollConfirmation(
         ? values.at(-1)!
         : selectionPolicy === 'lowest' ? Math.min(...values) : Math.max(...values)
     if (!Number.isInteger(selectedValue)) throw new Error('roll-confirmation-player-selection-pending')
-    const selectedIndex = selectionPolicy === 'owner-chooses' ? choiceSelectedIndex! : values.indexOf(selectedValue)
+    const selectedIndex = selectionPolicy === 'owner-chooses' ? choiceSelectedIndex!
+      : selectionPolicy === 'must-use-latest' ? values.length - 1 : values.indexOf(selectedValue)
     transaction = appendRollLedgerEntry(transaction, {
       id: `${interrupt.payload.rollId}:choice-reroll`,
       kind: 'other',
@@ -396,7 +407,7 @@ export function settleD20RollConfirmation(
       sourceId: contribution.characterId,
       createdAt: now,
     })
-    if (selectedValue !== originalValue) {
+    if (selectedIndex !== 0) {
       transaction = replaceLedgerDie(transaction, {
         entryId: interrupt.payload.rollId,
         dieIndex: 0,
@@ -570,6 +581,9 @@ export function d20RollConfirmationTimeoutContribution(input: {
         }
       : undefined
   }
+  // The owner has already decided. A slow Host die animation must not replace
+  // that committed choice with a decline while the Host settles it.
+  if (contribution) return undefined
   return input.hasEligibleFeature
     ? { featureId: '', featureLabel: '', decline: true }
     : undefined

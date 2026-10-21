@@ -19,7 +19,10 @@ export function validateChoiceRerollResponse(input) {
   const invalid = acceptedContribution.decision !== 'use' ||
     eligibleModifier?.modifierKind !== 'choice-reroll' ||
     !['self-roll', 'attack-against-self'].includes(scope) ||
-    resourceCosts.length < 1 || !choice || choice.characterId !== acceptedContribution.characterId ||
+    !Array.isArray(eligibleModifier?.resourceCosts) || resourceCosts.some((cost) =>
+      typeof cost?.resourceKey !== 'string' || !cost.resourceKey.trim() ||
+      !Number.isSafeInteger(cost.amount) || cost.amount < 1) ||
+    !choice || choice.characterId !== acceptedContribution.characterId ||
     choice.featureId !== acceptedContribution.featureId || choice.scope !== scope ||
     choice.originalValue !== originalValue || ![1, 2].includes(additionalDice) ||
     !SELECTION_POLICIES.has(selectionPolicy) || rerollValues.length !== additionalDice ||
@@ -36,7 +39,7 @@ export function validateChoiceRerollResponse(input) {
       ? values.at(-1)
       : selectionPolicy === 'lowest' ? Math.min(...values) : Math.max(...values)
   const selectedIndex = selectionPolicy === 'owner-chooses'
-    ? acceptedContribution.selectedIndex : values.indexOf(selectedValue)
+    ? acceptedContribution.selectedIndex : selectionPolicy === 'must-use-latest' ? values.length - 1 : values.indexOf(selectedValue)
   const selectionInvalid = choice.selectedValue !== selectedValue ||
     (choice.selectedIndex != null && choice.selectedIndex !== selectedIndex) ||
     (choice.selectionPolicy != null && choice.selectionPolicy !== selectionPolicy) ||
@@ -68,6 +71,7 @@ export function applyRollOptionsMutation(base, index, mutation, now) {
   const interrupts = [...base.interrupts]
   interrupts[index] = {
     ...current, payload: { ...current.payload, rollOptions: options },
+    status: (eligible.selectionPolicy ?? 'owner-chooses') === 'owner-chooses' ? 'pending' : current.status,
     expiresAt: current.payload?.visibility === 'dm-only' ? current.expiresAt : now + ROLL_CONFIRMATION_STAGE_TIMEOUT_MS,
     updatedAt: now,
   }

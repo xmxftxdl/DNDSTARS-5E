@@ -16,6 +16,7 @@ export function playerVisibleCanvasTokens(input: {
     area.obscuration?.kind === 'heavy' || area.blocking?.vision || area.lighting?.kind === 'magical-darkness')
   return input.map.tokens.filter(target => {
     if (target.visibilityMode === 'dm-only') return false
+    if (target.sourceLocationKnown === true && target.perceptionVisibility === 'detected-unseen') return true
     if (target.characterId && target.characterId === input.viewerCharacterId) return true
     if (target.visibilityMode === 'always') return true
     const forceEnabled = !!hasSpellObstruction || !!(input.fog && fogCoversPoint(input.fog, target.x, target.y)) ||
@@ -26,3 +27,4 @@ export function playerVisibleCanvasTokens(input: {
     }))
   })
 }
+

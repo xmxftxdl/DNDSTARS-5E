@@ -1,3 +1,9 @@
+import { dnd5eSpellInterrupted } from './spellInterruption'
+import { dnd5eMapRemainsCreationIsProtected } from './mapRemainsProtection'
+import { nextDnd5eAuguryHistory, recordDnd5eAuguryCast } from './auguryReliability'
+import { dnd5eAlternateResourceSpellForCharacter } from './pluginApi'
+import { normalizeDnd5eTempleDisintegrationDeclaration } from './templeDisintegrationDeclaration'
+import { dnd5eUndeadCreationIsProtected } from './undeadCreationProtection'
 import { validateTelepathicBondTargets } from './telepathicBondMarkers'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type {
@@ -24,6 +30,8 @@ import type { Character } from '../../types/character'
 import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
   endDnd5eConcentration,
+  previewDnd5eSpellcastingSaves,
+  type Dnd5eSpellcastingSavingThrowRoll,
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
@@ -87,7 +95,7 @@ import {
   normalizeDnd5eSequesterDeclarationV1,
   normalizeDnd5eSequesterResolutionV1,
 } from './sequester'
-import { normalizeDnd5eWishDeclarationV1 } from './wish'
+import { normalizeDnd5eWishDeclarationV1, dnd5eWishUndeadCopy } from './wish'
 import {
   dnd5eWordOfRecallSanctuary,
   normalizeDnd5eWordOfRecallDeclarationV1,
@@ -325,6 +333,7 @@ export function dnd5eSpellbookEntryDescription(spell: Dnd5eSpellbookEntry): stri
 }
 
 export function prepareDnd5eAdjudicatedSpell(input: {
+  worldMinute?: number
   action: SharedPlayerActionState
   spell: Dnd5eSpellbookEntry | undefined
   spellbookEntries?: readonly Dnd5eSpellbookEntry[]
@@ -337,7 +346,15 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   effectiveRules?: Dnd5eEffectiveRulesContextV1 | null
 }): { ok: true; prepared: PreparedDnd5eAdjudicatedSpell } | { ok: false; reason: Dnd5eAdjudicatedSpellRejectReason } {
   const payload = input.action.dnd5eAdjudicatedSpell
+  // Conditional recipes need the authoritative Activity choice and cannot use the narrative fallback.
+  if (input.spell?.imported?.components.materialRequirementByChoice) return { ok: false, reason: 'invalid-action' }
   const narrativeOnly = payload?.narrativeOnly === true
+  const templeDisintegration = normalizeDnd5eTempleDisintegrationDeclaration(payload?.templeDisintegration)
+  if (payload?.templeDisintegration != null && (!templeDisintegration || payload.spellId !== 'disintegrate' ||
+    narrativeOnly || payload.ritual || Object.keys(payload).some(key =>
+      !['spellId','castingClassId','slotLevel','templeDisintegration','narrativeOnly','ritual'].includes(key)))) {
+    return { ok: false, reason: 'invalid-action' }
+  }
   if (payload?.telepathicBondTargets != null && (
     payload.spellId !== 'telepathic-bond' || !narrativeOnly ||
     !validateTelepathicBondTargets(payload.telepathicBondTargets, input.maps ?? [input.map])
@@ -346,6 +363,8 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   if (
     input.action.type !== 'dnd5e-adjudicated-spell' || !payload || !input.spell ||
     (dnd5eSpellbookEntryHasFullHeadlessAutomation(input.spell) && payload.ritual !== true &&
+      !templeDisintegration &&
+      !(input.spell.id === 'wish' && payload.animateDead != null && dnd5eWishUndeadCopy(payload.wish)) &&
       !(narrativeOnly && (
         dnd5eSpellUsesNarrativeResolution(input.spell.id) ||
         dnd5eSpellSupportsNarrativeObjectAlternative(input.spell.id)
@@ -383,15 +402,21 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     (!narrativeOnly && input.spell.id === 'animal-messenger' && !animalMessenger) ||
     (input.spell.id !== 'animal-messenger' && payload.animalMessenger != null)
   ) return { ok: false, reason: 'invalid-action' }
-  const usesUndeadCreationDeclaration = input.spell.id === 'animate-dead' || input.spell.id === 'create-undead'
+  const wish = !narrativeOnly && input.spell.id === 'wish' ? normalizeDnd5eWishDeclarationV1(payload.wish) : undefined
+  if ((!narrativeOnly && input.spell.id === 'wish' && !wish) ||
+    (input.spell.id !== 'wish' && payload.wish != null)) return { ok: false, reason: 'invalid-action' }
+  const wishUndeadCopy = wish && payload.animateDead != null ? dnd5eWishUndeadCopy(wish) : undefined
+  const undeadCreationSpellId = wishUndeadCopy?.spellId ?? input.spell.id
+  const undeadEffectLevel = wishUndeadCopy?.spellLevel ?? payload.slotLevel
+  const usesUndeadCreationDeclaration = undeadCreationSpellId === 'animate-dead' || undeadCreationSpellId === 'create-undead'
   const animateDead = !narrativeOnly && usesUndeadCreationDeclaration
     ? normalizeDnd5eAnimateDeadDeclarationV1(payload.animateDead)
     : undefined
   if (
     (!narrativeOnly && usesUndeadCreationDeclaration && !animateDead) ||
     (!usesUndeadCreationDeclaration && payload.animateDead != null) ||
-    (input.spell.id === 'animate-dead' && animateDead?.undeadKind != null) ||
-    (input.spell.id === 'create-undead' && animateDead?.undeadKind == null)
+    (undeadCreationSpellId === 'animate-dead' && animateDead?.undeadKind != null) ||
+    (undeadCreationSpellId === 'create-undead' && animateDead?.undeadKind == null)
   ) return { ok: false, reason: 'invalid-action' }
   const animateObjects = !narrativeOnly && input.spell.id === 'animate-objects'
     ? normalizeDnd5eAnimateObjectsDeclarationV1(payload.animateObjects)
@@ -420,13 +445,6 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   if (
     (!narrativeOnly && input.spell.id === 'sequester' && !sequester) ||
     (input.spell.id !== 'sequester' && payload.sequester != null)
-  ) return { ok: false, reason: 'invalid-action' }
-  const wish = !narrativeOnly && input.spell.id === 'wish'
-    ? normalizeDnd5eWishDeclarationV1(payload.wish)
-    : undefined
-  if (
-    (!narrativeOnly && input.spell.id === 'wish' && !wish) ||
-    (input.spell.id !== 'wish' && payload.wish != null)
   ) return { ok: false, reason: 'invalid-action' }
   const wordOfRecall = !narrativeOnly && input.spell.id === 'word-of-recall'
     ? normalizeDnd5eWordOfRecallDeclarationV1(payload.wordOfRecall)
@@ -525,12 +543,12 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     ) return { ok: false, reason: 'invalid-action' }
   }
   if (animateDead) {
-    const spellId = input.spell.id
-    const maximumTargets = input.spell.id === 'create-undead'
-      ? dnd5eCreateUndeadCapacity(payload.slotLevel, animateDead.undeadKind!)
+    const spellId = undeadCreationSpellId
+    const maximumTargets = spellId === 'create-undead'
+      ? dnd5eCreateUndeadCapacity(undeadEffectLevel, animateDead.undeadKind!)
       : animateDead.mode === 'animate'
-        ? dnd5eAnimateDeadAnimationCapacity(payload.slotLevel)
-        : dnd5eAnimateDeadReassertionCapacity(payload.slotLevel)
+        ? dnd5eAnimateDeadAnimationCapacity(undeadEffectLevel)
+        : dnd5eAnimateDeadReassertionCapacity(undeadEffectLevel)
     const targetsValid = maximumTargets > 0 && animateDead.targets.length <= maximumTargets &&
       animateDead.targets.every((declaredTarget) => {
         const target = input.map.tokens.find((candidate) => candidate.id === declaredTarget.tokenId)
@@ -540,6 +558,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
           : Number.POSITIVE_INFINITY
         if (!target || target.label !== declaredTarget.targetName || distanceFeet > 10) return false
         if (animateDead.mode === 'animate') {
+          if (!wishUndeadCopy && (dnd5eMapRemainsCreationIsProtected(target, input.worldMinute) || dnd5eUndeadCreationIsProtected(target.dnd5eCombatState?.activeEffects))) return false
           const remainsKind = dnd5eAnimateDeadRemainsKind(target)
           return spellId === 'create-undead'
             ? remainsKind === 'humanoid-corpse' && declaredTarget.remainsKind === 'humanoid-corpse'
@@ -605,7 +624,13 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   if (enforceSpellcastingPrerequisites && dnd5eWearingUnproficientArmor(actor)) {
     return { ok: false, reason: 'armor-proficiency-required' }
   }
-  const castingClassId = dnd5eSpellcastingClassIdForSpell(
+  const resourceGrant = payload.alternateResourceSpell ? dnd5eAlternateResourceSpellForCharacter({
+    character: actor, ...payload.alternateResourceSpell, spellId: input.spell.id, slotLevel: payload.slotLevel,
+  }) : undefined
+  if (payload.alternateResourceSpell && (!resourceGrant || payload.castingClassId != null || payload.ritual === true)) {
+    return { ok: false, reason: 'invalid-action' }
+  }
+  const castingClassId = resourceGrant?.classId ?? dnd5eSpellcastingClassIdForSpell(
     actor,
     input.spell.id,
     payload.castingClassId,
@@ -618,11 +643,11 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   const definition = effectiveSource?.definition ??
     (castingClassId ? dnd5eClassDefinition(castingClassId) : undefined)
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
-  if (!definition?.spellcasting || castingClassLevel < 1) {
+  if (!definition || (!resourceGrant && !definition.spellcasting) || castingClassLevel < 1) {
     return { ok: false, reason: 'spellcasting-class-unavailable' }
   }
   if (
-    enforceSpellcastingPrerequisites && actor.dnd5eCombatState?.wildShapeFormId &&
+    enforceSpellcastingPrerequisites && actor.dnd5eCombatState?.wildShapeFormId && actor.dnd5eCombatState.wildShapeMode !== 'shapechange' &&
     (definition.id !== 'druid' || castingClassLevel < 18)
   ) return { ok: false, reason: 'wild-shape-spellcasting-unavailable' }
   let spellMaterialPlan: Dnd5eSpellMaterialConsumptionPlan | undefined
@@ -643,7 +668,11 @@ export function prepareDnd5eAdjudicatedSpell(input: {
       }),
       castingClassId,
     )
-    if (!dnd5eSpellComponentsAvailable(componentCheck)) {
+    const componentsAvailable = dnd5eSpellComponentsAvailable(componentCheck) || (
+      resourceGrant?.ignoreMaterialComponents === true &&
+      componentCheck.verbal !== 'unavailable-silenced' && componentCheck.somatic !== 'unavailable-hands-occupied'
+    )
+    if (!componentsAvailable) {
       if (componentCheck.verbal === 'unavailable-silenced') {
         return { ok: false, reason: 'verbal-component-unavailable' }
       }
@@ -666,14 +695,14 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     // is still a real spell cast.  Host authority validates V/S/M and settles
     // an allocated consumed component atomically; a narrative-only route must
     // never turn an explicitly consumed component into a free spell.
-    spellMaterialPlan = componentCheck.materialPlan
+    if (resourceGrant?.ignoreMaterialComponents !== true) spellMaterialPlan = componentCheck.materialPlan
   }
   const ritual = payload.ritual === true
   const spellIsRitual = input.spell.imported?.ritual === true || input.spell.reference?.ritual === true
   if (ritual && (
     !spellIsRitual ||
     input.spell.level < 1 ||
-    definition.spellcasting.ritualCasting !== true
+    definition.spellcasting?.ritualCasting !== true
   )) return { ok: false, reason: 'ritual-unavailable' }
   const declaredCastingTime = dnd5eSpellbookEntryCastingTime(input.spell)
   const castingTime = ritual || castingVariant === 'plant-growth-8-hours'
@@ -687,13 +716,13 @@ export function prepareDnd5eAdjudicatedSpell(input: {
 
   const slotLevel = input.spell.level === 0
     ? 0
-    : definition.spellcasting.kind === 'pact' && input.spell.level <= 5
+    : !resourceGrant && definition.spellcasting?.kind === 'pact' && input.spell.level <= 5
       ? dnd5ePactSlotLevel(castingClassLevel)
       : payload.slotLevel
   const selections = effectiveSource
     ? dnd5eEffectiveSpellSelections(actor, effectiveSource)
     : actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
-  if (effectiveSource?.declarative && input.spell.level > 0) {
+  if (!resourceGrant && effectiveSource?.declarative && input.spell.level > 0) {
     const entriesById = new Map(
       [...(input.spellbookEntries ?? []), input.spell].map((entry) => [entry.id, entry]),
     )
@@ -710,8 +739,11 @@ export function prepareDnd5eAdjudicatedSpell(input: {
       )
     ) return { ok: false, reason: 'spell-school-restricted' }
   }
-  if (input.spell.level > 0 && !ritual) {
-    const resourceKey = definition.spellcasting.kind === 'pact' && input.spell.level <= 5
+  if (resourceGrant && (actor.classResources?.[resourceGrant.resourceId]?.current ?? 0) < resourceGrant.resourceCost) {
+    return { ok: false, reason: 'slot-unavailable' }
+  }
+  if (!resourceGrant && input.spell.level > 0 && !ritual) {
+    const resourceKey = definition.spellcasting?.kind === 'pact' && input.spell.level <= 5
       ? 'dnd5e-pact-slot'
       : `dnd5e-spell-slot-${slotLevel}`
     const freeCastSource = dnd5eFreeSpellCastSource({
@@ -726,6 +758,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     ) return { ok: false, reason: 'slot-unavailable' }
   }
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: input.action.combatId ?? `map-${input.map.id}`,
     round: input.action.round,
     turnSlotId: input.initiativeOrder[input.action.initiativeIndex]?.slotId,
@@ -769,27 +802,29 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   // independently re-validates the projected entitlement before spending any
   // resource, so projecting it here keeps the two authority checks consistent
   // without trusting a player-supplied spell id.
-  const entitlementKey = input.spell.level === 0
-    ? effectiveSource?.cantripSelectionKey ?? 'spell-cantrips'
-    : effectiveSource?.spellSelectionKey ?? 'spell-prepared'
-  const classSelections = actorCombatant.classSelectionsByClass?.[castingClassId] ?? {}
-  const entitledSpellIds = [...new Set([
-    ...(classSelections[entitlementKey] ?? []),
-    input.spell.id,
-  ])]
-  actorCombatant.classSelections = {
-    ...actorCombatant.classSelections,
-    [entitlementKey]: [...new Set([
-      ...(actorCombatant.classSelections[entitlementKey] ?? []),
+  if (!resourceGrant) {
+    const entitlementKey = input.spell.level === 0
+      ? effectiveSource?.cantripSelectionKey ?? 'spell-cantrips'
+      : effectiveSource?.spellSelectionKey ?? 'spell-prepared'
+    const classSelections = actorCombatant.classSelectionsByClass?.[castingClassId] ?? {}
+    const entitledSpellIds = [...new Set([
+      ...(classSelections[entitlementKey] ?? []),
       input.spell.id,
-    ])],
-  }
-  actorCombatant.classSelectionsByClass = {
-    ...(actorCombatant.classSelectionsByClass ?? {}),
-    [castingClassId]: {
-      ...classSelections,
-      [entitlementKey]: entitledSpellIds,
-    },
+    ])]
+    actorCombatant.classSelections = {
+      ...actorCombatant.classSelections,
+      [entitlementKey]: [...new Set([
+        ...(actorCombatant.classSelections[entitlementKey] ?? []),
+        input.spell.id,
+      ])],
+    }
+    actorCombatant.classSelectionsByClass = {
+      ...(actorCombatant.classSelectionsByClass ?? {}),
+      [castingClassId]: {
+        ...classSelections,
+        [entitlementKey]: entitledSpellIds,
+      },
+    }
   }
   for (const [tokenId, economy] of Object.entries(input.turnEconomyByToken ?? {})) {
     const combatant = snapshot.state.combatants[tokenId]
@@ -960,8 +995,12 @@ function sanitizeSpeakWithPlantsTerrainEffects(
 }
 
 export function resolvePreparedDnd5eAdjudicatedSpell(input: {
+  sourceSlotSpellHealingTargets?: readonly { areaId: string; targetIds: readonly string[] }[]
+  sourceActionInterruptionReaction?: import('./headlessCombatEngine').Dnd5eSourceActionInterruptionReaction
+  counterspellReaction?: import('./headlessCombatEngine').Dnd5eCounterspellReaction
   prepared: PreparedDnd5eAdjudicatedSpell
   response: DmAdjudicationInterruptResponse
+  spellcastingSavingThrows?: readonly Dnd5eSpellcastingSavingThrowRoll[]
   /** Authoritative completion time. Required for Animate Dead's 24-hour control window. */
   worldMinute?: number
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
@@ -971,6 +1010,10 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
   airborneFalls?: readonly Dnd5eAirborneFallPreview[]
 } {
   const { prepared, response } = input
+  // A structured destruction request may only use its specialized atomic facade.
+  if (prepared.payload.templeDisintegration) return {
+    result: { ok: false, state: prepared.state, events: [], reason: 'invalid-class-feature' },
+  }
   if (response.decision !== 'approved') {
     return {
       result: {
@@ -981,11 +1024,14 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
       },
     }
   }
-  if (prepared.payload.narrativeOnly === true) {
+  const castingPrevented = previewDnd5eSpellcastingSaves(prepared.state, prepared.actorToken.id,
+    input.spellcastingSavingThrows, { spellId: prepared.spell.id, slotLevel: prepared.slotLevel }) === false
+  if (prepared.payload.narrativeOnly === true || castingPrevented) {
     if (
+      prepared.payload.narrativeOnly === true && (
       (Array.isArray(response.effects) && response.effects.length > 0) ||
       response.sending != null || response.animalMessenger != null || response.animateDead != null ||
-      response.animateObjects != null || response.sequester != null || response.wordOfRecall != null
+      response.animateObjects != null || response.sequester != null || response.wordOfRecall != null)
     ) {
       return {
         result: { ok: false, state: prepared.state, events: [], reason: 'invalid-class-feature' },
@@ -993,8 +1039,12 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
     }
     const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
       type: 'adjudicated-spell',
+      sourceActionInterruptionReaction: input.sourceActionInterruptionReaction,
+      counterspellReaction: input.counterspellReaction,
+      spellcastingSavingThrows: input.spellcastingSavingThrows,
       actorId: prepared.actorToken.id,
-      castingClassId: prepared.castingClassId,
+      castingClassId: prepared.payload.alternateResourceSpell ? undefined : prepared.castingClassId,
+      alternateResourceSpell: prepared.payload.alternateResourceSpell,
       spellId: prepared.spell.id,
       spellName: prepared.spell.name,
       castInstanceId: prepared.action.id,
@@ -1003,7 +1053,7 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
       castingTime: prepared.castingTime,
       ritual: prepared.ritual || undefined,
       effects: [],
-      settlementMode: 'narrative-slot-only',
+      settlementMode: prepared.payload.narrativeOnly === true ? 'narrative-slot-only' : 'dm-slot-only',
     }, input.airborneFallDamageRollsByCombatantId)
     if (!result.ok) return { result, airborneFalls }
     // The Headless action intentionally has slot-only settlement so that a
@@ -1020,6 +1070,10 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
         result: { ok: false, state: prepared.state, events: [], reason: 'item-resource-unavailable' },
         airborneFalls,
       }
+    }
+    if (prepared.spell.id === 'augury' && !castingPrevented &&
+      !dnd5eSpellInterrupted(result.events, prepared.actorToken.id, prepared.spell.id)) {
+      result.state.combatants[prepared.actorToken.id].classState.auguryHistory = nextDnd5eAuguryHistory(prepared.actor, prepared.action.id)
     }
     return {
       result,
@@ -1043,7 +1097,10 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
   const animalMessengerResolution = animalMessengerDeclaration
     ? normalizeDnd5eAnimalMessengerResolutionV1(response.animalMessenger)
     : undefined
-  const animateDeadDeclaration = prepared.spell.id === 'animate-dead' || prepared.spell.id === 'create-undead'
+  const wishUndeadCopy = prepared.spell.id === 'wish' && prepared.payload.animateDead
+    ? dnd5eWishUndeadCopy(prepared.payload.wish) : undefined
+  const undeadCreationSpellId = wishUndeadCopy?.spellId ?? prepared.spell.id
+  const animateDeadDeclaration = undeadCreationSpellId === 'animate-dead' || undeadCreationSpellId === 'create-undead'
     ? prepared.payload.animateDead
     : undefined
   const animateDeadResolution = animateDeadDeclaration
@@ -1085,13 +1142,13 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
       !animalMessengerResolution.targetVisibleConfirmed
     )) ||
     (prepared.spell.id !== 'animal-messenger' && response.animalMessenger != null) ||
-    ((prepared.spell.id === 'animate-dead' || prepared.spell.id === 'create-undead') && (
+    ((undeadCreationSpellId === 'animate-dead' || undeadCreationSpellId === 'create-undead') && (
       !animateDeadDeclaration || !animateDeadResolution || responseEffects.length > 0 ||
       !animateDeadResolution.targetsConfirmed ||
       !Number.isSafeInteger(input.worldMinute) || Number(input.worldMinute) < 0 ||
-      (prepared.spell.id === 'create-undead' && !dnd5eCreateUndeadIsNight(Number(input.worldMinute)))
+      (undeadCreationSpellId === 'create-undead' && !wishUndeadCopy && !dnd5eCreateUndeadIsNight(Number(input.worldMinute)))
     )) ||
-    (prepared.spell.id !== 'animate-dead' && prepared.spell.id !== 'create-undead' && response.animateDead != null) ||
+    (undeadCreationSpellId !== 'animate-dead' && undeadCreationSpellId !== 'create-undead' && response.animateDead != null) ||
     (prepared.spell.id === 'animate-objects' && (
       !animateObjectsDeclaration || !animateObjectsResolution || responseEffects.length > 0 ||
       !animateObjectsResolution.targetsConfirmed || response.concentrationRounds !== 10
@@ -1155,8 +1212,13 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
     : undefined
   let { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'adjudicated-spell',
+    sourceSlotSpellHealingTargets: input.sourceSlotSpellHealingTargets,
+    sourceActionInterruptionReaction: input.sourceActionInterruptionReaction,
+      counterspellReaction: input.counterspellReaction,
+    spellcastingSavingThrows: input.spellcastingSavingThrows,
     actorId: prepared.actorToken.id,
-    castingClassId: prepared.castingClassId,
+    castingClassId: prepared.payload.alternateResourceSpell ? undefined : prepared.castingClassId,
+    alternateResourceSpell: prepared.payload.alternateResourceSpell,
     spellId: prepared.spell.id,
     spellName: prepared.spell.name,
     castInstanceId: prepared.action.id,
@@ -1177,6 +1239,13 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
     settlementMode: 'dm-slot-only',
   }, input.airborneFallDamageRollsByCombatantId)
   if (!result.ok) return { result, airborneFalls }
+  if (dnd5eSpellInterrupted(result.events, prepared.actorToken.id, prepared.spell.id)) {
+    const materials = settleDnd5eSpellMaterialConsumption(prepared.characters, prepared.actor.id, prepared.spellMaterialPlan)
+    if (!materials.ok) return { result: { ok: false, state: prepared.state, events: [], reason: 'item-resource-unavailable' }, airborneFalls }
+    return { result, airborneFalls, application: planDnd5eMapResultApplication({ state: result.state, map: prepared.map,
+      characters: materials.characters, baselineCharacters: prepared.characters,
+      characterIdByCombatantId: prepared.characterIdByCombatantId, events: [...result.events] }) }
+  }
   if (createOrDestroyWaterDeclaration?.mode === 'destroy-fog') {
     const removedAreaIds = new Set(createOrDestroyWaterDeclaration.fogAreaIds ?? [])
     const removedAreas = (prepared.map.dnd5ePluginAreas ?? []).filter((area) =>
@@ -1371,7 +1440,7 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
   }
   if (animateDeadDeclaration) {
     const controlExpiresAtWorldMinute = Number(input.worldMinute) + 24 * 60
-    const createUndeadKind = prepared.spell.id === 'create-undead'
+    const createUndeadKind = undeadCreationSpellId === 'create-undead'
       ? animateDeadDeclaration.undeadKind
       : undefined
     const summonFeatureId = createUndeadKind ? 'spell:create-undead' : 'spell:animate-dead'
@@ -1385,7 +1454,7 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
       const addedIds: string[] = []
       for (const [index, declaredTarget] of animateDeadDeclaration.targets.entries()) {
         const remains = remainsById.get(declaredTarget.tokenId)
-        if (!remains) {
+        if (!remains || !wishUndeadCopy && (dnd5eMapRemainsCreationIsProtected(remains, input.worldMinute) || dnd5eUndeadCreationIsProtected(remains.dnd5eCombatState?.activeEffects))) {
           return {
             result: { ok: false, state: prepared.state, events: [], reason: 'invalid-target' },
             airborneFalls,
@@ -1604,9 +1673,11 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
       ])],
     }
   }
-  return {
-    result,
-    airborneFalls,
-    application,
+  if (prepared.spell.id === 'augury') {
+    application = recordDnd5eAuguryCast(application, prepared.actor, prepared.action.id)
+    // Reaction/fall coordinators rebuild the map plan from this authoritative state.
+    result.state.combatants[prepared.actorToken.id].classState.auguryHistory =
+      application.characters.find(character => character.id === prepared.actor.id)?.dnd5eCombatState?.auguryHistory
   }
+  return { result, airborneFalls, application }
 }

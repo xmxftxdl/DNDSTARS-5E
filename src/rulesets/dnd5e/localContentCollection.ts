@@ -731,6 +731,14 @@ async function shorthandCollectionFromJson(
   }
 }
 
+function validateLocalFeatureSourceBindings(value: Dnd5eContentPackageV2): void {
+  for (const feature of value.content.features) {
+    if (!feature.grantedBySubclass && (feature.sourceClassId || feature.sourceSubclassId)) {
+      throw new Error(`独立特性 ${feature.id} 不可声明 sourceClassId/sourceSubclassId；这些字段用于真实子职业授予绑定，不是职业先决条件。请保留正文资格要求并使用受支持的资格字段。`)
+    }
+  }
+}
+
 /**
  * Prepares any supported single JSON input for the same room-ephemeral install transaction.
  * The input may be a V2 package, a self-contained local collection, or shorthand content.
@@ -753,11 +761,13 @@ export async function prepareDnd5eLocalContentJson(
     throw new Error('输入内容不是有效 JSON')
   }
   if (!plainObject(parsed)) throw new Error('房间规则 JSON 顶层必须是对象')
+  const expanded = expandDnd5eActivityPatternsV1(parsed)
 
-  if (parsed.format === DND5E_CONTENT_PACKAGE_FORMAT) {
-    const bytes = sourceBytes.slice().buffer
+  if (expanded.format === DND5E_CONTENT_PACKAGE_FORMAT) {
+    const bytes = new TextEncoder().encode(JSON.stringify(expanded)).buffer
     const value = parseDnd5eContentPackageV2(bytes)
     if (!value) throw new Error('V2 房间规则包校验失败')
+    validateLocalFeatureSourceBindings(value)
     if (value.manifest.distributionPolicy !== 'room-ephemeral') {
       throw new Error('此入口只接受 room-ephemeral V2 包；其他包请使用“上传房间规则包”')
     }
@@ -769,16 +779,17 @@ export async function prepareDnd5eLocalContentJson(
     }
   }
 
-  const isCollection = parsed.format === DND5E_LOCAL_CONTENT_COLLECTION_FORMAT
+  const isCollection = expanded.format === DND5E_LOCAL_CONTENT_COLLECTION_FORMAT
   const collection = isCollection
-    ? collectionFromJson(parsed)
-    : await shorthandCollectionFromJson(parsed, options.targetCollection)
+    ? collectionFromJson(expanded)
+    : await shorthandCollectionFromJson(expanded, options.targetCollection)
   if (!collection) {
     throw new Error('未找到可导入的 races、backgrounds、features、feats、spells、items、classes、subclasses、monsters 或其他受支持分类')
   }
   const compiled = await compileDnd5eLocalContentCollection([
     new File([JSON.stringify(collection)], 'collection.json', { type: 'application/json' }),
   ])
+  validateLocalFeatureSourceBindings(compiled.package)
   return {
     package: compiled.package,
     bytes: compiled.bytes,
@@ -796,3 +807,4 @@ export async function prepareDnd5eLocalContentJsonFile(
   }
   return prepareDnd5eLocalContentJson(await file.text(), file.name)
 }
+import { expandDnd5eActivityPatternsV1 } from './activities/dnd5eActivityPatterns'

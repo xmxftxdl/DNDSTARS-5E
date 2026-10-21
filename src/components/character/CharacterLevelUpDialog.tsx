@@ -8,6 +8,7 @@ import {
   buildDnd5eLevelAdvancementPlan,
   dnd5eAdvancementRevisionBaseCharacter,
   dnd5eBuildChoiceRequirementsV1,
+  dnd5eBuildChoiceExpertiseAvailableV1,
   dnd5eClassDefinition,
   dnd5eRulesPluginRegistrySnapshot,
   fighterFightingStyleSelectionLimit,
@@ -30,6 +31,7 @@ import Dnd5eSpellAdvancementPicker from './Dnd5eSpellAdvancementPicker'
 import { dnd5eAdvancementFeatOptions } from './featAdvancementOptions'
 import { useCharacterCreationDraft } from './useCharacterCreationDraft'
 import { reviseDnd5eCreationAdvancement } from '../../rulesets/dnd5e/levelAdvancement'
+import { dnd5eBuildChoiceOptionAvailableV1, dnd5eBuildChoiceCharacterBeforeContentV1, DND5E_CUSTOM_BUILD_CHOICE_PREFIX, type Dnd5eBuildChoiceRequirementV1 } from '../../rulesets/dnd5e/buildChoices'
 
 interface CharacterLevelUpDialogProps {
   creationDraftKey?: string
@@ -59,7 +61,7 @@ const FAILURE_MESSAGES: Record<Dnd5eLevelAdvancementFailure, string> = {
   'missing-asi-choice': '还有属性值提升／专长尚未选择。',
   'invalid-asi-choice': '属性值提升不合法，或会令属性超过 20。',
   'invalid-feat': '所选专长不满足前提、已经拥有，或对应插件未安装。',
-  'missing-content-choice': '所选专长还有构筑选项尚未选满。',
+  'missing-content-choice': '所选内容还有构筑选项尚未选满。',
   'invalid-content-choice': '所选专长的构筑选项无效、互相冲突，或会让属性超过上限。',
   'missing-class-choice': '还有职业或子职选项尚未选满。',
   'invalid-class-choice': '职业或子职选项无效。',
@@ -168,6 +170,16 @@ export default function CharacterLevelUpDialog({
     : baseCharacter
   const featOptions = dnd5eAdvancementFeatOptions(featCandidateCharacter)
   const feats = featOptions.filter((feat) => feat.eligible)
+  const orderedBuildContents = [
+    ...(plan?.asiLevels ?? []).flatMap(level => {
+      const draft = asiDrafts[level]
+      const feat = draft?.mode === 'feat' ? featOptions.find(option => option.id === draft.featId) : undefined
+      return feat ? [{ contentId: feat.id, advancements: feat.advancements }] : []
+    }),
+    ...(plan?.contentAdvancements ?? []),
+  ]
+  const characterBeforeContent = (contentId: string) => dnd5eBuildChoiceCharacterBeforeContentV1(
+    baseCharacter, contentId, orderedBuildContents, contentChoiceSelections)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -201,6 +213,10 @@ export default function CharacterLevelUpDialog({
       const alreadyGranted = currentSelections.includes(optionId) && !replaceable
       if (alreadyGranted) return current
       const selected = existing.includes(optionId)
+      // Replaceable single choices switch directly without an empty interim state.
+      if (replaceable && targetLimit === 1 && !selected) {
+        return { ...current, [key]: [optionId] }
+      }
       if (
         selected &&
         replaceable &&
@@ -250,6 +266,36 @@ export default function CharacterLevelUpDialog({
         },
       }
     })
+  }
+
+  const renderCustomChoice = (contentId: string, requirement: Dnd5eBuildChoiceRequirementV1) => {
+    if (!requirement.customTag) return null
+    const prefix = DND5E_CUSTOM_BUILD_CHOICE_PREFIX
+    const selections = contentChoiceSelections[contentId]?.[requirement.id] ?? []
+    const custom = selections.find(id => id.startsWith(prefix))
+    return (
+      <label className="mt-2 block text-xs text-slate-300">
+        {requirement.customTag.label}
+        <input
+          aria-label={requirement.customTag.label}
+          maxLength={80}
+          value={custom?.slice(prefix.length) ?? ''}
+          disabled={requirement.count > 1 && !custom && selections.length >= requirement.count}
+          onChange={(event) => {
+            const value = event.target.value
+            setContentChoiceSelections(current => {
+              const existing = current[contentId]?.[requirement.id] ?? []
+              const regular = existing.filter(id => !id.startsWith(prefix))
+              const next = value
+                ? [...(requirement.count === 1 ? [] : regular), prefix + value]
+                : regular
+              return { ...current, [contentId]: { ...current[contentId], [requirement.id]: next } }
+            })
+          }}
+          className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-slate-100 disabled:opacity-35"
+        />
+      </label>
+    )
   }
 
   const confirm = async () => {
@@ -542,6 +588,8 @@ export default function CharacterLevelUpDialog({
                     {draft.featId && (() => {
                       const selected = featOptions.find((feat) => feat.id === draft.featId)
                       const requirements = dnd5eBuildChoiceRequirementsV1(selected?.advancements)
+                      const fixedGrants = (selected?.advancements ?? []).flatMap(advancement =>
+                        advancement.kind === 'build-grant' ? advancement.grants : [])
                       const selectedByGroup = contentChoiceSelections[draft.featId] ?? {}
                       return selected ? (
                         <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5 text-slate-400">
@@ -566,11 +614,14 @@ export default function CharacterLevelUpDialog({
                                   </div>
                                   <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-100">{chosen.size}/{requirement.count}</span>
                                 </div>
+                                {renderCustomChoice(selected.id, requirement)}
                                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                                   {requirement.options.map((option) => {
-                                    const available = option.requires?.every((dependency) =>
-                                      dependency.optionIds.some((optionId) =>
-                                        (selectedByGroup[dependency.advancementId] ?? []).includes(optionId))) ?? true
+                                    const dependenciesAvailable = dnd5eBuildChoiceOptionAvailableV1(option, selectedByGroup, characterBeforeContent(selected.id))
+                                    const otherGrants = requirements.filter(group => group.id !== requirement.id).flatMap(group =>
+                                      group.options.filter(candidate => (selectedByGroup[group.id] ?? []).includes(candidate.id)).flatMap(candidate => candidate.grants))
+                                    const available = dependenciesAvailable && dnd5eBuildChoiceExpertiseAvailableV1(character,
+                                      [...fixedGrants, ...otherGrants, ...option.grants], fixedGrants.length)
                                     const active = chosen.has(option.id)
                                     return (
                                       <button
@@ -757,11 +808,10 @@ export default function CharacterLevelUpDialog({
                           </div>
                           <span className="text-xs font-semibold text-cyan-100">{chosen.size}/{requirement.count}</span>
                         </div>
+                        {renderCustomChoice(content.contentId, requirement)}
                         <div className="mt-2 grid gap-2 sm:grid-cols-2">
                           {requirement.options.map((option) => {
-                            const available = option.requires?.every((dependency) =>
-                              dependency.optionIds.some((optionId) =>
-                                (selectedByGroup[dependency.advancementId] ?? []).includes(optionId))) ?? true
+                            const available = dnd5eBuildChoiceOptionAvailableV1(option, selectedByGroup, characterBeforeContent(content.contentId))
                             const active = chosen.has(option.id)
                             return (
                               <button

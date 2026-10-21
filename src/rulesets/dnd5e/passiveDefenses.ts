@@ -73,6 +73,7 @@ export interface Dnd5eDefensiveCreature {
   creatureType?: string
   magicResistance?: boolean
   spellSavingThrowAdvantage?: boolean
+  conditionSavingThrowAdvantages?: readonly string[]
   spellSavingThrowAdvantageWithinFeet?: number
   spellSavingThrowDisadvantageDamageTypes?: readonly Dnd5eDamageType[]
   spellSavingThrowDisadvantageCastingClassIds?: readonly string[]
@@ -94,6 +95,10 @@ export interface Dnd5eSavingThrowRuleReason {
 }
 
 const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason, 'id'>> = {
+  'recognized-illusion': {
+    label: '已识破幻象',
+    detail: '已通过调查识破这一个幻象，对其声明的豁免具有优势。',
+  },
   'danger-sense': {
     label: '危险感知',
     detail: '可见效果的敏捷豁免具有优势；目标未失能、未目盲且未耳聋。',
@@ -134,6 +139,10 @@ const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason,
     label: '种族适应',
     detail: '当前种族规则对这次豁免提供优势。',
   },
+  'feature-condition-save-advantage': {
+    label: '特性状态防护',
+    detail: '已获得的特性对当前状态的豁免提供优势。',
+  },
   'protection-from-poison': {
     label: '防护毒素',
     detail: '对中毒状态的豁免具有优势。',
@@ -173,6 +182,10 @@ const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason,
   'next-d20-advantage': {
     label: '预激活优势',
     detail: '玩家此前已主动准备一次优势，本次豁免会消耗该状态。',
+  },
+  'source-turn-spell-save-disadvantage': {
+    label: '来源回合法术豁免劣势',
+    detail: '攻击防护的后续效果在来源的本回合内生效，仅影响对该来源法术的豁免。',
   },
 }
 
@@ -230,11 +243,13 @@ export function dnd5eSavingThrowModeExplanation(
     effectVisible?: boolean
     condition?: string
     sourceCreatureType?: string
+    sourceActorId?: string
     sourceIsSpell?: boolean
     sourceSpellcastingClassId?: string
     sourceIsMagical?: boolean
     damageType?: Dnd5eDamageType
     sourceDistanceFeet?: number
+    recognizedIllusion?: boolean
   } = {},
 ): Dnd5eSavingThrowModeExplanation {
   const dangerSenseBlocked = dnd5eIsIncapacitated(creature) || hasCondition(creature, new Set([
@@ -300,8 +315,12 @@ export function dnd5eSavingThrowModeExplanation(
       { active: holyNimbus, reason: 'holy-nimbus' },
       { active: magicResistance, reason: 'magic-resistance' },
       { active: spellSavingThrowAdvantage, reason: 'spell-saving-throw-advantage' },
+      { active: context.recognizedIllusion === true, reason: 'recognized-illusion' },
       { active: nearbySpellSavingThrowAdvantage, reason: 'nearby-spell-saving-throw-advantage' },
       { active: racialSaveAdvantage, reason: 'racial-save-advantage' },
+      { active: context.condition != null && creature.conditionSavingThrowAdvantages?.some(condition =>
+        dnd5eStandardConditionId(condition) === dnd5eStandardConditionId(context.condition!) &&
+        dnd5eStandardConditionId(condition) != null) === true, reason: 'feature-condition-save-advantage' },
       { active: sourceQualifiedConditionSaveAdvantage, reason: 'source-qualified-condition-save-advantage' },
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: antitoxin, reason: 'antitoxin' },
@@ -323,6 +342,10 @@ export function dnd5eSavingThrowModeExplanation(
       },
     ],
     disadvantage: [
+      { active: context.sourceIsSpell === true && context.sourceActorId != null &&
+          effectiveDnd5eActiveEffects(creature.classState.activeEffects).some(effect =>
+            effect.source.actorId === context.sourceActorId && !!effect.sourceTurnSpellSaveDisadvantage?.activeTurnKey),
+        reason: 'source-turn-spell-save-disadvantage' },
       { active: creature.exhaustionLevel >= 3, reason: 'exhaustion-level-3' },
       {
         active: dnd5eConditionSavingThrowDisadvantage(creature, ability),
@@ -363,11 +386,13 @@ export function dnd5eSavingThrowMode(
     effectVisible?: boolean
     condition?: string
     sourceCreatureType?: string
+    sourceActorId?: string
     sourceIsSpell?: boolean
     sourceSpellcastingClassId?: string
     sourceIsMagical?: boolean
     damageType?: Dnd5eDamageType
     sourceDistanceFeet?: number
+    recognizedIllusion?: boolean
   } = {},
 ): D20RollMode {
   return dnd5eSavingThrowModeExplanation(creature, ability, context).mode
@@ -455,7 +480,8 @@ export function dnd5eTargetAttackAdvantageReasons(
 export function dnd5eAttackerIsUnseen(
   creature: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
 ): boolean {
-  if (hasMechanicalEffect(creature, 'srd-5.1:spell:faerie-fire')) return false
+  if (hasMechanicalEffect(creature, 'srd-5.1:spell:faerie-fire') ||
+    effectiveDnd5eActiveEffects(creature.classState.activeEffects).some(effect => effect.modifiers?.suppressInvisibilityBenefits)) return false
   return dnd5eConditionGrantsAttackAdvantageToAttacker(creature) ||
     (creature.classState.emptyBodyRoundsRemaining ?? 0) > 0
 }
@@ -519,11 +545,12 @@ export function dnd5eUnseenTargetImposesDisadvantage(
 ): boolean {
   if (dnd5eAttackerAttackDisadvantageReasons(attacker).length > 0) return true
   if (dnd5eTargetAttackDisadvantageReasons(attacker, target).length > 0) return true
-  const targetIsOutlined = hasMechanicalEffect(target, 'srd-5.1:spell:faerie-fire')
+  const targetIsOutlined = hasMechanicalEffect(target, 'srd-5.1:spell:faerie-fire') ||
+    effectiveDnd5eActiveEffects(target.classState.activeEffects).some(effect => effect.modifiers?.suppressInvisibilityBenefits)
   const targetIsUnseen = options?.targetVisible === true
     ? false
     : (!targetIsOutlined && dnd5eHasStandardCondition(target, 'invisible')) ||
-      (target.classState.emptyBodyRoundsRemaining ?? 0) > 0
+      (!targetIsOutlined && (target.classState.emptyBodyRoundsRemaining ?? 0) > 0)
   const unseenDisadvantage = targetIsUnseen && !(defensiveClassLevel(attacker as Dnd5eDefensiveCreature, 'ranger') >= 18)
   return unseenDisadvantage
 }

@@ -8,7 +8,7 @@ export function dnd5eBasicActionEconomyAvailable(input: {
   bonusActionAvailable: boolean
   usesBonusActionGrant?: boolean
 }): boolean {
-  if (input.kind === 'release-grapple') return true
+  if (input.kind === 'release-grapple' || input.kind === 'mount' || input.kind === 'dismount') return true
   if (input.kind === 'other-bonus-action' || input.kind === 'command-animate-dead' || input.kind === 'command-animate-objects' || input.usesBonusActionGrant) {
     return input.bonusActionAvailable
   }

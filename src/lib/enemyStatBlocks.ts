@@ -88,7 +88,7 @@ const DAMAGE_TYPE_LABELS: Record<string, string> = {
   thunder: '雷鸣',
 }
 
-function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBlock {
+export function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBlock {
   const convertAction = (action: Dnd5eMonsterStatBlock['actions'][number]): MonsterAction => {
     const attack = action.attack
     const primaryDamage = attack?.damage[0]
@@ -108,7 +108,7 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
         ? 'multiattack'
         : hasAreaRule
           ? 'aoe'
-        : action.rule?.kind === 'saving-throw-condition'
+        : (action.rule?.kind === 'saving-throw-condition' || action.rule?.kind === 'saving-throw-terminal-effect')
           ? 'targeted-condition'
         : action.rule?.kind === 'saving-throw-damage-and-max-hp-reduction'
           ? 'targeted-special'

@@ -1,4 +1,6 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useState, type Dispatch, type SetStateAction } from 'react'
+import { readPluginChoiceFields, readPluginChoiceSelection } from '../../lib/pluginChoiceFields'
+import {SurfaceDrawingInput} from '../../components/SurfaceDrawingInput'
 import type {
   SharedBardicInspirationPromptView,
   SharedCuttingWordsPromptView,
@@ -20,7 +22,7 @@ interface ClassFeatureInterruptPanelsProps {
   empoweredSpellPrompt: SharedEmpoweredSpellPromptView | null
   empoweredSpellSelection: string[]
   standAgainstTidePrompt: SharedStandAgainstTidePromptView | null
-  onPluginChoice: (optionId: string) => void | Promise<void>
+  onPluginChoice: (optionId: string, fieldValues?: Record<string, string>) => void | Promise<void>
   onBardicInspirationChoice: (use: boolean) => void
   onCuttingWordsChoice: (use: boolean) => void
   onDarkOnesOwnLuckChoice: (use: boolean) => void
@@ -60,6 +62,10 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
     sharedStandAgainstTidePrompt?.expiresAt ?? 0,
   ) || undefined
   const sharedDodgeNow = useInterruptCountdownNow(expiresAt, fixedNow)
+  const [fieldState, setFieldState] = useState<{ promptId: string; values: Record<string, string> }>({ promptId: '', values: {} })
+  const fields = sharedPluginChoicePrompt?.payload.fields ?? []
+  const fieldValues = sharedPluginChoicePrompt?.id === fieldState.promptId ? fieldState.values : {}
+  const checkedFields = readPluginChoiceFields(fields, fieldValues)
 
   return (
     <>
@@ -86,6 +92,22 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
             <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
               {sharedPluginChoicePrompt.payload.prompt}
             </p>
+            {fields.length > 0 && <div className="mt-3 grid gap-3">
+              {fields.map(field => <div key={field.id} className="text-sm text-slate-200">
+                {field.label}
+                {field.kind==='multi-select'?<div role="group" aria-label={field.label} className="mt-1 grid max-h-52 gap-2 overflow-y-auto rounded border border-white/20 p-2">
+                  {(field.options??[]).map(option=>{
+                    const selected=readPluginChoiceSelection({...field,required:false},fieldValues[field.id]??field.defaultValue??'[]')??[]
+                    return <label key={option.id} className="flex items-center gap-2"><input type="checkbox" checked={selected.includes(option.id)}
+                      onChange={event=>setFieldState({promptId:sharedPluginChoicePrompt.id,values:{...fieldValues,[field.id]:JSON.stringify(event.target.checked?[...selected,option.id]:selected.filter(id=>id!==option.id))}})}/>{option.label}</label>
+                  })}
+                </div>:field.kind==='surface-drawing'?<SurfaceDrawingInput onChange={value=>setFieldState({promptId:sharedPluginChoicePrompt.id,values:{...fieldValues,[field.id]:value}})}/>:<input aria-label={field.label} type={field.kind === 'color' ? 'color' : 'text'} maxLength={500}
+                  value={fieldValues[field.id] ?? field.defaultValue ?? ''}
+                  onChange={event => setFieldState({ promptId: sharedPluginChoicePrompt.id,
+                    values: { ...fieldValues, [field.id]: event.target.value } })}
+                  className="mt-1 block w-full rounded border border-white/20 bg-void-900 p-2" />}
+              </div>)}
+            </div>}
             <div
               data-testid="shared-plugin-choice-options"
               className="mt-5 grid min-h-0 gap-2 overflow-y-auto pr-1"
@@ -95,7 +117,8 @@ export default function ClassFeatureInterruptPanels(props: ClassFeatureInterrupt
                   key={option.id}
                   type="button"
                   data-testid={`shared-plugin-choice-${option.id}`}
-                  onClick={() => void handleSharedPluginChoice(option.id)}
+                  disabled={fields.length > 0 && option.id !== sharedPluginChoicePrompt.payload.defaultOptionId && !checkedFields}
+                  onClick={() => void handleSharedPluginChoice(option.id, checkedFields)}
                   className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition hover:border-violet-400/35 hover:bg-violet-500/10"
                 >
                   <span className="block text-sm font-semibold text-slate-100">{option.label}</span>

@@ -1,3 +1,11 @@
+import { dnd5eInherentFeatureLightEffects } from './inherentFeatureLight'
+import { dnd5eExhaustionState, dnd5eSourcedExhaustionLevel } from './sourcedExhaustion'
+import type { ResourceRestRecovery } from '../../lib/resourceRestRecovery'
+import { dnd5eCreatureFormVision } from './creatureFormVision'
+import { dnd5eInitiativeStaticModifierTotal } from './initiativeModifiers'
+import {ammunitionContainerSnapshots} from './ammunitionBindings'
+import { classResourceDefinitions } from '../../lib/classResources'
+import type { ClassResourceReset } from '../../lib/classDefinitionTypes'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { Dnd5eInventoryHeadlessEffectSnapshot, Dnd5eInventoryMagicDetectionSnapshot, Dnd5eInventoryReactionSpellSnapshot } from '../../types/inventory'
@@ -10,6 +18,7 @@ import {
   dnd5eArmorProficiencies,
   dnd5eArmorProficient,
   dnd5eWeaponProficient,
+  dnd5eWeaponDamageSource,
   dnd5eWeaponPropertyIds,
   dnd5eWearingUnproficientArmor,
 } from './equipment'
@@ -23,9 +32,11 @@ import {
 } from './classes'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import { syncDnd5ePrimalChampion } from './hitPoints'
-import { dnd5eInventoryHeadlessEffectSnapshots } from './inventoryHeadlessRuntime'
+import { dnd5eInventoryHeadlessEffectSnapshots, dnd5eInventoryResourceSnapshots, type Dnd5eInventoryResourceSnapshot } from './inventoryHeadlessRuntime'
 import { dnd5eInventoryReactionSpellSnapshots } from './inventoryReactionSpells'
-import { normalizeDnd5eInventory } from './items'
+import { normalizeDnd5eInventory, dnd5eInventoryLoad } from './items'
+import { dnd5eRageFeatureCarryingCapacityMultiplier } from './rageFeature'
+import { dnd5eActivityInventorySnapshot } from './activities/dnd5eActivityInventorySelection'
 import { normalizeDnd5eHitPointMaximumReductionLedger } from './hitPointMaximumReductions'
 import {
   dnd5ePluginFeaturePassiveEffectSnapshots,
@@ -33,13 +44,14 @@ import {
 } from './pluginFeaturePassiveEffects'
 import {
   dnd5eCharacterHasPluginFeature,
+  dnd5eCharacterHasDeferredRageDeath,
   dnd5ePluginBackgroundDefinition,
   dnd5ePluginRaceDefinition,
-  registeredDnd5ePluginFeatures,
+  runtimeDnd5ePluginFeatures as registeredDnd5ePluginFeatures,
   type Dnd5ePluginRacialSavingThrowAdvantages,
   type Dnd5ePluginStaticCombatModifiers,
 } from './pluginApi'
-import { dnd5eCharacterBuildSpellGrantsV1, dnd5eCharacterBuildTagsV1 } from './buildChoices'
+import { dnd5eCharacterBuildSpellGrantsV1, dnd5eCharacterBuildTagsV1, dnd5eCharacterBuildProficienciesV1 } from './buildChoices'
 import { dnd5eCharacterClassLevel, dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels, type Dnd5eClassLevels } from './multiclass'
 import {
   dnd5eCoreRaceMechanics,
@@ -76,6 +88,8 @@ export interface Dnd5eDeathSaves {
 
 export interface Dnd5eCharacter {
   id: string
+  alignment?: string
+  originalAlignment?: string
   name: string
   player: string
   /** 保留种族身份，以便 Headless 投影种族被动规则。 */
@@ -84,7 +98,9 @@ export interface Dnd5eCharacter {
   level: number
   abilities: Record<AbilityKey, number>
   savingThrowProficiencies: readonly AbilityKey[]
+  skillCheckAbilityBonuses?: readonly import('./plugins/pluginMechanicsContracts').Dnd5eSkillCheckAbilityBonus[]
   skillProficiencies: readonly string[]
+  toolProficiencies?: readonly string[]
   passivePerception: number
   passiveInvestigation: number
   saveDc?: number
@@ -94,6 +110,8 @@ export interface Dnd5eCharacter {
   temporaryHp: number
   exhaustionLevel: number
   speed: number
+  carriedWeightLb?: number
+  carryingCapacityMultiplier?: number
   movementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number; hover?: boolean }
   initiativeBonus: number
   hitPointDice: readonly { sides: number; current: number; max: number }[]
@@ -102,7 +120,11 @@ export interface Dnd5eCharacter {
   inspiration: boolean
   conditions: readonly string[]
   classResources: Record<string, { current: number; max: number }>
+  classResourceRestRecovery?: Record<string, ResourceRestRecovery>
+  classResourceResets?: Record<string, ClassResourceReset>
+  ammunitionContainers?: readonly import('./ammunitionBindings').Dnd5eAmmunitionContainerSnapshot[]
   inventoryHeadlessEffects?: readonly Dnd5eInventoryHeadlessEffectSnapshot[]
+  inventoryResourceSnapshots?: readonly Dnd5eInventoryResourceSnapshot[]
   inventoryMagicItems?: readonly Dnd5eInventoryMagicDetectionSnapshot[]
   inventoryReactionSpells?: readonly Dnd5eInventoryReactionSpellSnapshot[]
   pluginFeaturePassiveEffects?: readonly Dnd5ePluginFeaturePassiveEffectSnapshot[]
@@ -116,7 +138,14 @@ export interface Dnd5eCharacter {
   grantedSpellIds: readonly string[]
   pluginFeatureIds: readonly string[]
   sizeRank: number
+  racialDarkvisionRangeFeet?: number
   darkvisionRangeFeet?: number
+  darkvisionIfAbsentFeet?: number
+  darkvisionExistingBonusFeet?: number
+  darkvisionRacialFallbackFeet?: number
+  darkvisionRacialBonusFeet?: number
+  dnd5eFormDarkvisionRangeFeet?: number
+  dnd5eFormRetainsDarkvision?: boolean
   racialSavingThrowAdvantages?: Dnd5ePluginRacialSavingThrowAdvantages
   racialRules: Dnd5eRacialRulesSnapshot
   damageResistances: readonly Dnd5eDamageType[]
@@ -125,6 +154,7 @@ export interface Dnd5eCharacter {
   /** Damage types selected through the generic Elemental Adept build tag. */
   elementalAdeptDamageTypes?: readonly Dnd5eDamageType[]
   spellSavingThrowAdvantage?: boolean
+  conditionSavingThrowAdvantages?: readonly string[]
   spellSavingThrowAdvantageWithinFeet?: number
   imposeConcentrationCheckDisadvantageOnDamage?: boolean
   meleeWeaponDamageRerollOncePerTurn?: boolean
@@ -135,6 +165,7 @@ export interface Dnd5eCharacter {
   hitPointMaximumReductionImmunity?: boolean
   cannotBeSurprisedWhileConscious?: boolean
   unseenAttackersDoNotGainAdvantage?: boolean
+  invisibleToDarkvision?: boolean
   ignoreLongRangeRangedWeaponDisadvantage?: boolean
   ignoreNearbyHostileRangedAttackDisadvantage?: boolean
   ignoreLoadingWeaponProperty?: boolean
@@ -147,9 +178,13 @@ export interface Dnd5eCharacter {
   opportunityAttackHitStopsMovement?: boolean
   opportunityAttacksOnEnterReachWeaponIds?: readonly string[]
   ignoreDifficultTerrainWhileDashing?: boolean
+  maximizeHealingDiceNearCompanion?: readonly import('./ownedCompanionProximity').Dnd5eOwnedCompanionProximity[]
+  grappleEscapeAdvantage?: boolean
   climbWithoutSpeedCostMultiplier?: number
   runningJumpMinimumApproachFeet?: number
   standFromProneMovementCostFeet?: number
+  swimSpeedEqualsWalking?: boolean
+  canBreatheWater?: boolean
   spellAttackRangeMultiplier?: number
   ignoreSpellAttackCoverBonus?: boolean
   retainHiddenOnRangedWeaponMiss?: boolean
@@ -170,6 +205,7 @@ export interface Dnd5eCharacter {
     destroyed: boolean
   }
   hasShield: boolean
+  lastLongRestWorldMinute: number | null
   activityEquipment: Dnd5eActivityEquipmentSnapshotV1
   activitySpellcasting: { capable: boolean; classIds: readonly string[] }
   classState: NonNullable<Character['dnd5eCombatState']>
@@ -218,16 +254,16 @@ function combatManeuverDieSidesOverride(
 
 function staticModifierEnabled(
   modifiers: readonly Dnd5ePluginStaticCombatModifiers[],
-  key: 'cannotBeSurprisedWhileConscious' | 'unseenAttackersDoNotGainAdvantage' |
+  key: 'cannotBeSurprisedWhileConscious' | 'unseenAttackersDoNotGainAdvantage' | 'invisibleToDarkvision' |
     'ignoreLongRangeRangedWeaponDisadvantage' | 'ignoreNearbyHostileRangedAttackDisadvantage' |
     'ignoreLoadingWeaponProperty' | 'ignoreRangedWeaponCoverBonus' | 'ignoreMediumArmorStealthDisadvantage' |
-    'preventOpportunityAttacksFromMeleeAttackTargets' | 'ignoreDifficultTerrainWhileDashing' |
+    'preventOpportunityAttacksFromMeleeAttackTargets' | 'ignoreDifficultTerrainWhileDashing' | 'grappleEscapeAdvantage' |
     'ignoreSpellAttackCoverBonus' | 'mountedMeleeAdvantageAgainstSmallerUnmounted' |
     'redirectMountedCreatureAttacksToRider' | 'grantMountedCreatureDexterityEvasion' |
     'opportunityAttacksIgnoreDisengage' | 'opportunityAttackHitStopsMovement' |
     'imposeConcentrationCheckDisadvantageOnDamage' | 'meleeWeaponDamageRerollOncePerTurn' |
     'shieldDexteritySaveBonusWhenSoleTarget' | 'shieldSuccessfulDexteritySaveNegatesDamage' |
-    'opportunityAttackSpellReplacement' | 'retainHiddenOnRangedWeaponMiss',
+    'opportunityAttackSpellReplacement' | 'retainHiddenOnRangedWeaponMiss' | 'swimSpeedEqualsWalking' | 'canBreatheWater',
 ): boolean {
   return modifiers.some((modifier) => modifier[key] === true)
 }
@@ -244,10 +280,16 @@ function activityHeldItemSnapshot(
   if (roles.length === 0) roles.push('other')
   return {
     itemId: item.baseEquipmentId ?? item.id,
+    weaponId: item.dnd5e?.kind === 'weapon' ? item.id : undefined,
+    inventoryInstanceId: character.dnd5eInventory?.entries.find(entry => entry.equippedSlot != null && character.equipment?.[entry.equippedSlot] === item)?.instanceId,
     roles,
     ...(item.dnd5e?.kind === 'weapon'
       ? {
+          weaponBaseId: item.baseEquipmentId ?? item.id,
+          intrinsicAttackBonus: item.effects?.weaponAttackBonus ?? 0,
+          intrinsicDamageBonus: item.effects?.weaponDamageBonus ?? 0,
           weaponMode: item.dnd5e.mode,
+          magical: dnd5eWeaponDamageSource(item)?.magical,
           weaponProperties: dnd5eWeaponPropertyIds(item.dnd5e.properties),
           proficient: dnd5eWeaponProficient(character, item),
         }
@@ -261,6 +303,7 @@ function activityEquipmentSnapshot(
   character: Character,
   armorCategory: Dnd5eActivityEquipmentSnapshotV1['armorCategory'],
 ): Dnd5eActivityEquipmentSnapshotV1 {
+  const armorEntry = character.dnd5eInventory?.entries.find(entry => entry.equippedSlot === 'armor')
   const mainHand = activityHeldItemSnapshot(character, character.equipment?.mainWeapon)
   const offHand = activityHeldItemSnapshot(character, character.equipment?.offHand)
   const mainUsesTwoHands = mainHand?.weaponProperties?.includes('two-handed') === true
@@ -269,6 +312,13 @@ function activityEquipmentSnapshot(
     : Number(mainHand == null) + Number(offHand == null))) as 0 | 1 | 2
   return {
     armorCategory,
+    inventory: dnd5eActivityInventorySnapshot(character),
+    armor: character.equipment?.armor?.dnd5e?.kind === 'armor' ? {
+      itemId: character.equipment.armor.id,
+      inventoryInstanceId: armorEntry?.instanceId,
+      magical: armorEntry?.item.magicItem != null || armorEntry?.item.category === 'magic-item'
+        ? true : character.equipment.armor.dnd5e.magical ?? (armorEntry ? false : undefined),
+    } : undefined,
     armorProficient: armorCategory === 'none' || dnd5eArmorProficient(character, character.equipment?.armor),
     armorProficiencies: [...dnd5eArmorProficiencies(character)],
     mainHand,
@@ -356,7 +406,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       ? character.dnd5eClassChoices?.classes?.[classDefinition.id]?.subclass
       : undefined
   const armor = character.equipment?.armor?.dnd5e
-  const exhaustionLevel = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
+  const exhaustionLevel = dnd5eSourcedExhaustionLevel(dnd5eExhaustionState(character.dnd5eCombatState?.sourcedExhaustion, character.exhaustionLevel))
   const maximumReductionLedger =
     normalizeDnd5eHitPointMaximumReductionLedger(
       character.dnd5eCombatState?.hitPointMaximumReductionLedger,
@@ -418,17 +468,6 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   const passiveDefenseFeatures = selectedPluginFeatures.filter((feature) =>
     feature.automation !== 'manual' &&
     feature.declarativeAbility?.mechanic?.kind === 'passive-defense')
-  const pluginDamageDefenseRules: Dnd5eConditionalDamageDefense[] = passiveDefenseFeatures.flatMap((feature) => {
-    const mechanic = feature.declarativeAbility?.mechanic
-    if (mechanic?.kind !== 'passive-defense' || !mechanic.damageResistance) return []
-    return [{
-      outcome: 'resistant' as const,
-      damageTypes: [...mechanic.damageResistance.damageTypes],
-      delivery: mechanic.damageResistance.delivery,
-      magical: mechanic.damageResistance.magical,
-      reason: feature.id,
-    }]
-  })
   const staticModifiers = [
     ...(coreRace?.staticModifiers ? [coreRace.staticModifiers] : []),
     ...(raceDefinition?.staticModifiers ? [raceDefinition.staticModifiers] : []),
@@ -441,7 +480,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     pluginDamageResistances.push(racialRules.dragonbornAncestry.damageType)
   }
   const pluginDamageImmunities = normalizedDamageTypes(
-    staticModifiers.flatMap((modifier) => modifier.damageImmunities ?? []),
+    [...staticModifiers.flatMap((modifier) => modifier.damageImmunities ?? []),
+      ...passiveDefenseFeatures.flatMap(feature => feature.declarativeAbility?.mechanic?.kind === 'passive-defense' ? feature.declarativeAbility.mechanic.damageImmunities ?? [] : [])],
   ) ?? []
   const inventory = normalizeDnd5eInventory(character)
   const wearingWardingBondRing = inventory.entries.some((entry) =>
@@ -469,6 +509,13 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   const equippedArmorDefinition = armorEntry?.item.equipment?.dnd5e
   const armorClassPenalty = Math.max(0, Math.floor(armorEntry?.condition?.armorClassPenalty ?? 0))
   const armorDestroyed = armorEntry?.condition?.destroyed === true
+  const pluginDamageDefenseRules: Dnd5eConditionalDamageDefense[] = passiveDefenseFeatures.flatMap((feature) => {
+    const mechanic = feature.declarativeAbility?.mechanic
+    if (mechanic?.kind !== 'passive-defense' || !mechanic.damageResistance) return []
+    if (mechanic.damageResistance.requiresHeavyArmor && (armorDestroyed || armor?.kind !== 'armor' || armor.category !== 'heavy')) return []
+    return [{ outcome: 'resistant' as const, damageTypes: [...mechanic.damageResistance.damageTypes],
+      delivery: mechanic.damageResistance.delivery, magical: mechanic.damageResistance.magical, reason: feature.id }]
+  })
   const wornArmorCategory = armorDestroyed
     ? undefined
     : equippedArmorDefinition?.kind === 'armor'
@@ -492,12 +539,12 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   const unarmoredArmorClass = dnd5eArmorClass({
     ...character,
     equipment: { ...character.equipment, armor: undefined },
-  })
+  }, false)
   const equippedArmor = armorEntry && equippedArmorDefinition?.kind === 'armor'
     ? {
         instanceId: armorEntry.instanceId,
         equipmentId: armorEntry.item.equipment!.id,
-        magical: armorEntry.item.magicItem != null,
+        magical: armorEntry.item.magicItem != null || armorEntry.item.category === 'magic-item' || equippedArmorDefinition.magical === true,
         metal: equippedArmorDefinition.material === 'metal' ||
           (equippedArmorDefinition.material == null && equippedArmorDefinition.category === 'heavy'),
         baseProvidedArmorClass: equippedArmorDefinition.baseArmorClass,
@@ -522,12 +569,16 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   return {
     id: character.id,
     name: character.name,
+    alignment: character.alignment,
+    originalAlignment: character.dnd5eOriginalAlignment,
     player: character.player,
     race: character.race,
     raceId: character.dnd5eRaceId,
     level,
     abilities: effectiveAbilities,
     savingThrowProficiencies: [...dnd5eEffectiveSavingThrowProficiencies(character)],
+    toolProficiencies: [...dnd5eCharacterBuildProficienciesV1(character, 'tool')],
+    skillCheckAbilityBonuses: staticModifiers.flatMap(modifier=>modifier.skillCheckAbilityBonuses??[]).map(rule=>({...rule})),
     skillProficiencies: [...new Set([
       ...character.skills,
       ...backgroundSkills,
@@ -545,22 +596,24 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       : undefined,
     armorClass: (armorDestroyed
       ? unarmoredArmorClass
-      : Math.max(0, dnd5eArmorClass(character) - armorClassPenalty)) +
+      : Math.max(0, dnd5eArmorClass(character, false) - armorClassPenalty)) +
       staticModifierTotal(staticModifiers, 'armorClassBonus') + mediumArmorDexterityCapBonus +
       dualWieldMeleeArmorClassBonus,
     currentHp: currentHitPoints,
     maxHp: effectiveMaxHp,
     temporaryHp: Math.max(0, Math.floor(character.tempHp)),
     exhaustionLevel,
-    speed: Math.max(0, dnd5eWalkingSpeed(character) + staticModifierTotal(staticModifiers, 'speedBonusFeet')),
+    carriedWeightLb: dnd5eInventoryLoad(character).totalWeightLb,
+    carryingCapacityMultiplier: dnd5eRageFeatureCarryingCapacityMultiplier(character),
+    speed: Math.max(0, dnd5eWalkingSpeed({ ...character, exhaustionLevel: 0 }, true) + staticModifierTotal(staticModifiers, 'speedBonusFeet')),
     movementSpeeds: {
-      walk: Math.max(0, dnd5eWalkingSpeed(character) + staticModifierTotal(staticModifiers, 'speedBonusFeet')),
+      walk: Math.max(0, dnd5eWalkingSpeed({ ...character, exhaustionLevel: 0 }, true) + staticModifierTotal(staticModifiers, 'speedBonusFeet')),
       climb: character.dnd5eMovementSpeeds?.climb,
       swim: character.dnd5eMovementSpeeds?.swim,
       fly: character.dnd5eMovementSpeeds?.fly,
       hover: character.dnd5eMovementSpeeds?.hover,
     },
-    initiativeBonus: Math.floor(character.initiativeBonus) + staticModifierTotal(staticModifiers, 'initiativeBonus'),
+    initiativeBonus: Math.floor(character.initiativeBonus) + dnd5eInitiativeStaticModifierTotal(staticModifiers, effectiveAbilities),
     hitPointDice: character.hitPointDice?.length
       ? character.hitPointDice.map((pool) => ({ ...pool }))
       : [{ sides: hitDieSides, current: level, max: level }],
@@ -568,13 +621,18 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       successes: deathSaveSuccesses,
       failures: deathSaveFailures,
       stable: currentHitPoints === 0 && deathSaveFailures < 3 && character.deathSaveStable === true,
-      dead: currentHitPoints === 0 && deathSaveFailures >= 3,
+      dead: currentHitPoints === 0 && deathSaveFailures >= 3 &&
+        (exhaustionLevel >= 6 || !dnd5eCharacterHasDeferredRageDeath(character)),
     },
     concentrating: character.concentrating ?? false,
     inspiration: character.inspiration > 0,
     conditions: [...character.conditions],
     classResources: dnd5eClassResources(character),
+    classResourceRestRecovery: Object.fromEntries(classResourceDefinitions(character).filter(d => d.restRecovery).map(d => [d.key, structuredClone(d.restRecovery!)])),
+    classResourceResets: Object.fromEntries(classResourceDefinitions(character).map((definition) => [definition.key, definition.resetOn])),
+    ammunitionContainers: ammunitionContainerSnapshots(character),
     inventoryHeadlessEffects: dnd5eInventoryHeadlessEffectSnapshots(character),
+    inventoryResourceSnapshots: dnd5eInventoryResourceSnapshots(character),
     inventoryMagicItems: inventory.entries.flatMap((entry) =>
       entry.quantity > 0 && entry.item.magicItem && entry.planarState !== 'ethereal'
         ? [{
@@ -601,6 +659,12 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       character.dnd5eRaceId,
       raceDefinition?.size ?? coreRace?.size,
     ),
+    ...dnd5eCreatureFormVision(character.dnd5eCombatState),
+    racialDarkvisionRangeFeet: Math.max(0, coreRace?.staticModifiers?.darkvisionRangeFeet ?? 0, raceDefinition?.staticModifiers?.darkvisionRangeFeet ?? 0) || undefined,
+    darkvisionIfAbsentFeet: Math.max(0, ...staticModifiers.map(modifier => modifier.darkvisionIfAbsentFeet ?? 0)) || undefined,
+    darkvisionExistingBonusFeet: Math.min(10_000, staticModifiers.reduce((sum, modifier) => sum + (modifier.darkvisionExistingBonusFeet ?? 0), 0)) || undefined,
+    darkvisionRacialFallbackFeet: Math.max(0, ...staticModifiers.map(modifier => modifier.darkvisionRacialFallbackFeet ?? 0)) || undefined,
+    darkvisionRacialBonusFeet: Math.min(10_000, staticModifiers.reduce((sum, modifier) => sum + (modifier.darkvisionRacialBonusFeet ?? 0), 0)) || undefined,
     darkvisionRangeFeet: Math.max(
       0,
       ...staticModifiers.map((modifier) => modifier.darkvisionRangeFeet ?? 0),
@@ -619,6 +683,9 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     spellSavingThrowAdvantage: passiveDefenseFeatures.some((feature) =>
       feature.declarativeAbility?.mechanic?.kind === 'passive-defense' &&
       feature.declarativeAbility.mechanic.savingThrowAdvantageAgainstSpells === true),
+    conditionSavingThrowAdvantages: [...new Set(passiveDefenseFeatures.flatMap(feature =>
+      feature.declarativeAbility?.mechanic?.kind === 'passive-defense'
+        ? feature.declarativeAbility.mechanic.savingThrowAdvantageAgainstConditions ?? [] : []))],
     spellSavingThrowAdvantageWithinFeet: staticModifierMaximum(
       staticModifiers,
       'spellSavingThrowAdvantageWithinFeet',
@@ -649,6 +716,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       feature.declarativeAbility.mechanic.hitPointMaximumReductionImmunity === true),
     cannotBeSurprisedWhileConscious: staticModifierEnabled(staticModifiers, 'cannotBeSurprisedWhileConscious'),
     unseenAttackersDoNotGainAdvantage: staticModifierEnabled(staticModifiers, 'unseenAttackersDoNotGainAdvantage'),
+    invisibleToDarkvision: staticModifierEnabled(staticModifiers, 'invisibleToDarkvision'),
     ignoreLongRangeRangedWeaponDisadvantage: staticModifierEnabled(staticModifiers, 'ignoreLongRangeRangedWeaponDisadvantage'),
     ignoreNearbyHostileRangedAttackDisadvantage: staticModifierEnabled(staticModifiers, 'ignoreNearbyHostileRangedAttackDisadvantage'),
     ignoreLoadingWeaponProperty: staticModifierEnabled(staticModifiers, 'ignoreLoadingWeaponProperty'),
@@ -680,6 +748,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     opportunityAttacksOnEnterReachWeaponIds: [...new Set(
       staticModifiers.flatMap((modifier) => modifier.opportunityAttacksOnEnterReachWeaponIds ?? []),
     )],
+    maximizeHealingDiceNearCompanion: staticModifiers.flatMap(modifier => modifier.maximizeHealingDiceNearCompanion ?? []),
+    grappleEscapeAdvantage: staticModifierEnabled(staticModifiers, 'grappleEscapeAdvantage'),
     ignoreDifficultTerrainWhileDashing: staticModifierEnabled(
       staticModifiers,
       'ignoreDifficultTerrainWhileDashing',
@@ -697,6 +767,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       'standFromProneMovementCostFeet',
     ),
     spellAttackRangeMultiplier: Math.max(1, staticModifierMaximum(staticModifiers, 'spellAttackRangeMultiplier')),
+    swimSpeedEqualsWalking: staticModifierEnabled(staticModifiers, 'swimSpeedEqualsWalking'),
+    canBreatheWater: staticModifierEnabled(staticModifiers, 'canBreatheWater'),
     ignoreSpellAttackCoverBonus: staticModifierEnabled(staticModifiers, 'ignoreSpellAttackCoverBonus'),
     retainHiddenOnRangedWeaponMiss: staticModifierEnabled(staticModifiers, 'retainHiddenOnRangedWeaponMiss'),
     conditionImmunities: [...new Set([
@@ -717,6 +789,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     ),
     equippedArmor,
     hasShield: character.equipment?.offHand?.dnd5e?.kind === 'shield',
+    lastLongRestWorldMinute: character.dnd5eLastLongRestWorldMinute ?? null,
     activityEquipment: activityEquipmentSnapshot(character, wornArmorCategory ?? 'none'),
     activitySpellcasting: {
       capable: activitySpellcasting.capable || racialRules.innateSpells.length > 0,
@@ -724,7 +797,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     },
     classState: {
       ...character.dnd5eCombatState,
-      activeEffects: dnd5eInventoryPassiveEffects(character),
+      exhaustionBaseMaxHp: exhaustionLevel >= 4 ? storedMaxHp : undefined,
+      activeEffects: dnd5eInherentFeatureLightEffects(character, dnd5eInventoryPassiveEffects(character)),
       wardingBondMaterialEquipped: wearingWardingBondRing,
       wardingBondParticipantCharacterId: character.id,
     },
@@ -761,6 +835,8 @@ export function createCombatantFromDnd5eCharacter(input: {
   const persistedAbilityScoreReductions = character.classState.abilityScoreReductionLedger
     ?.map((entry) => ({ ...entry }))
   const combatant = createDnd5eCombatant({
+    alignment: character.alignment,
+    originalAlignment: character.originalAlignment,
     id: character.id,
     name: character.name,
     level: character.level,
@@ -770,7 +846,9 @@ export function createCombatantFromDnd5eCharacter(input: {
     baseSavingThrowBonuses: savingThrowBonuses,
     savingThrowBonuses,
     savingThrowProficiencies: [...character.savingThrowProficiencies],
+    skillCheckAbilityBonuses: character.skillCheckAbilityBonuses?.map(rule=>({...rule})),
     skillProficiencies: [...character.skillProficiencies],
+    toolProficiencies: [...character.toolProficiencies ?? []],
     passivePerception: character.passivePerception,
     passiveInvestigation: character.passiveInvestigation,
     saveDc: character.saveDc,
@@ -782,8 +860,15 @@ export function createCombatantFromDnd5eCharacter(input: {
     temporaryHp: character.temporaryHp,
     exhaustionLevel: character.exhaustionLevel,
     speed: character.speed,
+    carriedWeightLb: character.carriedWeightLb,
+    carryingCapacityMultiplier: character.carryingCapacityMultiplier,
     movementSpeeds: character.movementSpeeds ? { ...character.movementSpeeds } : undefined,
     darkvisionRangeFeet: character.darkvisionRangeFeet,
+    racialDarkvisionRangeFeet: character.racialDarkvisionRangeFeet,
+    darkvisionIfAbsentFeet: character.darkvisionIfAbsentFeet,
+    darkvisionExistingBonusFeet: character.darkvisionExistingBonusFeet,
+    darkvisionRacialFallbackFeet: character.darkvisionRacialFallbackFeet,
+    darkvisionRacialBonusFeet: character.darkvisionRacialBonusFeet,
     racialSavingThrowAdvantages: character.racialSavingThrowAdvantages
       ? structuredClone(character.racialSavingThrowAdvantages)
       : undefined,
@@ -794,7 +879,12 @@ export function createCombatantFromDnd5eCharacter(input: {
     race: character.race,
     raceId: character.raceId,
     classResources: character.classResources,
+    hitPointDice: character.hitPointDice.map(pool => ({ ...pool })),
+    classResourceResets: character.classResourceResets,
+    classResourceRestRecovery: character.classResourceRestRecovery,
+    ammunitionContainers:character.ammunitionContainers,
     inventoryHeadlessEffects: character.inventoryHeadlessEffects,
+    inventoryResourceSnapshots: character.inventoryResourceSnapshots,
     inventoryMagicItems: character.inventoryMagicItems,
     inventoryReactionSpells: character.inventoryReactionSpells,
     pluginFeaturePassiveEffects: character.pluginFeaturePassiveEffects,
@@ -814,6 +904,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     wearingMetalArmor: character.wearingMetalArmor,
     equippedArmor: character.equippedArmor ? { ...character.equippedArmor } : undefined,
     hasShield: character.hasShield,
+    lastLongRestWorldMinute: character.lastLongRestWorldMinute,
     activityEquipment: structuredClone(character.activityEquipment),
     activitySpellcasting: {
       ...character.activitySpellcasting,
@@ -824,6 +915,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     damageImmunities: character.damageImmunities,
     elementalAdeptDamageTypes: character.elementalAdeptDamageTypes,
     spellSavingThrowAdvantage: character.spellSavingThrowAdvantage,
+    conditionSavingThrowAdvantages: character.conditionSavingThrowAdvantages ? [...character.conditionSavingThrowAdvantages] : undefined,
     spellSavingThrowAdvantageWithinFeet: character.spellSavingThrowAdvantageWithinFeet,
     imposeConcentrationCheckDisadvantageOnDamage: character.imposeConcentrationCheckDisadvantageOnDamage,
     meleeWeaponDamageRerollOncePerTurn: character.meleeWeaponDamageRerollOncePerTurn,
@@ -834,6 +926,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     hitPointMaximumReductionImmunity: character.hitPointMaximumReductionImmunity,
     cannotBeSurprisedWhileConscious: character.cannotBeSurprisedWhileConscious,
     unseenAttackersDoNotGainAdvantage: character.unseenAttackersDoNotGainAdvantage,
+    invisibleToDarkvision: character.invisibleToDarkvision,
     ignoreLongRangeRangedWeaponDisadvantage: character.ignoreLongRangeRangedWeaponDisadvantage,
     ignoreNearbyHostileRangedAttackDisadvantage: character.ignoreNearbyHostileRangedAttackDisadvantage,
     ignoreLoadingWeaponProperty: character.ignoreLoadingWeaponProperty,
@@ -846,9 +939,13 @@ export function createCombatantFromDnd5eCharacter(input: {
     opportunityAttackHitStopsMovement: character.opportunityAttackHitStopsMovement,
     opportunityAttacksOnEnterReachWeaponIds: character.opportunityAttacksOnEnterReachWeaponIds,
     ignoreDifficultTerrainWhileDashing: character.ignoreDifficultTerrainWhileDashing,
+    maximizeHealingDiceNearCompanion: character.maximizeHealingDiceNearCompanion?.map(query => structuredClone(query)),
+    grappleEscapeAdvantage: character.grappleEscapeAdvantage,
     climbWithoutSpeedCostMultiplier: character.climbWithoutSpeedCostMultiplier,
     runningJumpMinimumApproachFeet: character.runningJumpMinimumApproachFeet,
     standFromProneMovementCostFeet: character.standFromProneMovementCostFeet,
+    swimSpeedEqualsWalking: character.swimSpeedEqualsWalking,
+    canBreatheWater: character.canBreatheWater,
     spellAttackRangeMultiplier: character.spellAttackRangeMultiplier,
     ignoreSpellAttackCoverBonus: character.ignoreSpellAttackCoverBonus,
     retainHiddenOnRangedWeaponMiss: character.retainHiddenOnRangedWeaponMiss,

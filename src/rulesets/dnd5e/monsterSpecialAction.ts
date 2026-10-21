@@ -112,6 +112,7 @@ function actionResourceAvailable(
 }
 
 export function prepareDnd5eMonsterSpecialAction(input: {
+  worldMinute?: number
   combatId: string
   round?: number
   map: BattleMap
@@ -147,15 +148,18 @@ export function prepareDnd5eMonsterSpecialAction(input: {
     action.rule?.kind !== 'invisibility' &&
     action.rule?.kind !== 'persistent-area' &&
     action.rule?.kind !== 'saving-throw-condition' &&
+    action.rule?.kind !== 'saving-throw-terminal-effect' &&
     action.rule?.kind !== 'saving-throw-damage-and-max-hp-reduction'
   ) return { ok: false, reason: 'invalid-action' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: input.combatId,
     round: input.round,
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
+    additionalCreatureTokenIds: input.targetTokenId ? [input.targetTokenId] : undefined,
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actor = snapshot.state.combatants[actorToken.id]
@@ -179,6 +183,7 @@ export function prepareDnd5eMonsterSpecialAction(input: {
   let targetToken: Token | undefined
   if (
     action.rule.kind === 'saving-throw-condition' ||
+    action.rule.kind === 'saving-throw-terminal-effect' ||
     action.rule.kind === 'saving-throw-damage-and-max-hp-reduction'
   ) {
     targetToken = input.map.tokens.find((candidate) =>
@@ -369,17 +374,20 @@ export function prepareDnd5eMonsterSpecialAction(input: {
 }
 
 export function resolvePreparedDnd5eMonsterSpecialAction(input: {
+  savingThrowCounterattacks?: import('./headlessCombatEngine').Dnd5eAction['savingThrowCounterattacks']
+  sourceActionInterruptionReaction?: import('./headlessCombatEngine').Dnd5eSourceActionInterruptionReaction
   prepared: PreparedDnd5eMonsterSpecialAction
   damageRolls?: readonly number[]
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
   savingThrow?: {
+    disadvantageNegationChoice?: import('./activeEffects').Dnd5eActiveEffectSavingThrowRoll['disadvantageNegationChoice']
     d20: number
     d20Second?: number
     halflingLuckyD20?: number
     halflingLuckyD20Second?: number
     blessRoll?: number
     baneRoll?: number
-    rerollD20?: number
+    rerollResourceKey?: string; rerollD20?: number
     rerollD20Second?: number
     bardicInspirationRoll?: number
     darkOnesOwnLuckRoll?: number
@@ -401,6 +409,8 @@ export function resolvePreparedDnd5eMonsterSpecialAction(input: {
     ...input.savingThrow,
     damageRolls: input.damageRolls,
     teleportDestination: prepared.teleportDestination,
+    sourceActionInterruptionReaction: input.sourceActionInterruptionReaction,
+    savingThrowCounterattacks: input.savingThrowCounterattacks,
     airborneFallDamageRollsByCombatantId: input.airborneFallDamageRollsByCombatantId,
   } as const
   const preview = previewDnd5eUnsupportedAirborneFalls(prepared.state, action)

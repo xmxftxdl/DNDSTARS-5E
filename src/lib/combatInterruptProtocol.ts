@@ -1,4 +1,5 @@
 import type { Token } from '../store/maps'
+import { dnd5eCharacterRageDeathDeferralActive } from '../rulesets/dnd5e/pluginApi'
 import type { Character } from '../types/character'
 import type { EnemyTurnResult } from './enemyAi'
 import type { CombatInterruptKind, SharedCombatInterrupt } from './combatInterruptQueue'
@@ -206,8 +207,9 @@ export type PluginChoiceInterruptPayload = Record<string, unknown> & {
   audience: 'actor' | 'target' | 'dm'
   options: PluginChoiceInterruptOption[]
   defaultOptionId: string
+  fields?: import('./pluginChoiceFields').PluginChoiceField[]
 }
-export type PluginChoiceInterruptResponse = Record<string, unknown> & { optionId: string }
+export type PluginChoiceInterruptResponse = Record<string, unknown> & { optionId: string; fieldValues?: Record<string, string> }
 
 /**
  * Reserved, data-only handshake used by assisted Activities and declarative
@@ -288,7 +290,7 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   proposedSaveSuccess?: boolean
   proposedConditionIds?: string[]
   targetTokenId?: string
-  triggerTiming?: 'on-create' | 'on-enter' | 'on-move-distance' | 'on-area-move-impact' | 'turn-start' | 'turn-end' | 'source-turn-start' | 'on-detonate'
+  triggerTiming?: 'on-create' | 'on-enter' | 'on-move-distance' | 'on-area-move-impact' | 'turn-start' | 'turn-end' | 'source-turn-start' | 'source-turn-end' | 'on-detonate'
   proposedDc?: number
   doorId?: string
   mapInteractionOperation?: string
@@ -579,7 +581,15 @@ export function resolveCombatInterruptAnswerCandidate(
     interrupt.kind === 'dm-adjudication' || interrupt.kind === 'roll-confirmation' || interrupt.kind === 'legendary-resistance' ||
     (interrupt.kind === 'plugin-choice' && interrupt.payload.audience === 'dm')
   ) return { character, canAnswer: false }
-  if (!character || (character.currentHp <= 0 && interrupt.kind !== 'bardic-inspiration')) {
+  // Host-issued death-save replacement choices are meaningful at zero HP.
+  // This only routes the prompt; the Host session still verifies the live
+  // checkpoint, registered ability, costs and selected targets on submission.
+  const deathSaveReplacement = interrupt.kind === 'plugin-choice' && interrupt.phase === 'before-action' &&
+    interrupt.payload.audience === 'actor' && interrupt.payload.contextKind === 'activity-trigger' &&
+    interrupt.payload.activityConfirmation === 'actor-choice' &&
+    typeof interrupt.payload.triggerEventId === 'string' && interrupt.payload.triggerEventId.startsWith('death-save:') &&
+    character?.currentHp === 0 && (character.deathSaveFailures ?? 0) < 3 && !character.deathSaveStable
+  if (!character || (character.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(character) && interrupt.kind !== 'bardic-inspiration' && !deathSaveReplacement)) {
     return { character, canAnswer: false }
   }
 

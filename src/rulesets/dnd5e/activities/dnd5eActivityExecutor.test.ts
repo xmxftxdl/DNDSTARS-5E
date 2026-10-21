@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { normalizeCharacter } from '../../../store/characters'
+import { migrateCharacterToDnd5e } from '../character'
+import { DND5E_LONGSWORD } from '../equipment'
+import { describe, expect, it, vi } from 'vitest'
 import { automationCapabilityFromLegacyStatus } from '../../../domain/automation/automationCapability'
 import type { Dnd5eActivityDefinitionV1 } from './dnd5eActivityContracts'
 import { resolveDnd5eActivity, type Dnd5eActivityActorSnapshot } from './dnd5eActivityExecutor'
 import { dnd5eBestowCurseSpellDamageRollDeclarationsV1 } from './dnd5eActivityRollRecipe'
+import { dnd5eActivityPerTargetRollDeclarationsV1 } from './dnd5eActivityPerTargetRolls'
+import { validateDnd5eActivityDefinitionV1 } from './dnd5eActivityValidation'
 
 const abilities = { str: 14, dex: 12, con: 12, int: 10, wis: 10, cha: 16 } as const
 const actor: Dnd5eActivityActorSnapshot = {
@@ -13,6 +18,268 @@ const target: Dnd5eActivityActorSnapshot = {
   id: 'target', controller: 'dm', level: 3, proficiencyBonus: 2, abilities,
   armorClass: 14, conditions: [], currentHp: 20, maxHp: 20, savingThrowModifiers: { dex: 1 },
 }
+
+it.each([true, false])('uses only the Host counter outcome for its exact saving throw (counter=%s)', counter => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'counter-save', name: 'Counter save', activation: { kind: 'action' },
+    target: { kind: 'creature', relation: 'any', count: 2 },
+    automation: automationCapabilityFromLegacyStatus('full'),
+    checks: [{ id: 'save', kind: 'saving-throw', scope: 'per-target', rollId: 'save',
+      ability: 'dex', dc: { kind: 'constant', value: 15 } }],
+    outcomes: [
+      { id: 'failed', when: { kind: 'check', checkId: 'save', result: 'failure' },
+        operations: [{ id: 'hurt', kind: 'damage', target: 'target',
+          amount: { kind: 'constant', value: 8 }, damageType: 'fire' }] },
+      { id: 'saved', when: { kind: 'check', checkId: 'save', result: 'success' },
+        operations: [{ id: 'half', kind: 'damage', target: 'target',
+          amount: { kind: 'constant', value: 4 }, damageType: 'fire' }] },
+    ],
+  }
+  const bonus = vi.fn(() => 0), negate = vi.fn(() => false)
+  const rolls: Record<string, { values: number[] }> = { 'save:other': { values: [1] } }
+  if (!counter) rolls['save:target'] = { values: [1] }
+  const result = resolveDnd5eActivity({ activity, actor, targets: [target, { ...target, id: 'other' }],
+    rolls, optionalSavingThrowBonus: bonus, negateDisadvantage: negate,
+    weaponCounterattackSuccessCheckKeys: counter ? new Set(['save:target']) : undefined })
+  expect(result.ok, result.ok ? '' : result.reason).toBe(true)
+  if (!result.ok) return
+  expect(result.checks.find(check => check.targetId === 'target')).toMatchObject({
+    success: counter, d20: counter ? 0 : 1,
+    automaticOutcome: counter ? 'weapon-counterattack-success' : undefined,
+    criticalSuccess: false, criticalFailure: !counter,
+  })
+  expect(result.checks.find(check => check.targetId === 'other')).toMatchObject({ success: false, d20: 1 })
+  expect(bonus).toHaveBeenCalledTimes(counter ? 1 : 2)
+  expect(result.proposals.filter(proposal => proposal.kind === 'deal-damage').map(proposal =>
+    [proposal.targetId, proposal.amount])).toEqual(expect.arrayContaining([
+      ['target', counter ? 4 : 8], ['other', 8],
+    ]))
+})
+
+it('executes explicit breathing capabilities from serialized activity declarations', () => {
+  const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'breathing', name: 'Breathing',
+    activation: { kind: 'free' }, target: { kind: 'self' }, automation: automationCapabilityFromLegacyStatus('full'),
+    effects: [{ schemaVersion: 1, id: 'airless', name: 'Airless', stacking: 'replace', duration: { kind: 'permanent' },
+      modifiers: [{ kind: 'environmental-capability', doesNotNeedAir: true, holdBreathSeconds: 3600 }] }],
+    outcomes: [{ id: 'apply', when: { kind: 'always' }, operations: [{ id: 'apply', kind: 'apply-effect', target: 'actor', effectId: 'airless' }] }] }
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  const result = resolveDnd5eActivity({ activity: JSON.parse(JSON.stringify(activity)), actor, targets: [actor], rolls: {} })
+  expect(result.ok).toBe(true)
+  if (result.ok) expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'apply-effect',
+    modifierGroups: [expect.objectContaining({ environmentalCapabilities: expect.objectContaining({ doesNotNeedAir: true, holdBreathSeconds: 3600 }) })] }))
+  for (const patch of [{ doesNotNeedAir: false }, { holdBreathSeconds: -1 }, { holdBreathSeconds: 86401 }, { holdBreathSeconds: '60' }]) {
+    const invalid = structuredClone(activity)
+    Object.assign(invalid.effects![0].modifiers![0], patch)
+    expect(validateDnd5eActivityDefinitionV1(invalid).some(error => error.includes('environmental capability'))).toBe(true)
+  }
+})
+
+it('carries declared harmful movement through execution and rejects malformed declarations',()=>{
+ const activity:Dnd5eActivityDefinitionV1={schemaVersion:1,id:'harmful-move',name:'Harmful move',activation:{kind:'action'},
+  target:{kind:'creature',relation:'any',count:1},automation:automationCapabilityFromLegacyStatus('full'),
+  outcomes:[{id:'move',when:{kind:'always'},operations:[{id:'push',kind:'move',target:'target',mode:'forced',harmful:true,distanceFeet:{kind:'constant',value:5}}]}]}
+ expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+ const resolved=resolveDnd5eActivity({activity:JSON.parse(JSON.stringify(activity)),actor,targets:[target],rolls:{}})
+ expect(resolved.ok).toBe(true)
+ if(resolved.ok)expect(resolved.proposals).toContainEqual(expect.objectContaining({kind:'move',targetId:'target',harmful:true}))
+ for(const value of [false,'true',1]){
+  const invalid=structuredClone(activity);Object.assign(invalid.outcomes[0].operations[0],{harmful:value})
+  expect(validateDnd5eActivityDefinitionV1(invalid).some(error=>error.includes('harmful'))).toBe(true)
+ }
+})
+
+it('branches on Host upward clearance and fails closed when that map fact is absent', () => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'clearance-test', name: 'Clearance', activation: { kind: 'free' },
+    target: { kind: 'creature', relation: 'any', count: 1 },
+    outcomes: [{ id: 'blocked', when: { kind: 'predicate', predicate: {
+      kind: 'upward-clearance', subject: 'target', distanceFeet: 30, blocked: true,
+    } }, operations: [{ id: 'marker', kind: 'temporary-hit-points', target: 'target', amount: { kind: 'constant', value: 1 } }] }],
+    automation: automationCapabilityFromLegacyStatus('full'),
+  }
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  for (const clearance of [undefined, 0, 10, 30, 10000]) {
+    const result = resolveDnd5eActivity({ activity, actor, targets: [{ ...target, upwardClearanceFeet: clearance }], rolls: {} })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.proposals.some(proposal => proposal.kind === 'grant-temporary-hit-points')).toBe(clearance != null && clearance < 30)
+  }
+})
+
+it('validates and carries the residual area surface declaration without changing its target volume', () => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'surface', name: 'Surface', activation: { kind: 'action' },
+    target: { kind: 'self' }, outcomes: [{ id: 'area', when: { kind: 'always' }, operations: [{
+      id: 'terrain', kind: 'create-persistent-area', label: 'Terrain', durationRounds: 1,
+      permanent: true, concentration: false, groundOnly: true, movementCostMultiplier: 2,
+    }] }], automation: automationCapabilityFromLegacyStatus('full'),
+  }
+  const resolved = resolveDnd5eActivity({ activity, actor, targets: [actor], rolls: {} })
+  expect(resolved.ok, JSON.stringify(resolved)).toBe(true)
+  if (resolved.ok) expect(resolved.proposals).toContainEqual(expect.objectContaining({
+    kind: 'create-persistent-area', groundOnly: true,
+  }))
+  for (const value of [false, 'ground', 1]) {
+    const malformed = structuredClone(activity)
+    Object.assign(malformed.outcomes[0].operations[0], { groundOnly: value })
+    expect(validateDnd5eActivityDefinitionV1(malformed).some(error => error.includes('groundOnly'))).toBe(true)
+  }
+})
+
+it.each([-1, 0, 5, 400_000])('does not silently clamp or discard a dynamic maximum-HP modifier (%s)', multiplier => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'maximum-hp', name: 'Maximum HP', activation: { kind: 'free' }, target: { kind: 'self' },
+    effects: [{ schemaVersion: 1, id: 'maximum', name: 'Maximum', stacking: 'replace', duration: { kind: 'permanent' },
+      modifiers: [{ kind: 'hit-point-maximum', mode: 'add', value: { kind: 'multiply', values: [
+        { kind: 'reference', reference: { kind: 'actor-proficiency-bonus' } }, { kind: 'constant', value: multiplier },
+      ] } }] }],
+    outcomes: [{ id: 'effect', when: { kind: 'always' }, operations: [{ id: 'apply', kind: 'apply-effect', target: 'actor', effectId: 'maximum' }] }],
+    automation: automationCapabilityFromLegacyStatus('full'),
+  }
+  const before = structuredClone(actor)
+  const result = resolveDnd5eActivity({ activity, actor, targets: [actor], rolls: {} })
+  expect(result.ok).toBe(multiplier >= 0 && multiplier <= 5)
+  expect(actor).toEqual(before)
+  if (result.ok) expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'apply-effect',
+    modifierGroups: [expect.objectContaining({ hitPointMaximumBonus: multiplier * actor.proficiencyBonus })] }))
+})
+
+it.each([6, 10, 12, 16, 20])('enforces the same ability-based target limit during execution (%s)', charisma => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'ability-targets', name: 'Ability targets', activation: { kind: 'free' },
+    target: { kind: 'creature', relation: 'any', count: 1, rangeFeet: 60 },
+    scaling: [{ basis: 'ability-modifier', ability: 'cha', baseLevel: 1, adjustments: [{ operationId: 'pool', additionalTargetsPerStep: 1 }] }],
+    outcomes: [{ id: 'pool', when: { kind: 'always' }, operations: [{ id: 'pool', kind: 'temporary-hit-points', target: 'target', amount: { kind: 'constant', value: 5 } }] }],
+    automation: automationCapabilityFromLegacyStatus('full'),
+  }
+  const owner = { ...actor, abilities: { ...actor.abilities, cha: charisma } }
+  const count = Math.max(1, Math.floor((charisma - 10) / 2))
+  const targets = Array.from({ length: count + 1 }, (_, i) => ({ ...target, id: `target-${i}` }))
+  const input = { activity, actor: owner, rolls: {}, distanceFeetByTargetId: Object.fromEntries(targets.map(t => [t.id, 5])) }
+  const valid = resolveDnd5eActivity({ ...input, targets: targets.slice(0, count) })
+  expect(valid.ok, JSON.stringify(valid)).toBe(true)
+  if (valid.ok) expect(valid.proposals).toHaveLength(count)
+  expect(resolveDnd5eActivity({ ...input, targets })).toMatchObject({ ok: false, reason: 'invalid-target' })
+  expect(resolveDnd5eActivity({ ...input, actor: { ...owner, abilities: { ...owner.abilities, cha: NaN } }, targets: [targets[0]] }))
+    .toMatchObject({ ok: false, reason: 'invalid-actor' })
+})
+
+it.each([0, 4, 5, 9, 10, 14, 15, 20])('uses class levels for tiered temporary HP without borrowing other class levels (%s)', fighterLevel => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'tiered-pool', name: 'Tiered pool', activation: { kind: 'free' }, target: { kind: 'self' },
+    outcomes: [{ id: 'pool', when: { kind: 'always' }, operations: [{ id: 'pool', kind: 'temporary-hit-points', target: 'actor', amount: { kind: 'constant', value: 5 } }] }],
+    scaling: [{ basis: 'custom-table', classId: 'fighter', table: [{ level: 5, value: 1 }, { level: 10, value: 2 }, { level: 15, value: 3 }], adjustments: [{ operationId: 'pool', flatAmountPerStep: 5 }] }],
+    automation: automationCapabilityFromLegacyStatus('full'),
+  }
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  const owner = { ...actor, level: 20, classLevels: { fighter: fighterLevel, wizard: 20 - fighterLevel } }
+  const result = resolveDnd5eActivity({ activity, actor: owner, targets: [owner], rolls: {} })
+  expect(result.ok, JSON.stringify(result)).toBe(true)
+  if (!result.ok) throw Error(result.reason)
+  expect(result.proposals).toContainEqual(expect.objectContaining({ amount: 5 + (fighterLevel >= 15 ? 3 : fighterLevel >= 10 ? 2 : fighterLevel >= 5 ? 1 : 0) * 5 }))
+  const byCharacter = structuredClone(activity)
+  delete byCharacter.scaling![0].classId
+  const totalLevel = resolveDnd5eActivity({ activity: byCharacter, actor: owner, targets: [owner], rolls: {} })
+  expect(totalLevel.ok).toBe(true)
+  if (totalLevel.ok) expect(totalLevel.proposals).toContainEqual(expect.objectContaining({ amount: 20 }))
+  const noClass = { ...owner, classLevels: {} }
+  const missing = resolveDnd5eActivity({ activity, actor: noClass, targets: [noClass], rolls: {} })
+  expect(missing.ok).toBe(true)
+  if (missing.ok) expect(missing.proposals).toContainEqual(expect.objectContaining({ amount: 5 }))
+})
+
+it.each([{ proficiencyBonus: 2, charisma: 10, dc: 10 }, { proficiencyBonus: 3, charisma: 18, dc: 15 }])(
+  'uses the Host ability and proficiency sum for a saving throw DC ($dc)', ({ proficiencyBonus, charisma, dc }) => {
+    const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'composed-save-dc', name: 'Synthetic DC',
+      activation: { kind: 'action' }, target: { kind: 'creature', relation: 'enemy', count: 1, rangeFeet: 30 },
+      automation: automationCapabilityFromLegacyStatus('full'),
+      checks: [{ id: 'save', kind: 'saving-throw', ability: 'wis', rollId: 'save', scope: 'per-target', rollMode: 'host-derived',
+        dc: { kind: 'add', values: [{ kind: 'constant', value: 8 },
+          { kind: 'reference', reference: { kind: 'actor-proficiency-bonus' } },
+          { kind: 'reference', reference: { kind: 'actor-ability-modifier', ability: 'cha' } }] } }],
+      outcomes: [{ id: 'failed', when: { kind: 'check', checkId: 'save', result: 'failure' }, operations: [
+        { id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'constant', value: 1 }, damageType: 'psychic' },
+      ] }],
+    }
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    for (const d20 of [dc - 1, dc]) {
+      const result = resolveDnd5eActivity({ activity, actor: { ...actor, proficiencyBonus, abilities: { ...abilities, cha: charisma } },
+        targets: [{ ...target, savingThrowModifiers: { wis: 0 } }], distanceFeetByTargetId: { target: 5 },
+        rolls: { 'save:target': { values: [d20] } }, checkRollModes: { 'save:target': 'normal' } })
+      expect(result.ok, JSON.stringify(result)).toBe(true)
+      if (!result.ok) throw new Error(result.reason)
+      expect(result.checks[0]).toMatchObject({ dc, success: d20 >= dc })
+      expect(result.proposals.filter(proposal => proposal.kind === 'deal-damage')).toHaveLength(d20 < dc ? 1 : 0)
+    }
+  },
+)
+
+it('accepts a willing save without dice while an unwilling target still rolls',()=>{
+  const activity:Dnd5eActivityDefinitionV1={schemaVersion:1,id:'willing-save',name:'Willing save',
+    activation:{kind:'action'},target:{kind:'creature',relation:'any',count:1},
+    checks:[{id:'save',kind:'saving-throw',rollId:'save',ability:'wis',scope:'per-target',
+      dc:{kind:'constant',value:15},rollMode:'host-derived',allowWillingFailure:true}],
+    outcomes:[{id:'move',when:{kind:'check',checkId:'save',result:'failure'},operations:[
+      {id:'move',kind:'move',target:'target',mode:'teleport',distanceFeet:{kind:'constant',value:30}},
+    ]}],automation:automationCapabilityFromLegacyStatus('full')}
+  const input={activity,actor,targets:[target],rolls:{}}
+  const willing=resolveDnd5eActivity({...input,willingTargetIds:[target.id]})
+  expect(willing.ok,JSON.stringify(willing)).toBe(true)
+  if(willing.ok)expect(willing.checks[0]).toMatchObject({success:false,d20:0,criticalFailure:false})
+  expect(resolveDnd5eActivity(input).ok).toBe(false)
+  const rolled=resolveDnd5eActivity({...input,rolls:{'save:target':{values:[20]}},checkRollModes:{'save:target':'normal'}})
+  expect(rolled.ok).toBe(true)
+  if(rolled.ok)expect(rolled.checks[0]).toMatchObject({success:true,d20:20})
+})
+
+it('requires explicit consent for every willing-only creature, including self and allies',()=>{
+  const activity:Dnd5eActivityDefinitionV1={schemaVersion:1,id:'consent-example',name:'Consent',activation:{kind:'action'},
+    target:{kind:'creature',relation:'any',count:3,includeSelf:true,requiresWilling:true},
+    outcomes:[{id:'damage',when:{kind:'always'},operations:[{id:'damage',kind:'damage',target:'target',amount:{kind:'constant',value:1},damageType:'psychic'}]}],
+    automation:automationCapabilityFromLegacyStatus('full')}
+  const ally={...target,id:'ally',controller:'players' as const}
+  const input={activity,actor,targets:[actor,ally,target],rolls:{}}
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  for(const willingTargetIds of [undefined,[],['actor'],['actor','ally'],['actor','ally','unselected']]){
+    expect(resolveDnd5eActivity({...input,willingTargetIds})).toMatchObject({ok:false,reason:'invalid-target',details:['explicit target willingness is required']})
+  }
+  const accepted=resolveDnd5eActivity({...input,willingTargetIds:['actor','ally','target']})
+  expect(accepted.ok).toBe(true)
+  if(accepted.ok)expect(accepted.proposals.filter(proposal=>proposal.kind==='deal-damage')).toHaveLength(3)
+  expect(validateDnd5eActivityDefinitionV1({...activity,target:{...activity.target,requiresWilling:'yes'} as any})).toContain('activity.target.requiresWilling is invalid')
+})
+
+it('resolves every eligible area occupant when no rule target limit is declared',()=>{
+  const activity:Dnd5eActivityDefinitionV1={schemaVersion:1,id:'all-in-area',name:'All in area',activation:{kind:'action'},
+    target:{kind:'area',relation:'enemy',origin:'point',shape:'sphere',radiusFeet:20,placeRangeFeet:120},
+    outcomes:[{id:'damage',when:{kind:'always'},operations:[{id:'damage',kind:'damage',target:'target',amount:{kind:'constant',value:1},damageType:'psychic'}]}],
+    automation:automationCapabilityFromLegacyStatus('full')}
+  const targets=Array.from({length:300},(_,index)=>({...target,id:`target-${index}`}))
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  const input={activity,actor,targets,areaPlacement:{x:5,y:5},areaPlacementDistanceFeet:20,rolls:{}}
+  const resolved=resolveDnd5eActivity(input)
+  expect(resolved.ok,JSON.stringify(resolved)).toBe(true)
+  if(resolved.ok)expect(resolved.proposals.filter(proposal=>proposal.kind==='deal-damage')).toHaveLength(300)
+  if(activity.target.kind!=='area')throw Error('expected area')
+  expect(resolveDnd5eActivity({...input,activity:{...activity,target:{...activity.target,maximumTargets:256}}}).ok).toBe(false)
+})
+
+it('scales persistent trigger dice at character tiers and spell slot levels before handoff', () => {
+  const base: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'scaled-hazard', name: 'Scaled hazard', activation: { kind: 'action' },
+    target: { kind: 'area', relation: 'any', origin: 'point', shape: 'cube', lengthFeet: 5, widthFeet: 5, heightFeet: 5, placeRangeFeet: 60, maximumTargets: 8 },
+    outcomes: [{ id: 'create', when: { kind: 'always' }, operations: [{ id: 'hazard', kind: 'create-persistent-area', label: 'Hazard', durationRounds: 10, concentration: true,
+      triggers: [{ id: 'end', label: 'End turn', timing: 'turn-end', oncePerTurn: true, damage: { count: 1, sides: 8, type: 'fire' } }] }] }],
+    automation: automationCapabilityFromLegacyStatus('full'),
+    scaling: [{ basis: 'custom-table', table: [{ level: 1, value: 0 }, { level: 5, value: 1 }, { level: 11, value: 2 }, { level: 17, value: 3 }], adjustments: [{ operationId: 'hazard', diceCountPerStep: 1 }] }],
+  }
+  for (const [level, count] of [[1, 1], [4, 1], [5, 2], [10, 2], [11, 3], [16, 3], [17, 4], [20, 4]]) {
+    const result = resolveDnd5eActivity({ activity: base, actor: { ...actor, level }, targets: [target], areaPlacement: { x: 5, y: 5 }, areaPlacementDistanceFeet: 20, rolls: {} })
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, proposals: [expect.objectContaining({ kind: 'create-persistent-area', triggers: [expect.objectContaining({ damage: expect.objectContaining({ count, sides: 8, type: 'fire' }) })] })] })
+  }
+  const upcast = { ...base, scaling: [{ basis: 'slot-level' as const, baseLevel: 5, adjustments: [{ operationId: 'hazard', diceCountPerStep: 1 }] }] }
+  const result = resolveDnd5eActivity({ activity: upcast, actor, targets: [target], castLevel: 7, areaPlacement: { x: 5, y: 5 }, areaPlacementDistanceFeet: 20, rolls: {} })
+  expect(result).toMatchObject({ ok: true, proposals: [expect.objectContaining({ triggers: [expect.objectContaining({ damage: expect.objectContaining({ count: 3, sides: 8, type: 'fire' }) })] })] })
+})
 
 function saveActivity(): Dnd5eActivityDefinitionV1 {
   return {
@@ -50,6 +317,112 @@ function saveActivity(): Dnd5eActivityDefinitionV1 {
 }
 
 describe('generic D&D 5e Activity executor', () => {
+  it('uses inclusive ability-score bounds for dice preparation and effect resolution', () => {
+    const activity = saveActivity()
+    activity.target = {kind:'creature',relation:'any',count:4,minimumAbilityScores:{int:3},maximumAbilityScores:{int:20}}
+    activity.consumption = [{kind:'spell-slot',minimumLevel:1,level:'selected',amount:1,consumeOn:'resolve'}]
+    const targets = [2,3,20,21].map(int=>({...target,id:`int-${int}`,abilities:{...abilities,int}}))
+    const dice = dnd5eActivityPerTargetRollDeclarationsV1({activity,actor:{id:actor.id},targets:targets.map(({id,abilities})=>({id,abilities})),
+      declarations:[{id:'save',count:1,sides:20,label:'Save'}],hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})
+    expect(dice.map(d=>d.id)).toEqual(['save:int-3','save:int-20'])
+    const result = resolveDnd5eActivity({activity,actor,targets,castLevel:1,
+      rolls:{'save:int-3':{values:[1]},'save:int-20':{values:[1]},damage:{values:[3,4]}}})
+    expect(result.ok,JSON.stringify(result)).toBe(true)
+    if(!result.ok)throw Error('score filter rejected')
+    expect(result.proposals.filter(p=>p.kind==='deal-damage').map(p=>p.targetId)).toEqual(['int-3','int-20'])
+    expect(result.checks).toHaveLength(2)
+    const immune = resolveDnd5eActivity({activity,actor,targets:[targets[0]],castLevel:1,rolls:{}})
+    expect(immune).toMatchObject({ok:true,checks:[],proposals:[],consumptions:[expect.objectContaining({kind:'spell-slot'})]})
+    const unknown={...target,abilities:{...abilities,int:NaN}}
+    expect(()=>dnd5eActivityPerTargetRollDeclarationsV1({activity,actor:{id:actor.id},targets:[{id:unknown.id,abilities:unknown.abilities}],declarations:[],hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})).toThrow('activity-target-ability-missing:int')
+    expect(resolveDnd5eActivity({activity,actor,targets:[unknown],rolls:{}})).toMatchObject({ok:false})
+  })
+
+  it.each([{}, {int:31}, {int:-1}, {int:2.5}, {luck:3}, []])('rejects malformed ability-score target bounds %j', bounds => {
+    const activity=saveActivity()
+    activity.target={kind:'creature',relation:'any',count:1,minimumAbilityScores:bounds as never}
+    expect(validateDnd5eActivityDefinitionV1(activity)).toContain('activity.target.minimumAbilityScores is invalid')
+    activity.target={kind:'creature',relation:'any',count:1,minimumAbilityScores:{int:10},maximumAbilityScores:{int:2}}
+    expect(validateDnd5eActivityDefinitionV1(activity)).toContain('activity.target ability score bounds for int are inverted')
+  })
+  it('preserves a chosen cone orientation through validation and resolution', () => {
+    const activity = saveActivity()
+    activity.target = { kind: 'area', relation: 'any', origin: 'self', shape: 'cone', lengthFeet: 15, maximumTargets: 10, rotatable: true }
+    const result = resolveDnd5eActivity({ activity, actor, targets: [target],
+      rolls: { 'save:target': { values: [1] }, damage: { values: [2, 3] } },
+      areaPlacement: { x: 0, y: 0, angleDegrees: 135 },
+    })
+    expect(result).toMatchObject({ ok: true, areaInstance: { shape: 'cone', angleDegrees: 135 },
+      proposals: [expect.objectContaining({ kind: 'deal-damage', amount: 5 })] })
+  })
+  it.each([30, 31, undefined, Number.NaN, -1])('checks every target pair before applying effects: %s', (distance) => {
+    const activity = saveActivity()
+    activity.target = { kind: 'creature', relation: 'any', count: 3, maximumTargetSeparationFeet: 30 }
+    activity.checks = []
+    activity.outcomes = [{ id: 'resolve', when: { kind: 'always' }, operations: [{
+      id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'constant', value: 1 }, damageType: 'force',
+    }] }]
+    const result = resolveDnd5eActivity({ activity, actor,
+      targets: [target, { ...target, id: 'second' }, { ...target, id: 'third' }], rolls: {},
+      distanceFeetBetweenTargets: { target: { second: 5, third: 5 },
+        second: distance == null ? {} : { third: distance } },
+    })
+    expect(result.ok).toBe(distance === 30)
+    if (!result.ok) expect(result.reason).toBe('invalid-target')
+  })
+  it('returns useful import errors for a subclass ability misplaced in activities', () => {
+    const malformed = { id: 'misplaced', name: 'Example', trigger: { kind: 'active-use' }, targeting: { kind: 'self' }, automation: 'manual' }
+    expect(validateDnd5eActivityDefinitionV1(malformed as unknown as Dnd5eActivityDefinitionV1)).toEqual([
+      'activity.activation must be an object', 'activity.target must be an object', 'activity.automation must be an object',
+    ])
+  })
+  it.each(['construct', '构装', '构装体', '构装生物'])('settles eligible creatures without asking excluded %s creatures for saves or applying damage', creatureType => {
+    const activity = saveActivity()
+    activity.target = { kind: 'creature', relation: 'any', count: 3, excludedCreatureTypes: ['construct', 'undead'] }
+    activity.legacySource = { kind: 'spell', id: 'test-selective-damage' }
+    const result = resolveDnd5eActivity({
+      activity, actor,
+      targets: [{ ...target, id: 'construct', creatureType }, { ...target, creatureType: 'humanoid' }, { ...target, id: 'undead', creatureType: 'undead' }],
+      rolls: { 'save:target': { values: [1] }, damage: { values: [3, 4] } },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.checks).toHaveLength(1)
+    expect(result.proposals.filter(p => p.kind === 'deal-damage')).toEqual([expect.objectContaining({ targetId: 'target', amount: 7 })])
+    const dice = dnd5eActivityPerTargetRollDeclarationsV1({
+      activity, actor: { id: actor.id }, targets: [{ id: 'construct', creatureType }, { id: target.id, creatureType: 'humanoid' }],
+      declarations: [{ id: 'save', count: 1, sides: 20, label: 'Save' }],
+      hostSavingThrowMode: () => 'normal', hostAttackRollMode: () => 'normal',
+    })
+    expect(dice).toHaveLength(1)
+    expect(dice[0].id).toBe('save:target')
+    activity.target.excludedCreatureTypes = []
+    expect(validateDnd5eActivityDefinitionV1(activity)).toContain('activity.target.excludedCreatureTypes is invalid')
+  })
+  it.each(['creature', 'area'] as const)('omits immune %s targets from dice and effects', kind => {
+    const activity = saveActivity()
+    activity.target = kind === 'creature'
+      ? { kind, relation: 'any', count: 2, excludedConditionImmunities: ['charmed'] }
+      : { kind, relation: 'any', origin: 'self', shape: 'circle', radiusFeet: 30, excludedConditionImmunities: ['charmed'] }
+    const targets = [{ ...target, id: 'immune', conditionImmunities: ['charmed'] as const }, { ...target, conditionImmunities: [] }]
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    const dice = dnd5eActivityPerTargetRollDeclarationsV1({ activity, actor: { id: actor.id }, targets: targets.map(({ id, conditionImmunities }) => ({ id, conditionImmunities })),
+      declarations: [{ id: 'save', count: 1, sides: 20, label: 'Save' }],
+      hostSavingThrowMode: () => 'normal', hostAttackRollMode: () => 'normal' })
+    expect(dice.map(d => d.id)).toEqual(['save:target'])
+    const result = resolveDnd5eActivity({ activity, actor, targets,
+      areaPlacement: kind === 'area' ? { x: 0, y: 0 } : undefined,
+      rolls: { 'save:target': { values: [1] }, damage: { values: [3, 4] } } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.checks).toHaveLength(1)
+    expect(result.proposals.filter(p => p.kind === 'deal-damage')).toEqual([expect.objectContaining({ targetId: 'target', amount: 7 })])
+    expect(() => dnd5eActivityPerTargetRollDeclarationsV1({ activity, actor: { id: actor.id }, targets: [{ id: target.id }],
+      declarations: [], hostSavingThrowMode: () => 'normal', hostAttackRollMode: () => 'normal' }))
+      .toThrow('activity-target-condition-immunities-missing')
+    activity.target.excludedConditionImmunities = ['charmed', 'charmed']
+    expect(validateDnd5eActivityDefinitionV1(activity)).toContain('activity.target.excludedConditionImmunities is invalid')
+  })
   it('preserves negative exhaustion adjustments for restorative Activities', () => {
     const activity: Dnd5eActivityDefinitionV1 = {
       schemaVersion: 1,
@@ -464,12 +837,56 @@ describe('generic D&D 5e Activity executor', () => {
     })
   })
 
+  it('checks temporary and permanent companion ownership independently of lifetime', () => {
+    const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'owned', name: 'Owned',
+      activation: { kind: 'free' }, target: { kind: 'creature', relation: 'any', count: 1, rangeFeet: 60 },
+      requirements: [{ kind: 'owned-companion', subject: 'target' }],
+      outcomes: [{ id: 'command', when: { kind: 'always' }, operations: [{ id: 'command', kind: 'command-owned-companion', target: 'target', command: 'attack' }] }],
+      automation: automationCapabilityFromLegacyStatus('full') }
+    const check = (owner: string | undefined, persistent: boolean, bondKey?: string) => resolveDnd5eActivity({
+      activity, actor, targets: [{ ...target, summonedSourceCombatantId: owner,
+        summonedPersistent: persistent, summonedBondKey: bondKey }], rolls: {}, distanceFeetByTargetId: { target: 5 },
+    })
+    for (const persistent of [false, true]) {
+      expect(check(actor.id, persistent).ok).toBe(true)
+      expect(check('other', persistent)).toMatchObject({ ok: false, reason: 'requirement-failed' })
+      expect(check(undefined, persistent)).toMatchObject({ ok: false, reason: 'requirement-failed' })
+    }
+    activity.requirements = [{ kind: 'owned-companion', subject: 'target', bondKey: 'steed' }]
+    expect(check(actor.id, true, 'steed').ok).toBe(true)
+    expect(check(actor.id, true, 'other').ok).toBe(false)
+  })
+
+  it('qualifies companions by exact source namespace before resolving benefits', () => {
+    const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'benefit', name: 'Benefit',
+      activation: { kind: 'free' }, target: { kind: 'creature', relation: 'any', count: 1, rangeFeet: 60 },
+      requirements: [{ kind: 'owned-companion', subject: 'target', source: { packageId: 'test.companions', activityId: 'summon' } }],
+      outcomes: [{ id: 'heal', when: { kind: 'always' }, operations: [{ id: 'heal', kind: 'healing', target: 'target', amount: { kind: 'constant', value: 1 } }] }],
+      automation: automationCapabilityFromLegacyStatus('full') }
+    const companion = { ...target, summonedSourceCombatantId: actor.id, summonedSourcePackageId: 'test.companions', summonedSourceActivityId: 'summon' }
+    const run = (patch: Partial<Dnd5eActivityActorSnapshot>) => resolveDnd5eActivity({ activity, actor,
+      targets: [{ ...companion, ...patch }], rolls: {}, distanceFeetByTargetId: { target: 5 } })
+    expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+    expect(run({}).ok).toBe(true)
+    for (const patch of [{ summonedSourceCombatantId: 'other' }, { summonedSourcePackageId: 'another.module' },
+      { summonedSourcePackageId: undefined }, { summonedSourceActivityId: 'another' }, { summonedSourceActivityId: undefined }]) {
+      expect(run(patch)).toMatchObject({ ok: false, reason: 'requirement-failed' })
+    }
+    for (const source of ['bad', [], {}, { packageId: 'test.companions' }, { packageId: 'bad id', activityId: 'summon' }]) {
+      const invalid = { ...activity, requirements: [{ kind: 'owned-companion', subject: 'target', source }] }
+      expect(validateDnd5eActivityDefinitionV1(invalid as unknown as Dnd5eActivityDefinitionV1).some(error => error.includes('.source is invalid'))).toBe(true)
+    }
+    activity.requirements = [{ kind: 'owned-companion', subject: 'target', source: { packageId: 'srd-5.1', activityId: 'summon' } }]
+    expect(run({ summonedSourcePackageId: undefined }).ok).toBe(true)
+    expect(run({}).ok).toBe(false)
+  })
+
   it('derives a reusable summon combat profile from the Host actor snapshot', () => {
     const activity: Dnd5eActivityDefinitionV1 = {
       schemaVersion: 1, id: 'companion', name: 'Companion', activation: { kind: 'action' },
       target: { kind: 'area', relation: 'ally', origin: 'point', shape: 'circle', radiusFeet: 5, maximumTargets: 1 },
       outcomes: [{ id: 'summon', when: { kind: 'always' }, operations: [{
-        id: 'wolf', kind: 'summon', monsterId: 'srd-5.1:wolf', count: { kind: 'constant', value: 1 },
+        id: 'wolf', kind: 'summon', monsterId: 'srd-5.1:wolf', count: { kind: 'constant', value: 1 }, placementRangeFeet: 60, requiresVisiblePlacement: true,
         timing: 'immediate', durationRounds: 100, concentration: false, side: 'ally', persistent: true,
         minimumMaximumHitPoints: { kind: 'multiply', values: [
           { kind: 'reference', reference: { kind: 'actor-class-level', classId: 'ranger' } },
@@ -486,6 +903,11 @@ describe('generic D&D 5e Activity executor', () => {
       }] }],
       automation: automationCapabilityFromLegacyStatus('full'),
     }
+    for (const patch of [{ placementRangeFeet: -1 }, { placementRangeFeet: 1.5 }, { placementRangeFeet: 100001 }, { requiresVisiblePlacement: 'yes' }]) {
+      const invalid = structuredClone(activity)
+      Object.assign(invalid.outcomes[0].operations[0], patch)
+      expect(validateDnd5eActivityDefinitionV1(invalid).some(error => /placementRangeFeet|requiresVisiblePlacement/.test(error))).toBe(true)
+    }
     const result = resolveDnd5eActivity({
       activity,
       actor: { ...actor, classLevels: { ranger: 11 } },
@@ -496,7 +918,7 @@ describe('generic D&D 5e Activity executor', () => {
     expect(result).toMatchObject({
       ok: true,
       proposals: [{
-        kind: 'summon', minimumMaximumHitPoints: 44,
+        kind: 'summon', minimumMaximumHitPoints: 44, placementRangeFeet: 60, requiresVisiblePlacement: true,
         armorClassBonus: 3, weaponAttackBonus: 3, weaponDamageBonus: 3,
         savingThrowBonus: 3, proficientSkillCheckBonus: 3,
         weaponAttacksMagical: true, attacksPerAction: 2,
@@ -565,7 +987,7 @@ describe('generic D&D 5e Activity executor', () => {
       target: { kind: 'area', relation: 'enemy', origin: 'point', shape: 'rect', lengthFeet: 20, widthFeet: 10, heightFeet: 5, placeRangeFeet: 60, maximumTargets: 1, rotatable: true },
       outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [
         { id: 'zone-damage', kind: 'damage', target: 'target', amount: { kind: 'dice', rollId: 'zone-damage', count: 1, sides: 6 }, damageType: 'cold' },
-        { id: 'zone-area', kind: 'create-persistent-area', label: 'Zone', durationRounds: 2, concentration: true },
+        { id: 'zone-area', kind: 'create-persistent-area', label: 'Zone', durationRounds: 2, concentration: true, sourceIncapacitatedBehavior: 'remove-area' },
       ] }],
       scaling: [{ basis: 'slot-level', baseLevel: 2, adjustments: [
         { operationId: 'zone-damage', diceCountPerStep: 1, additionalTargetsPerStep: 1, additionalProjectilesPerStep: 1 },
@@ -587,7 +1009,7 @@ describe('generic D&D 5e Activity executor', () => {
         expect.objectContaining({ kind: 'deal-damage', targetId: 'target', amount: 7 }),
         expect.objectContaining({ kind: 'deal-damage', targetId: 'target-2', amount: 7 }),
         expect.objectContaining({ kind: 'deal-damage', targetId: 'target-2', amount: 7 }),
-        expect.objectContaining({ kind: 'create-persistent-area', durationRounds: 4 }),
+        expect.objectContaining({ kind: 'create-persistent-area', durationRounds: 4, sourceIncapacitatedBehavior: 'remove-area' }),
       ]),
     })
   })
@@ -606,6 +1028,42 @@ describe('generic D&D 5e Activity executor', () => {
     expect(resolveDnd5eActivity({
       activity, actor, targets: [target], areaPlacement: { x: 2, y: 3, lengthFeet: 105 }, areaPlacementDistanceFeet: 30, dmApproved: true, rolls: {},
     })).toEqual({ ok: false, reason: 'invalid-target', details: ['area dimensions are invalid'] })
+  })
+
+  it('authorizes exact rectangle dimensions without relaxing grid-aligned or declared bounds', () => {
+    const activity: Dnd5eActivityDefinitionV1 = {
+      schemaVersion: 1, id: 'thin-wall', name: 'Thin Wall', activation: { kind: 'action' },
+      target: { kind: 'area', relation: 'enemy', origin: 'point', shape: 'rect', lengthFeet: 20, minimumLengthFeet: 1, widthFeet: 1, heightFeet: 10, placeRangeFeet: 90 },
+      outcomes: [{ id: 'resolve', when: { kind: 'always' }, operations: [{ id: 'damage', kind: 'damage', target: 'target', amount: { kind: 'constant', value: 1 }, damageType: 'force' }] }],
+      automation: automationCapabilityFromLegacyStatus('full'),
+    }
+    if (activity.target.kind !== 'area') throw Error('Expected area fixture')
+    const areaTarget = activity.target
+    const execute = (lengthFeet: number, widthFeet: number, gridAligned = false) => resolveDnd5eActivity({
+      activity: { ...activity, target: { ...areaTarget, gridAligned } }, actor, targets: [target],
+      areaPlacement: { x: 2, y: 3, lengthFeet, widthFeet }, areaPlacementDistanceFeet: 30, dmApproved: true, rolls: {},
+    })
+    const accepted = execute(13, 1)
+    expect(accepted, JSON.stringify(accepted)).toMatchObject({ ok: true, areaInstance: { lengthFeet: 13, widthFeet: 1 } })
+    for (const [length, width] of [[21, 1], [0, 1], [13, 2], [13, 0], [NaN, 1], [13, Infinity]]) {
+      expect(execute(length, width).ok).toBe(false)
+    }
+    expect(execute(13, 1, true).ok).toBe(false)
+  })
+
+  it.each(['actor', 'target', 'both'] as const)('keeps opposed-save dice and settlement aligned when %s controller is unknown', missing => {
+    const activity = saveActivity()
+    activity.target = {kind:'creature',relation:'any',count:1,rangeFeet:30}
+    activity.checks = [{id:'save',kind:'saving-throw',ability:'wis',rollId:'save',scope:'per-target',dc:{kind:'constant',value:15},rollMode:'normal',rollModeIfOpposed:'advantage'}]
+    const source = {...actor,controller:missing==='actor'||missing==='both'?undefined:actor.controller}
+    const recipient = {...target,controller:missing==='target'||missing==='both'?undefined:target.controller}
+    const dice = dnd5eActivityPerTargetRollDeclarationsV1({activity,actor:{id:source.id,controller:source.controller?'players':undefined},targets:[{id:recipient.id,controller:recipient.controller?'dm':undefined}],declarations:[{id:'save',label:'Save',count:1,sides:20}],hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})
+    expect(dice[0]).toMatchObject({count:1,d20RollMode:'normal'})
+    // Deliberately incomplete runtime data: the executor must agree with the
+    // public dice recipe even when a caller violates the snapshot contract.
+    const result=resolveDnd5eActivity({activity,actor:source as Dnd5eActivityActorSnapshot,targets:[recipient as Dnd5eActivityActorSnapshot],rolls:{'save:target':{values:[2]},damage:{values:[4,4]}},distanceFeetByTargetId:{target:10}})
+    expect(result.ok,JSON.stringify(result)).toBe(true)
+    if(result.ok)expect(result.checks[0]).toMatchObject({success:false,d20:2})
   })
 
   it('resolves cast-level profiles before creating a persistent area', () => {
@@ -721,7 +1179,7 @@ describe('generic D&D 5e Activity executor', () => {
       ok: true,
       proposals: [{
         kind: 'apply-effect', targetId: 'target', exclusiveBySource: true,
-        modifierGroups: [{ abilityCheckAdvantages: ['dex'], skillCheckAdvantages: ['stealth'] }],
+        modifierGroups: [{ abilityCheckRules: [{ ability: 'dex', skill: 'stealth', mode: 'advantage' }] }],
       }],
     })
   })
@@ -872,4 +1330,136 @@ describe('generic D&D 5e Activity executor', () => {
       areaPlacement: { ...placement, x: 11 }, areaPlacementDistanceFeet: 30,
     })).toMatchObject({ ok: false, reason: 'invalid-target' })
   })
+})
+
+
+it('materializes imported effect-local charges at the actual cast level and rejects invalid declarations', () => {
+  const activity: Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'charged-stars', name: 'Stars', activation: { kind: 'action' }, target: { kind: 'self' },
+    automation: automationCapabilityFromLegacyStatus('full'),
+    effects: [{ schemaVersion: 1, id: 'stars', name: 'Stars', stacking: 'replace',
+      duration: { kind: 'rounds', rounds: 600, expiresAt: 'source-turn-end' }, grants: ['star-attack'],
+      grantCharges: { initial: 7, baseCastLevel: 7, additionalPerSlotLevel: 2, endWhenEmpty: true,
+        lightTiers: [{ minimumRemaining: 4, brightRadiusFeet: 30, dimRadiusFeet: 30, color: '#ffffff' },
+          { minimumRemaining: 1, brightRadiusFeet: 0, dimRadiusFeet: 30, color: '#ffffff' }] } }],
+    outcomes: [{ id: 'cast', when: { kind: 'always' }, operations: [
+      { id: 'apply', kind: 'apply-effect', target: 'actor', effectId: 'stars' }] }],
+  }
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  for (const [castLevel, maximum] of [[7, 7], [8, 9], [9, 11]]) {
+    const result = resolveDnd5eActivity({ activity: JSON.parse(JSON.stringify(activity)), actor, targets: [actor], rolls: {}, castLevel })
+    expect(result.ok, JSON.stringify(result)).toBe(true)
+    if (result.ok) expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'apply-effect',
+      grantedActivities: ['star-attack'], grantedActivityCharges: expect.objectContaining({ current: maximum, maximum, endWhenEmpty: true }) }))
+  }
+  for (const castLevel of [undefined, 6, 10]) {
+    expect(resolveDnd5eActivity({ activity, actor, targets: [actor], rolls: {}, castLevel }).ok).toBe(false)
+  }
+  for (const patch of [{ initial: 0 }, { initial: 999 }, { additionalPerSlotLevel: undefined }, { unknown: true }]) {
+    const invalid = structuredClone(activity)
+    Object.assign(invalid.effects![0].grantCharges!, patch)
+    expect(validateDnd5eActivityDefinitionV1(invalid).some(error => error.includes('grantCharges'))).toBe(true)
+  }
+  for (const patch of [{ grants: [] }, { grantsSingleUse: true }]) {
+    const invalid = structuredClone(activity)
+    Object.assign(invalid.effects![0], patch)
+    expect(validateDnd5eActivityDefinitionV1(invalid).some(error => error.includes('grantCharges'))).toBe(true)
+  }
+})
+
+
+it('validates material-filtered terrain and carries its whitelist through the executor',()=>{
+ const activity:Dnd5eActivityDefinitionV1={schemaVersion:1,id:'filtered',name:'Filtered',activation:{kind:'action'},
+ target:{kind:'self'},automation:automationCapabilityFromLegacyStatus('full'),outcomes:[{id:'terrain',when:{kind:'always'},operations:[{
+ id:'terrain',kind:'create-persistent-area',label:'Terrain',durationRounds:1,permanent:true,concentration:false,
+ groundOnly:true,anchorMode:'fixed',surfaceMaterials:['loose-earth','stone'],terrainClearing:{squareFeetPerMinute:25},movementCostMultiplier:2}]}]}
+ expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+ const result=resolveDnd5eActivity({activity,actor,targets:[actor],rolls:{}})
+ expect(result.ok).toBe(true)
+ if(result.ok)expect(result.proposals).toContainEqual(expect.objectContaining({kind:'create-persistent-area',surfaceMaterials:['loose-earth','stone']}))
+ for(const patch of [{surfaceMaterials:[]},{surfaceMaterials:['lava']},{surfaceMaterials:['stone','stone']},{groundOnly:undefined},{permanent:false},{concentration:true},{anchorMode:'source-token'}]){
+  const invalid=structuredClone(activity);Object.assign(invalid.outcomes[0].operations[0],patch)
+  expect(validateDnd5eActivityDefinitionV1(invalid).some(e=>e.includes('surfaceMaterials'))).toBe(true)
+ }
+})
+
+
+it('skips ground-contact area saves and effects for airborne or underground targets without assuming missing facts',()=>{
+ const activity=saveActivity()
+ activity.target={kind:'area',origin:'self',shape:'circle',radiusFeet:10,relation:'any',requiresGroundContact:true}
+ const grounded={...target,id:'grounded',elevationFeet:10,groundElevationFeet:10}
+ const airborne={...target,id:'airborne',elevationFeet:15,groundElevationFeet:10}
+ const underground={...target,id:'underground',elevationFeet:5,groundElevationFeet:10}
+ const targets=[grounded,airborne,underground]
+ const dice=dnd5eActivityPerTargetRollDeclarationsV1({activity,actor:{id:actor.id},targets:targets.map(({id,elevationFeet,groundElevationFeet})=>({id,elevationFeet,groundElevationFeet})),declarations:[{id:'save',label:'Save',count:1,sides:20}],hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})
+ expect(dice.map(d=>d.id)).toEqual(['save:grounded'])
+ const result=resolveDnd5eActivity({activity,actor,targets,areaPlacement:{x:0,y:0,elevationFeet:10},areaPlacementDistanceFeet:0,
+ distanceFeetByTargetId:{grounded:5,airborne:5,underground:5},rolls:{'save:grounded':{values:[1]},damage:{values:[3,4]}}})
+ expect(result.ok,JSON.stringify(result)).toBe(true)
+ if(result.ok)expect(result.proposals.filter(p=>p.kind==='deal-damage').map(p=>p.targetId)).toEqual(['grounded'])
+ expect(()=>dnd5eActivityPerTargetRollDeclarationsV1({activity,actor:{id:actor.id},targets:[{id:target.id}],declarations:[],hostSavingThrowMode:()=> 'normal',hostAttackRollMode:()=> 'normal'})).toThrow('activity-target-ground-contact-missing')
+})
+
+
+it('applies a Host negation checkpoint after final save mode and before selecting d20', () => {
+  const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'luck-save', name: 'Luck save',
+    activation: { kind: 'action' }, target: { kind: 'creature', relation: 'any', count: 1 },
+    automation: automationCapabilityFromLegacyStatus('full'),
+    checks: [{ id: 'save', kind: 'saving-throw', ability: 'dex', rollId: 'save', scope: 'per-target',
+      rollMode: 'disadvantage', dc: { kind: 'constant', value: 14 } }],
+    outcomes: [{ id: 'passed', when: { kind: 'check', checkId: 'save', result: 'success' },
+      operations: [{ id: 'mark', kind: 'temporary-hit-points', target: 'target', amount: { kind: 'constant', value: 2 } }] }] }
+  const checkpoint = vi.fn(() => true)
+  const used = resolveDnd5eActivity({ activity, actor, targets: [target], rolls: { 'save:target': { values: [20] } }, negateDisadvantage: checkpoint })
+  expect(used.ok, JSON.stringify(used)).toBe(true)
+  expect(checkpoint).toHaveBeenCalledWith({ rollId: 'save:target', rollerId: target.id, kind: 'saving-throw', mode: 'disadvantage' })
+  if (used.ok) {
+    expect(used.checks[0]).toMatchObject({ d20: 20, success: true, rollMode: 'normal' })
+    expect(used.proposals).toContainEqual(expect.objectContaining({ kind: 'grant-temporary-hit-points', targetId: target.id }))
+  }
+  const declined = resolveDnd5eActivity({ activity, actor, targets: [target], rolls: { 'save:target': { values: [20, 1] } }, negateDisadvantage: () => false })
+  expect(declined.ok).toBe(true)
+  if (declined.ok) expect(declined.checks[0]).toMatchObject({ d20: 1, success: false, rollMode: 'disadvantage' })
+  const normal = structuredClone(activity)
+  Object.assign(normal.checks![0], { rollMode: 'normal' })
+  expect(resolveDnd5eActivity({ activity: normal, actor, targets: [target], rolls: { 'save:target': { values: [20] } }, negateDisadvantage: () => true }).ok).toBe(false)
+  const immune = structuredClone(activity)
+  Object.assign(immune.checks![0], { automaticSuccessIfConditionImmune: 'charmed' })
+  const automatic = vi.fn(() => true)
+  const result = resolveDnd5eActivity({ activity: immune, actor, targets: [{ ...target, conditionImmunities: ['charmed'] }], rolls: {}, negateDisadvantage: automatic })
+  expect(result.ok, JSON.stringify(result)).toBe(true)
+  expect(automatic).not.toHaveBeenCalled()
+})
+
+
+it('binds eligible weapon types while allowing magic without intrinsic attack and damage bonuses', () => {
+  const activity: Dnd5eActivityDefinitionV1 = { schemaVersion: 1, id: 'sharpen', name: 'Sharpen',
+    activation: { kind: 'bonus-action' }, target: { kind: 'self' }, automation: automationCapabilityFromLegacyStatus('full'),
+    effects: [{ schemaVersion: 1, id: 'sharp', name: 'Sharp', stacking: 'replace', duration: { kind: 'rounds', rounds: 10, expiresAt: 'source-turn-start' },
+      modifiers: [{ kind: 'weapon-enchantment', weaponSlot: 'main-hand', weaponBaseIds: ['dnd5e-longsword'],
+        requiresNoIntrinsicAttackAndDamageBonus: true, attackAndDamageBonus: { kind: 'constant', value: 3 } }] }],
+    outcomes: [{ id: 'apply', when: { kind: 'always' }, operations: [{ id: 'apply', kind: 'apply-effect', target: 'actor', effectId: 'sharp' }] }] }
+  expect(validateDnd5eActivityDefinitionV1(activity)).toEqual([])
+  for (const magical of [false, true]) for (const bonus of [0, 1, 3]) {
+    const equipment = structuredClone(DND5E_LONGSWORD)
+    equipment.id = 'owned-instance'; equipment.baseEquipmentId = 'dnd5e-longsword'
+    if (equipment.dnd5e?.kind !== 'weapon') throw Error('weapon required')
+    equipment.dnd5e.magical = magical
+    equipment.effects = { weaponAttackBonus: bonus, weaponDamageBonus: bonus }
+    const character = normalizeCharacter({ id: 'actor', level: 11, charClass: '武僧', equipment: { mainWeapon: equipment } })
+    const snapshot = migrateCharacterToDnd5e(character).activityEquipment
+    expect(snapshot.mainHand).toMatchObject({ weaponId: 'owned-instance', weaponBaseId: 'dnd5e-longsword', intrinsicAttackBonus: bonus, intrinsicDamageBonus: bonus, magical })
+    const wielder = { ...actor, equipment: JSON.parse(JSON.stringify(snapshot)) }
+    const result = resolveDnd5eActivity({ activity, actor: wielder, targets: [wielder], rolls: {} })
+    expect(result.ok, JSON.stringify(result)).toBe(bonus === 0)
+    if (result.ok) expect(result.proposals).toContainEqual(expect.objectContaining({ kind: 'apply-effect', modifierGroups: [expect.objectContaining({ weaponEnchantment: expect.objectContaining({ weaponId: 'owned-instance', attackAndDamageBonus: 3 }) })] }))
+    const wrong = structuredClone(wielder); wrong.equipment.mainHand!.weaponBaseId = 'dnd5e-shortbow'
+    expect(resolveDnd5eActivity({ activity, actor: wrong, targets: [wrong], rolls: {} }).ok).toBe(false)
+    const unknown = structuredClone(wielder); delete unknown.equipment.mainHand!.intrinsicAttackBonus
+    expect(resolveDnd5eActivity({ activity, actor: unknown, targets: [unknown], rolls: {} }).ok).toBe(false)
+  }
+  for (const patch of [{ weaponBaseIds: [] }, { weaponBaseIds: ['a', 'a'] }, { requiresNoIntrinsicAttackAndDamageBonus: false }, { weaponSlot: 'ammunition-container' }]) {
+    const invalid = structuredClone(activity); Object.assign(invalid.effects![0].modifiers![0], patch)
+    expect(validateDnd5eActivityDefinitionV1(invalid).length).toBeGreaterThan(0)
+  }
 })

@@ -1,6 +1,20 @@
 import { cellKey, tokenOccupiedCellsAt } from '../../lib/gridCombat'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 
+/** UI selection only; Host still verifies grants, range, relation and resources. */
+export function toggleGrantedActivityTarget(ids: readonly string[], targetId: string, maximum: number): string[] {
+  if (ids.includes(targetId)) return ids.filter(id => id !== targetId)
+  return ids.length < maximum ? [...ids, targetId] : [...ids]
+}
+
+export function grantedActivitySelectionIsCurrent(map: BattleMap, area: Pick<Dnd5ePluginArea, 'anchorTokenId'> | undefined,
+  ids: readonly string[], maximum: number): boolean {
+  return ids.length > 0 && ids.length <= maximum && new Set(ids).size === ids.length && ids.every(id => {
+    const token = resolvePersistentAreaCreatureTarget(map, area, id)
+    return token != null && token.type !== 'obstacle' && token.id === id
+  })
+}
+
 /**
  * Effect-token areas such as Arcane Hand can deliberately occupy the same
  * squares as the creature they are controlling.  Konva then reports the

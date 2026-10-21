@@ -31,6 +31,7 @@ export interface Dnd5eSandboxConditionDuration {
 export type Dnd5eSandboxCapabilityOperation =
   | { kind: 'grant-temporary-hit-points'; targetId: string; amount: number }
   | { kind: 'heal'; targetId: string; amount: number }
+  | { kind: 'deal-rolled-damage'; targetId: string; rollId: string; multiplier: 0.5 | 1 | 2 }
   | { kind: 'deal-damage'; targetId: string; amount: number; damageType: import('./monsters').Dnd5eDamageType }
   | {
       kind: 'apply-standard-condition'
@@ -158,6 +159,7 @@ function sandboxReplayFingerprint(action: Dnd5ePluginAction): string {
     actorId: action.actorId,
     targetId: action.targetId,
     targetIds: action.targetIds,
+    projectileTargetIds: action.projectileTargetIds,
     targetCell: action.targetCell,
     targetOrientation: action.targetOrientation,
     distanceFeet: action.distanceFeet,
@@ -196,6 +198,11 @@ function cloneCombatantForSandbox(combatant: Dnd5eCombatant): Record<string, unk
 function validOperation(value: unknown): value is Dnd5eSandboxCapabilityOperation {
   if (!value || typeof value !== 'object') return false
   const operation = value as Partial<Dnd5eSandboxCapabilityOperation>
+  if (operation.kind === 'deal-rolled-damage') {
+    return typeof operation.targetId === 'string' && !!operation.targetId &&
+      typeof operation.rollId === 'string' && !!operation.rollId &&
+      [0.5, 1, 2].includes(operation.multiplier ?? 0)
+  }
   if (operation.kind === 'spend-resource' || operation.kind === 'restore-resource') {
     return typeof operation.resourceId === 'string' && !!operation.resourceId &&
       typeof operation.amount === 'number' && Number.isInteger(operation.amount) &&
@@ -404,6 +411,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
             actorId: action.actorId,
             targetId: action.targetId,
             targetIds: action.targetIds,
+            projectileTargetIds: action.projectileTargetIds,
             targetCell: action.targetCell,
             targetOrientation: action.targetOrientation,
             distanceFeet: action.distanceFeet,

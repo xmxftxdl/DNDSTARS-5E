@@ -40,6 +40,29 @@ function bundle(value = spell()) {
 }
 
 describe('D&D 5e room spellbook import', () => {
+  it('preserves physical material binding through export and import and rejects consumed bindings', () => {
+    const materialRequirement = { label: 'Cage', options: [{ label: 'Cage', components: [{
+      tag: 'silver-cage', label: 'Cage', consumed: false, minimumUnitValueGp: 100, bindEffectId: 'captive-soul',
+    }] }] }
+    const data = bundle(spell({ components: { verbal: true, somatic: true, material: true, materialText: 'Cage', materialRequirement } }))
+    const parsed = parseDnd5eSpellImport(JSON.parse(JSON.stringify(data)))
+    expect(parsed.spells[0].components.materialRequirement).toEqual(materialRequirement)
+    materialRequirement.options[0].components[0].consumed = true
+    expect(() => parseDnd5eSpellImport(bundle(spell({ components: { verbal: true, somatic: true, material: true, materialText: 'Cage', materialRequirement } })))).toThrow(/bindEffectId/)
+  })
+  it('preserves conditional material recipes and rejects ambiguous or malformed branches', () => {
+    const mode = { choiceId: 'mode', options: [{ optionId: 'ordinary' }, { optionId: 'ward', requirement: {
+      label: 'Ward material', options: [{ label: 'Ingredient', components: [{ tag: 'test:ingredient', label: 'Ingredient', consumed: false }] }],
+    } }] }
+    const components = { verbal: true, somatic: true, material: true, materialText: 'Synthetic ingredient', materialRequirementByChoice: mode }
+    const parsed = parseDnd5eSpellImport(bundle(spell({ components })))
+    expect(parsed.spells[0].components.materialRequirementByChoice).toEqual(mode)
+    expect(() => parseDnd5eSpellImport(bundle(spell({ components: { ...components, material: false } })))).toThrow()
+    expect(() => parseDnd5eSpellImport(bundle(spell({ components: { ...components,
+      materialRequirementByChoice: { ...mode, options: [mode.options[0], mode.options[0]] } } })))).toThrow(/重复/)
+    expect(() => parseDnd5eSpellImport(bundle(spell({ components: { ...components,
+      materialRequirementByChoice: { ...mode, options: [{ optionId: 'ward', requirement: 'invalid' }] } } })))).toThrow()
+  })
   it('routes Alter Self through its mode Activity rather than DM adjudication', () => {
     const entry = dnd5eSpellbookEntries([]).find(spell => spell.id === 'alter-self')
     expect(entry).toMatchObject({ automationLevel: 'partial' })

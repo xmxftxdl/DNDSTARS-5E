@@ -9,7 +9,7 @@ import {
   type GridCell,
 } from '../../lib/gridCombat'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
-import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { createDnd5eMapHostilityView } from './mapPerceivedHostility'
 import { aoeOrientFromCell, canPlaceAoe, tokensInAoe } from '../../lib/skillTargeting'
 import {
   mapGeometryLineOfEffectBlocked,
@@ -53,6 +53,7 @@ import {
 } from './spellAction'
 import {
   dnd5eInstantAoeAffectsTokenVertically,
+  dnd5eTokenHeightFeet,
   dnd5eTokenToPointDistanceFeet,
 } from './verticalCombatGeometry'
 import { dnd5eTraversalMovementCost } from './traversal'
@@ -66,6 +67,7 @@ export type Dnd5eMonsterAreaActionRejectReason =
   | 'combatant-missing'
 
 export interface PreparedDnd5eMonsterAreaAction {
+  damagePathOrigin?: {x:number;y:number;elevationFeet:number}
   map: BattleMap
   characters: readonly Character[]
   characterIdByCombatantId: Record<string, string>
@@ -359,6 +361,10 @@ export function dnd5eMonsterAreaActionTargetIds(input: {
     ? dnd5eMonsterAreaSavingThrowEffect(action, input.variantId)
     : undefined
   if (!actorToken || !action || !variant || variant.actorLanding) return undefined
+  const perceivesHostile = createDnd5eMapHostilityView({ ...input, actorToken,
+    combatId: `area-targets:${input.map.id}`,
+    initiativeOrder: input.map.tokens.filter(token => token.type !== 'obstacle').map(token =>
+      ({ tokenId: token.id, label: token.label, emoji: token.emoji, color: token.color, roll: 0 })) })
   const casterCell = tokenAnchorCellFromPixel(
     actorToken.x,
     actorToken.y,
@@ -402,7 +408,7 @@ export function dnd5eMonsterAreaActionTargetIds(input: {
     isPresentMonsterAreaCreature(candidate, input.characters) &&
     monsterAreaTokensShareInteractionSpace(actorToken, candidate, input.characters) &&
     (variant.target === 'all-creatures-except-self' ||
-      areOpposedCombatTokens(actorToken, candidate)) &&
+      perceivesHostile(candidate)) &&
     dnd5eInstantAoeAffectsTokenVertically({
       spellId: `monster:${action.id}`,
       area: variant.area,
@@ -427,6 +433,7 @@ export function dnd5eMonsterAreaActionTargetIds(input: {
 }
 
 export function prepareDnd5eMonsterAreaAction(input: {
+  worldMinute?: number
   combatId: string
   round?: number
   map: BattleMap
@@ -531,6 +538,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
   let actorMovement: Dnd5eMonsterAreaActionResolutionV1['actorMovement']
   let landingTargets: Token[] | undefined
   if (variant.actorLanding) {
+    const perceivesHostile = createDnd5eMapHostilityView({ ...input, actorToken })
     const landingPosition = tokenCenterForAnchorCell(targetCell, actorToken, input.map)
     const landingCells = tokenOccupiedCellsAt(actorToken, input.map, landingPosition)
     const landingCellKeys = new Set(landingCells.map((cell) => `${cell.col},${cell.row}`))
@@ -545,7 +553,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
       tokenOccupiedCellsAt(candidate, input.map, candidate).some((cell) =>
         landingCellKeys.has(`${cell.col},${cell.row}`)))
     landingTargets = allLandingCreatures.filter((candidate) =>
-      variant.target === 'all-creatures-except-self' || areOpposedCombatTokens(actorToken, candidate))
+      variant.target === 'all-creatures-except-self' || perceivesHostile(candidate))
     if (
       landingTargets.length === 0 ||
       landingTargets.length !== allLandingCreatures.length
@@ -676,6 +684,7 @@ export function prepareDnd5eMonsterAreaAction(input: {
           }]),
   ]
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: input.combatId,
     round: input.round,
     map: snapshotMap,
@@ -738,12 +747,14 @@ export function prepareDnd5eMonsterAreaAction(input: {
       areaTargetOrientation: input.areaTargetOrientation,
       areaTargetElevationFeet: input.areaTargetElevationFeet,
       actorMovement,
+      damagePathOrigin:{x:effectOrigin.x,y:effectOrigin.y,elevationFeet:effectOriginElevation+(variant.area.origin==='point'?0:dnd5eTokenHeightFeet(actorToken)/2)},
     },
   }
 }
 
 export function resolvePreparedDnd5eMonsterAreaAction(input: {
   prepared: PreparedDnd5eMonsterAreaAction
+  savingThrowCounterattacks?: import('./headlessCombatEngine').Dnd5eAction['savingThrowCounterattacks']
   resolution: Omit<Dnd5eMonsterAreaActionResolutionV1, 'schemaVersion' | 'targetIds' | 'variantId'>
   airborneFallDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
 }): {
@@ -754,6 +765,8 @@ export function resolvePreparedDnd5eMonsterAreaAction(input: {
   const { prepared } = input
   const action = {
     type: 'monster-area-action',
+    savingThrowCounterattacks: input.savingThrowCounterattacks,
+    damagePathOrigin:prepared.damagePathOrigin,
     actorId: prepared.actorToken.id,
     actionId: prepared.action.id,
     legendary: prepared.legendary ? true : undefined,

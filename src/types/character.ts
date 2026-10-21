@@ -179,6 +179,8 @@ export interface Character {
   /** 规则包中的背景变体本地 ID。 */
   dnd5eBackgroundVariantId?: string
   alignment?: string // D&D 5e 2014 九大阵营
+  /** DM-recorded fact; never initialized by guessing from the current alignment. */
+  dnd5eOriginalAlignment?: string
   experience: number // 经验值
   /** DM 战斗结算收据；用于防止同一 combatId 因重试或断线恢复而重复发放经验。 */
   dnd5eExperienceAwards?: Array<{
@@ -240,6 +242,11 @@ export interface Character {
   dnd5eLastLongRestWorldMinute?: number
   /** 已应用到该角色的战役时间；支持刷新或断线后幂等补算黎明与长休事务。 */
   dnd5eWorldTimeAppliedMinute?: number
+  /** Host-issued, one-use choices at the most recent completed rest. */
+  dnd5eRestActivityWindow?: import('../rulesets/dnd5e/restActivityWindows').Dnd5eRestActivityWindow
+  dnd5eAwakeningEvents?: import('../rulesets/dnd5e/awakeningEvents').Dnd5eAwakeningEvent[]
+  dnd5eDreamContact?: import('../rulesets/dnd5e/dreamContact').Dnd5eDreamContact
+  dnd5eRestStartActivityWindow?: import('../rulesets/dnd5e/restStartActivityWindows').Dnd5eRestStartActivityWindow
   dnd5eClassChoices?: {
     fighter?: {
       /** Core uses "champion"; third-party values are namespaced by the rules plugin host. */
@@ -281,6 +288,10 @@ export interface Character {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
     /** 权威状态实例；旧 conditions 字符串仅作为兼容投影。 */
     activeEffects?: Dnd5eActiveEffectInstance[]
+    sourcedExhaustion?: import('../rulesets/dnd5e/sourcedExhaustion').Dnd5eSourcedExhaustion
+    submergedBreathing?: import('../rulesets/dnd5e/submergedBreathing').Dnd5eSubmergedBreathingState
+    submergedBreathingEffectDeadlines?: import('../../shared/submerged-breathing-state.mjs').SubmergedBreathingEffectDeadline[]
+    exhaustionBaseMaxHp?: number
     /** Host-authored long-lived spell state (clone vessels, planar links, and similar records). */
     spellAuthorityRecords?: Record<string, Dnd5eSpellAuthorityRecordV1>
     /** Host-only control delegation created by a durable spell authority record. */
@@ -311,11 +322,21 @@ export interface Character {
     dashedTurnKey?: string
     /** Consecutive on-foot movement immediately preceding a possible running jump. */
     runningJumpApproachFeet?: number
+    jumpMovementProgress?: import('../rulesets/dnd5e/traversal').Dnd5eJumpMovementProgress
+    straightMovementStreak?: import('../rulesets/dnd5e/straightMovementStreak').Dnd5eStraightMovementStreak
+    withinReachMovementByAttacker?: Record<string, import('../rulesets/dnd5e/withinReachMovementProgress').Dnd5eWithinReachMovementProgress>
     /** Opportunity-attack movement stop keyed to the affected creature's active turn. */
     movementStoppedTurnKey?: string
+    normalReactionSpentThisTurn?: boolean
+    specialOpportunityReactionUsed?: boolean
+    reactionAvailableBeforeSpecial?: boolean
     raging?: boolean
     /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
+    firstOwnCombatTurn?: { combatId: string; turnKey: string }
+    firstOwnTurnWeaponAttack?: { featureId: string; turnKey: string }
+    attackActionHistory?: import('../rulesets/dnd5e/attackActionHistory').Dnd5eAttackActionHistory
     turnStartResolvedTurnKey?: string
+    deathSaveTurn?: import('../rulesets/dnd5e/deathSaveTurn').Dnd5eDeathSaveTurn
     /** 本场战斗由 DM 判定为受突袭；自身首回合结束后失效。 */
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
@@ -327,7 +348,7 @@ export interface Character {
     relentlessRagePendingDc?: number
     /** 狂战士“反击”的一次性权威触发；由造成伤害的 Headless 事务写入。 */
     berserkerRetaliationTrigger?: { sourceId: string; round: number }
-    undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
+    undeadFortitudePending?: { dc: number; damage: number; sourceId?: string; destroysBodyOnDeath?: boolean; destroysBodyPartOnDeath?: import('../rulesets/dnd5e/lethalBodyPart').Dnd5eLethalBodyPartDestruction }
     monsterOnHitSavePending?: {
       sourceId: string
       actionId: string
@@ -352,6 +373,7 @@ export interface Character {
       requiredTargetCondition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
+    activeEffectDamageSavePendingQueue?: Array<{ effectId: string; mode: 'normal' | 'advantage' }>
     activeEffectDamageSavePendingModes?: Record<string, 'normal' | 'advantage'>
     /** Authoritative death/body state retained across map snapshots. */
     deathRound?: number
@@ -361,13 +383,15 @@ export interface Character {
     /** Host-confirmed state of the soul for magic that requires it to be free and willing. */
     soulReturnStatus?: 'free-willing' | 'unwilling' | 'not-free'
     bodyPresent?: boolean
+    /** Host-authored anatomy, independent of subsequent injury or regeneration. */
+    bodyPartPresence?: Record<string, boolean>
     missingBodyParts?: string[]
     /** A missing essential body part or organ prevents revival that cannot restore parts. */
     vitalBodyPartsMissing?: boolean
     /** Universal d20 penalty from resurrection magic; recovers on long rests. */
     resurrectionPenalty?: { value: number; recoveryPerLongRest: number }
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
-    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
+    temporaryHitPointsSource?: { actorId: string; rulesId: string; effectDefinitionId?: string }
     /** Recoverable maximum-HP reductions applied by authoritative combat. */
     hitPointMaximumReductionLedger?: Dnd5eHitPointMaximumReductionLedger
     /** Temporary ability damage; the persisted base ability scores are never overwritten. */
@@ -402,12 +426,18 @@ export interface Character {
     monsterReactiveAvailableTurnKey?: string
     monsterReactiveUsedTurnKey?: string
     weaponAttackActionTurnKey?: string
+    /** Host-owned conscious zero-HP turn; never granted by a client-side HP edit. */
+    zeroHitPointExtraTurn?: {featureId: string; slotId: string; phase: 'pending' | 'active'}
+    interruptedTurnResume?: import('../rulesets/dnd5e/interruptedTurn').Dnd5eInterruptedTurnResume
+    disengagedTurnKey?: string
     dodgingTurnKey?: string
     helpedAbilityCheckSourceId?: string
     helpedAbilityCheckSourceTurnKey?: string
     helpedAttackSourceId?: string
     helpedAttackSourceTurnKey?: string
     readiedAction?: {
+      movementExecution?: { turnKey: string; remaining: number; spent: number }
+      objectInteraction?: import('../rulesets/dnd5e/companionObjectInteraction').Dnd5eCompanionObjectInteraction
       trigger: string
       actionKind: 'attack' | 'move' | 'interact-object' | 'other'
       targetId?: string
@@ -438,8 +468,10 @@ export interface Character {
     quiveringPalmTargetId?: string
     /** 散打宗 11 级：长休后获得的庇护术效果，攻击或对敌施法后结束。 */
     tranquilityActive?: boolean
+    disadvantageNegationReceipts?: Record<string, import('../rulesets/dnd5e/disadvantageNegation').DisadvantageNegationReceipt>
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    activityTriggerReceipts?: { combatId: string; ids: string[] }
     declarativeWardPools?: Record<string, { current: number; max: number }>
     /** Active target marks keyed by the registered mark feature id. */
     declarativeMarkedTargets?: Record<string, { targetId: string; roundsRemaining: number }>
@@ -450,6 +482,14 @@ export interface Character {
       round: number
     }>
     /** One-shot weapon attack credentials granted by unified Activities. */
+    summonAttackerIds?:string[]
+    summonAutonomousTurnKey?: string
+    summonSelfDefenseTurnKey?:string
+    companionCommand?: {task?: import('../rulesets/dnd5e/companionTask').Dnd5eCompanionTask; ready?:import('../rulesets/dnd5e/companionReady').Dnd5eCompanionReady;objectInteractionCompleted?:true;objectInteraction?:import('../rulesets/dnd5e/companionObjectInteraction').Dnd5eCompanionObjectInteraction;guardArea?:import('../rulesets/dnd5e/companionGuardArea').Dnd5eCompanionGuardArea;executedTurnKey?:string;movementDestination?:import('../rulesets/dnd5e/companionMovementDestination').Dnd5eCompanionMovementDestination;attackTargetId?:string;attackKind?:import('../rulesets/dnd5e/companionAttackKind').Dnd5eCompanionAttackKind;helpTargetId?:string;helpKind?:'attack'|'ability-check';schemaVersion:1;sourceOwnerId:string;sourceFeatureId:string;command:'attack'|'dash'|'disengage'|'dodge'|'help'|'hide'|'use-object'|'ready'|'task';issuedRound:number;persistentOrder?:boolean;voluntaryForTokenId?:string}
+    recentCreatureSightings?: Record<string, import('../rulesets/dnd5e/recentCreatureSightings').Dnd5eCreatureSighting>
+    knownCreatureLocations?: Record<string, import('../rulesets/dnd5e/knownCreatureLocations').Dnd5eKnownCreatureLocation>
+    damageTraitReports?: Record<string, import('../rulesets/dnd5e/damageTraitReport').Dnd5eDamageTraitReceipt>
+    planarPortalReports?: Record<string, import('../rulesets/dnd5e/planarPortalReport').Dnd5ePlanarPortalReceipt>
     activityWeaponAttackGrants?: Record<string, Dnd5eActivityWeaponAttackGrantV1>
     activityBasicActionGrants?: Record<string, Dnd5eActivityBasicActionGrantV1>
     /** Temporary structured spells granted by a Host-settled interception. */
@@ -494,9 +534,14 @@ export interface Character {
     nextD20Advantage?: {
       featureId: string
       rollKinds: Array<'attack' | 'ability-check' | 'saving-throw'>
+      expiresAfterTurnKey?: string
     }
     /** Host-generated long-rest d20 results, keyed by the fully namespaced feature id. */
     declarativeStoredD20ByFeatureId?: Record<string, number[]>
+    /** Successful Augury casts since the last long rest; four saturates the random-omen chance. */
+    auguryHistory?: { casts: number; lastActionId: string }
+    rageAttackMark?: { targetId: string; featureId: string }
+    rageAttackMarkUsedTurnKey?: string
     postSpellRandomTableCheck?: {
       featureId: string
       spellId: string
@@ -520,7 +565,10 @@ export interface Character {
     concentrationRoundsRemaining?: number
     /** Turn that created the current concentration; its own end must not consume a full round. */
     concentrationStartedTurnKey?: string
+    concentrationTickOn?: 'source-turn-start'
+    concentrationLastTickTurnKey?: string
     /** Receipt for a bounded concentration duration that ended naturally. */
+    lastGrantedShortRest?: { receiptId: string; completedWorldMinute?: number }
     lastCompletedConcentration?: {
       spellId: string
       completedRound?: number
@@ -557,6 +605,8 @@ export interface Character {
     hurlThroughHellReady?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number
+    /** Original 10d10 pool; absent on legacy total-only saves. */
+    hurlThroughHellPendingRolls?: readonly number[]
     hurlThroughHellAppliedTurnKey?: string
     huntersMarkTargetId?: string
     wildShapeFormId?: string
@@ -564,6 +614,10 @@ export interface Character {
     wildShapeMode?: 'wild-shape' | 'polymorph' | 'true-polymorph' | 'animal-shapes' | 'shapechange'
     wildShapeSourceActorId?: string
     wildShapeSourceActivityId?: string
+    wildShapeConcentrationSpellId?: string
+    activityContinuations?: Record<string, import('../rulesets/dnd5e/activities/dnd5eActivityContinuation').Dnd5eActivityContinuationStateV1>
+    wildShapeRequiresConcentration?: boolean
+    wildShapeRetainsHitPoints?: boolean
     wildShapeMaximumChallengeRating?: number
     wildShapeMaximumSizeRank?: number
     shapechangeEquipmentDisposition?: 'drop' | 'merge' | 'wear'
@@ -571,6 +625,17 @@ export interface Character {
     wildShapeRoundsRemaining?: number
     wildShapePermanent?: boolean
     wildShapePermanentAfterConcentrationCompletes?: boolean
+    monsterMultiattackContinuation?: {
+      schemaVersion: 1
+      combatId: string
+      round: number
+      turnKey: string
+      parentActionId: string
+      nextOccurrenceIndex: number
+      sequenceActionIds: string[]
+      targetIds: string[]
+      hitByOccurrence: boolean[]
+    }
     wildShapeOriginalCurrentHp?: number
     wildShapeOriginalMaxHp?: number
     wildShapeOriginalArmorClass?: number
@@ -617,6 +682,10 @@ export interface Character {
   equipment?: CharacterEquipment
   /** SRD 5.1 物品实例、数量与穿戴状态；所有跨端变更均由 DM 权威事务写入。 */
   dnd5eInventory?: Dnd5eInventory
+  /** Host projection of explicitly displayed physical surfaces; contains no item rules. */
+  dnd5eExposedSurfaces?: import('../rulesets/dnd5e/mapObjectSurface').Dnd5eMapObjectSurface[]
+  /** Server-derived selection hints, never authoritative inventory or item rules. */
+  dnd5eExposedEnchantmentItems?: { instanceId: string; kind: 'armor' | 'weapon'; revision: number; equipped: boolean }[]
 
   // —— DM 专属 ——
   dmNotes: string // 仅 DM 可见
@@ -627,3 +696,5 @@ export interface CharacterResourceState {
   current: number
   max: number
 }
+
+

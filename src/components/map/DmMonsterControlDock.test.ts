@@ -149,6 +149,16 @@ const dryad: Token = {
 }
 
 describe('DmMonsterControlDock', () => {
+  it.each([false,true])('shows concrete quasit form buttons and respects spent action (%s)',actionUsed=>{
+    const quasit={...goblin,id:'quasit',poolId:'srd-5.1:quasit',label:'夸塞魔'}
+    const markup=renderToStaticMarkup(createElement(DmMonsterControlDock,{monsters:[quasit],currentTokenId:quasit.id,
+      actionUsed,onSelectAction:()=>{},onEndTurn:()=>{},onShapechange:()=>{},initialExpanded:true}))
+    for(const form of ['bat','centipede','toad']){
+      const button=markup.match(new RegExp('<button[^>]*data-testid="monster-shapechange-srd-5.1:quasit-'+form+'"[^>]*>'))?.[0]
+      expect(button).toBeDefined()
+      expect(button!.includes('disabled=""')).toBe(actionUsed)
+    }
+  })
   it('disables its end-turn control while an authoritative advance is pending', () => {
     const markup = renderToStaticMarkup(createElement(DmMonsterControlDock, {
       monsters: [goblin],
@@ -310,6 +320,20 @@ describe('DmMonsterControlDock', () => {
       .toMatch(/\sdisabled(?:=|\s|>)/)
     expect(markup.match(/data-testid="manual-monster-move-dash"[^>]*>/)?.[0])
       .toMatch(/\sdisabled(?:=|\s|>)/)
+  })
+
+  it('offers a declared Athletics removal without requiring a restrained condition', () => {
+    const affected: Token = {...goblin, dnd5eCombatState:{activeEffects:[createDnd5eMechanicalEffect({
+      definitionId:'test:binding',label:'Binding',targetId:goblin.id,source:{kind:'feature'},
+      modifiers:{speedPenaltyFeet:10},removal:{action:{label:'Remove',economy:'action',maxDistanceFeet:5,
+        abilityCheck:{ability:'str',skill:'athletics',dc:15}}},
+    })]}}
+    const markup=renderToStaticMarkup(createElement(DmMonsterControlDock,{
+      monsters:[affected],currentTokenId:affected.id,actionUsed:false,movementRemainingFeet:20,movementMaximumFeet:20,
+      onSelectAction:()=>{},onEscapeActiveEffect:()=>{},onSelectMovement:()=>{},onEndTurn:()=>{},initialExpanded:true,
+    }))
+    expect(markup).toContain('manual-monster-escape-active-effect')
+    expect(markup).toContain('挣脱Binding（力量检定 DC 15）')
   })
 
   it('keeps the exact remaining Multiattack occurrence usable after the prior strike', () => {

@@ -174,6 +174,8 @@ export function normalizeAiStructuredGenerationRequest(value) {
   const systemPrompt = boundedText(value.systemPrompt, 120_000)
   const userPrompt = boundedText(value.userPrompt, 120_000)
   const maxOutputTokens = value.maxOutputTokens == null ? undefined : Number(value.maxOutputTokens)
+  const reasoningEffort = value.reasoningEffort
+  if (reasoningEffort !== undefined && !['none', 'low', 'medium', 'high'].includes(reasoningEffort)) return { ok: false, error: 'invalid-ai-reasoning-effort' }
   if (!jobId || !STRUCTURED_GENERATION_TASKS.has(task) || !systemPrompt || !userPrompt || !plainObject(value.outputSchema)) {
     return { ok: false, error: 'invalid-ai-request' }
   }
@@ -243,6 +245,7 @@ export function normalizeAiStructuredGenerationRequest(value) {
       userPrompt,
       outputSchema: value.outputSchema,
       ...(maxOutputTokens != null ? { maxOutputTokens } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(normalizedDocuments.length ? { documents: normalizedDocuments } : {}),
       ...(normalizedImages.length ? { images: normalizedImages } : {}),
     },

@@ -1,3 +1,5 @@
+import { validDnd5eActivityTextInput } from '../../rulesets/dnd5e/activities/dnd5eActivityTextInput'
+import { showAppPrompt } from '../../lib/appDialog'
 export interface Dnd5eActivityChoiceOptionLike {
   id: string
   label: string
@@ -166,6 +168,7 @@ export async function promptDnd5eActivityChoice(input: {
   choiceLabel: string
   options: readonly Dnd5eActivityChoiceOptionLike[]
   defaultOptionId?: string
+  textInput?: { maximumLength: number; maximumWords?: number; format?: 'hex-color' | 'surface-drawing' }
   prompt: (message: string, defaultValue: string) => Promise<string | null>
   directionStepper: (
     options: Dnd5eDirectionStepperOptions,
@@ -175,6 +178,17 @@ export async function promptDnd5eActivityChoice(input: {
   notifyInvalid: (message: string) => Promise<unknown> | unknown
   pageSize?: number
 }): Promise<Dnd5eActivityChoiceOptionLike | null> {
+  if (input.textInput) {
+    const text = input.textInput.format==='surface-drawing'
+      ? await showAppPrompt({title:input.choiceLabel,message:'绘制本次要留在地表的图案。',surfaceDrawing:true})
+      : await input.prompt(`${input.choiceLabel}（${input.textInput.format === 'hex-color' ? '六位颜色，例如 #f5deb3' : input.textInput.maximumWords != null ? `最多 ${input.textInput.maximumWords} 词，中文逐字计数；总长不超过 ${input.textInput.maximumLength} 字符` : `最多 ${input.textInput.maximumLength} 字符`}）`, '')
+    if (text == null) return null
+    if (!validDnd5eActivityTextInput(text, input.textInput.maximumLength, input.textInput.format, input.textInput.maximumWords)) {
+      await input.notifyInvalid('请输入长度范围内的文字。')
+      return null
+    }
+    return { id: text, label: input.textInput.format==='surface-drawing'?'已绘制图案':text }
+  }
   if (dnd5eActivityChoiceUsesSenseOriginActions(input.options)) {
     const selectedOptionId = await input.actionChoice({
       title: input.ownerLabel,

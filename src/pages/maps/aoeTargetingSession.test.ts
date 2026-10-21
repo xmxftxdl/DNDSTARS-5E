@@ -187,6 +187,17 @@ describe('mapAoeTargetingSessionKey', () => {
 })
 
 describe('playerGrantedActivityAoeSelectActive', () => {
+  it('allows initial imported feature placement through the exploration UI lock', () => {
+    const playerActivityAoeSelectActive = playerGrantedActivityAoeSelectActive({
+      isDM: false, pluginArea: { source: 'plugin' },
+    })
+    expect(mapAoeSelectMode({ playerActivityAoeSelectActive,
+      playerSpellAoeSelectActive: false, coreAreaMoveTargetingActive: false,
+      playerCombatLocked: true, activeAoeTargeting: true,
+      itemAreaTargetingActive: false, guessedSpellTargetingActive: false,
+    })).toBe(true)
+    expect(playerGrantedActivityAoeSelectActive({ isDM: true, pluginArea: { source: 'plugin' } })).toBe(false)
+  })
   it('keeps player-owned persistent area and effect Activities clickable outside combat', () => {
     expect(playerGrantedActivityAoeSelectActive({
       isDM: false,
@@ -211,6 +222,14 @@ describe('playerGrantedActivityAoeSelectActive', () => {
 })
 
 describe('pluginAreaTargetingAllowsEmptyArea', () => {
+  it.each([0, 1])('respects the target minimum for an equipment attack replacement: %s', minimumTargets => {
+    const activity = {
+      target: {kind: 'area', minimumTargets},
+      outcomes: [{operations: [{kind: 'damage', equipmentWeaponDamage: {rollId: 'weapon', weaponBaseIds: ['longbow']}}]}],
+    } as unknown as NonNullable<Parameters<typeof pluginAreaTargetingAllowsEmptyArea>[0]['activity']>
+    expect(pluginAreaTargetingAllowsEmptyArea({activity})).toBe(minimumTargets === 0)
+  })
+
   it('allows an active-effect-granted Activity to select an empty destination cell', () => {
     expect(pluginAreaTargetingAllowsEmptyArea({
       activeEffectId: 'blink-return-pending',
@@ -219,6 +238,16 @@ describe('pluginAreaTargetingAllowsEmptyArea', () => {
 
   it('keeps ordinary creature-area plugin actions from submitting an empty template', () => {
     expect(pluginAreaTargetingAllowsEmptyArea({})).toBe(false)
+  })
+
+  it.each(['create-persistent-area', 'summon', 'wither-map-vegetation', 'control-map-water'] as const)('allows a declarative %s to be placed without creatures', kind => {
+    const activity = { outcomes: [{ operations: [{ kind }] }] } as unknown as NonNullable<Parameters<typeof pluginAreaTargetingAllowsEmptyArea>[0]['activity']>
+    expect(pluginAreaTargetingAllowsEmptyArea({ activity })).toBe(true)
+  })
+
+  it('does not permit an empty damage-only declarative template', () => {
+    const activity = { outcomes: [{ operations: [{ kind: 'damage' }] }] } as unknown as NonNullable<Parameters<typeof pluginAreaTargetingAllowsEmptyArea>[0]['activity']>
+    expect(pluginAreaTargetingAllowsEmptyArea({ activity })).toBe(false)
   })
 })
 

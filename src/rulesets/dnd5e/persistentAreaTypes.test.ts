@@ -7,7 +7,21 @@ import {
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
 
+it('accepts explicit restrained area lifetime and rejects unsupported or malformed lifetime declarations', () => {
+  const trigger = { id: 'roots', label: 'Roots', timing: 'on-create',
+    condition: { condition: 'restrained', duration: { expiresAt: 'permanent' }, endsWithArea: true } }
+  expect(normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)?.condition?.endsWithArea).toBe(true)
+  for (const endsWithArea of ['true', 1, {}]) {
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({ ...trigger, condition: { ...trigger.condition, endsWithArea } })).toBeUndefined()
+  }
+  expect(normalizeDnd5ePersistentAreaTriggerSnapshot({ ...trigger, condition: { ...trigger.condition, condition: 'prone' } })).toBeUndefined()
+})
+
 describe('persistent area vertical snapshots', () => {
+  it.each([0.5, 3.5, 3.125, -0.25])('preserves fractional physical surface elevation %s', baseElevationFeet => {
+    const value = { mode: 'volume', baseElevationFeet, heightFeet: 0.25 }
+    expect(normalizeDnd5ePersistentAreaVerticalSnapshot(value)).toEqual(value)
+  })
   it('normalizes bounded ground and volume declarations', () => {
     expect(normalizeDnd5ePersistentAreaVerticalSnapshot({ mode: 'ground' })).toEqual({ mode: 'ground' })
     expect(normalizeDnd5ePersistentAreaVerticalSnapshot({
@@ -25,7 +39,7 @@ describe('persistent area vertical snapshots', () => {
       { mode: 'ground', heightFeet: 5 },
       { mode: 'volume', baseElevationFeet: 0 },
       { mode: 'volume', baseElevationFeet: 0, heightFeet: 0 },
-      { mode: 'volume', baseElevationFeet: 0.5, heightFeet: 10 },
+      ...[NaN, Infinity, -1000.1, 10000.1, '3.5'].map(baseElevationFeet => ({ mode: 'volume', baseElevationFeet, heightFeet: 10 })),
       { mode: 'volume', baseElevationFeet: 0, heightFeet: 10, anchorOffsetFeet: 10_001 },
       { mode: 'volume', baseElevationFeet: 0, heightFeet: 10, run: 'eval()' },
     ]) expect(normalizeDnd5ePersistentAreaVerticalSnapshot(value)).toBeUndefined()
@@ -286,4 +300,46 @@ describe('persistent area boundary permissions', () => {
       teleportationExitSavingThrow: { ability: 'cha', dc: 'eval()' },
     })).toBeUndefined()
   })
+})
+
+
+it('accepts bounded recurring source-end choices and rejects ambiguous target budgets', () => {
+  const trigger = { id: 'roots', label: 'Roots', timing: 'source-turn-end',
+    sourceChoosesTargets: true, maximumTargetsPerTurn: 1, oncePerTurn: true,
+    requiresTargetGrounded: true,
+    savingThrow: { ability: 'str', dc: 15, onSuccess: 'none' },
+    condition: { condition: 'restrained', duration: { expiresAt: 'permanent' }, endsWithArea: true },
+  }
+  expect(normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)).toMatchObject({
+    timing: 'source-turn-end', maximumTargetsPerTurn: 1, sourceChoosesTargets: true,
+    requiresTargetGrounded: true, oncePerTurn: true,
+  })
+  for (const patch of [{ maximumTargetsPerTurn: 0 }, { maximumTargetsPerTurn: 1.5 },
+    { maximumTargetsPerTurn: '1' }, { oncePerTurn: false }, { oncePerTarget: true }, { sourceChoosesTargets: false },
+    { timing: 'turn-end' }]) {
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({ ...trigger, ...patch })).toBeUndefined()
+  }
+})
+
+
+it('preserves Athletics escape proficiency and rejects mismatched skill abilities', () => {
+  const trigger = { id: 'roots', label: 'Roots', timing: 'source-turn-end',
+    condition: { condition: 'restrained', duration: { expiresAt: 'permanent' }, endsWithArea: true,
+      escapeCheck: { ability: 'str', skill: 'athletics', dc: 15, economy: 'action' } } }
+  expect(normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)?.condition?.escapeCheck).toEqual(trigger.condition.escapeCheck)
+  for (const patch of [{ ability: 'dex' }, { skill: 'arcana' }, { skill: 'acrobatics' }]) {
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({ ...trigger, condition: {
+      ...trigger.condition, escapeCheck: { ...trigger.condition.escapeCheck, ...patch },
+    } })).toBeUndefined()
+  }
+})
+
+it('requires explicit valid object origins, distance, timing and target relation', () => {
+ const trigger={id:'trees',label:'Trees',timing:'source-turn-start',proximityObjectKind:'tree',proximityFeet:10,targetRelation:'enemy',
+  damage:{count:4,sides:6,type:'slashing'}}
+ expect(normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)).toMatchObject({proximityObjectKind:'tree',proximityFeet:10,targetRelation:'enemy'})
+ for(const patch of [{proximityFeet:undefined},{proximityObjectKind:['tree']},{proximityObjectKind:'tree.png'},
+  {targetRelation:['enemy']},{targetRelation:'hostile'},{timing:'on-enter'}]) {
+  expect(normalizeDnd5ePersistentAreaTriggerSnapshot({...trigger,...patch})).toBeUndefined()
+ }
 })

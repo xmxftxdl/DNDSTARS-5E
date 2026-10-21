@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { registerDnd5eRulesPlugin } from '../rulesets/dnd5e/pluginApi'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { createCombatInterrupt } from './combatInterruptQueue'
@@ -46,6 +47,25 @@ const baseCharacter = (patch: Partial<Character> & { id: string; name?: string }
 }
 
 describe('combatInterruptProtocol', () => {
+  it('routes qualified zero-HP rage choices while preserving defeat and DM-control checks', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({ manifest: { id: 'test.interrupt-rage', name: 'Interrupt rage', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+      featureId = api.registerFeature({ id: 'defer', name: 'Defer', summary: 'Synthetic', description: 'Synthetic', automation: 'full', declarativeAbility: {
+        schemaVersion: 1, id: 'defer', name: 'Defer', description: 'Synthetic', level: 1, trigger: { kind: 'passive' }, cost: { economy: 'none' }, targeting: { kind: 'self' }, effects: [], mechanic: { kind: 'rage-death-deferral' }, automation: 'full',
+      } })
+    } })
+    try {
+      const interrupt = createCombatInterrupt({ id: 'focus', mapId: 'map', kind: 'saving-throw-reroll', targetCharId: 'hero', payload: { targetName: 'Hero', featureName: 'Focus', total: 1, dc: 13 }, now: 100 })
+      for (const mode of ['active', 'not-raging', 'unowned', 'dead', 'exhausted'] as const) {
+        const hero = baseCharacter({ id: 'hero', currentHp: 0, deathSaveFailures: 3, roomMemberId: 'member-a',
+          dnd5ePluginFeatureIds: mode === 'unowned' ? [] : [featureId], exhaustionLevel: mode === 'exhausted' ? 6 : 0,
+          dnd5eCombatState: { schemaVersion: 2, raging: mode !== 'not-raging', rageTurnsRemaining: 5, ...(mode === 'dead' ? { deathRound: 1 } : {}) } })
+        const context = { characters: [hero], visibleCharacters: [hero], playerCharId: hero.id, roomMemberId: 'member-a' }
+        expect(resolveCombatInterruptAnswerCandidate(interrupt, context).canAnswer, mode).toBe(mode === 'active')
+        expect(resolveCombatInterruptAnswerCandidate(interrupt, { ...context, roomMemberId: 'member-b', tokens: [{ id: 'enemy', type: 'enemy', characterId: hero.id } as Token] }).canAnswer).toBe(false)
+      }
+    } finally { dispose() }
+  })
   it('recognizes only the reserved fail-closed DM boundary handshake', () => {
     const options = [
       { id: 'dm-apply', label: '批准安全子集' },
@@ -423,7 +443,17 @@ describe('combatInterruptProtocol', () => {
     }).canAnswer).toBe(false)
   })
 
-  it('rejects dead characters for any interrupt answer', () => {
+  it.each(['eligible','other-owner','ordinary','stable','dead','target-audience'] as const)('routes zero-HP replacement only for %s',mode=>{
+    const hero=baseCharacter({id:'hero',currentHp:0,roomMemberId:'owner',deathSaveFailures:mode==='dead'?3:0,deathSaveStable:mode==='stable'})
+    const interrupt=createCombatInterrupt({id:'recovery',mapId:'map',kind:'plugin-choice',actorCharId:'hero',phase:'before-action',now:100,
+      payload:{pluginId:'test',featureId:'recovery',featureName:'Recovery',prompt:'Recover?',audience:mode==='target-audience'?'target':'actor',
+        options:[{id:'use',label:'Use'}],defaultOptionId:'use',contextKind:'activity-trigger',activityConfirmation:'actor-choice',
+        triggerEventId:mode==='ordinary'?'before-damage:event':'death-save:combat:1:0:actor'}})
+    expect(resolveCombatInterruptAnswerCandidate(interrupt,{characters:[hero],visibleCharacters:[hero],playerCharId:'hero',
+      roomMemberId:mode==='other-owner'?'outsider':'owner'}).canAnswer).toBe(mode==='eligible')
+  })
+
+  it('rejects zero-HP characters for ordinary interrupt answers', () => {
     const hero = baseCharacter({ id: 'hero', currentHp: 0 })
     const interrupt = createCombatInterrupt({
       id: 'stable-1',

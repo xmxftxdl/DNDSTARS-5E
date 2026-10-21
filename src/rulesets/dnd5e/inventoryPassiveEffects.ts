@@ -1,3 +1,4 @@
+import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
 import type { Character } from '../../types/character'
 import { createDnd5eMechanicalEffect, normalizeDnd5eActiveEffects, applyDnd5eActiveEffect } from './activeEffects'
 import { dnd5eInventoryEntryIsActive, normalizeDnd5eInventory } from './items'
@@ -7,6 +8,7 @@ const prefix = 'inventory-equipped-passive:'
 export function dnd5eInventoryPassiveEffects(character: Character) {
   const persisted = normalizeDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects)
     .filter(effect => !effect.id.startsWith(prefix))
+  if (dnd5eEquipmentMergedBySpellForm(character)) return persisted
   const projected = normalizeDnd5eInventory(character).entries.flatMap(entry => {
     if (!entry.equippedSlot || !dnd5eInventoryEntryIsActive(entry)) return []
     return (entry.item.headlessEffects ?? []).flatMap((effect, index) => effect.kind !== 'equipped-passive' ? [] : [createDnd5eMechanicalEffect({

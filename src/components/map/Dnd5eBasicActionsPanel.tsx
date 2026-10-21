@@ -3,8 +3,10 @@ import { Hand, ListChecks } from 'lucide-react'
 import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 import type { Dnd5eActivityBasicActionGrantV1 } from '../../rulesets/dnd5e'
 import { dnd5eBasicActionEconomyAvailable } from './dnd5eBasicActionEconomy'
+import type { Dnd5eDismountDirection } from '../../rulesets/dnd5e/mountedPlacement'
 
 export interface Dnd5eBasicActionTarget {
+  removableEffects?: readonly { effectId: string; label: string; actionLabel: string; maxDistanceFeet: number }[]
   tokenId: string
   label: string
   opposed?: boolean
@@ -31,6 +33,8 @@ export interface Dnd5eGrappleEscapeTarget {
 }
 
 export interface Dnd5eDismissibleEffect {
+  economy?: 'action' | 'free'
+  targetTokenId?: string
   effectId: string
   label: string
   actionLabel: string
@@ -48,10 +52,12 @@ export default function Dnd5eBasicActionsPanel({
   pending,
   targets,
   grappleEscapes = EMPTY_GRAPPLE_ESCAPES,
-  dismissibleEffects = EMPTY_DISMISSIBLE_EFFECTS,
+  dismissibleEffects: ownDismissibleEffects = EMPTY_DISMISSIBLE_EFFECTS,
   canDismissWardingBond = false,
   basicActionGrants = [],
   allowedBasicActions,
+  effectsOnly = false,
+  attackTeleportRangeFeet,
   onAction,
 }: {
   canAct: boolean
@@ -64,10 +70,17 @@ export default function Dnd5eBasicActionsPanel({
   canDismissWardingBond?: boolean
   basicActionGrants?: readonly Dnd5eActivityBasicActionGrantV1[]
   allowedBasicActions?: readonly ('dash' | 'dismiss-effect')[]
+  effectsOnly?: boolean
+  attackTeleportRangeFeet?: number
   onAction: (payload: Dnd5eBasicActionPayload) => void
 }) {
-  const [kind, setKind] = useState<BasicActionKind>('help')
+  const [kind, setKind] = useState<BasicActionKind>(effectsOnly ? 'dismiss-effect' : 'help')
+  const dismissibleEffects: Dnd5eDismissibleEffect[] = [...ownDismissibleEffects, ...(allowedBasicActions == null ? targets : []).flatMap(target =>
+    (target.removableEffects ?? []).filter(effect => target.distanceFeet <= effect.maxDistanceFeet)
+      .map(effect => ({ ...effect, targetTokenId: target.tokenId, label: `${target.label} · ${effect.label}` })))]
+  const effectChoiceKey = (effect: Dnd5eDismissibleEffect) => `${effect.targetTokenId ?? ''}|${effect.effectId}`
   const [targetTokenId, setTargetTokenId] = useState('')
+  const [dismountDirection, setDismountDirection] = useState<Dnd5eDismountDirection>('east')
   const [helpKind, setHelpKind] = useState<'ability-check' | 'attack'>('attack')
   const [shoveOutcome, setShoveOutcome] = useState<'prone' | 'push'>('prone')
   const [readyTrigger, setReadyTrigger] = useState('')
@@ -98,15 +111,18 @@ export default function Dnd5eBasicActionsPanel({
       kind === 'release-grapple' ? 'enemy'
       : kind === 'escape-grapple' ? 'grappler'
       : kind === 'wake' ? 'sleeping'
+      : kind === 'mount' || kind === 'dismount' ? 'mount'
       : 'none'
   const targetOptions = useMemo(() => targets.filter((target) => {
     if (target.currentHp <= 0) return false
     if (targetRelation === 'ally') return target.opposed === false
-    if (targetRelation === 'enemy') return target.opposed === true && target.distanceFeet <= 5
+    if (targetRelation === 'enemy') return target.opposed === true && target.distanceFeet <=
+      (5 + ((kind === 'grapple' || kind === 'shove') && !selectedGrantId ? attackTeleportRangeFeet ?? 0 : 0))
     if (targetRelation === 'grappler') return grappleEscapeTargetIds.has(target.tokenId)
     if (targetRelation === 'sleeping') return target.awakenable === true && target.distanceFeet <= 5
+    if (targetRelation === 'mount') return target.distanceFeet <= 5
     return true
-  }), [grappleEscapeTargetIds, targetRelation, targets])
+  }), [grappleEscapeTargetIds, targetRelation, targets, kind, selectedGrantId, attackTeleportRangeFeet])
   const selectedTarget = targetOptions.some((target) => target.tokenId === targetTokenId)
     ? targetTokenId
     : targetOptions[0]?.tokenId ?? ''
@@ -125,9 +141,11 @@ export default function Dnd5eBasicActionsPanel({
   const actionAllowedByRestriction = allowedBasicActions == null ||
     (kind === 'dismiss-effect' && allowedBasicActions.includes('dismiss-effect'))
   const activeDismissEffectId = dismissibleEffects.some((effect) =>
-    effect.effectId === selectedDismissEffectId)
+    effectChoiceKey(effect) === selectedDismissEffectId)
     ? selectedDismissEffectId
-    : dismissibleEffects[0]?.effectId ?? ''
+    : dismissibleEffects[0] ? effectChoiceKey(dismissibleEffects[0]) : ''
+  const freeSelfDismissal = kind === 'dismiss-effect' && dismissibleEffects.some(effect =>
+    effectChoiceKey(effect) === activeDismissEffectId && !effect.targetTokenId && effect.economy === 'free')
   const animateDeadTargets = dnd5eControlledUndeadCommandTargets(targets)
   const selectedAnimateDeadTargetIds = (animateDeadTargetIds ?? animateDeadTargets.map((target) => target.tokenId))
     .filter((targetId) => animateDeadTargets.some((target) => target.tokenId === targetId))
@@ -142,15 +160,18 @@ export default function Dnd5eBasicActionsPanel({
       kind === 'dash' || kind === 'hide' || kind === 'escape-effect' ||
       kind === 'dismiss-warding-bond'
     ) return { kind }
-    if (kind === 'dismiss-effect') return activeDismissEffectId
-      ? { kind, effectId: activeDismissEffectId }
-      : undefined
+    if (kind === 'dismiss-effect') {
+      const effect = dismissibleEffects.find(entry => effectChoiceKey(entry) === activeDismissEffectId)
+      return effect ? { kind, effectId: effect.effectId, ...(effect.targetTokenId ? { targetTokenId: effect.targetTokenId } : {}) } : undefined
+    }
     if (kind === 'help') return selectedTarget ? { kind, helpKind, targetTokenId: selectedTarget } : undefined
     // The defending creature chooses Athletics or Acrobatics. The authority
     // engine selects its stronger legal option; the attacker never controls it.
     if (kind === 'grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics', ...(activeBasicActionGrantId ? { activityBasicActionGrantId: activeBasicActionGrantId } : {}) } : undefined
     if (kind === 'shove') return selectedTarget ? { kind, targetTokenId: selectedTarget, targetDefense: 'athletics', outcome: shoveOutcome, ...(activeBasicActionGrantId ? { activityBasicActionGrantId: activeBasicActionGrantId } : {}) } : undefined
     if (kind === 'release-grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
+    if (kind === 'mount') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
+    if (kind === 'dismount') return selectedTarget ? { kind, targetTokenId: selectedTarget, direction: dismountDirection } : undefined
     if (kind === 'escape-grapple') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
     if (kind === 'wake') return selectedTarget ? { kind, targetTokenId: selectedTarget } : undefined
     if (kind === 'command-animate-dead') {
@@ -207,33 +228,38 @@ export default function Dnd5eBasicActionsPanel({
       <label className="mt-3 block text-xs text-slate-400">
         动作
         <select value={kind} onChange={(event) => setKind(event.target.value as BasicActionKind)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200">
-          <option value="help">协助</option>
+          {!effectsOnly && <><option value="help">协助</option>
           <option value="ready">准备</option>
           <option value="use-object">使用物件</option>
           <option value="grapple">擒抱</option>
           <option value="shove">推撞</option>
           <option value="release-grapple">松开擒抱</option>
           <option value="escape-grapple">挣脱擒抱</option>
-          <option value="escape-effect">挣脱法术束缚</option>
+          <option value="escape-effect">挣脱法术束缚</option></>}
           {dismissibleEffects.length > 0 ? <option value="dismiss-effect">主动解除效果</option> : null}
-          {canDismissWardingBond ? <option value="dismiss-warding-bond">解除守护之链</option> : null}
+          {!effectsOnly && <>{canDismissWardingBond ? <option value="dismiss-warding-bond">解除守护之链</option> : null}
           <option value="wake">唤醒睡眠生物</option>
+          <option value="mount">上坐骑</option>
+          <option value="dismount">下坐骑</option>
           {animateDeadTargets.length > 0 ? <option value="command-animate-dead">操纵死尸：心灵命令</option> : null}
           {animateObjectsTargets.length > 0 ? <option value="command-animate-objects">活化物件：心灵命令</option> : null}
           <option value="other-action">其他（动作）</option>
-          <option value="other-bonus-action">其他（附赠动作）</option>
+          <option value="other-bonus-action">其他（附赠动作）</option></>}
         </select>
       </label>
       {kind === 'help' ? <label className="mt-2 block text-xs text-slate-400">协助类型<select value={helpKind} onChange={(event) => setHelpKind(event.target.value as typeof helpKind)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="attack">协助下一次攻击</option><option value="ability-check">协助能力检定</option></select></label> : null}
       {targetRelation !== 'none' ? <label className="mt-2 block text-xs text-slate-400">目标<select value={selectedTarget} onChange={(event) => setTargetTokenId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">选择目标…</option>{targetOptions.map((target) => <option key={target.tokenId} value={target.tokenId}>{target.label} · {target.distanceFeet}尺</option>)}</select></label> : null}
+      {(kind === 'grapple' || kind === 'shove') && attackTeleportRangeFeet != null && !selectedGrantId &&
+        <p className="mt-2 text-xs text-cyan-200">可先选择目标，再选择 {attackTeleportRangeFeet} 尺内能触及该目标的传送落点。仅在提交攻击后移动。</p>}
       {kind === 'grapple' || kind === 'shove' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">目标将自动使用力量（运动）或敏捷（体操）中较高的一项进行对抗。</p> : null}
       {matchingBasicActionGrants.length > 0 ? <label className="mt-2 block text-xs text-emerald-200">行动来源<select value={activeBasicActionGrantId} onChange={(event) => setSelectedGrantId(event.target.value)} className="mt-1 w-full rounded-lg border border-emerald-400/20 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">普通攻击动作/替换一次攻击</option>{matchingBasicActionGrants.map((grant) => <option key={grant.grantId} value={grant.grantId}>{grant.label} · 附赠动作{kind === 'shove' && grant.shovePushDistanceBonusFeet ? ` · 额外推开 ${grant.shovePushDistanceBonusFeet} 尺` : ''}</option>)}</select></label> : null}
       {kind === 'release-grapple' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">无需动作，立即松开由你通过基础动作擒抱的目标。</p> : null}
+      {kind === 'dismount' ? <label className="mt-2 block text-xs text-slate-400">下骑位置（相对坐骑）<select value={dismountDirection} onChange={event => setDismountDirection(event.target.value as Dnd5eDismountDirection)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200">{[['north', '上方'], ['northeast', '右上方'], ['east', '右侧'], ['southeast', '右下方'], ['south', '下方'], ['southwest', '左下方'], ['west', '左侧'], ['northwest', '左上方']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label> : null}
       {kind === 'escape-grapple' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，以自身力量（运动）或敏捷（体操）中较高的一项，对抗擒抱者的力量（运动）。</p> : null}
       {kind === 'escape-effect' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，按照当前状态规定的能力与 DC 进行检定；成功时由 Headless 权威结算移除该状态。纠缠术使用力量；黑触手允许力量或敏捷，由系统采用更有利的一项。</p> : null}
       {kind === 'dismiss-effect' ? <>
-        <label className="mt-2 block text-xs text-slate-400">要解除的效果<select value={activeDismissEffectId} onChange={(event) => setSelectedDismissEffectId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">选择效果…</option>{dismissibleEffects.map((effect) => <option key={effect.effectId} value={effect.effectId}>{effect.label} · {effect.actionLabel}</option>)}</select></label>
-        <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，结束规则明确允许主动解除的自身效果；由 Headless 权威事务同时结算动作资源与状态移除。</p>
+        <label className="mt-2 block text-xs text-slate-400">要解除的效果<select value={activeDismissEffectId} onChange={(event) => setSelectedDismissEffectId(event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-200"><option value="">选择效果…</option>{dismissibleEffects.map((effect) => <option key={effectChoiceKey(effect)} value={effectChoiceKey(effect)}>{effect.label} · {effect.actionLabel}</option>)}</select></label>
+        <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，尝试解除自己或附近角色身上允许解除的效果；需要检定时，成功才会解除。</p>
       </> : null}
       {kind === 'dismiss-warding-bond' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，结束由你施放且仍然生效的守护之链；目标身上的 AC、豁免与伤害抗性会在同一权威事务中移除。</p> : null}
       {kind === 'wake' ? <p className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">消耗一个动作，摇醒5尺内可被唤醒的昏迷生物。目标醒来，但仍保留其他状态。</p> : null}
@@ -282,8 +308,8 @@ export default function Dnd5eBasicActionsPanel({
           </span>
         </label>
       ) : null}
-      <button type="button" onClick={() => payload && onAction(payload)} disabled={!canAct || !economyAvailable || pending || !payload || !actionAllowedByRestriction} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"><Hand className="h-4 w-4" />{kind === 'other-action' || kind === 'other-bonus-action' ? '提交 DM 裁定' : kind === 'command-animate-dead' || kind === 'command-animate-objects' ? '下达相同命令' : '执行动作'}</button>
-      <p className="mt-2 text-[11px] leading-5 text-slate-500">疾走与躲藏使用底部快捷栏。准备动作先登记触发条件；触发时消耗反应。推开会由 DM 权威端检查边界、占位与墙体，并自动移动 5 尺。</p>
+      <button type="button" onClick={() => payload && onAction(payload)} disabled={!canAct || (!economyAvailable && !freeSelfDismissal) || pending || !payload || !actionAllowedByRestriction} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"><Hand className="h-4 w-4" />{kind === 'other-action' || kind === 'other-bonus-action' ? '提交 DM 裁定' : kind === 'command-animate-dead' || kind === 'command-animate-objects' ? '下达相同命令' : '执行动作'}</button>
+      {!effectsOnly && <p className="mt-2 text-[11px] leading-5 text-slate-500">疾走与躲藏使用底部快捷栏。准备动作先登记触发条件；触发时消耗反应。推开会由 DM 权威端检查边界、占位与墙体，并自动移动 5 尺。</p>}
     </section>
   )
 }

@@ -22,7 +22,10 @@ export interface ModuleActionContext {
  readonly rolls: Readonly<Record<string, ModuleReadonly<Dnd5ePluginDiceRollResult>>>
  heal(targetId:string, amount:number):number
  grantTemporaryHitPoints(targetId:string, amount:number):number
+ /** Final/fixed damage; no inferred damage-roll bonuses. */
  dealDamage(targetId:string, amount:number, type:Dnd5eDamageType):number
+ /** Queues a declared damageType roll; Host computes the actual damage. */
+ dealRolledDamage(targetId:string, rollId:string, multiplier?:0.5|1|2):void
  applyStandardCondition(targetId:string, condition:Dnd5eStandardConditionId, duration:Dnd5eSandboxConditionDuration):boolean
  spendResource(id:string, amount?:number):boolean
  restoreResource(id:string, amount?:number):boolean

@@ -1,3 +1,5 @@
+// Match the combat entry's effect initialization before loading item/campaign-time helpers.
+import '../../rulesets/dnd5e/activeEffects'
 import { describe, expect, it, vi } from 'vitest'
 import type { Dnd5eMapResultPlan } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
@@ -5,12 +7,16 @@ import type { BattleMap, Token } from '../../store/maps'
 import {
   applyDnd5eCombatResultApplication,
   compensateDnd5eCompletedLongCastApplication,
+  rebaseDnd5eCompletedBenefitHistoryApplication,
   commitDnd5eCombatResult,
   mergeDnd5eCharacterPatchIntoResult,
+  mergeDnd5eMapTokenChangesIntoResult,
   mergeDnd5eCombatCharacterResult,
 } from './commitDnd5eCombatResult'
 import { createDnd5eMechanicalEffect } from '../../rulesets/dnd5e/activeEffects'
 import { reconcileDnd5eCharacterCampaignTime } from '../../rulesets/dnd5e/campaignTimeRules'
+import { applyDnd5eInventoryGrantBundle, applyDnd5eInventoryMutation } from '../../rulesets/dnd5e/items'
+import { normalizeCharacter } from '../../store/characters'
 
 function plan(patch: Partial<Dnd5eMapResultPlan> = {}): Dnd5eMapResultPlan {
   const hero = { id: 'hero', name: 'Hero' } as Character
@@ -25,6 +31,100 @@ function plan(patch: Partial<Dnd5eMapResultPlan> = {}): Dnd5eMapResultPlan {
 }
 
 describe('战斗结果提交协调器', () => {
+  it('publishes spent reactions only after entity commit and deduplicates the receipt', () => {
+    const order: string[] = [], reaction = { current: 1 }
+    const input = { application: plan({ spentReactions: { round: 2, tokenIds: ['token', 'token'] } }), mapId: 'map',
+      applyCharacter: () => { order.push('character') }, applyToken: () => { order.push('token') },
+      applySpentReaction: (id: string, round: number) => {
+        expect(id).toBe('token'); expect(round).toBe(2)
+        reaction.current = 0; order.push('reaction')
+      } }
+    expect(reaction.current).toBe(1)
+    applyDnd5eCombatResultApplication(input)
+    expect(order).toEqual(['character', 'token', 'reaction'])
+    applyDnd5eCombatResultApplication(input)
+    expect(reaction.current).toBe(0)
+  })
+  it('rejects an invalid reaction receipt before any state is published', () => {
+    const write = vi.fn()
+    expect(() => applyDnd5eCombatResultApplication({ mapId: 'map',
+      application: plan({ spentReactions: { round: 1, tokenIds: ['absent'] } }),
+      applyCharacter: write, applyToken: write, applySpentReaction: write })).toThrow('combat-result-reaction-receipt-invalid')
+    expect(write).not.toHaveBeenCalled()
+  })
+  it.each([60, 70])('starts new Ceremony history at completion after %s minutes without changing old history or dropping commit patches', minutes => {
+    const record = (id: string, subjectActorId: string, createdWorldMinute: number) => ({ schemaVersion: 1 as const,
+      kind: 'benefit-history' as const, id, sourceActorId: 'caster', subjectActorId, sourceActivityId: 'ceremony',
+      sourcePackageId: 'test.ceremony', benefitKey: id, createdWorldMinute })
+    const old = record('old', 'hero', 100)
+    const hero = normalizeCharacter({ id: 'hero', name: 'Hero', dnd5eWorldTimeAppliedMinute: 200, dnd5eCombatState: {
+      schemaVersion: 2, spellAuthorityRecords: { old, new: record('new', 'hero', 200) } } })
+    const npc: Token = { id: 'token', label: 'NPC', x: 0, y: 0, type: 'enemy', size: 1, color: '', emoji: '', hp: 10, maxHp: 10,
+      dnd5eWorldTimeAppliedMinute: 200, dnd5eCombatState: { schemaVersion: 2, spellAuthorityRecords: { new: record('new', 'token', 200) } } }
+    // The authoritative patches differ from stale full snapshots, just as an entity-mode transaction can.
+    const input = plan({ characters: [{ ...hero, dnd5eCombatState: { schemaVersion: 2, spellAuthorityRecords: { old } } }],
+      map: { id: 'map', tokens: [{ ...npc, dnd5eCombatState: { schemaVersion: 2 } }] } as BattleMap,
+      characterPatches: { hero: { dnd5eCombatState: hero.dnd5eCombatState } },
+      tokenPatches: { token: { dnd5eCombatState: npc.dnd5eCombatState } } })
+    const before = structuredClone(input)
+    const clock = 200 + minutes
+    const result = rebaseDnd5eCompletedBenefitHistoryApplication(input,
+      new Map([['hero', new Set(['new'])]]), new Map([['token', new Set(['new'])]]), clock)
+    expect(result.characters[0].dnd5eCombatState!.spellAuthorityRecords!.new.createdWorldMinute).toBe(clock)
+    expect(result.characterPatches!.hero.dnd5eCombatState).toEqual(result.characters[0].dnd5eCombatState)
+    expect(result.map.tokens[0].dnd5eCombatState!.spellAuthorityRecords!.new.createdWorldMinute).toBe(clock)
+    expect(result.tokenPatches!.token.dnd5eCombatState).toEqual(result.map.tokens[0].dnd5eCombatState)
+    expect(result.characters[0].dnd5eCombatState!.spellAuthorityRecords!.old).toEqual(old)
+    expect(input).toEqual(before)
+    expect(rebaseDnd5eCompletedBenefitHistoryApplication(result,
+      new Map([['hero', new Set(['new'])]]), new Map([['token', new Set(['new'])]]), clock)).toBe(result)
+    const alreadyCompletedPatch = plan({ ...input, characterPatches: result.characterPatches, tokenPatches: result.tokenPatches })
+    const recovered = rebaseDnd5eCompletedBenefitHistoryApplication(alreadyCompletedPatch,
+      new Map([['hero', new Set(['new'])]]), new Map([['token', new Set(['new'])]]), clock)
+    expect(recovered.characters[0].dnd5eCombatState).toEqual(result.characters[0].dnd5eCombatState)
+    expect(recovered.map.tokens[0].dnd5eCombatState).toEqual(result.map.tokens[0].dnd5eCombatState)
+    const appliedCharacters: Character[] = [], appliedTokens: Token[] = []
+    applyDnd5eCombatResultApplication({ application: result, mapId: 'map',
+      applyCharacter: (_id, character, patch) => appliedCharacters.push({ ...character, ...patch }),
+      applyToken: (_mapId, _id, token, patch) => appliedTokens.push({ ...token, ...patch }) })
+    expect(appliedCharacters[0].dnd5eCombatState!.spellAuthorityRecords!.new.createdWorldMinute).toBe(clock)
+    expect(appliedTokens[0].dnd5eCombatState!.spellAuthorityRecords!.new.createdWorldMinute).toBe(clock)
+    expect(() => rebaseDnd5eCompletedBenefitHistoryApplication(input, new Map(), new Map(), NaN)).toThrow('invalid-benefit-completion-clock')
+    expect(() => rebaseDnd5eCompletedBenefitHistoryApplication(result,
+      new Map([['hero', new Set(['new'])]]), new Map(), 199)).toThrow('benefit-completion-clock-before-record')
+  })
+  it.each([false, true])('includes off-map transferred inventory expiry in the completion commit, ageAll=%s', ageAll => {
+    const tag = 'item-lease:11111111-1111-1111-1111-111111111111'
+    const effect = createDnd5eMechanicalEffect({ id: 'old', definitionId: 'old', label: 'Old', targetId: 'hero', source: { kind: 'spell', actorId: 'hero' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' }, modifiers: {} })
+    effect.tags = [tag]
+    const hero = normalizeCharacter({ id: 'hero', name: 'Hero', dnd5eWorldTimeAppliedMinute: 480, dnd5eCombatState: { schemaVersion: 2, activeEffects: [effect] } })
+    const holder = normalizeCharacter({ id: 'holder', name: 'Holder', dnd5eWorldTimeAppliedMinute: 480 })
+    const grant = applyDnd5eInventoryGrantBundle([hero, holder], { characterId: 'hero', receiptId: 'grant', grants: [{ templateId: 'srd-5.1:equipment:dnd5e-longsword', quantity: 1, sourceEffectTag: tag }] })
+    const item = grant.characters[0].dnd5eInventory!.entries.find(entry => entry.sourceEffectTag === tag)!
+    const transferred = applyDnd5eInventoryMutation(grant.characters, { type: 'transfer', characterId: 'hero', targetCharacterId: 'holder', instanceId: item.instanceId, quantity: 1 })
+    const held = transferred.characters[1].dnd5eInventory!.entries.find(entry => entry.sourceEffectTag === tag)!
+    const equipped = applyDnd5eInventoryMutation(transferred.characters, { type: 'equip', characterId: 'holder', instanceId: held.instanceId })
+    const input = plan({ characters: equipped.characters, characterPatches: { hero: {} }, map: { id: 'map', tokens: [] } as unknown as BattleMap, changedTokenIds: [] })
+    const result = compensateDnd5eCompletedLongCastApplication(input, new Map([['hero', new Set(['new-effect'])]]), 1, {
+      schemaVersion: 2, worldMinute: 481, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], advances: [], updatedAt: 1,
+    }, new Map(), new Map(), ageAll)
+    expect(result.changedCharacterIds).toContain('holder')
+    expect(result.characters[1].dnd5eInventory?.entries.some(entry => entry.sourceEffectTag === tag)).toBe(false)
+    expect(result.characterPatches?.holder?.dnd5eInventory).toEqual(result.characters[1].dnd5eInventory)
+    expect(result.characterPatches?.holder?.equipment?.mainWeapon).toBeUndefined()
+    expect(result.characters[1].equipment?.mainWeapon).toBeUndefined()
+    expect(input.characters[1].equipment?.mainWeapon).toBeDefined()
+  })
+  it('preserves consumed rest receipts against stale combat snapshots while accepting an explicit atomic receipt patch',()=>{
+    const receipt:NonNullable<Character['dnd5eRestActivityWindow']>={schemaVersion:1,characterId:'hero',eventId:'rest:long-rest-complete:480',event:'long-rest-complete',completedWorldMinute:480,receipts:{'["test.rest","bless"]':'used'}}
+    const current={...plan().characters[0],dnd5eRestActivityWindow:receipt}
+    const stale={...current,dnd5eRestActivityWindow:{...receipt,receipts:{}}}
+    expect(mergeDnd5eCombatCharacterResult(current,stale).dnd5eRestActivityWindow).toEqual(receipt)
+    const application=mergeDnd5eCharacterPatchIntoResult(plan({characters:[stale]}),'hero',{dnd5eRestActivityWindow:receipt})
+    expect(application.characterPatches?.hero?.dnd5eRestActivityWindow).toEqual(receipt)
+    expect(mergeDnd5eCombatCharacterResult(stale,application.characters[0],application.characterPatches?.hero).dnd5eRestActivityWindow).toEqual(receipt)
+  })
   it('同步补偿长施法新效果的完整快照与实体提交补丁', () => {
     const effect = createDnd5eMechanicalEffect({
       id: 'mirage', definitionId: 'activity:mirage', label: '海市蜃楼',
@@ -516,4 +616,19 @@ describe('战斗结果提交协调器', () => {
     expect(saveCharacters).not.toHaveBeenCalled()
     expect(saveMap).not.toHaveBeenCalled()
   })
+})
+
+it('commits handoff movement with an existing state patch without overwriting unrelated live fields', () => {
+  const token = { id: 'token', label: 'Target', x: 375, y: 275, hp: 50, elevationFeet: 10 } as Token
+  const input = plan({ map: { id: 'map', tokens: [token] } as BattleMap,
+    changedCharacterIds: [], tokenPatches: { token: { hp: 50 } } })
+  const moved = { ...token, x: 425, elevationFeet: undefined }
+  const merged = mergeDnd5eMapTokenChangesIntoResult(input, { ...input.map, tokens: [moved] })
+  let live = { ...token, label: 'Renamed during settlement' }
+  applyDnd5eCombatResultApplication({ application: merged, mapId: 'map',
+    applyCharacter: vi.fn(), applyToken: (_map, _id, resolved, patch) => { live = { ...live, ...(patch ?? resolved) } } })
+  expect(live).toMatchObject({ x: 425, y: 275, hp: 50, label: 'Renamed during settlement' })
+  expect(live.elevationFeet).toBeUndefined()
+  expect(merged.tokenPatches?.token).toEqual({ hp: 50, x: 425, elevationFeet: undefined })
+  expect(input.map.tokens[0].x).toBe(375)
 })

@@ -1,6 +1,7 @@
 import type { Character } from '../../types/character'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { dnd5ePersistentAreaEffectMatchesOrigin } from './persistentAreaConditionEffects'
 import { dnd5eTokenIntersectsPersistentAreaAt } from './persistentAreaGeometry'
 import { tokenOccupiedCellsAt } from '../../lib/gridCombat'
 import type { Dnd5eCombatEvent } from './headlessCombatEngine'
@@ -88,6 +89,24 @@ export function igniteDnd5eWebAreaCell(input: {
   }
 }
 
+/** Extinguishing before burnout preserves the web, its restraints and unrelated lifecycle. */
+export function extinguishDnd5eWebAreaCells(input: {
+  map: BattleMap; areaId: string; cells: readonly { col: number; row: number }[]
+}): BattleMap {
+  const area = input.map.dnd5ePluginAreas?.find(candidate => candidate.id === input.areaId)
+  if (!area || !isWebArea(area) || !area.webState?.burningCells?.length) return input.map
+  const keys = new Set(input.cells.map(cellKey))
+  const remaining = area.webState.burningCells.filter(cell => !keys.has(cellKey(cell)))
+  if (remaining.length === area.webState.burningCells.length) return input.map
+  const triggers = area.triggers?.flatMap(trigger => trigger.id !== WEB_BURN_TRIGGER_ID ? [trigger]
+    : remaining.length ? [{ ...trigger, cells: remaining.map(({col,row})=>({col,row})) }] : [])
+  return { ...input.map, dnd5ePluginAreas: input.map.dnd5ePluginAreas?.map(candidate => candidate.id !== area.id ? candidate : {
+    ...candidate, triggers,
+    webState: remaining.length || area.webState?.unsupportedCollapseAtRound != null
+      ? { ...area.webState, burningCells: remaining.length ? remaining : undefined } : undefined,
+  }) }
+}
+
 /** Explicit fire footprints include empty squares; damage events cover targeted attacks. */
 export function igniteDnd5eWebAreasFromFire(input: {
   map: BattleMap
@@ -162,7 +181,7 @@ export function igniteDnd5eWebAreasFromSpell(input: {
   })
 }
 
-/** Leaving a web ends only restraints belonging to that web's caster. */
+/** New restraints follow their exact area instance; old unscoped effects retain caster-based compatibility. */
 export function reconcileDnd5eWebRestraints(state: Dnd5eHeadlessCombatState, map: BattleMap,
   events: Dnd5eCombatEvent[] = []): void {
   for (const token of map.tokens) {
@@ -177,6 +196,7 @@ export function reconcileDnd5eWebRestraints(state: Dnd5eHeadlessCombatState, map
         event.targetId === token.id && event.effectId === effect.id)) return true
       const inside = map.dnd5ePluginAreas?.some((area) => isWebArea(area) &&
         area.sourceTokenId === effect.source.actorId &&
+        dnd5ePersistentAreaEffectMatchesOrigin(effect, area.id, true) &&
         dnd5eTokenIntersectsPersistentAreaAt({ ...token, elevationFeet: target.elevationFeet }, map, area, target.position))
       if (!inside) events.push({ type: 'active-effect-removed', targetId: token.id, effectId: effect.id,
         definitionId: effect.definitionId, reason: 'out-of-range' })
@@ -189,9 +209,11 @@ export function reconcileDnd5eWebRestraints(state: Dnd5eHeadlessCombatState, map
 function matchingWebEffect(
   effect: NonNullable<Token['dnd5eCombatState']>['activeEffects'] extends (infer T)[] | undefined ? T : never,
   area: Dnd5ePluginArea,
+  allowUnscopedLegacy = true,
 ): boolean {
   return effect.source.kind === 'spell' && effect.source.rulesId === 'web' &&
     effect.source.actorId === area.sourceTokenId &&
+    dnd5ePersistentAreaEffectMatchesOrigin(effect, area.id, allowUnscopedLegacy) &&
     effect.duration.type === 'concentration' &&
     (effect.duration.concentrationId == null || effect.duration.concentrationId === (area.concentrationId ?? 'web'))
 }
@@ -204,10 +226,11 @@ function removeWebEffects<T extends {
   subject: T,
   area: Dnd5ePluginArea,
   endSourceConcentration: boolean,
+  scopedOnly = false,
 ): T {
   const state = subject.dnd5eCombatState
   if (!state) return subject
-  const activeEffects = (state.activeEffects ?? []).filter((effect) => !matchingWebEffect(effect, area))
+  const activeEffects = (state.activeEffects ?? []).filter((effect) => !matchingWebEffect(effect, area, !scopedOnly))
   const controlsThisConcentration = endSourceConcentration &&
     state.concentrationSpellId === (area.concentrationId ?? area.coreSpellId)
   if (activeEffects.length === (state.activeEffects ?? []).length && !controlsThisConcentration) return subject
@@ -245,9 +268,10 @@ export function reconcileDnd5eWebRestraintsOnMap(map: BattleMap, characters: rea
   const clearOutside = <T extends { dnd5eCombatState?: Character['dnd5eCombatState'] }>(subject: T, token: Token): T => {
     let next = subject
     for (const area of areas) {
-      if (!areas.some((candidate) => candidate.sourceTokenId === area.sourceTokenId &&
-        dnd5eTokenIntersectsPersistentAreaAt(token, map, candidate, token))) {
-        next = removeWebEffects(next, area, false)
+      if (!dnd5eTokenIntersectsPersistentAreaAt(token, map, area, token)) {
+        const insideAnother = areas.some((candidate) => candidate.sourceTokenId === area.sourceTokenId &&
+          dnd5eTokenIntersectsPersistentAreaAt(token, map, candidate, token))
+        next = removeWebEffects(next, area, false, insideAnother)
       }
     }
     return next

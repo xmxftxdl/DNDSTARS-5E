@@ -1,3 +1,4 @@
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { restoreClassResources, syncCharacterClassResources } from '../../lib/classResources'
@@ -12,6 +13,8 @@ import {
   declarativeSubclassCompatibilityReportV1,
   migrateLegacyFeatureActionToDeclarativeV1,
   parseDnd5eDeclarativeRulesPackageV1,
+  validateDeclarativeSubclassAbilityV1,
+  validateDeclarativeSubclassDefinitionV1,
   type DeclarativeSubclassAbilityV1,
   type DeclarativeSubclassDefinitionV1,
 } from './declarativeSubclassAbility'
@@ -130,6 +133,49 @@ function stateFor(pluginId: string, input: {
 }
 
 describe('DeclarativeSubclassAbilityV1', () => {
+  it('validates bounded passive extra Flurry attacks with distinct targets', () => {
+    const candidate = ability({ trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], rolls: [],
+      mechanic: { kind: 'flurry-extra-attacks', additionalAttacks: 3, distinctTargets: true } })
+    expect(() => validateDeclarativeSubclassAbilityV1(candidate)).not.toThrow()
+    for (const additionalAttacks of [0, 7, 1.5]) {
+      expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, mechanic: { ...candidate.mechanic, additionalAttacks } })).toThrow()
+    }
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, mechanic: { ...candidate.mechanic, distinctTargets: false } })).toThrow()
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, trigger: { kind: 'active-use' } })).toThrow()
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...candidate, cost: { economy: 'bonus-action' } })).toThrow()
+  })
+
+  it('accepts passive Extra Attack without accepting action costs or unexecuted passive effects', () => {
+    const candidate = ability({ trigger: {kind:'passive'}, targeting:{kind:'self'}, cost:{economy:'none'},
+      mechanic:{kind:'attacks-per-action',attacks:2},effects:[],automation:'full' })
+    expect(()=>validateDeclarativeSubclassAbilityV1(candidate)).not.toThrow()
+    expect(()=>validateDeclarativeSubclassAbilityV1({...candidate,trigger:{kind:'active-use'}})).not.toThrow()
+    expect(()=>validateDeclarativeSubclassAbilityV1({...candidate,cost:{economy:'action'}})).toThrow()
+    expect(()=>validateDeclarativeSubclassAbilityV1({...candidate,effects:[{kind:'invented'}]})).toThrow()
+  })
+  it('identifies the precise invalid ability in a multi-ability import without relaxing validation', () => {
+    const invalid = { ...ability({ id: 'broken-target' }), targeting: undefined }
+    const candidate = { ...subclass(), abilities: [ability(), invalid] }
+    expect(() => validateDeclarativeSubclassDefinitionV1(candidate)).toThrow('能力[1] (broken-target)目标无效')
+    expect(() => validateDeclarativeSubclassDefinitionV1({ ...subclass(), abilities: [null] })).toThrow('能力[0]')
+  })
+  it.each([[], ['unknown'], ['poisoned', 'poisoned'], 'poisoned'])('rejects malformed condition-save advantages %j', (conditions) => {
+    const defense = ability({ trigger: { kind: 'passive' }, targeting: { kind: 'self' }, rolls: [], effects: [], mechanic: { kind: 'passive-defense', savingThrowAdvantageAgainstConditions: ['poisoned'] } })
+    expect(() => validateDeclarativeSubclassAbilityV1({ ...defense, mechanic: { ...defense.mechanic, savingThrowAdvantageAgainstConditions: conditions } } as unknown as DeclarativeSubclassAbilityV1)).toThrow()
+  })
+  it('validates explicit passive defenses without allowing unevaluated passive operations', () => {
+    for (const mechanic of [
+      { kind: 'passive-defense' as const, armorClassBonus: { value: 1, requiresHeavyArmor: true } },
+      { kind: 'passive-defense' as const, damageImmunities: ['fire' as const] },
+      { kind: 'passive-defense' as const, savingThrowAdvantageAgainstConditions: ['poisoned' as const] },
+    ]) {
+      const defense = ability({ trigger: { kind: 'passive' }, targeting: { kind: 'self' }, rolls: [], effects: [], mechanic })
+      expect(() => validateDeclarativeSubclassAbilityV1(defense)).not.toThrow()
+      expect(() => validateDeclarativeSubclassAbilityV1({ ...defense, mechanic: { kind: 'passive-defense' } })).toThrow('no effect')
+      expect(() => validateDeclarativeSubclassAbilityV1({ ...defense, mechanic: undefined })).toThrow('被动资料')
+      expect(() => validateDeclarativeSubclassAbilityV1({ ...defense, effects: ability().effects })).toThrow('被动资料')
+    }
+  })
   it('loads a subclass and grants its feature only at the declared level', () => {
     const { dispose, featureId } = register('com.example.decl')
     try {
@@ -319,10 +365,12 @@ describe('DeclarativeSubclassAbilityV1', () => {
     } finally { dispose() }
   })
 
-  it('spends declared resources and restores them on short and long rests', () => {
+  it.each([false, true])('spends declared resources and preserves rest recovery with combat recovery=%s', restoreOnCombatStart => {
     const pluginId = 'com.example.resource'
     const resourceAbility = ability({ cost: { economy: 'none', resources: [{ resourceId: 'focus', amount: 1 }] } })
-    const { dispose, featureId, subclassId } = register(pluginId, subclass([resourceAbility]))
+    const definition = subclass([resourceAbility])
+    definition.resources = definition.resources?.map(resource => ({ ...resource, restoreOnCombatStart }))
+    const { dispose, featureId, subclassId } = register(pluginId, definition)
     try {
       const resourceId = `${pluginId}:focus`
       const result = resolveDnd5eHeadlessAction(stateFor(pluginId, { resources: { [resourceId]: { current: 2, max: 2 } } }), {
@@ -334,6 +382,54 @@ describe('DeclarativeSubclassAbilityV1', () => {
       const depleted = syncCharacterClassResources({ ...character(3, subclassId), classResources: { [resourceId]: { current: 0, max: 2 } } })
       expect(restoreClassResources(depleted, 'short-rest').classResources?.[resourceId].current).toBe(2)
       expect(restoreClassResources(depleted, 'long-rest').classResources?.[resourceId].current).toBe(2)
+      expect(restoreClassResources(depleted, 'combat').classResources?.[resourceId].current).toBe(restoreOnCombatStart ? 2 : 0)
+    } finally { dispose() }
+  })
+
+  it('preserves conditional recovery through subclass validation and registration', () => {
+    const pluginId = 'com.example.conditional-rest'
+    const definition = subclass()
+    definition.resources = definition.resources?.map(resource => ({ ...resource,
+      resetOn: 'long-rest', restRecovery: {
+        'short-rest': { mode: 'restore', amount: 1, onlyWhenEmpty: true },
+        'long-rest': { mode: 'set', amount: 1 },
+      },
+    }))
+    const imported = JSON.parse(JSON.stringify(definition)) as DeclarativeSubclassDefinitionV1
+    expect(() => validateDeclarativeSubclassDefinitionV1(imported)).not.toThrow()
+    const malformed = JSON.parse(JSON.stringify(imported))
+    malformed.resources[0].restRecovery['short-rest'].onlyWhenEmpty = 'true'
+    expect(() => validateDeclarativeSubclassDefinitionV1(malformed)).toThrow()
+    const { dispose, subclassId } = register(pluginId, imported)
+    try {
+      // Registration owns an independent copy of the policy.
+      imported.resources![0].restRecovery!['long-rest']!.amount = 2
+      for (const current of [0, 2]) {
+        const key = `${pluginId}:focus`
+        const actor = syncCharacterClassResources({ ...character(3, subclassId), classResources: { [key]: { current, max: 2 } } })
+        expect(restoreClassResources(actor, 'short-rest').classResources?.[key].current).toBe(current === 0 ? 1 : 2)
+        expect(restoreClassResources(actor, 'long-rest').classResources?.[key].current).toBe(1)
+        expect(restoreClassResources(actor, 'combat').classResources?.[key].current).toBe(current)
+      }
+    } finally { dispose() }
+  })
+
+  it('retains level-gated initiative recovery on a subclass resource', () => {
+    const pluginId = 'com.example.initiative-recovery'
+    const definition = subclass()
+    definition.resources = definition.resources?.map(resource => ({ ...resource,
+      combatStartRecovery: { mode: 'restore', amount: 1, onlyWhenEmpty: true, minimumClassLevel: { classId: 'fighter', level: 15 } },
+    }))
+    expect(() => validateDeclarativeSubclassDefinitionV1(definition)).not.toThrow()
+    const { dispose, subclassId } = register(pluginId, definition)
+    try {
+      definition.resources![0].combatStartRecovery!.amount = 2
+      for (const level of [14, 15]) for (const current of [0, 1, 2]) {
+        const key = `${pluginId}:focus`
+        const actor = syncCharacterClassResources({ ...character(level, subclassId), classResources: { [key]: { current, max: 2 } } })
+        expect(restoreClassResources(actor, 'combat').classResources?.[key].current).toBe(level >= 15 && current === 0 ? 1 : current)
+        expect(restoreClassResources(actor, 'short-rest').classResources?.[key].current).toBe(2)
+      }
     } finally { dispose() }
   })
 
@@ -369,6 +465,7 @@ describe('DeclarativeSubclassAbilityV1', () => {
         id: `technique-${index + 1}`,
         name: `战技 ${index + 1}`,
         summary: '合成测试选项，不包含规则书原文。',
+        description: '使用时机、消耗与限制的详细说明。',
       })),
     }]
     definition.resources = [{
@@ -425,6 +522,7 @@ describe('DeclarativeSubclassAbilityV1', () => {
       const registered = dnd5ePluginSubclassDefinition(subclassId)
       const group = registered?.choiceGroups?.[0]
       expect(group).toBeDefined()
+      expect(group?.options[0].description).toBe('使用时机、消耗与限制的详细说明。')
       expect(dnd5ePluginSubclassChoiceLimit(group!, 3)).toBe(3)
       expect(dnd5ePluginSubclassChoiceLimit(group!, 7)).toBe(5)
       expect(dnd5ePluginSubclassChoiceLimit(group!, 15)).toBe(7)
@@ -1178,4 +1276,84 @@ describe('DeclarativeSubclassAbilityV1', () => {
     expect(report).toMatchObject({ full: 2, partial: 0, manual: 1 })
     expect(report.abilities.find((entry) => entry.abilityId === 'partial')?.effective).toBe('full')
   })
+})
+
+
+describe('legacy declarative damage roll provenance', () => {
+  function mark(state: ReturnType<typeof stateFor>, foreign = false) {
+    state.combatants.target.classState.activeEffects = [createDnd5eMechanicalEffect({
+      id:'mark',definitionId:'mark',label:'Mark',targetId:'target',
+      source:{kind:'feature',actorId:foreign ? 'other' : 'hero'},modifiers:{damageRollsBySourceBonus:3},
+    })]
+    return JSON.parse(JSON.stringify(state)) as typeof state
+  }
+  it.each(['own','foreign','half-resistant','negative','fixed','duplicate','invalid'])(
+    'applies an independent %s pool before multipliers and defenses', mode => {
+    const pluginId='test.legacy-damage'
+    const fixed=mode === 'fixed', modifier=mode === 'negative' ? -6 : fixed ? 5 : 0
+    const definition=ability({cost:{economy:'action'},rolls:[
+      {id:'damage',kind:'damage',label:'Damage',dice:{count:fixed ? 0 : 1,sides:6,modifier:{kind:'fixed',value:modifier}},damageType:'fire'},
+      ...(mode === 'half-resistant' ? [{id:'save',kind:'saving-throw' as const,label:'Save',ability:'dex' as const,dc:{kind:'fixed' as const,value:10},onSuccess:'half' as const}] : []),
+    ], effects:[{kind:'damage',target:'target',rollId:'damage'},
+      ...(mode === 'duplicate' ? [{kind:'damage' as const,target:'target' as const,rollId:'damage'}] : [])]})
+    const {dispose,featureId}=register(pluginId,subclass([definition]))
+    try {
+      const state=mark(stateFor(pluginId),mode === 'foreign')
+      if(mode === 'half-resistant')state.combatants.target.damageResistances=['fire']
+      const result=resolveDnd5eHeadlessAction(state,{type:'plugin',pluginId,actionId:'decl.arc-guard.arc-strike',featureId,
+        transactionId:'legacy-roll-test',actorId:'hero',targetId:'target',targetIds:['target'],distanceFeet:5,
+        rolls:fixed ? {} : {damage:{values:[mode === 'invalid' ? 7 : 5],modifier:0,total:mode === 'invalid' ? 7 : 5},
+          ...(mode === 'half-resistant' ? {'save-d20:target':{values:[15],modifier:0,total:15}} : {})}})
+      expect(result.ok,result.ok ? undefined : result.reason).toBe(mode !== 'invalid')
+      const hp=mode === 'invalid' ? 20 : mode === 'half-resistant' || mode === 'negative' ? 18 :
+        mode === 'foreign' || fixed ? 15 : mode === 'duplicate' ? 7 : 12
+      expect(result.state.combatants.target.currentHp).toBe(hp)
+      expect(result.state.combatants.hero.turn.actionAvailable).toBe(mode === 'invalid')
+      expect(state.combatants.target.currentHp).toBe(20)
+      expect(result.events.filter(e=>e.type === 'damage-roll-bonus-applied')).toHaveLength(['foreign','fixed','invalid'].includes(mode) ? 0 : 1)
+    } finally {dispose()}
+  })
+  it.each(['fixed-primary','rolled-primary','critical','foreign','invalid'])(
+    'shares the weapon pool with two prearmed riders: %s', mode => {
+    const pluginId='test.legacy-weapon-pool',resourceId=`${pluginId}:focus`
+    const riders=['arc-strike','second-strike'].map(id=>ability({id,trigger:{kind:'after-attack-hit'},
+      cost:{economy:'none',resources:[{resourceId:'focus',amount:1}]},
+      rolls:[{id:'damage',kind:'damage',label:'Rider',dice:{count:1,sides:6},damageType:'parent-weapon',
+        hostRoll:{timing:'on-trigger',die:{kind:'resource-die',resourceId:'focus'},critical:'double-dice'}}]}))
+    const definition=subclass(riders)
+    definition.resources=[{id:'focus',label:'Focus',minimumLevel:3,maximum:{kind:'fixed',value:2},resetOn:'short-rest',die:{sides:6}}]
+    definition.combatHooks=riders.map(rider=>({id:`arm-${rider.id}`,timing:'after-attack-hit',abilityId:rider.id,
+      decision:'actor-choice',activation:'prearm',retention:'until-triggered'}))
+    const {dispose,featureId}=register(pluginId,definition)
+    try {
+      const secondId=`${pluginId}:arc-guard.second-strike`
+      const state=mark(stateFor(pluginId,{resources:{[resourceId]:{current:2,max:2}}}),mode === 'foreign')
+      state.combatants.hero.pluginFeatureIds=[...state.combatants.hero.pluginFeatureIds,secondId]
+      const critical=mode === 'critical', rolled=mode === 'rolled-primary' || critical
+      const values=critical ? [2,2] : [2]
+      const invalidValues=mode === 'invalid' ? [7] : values
+      const result=resolveDnd5eHeadlessAction(state,{type:'attack',actorId:'hero',targetId:'target',attackModifier:5,d20:critical ? 20 : 15,
+        declarativeIntentFeatureIds:[featureId,secondId],declarativeIntentRolls:{
+          [featureId]:{damage:{values,modifier:0,total:critical ? 4 : 2}},
+          [secondId]:{damage:{values:invalidValues,modifier:0,total:mode === 'invalid' ? 7 : critical ? 4 : 2}},
+        },damage:{count:rolled ? 1 : 0,sides:4,bonus:rolled ? 0 : 1,rolls:rolled ? critical ? [1,1] : [1] : [],type:'slashing'}})
+      expect(result.ok,result.ok ? undefined : result.reason).toBe(mode !== 'invalid')
+      expect(result.state.combatants.target.currentHp).toBe(mode === 'invalid' ? 20 : critical ? 7 : mode === 'foreign' ? 15 : 12)
+      expect(result.state.combatants.hero.classResources[resourceId].current).toBe(mode === 'invalid' ? 2 : 0)
+      expect(result.events.filter(e=>e.type === 'damage-roll-bonus-applied')).toHaveLength(['foreign','invalid'].includes(mode) ? 0 : 1)
+      expect(result.events.filter(e=>e.type === 'declarative-subclass-trigger-rejected')).toHaveLength(0)
+      expect(state.combatants.target.currentHp).toBe(20)
+    } finally {dispose()}
+  })
+})
+
+
+it('validates the declared class-level choice replacement policy', () => {
+  const candidate = subclass()
+  candidate.choiceGroups = [{ id: 'environment', level: 3, name: 'Environment', maxSelections: 1,
+    replaceOnClassLevelGain: true,
+    options: [{ id: 'one', name: 'One', summary: 'One' }, { id: 'two', name: 'Two', summary: 'Two' }] }]
+  expect(() => validateDeclarativeSubclassDefinitionV1(candidate)).not.toThrow()
+  candidate.choiceGroups[0].replaceOnClassLevelGain = 'true' as unknown as boolean
+  expect(() => validateDeclarativeSubclassDefinitionV1(candidate)).toThrow()
 })

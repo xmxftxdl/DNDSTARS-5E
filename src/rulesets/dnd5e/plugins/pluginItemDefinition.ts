@@ -1,3 +1,4 @@
+import { DND5E_DAMAGE_TYPES } from '../damageTypes'
 import type { EquipmentItem } from '../../../types/equipment'
 import { DND5E_INVENTORY_ICON_IDS } from '../../../types/inventory'
 import type { Dnd5ePluginItemDefinition } from '../pluginApi'
@@ -81,7 +82,7 @@ export function clonePluginItemDefinition(
 
   let equipment: EquipmentItem | undefined
   if (definition.equipment) {
-    if (definition.category !== 'equipment' || definition.stackable) {
+    if (definition.category !== 'equipment' || (definition.stackable && !(definition.equipment.dnd5e?.kind === 'weapon' && definition.equipment.dnd5e.consumesQuantityOnAttack === true))) {
       throw new Error(`Plugin equipment must use the equipment category and cannot stack: ${itemId}`)
     }
     if (!(EQUIPMENT_SLOTS as readonly unknown[]).includes(definition.equipment.slot)) {
@@ -116,7 +117,13 @@ export function clonePluginItemDefinition(
         !['simple', 'martial'].includes(rules.category) || !['melee', 'ranged'].includes(rules.mode) ||
         !['str', 'dex', 'finesse'].includes(rules.attackAbility) ||
         !finiteInteger(rules.damage.count, 0, 20) || !finiteInteger(rules.damage.sides, 2, 1_000) ||
-        !['slashing', 'piercing', 'bludgeoning'].includes(rules.damage.type) ||
+        !(DND5E_DAMAGE_TYPES as readonly string[]).includes(rules.damage.type) ||
+        (rules.grantsProficiency != null && typeof rules.grantsProficiency !== 'boolean') ||
+          (rules.advantageAgainstUnlitTargets != null && typeof rules.advantageAgainstUnlitTargets !== 'boolean') ||
+          (rules.consumesQuantityOnAttack != null && typeof rules.consumesQuantityOnAttack !== 'boolean') ||
+          (rules.usesSourceSpellcastingAbility != null && typeof rules.usesSourceSpellcastingAbility !== 'boolean') ||
+          (rules.slingRangeFeet != null && (!finiteInteger(rules.slingRangeFeet.normal,1,10000) || !finiteInteger(rules.slingRangeFeet.long,rules.slingRangeFeet.normal,10000))) ||
+          (rules.vanishesAfterRelease != null && typeof rules.vanishesAfterRelease !== 'boolean') ||
         (rules.reachFeet != null && !finiteInteger(rules.reachFeet, 0, 500)) ||
         (rules.rangeFeet != null && (!finiteInteger(rules.rangeFeet.normal, 0, 10_000) ||
           !finiteInteger(rules.rangeFeet.long, rules.rangeFeet.normal, 10_000))) ||

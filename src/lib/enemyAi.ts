@@ -56,6 +56,9 @@ export interface EnemyAttackRoll {
 }
 
 export interface EnemyTurnResult {
+  /** Stable Host choice identity when this declared attack is retried. */
+  randomTargetTransactionId?: string
+  readiedAttack?: true
   moved: boolean
   moveApSpent?: number
   newPosition?: { x: number; y: number }

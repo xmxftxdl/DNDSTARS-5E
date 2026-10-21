@@ -84,6 +84,72 @@ function entry(tokenId: string, slotId = `${tokenId}-slot`): InitiativeEntry {
 }
 
 describe('persistent-area authoritative turn boundaries', () => {
+  it('recovers the exact departed summon slot after JSON reload and settles its end only once', async () => {
+    const map: BattleMap = { id: 'clock-map', name: 'Clock', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [],
+      dnd5eActivityTurnClock: { schemaVersion: 1, combatId: 'combat', turnKey: '2:summon:extra', sequence: 4,
+        cursor: { tokenId: 'summon', slotId: 'summon:extra', round: 2, initiativeIndex: 1 } } }
+    const current = dnd5ePersistentAreaTurnCursor({mapId:map.id,combatId:'combat',round:2,
+      initiativeIndex:0,initiativeOrder:[entry('hero','hero:normal')]})!
+    const seen:string[]=[]
+    const settleBoundary: Parameters<typeof settleDnd5ePersistentAreaTurnTransition>[0]['settleBoundary'] = async ({boundary,map,characters}) => {
+      seen.push(`${boundary.timing}:${boundary.tokenId}:${boundary.turnKey}`)
+      return {map,characters:[...characters],logs:[]}
+    }
+    const transition=planDnd5ePersistentAreaTurnTransition(null,current)
+    const result=await settleDnd5ePersistentAreaTurnTransition({map:JSON.parse(JSON.stringify(map)),characters:[],transition,
+      settleBoundary,expireBoundary:({map})=>map})
+    expect(seen).toEqual(['turn-end:summon:2:summon:extra','turn-start:hero:2:hero:normal'])
+    expect(result.map.dnd5eActivityTurnClock).toMatchObject({sequence:5,cursor:{tokenId:'hero',slotId:'hero:normal'}})
+    await settleDnd5ePersistentAreaTurnTransition({map:JSON.parse(JSON.stringify(result.map)),characters:[],transition,
+      settleBoundary,expireBoundary:({map})=>map})
+    expect(seen).toHaveLength(2)
+  })
+  it('persists the actual turn transition and skips saves on refresh or replay', async () => {
+    const map: BattleMap = { id: 'clock-map', name: 'Clock', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [],
+      dnd5eActivityTurnClock: { schemaVersion: 1, combatId: 'combat', turnKey: '1:first', sequence: 4 } }
+    const order = [entry('hero', 'first'), entry('hero', 'extra')]
+    const previous = dnd5ePersistentAreaTurnCursor({ mapId: map.id, combatId: 'combat', round: 1, initiativeIndex: 0, initiativeOrder: order })!
+    const current = dnd5ePersistentAreaTurnCursor({ mapId: map.id, combatId: 'combat', round: 1, initiativeIndex: 1, initiativeOrder: order })!
+    const transition = planDnd5ePersistentAreaTurnTransition(previous, current)
+    const seen: string[] = []
+    const settleBoundary: Parameters<typeof settleDnd5ePersistentAreaTurnTransition>[0]['settleBoundary'] = async ({ boundary, map, characters }) => {
+      seen.push(`${boundary.timing}:${map.dnd5eActivityTurnClock?.sequence}`)
+      return { map, characters: [...characters], logs: ['settled'] }
+    }
+    const expireBoundary: Parameters<typeof settleDnd5ePersistentAreaTurnTransition>[0]['expireBoundary'] = ({ map }) => map
+    const settled = await settleDnd5ePersistentAreaTurnTransition({ map, characters: [], transition, settleBoundary, expireBoundary })
+    expect(seen).toEqual(['turn-end:4', 'turn-start:5'])
+    expect(settled.map.dnd5eActivityTurnClock).toMatchObject({ turnKey: '1:extra', sequence: 5 })
+    const committed = mergeDnd5ePersistentAreaTurnMapDelta({ before: map, settled: settled.map, current: map })
+    for (const replay of [transition, planDnd5ePersistentAreaTurnTransition(null, current)]) {
+      const restored = JSON.parse(JSON.stringify(committed)) as BattleMap
+      const result = await settleDnd5ePersistentAreaTurnTransition({ map: restored, characters: [], transition: replay, settleBoundary, expireBoundary })
+      expect(result.map).toBe(restored)
+      expect(result.logs).toEqual([])
+    }
+    expect(seen).toHaveLength(2)
+    expect(() => mergeDnd5ePersistentAreaTurnMapDelta({ before: map, settled: settled.map, current: committed }))
+      .toThrow('stale-activity-turn-clock-commit')
+  })
+
+  it('rejects an out-of-order transition before executing any boundary effects', async () => {
+    const map: BattleMap = { id: 'clock-map', name: 'Clock', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [],
+      dnd5eActivityTurnClock: { schemaVersion: 1, combatId: 'combat', turnKey: '2:hero-slot', sequence: 9 } }
+    const order = [entry('hero'), entry('other')]
+    const previous = dnd5ePersistentAreaTurnCursor({ mapId: map.id, combatId: 'combat', round: 1, initiativeIndex: 0, initiativeOrder: order })!
+    const current = dnd5ePersistentAreaTurnCursor({ mapId: map.id, combatId: 'combat', round: 1, initiativeIndex: 1, initiativeOrder: order })!
+    let calls = 0
+    await expect(settleDnd5ePersistentAreaTurnTransition({ map, characters: [],
+      transition: planDnd5ePersistentAreaTurnTransition(previous, current),
+      settleBoundary: async ({ map }) => { calls++; return { map, characters: [], logs: [] } },
+      expireBoundary: ({ map }) => map,
+    })).rejects.toThrow('stale-activity-turn-transition')
+    expect(calls).toBe(0)
+    expect(map.dnd5eActivityTurnClock?.sequence).toBe(9)
+  })
   it('refreshes consecutive Time Stop slots before deferred begin-turn without losing area action loss', () => {
     const spentTurn = {
       actionAvailable: false, bonusActionAvailable: false, reactionAvailable: false,

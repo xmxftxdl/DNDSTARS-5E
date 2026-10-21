@@ -28,6 +28,7 @@ export interface Dnd5eLegendaryActionWindowAction {
     | 'wing-attack'
     | 'movement-selection'
     | 'teleport-placement'
+    | 'throw-placement'
     | 'spell-selection'
     | 'dm-adjudication'
 }
@@ -120,6 +121,8 @@ export function dnd5eLegendaryActionWindowCandidates(input: {
               ? 'spell-selection'
               : automation !== 'headless'
                 ? 'dm-adjudication'
+                : action.rule?.kind === 'throw-linked-target'
+                  ? 'throw-placement'
                 : action.rule?.kind === 'ability-check'
                   ? 'ability-check'
                 : action.rule?.kind === 'legendary-wing-attack'

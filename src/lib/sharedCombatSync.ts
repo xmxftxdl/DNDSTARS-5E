@@ -192,7 +192,9 @@ export function resolveSharedCombatStateApply(input: {
     state,
     tokenIds: Array.from(combatTokenIds).sort(),
   })
-  if (snapshot === input.lastSnapshot) return { status: 'ignored', reason: 'unchanged' }
+  // Returning from another scene must restore the local combat UI even when
+  // the authority has not advanced since we last viewed this battle.
+  if (snapshot === input.lastSnapshot && incomingCombatId === input.currentCombatId) return { status: 'ignored', reason: 'unchanged' }
 
   const combatChanged = incomingCombatId !== input.currentCombatId
   const writerId = state._sync?.writerId ?? ''

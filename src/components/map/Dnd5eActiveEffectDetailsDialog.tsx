@@ -1,4 +1,5 @@
 import { activeEffectDisplayName } from './activeEffectDisplayName'
+import { dnd5eActiveEffectMechanicalDescription } from '../../rulesets/dnd5e/activeEffectPresentation'
 import { Clock3, Link2, ShieldAlert, Trash2, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import {
@@ -14,15 +15,35 @@ const BREAK_LABELS = {
   'targeted-by-attack': '成为攻击目标后解除',
   'hit-by-attack': '被攻击命中后解除',
   'makes-attack': '发动攻击后解除',
+  'makes-weapon-attack': '发动武器攻击后解除',
   'casts-spell': '施放法术后解除',
+  'forces-saving-throw': '迫使其他生物豁免后解除',
+  'deals-damage': '造成伤害后解除',
+  'attacked-by-source-or-ally': '遭来源或其盟友攻击后解除',
+  'damaged-by-source-or-ally': '受到来源或其盟友伤害后解除',
+  'forced-save-by-source-or-ally': '被来源或其盟友迫使豁免后解除',
+  'attacked-by-source-ally': '遭来源的其他盟友攻击后解除',
+  'attacked-by-condition-entity': '被选定状态对象攻击后解除',
+    'damaged-by-condition-entity': '被选定状态对象伤害后解除',
+    'forced-save-by-condition-entity': '被选定状态对象迫使豁免后解除',
+    'attacked-by-source': '遭来源本人攻击后解除',
+  'damaged-by-source-ally': '受到来源的其他盟友伤害后解除',
+  'forced-save-by-source-ally': '被来源的其他盟友迫使豁免后解除',
+  'witnesses-ally-attacked': '目睹盟友被攻击后解除',
+  'witnesses-ally-damaged': '目睹盟友受伤后解除',
+  'witnesses-source-attack-ally': '目睹来源本人攻击盟友后解除',
+  'witnesses-source-damage-ally': '目睹来源本人伤害盟友后解除',
   moves: '移动后解除',
   'spends-action': '消耗动作后解除',
+  'spends-action-except-granted': '消耗动作执行本效果授予动作以外的行为后解除',
   'spends-bonus-action': '消耗附赠动作后解除',
   'spends-reaction': '消耗反应后解除',
   awakened: '被唤醒后解除',
   'magical-healing': '接受魔法治疗后解除',
   'short-rest-complete': '完成短休后解除',
   'long-rest-complete': '完成长休后解除',
+  'source-long-rest-complete': '来源完成长休后解除',
+  'source-dies': '来源死亡后解除',
   'reduced-to-zero': '生命值降至 0 后解除',
 } as const
 
@@ -133,6 +154,7 @@ export default function Dnd5eActiveEffectDetailsDialog({
                 <span className="rounded bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-200">独立实例</span>
               </div>
               {instance?.description ? <p className="mt-3 text-sm leading-6 text-slate-200">{instance.description}</p> : null}
+              {dnd5eActiveEffectMechanicalDescription(effect) && instance?.description !== dnd5eActiveEffectMechanicalDescription(effect) ? <p className="mt-3 text-sm leading-6 text-slate-200">{dnd5eActiveEffectMechanicalDescription(effect)}</p> : null}
               <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div><dt className="text-slate-500">来源</dt><dd className="mt-0.5 text-slate-200">{effect.source.actorName ?? effect.source.label ?? effect.source.rulesId ?? '旧数据 / 未注明'}</dd></div>
                 <div><dt className="text-slate-500">持续</dt><dd className="mt-0.5 inline-flex items-center gap-1 text-slate-200"><Clock3 className="h-3.5 w-3.5 text-violet-300" />{dnd5eActiveEffectRemainingLabel(effect)}</dd></div>
@@ -141,7 +163,7 @@ export default function Dnd5eActiveEffectDetailsDialog({
                 {effect.repeatSave?.onFailureTransition ? <div><dt className="text-slate-500">复检失败</dt><dd className="mt-0.5 text-slate-200">{effect.repeatSave.onFailureTransition.outcome === 'retain-effect' ? '效果锁定，不再重复豁免' : `转为${dnd5eConditionLabel(effect.repeatSave.onFailureTransition.replaceWithCondition)}${effect.repeatSave.onFailureTransition.duration === 'permanent' ? '（永久）' : '（完整维持专注后永久）'}`}</dd></div> : null}
                 {effect.escapeCheck ? <div><dt className="text-slate-500">挣脱</dt><dd className="mt-0.5 text-slate-200">消耗动作，{ABILITY_LABELS[effect.escapeCheck.ability]}{effect.escapeCheck.alternativeAbility ? `或${ABILITY_LABELS[effect.escapeCheck.alternativeAbility]}` : ''}检定 DC {effect.escapeCheck.dc}</dd></div> : null}
                 {effect.periodicDamage ? <div><dt className="text-slate-500">回合开始</dt><dd className="mt-0.5 text-slate-200">{effect.periodicDamage.count}d{effect.periodicDamage.sides}{effect.periodicDamage.modifier ? `${effect.periodicDamage.modifier > 0 ? '+' : ''}${effect.periodicDamage.modifier}` : ''} {effect.periodicDamage.type ? `${DAMAGE_LABELS[effect.periodicDamage.type] ?? effect.periodicDamage.type}伤害` : '生命值损失'}</dd></div> : null}
-                {effect.removal?.action ? <div><dt className="text-slate-500">主动解除</dt><dd className="mt-0.5 text-slate-200">{effect.removal.action.label}（动作{effect.removal.action.abilityCheck ? `，${ABILITY_LABELS[effect.removal.action.abilityCheck.ability]}${effect.removal.action.abilityCheck.skill === 'medicine' ? '（医药）' : ''} DC ${effect.removal.action.abilityCheck.dc}` : ''}）</dd></div> : null}
+                {effect.removal?.action ? <div><dt className="text-slate-500">主动解除</dt><dd className="mt-0.5 text-slate-200">{effect.removal.action.label}（动作{effect.removal.action.abilityCheck ? `，${ABILITY_LABELS[effect.removal.action.abilityCheck.ability]}${effect.removal.action.abilityCheck.skill === 'medicine' ? '（医药）' : effect.removal.action.abilityCheck.skill === 'arcana' ? '（奥秘）' : effect.removal.action.abilityCheck.skill === 'athletics' ? '（运动）' : ''} DC ${effect.removal.action.abilityCheck.dc}` : ''}）</dd></div> : null}
                 {effect.removal?.onMagicalHealing ? <div><dt className="text-slate-500">魔法治疗</dt><dd className="mt-0.5 text-slate-200">接受魔法治疗时自动解除</dd></div> : null}
                 {effect.modifiers?.flySpeedFeet ? <div><dt className="text-slate-500">飞行速度</dt><dd className="mt-0.5 text-slate-200">{effect.modifiers.flySpeedFeet} 尺</dd></div> : null}
                 {effect.modifiers?.preventHealing ? <div><dt className="text-slate-500">治疗</dt><dd className="mt-0.5 text-rose-200">无法恢复生命值</dd></div> : null}

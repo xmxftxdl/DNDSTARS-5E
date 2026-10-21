@@ -3,20 +3,23 @@ import type {
   Dnd5eCombatActionDescriptorV1,
   Dnd5eCombatSpellModifier,
 } from '../../lib/dnd5eCombatActionDescriptors'
+import { useCampaignTimeStore } from '../../store/campaignTime'
 import {
   canSubmitPlayerSpellAction,
   canSubmitPlayerTriggeredReactionSpellAction,
 } from '../../lib/playerActionAuthorityRouter'
 import type { PendingPlayerActionLock } from '../../lib/playerActionSync'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
-import { dnd5eEffectiveWalkingSpeed } from '../../rulesets/dnd5e/classes'
+import { dnd5eEffectiveCharacterMovementProfile } from '../../rulesets/dnd5e/characterMovement'
 import { dnd5eConditionIncapacitated } from '../../rulesets/dnd5e/conditions'
 import { dnd5eActivePreventsActions } from '../../rulesets/dnd5e/activeEffects'
 import { createDnd5eTurnEconomyCounts } from '../../rulesets/dnd5e/turnEconomy'
 import type { BattleMap, Token } from '../../store/maps'
+import { useMapStore } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import PlayerCombatHotbar from './PlayerCombatHotbar'
+import { projectDnd5eMapCohortArmorClassBonus } from '../../application/combat/mapCohortArmorClassProjection'
 import {
   playerMapGrantedActivityControls,
   playerMapMovablePersistentAreas,
@@ -27,6 +30,8 @@ import { resolvePlayerMapSpellHotbarCharacter, simulacrumHotbarTurnEconomy } fro
 interface PlayerMapSpellHotbarProps {
   isDM: boolean
   combatActive: boolean
+  combatId?: string
+  round?: number
   mode?: 'dm' | 'player' | null
   map: BattleMap
   activeCharacter?: Character | null
@@ -50,6 +55,8 @@ interface PlayerMapSpellHotbarProps {
 }
 
 export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
+  const campaignClock = useCampaignTimeStore(state => state.state)
+  const roomMaps = useMapStore(state => state.maps)
   // Keep the player's bar during enemy turns, and switch to the independently
   // projected simulacrum only on that owned companion's turn.
   const character = resolvePlayerMapSpellHotbarCharacter(props)
@@ -60,14 +67,14 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
         candidate.type === 'player' && candidate.characterId === character.id && !candidate.dnd5eSimulacrum,
       )
   const turnEconomy = token?.dnd5eSimulacrum
-    ? simulacrumHotbarTurnEconomy(token, props.turnEconomyByToken, dnd5eEffectiveWalkingSpeed(character))
+    ? simulacrumHotbarTurnEconomy(token, props.turnEconomyByToken, dnd5eEffectiveCharacterMovementProfile(character).walkSpeed)
     : character.id === props.activeCharacter?.id ||
     ((props.triggeredReactionSpellIds?.length ?? 0) > 0 && character.id === props.playerCharacter?.id)
     ? props.activeTurnEconomy
     : token
       ? createDnd5eTurnEconomyCounts(
           `exploration:${props.map.id}:${token.id}`,
-          dnd5eEffectiveWalkingSpeed(character),
+          dnd5eEffectiveCharacterMovementProfile(character).walkSpeed,
         )
       : createDnd5eTurnEconomyCounts('inactive')
   const actionsPrevented = dnd5eConditionIncapacitated(character) ||
@@ -98,7 +105,11 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
   const movablePersistentAreas = playerMapMovablePersistentAreas(props.map, character)
   const mapWeather = mapGeometryRuntimeForMap(props.map.id)?.weather
   const sustainedAreaControls = playerMapSustainedAreaControls(props.map, character)
-  const persistentAreaActivityControls = playerMapGrantedActivityControls(props.map, character)
+  const persistentAreaActivityControls = playerMapGrantedActivityControls(props.map, character, {
+    combatId: props.combatActive ? props.combatId : undefined, round: props.round,
+    turnKey: turnEconomy.turnKey, worldMinute: campaignClock.worldMinute,
+    worldSecondRemainder: campaignClock.worldSecondRemainder,
+  }, roomMaps)
   const hunterMarkTargetId = character.dnd5eCombatState?.huntersMarkTargetId
   const hunterMarkTarget = hunterMarkTargetId
     ? props.map.tokens.find((candidate) => candidate.id === hunterMarkTargetId)
@@ -114,6 +125,7 @@ export default function PlayerMapSpellHotbar(props: PlayerMapSpellHotbarProps) {
         key={`${props.combatActive ? 'combat' : 'exploration'}:${token?.id ?? character.id}`}
         mode={props.combatActive ? 'combat' : 'exploration'}
         character={character}
+        mapArmorClassBonus={token ? projectDnd5eMapCohortArmorClassBonus({map:props.map,characters:props.characters,tokenId:token.id}) : 0}
         mapWeather={mapWeather}
         canAct={canAct}
         canUseTriggeredReactions={canUseTriggeredReactions}

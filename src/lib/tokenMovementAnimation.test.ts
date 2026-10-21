@@ -1,3 +1,4 @@
+import { truncateTokenMovementTrace } from './tokenMovementAnimation'
 import { describe, expect, it } from 'vitest'
 import {
   createTokenMovementAnimation,
@@ -10,6 +11,14 @@ import {
 } from './tokenMovementAnimation'
 
 describe('token movement path animation', () => {
+  it('preserves an endpoint ejection back to an earlier checkpoint on a completed route', () => {
+    const path = [{ x: 25, y: 75 }, { x: 75, y: 75 }, { x: 125, y: 75 }, { x: 75, y: 75 }]
+    const suffix = continueTokenMovementPath(path, path[1], path[3], { completed: true })
+    expect(suffix).toEqual([path[1], path[2], path[3]])
+    const animation = createTokenMovementAnimation({ id: 'eject-back', path: suffix, finalPosition: path[3], issuedAt: 1 })!
+    expect(animation.points).toEqual(suffix)
+    expect(tokenMovementAnimationPosition(animation, animation.durationMs / 2)).toEqual(path[2])
+  })
   it('releases position ownership after completion or a newer destination', () => {
     const animation = { id: 'first', points: [{ x: 0, y: 0 }, { x: 50, y: 0 }], issuedAt: 1000, durationMs: 500 }
     expect(tokenMovementAnimationOwnsPosition(animation, { x: 50, y: 0 }, 900)).toBe(true)
@@ -134,4 +143,20 @@ describe('token movement path animation', () => {
 
     expect(tokenMovementAnimationForObservation(animation, observedAt)).toBe(animation)
   })
+})
+
+
+it('preserves descent and return heights at identical map coordinates', () => {
+  const point={x:25,y:25}
+  const trace={path:[point,point,point],pathElevationsFeet:[0,-5,0]}
+  expect(truncateTokenMovementTrace({...trace,finalPosition:point,finalElevationFeet:0})).toEqual(trace)
+  expect(truncateTokenMovementTrace({...trace,finalPosition:point,finalElevationFeet:-5})).toEqual({path:[point,point],pathElevationsFeet:[0,-5]})
+  expect(truncateTokenMovementTrace({...trace,finalPosition:point,finalElevationFeet:0,stopPathIndex:0})).toEqual({path:[point],pathElevationsFeet:[0]})
+})
+
+it('keeps a stopping checkpoint aligned with its height when the route revisits a cell', () => {
+  const start={x:25,y:25},other={x:75,y:25}
+  const trace={path:[start,other,start,other],pathElevationsFeet:[0,-5,-10,-15]}
+  expect(truncateTokenMovementTrace({...trace,finalPosition:other,finalElevationFeet:-5,stopPathIndex:1})).toEqual({path:[start,other],pathElevationsFeet:[0,-5]})
+  expect(trace.pathElevationsFeet).toEqual([0,-5,-10,-15])
 })

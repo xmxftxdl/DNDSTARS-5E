@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadSharedResource } from '../composition/browserSharedRoomResources'
+import { loadSharedResource,saveSharedResourceWithResult } from '../composition/browserSharedRoomResources'
 vi.mock('../composition/browserSharedRoomResources', () => ({
   loadSharedResource: vi.fn(),
   saveSharedResourceWithResult: vi.fn().mockResolvedValue({ status: 'saved' }),
@@ -12,6 +12,8 @@ import {
   type MapGeometryWall,
 } from '../lib/mapGeometry'
 import { useMapGeometryStore } from './mapGeometry'
+import { buildLooseEarthTransferGeometry } from '../rulesets/dnd5e/looseEarthTransferGeometry'
+import { mapGeometryTerrainElevationAtPoint } from '../lib/mapGeometry'
 
 const wall: MapGeometryWall = {
   id: 'wall-1',
@@ -27,6 +29,62 @@ const wall: MapGeometryWall = {
 }
 
 describe('map geometry editor history', () => {
+  it('stages every map together and rejects a malformed batch without partial writes',()=>{
+    const store=useMapGeometryStore.getState()
+    const first=createEmptyMapGeometry('first',1),second=createEmptyMapGeometry('second',1)
+    second.walls=[{...wall}]
+    vi.mocked(saveSharedResourceWithResult).mockClear()
+    const updates=vi.fn(),unsubscribe=useMapGeometryStore.subscribe(updates)
+    try {
+      const before=useMapGeometryStore.getState().maps
+      expect(store.applyAuthorityMapReplacements([first,{...second,mapId:''}])).toBe(false)
+      expect(useMapGeometryStore.getState().maps).toBe(before)
+      expect(updates).not.toHaveBeenCalled()
+      expect(store.applyAuthorityMapReplacements([first,first])).toBe(false)
+      expect(store.applyAuthorityMapReplacements([first,second])).toBe(true)
+      expect(updates).toHaveBeenCalledTimes(1)
+      expect(useMapGeometryStore.getState().maps.map(map=>map.mapId)).toEqual([...before.map(map=>map.mapId),'first','second'])
+      second.walls[0].label='External mutation'
+      expect(useMapGeometryStore.getState().maps.find(map=>map.mapId==='second')!.walls[0].label).toBe('北墙')
+      expect(saveSharedResourceWithResult).not.toHaveBeenCalled()
+      expect(useMapGeometryStore.getState().historyByMapId).toEqual({})
+    } finally {unsubscribe()}
+  })
+  it('stages excavation geometry without independently publishing or flattening the pit', () => {
+    vi.mocked(saveSharedResourceWithResult).mockClear()
+    const geometry = createEmptyMapGeometry('soil-map', 1)
+    geometry.obstacles.push({ id: 'soil-volume', kind: 'obstacle', label: 'Soil',
+      points: [{x:0,y:0},{x:50,y:0},{x:50,y:50},{x:0,y:50}],
+      surfaceMaterial: 'loose-earth', terrainRegion: true, terrainElevationFeet: 0,
+      baseHeightFeet: -5, heightFeet: 5, cover: 'none', blocksMovement: false,
+      blocksVision: false, blocksLineOfEffect: false, createdAt: 1 })
+    const candidate = buildLooseEarthTransferGeometry({ geometry, sourceVolumeId: 'soil-volume',
+      translation: {x:50,y:0}, pixelsPerFoot: 10, maximumSideFeet: 5, maximumDisplacementFeet: 5,
+      destinationGroundFeet: 0, executionId: 'cast', now: 2 })!
+    expect(useMapGeometryStore.getState().applyAuthorityMapReplacement('soil-map', candidate)).toBe(true)
+    const staged = useMapGeometryStore.getState().maps.find(map => map.mapId === 'soil-map')!
+    const restored = normalizeMapGeometry(JSON.parse(JSON.stringify(staged)))!
+    expect(mapGeometryTerrainElevationAtPoint(restored, {x:25,y:25})).toBe(-5)
+    expect(mapGeometryTerrainElevationAtPoint(restored, {x:75,y:25})).toBe(5)
+    expect(saveSharedResourceWithResult).not.toHaveBeenCalled()
+    const previous = useMapGeometryStore.getState().maps
+    expect(useMapGeometryStore.getState().applyAuthorityMapReplacement('other-map', candidate)).toBe(false)
+    expect(useMapGeometryStore.getState().maps).toBe(previous)
+  })
+  it('stages a complete Host geometry result without an independent save or editor undo entry',()=>{
+    vi.mocked(saveSharedResourceWithResult).mockClear()
+    const geometry={...createEmptyMapGeometry('map-1',2),walls:[wall],structureLifetimes:[{id:'cast',casterId:'caster',createdWorldMinute:0,expiresWorldMinute:10080,entityIds:[wall.id]}]}
+    expect(useMapGeometryStore.getState().applyAuthorityMapReplacement('map-1',geometry)).toBe(true)
+    expect(useMapGeometryStore.getState().maps[0].structureLifetimes).toEqual(geometry.structureLifetimes)
+    expect(saveSharedResourceWithResult).not.toHaveBeenCalled()
+    expect(useMapGeometryStore.getState().historyByMapId).toEqual({})
+    const staged=useMapGeometryStore.getState().maps
+    expect(useMapGeometryStore.getState().applyAuthorityMapReplacement('wrong-map',geometry)).toBe(false)
+    expect(useMapGeometryStore.getState().applyAuthorityMapReplacement('map-1',{...geometry,structureLifetimes:[...geometry.structureLifetimes,...geometry.structureLifetimes]})).toBe(false)
+    expect(useMapGeometryStore.getState().maps).toBe(staged)
+    geometry.walls[0]={...wall,label:'Changed outside'}
+    expect(useMapGeometryStore.getState().maps[0].walls[0].label).toBe('北墙')
+  })
   it('preserves undo for server echoes and drops it for a competing edit', async () => {
     const store = useMapGeometryStore.getState()
     store.addEntity('map-1', wall)

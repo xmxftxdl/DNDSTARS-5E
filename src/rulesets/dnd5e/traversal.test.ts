@@ -6,12 +6,18 @@ import {
   dnd5eRunningJumpSegments,
   dnd5eTraversalMovementCost,
   dnd5eTraversalTargetingDistanceFeet,
+  dnd5eTraversalSupportsReactionSegments,
   resolveDnd5eFallingDamage,
 } from './traversal'
 
 const profile = { strengthScore: 16, strengthModifier: 3, walkSpeed: 30 }
 
 describe('D&D 5e 2014 traversal', () => {
+  it('segments voluntary travel including jumps and excludes forced falls', () => {
+    expect(dnd5eTraversalSupportsReactionSegments()).toBe(true)
+    for (const mode of ['walk', 'climb', 'swim', 'fly','long-jump-running','long-jump-standing'] as const) expect(dnd5eTraversalSupportsReactionSegments(mode)).toBe(true)
+    expect(dnd5eTraversalSupportsReactionSegments('fall')).toBe(false)
+  })
   it('uses Strength for running jumps and halves standing jumps', () => {
     expect(dnd5eLongJumpMaximumFeet(16, true)).toBe(16)
     expect(dnd5eLongJumpMaximumFeet(16, false)).toBe(8)

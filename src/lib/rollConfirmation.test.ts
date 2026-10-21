@@ -6,6 +6,7 @@ import {
   createD20ReplacementContribution,
   createD20RollConfirmationInterrupt,
   currentD20RollConfirmations,
+  d20RollConfirmationTimeoutContribution,
   d20ChoiceRerollRequiresOwnerSelection,
   durableD20RollId,
   findD20RollConfirmationByRollId,
@@ -17,6 +18,19 @@ import {
 import { dnd5eCoreInspirationChoiceRerollOption } from './d20InterruptPolicy'
 
 describe('d20 roll confirmation', () => {
+  it('keeps a submitted adjustment or replacement when the selection clock expires during Host settlement', () => {
+    const common = { interruptId: 'save', characterId: 'owner', characterName: 'Ranger',
+      featureId: 'prey', featureLabel: 'Defense', now: 100 }
+    for (const contribution of [
+      createD20AdjustmentContribution({ ...common, direction: 'add' }),
+      createD20ReplacementContribution({ ...common, replacementValue: 15 }),
+      createD20DeclineContribution(common),
+    ]) {
+      expect(d20RollConfirmationTimeoutContribution({ contribution, hasEligibleFeature: true })).toBeUndefined()
+    }
+    expect(d20RollConfirmationTimeoutContribution({ hasEligibleFeature: true }))
+      .toEqual({ featureId: '', featureLabel: '', decline: true })
+  })
   it('reuses a stable d20 identity when a durable parent action resumes after refresh', () => {
     const first = durableD20RollId({
       mapId: 'map-1', sourceMode: 'dm', transactionId: 'player-action-123', occurrenceIndex: 0,

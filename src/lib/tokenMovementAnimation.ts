@@ -150,13 +150,48 @@ export function truncateTokenMovementPath(
   return dedupePoints(truncated)
 }
 
+/** Mechanical trace truncation: equal XY points can represent distinct heights. */
+export function truncateTokenMovementTrace(input: {
+  path: readonly TokenMovementAnimationPoint[]
+  pathElevationsFeet?: readonly number[]
+  finalPosition: TokenMovementAnimationPoint
+  finalElevationFeet?: number
+  stopPathIndex?: number
+}): { path: TokenMovementAnimationPoint[]; pathElevationsFeet?: number[] } {
+  if (!input.path.length) return { path: [] }
+  let index = input.stopPathIndex
+  if (index == null) {
+    let closest = Number.POSITIVE_INFINITY
+    input.path.forEach((point, candidate) => {
+      const height = input.pathElevationsFeet?.[candidate]
+      const dz = height != null && input.finalElevationFeet != null ? height - input.finalElevationFeet : 0
+      const distance = Math.hypot(point.x - input.finalPosition.x, point.y - input.finalPosition.y, dz)
+      if (distance <= closest) { index = candidate; closest = distance }
+    })
+  }
+  index = Math.max(0, Math.min(input.path.length - 1, index ?? 0))
+  const path = input.path.slice(0, index + 1).map(point => ({ ...point }))
+  const heights = input.pathElevationsFeet?.slice(0, index + 1)
+  const last = path.at(-1)!
+  const samePosition = Math.hypot(last.x - input.finalPosition.x, last.y - input.finalPosition.y) < 0.01
+  if (samePosition) {
+    path[path.length - 1] = { ...input.finalPosition }
+    if (heights && input.finalElevationFeet != null) heights[heights.length - 1] = input.finalElevationFeet
+  } else {
+    path.push({ ...input.finalPosition })
+    if (heights) heights.push(input.finalElevationFeet ?? heights.at(-1) ?? 0)
+  }
+  return { path, pathElevationsFeet: heights }
+}
+
 /** Builds the unplayed suffix after an interrupt checkpoint on the route. */
 export function continueTokenMovementPath(
   path: readonly TokenMovementAnimationPoint[],
   checkpoint: TokenMovementAnimationPoint,
   finalPosition: TokenMovementAnimationPoint,
+  options: { completed?: boolean } = {},
 ): TokenMovementAnimationPoint[] {
-  const route = truncateTokenMovementPath(path, finalPosition)
+  const route = options.completed ? path.map(point => ({ ...point })) : truncateTokenMovementPath(path, finalPosition)
   if (route.length < 2) return dedupePoints([checkpoint, finalPosition])
   let closestSegmentIndex = 0
   let closestSegmentRatio = 0

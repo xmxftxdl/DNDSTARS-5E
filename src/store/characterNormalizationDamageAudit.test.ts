@@ -5,8 +5,21 @@ import {
   dnd5eSpellComponentsAvailable,
 } from '../rulesets/dnd5e/spellComponents'
 import { normalizeCharacter, serializeDnd5eCharacterSnapshot } from './characters'
+import { projectCharactersForRoomMember } from '../../scripts/shared-server-core.mjs'
+import { dnd5eEffectiveCharacterMovementProfile } from '../rulesets/dnd5e/characterMovement'
 
 describe('character normalization damage-path audit', () => {
+  it('does not invent starter armor when a viewer reloads a redacted fighter', () => {
+    const fighter = normalizeCharacter({ id: 'fighter', name: 'Fighter',
+      roomMemberId: 'dm', charClass: '战士', level: 6, dnd5eClassLevels: { fighter: 6 },
+      speed: 30, abilities: { str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10 },
+      equipment: {}, conditions: [] })
+    const snapshot = projectCharactersForRoomMember({ characters: [fighter] }, { memberId: 'viewer' })
+    const reloaded = normalizeCharacter(JSON.parse(JSON.stringify(snapshot.characters[0])))
+    expect(reloaded.equipment).toEqual({})
+    expect(dnd5eEffectiveCharacterMovementProfile(reloaded).walkSpeed).toBe(30)
+    expect(fighter.equipment).toEqual({})
+  })
   // The shared DM/player path normalizes a character again after a persisted
   // snapshot is read. An explicitly empty loadout must therefore survive more
   // than one normalization pass; otherwise a caster can acquire default gear

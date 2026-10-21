@@ -169,6 +169,7 @@ export interface Dnd5eSrdSpellDefinition {
   additionalProjectilesPerHigherSlot?: number
   onHitEffect?: 'ray-of-frost' | 'shocking-grasp' | 'guiding-bolt' | 'chill-touch'
   onFailedSaveEffect?:
+    | 'confusion'
     | 'vicious-mockery'
     | 'thunderwave-push'
     | 'sunburst-blindness'

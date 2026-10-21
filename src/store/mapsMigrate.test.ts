@@ -6,6 +6,37 @@ import { migrateMapsState, MAPS_PERSIST_VERSION } from './maps'
 // 被规整为可直接渲染的当前 BattleMap 形状，且 version 已落定。
 
 describe('T10/AC3 — maps store version + migrate', () => {
+  it('does not infer dimensions for legacy areas and rejects malformed geometry', () => {
+    const area = { id: 'area', pluginId: 'test', featureId: 'wall', label: 'Wall', color: '#fff', sourceCharacterId: 'hero', sourceTokenId: 'hero', cells: [{ col: 1, row: 1 }], createdRound: 1, expiresAfterRound: 11 }
+    const restore = (patch: object) => migrateMapsState({ maps: [{ id: 'map', dnd5ePluginAreas: [{ ...area, ...patch }] }] }).maps[0].dnd5ePluginAreas!
+    expect(restore({})).toHaveLength(1)
+    expect(restore({})[0].rectGeometry).toBeUndefined()
+    for (const geometry of [
+      { widthFeet: -1, lengthFeet: 20, direction: { dc: 1, dr: 0 }, gridAligned: false },
+      { widthFeet: 5, lengthFeet: Infinity, direction: { dc: 1, dr: 0 }, gridAligned: false },
+      { widthFeet: 5, lengthFeet: 20, direction: { dc: 0, dr: 0 }, gridAligned: false },
+      { widthFeet: 5, lengthFeet: 20, direction: { dc: 100, dr: 0 }, gridAligned: false },
+    ]) expect(restore({ rectGeometry: geometry })).toHaveLength(0)
+  })
+
+  it('retains healing dice, eligibility and declined receipts across JSON persistence', () => {
+    const snapshot = { maps: [{ id: 'healing-map', name: 'Map', width: 500, height: 500,
+      dnd5ePluginAreas: [{ id: 'healing-area', pluginId: 'local.healing', featureId: 'local.healing:cast',
+        label: 'Healing', color: '#fff', sourceCharacterId: 'hero', sourceTokenId: 'hero-token',
+        cells: [{ col: 1, row: 1 }], createdRound: 1, expiresAfterRound: 11,
+        triggers: [{ id: 'heal', label: 'Heal', timing: 'turn-start', oncePerTurn: true,
+          frequencyGroupId: 'healing', sourceMayDecline: true, requiresSourceVision: true,
+          excludedCreatureTypes: ['construct', 'undead'], healing: { amount: 0, dice: { count: 3, sides: 6 } } }],
+        triggerReceipts: [{ triggerId: 'healing', targetTokenId: 'patient', round: 1, turnKey: 'turn-1', transactionId: 'decline-1', declined: true }],
+      }],
+    }] }
+    const restored = migrateMapsState(JSON.parse(JSON.stringify(snapshot)))
+    const area = restored.maps[0].dnd5ePluginAreas![0]
+    expect(area.triggers?.[0]).toMatchObject(snapshot.maps[0].dnd5ePluginAreas[0].triggers[0])
+    expect(area.triggerReceipts?.[0]).toMatchObject({ declined: true, turnKey: 'turn-1' })
+    const second = migrateMapsState(JSON.parse(JSON.stringify(restored)))
+    expect(second.maps[0].dnd5ePluginAreas).toEqual(restored.maps[0].dnd5ePluginAreas)
+  })
   it('retains valid viewport notes while normalizing unsafe coordinates', () => {
     const result = migrateMapsState({
       maps: [{
@@ -450,6 +481,7 @@ describe('T10/AC3 — maps store version + migrate', () => {
           anchorMode: 'fixed', anchorCell: { col: 1, row: 1 },
           sourceExitBehavior: 'remove-area',
           sourceOverlapBehavior: 'remove-area',
+          sourceIncapacitatedBehavior: 'remove-area',
           blocking: {
             movement: true, movementMode: 'enter',
             entryPermission: 'occupants-at-creation',
@@ -466,6 +498,7 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].dnd5ePluginAreas?.[0]).toMatchObject({
       sourceExitBehavior: 'remove-area',
       sourceOverlapBehavior: 'remove-area',
+      sourceIncapacitatedBehavior: 'remove-area',
       blocking: {
         entryPermission: 'occupants-at-creation',
         authorizedTokenIds: ['wizard-token', 'ally-token'],
@@ -517,4 +550,13 @@ it('preserves burning web squares across shared JSON and player map normalizatio
     }] }] }
   const player = migrateMapsState(JSON.parse(JSON.stringify(snapshot)))
   expect(player.maps[0].dnd5ePluginAreas?.[0].webState).toEqual(webState)
+})
+
+it('retains movement completion recovery together with the moved position through map migration',()=>{
+ const original={maps:[{id:'recovery-map',tokens:[{id:'mover',label:'Mover',type:'enemy',x:25,y:5}],
+  dnd5ePendingMovementCompletions:[{id:'completion:1',actorTokenId:'mover'}]}]}
+ const restored=migrateMapsState(JSON.parse(JSON.stringify(original)))
+ const again=migrateMapsState(JSON.parse(JSON.stringify(restored)))
+ expect(again.maps[0].tokens[0]).toMatchObject({id:'mover',x:25,y:5})
+ expect(again.maps[0].dnd5ePendingMovementCompletions).toEqual(original.maps[0].dnd5ePendingMovementCompletions)
 })

@@ -9,6 +9,7 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 import type { Dnd5eDamageType } from './damageTypes'
+import type { Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { prepareDnd5eSpellCast } from './spellAction'
 import {
   dnd5eSelectedCombatSpellIds,
@@ -146,7 +147,7 @@ export function dnd5eWarCasterOpportunitySpellOptions(input: {
   turnEconomyByToken?: Dnd5eTurnEconomyByToken
   effectiveRules?: Dnd5eEffectiveRulesContextV1 | null
   now: number
-}): readonly Dnd5eWarCasterOpportunitySpellOption[] {
+}, hostReactionState?: Dnd5eHeadlessCombatState): readonly Dnd5eWarCasterOpportunitySpellOption[] {
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId)
   const character = actorToken?.characterId
     ? input.characters.find((candidate) => candidate.id === actorToken.characterId)
@@ -202,7 +203,7 @@ export function dnd5eWarCasterOpportunitySpellOptions(input: {
           turnEconomy: input.turnEconomy,
           turnEconomyByToken: input.turnEconomyByToken,
           effectiveRules: input.effectiveRules,
-        })
+        }, hostReactionState)
         if (!prepared.ok || prepared.prepared.targetTokens.length !== 1 ||
           prepared.prepared.targetTokens[0]?.id !== input.targetTokenId ||
           prepared.prepared.sustainedEffectAttack != null) continue

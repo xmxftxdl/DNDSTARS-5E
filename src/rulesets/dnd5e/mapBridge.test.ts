@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { applyDnd5eContentBuildChoicesV1, dnd5eCharacterKnownLanguagesV1 } from './buildChoices'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
@@ -24,7 +25,7 @@ import {
   dnd5eConditionsFromActiveEffects,
 } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
-import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
+import { createEmptyMapGeometry, setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
 import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
 import { createDnd5eMonsterInstanceOverride } from './monsterInstanceOverride'
@@ -37,6 +38,7 @@ import { registerDnd5eRulesPlugin } from './pluginApi'
 import { dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated, dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eCombatantCanHearSource } from './audibility'
 import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
+import { DND5E_SRD_ITEM_TEMPLATES } from './items'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -57,6 +59,241 @@ function characterWithConditions(base: Character, conditions: string[]): Charact
 }
 
 describe('D&D 5e map bridge', () => {
+  it.each(['player', 'enemy'] as const)('preserves independent Attack action history through %s map writeback and JSON reload', type => {
+    const hero = character()
+    const characters = type === 'player' ? [hero] : []
+    const map: BattleMap = { id: 'attack-history', name: 'Map', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [token({ id: 'target', type, characterId: type === 'player' ? hero.id : undefined })] }
+    const initiativeOrder = [{ tokenId: 'target', label: 'Target', emoji: '', color: '', roll: 10 }]
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'history', map, characters, initiativeOrder })
+    const history = { turnKey: 'history:1:target', actionOrdinal: 2, attacksTaken: 2,
+      creatureTargetIds: ['first', 'second'], restricted: false }
+    snapshot.state.combatants.target.classState.attackActionHistory = history
+    const plan = planDnd5eMapResultApplication({ ...snapshot, map, characters })
+    const restored = createDnd5eMapCombatSnapshot({ combatId: 'history', initiativeOrder,
+      map: JSON.parse(JSON.stringify(plan.map)), characters: JSON.parse(JSON.stringify(plan.characters)) })
+    expect(restored.state.combatants.target.classState.attackActionHistory).toEqual(history)
+    restored.state.combatants.target.classState.attackActionHistory!.creatureTargetIds.push('third')
+    expect(history.creatureTargetIds).toEqual(['first', 'second'])
+    expect((type === 'player' ? plan.characters[0] : plan.map.tokens[0]).dnd5eCombatState?.attackActionHistory?.creatureTargetIds)
+      .toEqual(['first', 'second'])
+  })
+  it.each(['player', 'enemy'] as const)('persists and clears the Host zero-HP turn across %s reload', type => {
+    const hero = character()
+    let characters = type === 'player' ? [hero] : []
+    let map: BattleMap = {id:'zero-turn-map',name:'Map',width:100,height:100,gridSize:10,gridOffsetX:0,gridOffsetY:0,showGrid:true,
+      tokens:[token({id:'target',type,characterId:type === 'player' ? hero.id : undefined})]}
+    const initiativeOrder = [{tokenId:'target',slotId:'interrupting-turn:test',label:'Target',emoji:'',color:'',roll:10}]
+    const marker = {featureId:'test:zero-turn',slotId:'interrupting-turn:test',phase:'active' as const}
+    for (const expected of [marker, undefined]) {
+      const snapshot = createDnd5eMapCombatSnapshot({combatId:'zero-turn',map,characters,initiativeOrder})
+      snapshot.state.combatants.target.currentHp = 0
+      snapshot.state.combatants.target.classState.zeroHitPointExtraTurn = expected
+      const plan = planDnd5eMapResultApplication({...snapshot,map,characters})
+      expect(!!plan.interruptedTurnState).toBe(!!expected)
+      if (plan.interruptedTurnState) {
+        plan.interruptedTurnState.combatants.target.turn.actionAvailable = false
+        expect(snapshot.state.combatants.target.turn.actionAvailable).toBe(true)
+      }
+      map = JSON.parse(JSON.stringify(plan.map))
+      characters = JSON.parse(JSON.stringify(plan.characters))
+      const rebuilt = createDnd5eMapCombatSnapshot({combatId:'zero-turn',map,characters,initiativeOrder})
+      expect(rebuilt.state.combatants.target.currentHp).toBe(0)
+      expect(rebuilt.state.combatants.target.classState.zeroHitPointExtraTurn).toEqual(expected)
+      expect(rebuilt.state.oneShotInitiativeSlotIds?.includes('interrupting-turn:test') ?? false).toBe(!!expected)
+      if (expected) {
+        rebuilt.state.combatants.target.classState.zeroHitPointExtraTurn!.phase = 'pending'
+        expect(marker.phase).toBe('active')
+        expect((type === 'player' ? characters[0] : map.tokens[0]).dnd5eCombatState?.zeroHitPointExtraTurn?.phase).toBe('active')
+      }
+    }
+  })
+  it.each(['player','enemy'] as const)('does not repeatedly halve an odd exhausted HP maximum on %s reload',type=>{
+    const ledger={schemaVersion:1 as const,baseLevel:4,sources:[]}
+    let characters:Character[]=type==='player'?[{...character(),maxHp:101,currentHp:90,exhaustionLevel:4,dnd5eCombatState:{sourcedExhaustion:ledger}}]:[]
+    let map:BattleMap={id:'fatigue-hp',name:'Map',width:100,height:100,gridSize:10,gridOffsetX:0,gridOffsetY:0,showGrid:true,
+      tokens:[token({id:'target',type,characterId:type==='player'?'char':undefined,maxHp:101,hp:90,dnd5eCombatState:{sourcedExhaustion:ledger}})]}
+    const initiativeOrder=[{tokenId:'target',label:'Target',emoji:'',color:'',roll:10}]
+    for(let i=0;i<3;i++){
+      const snapshot=createDnd5eMapCombatSnapshot({combatId:'fatigue-hp',map,characters,initiativeOrder})
+      expect(snapshot.state.combatants.target).toMatchObject({maxHp:50,currentHp:50})
+      const result=planDnd5eMapResultApplication({...snapshot,map,characters})
+      map=JSON.parse(JSON.stringify(result.map))
+      characters=JSON.parse(JSON.stringify(result.characters))
+      expect(type==='player'?characters[0].maxHp:map.tokens[0].maxHp).toBe(101)
+    }
+  })
+  it.each(['player', 'enemy'] as const)('persists independently removable exhaustion through JSON reload for %s', type => {
+    const hero = character()
+    const target = token({id:'fatigue-target',type,characterId:type==='player'?hero.id:undefined})
+    const map: BattleMap = {id:'fatigue-map',name:'Map',width:100,height:100,gridSize:10,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[target]}
+    const characters = type==='player'?[hero]:[]
+    const initiativeOrder = [{tokenId:target.id,label:target.label,emoji:'',color:'',roll:10}]
+    const snapshot = createDnd5eMapCombatSnapshot({combatId:'fatigue-combat',map,characters,initiativeOrder})
+    const ledger = {schemaVersion:1 as const,baseLevel:1,sources:[{sourceId:'area-a',levels:1},{sourceId:'area-b',levels:1}]}
+    snapshot.state.combatants[target.id].classState.sourcedExhaustion=ledger
+    snapshot.state.combatants[target.id].exhaustionLevel=3
+    const plan=planDnd5eMapResultApplication({...snapshot,map,characters})
+    const loaded=JSON.parse(JSON.stringify(plan.map)) as BattleMap
+    const updated=JSON.parse(JSON.stringify(characters.map(entry=>({...entry,...plan.characterPatches?.[entry.id]})))) as Character[]
+    const rebuilt=createDnd5eMapCombatSnapshot({combatId:'fatigue-combat',map:loaded,characters:updated,initiativeOrder})
+    expect(rebuilt.state.combatants[target.id].exhaustionLevel).toBe(3)
+    expect(rebuilt.state.combatants[target.id].classState.sourcedExhaustion).toEqual(ledger)
+    rebuilt.state.combatants[target.id].classState.sourcedExhaustion!.sources[0].levels=2
+    expect(ledger.sources[0].levels).toBe(1)
+    expect(target.dnd5eCombatState?.sourcedExhaustion).toBeUndefined()
+  })
+  it.each(['player', 'enemy'] as const)('preserves separate floor support for %s without lifting actors under the ceiling', type => {
+    const hero = character()
+    const target = token({ id:'floor-actor',type,characterId:type==='player'?hero.id:undefined,x:50,y:50,elevationFeet:10 })
+    const map: BattleMap={id:'floor-map',name:'Floors',width:200,height:200,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[target]}
+    const geometry=createEmptyMapGeometry(map.id,1)
+    geometry.obstacles=[10,20,30].map(top=>({id:`floor-${top}`,kind:'obstacle' as const,label:'Floor',
+      points:[{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}],cover:'total' as const,
+      surfaceMaterial:'stone' as const,blocksMovement:true,blocksVision:true,blocksLineOfEffect:true,baseHeightFeet:top-0.5,heightFeet:0.5,createdAt:1,
+      dnd5eDurability:{hitPoints:180,maxHitPoints:180,damageThreshold:0}}))
+    setMapGeometryRuntime([geometry])
+    const read=()=>createDnd5eMapCombatSnapshot({combatId:'floor-combat',map,characters:type==='player'?[hero]:[],
+      initiativeOrder:[{tokenId:target.id,label:target.label,emoji:'',color:'',roll:10}]}).state.combatants[target.id]
+    expect(read()).toMatchObject({elevationFeet:10,groundElevationFeet:10,airborne:false})
+    target.elevationFeet=0
+    expect(read()).toMatchObject({elevationFeet:0,groundElevationFeet:0,airborne:false})
+    target.elevationFeet=25
+    expect(read()).toMatchObject({elevationFeet:25,groundElevationFeet:20,airborne:true})
+    geometry.obstacles[1].dnd5eDurability!.hitPoints=0
+    setMapGeometryRuntime([JSON.parse(JSON.stringify(geometry))])
+    expect(read()).toMatchObject({elevationFeet:25,groundElevationFeet:10,airborne:true})
+  })
+  it.each(['player', 'enemy'] as const)('retains delayed Hurl dice through map and character persistence: %s', type => {
+    const hero = character()
+    const target = token({ id: 'hurl-target', type, characterId: type === 'player' ? hero.id : undefined })
+    const map: BattleMap = { id: 'hurl-map', name: 'Map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [target] }
+    const characters = type === 'player' ? [hero] : []
+    const initiativeOrder = [{ tokenId: target.id, label: target.label, emoji: '', color: '', roll: 10 }]
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'hurl-combat', map, characters, initiativeOrder })
+    const pending = { hurlThroughHellSourceId: 'warlock', hurlThroughHellDamage: 30,
+      hurlThroughHellPendingRolls: Array(10).fill(3), hurlThroughHellAppliedTurnKey: 'hurl-combat:1:warlock' }
+    Object.assign(snapshot.state.combatants[target.id].classState, pending)
+    const plan = planDnd5eMapResultApplication({ ...snapshot, map, characters })
+    const persisted = type === 'player' ? plan.characterPatches?.[hero.id].dnd5eCombatState : plan.tokenPatches?.[target.id].dnd5eCombatState
+    expect(persisted).toMatchObject(pending)
+    const loaded = JSON.parse(JSON.stringify(plan.map)) as BattleMap
+    const updatedCharacters = JSON.parse(JSON.stringify(characters.map(entry => ({ ...entry, ...plan.characterPatches?.[entry.id] })))) as Character[]
+    const rebuilt = createDnd5eMapCombatSnapshot({ combatId: 'hurl-combat', map: loaded, characters: updatedCharacters, initiativeOrder })
+    expect(rebuilt.state.combatants[target.id].classState).toMatchObject(pending)
+    expect(map.tokens[0].dnd5eCombatState?.hurlThroughHellPendingRolls).toBeUndefined()
+  })
+
+  it.each(['player', 'enemy'] as const)('persists Host straight movement history for %s tokens', type => {
+    const hero = character()
+    const mover = token({ id: 'streak-owner', type, characterId: type === 'player' ? hero.id : undefined })
+    const map: BattleMap = { id: 'streak-map', name: 'Map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [mover] }
+    const characters = type === 'player' ? [hero] : []
+    const initiativeOrder = [{ tokenId: mover.id, label: mover.label, emoji: '', color: '', roll: 10 }]
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'streak-combat', map, characters, initiativeOrder })
+    const streak = { turnKey: 'streak-combat:1:streak-owner', end: { x: 50, y: 0 }, direction: { x: 1, y: 0 }, distanceFeet: 5 }
+    snapshot.state.combatants[mover.id].classState.straightMovementStreak = streak
+    const withinReach = {guard:{turnKey:streak.turnKey,end:{x:50,y:0,elevationFeet:0},
+      attackerPosition:{x:50,y:10,elevationFeet:0},reachFeet:5,distanceFeet:2.5,lastCommitKey:'movement:1'}}
+    snapshot.state.combatants[mover.id].classState.withinReachMovementByAttacker = withinReach
+    const plan = planDnd5eMapResultApplication({ ...snapshot, map, characters })
+    const persisted = type === 'player' ? plan.characterPatches?.[hero.id].dnd5eCombatState : plan.tokenPatches?.[mover.id].dnd5eCombatState
+    expect(persisted?.straightMovementStreak).toEqual(streak)
+    expect(persisted?.withinReachMovementByAttacker).toEqual(withinReach)
+    const loaded = JSON.parse(JSON.stringify(plan.map)) as BattleMap
+    const updatedCharacters = characters.map(entry => ({ ...entry, ...plan.characterPatches?.[entry.id] }))
+    const rebuilt = createDnd5eMapCombatSnapshot({ combatId: 'streak-combat', map: loaded, characters: updatedCharacters, initiativeOrder })
+    expect(rebuilt.state.combatants[mover.id].classState.straightMovementStreak).toEqual(streak)
+    expect(rebuilt.state.combatants[mover.id].classState.withinReachMovementByAttacker).toEqual(withinReach)
+    expect(map.tokens[0].dnd5eCombatState?.straightMovementStreak).toBeUndefined()
+  })
+  it('persists trigger receipts for independent monster tokens through map reload', () => {
+    const enemy = token({ id: 'receipt-owner' })
+    const map: BattleMap = { id: 'receipt-map', name: 'Map', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [enemy] }
+    const initiativeOrder = [{ tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 10 }]
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'receipt-combat', map, characters: [], initiativeOrder })
+    const receipts = { combatId: 'receipt-combat', ids: ['synthetic-host-event:feature'] }
+    snapshot.state.combatants[enemy.id].classState.activityTriggerReceipts = receipts
+    const plan = planDnd5eMapResultApplication({ ...snapshot, map, characters: [] })
+    expect(plan.tokenPatches?.[enemy.id].dnd5eCombatState?.activityTriggerReceipts).toEqual(receipts)
+    const loaded = JSON.parse(JSON.stringify(plan.map)) as BattleMap
+    const rebuilt = createDnd5eMapCombatSnapshot({ combatId: 'receipt-combat', round: 2, map: loaded, characters: [], initiativeOrder })
+    expect(rebuilt.state.combatants[enemy.id].classState.activityTriggerReceipts).toEqual(receipts)
+    expect(map.tokens[0].dnd5eCombatState?.activityTriggerReceipts).toBeUndefined()
+  })
+  it('persists actual granted-rest expiry and opens its rest activity window without resetting used receipts', () => {
+    const hero: Character = { ...character(), rulesetId: 'dnd5e-2014-srd-5.1', charClass: '战士', level: 2,
+      dnd5eWorldTimeAppliedMinute: 600, classResources: { fighterSecondWind: { current: 0, max: 1 } },
+      dnd5eCombatState: { activeEffects: [createDnd5eConditionEffect({ condition: 'unconscious', targetId: 'char',
+        source: { kind: 'spell', rulesId: 'synthetic-rest' }, duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end' },
+        completionRequirement: { condition: 'unconscious', interrupted: false }, completionReward: { kind: 'short-rest' },
+      })] },
+    }
+    const player = token({ id: 'owner', type: 'player', characterId: hero.id })
+    const enemy = token({ id: 'other', x: 5 })
+    const map: BattleMap = { id: 'rest-map', name: 'Rest', width: 100, height: 100, gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [player, enemy] }
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'rest-map', map, characters: [hero], initiativeOrder: [
+      { tokenId: player.id, label: player.label, emoji: '', color: '', roll: 20 },
+      { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 10 },
+    ] })
+    const result = resolveDnd5eHeadlessAction(snapshot.state, { type: 'end-turn', actorId: player.id })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const plan = planDnd5eMapResultApplication({ ...snapshot, state: result.state, events: [...result.events], map, characters: [hero] })
+    const recovered = plan.characters[0]
+    expect(recovered.classResources?.fighterSecondWind.current).toBe(1)
+    expect(recovered.dnd5eRestActivityWindow).toMatchObject({ event: 'short-rest-complete', completedWorldMinute: 600 })
+    expect(recovered.dnd5eCombatState?.lastGrantedShortRest?.receiptId).toBeTruthy()
+    recovered.dnd5eRestActivityWindow!.receipts['["test","feature"]'] = 'used'
+    const replay = planDnd5eMapResultApplication({ ...snapshot, state: result.state, map: plan.map, characters: [recovered] })
+    expect(replay.characters[0].dnd5eRestActivityWindow?.receipts['["test","feature"]']).toBe('used')
+  })
+  it('round-trips unequipped item resources and combines equipped resource spending in one inventory revision', () => {
+    const hero = character()
+    hero.dnd5eInventory = { schemaVersion: 2, revision: 2, entries: [{
+      instanceId: 'backpack', templateId: 'test:backpack', quantity: 1, acquiredAt: 1,
+      item: { ...DND5E_SRD_ITEM_TEMPLATES[0], id: 'test:backpack', resources: [{ id: 'charge', label: 'Charge', maximum: 4, resetOn: 'short-rest' }] },
+      resources: { charge: { id: 'charge', label: 'Charge', current: 0, maximum: 4, resetOn: 'short-rest' } },
+    }] }
+    const player = token({ id: 'owner', type: 'player', characterId: hero.id })
+    const map: BattleMap = { id: 'resource-map', name: 'Resources', width: 100, height: 100, gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [player] }
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'resources', map, characters: [hero], initiativeOrder: [{ tokenId: player.id, label: player.label, emoji: '', color: '', roll: 10 }] })
+    const actor = snapshot.state.combatants[player.id]
+    expect(actor.inventoryHeadlessEffects).toEqual([])
+    expect(actor.inventoryResourceSnapshots?.[0].resources.charge).toMatchObject({ current: 0, resetOn: 'short-rest' })
+    actor.inventoryResourceSnapshots![0].resources.charge.current = 4
+    actor.inventoryRevision = 3
+    const recovered = planDnd5eMapResultApplication({ ...snapshot, map, characters: [hero] })
+    expect(recovered.characters[0].dnd5eInventory?.entries[0].resources?.charge.current).toBe(4)
+    expect(hero.dnd5eInventory.entries[0].resources?.charge.current).toBe(0)
+    actor.inventoryHeadlessEffects = [{ instanceId: 'backpack', templateId: 'test:backpack', itemName: 'Synthetic effect', equippedSlot: 'mainWeapon', effectId: 'guard', effect: { schemaVersion: 1, kind: 'damage-reduction', trigger: 'before-damage', amount: 1 }, resources: { ...actor.inventoryResourceSnapshots![0].resources, charge: { ...actor.inventoryResourceSnapshots![0].resources.charge, current: 2 } } }]
+    actor.inventoryRevision = 4
+    const spent = planDnd5eMapResultApplication({ ...snapshot, map, characters: recovered.characters })
+    expect(spent.characters[0].dnd5eInventory?.entries[0].resources?.charge.current).toBe(2)
+    actor.inventoryRevision = 3
+    actor.inventoryResourceSnapshots![0].resources.charge.current = 1
+    const stale = planDnd5eMapResultApplication({ ...snapshot, map, characters: spent.characters })
+    expect(stale.characters[0].dnd5eInventory?.entries[0].resources?.charge.current).toBe(2)
+  })
+  it('projects acquired language grants consistently and removes them when the grant is removed', () => {
+    const hero = { ...character(), dnd5eBackgroundLanguages: ['Common', 'draconic'] }
+    const applied = applyDnd5eContentBuildChoicesV1({ character: hero, contentId: 'test:language', advancements: [{
+      schemaVersion: 1, id: 'language', level: 1, kind: 'build-grant', grants: [{ kind: 'tag', key: 'language', value: 'Sylvan' }],
+    }] })
+    expect(applied.ok).toBe(true)
+    if (!applied.ok) return
+    expect(dnd5eCharacterKnownLanguagesV1(applied.character)).toEqual(['common', 'draconic', 'sylvan'])
+    const player = token({ id: 'speaker', type: 'player', characterId: hero.id })
+    const map: BattleMap = { id: 'language-map', name: 'Language', width: 100, height: 100, gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [player] }
+    const snapshot = (subject: Character) => createDnd5eMapCombatSnapshot({ combatId: 'language', map, characters: [subject], initiativeOrder: [{ tokenId: player.id, label: player.label, emoji: '', color: '', roll: 10 }] }).state.combatants[player.id]
+    expect(snapshot(applied.character).languages).toEqual(['common', 'draconic', 'sylvan'])
+    expect(snapshot({ ...applied.character, dnd5eContentChoices: {} }).languages).toEqual(['common', 'draconic'])
+    expect(hero.dnd5eBackgroundLanguages).toEqual(['Common', 'draconic'])
+  })
   afterEach(() => {
     setMapGeometryRuntime([])
     setDnd5eRoomMonsterCatalog([])
@@ -466,7 +703,12 @@ describe('D&D 5e map bridge', () => {
     })
     const hero: Character = {
       ...character(),
-      dnd5eCombatState: { schemaVersion: 2, activeEffects: [magicalEffect] },
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [magicalEffect, createDnd5eConditionEffect({
+        id: 'rest-in-antimagic', condition: 'unconscious', targetId: 'char',
+        source: { kind: 'spell', rulesId: 'synthetic-rest', magical: true },
+        duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+        completionRequirement: { condition: 'unconscious', interrupted: false }, completionReward: { kind: 'short-rest' },
+      })] },
     }
     const heroToken = token({
       id: 'hero-token', type: 'player', characterId: hero.id, x: 25, y: 25,
@@ -498,6 +740,7 @@ describe('D&D 5e map bridge', () => {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
     })
     expect(plan.characters[0].dnd5eCombatState?.activeEffects?.[0].suspendedBy).toBeUndefined()
+    expect(plan.characters[0].dnd5eCombatState?.activeEffects?.find(effect => effect.id === 'rest-in-antimagic')?.completionRequirement?.interrupted).toBe(true)
     const outside = createDnd5eMapCombatSnapshot({
       combatId: 'antimagic',
       map: { ...plan.map, tokens: [{ ...heroToken, x: 75, y: 75 }] },
@@ -507,6 +750,7 @@ describe('D&D 5e map bridge', () => {
     expect(outside.state.combatants[heroToken.id].magicSuppressed).not.toBe(true)
     expect(outside.state.combatants[heroToken.id].classState.activeEffects?.[0].suspendedBy)
       .toBeUndefined()
+    expect(outside.state.combatants[heroToken.id].classState.activeEffects?.find(effect => effect.id === 'rest-in-antimagic')?.completionRequirement?.interrupted).toBe(true)
   })
 
   it('incapacitates Antimagic Susceptibility monsters only while they occupy an antimagic area', () => {
@@ -1125,6 +1369,10 @@ describe('D&D 5e map bridge', () => {
       'custom-resources:1:other'
     snapshot.state.combatants[monsterToken.id].classState.monsterReactiveUsedTurnKey =
       'custom-resources:1:other'
+    Object.assign(snapshot.state.combatants[monsterToken.id].classState, {
+      movementStoppedTurnKey:'custom-resources:1:custom',normalReactionSpentThisTurn:true,
+      specialOpportunityReactionUsed:true,reactionAvailableBeforeSpecial:false,
+    })
     const plan = planDnd5eMapResultApplication({
       state: snapshot.state,
       map,
@@ -1134,6 +1382,8 @@ describe('D&D 5e map bridge', () => {
     expect(plan.map.tokens[0].dnd5eCombatState?.monsterActionUsesByActionId?.[draft.actions[0].id])
       .toEqual({ current: 1, max: 2 })
     expect(plan.map.tokens[0].dnd5eCombatState).toMatchObject({
+      movementStoppedTurnKey:'custom-resources:1:custom',normalReactionSpentThisTurn:true,
+      specialOpportunityReactionUsed:true,reactionAvailableBeforeSpecial:false,
       attacksMadeTurnKey: 'custom-resources:1:custom',
       attacksMadeThisTurn: 1,
       recklessAttackTurnKey: 'custom-resources:1:custom',
@@ -1147,6 +1397,8 @@ describe('D&D 5e map bridge', () => {
       initiativeOrder: [{ tokenId: monsterToken.id, label: monsterToken.label, emoji: '', color: '', roll: 10 }],
     })
     expect(reconnected.state.combatants[monsterToken.id].classState).toMatchObject({
+      movementStoppedTurnKey:'custom-resources:1:custom',normalReactionSpentThisTurn:true,
+      specialOpportunityReactionUsed:true,reactionAvailableBeforeSpecial:false,
       attacksMadeTurnKey: 'custom-resources:1:custom',
       attacksMadeThisTurn: 1,
       recklessAttackTurnKey: 'custom-resources:1:custom',
@@ -2219,8 +2471,9 @@ describe('D&D 5e map bridge', () => {
     const hero: Character = {
       ...character(),
       dnd5eCombatState: {
-        activeEffectDamageSavePendingIds: ['hero-effect'],
+        activeEffectDamageSavePendingIds: ['hero-effect', 'hero-effect'],
         activeEffectDamageSavePendingModes: { 'hero-effect': 'advantage' },
+        activeEffectDamageSavePendingQueue: [{ effectId: 'hero-effect', mode: 'normal' }, { effectId: 'hero-effect', mode: 'advantage' }],
         monsterOnHitSavePending: {
           sourceId: 'zombie-token', actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
         },
@@ -2230,8 +2483,9 @@ describe('D&D 5e map bridge', () => {
     const zombie = token({
       id: 'zombie-token', poolId: 'srd-5.1:zombie', hp: 0, maxHp: 22,
       dnd5eCombatState: {
-        activeEffectDamageSavePendingIds: ['zombie-effect'],
+        activeEffectDamageSavePendingIds: ['zombie-effect', 'zombie-effect'],
         activeEffectDamageSavePendingModes: { 'zombie-effect': 'normal' },
+        activeEffectDamageSavePendingQueue: [{ effectId: 'zombie-effect', mode: 'normal' }, { effectId: 'zombie-effect', mode: 'advantage' }],
         undeadFortitudePending: { dc: 12, damage: 7, sourceId: heroToken.id },
       },
     })
@@ -2251,7 +2505,7 @@ describe('D&D 5e map bridge', () => {
     expect(first.state.combatants[heroToken.id].classState.monsterOnHitSavePending).toMatchObject({
       sourceId: zombie.id, actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
     })
-    expect(first.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect'])
+    expect(first.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect', 'hero-effect'])
     expect(first.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingModes)
       .toEqual({ 'hero-effect': 'advantage' })
     const plan = planDnd5eMapResultApplication({
@@ -2260,7 +2514,7 @@ describe('D&D 5e map bridge', () => {
     expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.undeadFortitudePending)
       .toEqual({ dc: 12, damage: 7, sourceId: heroToken.id })
     expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.activeEffectDamageSavePendingIds)
-      .toEqual(['zombie-effect'])
+      .toEqual(['zombie-effect', 'zombie-effect'])
     expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.activeEffectDamageSavePendingModes)
       .toEqual({ 'zombie-effect': 'normal' })
     expect(plan.characters[0].dnd5eCombatState?.monsterOnHitSavePending).toMatchObject({
@@ -2270,10 +2524,15 @@ describe('D&D 5e map bridge', () => {
     const reconnected = createDnd5eMapCombatSnapshot({
       combatId: 'combat', map: plan.map, characters: plan.characters, initiativeOrder,
     })
+    for (const [id,effectId] of [[heroToken.id,'hero-effect'],[zombie.id,'zombie-effect']]) {
+      expect(reconnected.state.combatants[id].classState.activeEffectDamageSavePendingQueue).toEqual([
+        {effectId,mode:'normal'},{effectId,mode:'advantage'},
+      ])
+    }
     expect(reconnected.state.combatants[zombie.id].classState.undeadFortitudePending?.dc).toBe(12)
     expect(reconnected.state.combatants[heroToken.id].classState.monsterOnHitSavePending?.dc).toBe(11)
-    expect(reconnected.state.combatants[zombie.id].classState.activeEffectDamageSavePendingIds).toEqual(['zombie-effect'])
-    expect(reconnected.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect'])
+    expect(reconnected.state.combatants[zombie.id].classState.activeEffectDamageSavePendingIds).toEqual(['zombie-effect', 'zombie-effect'])
+    expect(reconnected.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect', 'hero-effect'])
     expect(reconnected.state.combatants[zombie.id].classState.activeEffectDamageSavePendingModes)
       .toEqual({ 'zombie-effect': 'normal' })
     expect(reconnected.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingModes)

@@ -50,6 +50,9 @@ export function mapViewportRelevantCharacterIds(
   const result = new Set(tokenCharacterIdById.values())
 
   for (const token of tokens) {
+    if (token.dnd5eSpellEffect?.visionFromSource) {
+      collectSourceActorId(token.dnd5eSpellEffect.sourceCharacterId, tokenCharacterIdById, characterIds, result)
+    }
     for (const effect of token.dnd5eCombatState?.activeEffects ?? []) {
       collectSourceActorId(effect.source.actorId, tokenCharacterIdById, characterIds, result)
     }

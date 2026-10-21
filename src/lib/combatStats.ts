@@ -1,3 +1,4 @@
+import { DND5E_DAMAGE_TYPE_LABELS, type Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 import type { Character } from '../types/character'
 import type { EquipmentItem } from '../types/equipment'
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
@@ -66,8 +67,6 @@ function effectSummary(item: EquipmentItem): string {
   return labels.length ? ` · ${labels.join(' · ')}` : ''
 }
 
-function damageTypeLabel(type: 'slashing' | 'piercing' | 'bludgeoning'): string {
-  if (type === 'slashing') return '挥砍伤害'
-  if (type === 'piercing') return '穿刺伤害'
-  return '钝击伤害'
+function damageTypeLabel(type: Dnd5eDamageType): string {
+  return DND5E_DAMAGE_TYPE_LABELS[type] + '伤害'
 }

@@ -83,7 +83,12 @@ export function shouldOpenD20RollConfirmation(input: {
   visibility: 'public' | 'dm-only'
   outcome: D20ResolvedOutcome
   eligibleEnemyModifiers?: readonly D20EnemyModifierOption[]
+  combatActive?: boolean
+  forceOpen?: boolean
 }): boolean {
+  // Explicit effect choices also apply to exploration checks.
+  if (input.forceOpen) return true
+  if (input.combatActive === false) return false
   if (input.visibility === 'dm-only') return true
   const modifiers = input.eligibleEnemyModifiers ?? []
   if (modifiers.some((entry) => entry.modifierKind === 'choice-reroll')) return true

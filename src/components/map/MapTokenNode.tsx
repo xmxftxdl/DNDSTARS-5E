@@ -1,3 +1,4 @@
+import { isDnd5eInvisibleVisionSensor } from '../../../shared/dnd5e-vision-profile.mjs'
 import { tokenScale, tokenLineWidth, tokenDash } from './tokenStrokeGeometry'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
@@ -225,6 +226,19 @@ function Dnd5eStandardConditionBadge({
   const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
   const style = condition ? DND5E_CONDITION_MARKERS[condition] : undefined
   const conditionImage = useTokenBadgeImage(style?.icon)
+  const backgroundRef = useRef<Konva.Circle>(null)
+  const backgroundFill = mark?.backgroundColor ?? style?.fill ?? '#312e81'
+  const backgroundStroke = mark?.borderColor ?? '#ffffff'
+  const backgroundGlow = mark?.glowColor ?? style?.stroke ?? '#a78bfa'
+  useLayoutEffect(() => {
+    const background = backgroundRef.current
+    if (!background) return
+    // Fill + stroke + shadow otherwise uses the full stage buffer for every
+    // badge on every redraw. Cache only this static shape, including its glow;
+    // the label, icon and interactive group remain independently updatable.
+    background.cache()
+    return () => { background.clearCache() }
+  }, [radius, size, backgroundFill, backgroundStroke, backgroundGlow])
   return (
     <Group
       x={x}
@@ -245,12 +259,13 @@ function Dnd5eStandardConditionBadge({
       onMouseLeave={() => onTooltipChange?.()}
     >
       <Circle
+        ref={backgroundRef}
         radius={size / 2}
-        fill={mark?.backgroundColor ?? style?.fill ?? '#312e81'}
-        stroke={mark?.borderColor ?? '#ffffff'}
+        fill={backgroundFill}
+        stroke={backgroundStroke}
         strokeWidth={tokenLineWidth(radius, 1.5)}
         shadowBlur={4 * tokenScale(radius)}
-        shadowColor={mark?.glowColor ?? style?.stroke ?? '#a78bfa'}
+        shadowColor={backgroundGlow}
         listening={!!onClick || !!onTooltipChange}
       />
       <Text
@@ -821,6 +836,7 @@ export function TokenNode({
   targetSelected = false,
   targetSelectable = false,
   defeated = false,
+  illusionRecognized = false,
   currentTurn = false,
   borderColor,
   draggable = true,
@@ -856,6 +872,7 @@ export function TokenNode({
   targetSelected?: boolean
   targetSelectable?: boolean
   defeated?: boolean
+  illusionRecognized?: boolean
   currentTurn?: boolean
   borderColor?: string
   draggable?: boolean
@@ -886,6 +903,8 @@ export function TokenNode({
   instantPosition?: boolean
 }) {
   const flightTooltip = flightTokenTooltip(flightHeightFeet)
+  const linkedProjection = token.dnd5eLinkedProjectionVisible === true ? token.dnd5eSpellEffect?.linkedTargetProjection : undefined
+  if (linkedProjection) token = { ...token, ...linkedProjection.presentation, label: linkedProjection.name }
   const groupRef = useRef<Konva.Group>(null)
   const sharedTokenImageId = token.tokenPortraitImageId ?? token.portraitImageId
   const tokenImageKey = token.tokenPortrait
@@ -917,6 +936,7 @@ export function TokenNode({
   const draggingRef = useRef(false)
   const externalPositionLockedRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
+  const suppressTouchMouseClickUntilRef = useRef(0)
   const prevGridSizeRef = useRef(gridSize)
   // 拖拽起点（用于判断是否超过移动阈值）
   const dragStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -985,7 +1005,8 @@ export function TokenNode({
   // movement and Headless settlement still work without drawing a second
   // black-backed fire token on top of the sphere.
   const hidePersistentEffectTokenBody =
-    token.dnd5eSpellEffect?.hiddenBody === true ||
+    (token.dnd5eSpellEffect?.hiddenBody === true && !linkedProjection &&
+      !(isDnd5eInvisibleVisionSensor(token) && token.dnd5eSensorVisible === true)) ||
     token.dnd5eSpellEffect?.spellId === 'flaming-sphere' ||
     token.dnd5eSpellEffect?.spellId === 'spiritual-weapon' ||
     token.dnd5eSpellEffect?.spellId === 'mislead' ||
@@ -1392,8 +1413,12 @@ export function TokenNode({
     e.cancelBubble = true
     // A right-click cancels targeting; Konva also emits click for that mouse-up.
     if ('button' in e.evt && e.evt.button !== 0) return
-    if (draggingRef.current || Date.now() < suppressClickUntilRef.current) return
-    suppressClickUntilRef.current = Date.now() + 300
+    const now = Date.now()
+    if (draggingRef.current || now < suppressClickUntilRef.current) return
+    // Ignore only a touch gesture's synthesized mouse click. Distinct mouse
+    // clicks must remain selectable when assigning several projectiles.
+    if ('button' in e.evt && now < suppressTouchMouseClickUntilRef.current) return
+    if ('touches' in e.evt) suppressTouchMouseClickUntilRef.current = now + 300
     onSelect()
   }
 
@@ -1403,7 +1428,7 @@ export function TokenNode({
       name="map-token"
       id={token.id}
       draggable={draggable}
-      opacity={defeated ? 0.55 : isMirrorImageDecoy ? 0.74 : 1}
+      opacity={linkedProjection ? 0.45 : illusionRecognized ? 0.35 : defeated ? 0.55 : isMirrorImageDecoy ? 0.74 : 1}
       onClick={handleTokenSelect}
       onTap={handleTokenSelect}
       onMouseEnter={() => onHoverChange?.(true)}
@@ -1629,9 +1654,10 @@ export function TokenNode({
       )}
       {!hidePersistentEffectTokenBody && !tokenImage && (
         <Text
-          text={token.emoji}
+          text={token.emoji || (token.dnd5eObjectState?.inventoryItem ? token.label : '')}
+          fill={!token.emoji && token.dnd5eObjectState?.inventoryItem ? '#f8fafc' : undefined}
           y={emojiOffsetY}
-          fontSize={radius * emojiFontScale}
+          fontSize={radius * (token.emoji || !token.dnd5eObjectState?.inventoryItem ? emojiFontScale : 0.55)}
           width={radius * 2}
           height={radius * 2}
           offsetX={radius}

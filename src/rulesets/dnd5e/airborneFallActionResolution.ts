@@ -22,6 +22,7 @@ export function resolveDnd5eActionWithAirborneFallPreview(
   action: Dnd5eAction,
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls,
   options?: Parameters<typeof resolveDnd5eHeadlessAction>[2],
+  executionOptions?: Parameters<typeof resolveDnd5eHeadlessAction>[3],
 ): {
   result: Dnd5eActionResult
   airborneFalls?: readonly Dnd5eUnsupportedAirborneFallPreview[]
@@ -31,13 +32,13 @@ export function resolveDnd5eActionWithAirborneFallPreview(
     airborneFallDamageRollsByCombatantId,
   }
   const fallPreview = airborneFallDamageRollsByCombatantId == null
-    ? previewDnd5eUnsupportedAirborneFalls(state, actionWithFallRolls)
+    ? previewDnd5eUnsupportedAirborneFalls(state, actionWithFallRolls, options, executionOptions)
     : undefined
   const airborneFalls = fallPreview?.ok && fallPreview.falls.length > 0
     ? fallPreview.falls
     : undefined
   return {
-    result: resolveDnd5eHeadlessAction(state, actionWithFallRolls, options),
+    result: resolveDnd5eHeadlessAction(state, actionWithFallRolls, options, executionOptions),
     airborneFalls,
   }
 }

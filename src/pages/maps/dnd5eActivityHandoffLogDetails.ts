@@ -2,6 +2,8 @@ import type { Dnd5eActivityDefinitionV1 } from '../../rulesets/dnd5e/activities/
 import type { Dnd5eFormulaV1 } from '../../rulesets/dnd5e/activities/dnd5eFormula'
 import type { Dnd5eCombatEvent } from '../../application/combat/dnd5eCombatRules'
 import type { Dnd5ePluginDiceRollResult } from '../../rulesets/dnd5e/pluginApi'
+import { dnd5eConditionLabel } from '../../rulesets/dnd5e/conditions'
+import type { Dnd5eActivityMapHandoffResultV1 } from '../../rulesets/dnd5e/activities/dnd5eActivityMapInteraction'
 
 export interface Dnd5eActivityMapObjectLockLogDetail {
   mode: 'arcane-lock' | 'knock'
@@ -135,14 +137,18 @@ export function dnd5eActivityRollLogDetails(
       const targetId = rollId.startsWith(`${check.rollId}:`)
         ? rollId.slice(check.rollId.length + 1)
         : undefined
-      const settled = events.find((event) =>
-        event.type === 'ability-check-resolved' &&
-        (targetId == null || event.perceivedTargetId === targetId))
+      const settled = events.find((event) => check.kind === 'concentration-check'
+        ? event.type === 'concentration-resolved' &&
+          (event.activityId == null || event.activityId === activity?.id) &&
+          (event.checkId == null || event.checkId === check.id)
+        : event.type === 'ability-check-resolved' &&
+          (targetId == null || event.perceivedTargetId === targetId))
       const candidates = roll.values.join(' / ')
-      if (settled?.type === 'ability-check-resolved') {
-        const modifier = settled.modifier === 0
+      if (settled?.type === 'ability-check-resolved' || settled?.type === 'concentration-resolved') {
+        const authoritativeModifier = settled.total - settled.d20
+        const modifier = authoritativeModifier === 0
           ? '+ 0'
-          : `${settled.modifier > 0 ? '+' : '-'} ${Math.abs(settled.modifier)}`
+          : `${authoritativeModifier > 0 ? '+' : '-'} ${Math.abs(authoritativeModifier)}`
         const outcome = settled.dc == null
           ? ''
           : `；对抗 DC ${settled.dc}｜${settled.success ? '成功' : '失败'}`
@@ -161,7 +167,7 @@ export function dnd5eActivityRollLogDetails(
 
 export interface Dnd5eActivityMovementLogDetail {
   targetId: string
-  mode: 'push' | 'pull' | 'forced' | 'teleport' | 'swap' | 'ascend' | 'descend'
+  mode: 'push' | 'pull' | 'forced' | 'voluntary' | 'teleport' | 'swap' | 'ascend' | 'descend'
   distanceFeet: number
 }
 
@@ -198,6 +204,7 @@ export function dnd5eActivityChoiceLogDetails(
  * rule-significant result beside the ordinary Headless event evidence.
  */
 export function dnd5eActivityHandoffLogDetails(input: {
+  persistentEntityResults?: Dnd5eActivityMapHandoffResultV1['persistentEntityResults']
   mapObjectLocks?: readonly Dnd5eActivityMapObjectLockLogDetail[]
   movements?: readonly Dnd5eActivityMovementLogDetail[]
   targetLabelsById?: Readonly<Record<string, string>>
@@ -222,7 +229,15 @@ export function dnd5eActivityHandoffLogDetails(input: {
       : ''
     return [`地图垂直位移：${label}｜${movement.mode === 'ascend' ? '上升' : '下降'} ${distanceFeet} 尺${elevationDetail}`]
   })
-  return [...lockDetails, ...verticalMovementDetails]
+  const entityDetails = (input?.persistentEntityResults ?? []).flatMap(result => {
+    const details = [
+      ...(result.savingThrow ? [`${result.savingThrow.ability.toUpperCase()} 豁免自动成功（无需掷骰）`] : []),
+      ...(result.damageImmune ? ['免疫伤害'] : []),
+      ...(result.immuneConditions?.length ? [`免疫状态：${result.immuneConditions.map(dnd5eConditionLabel).join('、')}`] : []),
+    ]
+    return details.length ? [`${result.label}：${details.join('；')}`] : []
+  })
+  return [...lockDetails, ...verticalMovementDetails, ...entityDetails]
 }
 
 /** Structured ownership accompanies display text; arbitrary text never grants visibility. */
@@ -266,7 +281,9 @@ export function dnd5eActivityRollLogEvidence(
     const settled = events.find(event =>
       check?.kind === 'saving-throw' && event.type === 'saving-throw-resolved' && event.targetId === rollerId ||
       check?.kind === 'attack-roll' && event.type === 'attack-resolved' && event.actorId === casterId && (!targetId || event.targetId === targetId) ||
-      (check?.kind === 'ability-check' || check?.kind === 'skill-check' || check?.kind === 'concentration-check') && event.type === 'ability-check-resolved' && event.actorId === casterId && (!targetId || event.perceivedTargetId === targetId) ||
+      (check?.kind === 'ability-check' || check?.kind === 'skill-check') && event.type === 'ability-check-resolved' && event.actorId === casterId && (!targetId || event.perceivedTargetId === targetId) ||
+      check?.kind === 'concentration-check' && event.type === 'concentration-resolved' && event.actorId === casterId &&
+        (event.activityId == null || event.activityId === activity?.id) && (event.checkId == null || event.checkId === check.id) ||
       check?.kind === 'opposed-ability-check' && event.type === 'opposed-ability-check-resolved' && event.activityId === activity?.id && event.checkId === check.id && event.targetId === targetId)
     let modifier = roll.modifier
     let total = roll.total

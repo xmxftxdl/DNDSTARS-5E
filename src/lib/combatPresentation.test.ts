@@ -264,6 +264,18 @@ describe('combat presentation events', () => {
 
   afterEach(() => setRoomRulesSnapshot(null))
 
+  it('does not reject spell settlement when its cosmetic banner cannot be delivered', async () => {
+    vi.mocked(publishSharedEvent).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const warning=vi.spyOn(console,'warn').mockImplementation(()=>{})
+    try {
+      await expect(publishSpellBannerPresentation({
+        id:'offline-banner',mapId:'map-a',transactionId:'spell-action',sourceTokenId:'wizard',
+        spellId:'warding-wind',casterName:'Wizard',spellName:'Warding Wind',castingClassId:'wizard',
+      })).resolves.toEqual({completesAt:expect.any(Number)})
+      expect(warning).toHaveBeenCalledWith('[combat-presentation] spell banner delivery failed',expect.any(TypeError))
+    } finally { warning.mockRestore() }
+  })
+
   it('does not publish banners or spell visuals disabled by the synchronized room rules', async () => {
     setRoomRulesSnapshot({
       schemaVersion: 1,

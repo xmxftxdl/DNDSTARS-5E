@@ -19,13 +19,51 @@ function normalizeDefinition(definition: RegisteredContentDefinition): Registere
     const errors = validateDnd5eEffectDefinitionV1(effect)
     if (errors.length) throw new Error(`Invalid Effect ${effect.id}: ${errors.join('; ')}`)
   }
-  const normalizedActivities = activities.map(dnd5eActivityWithDerivedAutomationV1)
+  const normalizedActivities = activities.map(activity => {
+    // A damage-interruption reaction always spends the reaction. Imported
+    // recipes may specify only their limited-use resource; supply the missing
+    // economy cost without duplicating an explicitly declared reaction cost.
+    const consumption = activity.consumption ?? []
+    const needsReactionCost = activity.activation.kind === 'reaction' &&
+      activity.invocation?.kind === 'triggered' && activity.invocation.event === 'before-damage' &&
+      !consumption.some(cost => cost.kind === 'action-economy' && cost.economy === 'reaction')
+    return dnd5eActivityWithDerivedAutomationV1(needsReactionCost ? {
+      ...activity, consumption: [...consumption, {kind:'action-economy',economy:'reaction',amount:1,consumeOn:'confirm'}],
+    } : activity)
+  })
   return {
     ...structuredClone(definition),
     activities: normalizedActivities,
     effects: structuredClone(effects),
     automation: dnd5eCombinedAutomationCapabilityV1({ activities: normalizedActivities, effects }),
   }
+}
+
+/** Resolve only resource IDs declared by this package. Core and external IDs
+ * must remain unchanged; a coincidentally named resource in another package
+ * must never satisfy a local cost.
+ */
+function resolveDeclaredResourceReferences(value: RegisteredContentPackage): readonly RegisteredContentDefinition[] {
+  const resourceIds = new Map<string, string>()
+  for (const definition of value.definitions) {
+    if (definition.kind !== 'feature' && definition.kind !== 'feat') continue
+    const payload = definition.payload as { resources?: readonly { id?: unknown }[] } | undefined
+    if (!Array.isArray(payload?.resources)) continue
+    for (const resource of payload.resources) {
+      if (typeof resource.id !== 'string') continue
+      resourceIds.set(resource.id, `${value.packageId}:${resource.id}`)
+    }
+  }
+  const rewrite = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(rewrite)
+    if (!input || typeof input !== 'object') return input
+    return Object.fromEntries(Object.entries(input).map(([key, child]) => [key,
+      key === 'resourceId' && typeof child === 'string' ? resourceIds.get(child) ?? child : rewrite(child),
+    ]))
+  }
+  return value.definitions.map(definition => ({ ...definition,
+    activities: definition.activities?.map(activity => rewrite(activity)),
+  }))
 }
 
 /** The sole D&D 5e runtime content registration boundary. */
@@ -35,6 +73,6 @@ export function registerDnd5eUnifiedContentPackageV1(
   return registerContentDefinitionPackage({
     packageId: value.packageId,
     packageVersion: value.packageVersion,
-    definitions: value.definitions.map(normalizeDefinition),
+    definitions: resolveDeclaredResourceReferences(value).map(normalizeDefinition),
   })
 }

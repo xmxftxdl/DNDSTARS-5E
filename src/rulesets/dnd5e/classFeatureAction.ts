@@ -1,3 +1,6 @@
+import { dnd5eFlurryMaximumForCombatant, dnd5eFlurryTargetsValid } from './flurryExtraAttacks'
+import { dnd5eCharacterRageDeathDeferralActive } from './pluginApi'
+import {dnd5eSkillProficiencyRank} from './headlessCombatEngine'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import {
   DND_FEET_PER_CELL,
@@ -146,7 +149,7 @@ export interface PreparedDnd5eMonkBonusAttack {
     stunningStrike?: {
       saveDc: number
       saveModifier: number
-      saveMode: 'normal' | 'disadvantage'
+      saveMode: 'normal' | 'advantage' | 'disadvantage'
       blessed: boolean
       baned: boolean
     }
@@ -166,6 +169,7 @@ export interface PreparedDnd5eMonkBonusAttack {
 }
 
 export interface Dnd5eMonkBonusAttackRoll {
+  disadvantageNegation?: { rollId: string; transactionId: string }
   d20: number
   d20Second?: number
   halflingLuckyD20?: number
@@ -183,7 +187,7 @@ export interface Dnd5eMonkBonusAttackRoll {
   stunningStrikeSaveHalflingLuckyD20Second?: number
   stunningStrikeSaveBlessRoll?: number
   stunningStrikeSaveBaneRoll?: number
-  stunningStrikeSaveRerollD20?: number
+  stunningStrikeSaveRerollResourceKey?: string; stunningStrikeSaveRerollD20?: number
   stunningStrikeSaveRerollD20Second?: number
   stunningStrikeBardicInspirationRoll?: number
   stunningStrikeDarkOnesOwnLuckRoll?: number
@@ -193,6 +197,7 @@ export interface Dnd5eMonkBonusAttackRoll {
   openHandHalflingLuckyD20Second?: number
   openHandBlessRoll?: number
   openHandBaneRoll?: number
+  openHandSavingThrowRerollResourceKey?: string
   openHandSavingThrowRerollD20?: number
   openHandSavingThrowRerollD20Second?: number
   openHandBardicInspirationRoll?: number
@@ -408,8 +413,7 @@ function buildHeadlessAction(
     case 'paladin-holy-nimbus':
       return { type: payload.feature, actorId: actorTokenId }
     case 'monk-unarmed-bonus': {
-      const expectedTargets = payload.mode === 'flurry' ? 2 : 1
-      if (!monkBonusAttack || payload.targetTokenIds.length !== expectedTargets) return undefined
+      if (!monkBonusAttack || payload.targetTokenIds.length !== monkBonusAttack.targets.length) return undefined
       return {
         type: payload.feature,
         actorId: actorTokenId,
@@ -522,6 +526,7 @@ function buildHeadlessAction(
 }
 
 export function prepareDnd5eClassFeature(input: {
+  worldMinute?: number
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -537,9 +542,10 @@ export function prepareDnd5eClassFeature(input: {
 
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
-  if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  if (!actor || !actorToken || (actor.currentHp <= 0 && !dnd5eCharacterRageDeathDeferralActive(actor))) return { ok: false, reason: 'invalid-actor' }
 
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: action.combatId ?? `map-${input.map.id}`,
     round: action.round,
     turnSlotId: input.initiativeOrder[action.initiativeIndex]?.slotId,
@@ -676,7 +682,7 @@ export function prepareDnd5eClassFeature(input: {
       : payload.option === 'sleight-of-hand' ? 'sleightOfHand' : 'thievesTools'
     const proficient = skill === 'thievesTools' || actorCombatant.skillProficiencies.includes(skill)
     const expertise = actorCombatant.classSelections.expertise?.includes(skill) === true
-    const rank = expertise ? 2 : proficient ? 1 : 0
+    const rank = skill === 'thievesTools' ? expertise ? 2 : proficient ? 1 : 0 : dnd5eSkillProficiencyRank(actorCombatant, skill)
     const modifier = rules.abilityModifier(actorCombatant.abilities.dex) + actorCombatant.proficiencyBonus * rank +
       (skill === 'stealth' && actorCombatant.classState.hideInPlainSightPrepared ? 10 : 0)
     const movementSpent = Math.max(0, actorCombatant.speed - (input.turnEconomy?.movement.current ?? actorCombatant.turn.movementRemaining))
@@ -704,8 +710,10 @@ export function prepareDnd5eClassFeature(input: {
     }
   }
   if (payload.feature === 'monk-unarmed-bonus') {
-    const expectedTargets = payload.mode === 'flurry' ? 2 : 1
-    if (payload.targetTokenIds.length !== expectedTargets) return { ok: false, reason: 'invalid-action' }
+    const expectedTargets = payload.targetTokenIds.length
+    if (payload.mode === 'flurry'
+      ? !dnd5eFlurryTargetsValid(payload.targetTokenIds, dnd5eFlurryMaximumForCombatant(actorCombatant))
+      : expectedTargets !== 1) return { ok: false, reason: 'invalid-action' }
     const profile = dnd5eMonkUnarmedStrikeProfile(actor)
     if (!profile) return { ok: false, reason: 'wrong-class' }
     const attackProfileRewrite = dnd5eActiveAttackProfileRewrite(
@@ -747,7 +755,7 @@ export function prepareDnd5eClassFeature(input: {
           dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
           dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) ||
           dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, targetCombatant) ||
-          dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
+          (targetIndex === 0 && dnd5eNextD20AdvantageApplies(actorCombatant, 'attack')) ||
           targetProne ||
           dnd5eRageAllyMeleeAdvantage(snapshot.state, actorCombatant, targetCombatant, true))
       const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) ||
@@ -771,7 +779,7 @@ export function prepareDnd5eClassFeature(input: {
           stunningStrike: {
             saveDc: 8 + actorCombatant.proficiencyBonus + rules.abilityModifier(actor.abilities.wis),
             saveModifier: targetCombatant.savingThrowBonuses.con ?? rules.abilityModifier(targetCombatant.abilities.con),
-            saveMode: targetCombatant.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const,
+            saveMode: dnd5eSavingThrowMode(targetCombatant, 'con', { condition: 'stunned' }),
             blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, targetCombatant.id, 'bless'),
             baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, targetCombatant.id, 'bane'),
           },
@@ -970,6 +978,7 @@ export function previewDnd5eMonkBonusAttack(
 }
 
 export function resolvePreparedDnd5eClassFeature(input: {
+  shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
   prepared: PreparedDnd5eClassFeature
   monkAttackRolls?: readonly Dnd5eMonkBonusAttackRoll[]
   turnUndeadSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]
@@ -979,7 +988,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
   savingThrowHalflingLuckyD20Second?: number
   savingThrowBlessRoll?: number
   savingThrowBaneRoll?: number
-  savingThrowRerollD20?: number
+  savingThrowRerollResourceKey?: string; savingThrowRerollD20?: number
   savingThrowRerollD20Second?: number
   bardicInspirationRoll?: number
   darkOnesOwnLuckRoll?: number
@@ -1002,6 +1011,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
         attacks: prepared.headlessAction.attacks.map((attack, index) => ({
           ...attack,
           d20: input.monkAttackRolls?.[index]?.d20 ?? 0,
+          disadvantageNegation: input.monkAttackRolls?.[index]?.disadvantageNegation,
           d20Second: input.monkAttackRolls?.[index]?.d20Second,
           halflingLuckyD20: input.monkAttackRolls?.[index]?.halflingLuckyD20,
           halflingLuckyD20Second: input.monkAttackRolls?.[index]?.halflingLuckyD20Second,
@@ -1020,6 +1030,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
           stunningStrikeSaveHalflingLuckyD20Second: input.monkAttackRolls?.[index]?.stunningStrikeSaveHalflingLuckyD20Second,
           stunningStrikeSaveBlessRoll: input.monkAttackRolls?.[index]?.stunningStrikeSaveBlessRoll,
           stunningStrikeSaveBaneRoll: input.monkAttackRolls?.[index]?.stunningStrikeSaveBaneRoll,
+          stunningStrikeSaveRerollResourceKey: input.monkAttackRolls?.[index]?.stunningStrikeSaveRerollResourceKey,
           stunningStrikeSaveRerollD20: input.monkAttackRolls?.[index]?.stunningStrikeSaveRerollD20,
           stunningStrikeSaveRerollD20Second: input.monkAttackRolls?.[index]?.stunningStrikeSaveRerollD20Second,
           stunningStrikeBardicInspirationRoll: input.monkAttackRolls?.[index]?.stunningStrikeBardicInspirationRoll,
@@ -1032,6 +1043,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
             halflingLuckyD20Second: input.monkAttackRolls?.[index]?.openHandHalflingLuckyD20Second,
             blessRoll: input.monkAttackRolls?.[index]?.openHandBlessRoll,
             baneRoll: input.monkAttackRolls?.[index]?.openHandBaneRoll,
+            savingThrowRerollResourceKey: input.monkAttackRolls?.[index]?.openHandSavingThrowRerollResourceKey,
             savingThrowRerollD20: input.monkAttackRolls?.[index]?.openHandSavingThrowRerollD20,
             savingThrowRerollD20Second: input.monkAttackRolls?.[index]?.openHandSavingThrowRerollD20Second,
             bardicInspirationRoll: input.monkAttackRolls?.[index]?.openHandBardicInspirationRoll,
@@ -1075,7 +1087,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
           halflingLuckyD20Second: input.savingThrowHalflingLuckyD20Second,
           savingThrowBlessRoll: input.savingThrowBlessRoll,
           savingThrowBaneRoll: input.savingThrowBaneRoll,
-          savingThrowRerollD20: input.savingThrowRerollD20,
+          savingThrowRerollResourceKey: input.savingThrowRerollResourceKey, savingThrowRerollD20: input.savingThrowRerollD20,
           savingThrowRerollD20Second: input.savingThrowRerollD20Second,
           bardicInspirationRoll: input.bardicInspirationRoll,
           darkOnesOwnLuckRoll: input.darkOnesOwnLuckRoll,
@@ -1086,7 +1098,7 @@ export function resolvePreparedDnd5eClassFeature(input: {
       : prepared.headlessAction
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(
     prepared.state,
-    { ...headlessAction, attackDecoyRolls: input.attackDecoyRolls },
+    { ...headlessAction, attackDecoyRolls: input.attackDecoyRolls, shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows },
     input.airborneFallDamageRollsByCombatantId,
   )
   if (!result.ok) return { result, airborneFalls }
@@ -1102,3 +1114,4 @@ export function resolvePreparedDnd5eClassFeature(input: {
     }),
   }
 }
+

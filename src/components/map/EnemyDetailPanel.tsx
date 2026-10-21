@@ -1,9 +1,12 @@
+import { dnd5eMonsterWithHeldWeapon, dnd5eMonsterWithSceneHeldWeapon } from '../../rulesets/dnd5e/companionHeldWeapon'
+import { dnd5eCompanionWornArmor, dnd5eCompanionSceneWornArmor } from '../../rulesets/dnd5e/companionWornArmor'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Token } from '../../store/maps'
+import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
+import { DND5E_2014_ALIGNMENT_OPTIONS } from '../../rulesets/dnd5e/characterOptions'
 import { getEnemyTemplate, type EnemyTemplate } from '../../lib/enemyPool'
-import { getEnemyStatBlock, type EnemyStatBlock } from '../../lib/enemyStatBlocks'
+import { getEnemyStatBlock, srdMonsterToEnemyStatBlock, type EnemyStatBlock } from '../../lib/enemyStatBlocks'
 import { buildEnemyPlayerVisibleDetail } from '../../lib/enemyPlayerVisibleDetail'
 import {
   getEnemyDerivedCombatStats,
@@ -100,6 +103,8 @@ function resolveEnemyDetail(token: Token): {
 
 export default function EnemyDetailPanel({
   token,
+  battleMap,
+  mapArmorClassBonus = 0,
   onClose,
   isDM = false,
   mapId,
@@ -119,9 +124,13 @@ export default function EnemyDetailPanel({
   canUseMonsterActions = false,
   monsterActionUsed = false,
   monsterActionPending = false,
+  onVisualSearch,
+  onInvestigationSearch,
+  visualSearchDisabled = false,
   onSelectMonsterAction,
   onSelectMonsterContinuation,
   grantedActivityControls = [],
+  canUseGrantedActivity,
   canUseGrantedActivities = false,
   grantedActivityPendingId,
   onUseGrantedActivity,
@@ -130,6 +139,8 @@ export default function EnemyDetailPanel({
   statusSummary,
 }: {
   token: Token
+  battleMap?: BattleMap
+  mapArmorClassBonus?: number
   onClose: () => void
   closable?: boolean
   isDM?: boolean
@@ -157,6 +168,9 @@ export default function EnemyDetailPanel({
   canUseMonsterActions?: boolean
   monsterActionUsed?: boolean
   monsterActionPending?: boolean
+  onVisualSearch?: () => void
+  onInvestigationSearch?: () => void
+  visualSearchDisabled?: boolean
   onSelectMonsterAction?: (
     actionIndex: number,
     actionName: string,
@@ -167,6 +181,7 @@ export default function EnemyDetailPanel({
     rollMode?: D20RollMode,
   ) => void
   grantedActivityControls?: readonly PlayerMapGrantedActivityControl[]
+  canUseGrantedActivity?: (control: PlayerMapGrantedActivityControl) => boolean
   canUseGrantedActivities?: boolean
   grantedActivityPendingId?: string
   onUseGrantedActivity?: (control: PlayerMapGrantedActivityControl) => void
@@ -191,9 +206,6 @@ export default function EnemyDetailPanel({
   const activeObjectForm = dnd5eTruePolymorphObjectFormFromEffects(
     creatureFormState?.activeEffects,
   )
-  const stats = activeCreatureForm
-    ? getEnemyStatBlock(activeCreatureForm.id) ?? originalStats
-    : originalStats
   const activeCreatureFormLabel = creatureFormState?.wildShapeMode === 'true-polymorph'
     ? '完全变形术'
     : creatureFormState?.wildShapeMode === 'polymorph'
@@ -201,18 +213,23 @@ export default function EnemyDetailPanel({
       : creatureFormState?.wildShapeMode === 'animal-shapes'
         ? '动物形态'
         : creatureFormState?.wildShapeMode === 'shapechange' ? '形体变化' : '荒野形态'
-  const structuredMonster = activeCreatureForm ?? (token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined)
+  const structuredMonster = activeCreatureForm ?? (battleMap
+    ? dnd5eMonsterWithSceneHeldWeapon(token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined, token, battleMap, characters)
+    : dnd5eMonsterWithHeldWeapon(token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined, token))
+  const stats = structuredMonster ? srdMonsterToEnemyStatBlock(structuredMonster) : originalStats
+  const wornArmor = battleMap ? dnd5eCompanionSceneWornArmor(token, structuredMonster, battleMap, characters)
+    : dnd5eCompanionWornArmor(token, structuredMonster)
   const originalCreatureFormMonster = creatureFormState?.wildShapeOriginalStatBlockId
     ? getDnd5eSrdMonster(creatureFormState.wildShapeOriginalStatBlockId)
     : undefined
   const retainsOriginalAlignmentAndPersonality = !activeObjectForm && (creatureFormState?.wildShapeMode === 'true-polymorph' ||
     creatureFormState?.wildShapeMode === 'polymorph' ||
     creatureFormState?.wildShapeMode === 'animal-shapes')
-  const displayedAlignment = retainsOriginalAlignmentAndPersonality
+  const displayedAlignment = token.dnd5eAlignment ?? (retainsOriginalAlignmentAndPersonality
     ? originalCreatureFormMonster?.alignment ?? stats?.alignment
-    : stats?.alignment
+    : stats?.alignment)
   const effectiveSpeed = structuredMonster
-    ? `${dnd5eMonsterTokenEffectiveSpeed(token, dnd5eMonsterMapSpeed(structuredMonster))} 尺`
+    ? `${dnd5eMonsterTokenEffectiveSpeed(token, Math.max(0, (token.dnd5eSummon?.walkingSpeedFeet ?? dnd5eMonsterMapSpeed(structuredMonster)) - (wornArmor?.speedPenaltyFeet ?? 0)))} 尺`
     : stats?.speed
   const maximumAttacksPerTurn = dnd5eActiveMaximumAttacksPerTurn(
     token.dnd5eCombatState?.activeEffects,
@@ -530,6 +547,26 @@ export default function EnemyDetailPanel({
                 onChange={(e) => updateToken!(mapId!, token.id, { label: e.target.value })}
                 className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-100 outline-none focus:border-arcane-500"
               />
+              <span className="text-xs text-slate-500">AC</span>
+              <span data-testid="map-enemy-armor-class" className="text-xs font-semibold text-sky-100">
+                {(wornArmor?.armorClass ?? (isStructured5eMonster ? stats?.ac : derived?.ac ?? stats?.ac) ?? 10) + mapArmorClassBonus}
+              </span>
+              <span className="text-xs text-slate-500">速度</span>
+              <span data-testid="map-enemy-current-speed" className="text-xs text-emerald-100">{effectiveSpeed}</span>
+              <span className="text-xs text-slate-500">当前阵营</span>
+              <select aria-label="怪物当前阵营" value={token.dnd5eAlignment ?? ''}
+                onChange={(event) => updateToken!(mapId!, token.id, { dnd5eAlignment: event.target.value || undefined })}
+                className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-100">
+                <option value="">未记录</option>
+                {DND5E_2014_ALIGNMENT_OPTIONS.map(alignment => <option key={alignment} value={alignment}>{alignment}</option>)}
+              </select>
+              <span className="text-xs text-slate-500">原始阵营</span>
+              <select aria-label="怪物原始阵营（DM记录）" value={token.dnd5eOriginalAlignment ?? ''}
+                onChange={(event) => updateToken!(mapId!, token.id, { dnd5eOriginalAlignment: event.target.value || undefined })}
+                className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-100">
+                <option value="">未记录</option>
+                {DND5E_2014_ALIGNMENT_OPTIONS.map(alignment => <option key={alignment} value={alignment}>{alignment}</option>)}
+              </select>
               <span className="text-xs text-slate-500">体型</span>
               <select
                 value={creatureSize}
@@ -829,7 +866,7 @@ export default function EnemyDetailPanel({
                 <Shield className="h-4 w-4 text-sky-400" />
                 <div>
                   <p className="text-[10px] text-slate-500">AC</p>
-                  <p className="text-sm font-semibold text-slate-100">{isStructured5eMonster ? stats.ac : derived?.ac ?? stats.ac}</p>
+                  <p data-testid="map-enemy-armor-class" className="text-sm font-semibold text-slate-100">{(wornArmor?.armorClass ?? (isStructured5eMonster ? stats.ac : derived?.ac ?? stats.ac)) + mapArmorClassBonus}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
@@ -939,6 +976,14 @@ export default function EnemyDetailPanel({
             </section>
 
             {/* 技能 / 感官 / 语言 */}
+            {isDM && !activeObjectForm && onVisualSearch && (
+              <button type="button" onClick={onVisualSearch} disabled={visualSearchDisabled}
+                className="mb-3 rounded-lg border border-cyan-400/30 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">
+                视觉察觉：搜索区域
+              </button>
+            )}
+            {isDM && !activeObjectForm && onInvestigationSearch && <button type="button" onClick={onInvestigationSearch} disabled={visualSearchDisabled}
+              className="mb-3 rounded-lg border border-cyan-400/30 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">智力（调查）：搜索区域</button>}
             {!activeObjectForm && (stats.skills?.length || stats.senses || stats.languages) && (
               <section className="mb-4 space-y-1.5 text-xs text-slate-400">
                 {stats.skills?.map((s) => (
@@ -1066,16 +1111,13 @@ export default function EnemyDetailPanel({
               <section className="mb-4 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-3">
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-200">
                   <Sparkles className="h-3.5 w-3.5" />
-                  状态授予动作
+                  状态与区域授予动作
                 </h3>
                 <ul className="space-y-2">
                   {grantedActivityControls.map((control) => {
-                    const hasNaturalTarget = control.targeting === 'self' || (
-                      control.targeting === 'creature' && !!control.sourceActorTokenId
-                    )
                     const pending = grantedActivityPendingId === control.activityId
                     return (
-                      <li key={`${control.effectId}:${control.activityId}`} className="rounded-lg bg-black/15 px-3 py-2">
+                      <li key={`${control.areaId ?? control.effectId}:${control.activityId}`} className="rounded-lg bg-black/15 px-3 py-2">
                         <p className="text-sm font-medium text-violet-100">{control.label}</p>
                         <p className="mt-0.5 text-[11px] text-slate-400">
                           {control.economy === 'action'
@@ -1090,7 +1132,7 @@ export default function EnemyDetailPanel({
                         <button
                           type="button"
                           data-testid={`enemy-detail-granted-activity-${control.activityId}`}
-                          disabled={!canUseGrantedActivities || !hasNaturalTarget || !!grantedActivityPendingId}
+                          disabled={!canUseGrantedActivities || canUseGrantedActivity?.(control) === false || !!grantedActivityPendingId}
                           onClick={() => onUseGrantedActivity?.(control)}
                           className="mt-2 w-full rounded-lg bg-violet-500/20 px-2 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-40"
                         >

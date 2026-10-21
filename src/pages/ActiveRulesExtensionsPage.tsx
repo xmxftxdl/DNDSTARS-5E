@@ -1,105 +1,23 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
-import { CheckCircle2, PackageCheck, RefreshCw, ShieldCheck, Store, Wrench } from 'lucide-react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { CheckCircle2, PackageCheck, RefreshCw, ShieldCheck, Store, Trash2, Wrench } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import { getRoomSession } from '../lib/roomSession'
+import { deleteRoomPlugin } from '../lib/roomApi'
+import { showAppConfirm } from '../lib/appDialog'
 import {
   getRoomRulesSnapshot,
   subscribeRoomRules,
+  setRoomRulesSnapshot,
 } from '../lib/roomRulesState'
-import type {
-  Dnd5eContentAutomationCoverageReportV2,
-  Dnd5eContentPackageSummaryV2,
-} from '../rulesets/dnd5e'
 import {
   dnd5eRulesPluginRegistrySnapshot,
-  registeredDeclarativeClassesV1,
-  registeredDnd5ePluginBackgrounds,
-  registeredDnd5ePluginFeats,
-  registeredDnd5ePluginFeatures,
-  registeredDnd5ePluginItems,
-  registeredDnd5ePluginMonsters,
-  registeredDnd5ePluginRaces,
-  registeredDnd5ePluginSpells,
-  registeredDnd5ePluginSubclasses,
+  registeredDnd5ePluginContentNames,
   subscribeDnd5eRulesPluginRegistry,
 } from '../rulesets/dnd5e'
 import { activeRulesExtensionRecords } from './activeRulesExtensionsModel'
-
-interface ActiveExtensionDetails {
-  summary?: Dnd5eContentPackageSummaryV2
-  coverage?: Dnd5eContentAutomationCoverageReportV2
-}
-
-interface ActiveExtensionContentGroup {
-  label: string
-  names: string[]
-}
-
-function uniqueNames(names: readonly string[]): string[] {
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
-}
-
-function activeExtensionContentGroups(ownerPluginId: string): ActiveExtensionContentGroup[] {
-  return [
-    {
-      label: '职业',
-      names: registeredDeclarativeClassesV1()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.definition.name),
-    },
-    {
-      label: '子职',
-      names: registeredDnd5ePluginSubclasses()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '种族',
-      names: registeredDnd5ePluginRaces()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '背景',
-      names: registeredDnd5ePluginBackgrounds()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '专长',
-      names: registeredDnd5ePluginFeats()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '特性',
-      names: registeredDnd5ePluginFeatures()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '法术',
-      names: registeredDnd5ePluginSpells()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '物品',
-      names: registeredDnd5ePluginItems()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-    {
-      label: '怪物',
-      names: registeredDnd5ePluginMonsters()
-        .filter((entry) => entry.ownerPluginId === ownerPluginId)
-        .map((entry) => entry.name),
-    },
-  ].map((group) => ({ ...group, names: uniqueNames(group.names) }))
-    .filter((group) => group.names.length > 0)
-}
+import { loadActiveExtensionDetails, type ActiveExtensionDetails } from './activeRulesExtensionDetails'
+import { activeRulesExtensionNames } from './activeRulesExtensionNames'
 
 export default function ActiveRulesExtensionsPage() {
   const { campaignId = 'local' } = useParams()
@@ -109,13 +27,21 @@ export default function ActiveRulesExtensionsPage() {
     getRoomRulesSnapshot,
     getRoomRulesSnapshot,
   )
-  useSyncExternalStore(
+  const registryRevision = useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
     dnd5eRulesPluginRegistrySnapshot,
     dnd5eRulesPluginRegistrySnapshot,
   )
+  const contentGroupsByOwner = useMemo(
+    () => activeRulesExtensionNames(registeredDnd5ePluginContentNames()),
+    // The external registry revision invalidates this metadata-only view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [registryRevision],
+  )
   const [revision, setRevision] = useState(0)
   const [details, setDetails] = useState<Record<string, ActiveExtensionDetails>>({})
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
   const host = window.DNDSTARS_5E_RULES_PLUGINS
   const records = activeRulesExtensionRecords({
     installed: host?.listInstalled() ?? [],
@@ -132,21 +58,31 @@ export default function ActiveRulesExtensionsPage() {
     : 0
   const campaignBasePath = `/campaign/${encodeURIComponent(campaignId)}`
 
+  const removeExtension = async (id: string, name: string) => {
+    if (!host || removing || (roomSession && roomSession.role !== 'dm')) return
+    if (!(await showAppConfirm({ title: `卸载 ${name}`, message: '卸载后，该扩展的规则内容将停止生效。已有角色记录保留，但关联能力可能需要重新导入扩展才能使用。房间中的玩家会同步此变更。', tone: 'danger', confirmLabel: '卸载' }))) return
+    setRemoving(id)
+    setMessage(null)
+    try {
+      if (roomSession && roomRules?.requiredPlugins.some(plugin => plugin.id === id)) {
+        setRoomRulesSnapshot(await deleteRoomPlugin(roomSession, id))
+      }
+      await host.remove(id)
+      setRevision(value => value + 1)
+      setMessage(`已卸载 ${name}。`)
+    } catch (error) {
+      setMessage(`卸载未完成：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setRemoving(null)
+    }
+  }
+
   useEffect(() => {
     if (!host || records.length === 0) return
     let disposed = false
     void Promise.all(records.map(async ({ manifest, installed }) => {
       try {
-        const bytes = await host.readBytes(manifest.id)
-        const inspected = await host.inspectFile(new File(
-          [new Uint8Array(bytes)],
-          installed.source === 'url' ? `${manifest.id}.dndstars5e` : installed.fileName,
-          { type: 'application/json' },
-        ))
-        return [manifest.id, {
-          summary: inspected.contentSummary,
-          coverage: inspected.automationCoverage,
-        }] as const
+        return [manifest.id, await loadActiveExtensionDetails(host, manifest, installed)] as const
       } catch {
         return [manifest.id, {}] as const
       }
@@ -197,6 +133,7 @@ export default function ActiveRulesExtensionsPage() {
           </div>
         </div>
       </section>
+      {message && <p role="status" className="mb-4 text-sm text-amber-200">{message}</p>}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-400">
@@ -226,7 +163,7 @@ export default function ActiveRulesExtensionsPage() {
             const inspected = details[manifest.id]
             const summary = inspected?.summary
             const coverage = inspected?.coverage
-            const contentGroups = activeExtensionContentGroups(manifest.id)
+            const contentGroups = contentGroupsByOwner.get(manifest.id) ?? []
             const contentCount = contentGroups.reduce((total, group) => total + group.names.length, 0)
             const counts = summary ? [
               ['种族', summary.races], ['背景', summary.backgrounds], ['特性', summary.features],
@@ -252,6 +189,13 @@ export default function ActiveRulesExtensionsPage() {
                   <div className="text-right text-xs text-slate-500">
                     <p>{manifest.publisher}</p>
                     <p className="mt-1">{manifest.license}</p>
+                    {(!roomSession || roomSession.role === 'dm') && (
+                      <button type="button" disabled={removing !== null}
+                        onClick={() => void removeExtension(manifest.id, manifest.name)}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-rose-400/20 px-3 py-2 text-rose-200 disabled:opacity-50">
+                        <Trash2 className="h-3.5 w-3.5" />{removing === manifest.id ? '正在卸载…' : '卸载'}
+                      </button>
+                    )}
                   </div>
                 </div>
 

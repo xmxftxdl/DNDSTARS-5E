@@ -1,3 +1,5 @@
+import {withDnd5ePendingMovementCompletion} from './pendingMovementCompletion'
+import { recordDnd5eAcceptedMovementSightings } from './mapMovementSightings'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
@@ -5,6 +7,7 @@ import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts, spendDnd5eMovement } from './turnEconomy'
 import {
   prepareDnd5eExplorationMove,
+  resolvePreparedDnd5eExplorationMove,
   prepareDnd5ePlayerMove,
   resolveDnd5ePlayerDisengage,
   resolveDnd5ePlayerDodge,
@@ -19,6 +22,11 @@ import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { createDnd5eMapCombatSnapshot } from './mapBridge'
+import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
+import { advanceDnd5eCampaignTimedActiveEffects } from './campaignTimeRules'
+import { createTokenMovementAnimation } from '../../lib/tokenMovementAnimation'
+import {prepareDnd5eMovementEffectDice} from './movementEffectDice'
+import {coordinateDnd5eMovementHazards} from '../../application/maps/MovementHazardCoordinator'
 
 function character(): Character {
   return {
@@ -46,6 +54,199 @@ const action: SharedPlayerActionState = {
   seq: 1, updatedAt: 1,
 }
 
+it('permits qualified conscious zero-HP movement while retaining ordinary defeat gates', () => {
+  let featureId = ''
+  const dispose = registerDnd5eRulesPlugin({manifest:{id:'test.zero-move',name:'Movement',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+    featureId=api.registerFeature({id:'defer',name:'Defer',summary:'Synthetic',description:'Synthetic',automation:'full',declarativeAbility:{
+      schemaVersion:1,id:'defer',name:'Defer',description:'Synthetic',level:1,trigger:{kind:'passive'},cost:{economy:'none'},targeting:{kind:'self'},effects:[],mechanic:{kind:'rage-death-deferral'},automation:'full',
+    }})
+  }})
+  try {
+    for (const mode of ['active','not-raging','unowned','dead','exhausted'] as const) {
+      const hero=character()
+      hero.currentHp=0
+      hero.dnd5ePluginFeatureIds=mode==='unowned'?[]:[featureId]
+      hero.dnd5eCombatState={raging:mode!=='not-raging',rageTurnsRemaining:5,...(mode==='dead'?{deathRound:1}:{})}
+      if(mode==='exhausted')hero.exhaustionLevel=6
+      const input={action,map,characters:[hero],initiativeOrder:[{tokenId:'hero-token',label:'Hero',emoji:'',color:'',roll:20}],turnEconomy:createDnd5eTurnEconomyCounts('turn',30)}
+      const prepared=prepareDnd5ePlayerMove(input)
+      expect(prepared.ok,mode).toBe(mode==='active')
+      expect(prepareDnd5eExplorationMove({...input,action:{...action,combatId:undefined}}).ok,mode).toBe(mode==='active')
+      if(prepared.ok){
+        const settled=resolvePreparedDnd5ePlayerMove({prepared:prepared.prepared})
+        expect(settled.result.ok).toBe(true)
+        expect(settled.result.state.combatants['hero-token'].position).toMatchObject({x:25,y:5})
+      }
+    }
+  } finally { dispose() }
+})
+
+it.each([1,4])('collects temple penalty dice for a player combat move (%s)',async penalty=>{
+ const hero=character()
+ hero.dnd5eCombatState={schemaVersion:2,wildShapeFormId:'srd-5.1:imp',wildShapeMode:'shapechange',wildShapeCurrentHp:10,wildShapeRoundsRemaining:600,wildShapeMaximumChallengeRating:20,
+  wildShapeOriginalCurrentHp:hero.currentHp,wildShapeOriginalMaxHp:hero.maxHp,wildShapeOriginalArmorClass:hero.ac,wildShapeOriginalSpeed:hero.speed,
+  wildShapeOriginalAbilities:{...hero.abilities},wildShapeOriginalSavingThrowBonuses:{}}
+ const current={...map,tokens:[map.tokens[0]]}
+ const geometry=createEmptyMapGeometry(map.id)
+ geometry.structureLifetimes=[0,20].map((x,index)=>({id:`temple-${index}`,casterId:'builder',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:[],replacementGroup:'temple-of-the-gods' as const,
+  objectBoundary:{points:[{x,y:0},{x:x+20,y:0},{x:x+20,y:30},{x,y:30}],bottomFeet:0,topFeet:20},
+  templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}))
+ try{
+  setMapGeometryRuntime([geometry])
+  const prepared=prepareDnd5ePlayerMove({worldMinute:100,action,map:current,characters:[hero],initiativeOrder:[{tokenId:'hero-token',label:'Hero',emoji:'',color:'',roll:20}],turnEconomy:createDnd5eTurnEconomyCounts('turn',30)})
+  expect(prepared.ok,JSON.stringify(prepared)).toBe(true);if(!prepared.ok)throw Error(prepared.reason)
+  const boundary=prepared.prepared.boundarySavingThrows[0]
+  expect(boundary).toBeDefined()
+  const input={prepared:prepared.prepared,transactionId:'player-temple-effect-dice',deferSolidMaterialExit:true,
+   boundarySavingThrows:[{effectId:boundary.effectId,d20:19-boundary.requirement.modifier,d20Second:19-boundary.requirement.modifier}]}
+  const before=structuredClone(prepared.prepared.state)
+  let count=0
+  const dice=await prepareDnd5eMovementEffectDice({resolve:effectRollDice=>resolvePreparedDnd5ePlayerMove({...input,effectRollDice}),
+   isCurrent:()=>true,roll:async recipe=>{count++;expect(recipe.sides).toBe(4);return [penalty]}})
+  expect(dice.ok).toBe(true);if(!dice.ok)throw Error(dice.reason)
+  const settled=resolvePreparedDnd5ePlayerMove({...input,effectRollDice:dice.rolls})
+  expect(settled.result.ok,JSON.stringify(settled.result)).toBe(true)
+  expect(count).toBe(1)
+  expect(settled.result.state.combatants['hero-token'].position).toEqual({x:penalty===1?25:5,y:5})
+  if(penalty===4)expect(settled.result.state.combatants['hero-token'].turn.movementSpent??0).toBe(0)
+  if(penalty===4){
+   const hazards=await coordinateDnd5eMovementHazards({state:settled.result.state,map:current,characters:[hero],
+    characterIdByCombatantId:prepared.prepared.characterIdByCombatantId,initialApplication:settled.application,movements:[],initiativeOrder:[],
+    settleStep:async()=>{throw Error('Denied movement must not enter another area')}})
+   expect(hazards.application.changedCharacterIds).toContain(hero.id)
+   expect(hazards.application.characters[0].dnd5eCombatState?.activeEffects).toContainEqual(expect.objectContaining({definitionId:'temple-of-the-gods:entry-denied'}))
+  }
+  expect(prepared.prepared.state).toEqual(before)
+ }finally{setMapGeometryRuntime([])}
+})
+
+it.each([
+ ['ethereal',0],['stone',0],['ethereal',1],['stone',1],
+] as const)('enforces temple boundaries in Host combat and exploration movement for %s with origin offset %s',(mode,offset)=>{
+ const movementMap={...map,tokens:map.tokens.map(token=>token.id==='hero-token'?{...token,x:token.x+offset}:token)}
+ const hero=character()
+ hero.dnd5eCombatState={schemaVersion:2,activeEffects:[createDnd5eMechanicalEffect({definitionId:'travel',label:'Travel',targetId:'hero-token',source:{kind:'spell',actorId:'hero-token'},
+ modifiers:mode==='ethereal'?{planarPhase:{plane:'ethereal',ignoresMaterialCollision:true,suppressCrossPlaneEffects:true,unrestrictedVerticalMovement:true}}:
+ {solidMaterialTraversal:{materials:['stone'],endInside:'eject-end-source-stun-until-next-turn-end'}}})]}
+ const geometry=createEmptyMapGeometry(map.id)
+ geometry.walls=[{id:'temple-wall',kind:'wall',label:'Stone-looking force wall',material:'stone',points:[{x:15,y:0},{x:15,y:200}],baseHeightFeet:0,heightFeet:100,
+ blocksMovement:true,blocksVision:true,blocksLineOfEffect:true,createdAt:1}]
+ const initiativeOrder=[{tokenId:'hero-token',label:'Hero',emoji:'',color:'',roll:20},{tokenId:'enemy-token',label:'Enemy',emoji:'',color:'',roll:10}]
+ const prepare=()=>[
+  prepareDnd5ePlayerMove({action,map:movementMap,characters:[hero],initiativeOrder,turnEconomy:createDnd5eTurnEconomyCounts('turn',30)}),
+  prepareDnd5eExplorationMove({action:{...action,combatId:undefined},map:movementMap,characters:[hero]})]
+ try{
+  setMapGeometryRuntime([geometry])
+  for(const result of prepare())expect(result.ok,result.ok?undefined:result.reason).toBe(true)
+  geometry.structureLifetimes=[{id:'temple',casterId:'caster',createdWorldMinute:0,expiresWorldMinute:1440,entityIds:['temple-wall'],replacementGroup:'temple-of-the-gods',siteKey:'site',
+   objectBoundary:{points:[{x:15,y:0},{x:100,y:0},{x:100,y:200},{x:15,y:200}],bottomFeet:0,topFeet:100},
+   templeWard:{hostileCreatureTypes:['fiend'],saveDc:18,healingBonus:5,lighting:'none'}}]
+  setMapGeometryRuntime([geometry])
+  for(const result of prepare())expect(result.ok).toBe(false)
+ }finally{setMapGeometryRuntime([])}
+})
+
+it.each([
+  ['player', true], ['monster', true], ['player', false], ['monster', false],
+  ['exploration', true], ['exploration', false],
+] as const)('settles %s solid traversal (ends inside=%s) through the actual movement adapter', (kind, inside) => {
+  const moveAction = { ...action, targetPosition: { x: inside ? 25 : 35, y: 5 } }
+  const actor = character()
+  actor.concentrating = true
+  actor.dnd5eCombatState = { schemaVersion: 2, concentrationSpellId: 'test:stone', activeEffects: [createDnd5eMechanicalEffect({
+    definitionId: 'test:stone:body', label: 'Stone', targetId: 'hero-token',
+    source: { kind: 'spell', actorId: 'hero-token', rulesId: 'test:stone', magical: true },
+    duration: { type: 'concentration', sourceActorId: 'hero-token', concentrationId: 'test:stone', remainingRounds: 100 },
+    modifiers: { solidMaterialTraversal: { materials: ['earth', 'stone'], endInside: 'eject-end-source-stun-until-next-turn-end' } },
+  })] }
+  const current: BattleMap = { ...map, tokens: [{ ...map.tokens[0], ...(kind === 'monster' ? {
+    type: 'enemy' as const, characterId: undefined, poolId: 'srd-5.1:goblin', dnd5eCombatState: actor.dnd5eCombatState,
+  } : {}) }] }
+  const geometry = createEmptyMapGeometry(map.id, 1)
+  geometry.obstacles.push({ id: 'stone', kind: 'obstacle', label: 'Stone', surfaceMaterial: 'stone',
+    points: [{ x: 20, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 200 }, { x: 20, y: 200 }],
+    blocksMovement: true, blocksVision: true, blocksLineOfEffect: true, cover: 'total',
+    heightFeet: 10, baseHeightFeet: 0, createdAt: 1 })
+  setMapGeometryRuntime([geometry])
+  const initiativeOrder = [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }]
+  try {
+    const before = structuredClone({ current, actor })
+    if (kind === 'exploration') {
+      const prepared = prepareDnd5eExplorationMove({ action: { ...moveAction, combatId: undefined }, map: current, characters: [actor] })
+      if (!prepared.ok) throw new Error(prepared.reason)
+      const deferred = resolvePreparedDnd5eExplorationMove({ prepared: prepared.prepared, map: current,
+        characters: [actor], deferSolidMaterialExit: true })
+      if (!deferred.ok) throw new Error(deferred.reason)
+      expect(deferred.state.active).toBe(false)
+      expect(deferred.state.combatants['hero-token'].position).toEqual(moveAction.targetPosition)
+      expect(deferred.characterIdByCombatantId['hero-token']).toBe(actor.id)
+      expect(deferred.application.characters.find(entry => entry.id === actor.id)?.concentrating).toBe(true)
+      expect(deferred.state.combatants['hero-token'].conditions).not.toContain('stunned')
+      const resolved = resolvePreparedDnd5eExplorationMove({ prepared: prepared.prepared, map: current, characters: [actor] })
+      if (!resolved.ok) throw new Error(resolved.reason)
+      expect(resolved.prepared.to).toEqual({ x: inside ? 15 : 35, y: 5 })
+      expect(resolved.application.map.tokens[0]).toMatchObject({ x: inside ? 15 : 35, y: 5 })
+      const updated = resolved.application.characters.find(character => character.id === actor.id)!
+      expect(updated.concentrating).toBe(!inside)
+      expect(updated.dnd5eCombatState?.activeEffects?.some(effect => effect.standardCondition === 'stunned')).toBe(inside)
+      if (inside) {
+        const animation = createTokenMovementAnimation({ id: 'exploration-ejection', issuedAt: 1,
+          path: resolved.prepared.path, finalPosition: resolved.prepared.to })!
+        expect(animation.points).toContainEqual({ x: 25, y: 5 })
+        expect(animation.points.at(-1)).toEqual({ x: 15, y: 5 })
+        const advanced = advanceDnd5eCampaignTimedActiveEffects(updated, 0.1)
+        expect((advanced.dnd5eCombatState?.activeEffects ?? []).some(effect => effect.standardCondition === 'stunned')).toBe(false)
+        expect(advanced.conditions).not.toContain('stunned')
+      }
+      expect({ current, actor }).toEqual(before)
+      return
+    }
+    const resolve = () => {
+      if (kind === 'monster') {
+        const value = resolveDnd5eMonsterMapMove({ combatId: 'combat', round: 1, map: current, characters: [],
+          initiativeOrder, actorTokenId: 'hero-token', to: moveAction.targetPosition,
+          turnEconomy: createDnd5eTurnEconomyCounts('turn', 30) })
+        if (!value.ok) throw new Error(value.reason)
+        return value
+      }
+      const value = prepareDnd5ePlayerMove({ action: moveAction, map: current, characters: [actor], initiativeOrder,
+        turnEconomy: createDnd5eTurnEconomyCounts('turn', 30) })
+      if (!value.ok) throw new Error(value.reason)
+      return resolvePreparedDnd5ePlayerMove({ prepared: value.prepared })
+    }
+    const resolved = resolve()
+    expect(resolved.result.ok).toBe(true)
+    const moved = resolved.result.state.combatants['hero-token']
+    expect(moved.position).toEqual({ x: inside ? 15 : 35, y: 5 })
+    expect(moved.concentrating).toBe(!inside)
+    expect(moved.conditions.includes('stunned')).toBe(inside)
+    expect(moved.turn.movementRemaining).toBe(inside ? 0 : 15)
+    expect(moved.turn.movementSpent).toBe(inside ? 10 : 15)
+    expect(resolved.application?.map.tokens[0]).toMatchObject({ x: inside ? 15 : 35, y: 5 })
+    const traces = 'prepared' in resolved ? resolved.prepared?.movementTraces
+      : 'movementTraces' in resolved ? resolved.movementTraces : undefined
+    expect(traces?.find(trace => trace.tokenId === 'hero-token')?.to).toEqual(moved.position)
+    expect(traces?.find(trace => trace.tokenId === 'hero-token')?.path.at(-1)).toEqual(moved.position)
+    expect(resolved.result.events.filter(event => event.type === 'moved')).toHaveLength(inside ? 2 : 1)
+    expect({ current, actor }).toEqual(before)
+  } finally { setMapGeometryRuntime([]) }
+})
+
+it.each([true, false])('charges movement from the live area source exemption (source=%s)', isSource => {
+  const terrainMap: BattleMap = { ...map, dnd5ePluginAreas: [{
+    id: 'mixed-wind', pluginId: 'test.wind', featureId: 'wind', label: 'Wind', color: '#fff',
+    sourceCharacterId: isSource ? 'hero' : 'other', sourceTokenId: isSource ? 'hero-token' : 'enemy-token',
+    createdRound: 1, expiresAfterRound: 11, includeSelf: true, relation: 'any',
+    cells: Array.from({ length: 600 }, (_, index) => ({ col: index % 30, row: Math.floor(index / 30) })),
+    movementCostMultiplier: 2, movementExcludesSource: true, occupantModifiers: { conditions: ['deafened'] },
+  }] }
+  const prepared = prepareDnd5ePlayerMove({ action, map: terrainMap, characters: [character()],
+    initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }],
+    turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+  })
+  expect(prepared, JSON.stringify(prepared)).toMatchObject({ ok: true, prepared: { movementCostFeet: isSource ? 10 : 20 } })
+})
+
 function playerGrappleRelation() {
   return createDnd5eConditionEffect({
     id: 'hero-grapple-relation',
@@ -64,6 +265,28 @@ function playerGrappleRelation() {
     },
   })
 }
+
+it.each(['thick', 'ice'] as const)('validates free exploration across %s spell panels using the same material rules', mode => {
+  const actor = character()
+  actor.dnd5eCombatState = { schemaVersion: 2, activeEffects: [createDnd5eMechanicalEffect({
+    definitionId: 'test:stone', label: 'Stone', targetId: 'hero-token', source: { kind: 'spell', actorId: 'hero-token' },
+    modifiers: { solidMaterialTraversal: { materials: ['stone'], endInside: 'eject-end-source-stun-until-next-turn-end' } },
+  })] }
+  const freeMap: BattleMap = { ...map, snapMonstersToGrid: false, tokens: [map.tokens[0]],
+    dnd5ePluginAreas: [{ id: 'wall', pluginId: 'test.wall', featureId: 'wall', label: 'Wall', color: '#aaa',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token',
+      cells: [], createdRound: 1, expiresAfterRound: 100,
+      stoneWall: { mode, saveDc: 15, panels: [{ id: 'panel', start: { col: 2, row: -1 }, end: { col: 2, row: 21 },
+        cells: [], hitPoints: 30, maxHitPoints: 30 }] },
+      vertical: { mode: 'volume', baseElevationFeet: 0, heightFeet: 10 },
+    }] }
+  const before = structuredClone(freeMap)
+  const prepared = prepareDnd5eExplorationMove({ action: { ...action, combatId: undefined, targetPosition: { x: 37, y: 7 } },
+    map: freeMap, characters: [actor] })
+  expect(prepared.ok).toBe(mode === 'thick')
+  if (prepared.ok) expect(prepared.prepared.path.at(-1)).toEqual({ x: 37, y: 7 })
+  expect(freeMap).toEqual(before)
+})
 
 function playerDragMap(): BattleMap {
   return {
@@ -85,6 +308,25 @@ function playerDragMap(): BattleMap {
 }
 
 describe('D&D 5e player map movement', () => {
+  it('commits a failed boundary save without moving the player or spending movement', () => {
+    const hero = character()
+    hero.dnd5eCombatState = { schemaVersion: 2, activeEffects: [createDnd5eMechanicalEffect({
+      id: 'boundary', definitionId: 'boundary', label: 'Boundary', targetId: 'hero-token', source: { kind: 'spell', actorId: 'enemy-token' },
+      modifiers: { movementBoundarySave: { maximumDistanceFeet: 15, ability: 'wis', dc: 15 } },
+    })] }
+    const current = { ...map, tokens: map.tokens.map(token => token.id === 'enemy-token' ? { ...token, x: 5, y: 25, poolId: 'srd-5.1:goblin' } : token) }
+    const prepared = prepareDnd5ePlayerMove({ action: { ...action, targetPosition: { x: 65, y: 5 } }, map: current, characters: [hero],
+      initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }, { tokenId: 'enemy-token', label: 'Source', emoji: '', color: '', roll: 10 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30) })
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5ePlayerMove({ prepared: prepared.prepared, boundarySavingThrows: [{ effectId: 'boundary', d20: 1 }] })
+    expect(resolved.result).toMatchObject({ ok: true, movementBlocked: 'saving-throw' })
+    expect(resolved.application?.map.tokens.find(token => token.id === 'hero-token')).toMatchObject({ x: 5, y: 5 })
+    expect(resolved.result.state.combatants['hero-token'].turn.movementRemaining).toBe(30)
+    expect(resolved.result.events.some(event => event.type === 'moved')).toBe(false)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({ type: 'saving-throw-resolved', success: false }))
+  })
   afterEach(() => setMapGeometryRuntime([]))
 
   it('allows an owned living player Token to move outside combat without turn economy', () => {
@@ -481,6 +723,33 @@ describe('D&D 5e player map movement', () => {
       ok: true,
       prepared: { distanceFeet: 0, movementCostFeet: 30, toElevationFeet: 15 },
     })
+    if (!vertical.ok) throw Error('ethereal ascent rejected')
+    const climbed = resolvePreparedDnd5ePlayerMove({ prepared: vertical.prepared })
+    expect(climbed.result.ok, climbed.result.ok ? undefined : climbed.result.reason).toBe(true)
+    expect(climbed.result.state.combatants['hero-token'].turn.movementRemaining).toBe(0)
+    expect(climbed.application?.map.tokens.find(token => token.id === 'hero-token')).toMatchObject({ elevationFeet: 15 })
+    expect(climbed.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', resource: 'movement', amount: 30,
+    }))
+
+    // A descent is voluntary movement as well; it is not a free material-plane fall.
+    const elevatedMap = { ...occupiedMap, tokens: occupiedMap.tokens.map(token =>
+      token.id === 'hero-token' ? { ...token, elevationFeet: 15 } : token) }
+    for (const available of [29, 30]) {
+      const descent = prepareDnd5ePlayerMove({
+        action: { ...action, targetPosition: { x: 5, y: 5 }, dnd5eTraversalMode: 'fly', targetElevationFeet: 0 },
+        map: elevatedMap, characters: [etherealHero], initiativeOrder,
+        turnEconomy: createDnd5eTurnEconomyCounts('turn', available),
+      })
+      expect(descent.ok).toBe(available === 30)
+      if (!descent.ok) continue
+      expect(descent.prepared.movementCostFeet).toBe(30)
+      const descended = resolvePreparedDnd5ePlayerMove({ prepared: descent.prepared })
+      expect(descended.result.ok).toBe(true)
+      expect(descended.result.state.combatants['hero-token'].turn.movementRemaining).toBe(0)
+      expect(descended.application?.map.tokens.find(token => token.id === 'hero-token')).toMatchObject({ elevationFeet: 0 })
+      expect(descended.result.events.some(event => event.type === 'damage-applied')).toBe(false)
+    }
   })
 
   it('spends movement feet through the 5e Headless engine and never changes AP', () => {
@@ -677,6 +946,17 @@ describe('D&D 5e player map movement', () => {
     if (!prepared.ok) return
     expect(prepared.prepared.movementCostFeet).toBe(15)
     expect(prepared.prepared.state.combatants['hero-token'].conditions).not.toContain('grappled')
+    const blockedPreparation = structuredClone(prepared.prepared)
+    blockedPreparation.state.combatants['hero-token'].classState.activeEffects!.push(createDnd5eMechanicalEffect({
+      id: 'escape-boundary', definitionId: 'escape-boundary', label: 'Boundary', targetId: 'hero-token',
+      source: { kind: 'spell', actorId: 'enemy-token' }, modifiers: { movementBoundarySave: { maximumDistanceFeet: 5, ability: 'wis', dc: 20 } },
+    }))
+    const blocked = resolvePreparedDnd5ePlayerMove({ prepared: blockedPreparation, boundarySavingThrows: [{ effectId: 'escape-boundary', d20: 1 }] })
+    expect(blocked.result).toMatchObject({ ok: true, movementBlocked: 'saving-throw' })
+    expect(blocked.result.state.combatants['hero-token'].conditions).toContain('grappled')
+    expect(blocked.result.state.combatants['hero-token'].turn.movementRemaining).toBe(15)
+    expect(blocked.result.events.some(event => event.type === 'active-effect-removed' && event.effectId === grapple.id)).toBe(false)
+    expect(blocked.application?.map.tokens.find(token => token.id === 'hero-token')).toMatchObject({ x: 5, y: 5 })
     const resolved = resolvePreparedDnd5ePlayerMove({ prepared: prepared.prepared })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.result.events).toContainEqual(expect.objectContaining({
@@ -1679,4 +1959,109 @@ describe('reverse gravity movement ownership', () => {
       map: board, characters: [hero], initiativeOrder: [{ tokenId: 'hero-token', label: 'hero', emoji: '', color: '', roll: 20 }],
       turnEconomy: createDnd5eTurnEconomyCounts('turn', 60) })).toMatchObject({ ok: true })
   })
+})
+
+it.each([false, true])('charges grid movement against a live wind direction (terrain=%s)', terrain => {
+  setMapGeometryRuntime([])
+  const wind: BattleMap = { ...map, dnd5ePluginAreas: [{ id: 'wind', pluginId: 'test.wind', featureId: 'zone', label: 'Wind', color: '#fff', sourceCharacterId: 'other', sourceTokenId: 'other',
+    createdRound: 1, expiresAfterRound: 11, includeSelf: true, relation: 'any', cells: Array.from({ length: 600 }, (_, i) => ({ col: i % 30, row: Math.floor(i / 30) })),
+    movementCostMultiplier: terrain ? 2 : 1, directionalMovementCost: { direction: { dc: -1, dr: 0 }, additionalFeetPerFoot: 1 } }] }
+  const prepared = prepareDnd5ePlayerMove({ action, map: wind, characters: [character()], initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }], turnEconomy: createDnd5eTurnEconomyCounts('turn', 30) })
+  expect(prepared, JSON.stringify(prepared)).toMatchObject({ ok: true, prepared: { movementCostFeet: terrain ? 30 : 20 } })
+})
+
+
+it.each(['ice', 'snow', 'sand'] as const)('charges the player actual movement with selective %s terrain', surfaceMaterial => {
+  const state = createEmptyMapGeometry(map.id, 1)
+  state.obstacles.push({
+    id: 'ground', kind: 'obstacle', label: 'Ground',
+    points: [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 200 }, { x: 0, y: 200 }],
+    blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+    heightFeet: 0, baseHeightFeet: 0, traversal: 'ground', terrainCostMultiplier: 2, surfaceMaterial, createdAt: 1,
+  })
+  setMapGeometryRuntime([state])
+  const actor = character()
+  actor.dnd5eCombatState = { schemaVersion: 2, activeEffects: [createDnd5eMechanicalEffect({
+    definitionId: 'test:ice-terrain', label: 'Ice terrain', targetId: 'hero-token',
+    source: { kind: 'spell', actorId: 'hero-token', rulesId: 'test:ice', magical: true },
+    modifiers: { environmentalCapabilities: { ignoreDifficultTerrainMaterials: ['ice', 'snow'] } },
+  })] }
+  try {
+    const prepared = prepareDnd5ePlayerMove({ action, map, characters: [actor],
+      initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared).toMatchObject({ ok: true, prepared: { movementCostFeet: surfaceMaterial === 'sand' ? 20 : 10 } })
+  } finally { setMapGeometryRuntime([]) }
+})
+
+
+it('settles an in-place underground walk through Host, charging movement before ejection', () => {
+  const actor=character()
+  actor.concentrating=true
+  actor.dnd5eCombatState={schemaVersion:2,concentrationSpellId:'test:earth',activeEffects:[createDnd5eMechanicalEffect({
+    definitionId:'test:earth:body',label:'Earth',targetId:'hero-token',
+    source:{kind:'spell',actorId:'hero-token',rulesId:'test:earth',magical:true},
+    duration:{type:'concentration',sourceActorId:'hero-token',concentrationId:'test:earth',remainingRounds:100},
+    modifiers:{solidMaterialTraversal:{materials:['earth','stone'],endInside:'eject-end-source-stun-until-next-turn-end'}},
+  })]}
+  const geometry=createEmptyMapGeometry(map.id,1)
+  geometry.obstacles=[{id:'earth',kind:'obstacle',label:'Earth',surfaceMaterial:'earth',terrainRegion:true,terrainElevationFeet:0,
+    points:[{x:0,y:0},{x:300,y:0},{x:300,y:200},{x:0,y:200}],heightFeet:0,baseHeightFeet:0,
+    blocksMovement:false,blocksVision:false,blocksLineOfEffect:false,cover:'none',createdAt:1}]
+  setMapGeometryRuntime([geometry])
+  try {
+    const prepared=prepareDnd5ePlayerMove({action:{...action,targetPosition:{x:5,y:5},targetElevationFeet:-5,dnd5eTraversalMode:'walk'},
+      map,characters:[actor],initiativeOrder:[{tokenId:'hero-token',label:'Hero',emoji:'',color:'',roll:20}],
+      turnEconomy:createDnd5eTurnEconomyCounts('turn',30)})
+    if(!prepared.ok)throw new Error(prepared.reason)
+    expect(prepared.prepared).toMatchObject({distanceFeet:5,movementCostFeet:5,toElevationFeet:-5,pathElevationsFeet:[0,-5]})
+    const resolved=resolvePreparedDnd5ePlayerMove({prepared:prepared.prepared})
+    expect(resolved.result.ok).toBe(true)
+    const moved=resolved.result.state.combatants['hero-token']
+    expect(moved.turn.movementSpent).toBe(5)
+    expect(moved.elevationFeet).toBe(0)
+    expect(moved.concentrating).toBe(false)
+    expect(moved.conditions).toContain('stunned')
+  }finally{setMapGeometryRuntime([])}
+})
+
+
+it('persists exploration sightings on the player character while preserving unrelated character and token state', () => {
+  const hero = { ...character(), notes: 'keep', dnd5eCombatState: { recentCreatureSightings: undefined } }
+  const before = JSON.stringify({map, hero})
+  const result = recordDnd5eAcceptedMovementSightings({ map, characters: [hero], actorTokenId: 'hero-token',
+    path: [{x:5,y:5},{x:25,y:5}], worldMinute: 12, worldSecondRemainder: 15 })
+  expect(result.characters[0].dnd5eCombatState?.recentCreatureSightings?.['enemy-token'].worldMinute).toBe(12.25)
+  expect(result.map.tokens[0].dnd5eCombatState?.recentCreatureSightings).toBeUndefined()
+  expect(result.map.tokens[1].dnd5eCombatState?.recentCreatureSightings?.['hero-token'].worldMinute).toBe(12.25)
+  expect(result.characters[0]).toMatchObject({notes:'keep',currentHp:30,maxHp:30})
+  expect(JSON.stringify({map,hero})).toBe(before)
+  expect(JSON.parse(JSON.stringify(result.characters))[0].dnd5eCombatState.recentCreatureSightings['enemy-token'].worldMinute).toBe(12.25)
+})
+import {resolveDnd5eDeferredMovementRepeatSaves} from './headlessCombatEngine'
+it.each([1,2])('preserves a player after-movement effect until %s committed segments finish',segments=>{
+ const effect=createDnd5eMechanicalEffect({id:'player-move-save',definitionId:'test:move-save',label:'After movement',targetId:'hero-token',
+  source:{kind:'spell',actorId:'hero-token'},duration:{type:'rounds',remainingRounds:10,tickOn:'target-turn-end'},
+  repeatSave:{ability:'wis',dc:15,timing:'after-movement',onSuccess:'remove'}})
+ let people=[character()];people[0].dnd5eCombatState={schemaVersion:2,activeEffects:[effect]}
+ let board=structuredClone(map)
+ const initiativeOrder=[{tokenId:'hero-token',label:'Hero',emoji:'',color:'',roll:20}]
+ let state:Parameters<typeof resolveDnd5eDeferredMovementRepeatSaves>[0]|undefined
+ for(let index=0;index<segments;index++){
+  const p=prepareDnd5ePlayerMove({action:{...action,targetPosition:{x:15+10*index,y:5}},map:board,characters:people,initiativeOrder,
+   turnEconomy:createDnd5eTurnEconomyCounts('turn',30-index*5)})
+  expect(p.ok).toBe(true);if(!p.ok)throw Error(p.reason)
+  const result=resolvePreparedDnd5ePlayerMove({prepared:p.prepared,deferMovementRepeatSavingThrows:true})
+  expect(result.result.ok).toBe(true)
+  expect(result.result.events.some(e=>e.type==='saving-throw-resolved')).toBe(false)
+  expect(result.result.state.combatants['hero-token'].classState.activeEffects?.some(e=>e.id===effect.id)).toBe(true)
+  const atomic=withDnd5ePendingMovementCompletion(result.application!,'hero-token',`completion:${index}`,true)
+  expect(atomic.map.dnd5ePendingMovementCompletions).toEqual([{id:'completion:0',actorTokenId:'hero-token'}])
+  board=JSON.parse(JSON.stringify(atomic.map));people=JSON.parse(JSON.stringify(result.application!.characters));state=result.result.state
+ }
+ const result=resolveDnd5eDeferredMovementRepeatSaves(state!,'hero-token',true,[{effectId:effect.id,d20:20}],{transactionId:'player-finish',effectRollDice:{}})
+ expect(result.ok).toBe(true)
+ expect(result.events.filter(e=>e.type==='saving-throw-resolved')).toHaveLength(1)
+ expect(result.state.combatants['hero-token'].classState.activeEffects?.some(e=>e.id===effect.id)).toBe(false)
 })

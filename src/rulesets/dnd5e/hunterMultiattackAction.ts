@@ -1,4 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import { consumeDnd5eWeaponAmmunition } from './items'
+import { spendDnd5eWeaponEnchantmentAttack } from './activeEffects'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
@@ -8,8 +10,7 @@ import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
-import { dnd5eAttackModeWithProtection } from './equipmentAttackAction'
-import { resolveDnd5eRollMode } from './rollMode'
+import { resolveDnd5eRollMode, type Dnd5eRollModeResolution } from './rollMode'
 import { dnd5eUtilityProjectionAttackAdvantageApplies } from './utilityProjection'
 import { dnd5eNextD20AdvantageApplies } from './nextD20Advantage'
 import {
@@ -21,6 +22,7 @@ import {
   type Dnd5eWeaponAttackProfile,
 } from './equipment'
 import {
+  dnd5eAreaAttackAdvantageCandidates,
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
@@ -59,8 +61,11 @@ export type Dnd5eHunterMultiattackRejectReason =
   | 'no-targets'
   | 'action-unavailable'
   | 'combatant-missing'
+  | 'ammunition-unavailable'
 
 export interface PreparedDnd5eHunterMultiattackTarget {
+  areaAttackAdvantageReaction?: { areaId: string; sourceId: string }
+  attackModeResolution?: Dnd5eRollModeResolution
   token: Token
   distanceFeet: number
   armorClass: number
@@ -193,7 +198,7 @@ export function prepareDnd5eHunterMultiattack(input: {
         dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) ||
         dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) ||
         dnd5eUtilityProjectionAttackAdvantageApplies(snapshot.state, actorCombatant, target) ||
-        dnd5eNextD20AdvantageApplies(actorCombatant, 'attack') ||
+        (targetIndex === 0 && dnd5eNextD20AdvantageApplies(actorCombatant, 'attack')) ||
         (targetProne && targetDistance <= 5))
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
       dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, token.id) || actorCombatant.exhaustionLevel >= 3 ||
@@ -202,10 +207,11 @@ export function prepareDnd5eHunterMultiattack(input: {
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
       dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne || (targetProne && targetDistance > 5) ||
       (feature === 'volley' && (rangedThreatened || targetDistance > (profile.rangeFeet?.normal ?? 0)))
-    const attackMode = resolveDnd5eRollMode({
+    const attackModeResolution = resolveDnd5eRollMode({
       advantage: [{ active: targetGrantsAdvantage, reason: 'hunter-multiattack-advantage' }],
       disadvantage: [{ active: targetImposesDisadvantage, reason: 'hunter-multiattack-disadvantage' }],
-    }).mode
+    })
+    const attackMode = attackModeResolution.mode
     const adjacentEnemyOfTarget = input.map.tokens.some((candidate) => {
       if (candidate.id === actorToken.id || candidate.id === token.id || !areOpposedCombatTokens(actorToken, candidate)) return false
       const combatant = snapshot.state.combatants[candidate.id]
@@ -216,6 +222,7 @@ export function prepareDnd5eHunterMultiattack(input: {
       distanceFeet: targetDistance,
       armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, token.id),
       attackMode,
+      attackModeResolution,
       classDamageContext: {
         mode: profile.mode,
         distanceFeet: targetDistance,
@@ -235,6 +242,12 @@ export function prepareDnd5eHunterMultiattack(input: {
       tranquilityWard: dnd5eTranquilityWardCheck(actorCombatant, target, snapshot.state),
     }
   })
+  let ammunitionActor=actor
+  for (const _target of targets) {
+    const consumed=consumeDnd5eWeaponAmmunition(ammunitionActor,profile.weaponId)
+    if(!consumed.ok)return {ok:false,reason:'ammunition-unavailable'}
+    ammunitionActor={...consumed.character,dnd5eCombatState:{...consumed.character.dnd5eCombatState,activeEffects:spendDnd5eWeaponEnchantmentAttack(consumed.character.dnd5eCombatState?.activeEffects,profile.weaponId)}}
+  }
   return {
     ok: true,
     prepared: {
@@ -255,6 +268,22 @@ export function prepareDnd5eHunterMultiattack(input: {
   }
 }
 
+export function dnd5eHunterAttackModeResolution(prepared: PreparedDnd5eHunterMultiattack, index: number, protectedAttack = false): Dnd5eRollModeResolution {
+  const target = prepared.targets[index]
+  if (!target) throw new RangeError('hunter multiattack index is out of range')
+  const base = target.attackModeResolution ?? resolveDnd5eRollMode({
+    advantage: [{ active: target.attackMode === 'advantage', reason: 'hunter-multiattack-advantage' }],
+    disadvantage: [{ active: target.attackMode === 'disadvantage', reason: 'hunter-multiattack-disadvantage' }],
+  })
+  const use = target.areaAttackAdvantageReaction
+  const allowed = !!use && !dnd5ePreventsAttackAdvantage(prepared.state.combatants[target.token.id]) &&
+    dnd5eAreaAttackAdvantageCandidates(prepared.state, target.token.id).some(candidate => candidate.areaId === use.areaId && candidate.sourceId === use.sourceId)
+  return resolveDnd5eRollMode({
+    advantage: [...base.advantageReasons.map(reason => ({ active: true, reason })), { active: allowed, reason: '区域来源者消耗反应授予优势' }],
+    disadvantage: [...base.disadvantageReasons.map(reason => ({ active: true, reason })), { active: protectedAttack, reason: '保护战斗风格' }],
+  })
+}
+
 export function previewDnd5eHunterMultiattack(
   prepared: PreparedDnd5eHunterMultiattack,
   attackIndex: number,
@@ -266,11 +295,13 @@ export function previewDnd5eHunterMultiattack(
 ) {
   const target = prepared.targets[attackIndex]
   if (!target) throw new RangeError('hunter multiattack index is out of range')
-  const mode = dnd5eAttackModeWithProtection(target.attackMode, protectedAttack)
+  const mode = dnd5eHunterAttackModeResolution(prepared, attackIndex, protectedAttack).mode
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   const resolved = rules.resolveAttack({ rolls, mode, modifier: prepared.profile.attackModifier + (blessRoll ?? 0) - (baneRoll ?? 0), targetAc: target.armorClass })
   return {
     ...resolveDnd5eAttackOutcome({
+    sourceId: prepared.actorToken.id,
+    targetEffects: prepared.state.combatants[target.token.id]?.classState.activeEffects,
       attack: resolved,
       criticalThreshold: prepared.profile.criticalThreshold,
       automaticCritical: dnd5eConditionHitIsAutomaticCritical({
@@ -290,12 +321,15 @@ export function dnd5eHunterMultiattackClassDamageDefinitions(
 ): readonly Dnd5eClassDamageDefinition[] {
   const target = prepared.targets[attackIndex]
   if (!target) throw new RangeError('hunter multiattack index is out of range')
+  const state=structuredClone(prepared.state)
+  const actor=state.combatants[prepared.actorToken.id]
+  for(let previous=0;previous<attackIndex;previous++)actor.classState.activeEffects=spendDnd5eWeaponEnchantmentAttack(actor.classState.activeEffects,prepared.profile.weaponId)
   const definitions = dnd5eWeaponClassDamageDefinitions({
-    state: prepared.state,
+    state,
     actorId: prepared.actorToken.id,
     targetId: target.token.id,
     context: target.classDamageContext,
-    effectiveMode: dnd5eAttackModeWithProtection(target.attackMode, !!options.protectedAttack),
+    effectiveMode: dnd5eHunterAttackModeResolution(prepared, attackIndex, !!options.protectedAttack).mode,
     critical,
   })
   return options.colossusSlayerCommitted
@@ -313,6 +347,7 @@ export interface Dnd5eHunterMultiattackResolutionRoll {
   bardicInspirationRoll?: number
   cuttingWords?: Dnd5eCuttingWordsUse
   cuttingWordsDamage?: Dnd5eCuttingWordsUse
+  areaAttackAdvantageReaction?: { areaId: string; sourceId: string }
   protectionReactionActorId?: string
   shieldSpellReaction?: boolean
   uncannyDodge?: boolean
@@ -324,6 +359,7 @@ export interface Dnd5eHunterMultiattackResolutionRoll {
 }
 
 export function resolvePreparedDnd5eHunterMultiattack(input: {
+  shieldSpellcastingSavingThrows?: Readonly<Record<string, readonly import('./headlessCombatEngine').Dnd5eSpellcastingSavingThrowRoll[]>>
   prepared: PreparedDnd5eHunterMultiattack
   rolls: readonly Dnd5eHunterMultiattackResolutionRoll[]
   airborneFallDamageRollsByCombatantId?: Dnd5eAirborneFallDamageRolls
@@ -339,6 +375,7 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
   }
   const { result, airborneFalls } = resolveDnd5eActionWithAirborneFallPreview(prepared.state, {
     type: 'ranger-hunter-multiattack',
+    shieldSpellcastingSavingThrows: input.shieldSpellcastingSavingThrows,
     actorId: prepared.actorToken.id,
     attackDecoyRolls: input.attackDecoyRolls,
     feature: prepared.feature,
@@ -357,7 +394,8 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
       bardicInspirationRoll: roll.bardicInspirationRoll,
       cuttingWords: roll.cuttingWords,
       cuttingWordsDamage: roll.cuttingWordsDamage,
-      protectionReactionActorId: roll.protectionReactionActorId,
+      areaAttackAdvantageReaction: roll.areaAttackAdvantageReaction,
+    protectionReactionActorId: roll.protectionReactionActorId,
       shieldSpellReaction: roll.shieldSpellReaction,
       uncannyDodge: roll.uncannyDodge,
       deflectMissilesD10: roll.deflectMissilesD10,
@@ -370,13 +408,20 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
     })),
   }, input.airborneFallDamageRollsByCombatantId)
   if (!result.ok) return { result, airborneFalls }
+  let ammunitionActor=prepared.actor
+  for(const _target of prepared.targets) {
+    const consumed=consumeDnd5eWeaponAmmunition(ammunitionActor,prepared.profile.weaponId)
+    if(!consumed.ok)return {result:{ok:false,state:prepared.state,events:[],reason:'invalid-class-feature'}}
+    ammunitionActor=consumed.character
+    ammunitionActor={...ammunitionActor,dnd5eCombatState:{...ammunitionActor.dnd5eCombatState,activeEffects:spendDnd5eWeaponEnchantmentAttack(ammunitionActor.dnd5eCombatState?.activeEffects,prepared.profile.weaponId)}}
+  }
   return {
     result,
     airborneFalls,
     application: planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,
-      characters: prepared.characters,
+      characters: prepared.characters.map(character=>character.id===prepared.actor.id?ammunitionActor:character),
       characterIdByCombatantId: prepared.characterIdByCombatantId,
       events: [...result.events],
     }),

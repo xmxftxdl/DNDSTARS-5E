@@ -1,4 +1,5 @@
 export const LOCAL_AI_BRIDGE_SCHEMA_VERSION: 1
+export function schemaNeedsJsonObjectMode(schema: unknown): boolean
 export const LOCAL_AI_BRIDGE_DEFAULT_PORT: number
 export const LOCAL_AI_BRIDGE_DEFAULT_ORIGINS: readonly string[]
 

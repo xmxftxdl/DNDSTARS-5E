@@ -47,6 +47,7 @@ export type Dnd5eCombatActionCommand =
   | { kind: 'basic-action'; action: 'dash' | 'hide'; sourceSpellId?: 'expeditious-retreat' }
   | { kind: 'set-flame-blade-manifestation'; effectId: string; manifested: boolean }
   | { kind: 'escape-grapple'; grapplerTokenId: string }
+  | { kind: 'escape-effect' }
   | { kind: 'dodge' }
   | { kind: 'disengage' }
   | {
@@ -58,6 +59,8 @@ export type Dnd5eCombatActionCommand =
       sustainedEffectAttack?: Dnd5eSustainedSpellControlId
       sustainedEffectAreaId?: string
     }
+  | { kind: 'cast-resource-spell'; spellId: string; slotLevel: number; featureId: string; grantId: string }
+  | { kind: 'cast-independent-spell'; spellId: string; slotLevel: number }
   | { kind: 'toggle-spell-modifier'; modifier: Dnd5eCombatSpellModifier }
   | { kind: 'use-fighter-feature'; feature: 'second-wind' | 'action-surge' }
   | { kind: 'use-class-feature'; payload: Dnd5eClassFeaturePayload }
@@ -67,6 +70,7 @@ export type Dnd5eCombatActionCommand =
       kind: 'use-persistent-area-activity'
       featureId: string
       areaId?: string
+      areaMapId?: string
       effectId?: string
     }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
@@ -221,7 +225,9 @@ export interface BuildDnd5eCombatActionDescriptorsInput {
   restrictedExtraActionKinds?: readonly (
     'weapon-attack' | 'dash' | 'disengage' | 'hide' | 'use-object'
   )[]
+  weaponAttackContinuation?: boolean
   weaponLabel?: string
+  canEscapeEffect?: boolean
   grappleEscapes?: readonly {
     grapplerTokenId: string
     grapplerLabel: string
@@ -265,7 +271,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       description: '选择地图上的目标，由 Headless 校验武器、熟练、距离、掩护、弹药与本回合攻击次数。',
       icon: dnd5eSystemActionIcon('weapon-attack', 'melee-attack'), economy: 'action', targeting: 'creature',
       command: { kind: 'select-weapon-target' },
-    }, availability(input, 'action', true, undefined, 'weapon-attack')),
+    }, availability(input.weaponAttackContinuation ? { ...input, actionRemaining: Math.max(1, input.actionRemaining) } : input, 'action', true, undefined, 'weapon-attack')),
     descriptor({
       id: 'system:move', sourceKind: 'system', label: '移动', description: '显示本回合剩余移动范围，并在地图上选择合法落点。',
       icon: dnd5eSystemActionIcon('move', 'move'), economy: 'movement', targeting: 'map-position', command: { kind: 'select-move' },
@@ -290,7 +296,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
     descriptor({
       id: 'feature:class-actions', sourceKind: 'feature', label: '职业特性', description: '打开当前职业、子职与插件授予的 Headless 主动能力；被动能力仍由结算引擎自动应用。',
       icon: dnd5eSystemActionIcon('other-actions', 'control'), economy: 'special', targeting: 'configure', command: { kind: 'open-panel', panel: 'skills' },
-    }, availability(input, 'none')),
+    }, { enabled: true, disabledReason: undefined }),
     descriptor({
       id: 'system:other-actions', sourceKind: 'system', label: '更多主动动作', description: '扣除一次主动动作。',
       icon: dnd5eSystemActionIcon('other-basic-actions', 'control'), economy: 'action', targeting: 'none', command: { kind: 'spend-action', economy: 'action' },
@@ -304,6 +310,13 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       icon: dnd5eSystemActionIcon('end-turn', 'arcane'), economy: 'none', targeting: 'none', command: { kind: 'end-turn' },
     }, availability(input, 'none')),
   ]
+
+  if (input.canEscapeEffect) actions.push(descriptor({
+    id: 'system:escape-effect', sourceKind: 'system', label: '挣脱效果',
+    description: '消耗一个动作，按当前效果规定进行检定或豁免；成功后解除效果。',
+    icon: dnd5eSystemActionIcon('escape-grapple', 'control'),
+    economy: 'action', targeting: 'self', command: { kind: 'escape-effect' },
+  }, availability(input, 'action')))
 
   for (const grapple of input.grappleEscapes ?? []) {
     actions.push(descriptor({
@@ -395,6 +408,7 @@ export function reconcileDnd5eCombatHotbarPreference(
     .map((entry) => entry.id)
     .filter((id) =>
       id.startsWith('system:escape-grapple:') ||
+      id === 'system:escape-effect' ||
       id.startsWith('feature:persistent-area-move:') ||
       id.startsWith('feature:sustained-spell:'),
     )

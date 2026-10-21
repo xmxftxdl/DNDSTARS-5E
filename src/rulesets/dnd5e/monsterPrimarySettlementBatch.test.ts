@@ -229,6 +229,23 @@ describe('primary monster settlement gap batch', () => {
     expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
     if (!result.ok) return
     expect(result.state.combatants.target.conditions).toContain('paralyzed')
+    expect(result.state.combatants.target.currentHp).toBeGreaterThan(0)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'condition-applied', targetId: 'target', condition: 'paralyzed',
+      becameIncapacitatedInvoluntarily: true,
+    }))
+  })
+
+  it('does not announce involuntary incapacitation after a successful on-hit save', () => {
+    const effect = effectOfKind(catalogAction('ghoul', 'claws'), 'saving-throw-condition')
+    const { result } = resolveCatalogAttack({ slug: 'ghoul', actionId: 'claws',
+      onHitEffectRolls: [{ effectId: effect.id, d20: 20 }],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.target.conditions).not.toContain('paralyzed')
+    expect(result.events.some(event => event.type === 'condition-applied' &&
+      event.becameIncapacitatedInvoluntarily)).toBe(false)
   })
 
   it('skips Ghoul paralysis and its saving throw for elves and undead', () => {

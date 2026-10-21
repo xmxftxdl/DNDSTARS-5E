@@ -62,6 +62,12 @@ export function validateDnd5eRulesPluginManifest(manifest: Dnd5eRulesPluginManif
   if (manifest.contentCategory != null && !isDnd5ePluginContentCategory(manifest.contentCategory)) {
     throw new Error(`Invalid plugin content category: ${manifest.id}`)
   }
+  if (manifest.roomSpellText != null && (
+    manifest.roomSpellText !== 'include' || manifest.distributionPolicy !== 'room-ephemeral'
+  )) throw new Error(`Invalid room spell text policy: ${manifest.id}`)
+  if (manifest.roomContentText != null && (
+    manifest.roomContentText !== 'include' || manifest.distributionPolicy !== 'room-ephemeral'
+  )) throw new Error(`Invalid room content text policy: ${manifest.id}`)
   if (!(DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS as readonly number[]).includes(manifest.apiVersion)) {
     throw new Error(`Unsupported rules plugin API version: ${manifest.apiVersion}`)
   }

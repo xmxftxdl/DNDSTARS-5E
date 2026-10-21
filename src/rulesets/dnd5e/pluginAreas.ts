@@ -1,3 +1,20 @@
+import { dnd5eMappedObjectProximityIncludes } from './persistentAreaMappedObjectProximity'
+import { dnd5ePersistentAreaRemainingTargetBudget } from './persistentAreaTriggerBudget'
+import { areaExtinguishesExposedFlame } from './areaFlamePolicy'
+import { firstSpherePathContact, firstCylinderPathContact } from './sweptSphereContact'
+import { mapGeometryEntityBodyHeightFeet } from '../../lib/mapGeometry'
+import { isFlameLight, isFlameProtected } from '../../../shared/flame-light-concealment.mjs'
+import { dnd5ePersistentAreaProximityIncludes } from './persistentAreaProximity'
+import { dnd5ePersistentAreaObserverSeesAnchor } from './persistentAreaObserverVision'
+import { reconcileStrongWindFlameReceipts, STRONG_WIND_FLAME_RECEIPT_PREFIX } from './strongWindFlames'
+import { persistentAreaHeightSlices } from '../../../shared/persistent-area-columns.mjs'
+import { dnd5ePersistentAreaAllModeTriggers } from './persistentAreaModes'
+import { mapGeometryLineOfEffectBlocked, mapGeometryCoverBetween, mapGeometryRuntimeForMap, mapGeometryTerrainElevationAtPoint, mapGeometryTokenElevation } from '../../lib/mapGeometry'
+import { persistentAreaCreatureTypesAllowed, persistentAreaSizeAllowed } from './persistentAreaCreatureFilter'
+import { dnd5eIsSourceSpellSummon } from './sourceSpellSummon'
+import { reconcileDnd5eEndedAreaCaptives } from './persistentAreaEnd'
+import { reconcileDnd5eTriggeredAreaLifetimes } from './persistentAreaTriggeredLifetime'
+import { reconcileDnd5eGroveGuardians } from './druidGroveRestoration'
 import {
   mapCellExtent,
   tokenAnchorCellFromPixel,
@@ -17,7 +34,8 @@ import {
   getDnd5eCoreSpellAreaDeclaration,
   reconcileDnd5ePersistentAreaAnchors,
 } from './coreSpellAreas'
-import { normalizeDnd5eActiveEffects, projectDnd5eActiveEffectState } from './activeEffects'
+import { dnd5eConditionsFromActiveEffects, normalizeDnd5eActiveEffects, projectDnd5eActiveEffectState } from './activeEffects'
+import { dnd5eConditionIncapacitated } from './conditions'
 import {
   dnd5eHallowAdditionalEffectAllowsTarget,
   dnd5ePersistentAreaAllowsTarget,
@@ -32,7 +50,34 @@ export {
   dnd5ePersistentAreaSpeedCostMultiplierAt,
 } from './persistentAreaGeometry'
 
+function sourceEffectPathClear(map: BattleMap, area: Dnd5ePluginArea, targetId: string, at?: Partial<Token>): boolean {
+  const source = map.tokens.find(token => token.id === area.sourceTokenId)
+  const target = map.tokens.find(token => token.id === targetId)
+  if (!source || !target) return false
+  if (source.id === target.id) return true
+  return !mapGeometryCoverBetween(mapGeometryRuntimeForMap(map.id), source, { ...target, ...at }, map).blocksLineOfEffect
+}
+
+function anchorEffectPathClear(map: BattleMap, area: Dnd5ePluginArea, targetId: string, at?: Partial<Token>): boolean {
+  const target = map.tokens.find(token => token.id === targetId)
+  if (!target || !area.anchorCell) return false
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  const from = tokenCenterForAnchorCell(area.anchorCell, { size: 1 }, map)
+  const destination = { ...target, ...at }
+  const anchor = map.tokens.find(token => token.id === (area.anchorTokenId ?? area.sourceTokenId))
+  const vertical = area.vertical
+  const elevation = vertical?.mode === 'volume'
+    ? anchor && area.anchorMode !== 'fixed' && Number.isFinite(vertical.anchorOffsetFeet)
+      ? mapGeometryTokenElevation(geometry, anchor) + Number(vertical.anchorOffsetFeet)
+      : vertical.baseElevationFeet
+    : mapGeometryTerrainElevationAtPoint(geometry, from)
+  return !mapGeometryLineOfEffectBlocked({ geometry, map, from, to: destination,
+    fromElevationFeet: elevation, toElevationFeet: mapGeometryTokenElevation(geometry, destination) })
+}
+
 export interface Dnd5ePersistentAreaTriggerCandidate {
+  /** Host path contact; settle at this intermediate position before continuing movement. */
+  areaContact?: NonNullable<ReturnType<typeof firstSpherePathContact>>
   area: Dnd5ePluginArea
   trigger: Dnd5ePersistentAreaTriggerSnapshot
   targetToken: Token
@@ -46,6 +91,8 @@ export interface Dnd5eAreaMovementCheckpoint {
   candidate: Dnd5ePersistentAreaTriggerCandidate
   position: { x: number; y: number }
   pathIndex: number
+  /** Height imposed by the trigger after the creature reached this path cell. */
+  elevationFeet?: number
 }
 
 /**
@@ -61,7 +108,7 @@ export function dnd5eFirstAreaMovementCheckpoint(input: {
 }): Dnd5eAreaMovementCheckpoint | undefined {
   const candidate = input.candidates
     .filter((entry) =>
-      (entry.area.coreSpellId === 'grease' || entry.area.coreSpellId === 'web') &&
+      (entry.area.coreSpellId === 'grease' || entry.area.coreSpellId === 'web' || entry.trigger.condition?.condition === 'restrained') &&
       entry.trigger.timing === 'on-enter' &&
       entry.targetToken.id === input.token.id &&
       entry.enteredAt != null)
@@ -86,23 +133,29 @@ export function dnd5eFailedAreaMovementCheckpoint(input: {
     targetId?: string
     saveSuccess?: boolean
     conditionApplied?: string
+    actorId?: string
+    toElevationFeet?: number
   }[]
 }): Dnd5eAreaMovementCheckpoint | undefined {
   const failedCandidates = input.candidates.filter((candidate) =>
-    (candidate.area.coreSpellId === 'grease' || candidate.area.coreSpellId === 'web') &&
+    (candidate.area.coreSpellId === 'grease' || candidate.area.coreSpellId === 'web' || candidate.trigger.condition?.condition === 'restrained') &&
     candidate.trigger.timing === 'on-enter' &&
     input.events.some((event) =>
       event.type === 'persistent-area-triggered' &&
       event.areaId === candidate.area.id &&
       event.triggerId === candidate.trigger.id &&
       event.targetId === input.token.id &&
-      event.saveSuccess === false &&
-      (candidate.area.coreSpellId !== 'web' || event.conditionApplied === 'restrained')))
-  return dnd5eFirstAreaMovementCheckpoint({
+      (event.saveSuccess === false || (!candidate.trigger.savingThrow && event.conditionApplied === 'restrained')) &&
+      (candidate.area.coreSpellId === 'grease' || event.conditionApplied === 'restrained')))
+  const checkpoint = dnd5eFirstAreaMovementCheckpoint({
     map: input.map,
     token: input.token,
     candidates: failedCandidates,
   })
+  if (!checkpoint) return undefined
+  const displacement = input.events.findLast(event => event.type === 'moved' &&
+    event.actorId === input.token.id && Number.isFinite(event.toElevationFeet))
+  return displacement ? { ...checkpoint, elevationFeet: displacement.toElevationFeet } : checkpoint
 }
 
 /**
@@ -118,8 +171,39 @@ export function dnd5ePersistentAreaTriggerTimingIsSimultaneousWave(
     timing === 'on-detonate' || timing === 'on-area-move-impact'
 }
 
-const tokenIntersectsAreaAt = dnd5eTokenIntersectsPersistentAreaAt
+function tokenIntersectsAreaAt(...args: Parameters<typeof dnd5eTokenIntersectsPersistentAreaAt>): boolean {
+  const [token, map, area, position, cells, elevationFeet] = args
+  // A carried gas barrier travels with its owner at every authoritative path
+  // sample. Testing against the old anchor would invent a cloud-entry event.
+  if ((position.x !== token.x || position.y !== token.y ||
+      (elevationFeet != null && elevationFeet !== token.elevationFeet)) &&
+      map.dnd5ePluginAreas?.some(ward => ward.excludesWindDispersibleGas === true &&
+        ['source-token', 'target-token', 'effect-token'].includes(ward.anchorMode ?? '') &&
+        (ward.anchorTokenId ?? ward.sourceTokenId) === token.id)) {
+    const projected = reconcileDnd5ePersistentAreaAnchors({ ...map,
+      tokens: map.tokens.map(entry => entry.id === token.id
+        ? { ...entry, ...position, elevationFeet: elevationFeet ?? entry.elevationFeet } : entry),
+    })
+    return dnd5eTokenIntersectsPersistentAreaAt(token, projected, area, position, cells, elevationFeet)
+  }
+  return dnd5eTokenIntersectsPersistentAreaAt(...args)
+}
 const areaAllowsTarget = dnd5ePersistentAreaAllowsTarget
+
+function persistentAreaFlightGateAt(map: BattleMap, trigger: Dnd5ePersistentAreaTriggerSnapshot, tokenId: string,
+  flightCapableTokenIds?: ReadonlySet<string>, at?: Partial<Token>): boolean {
+  if (trigger.requiresTargetGrounded) {
+    const token = map.tokens.find(candidate => candidate.id === tokenId)
+    if (!token) return false
+    const geometry = mapGeometryRuntimeForMap(map.id), position = { ...token, ...at, elevationFeet: at?.elevationFeet ?? token.elevationFeet }
+    if (Math.abs(mapGeometryTokenElevation(geometry, position) - mapGeometryTerrainElevationAtPoint(geometry, position)) > 1e-4) return false
+  }
+  if (!trigger.requiresTargetFlying) return true
+  const token = map.tokens.find(token => token.id === tokenId)
+  if (!token || token.dnd5eTraversalMode !== 'fly' || !flightCapableTokenIds?.has(tokenId)) return false
+  const geometry = mapGeometryRuntimeForMap(map.id), position = { ...token, ...at, elevationFeet: at?.elevationFeet ?? token.elevationFeet }
+  return mapGeometryTokenElevation(geometry, position) > mapGeometryTerrainElevationAtPoint(geometry, position) + 1e-4
+}
 
 function persistentAreaTriggerAllowsTarget(
   area: Dnd5ePluginArea,
@@ -132,6 +216,8 @@ function persistentAreaTriggerAllowsTarget(
   // the authoritative trigger pipeline.
   if (token.type === 'obstacle' || token.dnd5eSpellEffect) return false
   if (!(trigger.targetKinds ?? ['creature']).includes('creature')) return false
+  if (trigger.requiresSourceSpellSummon && !dnd5eIsSourceSpellSummon(map, area.sourceTokenId, token.id)) return false
+  if (!persistentAreaCreatureTypesAllowed(trigger, token.creatureTypes ?? (token.type === 'player' ? ['humanoid'] : []))) return false
   if (area.coreSpellId === 'web' && trigger.condition?.condition === 'restrained' &&
     dnd5eTokenHasWebWalker(token)) return false
   // Stinking Cloud requires the creature to start its turn entirely in the cloud.
@@ -139,7 +225,7 @@ function persistentAreaTriggerAllowsTarget(
     !dnd5eTokenFullyContainedInPersistentAreaAt(token, map, area, token)) return false
   if (area.hallow &&
     !dnd5eHallowAdditionalEffectAllowsTarget(area, token, map)) return false
-  return areaAllowsTarget(area, token, map)
+  return areaAllowsTarget(trigger.targetRelation ? {...area, relation: trigger.targetRelation} : area, token, map)
 }
 
 function gridCellKey(cell: GridCell): string {
@@ -271,9 +357,10 @@ function alreadyTriggered(
   turnKey?: string,
 ): boolean {
   const frequencyId = trigger.frequencyGroupId ?? trigger.id
+  if (dnd5ePersistentAreaRemainingTargetBudget(area, trigger, turnKey) <= 0) return true
   if (
     trigger.maximumTotalUses != null &&
-    (area.triggerReceipts ?? []).filter((receipt) => receipt.triggerId === frequencyId).length >=
+    (area.triggerReceipts ?? []).filter((receipt) => !receipt.declined && receipt.triggerId === frequencyId).length >=
       trigger.maximumTotalUses
   ) return true
   if (
@@ -368,11 +455,14 @@ export function normalizeDnd5ePersistentAreaTriggerForRuntime(
  * excluded (2014 errata: relocating the area onto a creature is not "entering").
  */
 export function collectDnd5ePersistentAreaTriggersForSourceMove(input: {
+  sizeRanksByTokenId?: ReadonlyMap<string, number | undefined>
   beforeMap: BattleMap
   afterMap: BattleMap
   sourceTokenId: string
   round: number
   turnKey?: string
+  /** Host-produced capability context; omitted evidence fails flight-only triggers closed. */
+  flightCapableTokenIds?: ReadonlySet<string>
 }): Dnd5ePersistentAreaTriggerCandidate[] {
   const beforeAreas = new Map(
     (input.beforeMap.dnd5ePluginAreas ?? [])
@@ -392,7 +482,14 @@ export function collectDnd5ePersistentAreaTriggersForSourceMove(input: {
     targetTokenId: string,
   ) => {
     const runtimeTrigger = normalizeDnd5ePersistentAreaTriggerForRuntime(area, trigger)
+    // Expiry detonations deliberately use the saved area after its last round.
+    // Ordinary exposure must not survive a delayed map cleanup.
+    if (runtimeTrigger.timing !== 'on-detonate' && area.permanent !== true && input.round > area.expiresAfterRound) return false
+    if (!persistentAreaFlightGateAt(input.afterMap, runtimeTrigger, targetTokenId, input.flightCapableTokenIds)) return false
+    if (!persistentAreaSizeAllowed(runtimeTrigger, input.sizeRanksByTokenId?.get(targetTokenId))) return false
     if (runtimeTrigger.excludedTokenIds?.includes(targetTokenId)) return false
+    if (runtimeTrigger.requiresSourceLineOfEffect && !sourceEffectPathClear(input.afterMap, area, targetTokenId)) return false
+    if (runtimeTrigger.requiresAnchorLineOfEffect && !anchorEffectPathClear(input.afterMap, area, targetTokenId)) return false
     const lifecycleAdvances = area.lifecycleAdvances ?? 0
     if (
       (runtimeTrigger.minimumLifecycleAdvances != null && lifecycleAdvances < runtimeTrigger.minimumLifecycleAdvances) ||
@@ -411,10 +508,10 @@ export function collectDnd5ePersistentAreaTriggersForSourceMove(input: {
       if (queuedLimited.has(key)) return false
       queuedLimited.add(key)
     }
-    if (runtimeTrigger.maximumTotalUses != null && !runtimeTrigger.sourceChoosesTargets) {
+    if (runtimeTrigger.maximumTotalUses != null && !runtimeTrigger.sourceChoosesTargets && !runtimeTrigger.sourceMayDecline) {
       const totalKey = `${area.id}\u0000${runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id}`
       const committed = (area.triggerReceipts ?? []).filter((receipt) =>
-        receipt.triggerId === (runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id)).length
+        !receipt.declined && receipt.triggerId === (runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id)).length
       const queued = queuedTotalUses.get(totalKey) ?? 0
       if (committed + queued >= runtimeTrigger.maximumTotalUses) return false
       queuedTotalUses.set(totalKey, queued + 1)
@@ -465,6 +562,9 @@ export function collectDnd5ePersistentAreaTriggersForSourceMove(input: {
 }
 
 export function collectDnd5ePersistentAreaTriggers(input: {
+  /** Host-approved sphere movement, with elevations measured at the volume bottom. */
+  areaSweep?: {areaId:string;path:readonly {x:number;y:number;elevationFeet:number}[]}
+  sizeRanksByTokenId?: ReadonlyMap<string, number | undefined>
   map: BattleMap
   timing: Dnd5ePersistentAreaTriggerTiming
   round: number
@@ -472,9 +572,13 @@ export function collectDnd5ePersistentAreaTriggers(input: {
   areaId?: string
   /** 当前权威回合标识；oncePerTurn 声明必须提供。 */
   turnKey?: string
+  /** Host-produced capability context; omitted evidence fails flight-only triggers closed. */
+  flightCapableTokenIds?: ReadonlySet<string>
   movement?: {
     token: Token
     to: { x: number; y: number }
+    /** Teleportation checks arrival only, never the intervening path or travel distance. */
+    transportMode?: 'teleport'
     /** 权威移动规划器生成的完整折线路径；缺省时才回退为起终点直线。 */
     path?: readonly { x: number; y: number }[]
     /** 与 path 一一对应的绝对高度；用于飞越地面效果和进入三维体积。 */
@@ -491,9 +595,15 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     area: Dnd5ePluginArea,
     trigger: Dnd5ePersistentAreaTriggerSnapshot,
     targetTokenId: string,
+    at?: Partial<Token>,
   ) => {
     const runtimeTrigger = normalizeDnd5ePersistentAreaTriggerForRuntime(area, trigger)
+    if (!persistentAreaFlightGateAt(input.map, runtimeTrigger, targetTokenId, input.flightCapableTokenIds, at)) return false
+    if (runtimeTrigger.timing !== 'on-detonate' && area.permanent !== true && input.round > area.expiresAfterRound) return false
+    if (!persistentAreaSizeAllowed(runtimeTrigger, input.sizeRanksByTokenId?.get(targetTokenId))) return false
     if (runtimeTrigger.excludedTokenIds?.includes(targetTokenId)) return false
+    if (runtimeTrigger.requiresSourceLineOfEffect && !sourceEffectPathClear(input.map, area, targetTokenId, at)) return false
+    if (runtimeTrigger.requiresAnchorLineOfEffect && !anchorEffectPathClear(input.map, area, targetTokenId, at)) return false
     const lifecycleAdvances = area.lifecycleAdvances ?? 0
     if (
       (runtimeTrigger.minimumLifecycleAdvances != null && lifecycleAdvances < runtimeTrigger.minimumLifecycleAdvances) ||
@@ -512,10 +622,10 @@ export function collectDnd5ePersistentAreaTriggers(input: {
       if (queuedLimited.has(key)) return false
       queuedLimited.add(key)
     }
-    if (runtimeTrigger.maximumTotalUses != null && !runtimeTrigger.sourceChoosesTargets) {
+    if (runtimeTrigger.maximumTotalUses != null && !runtimeTrigger.sourceChoosesTargets && !runtimeTrigger.sourceMayDecline) {
       const totalKey = `${area.id}\u0000${runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id}`
       const committed = (area.triggerReceipts ?? []).filter((receipt) =>
-        receipt.triggerId === (runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id)).length
+        !receipt.declined && receipt.triggerId === (runtimeTrigger.frequencyGroupId ?? runtimeTrigger.id)).length
       const queued = queuedTotalUses.get(totalKey) ?? 0
       if (committed + queued >= runtimeTrigger.maximumTotalUses) return false
       queuedTotalUses.set(totalKey, queued + 1)
@@ -526,6 +636,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
   if (input.timing === 'on-enter' || input.timing === 'on-move-distance') {
     const movement = input.movement
     if (!movement) return []
+    if (movement.transportMode === 'teleport' && input.timing === 'on-move-distance') return []
     const target = movement.token
     if (isDefeatedPersistentAreaTarget(target)) return []
     const from = tokenAnchorCellFromPixel(target.x, target.y, target, input.map)
@@ -534,7 +645,10 @@ export function collectDnd5ePersistentAreaTriggers(input: {
       cell: tokenAnchorCellFromPixel(point.x, point.y, target, input.map),
       elevationFeet: movement.pathElevationsFeet?.[index],
     })) ?? []
-    const rawPath = declaredWaypoints.length > 0
+    const rawPath = movement.transportMode === 'teleport'
+      ? [{ cell: from, elevationFeet: target.elevationFeet },
+          { cell: to, elevationFeet: movement.pathElevationsFeet?.at(-1) }]
+      : declaredWaypoints.length > 0
       ? [
           { cell: from, elevationFeet: target.elevationFeet },
           ...declaredWaypoints,
@@ -602,7 +716,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
               triggerCells,
               path[pathIndex].elevationFeet,
             )
-            if (!inside && nextInside && mayQueue(area, trigger, target.id)) {
+            if (!inside && nextInside && mayQueue(area, trigger, target.id, { ...position, elevationFeet: path[pathIndex].elevationFeet })) {
               out.push(candidate(
                 area,
                 trigger,
@@ -646,7 +760,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
             const interval = Math.max(1, trigger.movementIntervalFeet ?? feetPerCell)
             while (distanceInsideFeet >= interval) {
               distanceInsideFeet -= interval
-              if (mayQueue(area, trigger, target.id)) {
+              if (mayQueue(area, trigger, target.id, { ...position, elevationFeet: path[pathIndex].elevationFeet })) {
                 out.push(candidate(
                   area,
                   trigger,
@@ -674,20 +788,36 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     const lifecycleAdvances = area.lifecycleAdvances ?? 0
     for (const target of targets) {
       if (isDefeatedPersistentAreaTarget(target)) continue
+      const sweep=input.timing==='on-area-move-impact'&&input.areaSweep?.areaId===area.id?input.areaSweep:undefined
+      let contact:ReturnType<typeof firstSpherePathContact>
+      if(sweep){
+        if(area.vertical?.mode!=='volume'||(area.vertical.shape!=='sphere'&&!area.circularGeometry?.radiusFeet))continue
+        const geometry=mapGeometryRuntimeForMap(input.map.id),scale=input.map.gridSize/(input.map.feetPerCell??5)
+        const half=target.size*input.map.gridSize/2,bottom=mapGeometryTokenElevation(geometry,target)
+        const low:readonly [number,number,number]=[(target.x-half)/scale,(target.y-half)/scale,bottom]
+        const high:readonly [number,number,number]=[(target.x+half)/scale,(target.y+half)/scale,bottom+(mapGeometryEntityBodyHeightFeet(target)??5)]
+        contact=area.vertical.shape==='sphere'
+          ? firstSpherePathContact(sweep.path,scale,area.vertical.heightFeet/2,low,high)
+          : firstCylinderPathContact(sweep.path,scale,area.circularGeometry!.radiusFeet,area.vertical.heightFeet,low,high)
+        if(!contact)continue
+      }
       for (const trigger of area.triggers ?? []) {
         if (
           trigger.timing !== input.timing ||
           !persistentAreaTriggerAllowsTarget(area, trigger, target, input.map) ||
           (trigger.minimumLifecycleAdvances != null && lifecycleAdvances < trigger.minimumLifecycleAdvances) ||
           (trigger.maximumLifecycleAdvances != null && lifecycleAdvances > trigger.maximumLifecycleAdvances) ||
-          !tokenIntersectsAreaAt(target, input.map, area, target, trigger.cells ?? area.cells) ||
+          !(sweep ? contact!==undefined : trigger.targetSeesAnchorOnCreate
+            ? input.timing === 'on-create' && dnd5ePersistentAreaObserverSeesAnchor(input.map, area, target.id)
+            : trigger.proximityObjectKind ? dnd5eMappedObjectProximityIncludes(input.map, area, trigger, target)
+            : dnd5ePersistentAreaProximityIncludes(target, input.map, trigger.cells ? {...area, cells: [...trigger.cells]} : area, trigger.proximityFeet)) ||
           !mayQueue(area, trigger, target.id)
         ) continue
-        out.push(candidate(area, trigger, target, input.round, input.timing, undefined, undefined, input.turnKey))
+        out.push({...candidate(area, trigger, target, input.round, input.timing, undefined, undefined, input.turnKey),...(contact?{areaContact:contact}:{})})
       }
     }
   }
-  return out
+  return input.areaSweep?out.sort((a,b)=>(a.areaContact?.segment??0)-(b.areaContact?.segment??0)||(a.areaContact?.fraction??0)-(b.areaContact?.fraction??0)):out
 }
 
 export function recordDnd5ePersistentAreaTrigger(
@@ -696,6 +826,7 @@ export function recordDnd5ePersistentAreaTrigger(
   round: number,
   damage = 0,
   savingThrowSucceeded?: boolean,
+  declined?: boolean,
 ): Dnd5ePluginArea[] {
   return (areas ?? []).flatMap((area) => {
     if (area.id !== resolved.area.id) return [area]
@@ -712,6 +843,7 @@ export function recordDnd5ePersistentAreaTrigger(
       transactionId: resolved.transactionId,
       damage: Math.max(0, Math.floor(damage)) || undefined,
       savingThrowSucceeded,
+      declined: declined === true || undefined,
     })
     const frequencyId = resolved.trigger.frequencyGroupId ?? resolved.trigger.id
     const exhausted = resolved.trigger.maximumTotalDamage != null && receipts
@@ -719,6 +851,19 @@ export function recordDnd5ePersistentAreaTrigger(
       .reduce((total, receipt) => total + Math.max(0, receipt.damage ?? 0), 0) >=
         resolved.trigger.maximumTotalDamage
     return exhausted ? [] : [{ ...area, triggerReceipts: receipts.slice(-2_048) }]
+  })
+}
+
+/** A child cannot outlive its parent, including when both are reconciled in one pass. */
+function rootedPersistentAreas(areas:readonly Dnd5ePluginArea[]):Dnd5ePluginArea[]{
+  const byId=new Map(areas.map(area=>[area.id,area]))
+  return areas.filter(area=>{
+    const visited=new Set<string>();let current:Dnd5ePluginArea|undefined=area
+    while(current?.linkedParentAreaId){
+      if(visited.has(current.id))return false
+      visited.add(current.id);current=byId.get(current.linkedParentAreaId)
+    }
+    return current!=null
   })
 }
 
@@ -730,13 +875,25 @@ export function reconcileDnd5ePluginAreas(
 ): Dnd5ePluginArea[] {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
   const tokensById = new Map(tokens.map((token) => [token.id, token]))
-  return (areas ?? []).filter((area) => {
+  return rootedPersistentAreas((areas ?? []).filter((area) => {
     // Legacy map-save data may still contain Magic Mouth projections from an
     // older build. Remove the projection only; its associated object remains
     // a normal DM-managed map object.
+    if (area.linkedParentAreaId && !(areas ?? []).some(parent=>parent.id===area.linkedParentAreaId)) return false
     if (area.magicMouth) return false
     if (area.permanent !== true && round > area.expiresAfterRound) return false
     const source = charactersById.get(area.sourceCharacterId)
+    if (area.sourceIncapacitatedBehavior === 'remove-area') {
+      // A character sheet is authoritative for linked player Tokens; monsters
+      // instead carry their own rules state. Missing data is not incapacity.
+      const sourceToken = tokensById.get(area.sourceTokenId)
+      const sourceState = source ? source.dnd5eCombatState : sourceToken?.dnd5eCombatState
+      const conditions = [
+        ...(source ? source.conditions : sourceToken?.dnd5eCombatState?.conditions ?? []),
+        ...dnd5eConditionsFromActiveEffects(normalizeDnd5eActiveEffects(sourceState?.activeEffects)),
+      ]
+      if (sourceState?.stunnedByActorId || dnd5eConditionIncapacitated({ conditions })) return false
+    }
     if (area.sourceKind === 'core-spell' && area.coreSpellId === 'spiritual-weapon') {
       return normalizeDnd5eActiveEffects(source?.dnd5eCombatState?.activeEffects).some((effect) =>
         effect.definitionId === 'srd-5.1:spell:spiritual-weapon' &&
@@ -752,14 +909,14 @@ export function reconcileDnd5ePluginAreas(
     }
     const sourceToken = tokensById.get(area.sourceTokenId)
     return sourceToken?.dnd5eCombatState?.concentrationSpellId === area.concentrationId
-  }).map((area) => {
+  })).map((area) => {
     if (!area.triggerReceipts) return area
-    const persistentReceiptIds = new Set((area.triggers ?? [])
+    const persistentReceiptIds = new Set(dnd5ePersistentAreaAllModeTriggers(area)
       .filter((trigger) =>
-        trigger.maximumTotalUses != null || trigger.maximumTotalDamage != null || trigger.oncePerTarget === true)
+        trigger.maximumTotalUses != null || trigger.maximumTotalDamage != null || trigger.oncePerTarget === true || trigger.endAreaWhenNoBoundConditions === true)
       .map((trigger) => trigger.frequencyGroupId ?? trigger.id))
     const triggerReceipts = area.triggerReceipts.filter((receipt) =>
-      receipt.round >= round - 2 || persistentReceiptIds.has(receipt.triggerId) ||
+      receipt.triggerId.startsWith(STRONG_WIND_FLAME_RECEIPT_PREFIX) || receipt.round >= round - 2 || persistentReceiptIds.has(receipt.triggerId) ||
       receipt.savingThrowSucceeded === true)
     return triggerReceipts.length === area.triggerReceipts.length
       ? area
@@ -779,8 +936,8 @@ export function expireDnd5ePluginAreasAtWorldMinute(
 ): BattleMap {
   if (!Number.isSafeInteger(worldMinute) || worldMinute < 0) return map
   const previous = map.dnd5ePluginAreas ?? []
-  const next = previous.filter((area) =>
-    area.permanent === true || area.expiresAtWorldMinute == null || worldMinute < area.expiresAtWorldMinute)
+  const next = rootedPersistentAreas(previous.filter((area) =>
+    area.permanent === true || area.expiresAtWorldMinute == null || worldMinute < area.expiresAtWorldMinute))
   if (next.length === previous.length) return map
   const liveEffectTokenIds = new Set(next.flatMap((area) =>
     area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : [],
@@ -788,11 +945,11 @@ export function expireDnd5ePluginAreasAtWorldMinute(
   const tokens = map.tokens.filter((token) =>
     retainDnd5eSpellEffectToken(token, liveEffectTokenIds),
   )
-  return {
+  return reconcileDnd5eGroveGuardians({
     ...map,
     dnd5ePluginAreas: next,
     tokens,
-  }
+  })
 }
 
 /**
@@ -816,12 +973,12 @@ export function rebaseDnd5ePluginAreasAfterCombat(
       changed = true
       return []
     }
-    const persistentReceiptIds = new Set((area.triggers ?? [])
+    const persistentReceiptIds = new Set(dnd5ePersistentAreaAllModeTriggers(area)
       .filter((trigger) =>
-        trigger.maximumTotalUses != null || trigger.maximumTotalDamage != null || trigger.oncePerTarget === true)
+        trigger.maximumTotalUses != null || trigger.maximumTotalDamage != null || trigger.oncePerTarget === true || trigger.endAreaWhenNoBoundConditions === true)
       .map((trigger) => trigger.frequencyGroupId ?? trigger.id))
     const triggerReceipts = area.triggerReceipts?.filter((receipt) =>
-      persistentReceiptIds.has(receipt.triggerId),
+      persistentReceiptIds.has(receipt.triggerId) || receipt.triggerId.startsWith(STRONG_WIND_FLAME_RECEIPT_PREFIX),
     )
     const rebaseBoundary = (value: number | undefined) => value == null
       ? undefined
@@ -890,6 +1047,13 @@ export function reconcileDnd5ePluginAreasOnMap(
     round,
     anchoredMap.tokens,
   )).map((area) => {
+    if (area.effectGroup?.effectId === 'guardians' && area.groveInitialOccupantIds?.length) {
+      const present = area.groveInitialOccupantIds.filter(id => {
+        const token = anchoredMap.tokens.find(candidate => candidate.id === id)
+        return !!token && token.type !== 'obstacle' && tokenIntersectsAreaAt(token, anchoredMap, area, token)
+      })
+      if (present.length !== area.groveInitialOccupantIds.length) area = { ...area, groveInitialOccupantIds: present }
+    }
     if (!area.hallow || !area.triggerReceipts?.some((receipt) =>
       receipt.savingThrowSucceeded === true)) return area
     const triggerReceipts = area.triggerReceipts.filter((receipt) => {
@@ -925,8 +1089,8 @@ export function reconcileDnd5ePluginAreasOnMap(
     tokens.length === anchoredMap.tokens.length &&
     tokens.every((token, index) => token === anchoredMap.tokens[index]) &&
     reconciledMap.tokens === tokens
-  ) return anchoredMap
-  return reconciledMap
+  ) return reconcileStrongWindFlameReceipts(anchoredMap)
+  return reconcileStrongWindFlameReceipts(reconciledMap)
 }
 
 export interface Dnd5ePluginAreaConcentrationReconciliation {
@@ -948,8 +1112,12 @@ export function reconcileDnd5ePluginAreasAndConcentrationOnMap(
   characters: readonly Character[],
   round: number,
   reconciledMapOverride?: BattleMap,
+  roomMaps?: readonly BattleMap[],
 ): Dnd5ePluginAreaConcentrationReconciliation {
-  const reconciledMap = reconciledMapOverride ?? reconcileDnd5ePluginAreasOnMap(map, characters, round)
+  const endedCaptives = reconcileDnd5eEndedAreaCaptives({ before: map,
+    after: reconcileDnd5eTriggeredAreaLifetimes(reconciledMapOverride ?? reconcileDnd5ePluginAreasOnMap(map, characters, round), characters, roomMaps), characters, round })
+  const reconciledMap = endedCaptives.map
+  characters = endedCaptives.characters
   const liveAreas = reconciledMap.dnd5ePluginAreas ?? []
   const liveAreaIds = new Set(liveAreas.map((area) => area.id))
   const endedSources = (map.dnd5ePluginAreas ?? []).flatMap((area) => {
@@ -1105,6 +1273,9 @@ export function reconcileDnd5ePluginAreasAfterSourceMove(input: {
   characters: readonly Character[]
   round: number
   sourceTokenId: string
+  /** Actual traversed positions, truncated after any movement interruption. */
+  path?: readonly { x: number; y: number }[]
+  pathElevationsFeet?: readonly number[]
 }): Dnd5ePluginAreaConcentrationReconciliation {
   const beforeSource = input.beforeMap.tokens.find((token) => token.id === input.sourceTokenId)
   const afterSource = input.afterMap.tokens.find((token) => token.id === input.sourceTokenId)
@@ -1132,8 +1303,16 @@ export function reconcileDnd5ePluginAreasAfterSourceMove(input: {
           : [],
       )
     : [])
+  const pathAreas = input.afterMap.dnd5ePluginAreas?.map(area => {
+    if (!afterSource || area.effectGroup?.effectId !== 'guardians' ||
+      !area.groveInitialOccupantIds?.includes(input.sourceTokenId) || !input.path?.some((point, index) =>
+        !tokenIntersectsAreaAt(afterSource, input.afterMap, area, point, area.cells, input.pathElevationsFeet?.[index]))) return area
+    return { ...area, groveInitialOccupantIds: area.groveInitialOccupantIds.filter(id => id !== input.sourceTokenId) }
+  })
+  const pathMap = pathAreas?.some((area, index) => area !== input.afterMap.dnd5ePluginAreas?.[index])
+    ? { ...input.afterMap, dnd5ePluginAreas: pathAreas } : input.afterMap
   const reconciledMap = reconcileDnd5ePluginAreasOnMap(
-    input.afterMap,
+    pathMap,
     input.characters,
     input.round,
     movedSourceAreaIds,
@@ -1158,11 +1337,19 @@ const DND5E_WIND_DISPERSIBLE_CORE_SPELL_IDS = new Set([
 ])
 
 function persistentAreasOverlap(left: Dnd5ePluginArea, right: Dnd5ePluginArea): boolean {
+  if ((left.vertical?.mode === 'volume' && left.vertical.columns) ||
+    (right.vertical?.mode === 'volume' && right.vertical.columns)) {
+    return persistentAreaHeightSlices(left).some(a => persistentAreaHeightSlices(right).some(b => persistentAreasOverlap(a, b)))
+  }
+  if (left.vertical?.mode === 'volume' && right.vertical?.mode === 'volume' &&
+    (left.vertical.baseElevationFeet >= right.vertical.baseElevationFeet + right.vertical.heightFeet ||
+      right.vertical.baseElevationFeet >= left.vertical.baseElevationFeet + left.vertical.heightFeet)) return false
   const leftCells = new Set(left.cells.map(gridCellKey))
   return right.cells.some((cell) => leftCells.has(gridCellKey(cell)))
 }
 
 function persistentAreaActivelyDispersesFogAndMist(area: Dnd5ePluginArea): boolean {
+  if (area.windBarrier || area.strongWind) return true
   const lifecycleAdvances = area.lifecycleAdvances ?? 0
   // Gust of Wind and Wind Wall are strong wind for their complete lifetime,
   // so overlapping fog, smoke, and gas spell areas are removed as soon as
@@ -1188,34 +1375,34 @@ function disperseDnd5eFogAndMistAreas(areas: readonly Dnd5ePluginArea[]): Dnd5eP
   const sources = areas.filter(persistentAreaActivelyDispersesFogAndMist)
   if (sources.length === 0) return [...areas]
   return areas.filter((area) => !(
-    area.sourceKind === 'core-spell' && area.coreSpellId &&
-    DND5E_WIND_DISPERSIBLE_CORE_SPELL_IDS.has(area.coreSpellId) &&
+    (area.dispersedByStrongWind === true || (
+      area.sourceKind === 'core-spell' && area.coreSpellId &&
+      DND5E_WIND_DISPERSIBLE_CORE_SPELL_IDS.has(area.coreSpellId)
+    )) &&
     sources.some((sourceArea) => sourceArea.id !== area.id && persistentAreasOverlap(sourceArea, area))
   ))
 }
 
-const DND5E_UNPROTECTED_FLAME_SOURCE_KINDS = new Set(['torch', 'candle'])
+
 
 /**
  * Gust of Wind extinguishes ordinary exposed flames without a roll. Token
  * light presets are authoritative map state, so clear the carried light as
  * soon as an exposed torch or candle overlaps a live strong-wind area. Lamps
  * and lanterns are protected flames and intentionally remain for the separate
- * 50% adjudication instead of being silently resolved by a non-auditable RNG.
+ * Host d100 transaction in strongWindFlames instead of rolling during reconciliation.
  */
 function extinguishDnd5eUnprotectedFlamesInStrongWind(map: BattleMap): Token[] {
   const strongWindAreas = (map.dnd5ePluginAreas ?? []).filter((area) =>
-    area.sourceKind === 'core-spell' && area.coreSpellId === 'gust-of-wind')
+    area.extinguishesUnprotectedFlames || area.strongWind || (area.sourceKind === 'core-spell' && area.coreSpellId === 'gust-of-wind'))
   if (strongWindAreas.length === 0) return map.tokens
 
   let changed = false
   const tokens = map.tokens.map((token) => {
-    const lightSourceKind = token.lightSource?.sourceKind
     if (
-      token.lightSource?.enabled !== true ||
-      !lightSourceKind ||
-      !DND5E_UNPROTECTED_FLAME_SOURCE_KINDS.has(lightSourceKind) ||
-      !strongWindAreas.some((area) => tokenIntersectsAreaAt(token, map, area, token))
+      token.lightSource?.enabled !== true || token.lightSource.flame === false ||
+      !isFlameLight(token.lightSource) || isFlameProtected(token.lightSource) ||
+      !strongWindAreas.some((area) => areaExtinguishesExposedFlame(area, token.lightSource!) && !area.excludedTargetIds?.includes(token.id) && tokenIntersectsAreaAt(token, map, area, token))
     ) return token
     changed = true
     return { ...token, lightSource: undefined }
@@ -1312,6 +1499,7 @@ export function advanceDnd5ePluginAreasAtTurnBoundary(input: {
     if (vertical?.mode === 'volume' && vertical.heightFeet <= 0) return []
     if (colOffset !== 0 || rowOffset !== 0) movedAreaIds.push(area.id)
     const nextLifecycleAdvances = (area.lifecycleAdvances ?? 0) + 1
+    if (lifecycle.expireAfterAdvances != null && nextLifecycleAdvances >= lifecycle.expireAfterAdvances) return []
     const lifecycleStage = lifecycle.stages?.find((stage) => stage.atAdvance === nextLifecycleAdvances)
     return [{
       ...area,

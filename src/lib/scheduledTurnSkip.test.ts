@@ -1,0 +1,30 @@
+import {afterEach,expect,it,vi} from 'vitest'
+import {scheduleTurnSkip} from './scheduledTurnSkip'
+afterEach(()=>vi.useRealTimers())
+it('reschedules a stunned turn when a render cancels its unstarted timer',()=>{
+  vi.useFakeTimers()
+  const keys=new Set<string>(),settle=vi.fn()
+  const cleanup=scheduleTurnSkip(keys,'round1:stunned',settle)
+  vi.advanceTimersByTime(25);cleanup()
+  scheduleTurnSkip(keys,'round1:stunned',settle)
+  vi.advanceTimersByTime(50)
+  expect(settle).toHaveBeenCalledTimes(1)
+  expect(keys.has('round1:stunned')).toBe(true)
+})
+it('does not cancel or release an existing timer for a duplicate request',()=>{
+  vi.useFakeTimers()
+  const keys=new Set<string>(),settle=vi.fn()
+  scheduleTurnSkip(keys,'turn',settle)
+  scheduleTurnSkip(keys,'turn',settle)()
+  vi.advanceTimersByTime(50)
+  expect(settle).toHaveBeenCalledTimes(1)
+})
+it('keeps an already running save deduplicated across effect cleanup',()=>{
+  vi.useFakeTimers()
+  const keys=new Set<string>(),settle=vi.fn()
+  const cleanup=scheduleTurnSkip(keys,'turn',settle)
+  vi.advanceTimersByTime(50);cleanup()
+  scheduleTurnSkip(keys,'turn',settle)
+  vi.advanceTimersByTime(50)
+  expect(settle).toHaveBeenCalledTimes(1)
+})

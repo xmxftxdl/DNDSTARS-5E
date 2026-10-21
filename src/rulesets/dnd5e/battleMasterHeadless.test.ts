@@ -1,3 +1,7 @@
+import { resolveDnd5eActionWithDamageReactions } from './damageReactionFlow'
+import { registerDnd5eActivityPackage } from './activities/dnd5eActivityRegistry'
+import { automationCapabilityFromLegacyStatus } from '../../domain/automation/automationCapability'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import type { DeclarativeSubclassDefinitionV1 } from './declarativeSubclassAbility'
@@ -124,6 +128,7 @@ function weaponAttack(
     mode?: 'normal' | 'advantage' | 'disadvantage'
     damageRoll?: number
     reachFeet?: number
+    fixedDamage?: boolean
   } = {},
 ): Dnd5eActionResult {
   const id = featureId(maneuver)
@@ -152,10 +157,10 @@ function weaponAttack(
       adjacentEnemyOfTarget: false,
     },
     damage: {
-      count: 1,
+      count: input.fixedDamage ? 0 : 1,
       sides: 8,
-      bonus: 0,
-      rolls: [input.damageRoll ?? 3],
+      bonus: input.fixedDamage ? 3 : 0,
+      rolls: input.fixedDamage ? [] : [input.damageRoll ?? 3],
       type: 'slashing',
     },
   })
@@ -164,6 +169,63 @@ function weaponAttack(
 let unregister: (() => void) | undefined
 
 describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('Battle Master 2014 local Headless settlement', () => {
+  it.each(['distracting-strike', 'riposte', 'commanders-strike'] as const)('shares one actual attacker bonus across weapon and maneuver dice: %s', maneuver => {
+    for (const fixed of [false, true]) for (const mode of ['own', 'foreign', 'invalid'] as const) {
+      const commander = maneuver === 'commanders-strike'
+      const reaction = maneuver === 'riposte'
+      const state = stateWith([battleMaster('fighter', [maneuver], { initiative: reaction ? 10 : 20 }),
+        combatant('enemy', 'dm', reaction ? 20 : 10), combatant('ally', 'player', 5, { mainWeaponId: 'spear' })],
+        [['fighter', 'enemy', 5], ['fighter', 'ally', 5], ['ally', 'enemy', 5]])
+      const actualSource = commander ? 'ally' : 'fighter'
+      state.combatants.enemy.classState.activeEffects = [createDnd5eMechanicalEffect({ definitionId: 'mark', label: 'Mark', targetId: 'enemy',
+        source: { kind: 'feature', actorId: mode === 'foreign' ? (commander ? 'fighter' : 'other') : actualSource },
+        modifiers: { damageRollsBySourceBonus: 3 } })]
+      const before = structuredClone(state)
+      const weapon = { attackModifier: 5, d20: 15,
+        damage: { count: fixed ? 0 : 1, sides: 8, bonus: fixed ? 3 : 0, rolls: fixed ? [] : [3], type: 'slashing' as const },
+        classDamageContext: { weaponId: commander ? 'spear' : 'longsword', mode: 'melee' as const, reachFeet: 5, finesse: false, strengthBased: true,
+          weaponDamageSides: 8, damageType: 'slashing' as const, adjacentEnemyOfTarget: false } }
+      const die = mode === 'invalid' ? 99 : 6
+      const result = commander ? resolveDnd5eHeadlessAction(state, {
+        type: 'plugin', pluginId: PLUGIN_ID, actionId: 'decl.battle-master-2014.maneuver-commanders-strike', featureId: featureId(maneuver),
+        transactionId: `command:${fixed}:${mode}`, actorId: 'fighter', targetId: 'ally', targetIds: ['ally'], distanceFeet: 5,
+        rolls: { 'superiority-damage': { values: [die], modifier: 0, total: die } }, payload: { enemyTargetId: 'enemy', weaponAttack: weapon },
+      }) : reaction ? resolveDnd5eHeadlessAction(state, {
+        type: 'attack', actorId: 'enemy', targetId: 'fighter', attackModifier: 0, d20: 1, spendAction: false,
+        damage: { count: 1, sides: 8, bonus: 0, rolls: [], type: 'slashing' }, classDamageContext: weapon.classDamageContext,
+        declarativeTargetReaction: { featureId: featureId(maneuver), rolls: { 'superiority-damage': { values: [die], modifier: 0, total: die } }, weaponAttack: weapon },
+      }) : weaponAttack(state, maneuver, { fixedDamage: fixed, die })
+      expect(result.ok, `${maneuver}/${fixed}/${mode}: ${JSON.stringify(result)}`).toBe(mode !== 'invalid')
+      if (!result.ok) expect(result.state).toEqual(before)
+      else {
+        expect(result.state.combatants.enemy.currentHp).toBe(mode === 'foreign' ? 31 : 28)
+        const bonuses = result.events.filter(event => event.type === 'damage-roll-bonus-applied')
+        expect(bonuses).toHaveLength(mode === 'foreign' ? 0 : 1)
+        if (mode === 'own') expect(bonuses[0]).toMatchObject({ actorId: actualSource, targetId: 'enemy', amount: 3 })
+        expect(result.state.combatants.fighter.classResources[RESOURCE_ID].current).toBe(5)
+        if (reaction || commander) expect(result.state.combatants[actualSource].turn.reactionAvailable).toBe(false)
+      }
+      expect(state).toEqual(before)
+    }
+  })
+
+  it.each(['own', 'foreign', 'resistant', 'negative', 'no-hit'] as const)('secondary maneuver damage owns its target source bonus: %s', mode => {
+    const state = stateWith([battleMaster('fighter', ['sweeping-attack']), combatant('enemy', 'dm', 10),
+      combatant('enemy-two', 'dm', 5, { armorClass: mode === 'no-hit' ? 30 : 5, position: { x: 5, y: 5 } })],
+      [['fighter', 'enemy', 5], ['fighter', 'enemy-two', 5], ['enemy', 'enemy-two', 5]])
+    state.combatants['enemy-two'].classState.activeEffects = [createDnd5eMechanicalEffect({ definitionId: 'mark', label: 'Mark', targetId: 'enemy-two',
+      source: { kind: 'feature', actorId: mode === 'foreign' ? 'other' : 'fighter' },
+      modifiers: { damageRollsBySourceBonus: mode === 'negative' ? -10 : 3 } })]
+    if (mode === 'resistant') state.combatants['enemy-two'].damageResistances = ['slashing']
+    const before = structuredClone(state)
+    const result = success(weaponAttack(state, 'sweeping-attack', { die: 6, payload: { secondaryTargetId: 'enemy-two' } }))
+    expect(result.state.combatants.enemy.currentHp).toBe(37)
+    expect(result.state.combatants['enemy-two'].currentHp).toBe(40 - ({ own: 9, foreign: 6, resistant: 4, negative: 0, 'no-hit': 0 })[mode])
+    expect(result.events.filter(event => event.type === 'damage-roll-bonus-applied')).toHaveLength(['own', 'resistant', 'negative'].includes(mode) ? 1 : 0)
+    expect(result.state.combatants.fighter.classResources[RESOURCE_ID].current).toBe(5)
+    expect(state).toEqual(before)
+  })
+
   beforeAll(() => {
     const definition = JSON.parse(readFileSync(LOCAL_DEFINITION_PATH, 'utf8'))[0] as DeclarativeSubclassDefinitionV1
     unregister = registerDnd5eRulesPlugin({
@@ -684,4 +746,68 @@ describe.runIf(existsSync(LOCAL_DEFINITION_PATH))('Battle Master 2014 local Head
       current: 1,
     }))
   })
+  it.each(['accept','decline','immune'])('opens elemental reaction on the sweep recipient: %s', async mode => {
+  const packageId = 'test.stored-reaction'
+  const automation = automationCapabilityFromLegacyStatus('full')
+  const registration = registerDnd5eActivityPackage({ packageId, packageVersion: '1.0.0', activities: [{
+    schemaVersion: 1, id: 'ward', name: 'Synthetic ward', activation: { kind: 'reaction' }, target: { kind: 'self' },
+    legacySource: { kind: 'feature', id: 'ward' }, automation,
+    invocation: { kind: 'triggered', event: 'before-damage', confirmation: 'actor-choice' },
+    requirements: [{ kind: 'damage-type', damageTypes: ['fire','acid'] }],
+    consumption: [{ kind: 'action-economy', economy: 'reaction', amount: 1, consumeOn: 'resolve' }],
+    effects: [{ schemaVersion: 1, id: 'defense', name: 'Defense', stacking: 'replace',
+      duration: { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-start' },
+      modifiers: [{ kind: 'damage-resistance', damageType: 'fire' }, { kind: 'damage-resistance', damageType: 'acid' }] },
+    { schemaVersion: 1, id: 'charge', name: 'Stored follow-up', stacking: 'replace',
+      duration: { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-end' },
+      suspendWhileEffectId: 'defense', grants: ['follow-up'], grantsSingleUse: true }],
+    outcomes: [{ id: 'ward', when: { kind: 'always' }, operations: [
+      { id: 'defense', kind: 'apply-effect', target: 'actor', effectId: 'defense' },
+      { id: 'charge', kind: 'apply-effect', target: 'actor', effectId: 'charge' },
+    ] }],
+  }, {
+    schemaVersion: 1, id: 'follow-up', name: 'Synthetic follow-up', activation: { kind: 'free' }, automation,
+    legacySource: { kind: 'feature', id: 'ward' }, requiresEffectGrant: true,
+    invocation: { kind: 'triggered', event: 'attack-hit', confirmation: 'automatic' },
+    target: { kind: 'creature', relation: 'any', count: 1 },
+    requirements: [{ kind: 'attack-delivery', delivery: 'melee' }, { kind: 'turn-owner', owner: 'actor' }],
+    outcomes: [{ id: 'hit', when: { kind: 'always' }, operations: [
+      { id: 'extra', kind: 'damage', target: 'target', damageType: 'fire', amount: { kind: 'constant', value: 3 } },
+    ] }],
+  }] })
+
+    try {
+      const state=stateWith([battleMaster('fighter',['sweeping-attack']),combatant('enemy','dm',10),combatant('secondary','dm',5,{armorClass:5,concentrating:true})],[['fighter','enemy',5],['fighter','secondary',5],['enemy','secondary',5]])
+      state.combatants.secondary.pluginFeatureIds=[packageId+':ward']
+      if(mode==='immune')state.combatants.secondary.damageImmunities=['fire']
+      const before=structuredClone(state)
+      let prompts=0
+      const id=featureId('sweeping-attack')
+      const result=await resolveDnd5eActionWithDamageReactions({state,combatRevision:1,charactersByCombatantId:{},authorityUnchanged:()=>true,
+        confirm:async()=>{prompts++;return {accepted:mode!=='decline'}},roll:async()=>{throw Error('No initial dice')},
+        action:{type:'attack',actorId:'fighter',targetId:'enemy',attackModifier:5,d20:15,spendAction:false,
+          declarativeIntentFeatureIds:[id],declarativeIntentRolls:superiorityRoll('sweeping-attack',6),declarativeIntentPayloads:{[id]:{secondaryTargetId:'secondary'}},
+          classDamageContext:{weaponId:'longsword',mode:'melee',reachFeet:5,finesse:false,strengthBased:true,weaponDamageSides:8,damageType:'fire',adjacentEnemyOfTarget:false},
+          damage:{count:1,sides:8,bonus:0,rolls:[3],type:'fire'}}})
+      expect(result.ok,JSON.stringify(result)).toBe(true)
+      expect(prompts).toBe(mode==='immune'?0:1)
+      expect(result.state.combatants.secondary.currentHp).toBe(mode==='immune'?40:mode==='decline'?34:37)
+      expect(result.state.combatants.enemy.currentHp).toBe(37)
+      expect(result.state.combatants.fighter.classResources[RESOURCE_ID].current).toBe(5)
+      expect(result.state.combatants.secondary.turn.reactionAvailable).toBe(mode!=='accept')
+      expect(result.events.filter(event=>event.type==='concentration-check-required')).toHaveLength(mode==='immune'?0:1)
+      expect(state).toEqual(before)
+    }finally{registration.dispose()}
+  })
+
+  it.each([14,20,21])('compares original attack total 20 against secondary AC %s', armorClass=>{
+    const state=stateWith([battleMaster('fighter',['sweeping-attack']),combatant('enemy','dm',10),combatant('secondary','dm',5,{armorClass})],[['fighter','enemy',5],['fighter','secondary',5],['enemy','secondary',5]])
+    const before=structuredClone(state)
+    const result=success(weaponAttack(state,'sweeping-attack',{die:6,payload:{secondaryTargetId:'secondary',attackTotal:999}}))
+    expect(result.state.combatants.secondary.currentHp).toBe(armorClass<=20?34:40)
+    expect(result.state.combatants.enemy.currentHp).toBe(37)
+    expect(result.state.combatants.fighter.classResources[RESOURCE_ID].current).toBe(5)
+    expect(state).toEqual(before)
+  })
+
 })

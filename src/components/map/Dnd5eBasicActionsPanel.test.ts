@@ -5,6 +5,28 @@ import Dnd5eBasicActionsPanel, { dnd5eControlledUndeadCommandTargets } from './D
 import { dnd5eBasicActionEconomyAvailable } from './dnd5eBasicActionEconomy'
 
 describe('Dnd5eBasicActionsPanel', () => {
+  it('exposes only effect removal in exploration while preserving nearby target choices', () => {
+    const html = renderToStaticMarkup(createElement(Dnd5eBasicActionsPanel, {
+      effectsOnly: true, canAct: true, pending: false, onAction: vi.fn(),
+      targets: [{ tokenId: 'ally', label: 'Ally', currentHp: 20, distanceFeet: 5,
+        removableEffects: [{ effectId: 'trap', label: 'Trap', actionLabel: '解救', maxDistanceFeet: 5 }] }],
+    }))
+    expect(html).toContain('value="ally|trap"')
+    expect(html).toContain('value="dismiss-effect"')
+    expect(html).not.toContain('value="shove"')
+    expect(html).not.toContain('value="other-action"')
+  })
+  it('offers nearby creature rescue even without a self-dismissal effect', () => {
+    const render = (distanceFeet: number, restricted = false) => renderToStaticMarkup(createElement(Dnd5eBasicActionsPanel, {
+      canAct: true, pending: false, onAction: vi.fn(),
+      ...(restricted ? { allowedBasicActions: ['dismiss-effect'] as const } : {}),
+      targets: [{ tokenId: 'ally', label: 'Ally', currentHp: 20, distanceFeet,
+        removableEffects: [{ effectId: 'trap', label: 'Trap', actionLabel: '解救', maxDistanceFeet: 5 }] }],
+    }))
+    expect(render(5)).toContain('<option value="dismiss-effect">')
+    expect(render(10)).not.toContain('<option value="dismiss-effect">')
+    expect(render(5, true)).not.toContain('<option value="dismiss-effect">')
+  })
   it('keeps other bonus actions available after the ordinary action is spent', () => {
     expect(dnd5eBasicActionEconomyAvailable({
       kind: 'other-bonus-action',

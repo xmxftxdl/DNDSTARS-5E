@@ -366,3 +366,17 @@ describe('D&D 5e 2014 character hit points', () => {
     ])
   })
 })
+
+it.each([false, true])('maximizes short-rest dice and Song of Rest unless suppressed: %s', suspended => {
+  const hero = fighter({ currentHp: 1, maxHp: 100, abilities: { str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10 },
+    hitPointDice: [{ sides: 10, current: 2, max: 2 }], dnd5eCombatState: { activeEffects: [{
+      ...createDnd5eMechanicalEffect({ definitionId: 'maximum', label: 'Maximum', source: { kind: 'plugin' },
+        targetId: 'hero', modifiers: { maximizeHealingDice: true } }), ...(suspended ? { suspendedBy: ['antimagic'] } : {}),
+    }] } })
+  const input = { character: hero, spends: [{ poolIndex: 0, rolls: [1, 2] }], songOfRest: { dieSides: 8 as const, roll: 1 } }
+  const result = resolveDnd5eShortRestHitDice(input)
+  expect(result).toMatchObject({ hitDiceSpent: 2, hitDiceHealing: suspended ? 7 : 24,
+    songOfRestHealing: suspended ? 1 : 8, character: { currentHp: suspended ? 9 : 33, hitPointDice: [{ current: 0 }] } })
+  expect(() => resolveDnd5eShortRestHitDice({ ...input, spends: [{ poolIndex: 0, rolls: [11] }] })).toThrow()
+  expect(hero.currentHp).toBe(1)
+})

@@ -67,3 +67,14 @@ describe('传奇动作选择窗口', () => {
     expect(html).not.toContain('value="fireball"')
   })
 })
+
+it('allows a monster as the thrown target and asks for map placement',()=>{
+ const html=renderToStaticMarkup(createElement(Dnd5eLegendaryActionWindow,{endingTokenName:'Hero',
+  candidates:[{token:{id:'kraken',label:'Kraken',type:'enemy',x:0,y:0,size:1,color:'',emoji:''},currentPoints:3,maximumPoints:3,
+   actions:[{id:'legendary-fling',name:'Fling',description:'Throw',cost:1,affordable:true,actionIndex:0,automation:'headless',windowExecution:'throw-placement'}]}],
+  targets:[{id:'imp',label:'Imp target',type:'enemy',x:50,y:0,size:1,color:'',emoji:''}],onUse:vi.fn(),onSkip:vi.fn()}))
+ expect(html).toContain('Imp target')
+ expect(html).toContain('选择投掷落点')
+ expect(html).toContain('须由该怪物抓握')
+ expect(html).not.toContain('交给 DM 裁定')
+})

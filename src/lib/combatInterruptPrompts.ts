@@ -212,6 +212,7 @@ export interface SharedStandAgainstTidePromptView {
 
 export interface SharedPluginChoicePromptView {
   id: string
+  mapId?: string
   character?: Character
   payload: CombatInterruptByKind<'plugin-choice'>['payload']
   expiresAt?: number
@@ -630,6 +631,7 @@ export function buildCombatInterruptPromptViews(
     pluginChoice: pluginChoice
       ? {
           id: pluginChoice.interrupt.id,
+          mapId: pluginChoice.interrupt.mapId,
           character: pluginChoice.character,
           payload: pluginChoice.interrupt.payload,
           expiresAt: pluginChoice.interrupt.expiresAt,

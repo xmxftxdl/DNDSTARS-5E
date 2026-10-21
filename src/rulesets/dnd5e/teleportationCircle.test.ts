@@ -7,6 +7,15 @@ const token = (id: string, patch: Partial<Token> = {}): Token => ({ id, label: i
 const map = (id: string, tokens: Token[] = []): BattleMap => ({ id, name: id, width: 200, height: 200, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens })
 
 describe('DM-directed Teleportation Circle', () => {
+  it('preserves an explicit return altitude in saved portals and landing',()=>{
+    const source=map('source',[token('hero')]),destination=map('camp')
+    const exit={mapId:'camp',x:75,y:75,elevationFeet:30}
+    source.dnd5ePluginAreas=[createTeleportationCircle({id:'portal',map:source,caster:source.tokens[0],round:1,exit})]
+    const saved=migrateMapsState(JSON.parse(JSON.stringify({maps:[source,destination]}))).maps
+    expect(saved[0].dnd5ePluginAreas?.[0].teleportationExit?.elevationFeet).toBe(30)
+    expect(teleportationCircleLanding(saved[1],source.tokens[0],exit)?.elevationFeet).toBe(30)
+    expect(normalizeTeleportationCircleExit({...exit,elevationFeet:NaN})).toBeUndefined()
+  })
   it('moves the original token across maps and places subsequent travelers in distinct spaces', () => {
     const a = token('a', { hp: 7, characterId: 'hero' }), b = token('b')
     const source = map('source', [a, b]), destination = map('destination', [token('block', { type: 'obstacle' })])

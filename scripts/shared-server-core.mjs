@@ -1,4 +1,40 @@
+import { recordSceneTransitionSightings } from './scene-transition-sightings.mjs'
+import { recordAcceptedMovementSightings } from './movement-sightings.mjs'
+import {retainDnd5eEndedEffectSavingThrows} from '../shared/effect-end-saving-throw.mjs'
+import { subclassChoicePoliciesFromPackage, preserveSubclassLevelChoices } from '../shared/subclass-choice-policy.mjs'
+import { rectangularLightCandidateOrigins, rectangularLightOrigin, refineRectangularLightOrigin } from '../shared/rectangular-light-origin.mjs'
+import { prepareStructureExpiry, prepareStructureRemoval } from '../shared/structure-expiry.mjs'
+import { templeExpirySupportLoss } from '../shared/temple-expiry-falls.mjs'
+import { settleAreaEndFlames } from '../shared/persistent-area-end-flames.mjs'
+import { normalizeDnd5eSubmergedBreathing, normalizeSubmergedBreathingEffectDeadlines } from '../shared/submerged-breathing-state.mjs'
+import { planCampaignSubmergedBreathing } from '../shared/campaign-submerged-breathing.mjs'
+import { ROOM_SPELL_TEXT_KEYS, ROOM_SPELL_TEXT_MAX_LENGTH, roomSpellTextObjects } from '../shared/room-spell-text.mjs'
+import { expireStructureMapObjects } from '../shared/structure-object-expiry.mjs'
+import { expireStructureInventoryItems } from '../shared/structure-inventory-cleanup.mjs'
+import { geometryEntityDestroyed } from '../shared/map-geometry-durability.mjs'
+import { validCombatRoundCredits } from '../shared/combat-round-credits.mjs'
+import { advancePersistentAreaSeconds } from '../shared/persistent-area-seconds.mjs'
+import { normalizeControlledFlameState, projectControlledFlameLight } from '../shared/controlled-flame-state.mjs'
+import { normalizeControlledWaterState } from '../shared/controlled-water-state.mjs'
+import { validPersistentAreaColumns } from '../shared/persistent-area-columns.mjs'
+import { groveVolumeOverlaps } from '../shared/grove-volume.mjs'
+import { validAreaVisualRecognition } from '../shared/area-visual-recognition.mjs'
+import { validTerrainClearing, validTerrainClearingProgress } from '../shared/terrain-clearing.mjs'
+import { SHORT_REST_RECOVERY_RESOURCE, validShortRestRecoveryJournal } from '../shared/short-rest-recovery.mjs'
+import { mergeMapsDeletionHistory } from '../shared/map-deletion-history.mjs'
+import { concentrationInitiativeCleanup } from '../shared/concentration-initiative-cleanup.mjs'
+import { persistentAreaBlocksRay } from '../shared/persistent-area-ray.mjs'
+import { flameLightConcealed } from '../shared/flame-light-concealment.mjs'
+import { expireRestBoundAreas, validRestAreaSessionId } from '../shared/rest-bound-areas.mjs'
+import { campaignInteractionReferenceIssue, validCampaignInteractions, mutateCampaignInteraction, interruptCampaignInteractionsForTimeAdvance } from '../shared/campaign-interactions.mjs'
+import { validCampaignRestSessions, mutateCampaignRestSession, interruptCampaignRestSessionsForTimeAdvance } from '../shared/campaign-rest-sessions.mjs'
+import { validCampaignRestLocations, recordCampaignLongRestLocations } from '../shared/campaign-rest-locations.mjs'
+import { validCampaignEnvironmentalExposures } from '../shared/campaign-environmental-exposures.mjs'
+import { inventoryAlterationIssue } from '../shared/inventory-alteration.mjs'
+import { detachDnd5eUncontrolledSummon, expireDnd5eSummonLingerAtWorldMinute, dnd5eSummonDurationExpired } from '../shared/summon-linger.mjs'
 import { stoneWallIntersects } from '../shared/stone-wall-geometry.mjs'
+import { ACTIVE_EFFECT_BREAK_TRIGGERS } from '../shared/active-effect-break-triggers.mjs'
+import { normalizeDnd5eRollDiceModifiers } from '../shared/roll-dice-modifiers.mjs'
 import { handleAccountStorageRequest, withAccountAssetBudget } from './account-storage-quota.mjs'
 // DM 与玩家服务端共用的权威协议、鉴权和原子持久化核心。
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -46,7 +82,12 @@ import {
 export { mutatePlayerExplorationMoveState }
 import {
   applyDnd5eEffectiveVisionProfile,
+  projectDnd5eSourceVisionSensor,
+  isDnd5eInvisibleVisionSensor,
+  resolveDnd5eVisionSensorSource,
   compileDnd5eEffectiveVisionProfile,
+  dnd5eHasDarkvisionConcealment,
+  dnd5eConcealedFromDarkvision,
 } from '../shared/dnd5e-vision-profile.mjs'
 import {
   COMBAT_PRESENTATION_AREA_SPELL_CONTRACTS,
@@ -104,6 +145,7 @@ export { projectDnd5eShopsForPlayer } from './dnd5e-shop-state.mjs'
 import { createInMemorySseEventPublisher } from './adapters/in-memory-sse-event-publisher.mjs'
 import { listCampaignSnapshotSummaries, readCampaignSnapshot } from './application/campaign-snapshot-catalog.mjs'
 import { handleRoomVoiceApi } from './application/room-voice-api.mjs'
+import { handleLongCastingOwnerApi } from './application/long-casting-owner-api.mjs'
 import {
   applyDmAuthoritativeCombatRecovery as recoverDmCombat,
   dmUndoAfterMetadata,
@@ -331,9 +373,10 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
         return { ok: false, stale: true, currentRevision, current }
       }
     }
-    const candidate = typeof options.mergeIncoming === 'function'
+    const mergedIncoming = typeof options.mergeIncoming === 'function'
       ? options.mergeIncoming(current, incoming)
       : incoming
+    const candidate = path.basename(filePath) === 'maps.json' ? mergeMapsDeletionHistory(current, mergedIncoming) : mergedIncoming
     const candidateValidation = typeof options.validateIncoming === 'function'
       ? options.validateIncoming(candidate)
       : { ok: true }
@@ -379,6 +422,11 @@ const SHARED_STATE_TRANSACTION_RESOURCES = new Set([
   'campaign-time',
   'room-journal',
   'dnd5e-shops',
+  SHORT_REST_RECOVERY_RESOURCE,
+])
+const SHARED_STATE_TRANSACTION_READ_RESOURCES = new Set([
+  ...SHARED_STATE_TRANSACTION_RESOURCES,
+  'scene-orchestration',
 ])
 
 export const COMBAT_COMMAND_SCHEMA_VERSION = 1
@@ -491,7 +539,7 @@ async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, 
       }
       const writtenAt = Date.now()
       const next = {
-        ...write.data,
+        ...(write.name === 'maps' ? mergeMapsDeletionHistory(current, write.data) : write.data),
         _sync: {
           schemaVersion: SHARED_STATE_SCHEMA_VERSION,
           revision: currentRevision + 1,
@@ -512,6 +560,141 @@ async function atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, 
       })
     }
 
+    // Derive end-of-area consequences under the same room lock and journal.
+    // This also covers server-owned concentration cleanup without a mounted DM page.
+    const mapsEntry=prepared.find(entry=>entry.name==='maps')
+    const beforeMaps=mapsEntry?.current?.maps??[]
+    const endedAreas = beforeMaps.flatMap(map => {
+      const next = mapsEntry.next.maps?.find(candidate => candidate.id === map.id)
+      if (!next) return [] // Removing an entire scene is not dismissing its effects.
+      return (map.dnd5ePluginAreas ?? []).filter(area => !(next.dnd5ePluginAreas ?? []).some(live =>
+        live.id === area.id && live.sourceTokenId === area.sourceTokenId &&
+        (live.boundEffectGeneration ?? 0) === (area.boundEffectGeneration ?? 0)))
+        .map(area => ({ mapId: map.id, area }))
+    })
+    if (endedAreas.length) {
+      const groundingAreas = endedAreas.filter(({ area }) => area.triggers?.some(trigger => trigger.condition?.groundOnAreaEnd === true))
+      if (groundingAreas.length) {
+        const geometryEntry = prepared.find(entry => entry.name === 'map-geometry')
+        const geometry = geometryEntry?.next ?? (await readSharedStateFile(ctx, 'map-geometry')).value
+        const charactersEntry = prepared.find(entry => entry.name === 'characters')
+        const previousCharacters = charactersEntry?.current ?? (await readSharedStateFile(ctx, 'characters')).value
+        mapsEntry.next = { ...mapsEntry.next, maps: mapsEntry.next.maps.map(map => {
+          const previousMap = beforeMaps.find(previous => previous.id === map.id)
+          const scene = geometry?.maps?.find(scene => scene.mapId === map.id)
+          return { ...map, tokens: map.tokens.map(token => {
+            const previous = previousMap?.tokens?.find(previous => previous.id === token.id)
+            if (!previous) return token
+            const character = previous.characterId && !previous.dnd5eSimulacrum
+              ? previousCharacters?.characters?.find(character => character.id === previous.characterId) : undefined
+            const effects = (character?.dnd5eCombatState ?? previous.dnd5eCombatState)?.activeEffects ?? []
+            if (!effects.some(effect => endedAreaForBoundEffect(effect, groundingAreas.filter(ended => ended.mapId === map.id)))) return token
+            return { ...token, elevationFeet: terrainElevationAtPoint(scene, token) }
+          }) }
+        }) }
+      }
+      const release = (entity, character = false) => {
+        const state = entity.dnd5eCombatState
+        if (!Array.isArray(state?.activeEffects)) return entity
+        const effects = releaseEndedAreaConditions(state.activeEffects, endedAreas, entity.id)
+        const clearBreathing = state.submergedBreathing != null && !effects.some(effect =>
+          effect.modifiers?.submerged === true && !(effect.suspendedBy?.length > 0))
+        if (effects === state.activeEffects && !clearBreathing) return entity
+        const conditions = projectedConditionsFromActiveEffects(effects)
+        return { ...entity, ...(character ? { conditions } : {}), dnd5eCombatState: {
+          ...state, activeEffects: effects.length ? effects : undefined, conditions: conditions.length ? conditions : undefined,
+          ...(clearBreathing ? { submergedBreathing: undefined } : {}),
+        } }
+      }
+      mapsEntry.next = { ...mapsEntry.next, maps: mapsEntry.next.maps.map(map => ({ ...map, tokens: map.tokens.map(token => release(token)) })) }
+      mapsEntry.nextBody = JSON.stringify(mapsEntry.next)
+      let charactersEntry = prepared.find(entry => entry.name === 'characters')
+      const resource = charactersEntry ? { value: charactersEntry.next, body: charactersEntry.currentBody } : await readSharedStateFile(ctx, 'characters')
+      if (Array.isArray(resource.value?.characters)) {
+        const characters = resource.value.characters.map(character => release(character, true))
+        if (characters.some((character, index) => character !== resource.value.characters[index])) {
+          if (!charactersEntry) {
+            const current = resource.value, currentRevision = sharedStateRevision(current), writtenAt = Date.now()
+            charactersEntry = { name: 'characters', filePath: path.join(ctx.stateRoot, 'characters.json'), current,
+              currentBody: resource.body, currentRevision, revision: currentRevision + 1, writtenAt }
+            prepared.push(charactersEntry)
+            charactersEntry.next = { ...current, _sync: { schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+              revision: currentRevision + 1, writerId: normalizedLabel(writerId, 120) || 'state-transaction', writtenAt } }
+          }
+          charactersEntry.next = { ...charactersEntry.next, characters }
+          charactersEntry.nextBody = JSON.stringify(charactersEntry.next)
+        }
+      }
+    }
+    if(mapsEntry && beforeMaps.some(map=>(map.dnd5ePluginAreas??[]).some(area=>area.endFlameExtinguishRadiusFeet &&
+      mapsEntry.next.maps?.some(next=>next.id===map.id&&!next.dnd5ePluginAreas?.some(live=>live.id===area.id))))){
+      let geometryEntry=prepared.find(entry=>entry.name==='map-geometry')
+      const geometryResource=geometryEntry?{value:geometryEntry.next,body:geometryEntry.currentBody}:await readSharedStateFile(ctx,'map-geometry')
+      let geometryState=geometryResource.value??{maps:[]}
+      const clock=await readCampaignTimeForProjection(ctx)
+      let geometryChanged=false
+      const maps=mapsEntry.next.maps.map(map=>{
+        const before=beforeMaps.find(previous=>previous.id===map.id)
+        if(!before)return map
+        const geometry=geometryState.maps?.find(scene=>scene.mapId===map.id)??{mapId:map.id,obstacles:[],lights:[]}
+        const settled=settleAreaEndFlames({before,after:map,geometry,worldMinute:clock.worldMinute,
+          groundAt:terrainElevationAtPoint,tokenElevation:tokenElevationFeet})
+        if(settled.geometry!==geometry){
+          geometryChanged=true
+          geometryState={...geometryState,maps:geometryState.maps.map(scene=>scene.mapId===map.id?settled.geometry:scene)}
+        }
+        return settled.map
+      })
+      mapsEntry.next={...mapsEntry.next,maps}
+      mapsEntry.nextBody=JSON.stringify(mapsEntry.next)
+      if(geometryChanged){
+        if(!geometryEntry){
+          const current=geometryResource.value,currentRevision=sharedStateRevision(current),writtenAt=Date.now()
+          geometryEntry={name:'map-geometry',filePath:path.join(ctx.stateRoot,'map-geometry.json'),current,currentBody:geometryResource.body,
+            currentRevision,revision:currentRevision+1,writtenAt,next:null,nextBody:''}
+          prepared.push(geometryEntry)
+          geometryState={...geometryState,_sync:{schemaVersion:SHARED_STATE_SCHEMA_VERSION,revision:currentRevision+1,
+            writerId:normalizedLabel(writerId,120)||'state-transaction',writtenAt}}
+        }
+        geometryEntry.next=geometryState
+        geometryEntry.nextBody=JSON.stringify(geometryState)
+      }
+    }
+    // Preserve the final visible instant before a door/light/condition change,
+    // then sample the committed scene. Derived histories share the same journal.
+    if (prepared.some(entry => ['maps', 'characters', 'map-geometry'].includes(entry.name))) {
+      const resources = new Map()
+      for (const name of ['maps', 'characters', 'map-geometry', 'campaign-time']) {
+        const entry = prepared.find(candidate => candidate.name === name)
+        const stored = entry ? { value: entry.current, body: entry.currentBody } : await readSharedStateFile(ctx, name)
+        resources.set(name, { entry, stored, next: entry?.next ?? stored.value })
+      }
+      const maps = resources.get('maps'), characters = resources.get('characters'), geometry = resources.get('map-geometry')
+      const clock = resources.get('campaign-time').next
+      if (Array.isArray(maps.next?.maps) && Array.isArray(characters.next?.characters) && clock) {
+        const observed = recordSceneTransitionSightings({
+          beforeMaps: maps.stored.value, afterMaps: maps.next,
+          beforeCharacters: characters.stored.value, afterCharacters: characters.next,
+          beforeGeometry: geometry.stored.value, afterGeometry: geometry.next,
+          clock: { ...clock, worldSecondRemainder: clock.worldSecondRemainder ?? 0 }, observe: recordServerMovementSightings,
+        })
+        for (const [name, data] of [['maps', observed.maps], ['characters', observed.characters]]) {
+          const resource = resources.get(name)
+          if (data === resource.next) continue
+          let entry = resource.entry
+          if (!entry) {
+            const current = resource.stored.value, currentRevision = sharedStateRevision(current), writtenAt = Date.now()
+            entry = { name, filePath: path.join(ctx.stateRoot, `${name}.json`), current,
+              currentBody: resource.stored.body, currentRevision, revision: currentRevision + 1, writtenAt }
+            prepared.push(entry)
+            entry.next = { ...current, _sync: { schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+              revision: entry.revision, writerId: normalizedLabel(writerId, 120) || 'state-transaction', writtenAt } }
+          }
+          entry.next = { ...data, _sync: entry.next._sync }
+          entry.nextBody = JSON.stringify(entry.next)
+        }
+      }
+    }
     const revisions = Object.fromEntries(prepared.map((entry) => [entry.name, entry.revision]))
     const authorityRevisions = Object.fromEntries(
       Object.entries(revisions).filter(([name]) => name !== COMBAT_COMMAND_RECEIPT_RESOURCE),
@@ -732,9 +915,16 @@ async function terminalizeCombatCommandSettlementConflictUnlocked(input) {
   }
 }
 
-async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transactionId) {
+async function atomicWriteSharedStateTransaction(ctx, writes, writerId, transactionId, readRevisions = {}) {
   return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
     await recoverSharedStateTransaction(ctx)
+    for (const [name, expectedRevision] of Object.entries(readRevisions)) {
+      const current = await readSharedStateFile(ctx, name)
+      const currentRevision = sharedStateRevision(current.value)
+      if (currentRevision !== expectedRevision) return {
+        ok: false, conflict: true, conflicts: [{ name, expectedRevision, currentRevision }],
+      }
+    }
     const ackWrite = writes.find((write) => write.name === 'player-action-ack')
     let settlement = combatCommandSettlementFromAck(ackWrite?.data)
     if (!settlement) {
@@ -1271,10 +1461,13 @@ async function atomicAppendCombatCommand(ctx, normalized, member, role) {
 }
 
 const PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS = Object.freeze([
+  'dnd5eOriginalAlignment',
   'conditions',
   'concentrating',
   'dnd5eCombatState',
   'dnd5eInventory',
+  'dnd5eExposedSurfaces',
+  'dnd5eExposedEnchantmentItems',
   'dnd5eExperienceAwards',
   'dmNotes',
   'visibleToPlayers',
@@ -1302,6 +1495,7 @@ const PLAYER_ADVANCEMENT_CONTROLLED_CHARACTER_FIELDS = Object.freeze([
   'savingThrows',
   'skills',
   'dnd5eFeatIds',
+  'dnd5eContentChoices',
   'hitDice',
   'hitPointMaximumMode',
   'hitPointRolls',
@@ -1443,8 +1637,10 @@ function advancementSnapshotMatchesCharacter(snapshot, character) {
     sameJsonValue(snapshot.dnd5eClassContentBindings, character?.dnd5eClassContentBindings) &&
     sameJsonValue(snapshot.abilities, character?.abilities) &&
     sameJsonValue(snapshot.skills, character?.skills) &&
+    (snapshot.savingThrows == null || sameJsonValue(snapshot.savingThrows, character?.savingThrows)) &&
     sameJsonValue(snapshot.dnd5eClassChoices, character?.dnd5eClassChoices) &&
     sameJsonValue(snapshot.dnd5eFeatIds, character?.dnd5eFeatIds) &&
+    sameJsonValue(snapshot.dnd5eContentChoices, character?.dnd5eContentChoices) &&
     snapshot.hitPointMaximumMode === character?.hitPointMaximumMode &&
     sameJsonValue(snapshot.hitPointRolls, character?.hitPointRolls) &&
     snapshot.maxHp === character?.maxHp
@@ -1521,7 +1717,11 @@ export function mergePlayerCharactersStateForAuthority(
     const current = currentById.get(incoming.id)
     if (!current) {
       if (incoming.roomMemberId !== memberId) continue
-      merged.push({ ...incoming, roomMemberId: memberId })
+      const created = { ...incoming, roomMemberId: memberId }
+      delete created.dnd5eOriginalAlignment
+      delete created.dnd5eExposedSurfaces
+      delete created.dnd5eExposedEnchantmentItems
+      merged.push(created)
       includedIds.add(incoming.id)
       continue
     }
@@ -1530,6 +1730,10 @@ export function mergePlayerCharactersStateForAuthority(
     if (current.ownerAccountId) next.ownerAccountId = current.ownerAccountId
     preserveCharacterFields(next, current, PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS)
     const advancementTransition = playerAdvancementTransition(current, incoming)
+    const advancedClassId = advancementTransition === 'append' &&
+      validateDnd5eAdvancementForAuthority(current, incoming, { expectedHitPointRoll: options.expectedHitPointRoll }) == null
+      ? incoming.dnd5eLevelAdvancements.at(-1).classId : undefined
+    preserveSubclassLevelChoices(next, current, options.subclassChoicePolicies, advancedClassId)
     if (advancementTransition === 'unchanged' || advancementTransition === 'invalid') {
       preserveCharacterFields(next, current, PLAYER_ADVANCEMENT_CONTROLLED_CHARACTER_FIELDS)
       preserveAcknowledgedAdvancementChoices(next, current)
@@ -1719,6 +1923,18 @@ function validateDnd5eAdvancementForAuthority(current, incoming, authority = {})
     receipt.toClassLevel !== Number(nextLevels[receipt.classId] ?? 0) ||
     receipt.toClassLevel !== receipt.fromClassLevel + 1
   ) return 'invalid-advancement-class'
+  // A level-up of one class must not rewrite choices belonging to another class.
+  // Compare authoritative stored choices, not only the player-supplied receipt.
+  const previousClassChoices = plainObject(current.dnd5eClassChoices?.classes) ? current.dnd5eClassChoices.classes : {}
+  const nextClassChoices = plainObject(incoming.dnd5eClassChoices?.classes) ? incoming.dnd5eClassChoices.classes : {}
+  for (const classId of new Set([...Object.keys(previousClassChoices), ...Object.keys(nextClassChoices)])) {
+    if (classId !== receipt.classId && !sameJsonValue(previousClassChoices[classId], nextClassChoices[classId])) {
+      return 'invalid-class-choice-transition'
+    }
+  }
+  if (receipt.classId !== 'fighter' && !sameJsonValue(current.dnd5eClassChoices?.fighter, incoming.dnd5eClassChoices?.fighter)) {
+    return 'invalid-class-choice-transition'
+  }
   const hitDie = DND5E_CLASS_HIT_DIE_BY_ID[receipt.classId]
   const constitutionModifier = dnd5eAbilityModifier(incoming.abilities?.con)
   const hpIncrease = Number(incoming.maxHp) - Number(current.maxHp)
@@ -1813,6 +2029,7 @@ const DND5E_CREATURE_FORM_STATE_KEYS = [
   'wildShapeMode',
   'wildShapeSourceActorId',
   'wildShapeSourceActivityId',
+  'wildShapeConcentrationSpellId', 'wildShapeRequiresConcentration', 'wildShapeRetainsHitPoints',
   'wildShapeMaximumChallengeRating',
   'wildShapeMaximumSizeRank',
   'shapechangeEquipmentDisposition',
@@ -1853,6 +2070,7 @@ function concentrationLinkedCreatureForm(state, sourceActorIds) {
 
 function clearConcentrationLinkedCreatureForm(state) {
   const next = structuredClone(state)
+  if (state.wildShapeRetainsHitPoints) Object.assign(next, { temporaryHp: undefined, temporaryHitPointsSource: undefined })
   for (const key of DND5E_CREATURE_FORM_STATE_KEYS) delete next[key]
   return next
 }
@@ -1863,20 +2081,47 @@ function tokenSizeForDnd5eSizeRank(sizeRank) {
 }
 
 /** Remove every map projection sustained by one character's concentration. */
+function endedAreaForBoundEffect(effect, endedAreas) {
+  const link = effect?.areaLifetime
+  if (!link || effect.source?.actorId !== link.sourceActorId || effect.standardCondition !== 'restrained') return undefined
+  const origins = (effect.tags ?? []).filter(tag => tag.startsWith('persistent-area:'))
+  if (origins.length && (origins.length !== 1 || origins[0] !== `persistent-area:${link.areaId}`)) return undefined
+  return endedAreas.find(({ mapId, area }) => mapId === link.mapId && area.id === link.areaId &&
+    area.sourceTokenId === link.sourceActorId && (area.boundEffectGeneration ?? 0) === (link.generation ?? 0))
+}
+
+function releaseEndedAreaConditions(effects, endedAreas, targetId, now = Date.now()) {
+  let prone = false
+  const remaining = effects.filter(effect => {
+    const ended = endedAreaForBoundEffect(effect, endedAreas)
+    if (!ended) return true
+    prone ||= ended.area.triggers?.some(trigger => trigger.condition?.proneOnAreaEnd === true) === true
+    return false
+  })
+  if (remaining.length === effects.length) return effects
+  if (prone && !remaining.some(effect => effect.standardCondition === 'prone')) remaining.push({
+    schemaVersion: 1, id: `area-release-prone:${targetId}`, definitionId: 'condition:prone', label: '倒地',
+    kind: 'condition', standardCondition: 'prone', source: { kind: 'system', actorId: targetId, rulesId: 'persistent-area-release' },
+    appliedAt: now, duration: { type: 'permanent' }, stackingKey: 'condition:prone', stackingPolicy: 'refresh-duration',
+  })
+  return remaining
+}
+
 export function removeCharacterConcentrationEffectsFromMaps(
   currentState,
   characterId,
   endedSpellId = '',
   revertedCreatureForms = [],
+  authority = {},
 ) {
   const maps = Array.isArray(currentState?.maps) ? currentState.maps : []
-  const sourceActorIds = new Set()
+  const sourceActorIds = new Set(authority.sourceActorIds ?? [])
   for (const map of maps) {
     for (const token of Array.isArray(map?.tokens) ? map.tokens : []) {
-      if (token?.characterId === characterId && typeof token?.id === 'string') sourceActorIds.add(token.id)
+      if (characterId && token?.characterId === characterId && typeof token?.id === 'string') sourceActorIds.add(token.id)
     }
   }
-  sourceActorIds.add(characterId)
+  if (characterId) sourceActorIds.add(characterId)
   const revertedCharacterFormsById = new Map(
     (Array.isArray(revertedCreatureForms) ? revertedCreatureForms : [])
       .filter((entry) => typeof entry?.characterId === 'string')
@@ -1890,7 +2135,7 @@ export function removeCharacterConcentrationEffectsFromMaps(
     let mapChanged = false
     const entityMatches = (entity) => {
       if (!entity?.concentrationId) return false
-      const sourceMatches = entity.sourceCharacterId === characterId || sourceActorIds.has(entity.sourceTokenId)
+      const sourceMatches = (characterId && entity.sourceCharacterId === characterId) || sourceActorIds.has(entity.sourceTokenId)
       return sourceMatches && (!endedSpellId || entity.concentrationId === endedSpellId)
     }
     const removedAreas = (Array.isArray(map.dnd5ePluginAreas) ? map.dnd5ePluginAreas : [])
@@ -1917,6 +2162,15 @@ export function removeCharacterConcentrationEffectsFromMaps(
       if (plainObject(token?.dnd5eSummon) && entityMatches(token.dnd5eSummon)) {
         changed = true
         mapChanged = true
+        const summon = token.dnd5eSummon
+        if (summon.controlEnded && (summon.uncontrolledLinger || summon.controlSave?.lingerDieSides) &&
+          (token.hp ?? token.maxHp ?? 1) > 0 && !summon.dismissed) {
+          if (!Number.isInteger(authority.round) || authority.round < 0) throw new Error('summon-time-unavailable')
+          if (!dnd5eSummonDurationExpired(summon, authority.round, authority.worldMinute) &&
+            (summon.dismissAtRound == null || authority.round < summon.dismissAtRound)) {
+            return [detachDnd5eUncontrolledSummon(token, authority.round, authority.lingerRollsByTokenId?.[token.id], authority.worldMinute)]
+          }
+        }
         if (token.dnd5eSummon.becomesHostileAfterConcentrationEnds === true) {
           return [{
             ...token,
@@ -1928,6 +2182,25 @@ export function removeCharacterConcentrationEffectsFromMaps(
               controlEnded: true,
             },
           }]
+        }
+        const possessions = (Array.isArray(token.dnd5eCarriedObjects) ? token.dnd5eCarriedObjects : [])
+          .filter(item => typeof item?.id === 'string' && typeof item.label === 'string' &&
+            plainObject(item.objectState) && plainObject(item.objectState.inventoryItem) &&
+            item.objectState.inventoryItem.quantity === 1)
+          .map(item => ({
+            id: `carried:${item.id}`, label: item.label, type: 'obstacle', size: 1,
+            x: token.x, y: token.y, elevationFeet: token.elevationFeet, color: '', emoji: '',
+            dnd5eObjectState: { ...structuredClone(item.objectState), wornOrCarried: false,
+              inventoryItem: { ...item.objectState.inventoryItem, receiptId: `carried:${item.id}` } },
+          }))
+        if (plainObject(token.dnd5eSummon.animatedCorpse)) {
+          return [{
+            ...structuredClone(token.dnd5eSummon.animatedCorpse),
+            x: token.x,
+            y: token.y,
+            elevationFeet: token.elevationFeet ?? token.dnd5eSummon.animatedCorpse.elevationFeet,
+            hp: 0,
+          }, ...possessions]
         }
         if (plainObject(token.dnd5eSummon.truePolymorphOriginalObject)) {
           const { schemaVersion: _schemaVersion, ...original } = token.dnd5eSummon.truePolymorphOriginalObject
@@ -1941,14 +2214,14 @@ export function removeCharacterConcentrationEffectsFromMaps(
             dnd5eObjectState: original.dnd5eObjectState
               ? structuredClone(original.dnd5eObjectState)
               : undefined,
-          }]
+          }, ...possessions]
         }
-        return []
+        return possessions
       }
       const originalState = plainObject(token?.dnd5eCombatState) ? token.dnd5eCombatState : null
       const tokenCreatureFormReversion = concentrationLinkedCreatureForm(originalState, sourceActorIds)
         ? {
-            currentHp: originalState.wildShapeOriginalCurrentHp,
+            currentHp: originalState.wildShapeRetainsHitPoints ? token.hp : originalState.wildShapeOriginalCurrentHp,
             maxHp: originalState.wildShapeOriginalMaxHp,
             size: tokenSizeForDnd5eSizeRank(originalState.wildShapeOriginalSizeRank),
             originalStatBlockId: originalState.wildShapeOriginalStatBlockId,
@@ -1961,7 +2234,11 @@ export function removeCharacterConcentrationEffectsFromMaps(
         ? clearConcentrationLinkedCreatureForm(originalState)
         : originalState
       const activeEffects = Array.isArray(state?.activeEffects) ? state.activeEffects : null
-      const remaining = (activeEffects ?? []).filter((effect) => {
+      const released = releaseEndedAreaConditions(activeEffects ?? [], removedAreas.map(area => ({ mapId: map.id, area })), token.id)
+      for (const effect of activeEffects ?? []) {
+        if (!released.includes(effect)) removedEffectIds.push(effect.id)
+      }
+      const remaining = released.filter((effect) => {
         const remove = effect?.duration?.type === 'concentration' &&
           sourceActorIds.has(effect.duration.sourceActorId) &&
           (!endedSpellId || !effect.duration.concentrationId || effect.duration.concentrationId === endedSpellId)
@@ -1972,10 +2249,10 @@ export function removeCharacterConcentrationEffectsFromMaps(
         ? Object.fromEntries(Object.entries(state.concentrationEffectsBySource)
           .filter(([sourceActorId]) => !sourceActorIds.has(sourceActorId)))
         : null
-      const effectsChanged = !!activeEffects && remaining.length !== activeEffects.length
+      const effectsChanged = !!activeEffects && (released !== activeEffects || remaining.length !== activeEffects.length)
       const sourceLinksChanged = sourceLinks != null &&
         Object.keys(sourceLinks).length !== Object.keys(state.concentrationEffectsBySource).length
-      const tokenOwnConcentrationMatches = token?.characterId === characterId && state && (
+      const tokenOwnConcentrationMatches = ((characterId && token?.characterId === characterId) || sourceActorIds.has(token.id)) && state && (
         !endedSpellId || !state.concentrationSpellId || state.concentrationSpellId === endedSpellId
       )
       const creatureFormReversion = linkedCharacterReversion ?? tokenCreatureFormReversion
@@ -2033,7 +2310,121 @@ export function removeCharacterConcentrationEffectsFromMaps(
   }
 }
 
-/** Server-side command reducer used by web and native players. */
+/** Shared concentration cleanup for character and NPC sources. */
+function clearConcentrationFromCharacters(characters, characterId, sourceActorIds, endedSpellId, options = {}) {
+  const revertedCreatureForms = []
+  for (let characterIndex = 0; characterIndex < characters.length; characterIndex += 1) {
+    const candidate = characters[characterIndex]
+    const candidateState = plainObject(candidate?.dnd5eCombatState)
+      ? structuredClone(candidate.dnd5eCombatState)
+      : null
+    if (!candidateState) continue
+    const activeEffects = Array.isArray(candidateState.activeEffects) ? candidateState.activeEffects : []
+    const endedAreas = (options.concentrationMaps ?? []).flatMap(map => (map.dnd5ePluginAreas ?? [])
+      .filter(area => area.concentrationId && ((characterId && area.sourceCharacterId === characterId) || sourceActorIds.has(area.sourceTokenId)) &&
+        (!endedSpellId || area.concentrationId === endedSpellId)).map(area => ({ mapId: map.id, area })))
+    const releasedEffects = releaseEndedAreaConditions(activeEffects, endedAreas, candidate.id, options.now)
+    const remainingEffects = retainDnd5eEndedEffectSavingThrows(releasedEffects, releasedEffects.filter((effect) => !(
+      effect?.duration?.type === 'concentration' &&
+      sourceActorIds.has(effect.duration.sourceActorId) &&
+      (!endedSpellId || !effect.duration.concentrationId || effect.duration.concentrationId === endedSpellId)
+    )))
+    const concentrationEffectsBySource = plainObject(candidateState.concentrationEffectsBySource)
+      ? Object.fromEntries(Object.entries(candidateState.concentrationEffectsBySource)
+        .filter(([sourceActorId]) => !sourceActorIds.has(sourceActorId)))
+      : null
+    const effectsChanged = releasedEffects !== activeEffects || remainingEffects.length !== activeEffects.length || remainingEffects.some((effect,index) => effect !== activeEffects[index])
+    const temporarySource = candidateState.temporaryHitPointsSource
+    const bindsTemporaryHp = (effect) => {
+      const prefix = temporarySource?.effectDefinitionId
+      return typeof prefix === 'string' && prefix.length > 0 &&
+        effect?.source?.actorId === temporarySource.actorId &&
+        [effect.definitionId, effect.stackingKey].some(value => typeof value === 'string' &&
+          (value === prefix || value.startsWith(`${prefix}:`) || value.includes(`:${prefix}:`)))
+    }
+    const temporaryHpEnded = activeEffects.some(bindsTemporaryHp) && !remainingEffects.some(bindsTemporaryHp)
+    if (temporaryHpEnded) delete candidateState.temporaryHitPointsSource
+    const sourceLinksChanged = concentrationEffectsBySource != null &&
+      Object.keys(concentrationEffectsBySource).length !== Object.keys(candidateState.concentrationEffectsBySource).length
+    const creatureFormEnded = concentrationLinkedCreatureForm(candidateState, sourceActorIds)
+    if (creatureFormEnded) {
+      revertedCreatureForms.push({
+        characterId: candidate.id,
+        currentHp: candidate.currentHp,
+        maxHp: candidate.maxHp,
+        size: tokenSizeForDnd5eSizeRank(candidateState.wildShapeOriginalSizeRank),
+      })
+    }
+    if (!effectsChanged && !sourceLinksChanged && !creatureFormEnded) continue
+    if (effectsChanged) {
+      candidateState.activeEffects = remainingEffects.length > 0 ? remainingEffects : undefined
+      candidateState.conditions = remainingEffects.length > 0
+        ? projectedConditionsFromActiveEffects(remainingEffects)
+        : undefined
+    }
+    if (sourceLinksChanged) {
+      candidateState.concentrationEffectsBySource = Object.keys(concentrationEffectsBySource).length > 0
+        ? concentrationEffectsBySource
+        : undefined
+    }
+    const nextCandidateState = creatureFormEnded
+      ? clearConcentrationLinkedCreatureForm(candidateState)
+      : candidateState
+    const endedEffectIds = new Set(activeEffects.filter(effect =>
+      !remainingEffects.some(remaining => remaining.id === effect.id)).map(effect => effect.id))
+    let consumedMaterials = false
+    const materialEscrows = candidate.dnd5eInventory?.spellMaterialEscrows?.map(record => {
+      if (record.status !== 'reserved' || !endedEffectIds.has(record.sourceEffectId)) return record
+      consumedMaterials = true
+      return { ...record, status: 'consumed', entries: [] }
+    })
+    characters[characterIndex] = {
+      ...candidate,
+      ...(consumedMaterials ? { dnd5eInventory: { ...candidate.dnd5eInventory,
+        revision: (candidate.dnd5eInventory.revision ?? 0) + 1, spellMaterialEscrows: materialEscrows } } : {}),
+      ...(creatureFormEnded && candidateState.wildShapeRetainsHitPoints ? { tempHp: 0 } : {}),
+      ...(temporaryHpEnded ? { tempHp: 0 } : {}),
+      ...(effectsChanged ? { conditions: projectedConditionsFromActiveEffects(remainingEffects) } : {}),
+      dnd5eCombatState: nextCandidateState,
+    }
+  }
+  return revertedCreatureForms
+}
+
+function endCharacterConcentration(characters, index, options = {}) {
+  const current = characters[index]
+  const characterId = current.id
+
+  const combatState = plainObject(current.dnd5eCombatState)
+    ? structuredClone(current.dnd5eCombatState)
+    : undefined
+  const endedSpellId = boundedText(combatState?.concentrationSpellId, 180)
+  const targetIds = Array.isArray(combatState?.concentrationTargetIds)
+    ? combatState.concentrationTargetIds.filter((targetId) => typeof targetId === 'string').slice(0, 512)
+    : []
+  if (combatState) {
+    delete combatState.concentrationSpellId
+    delete combatState.concentrationSpellLevel
+    delete combatState.concentrationTargetIds
+    delete combatState.concentrationRoundsRemaining
+    delete combatState.concentrationStartedTurnKey
+    delete combatState.huntersMarkTargetId
+  }
+  characters[index] = {
+    ...current,
+    concentrating: false,
+    ...(combatState ? { dnd5eCombatState: combatState } : {}),
+  }
+  const sourceActorIds = new Set([
+    characterId,
+    ...(Array.isArray(options.concentrationSourceActorIds)
+      ? options.concentrationSourceActorIds.filter((actorId) => typeof actorId === 'string')
+      : []),
+  ])
+  const revertedCreatureForms = clearConcentrationFromCharacters(characters, characterId, sourceActorIds, endedSpellId, options)
+  return { character: characters[index], endedSpellId, targetIds, revertedCreatureForms }
+}
+
 export function applyPlayerCharacterCommand(currentState, rawCommand, member, options = {}) {
   const command = plainObject(rawCommand) ? rawCommand : {}
   const commandId = boundedText(command.commandId, 180)
@@ -2119,6 +2510,8 @@ export function applyPlayerCharacterCommand(currentState, rawCommand, member, op
       const selectionKey = boundedText(command.selectionKey, 100)
       const spellId = boundedText(command.spellId, 160)
       if (!classId || !selectionKey || !spellId) return { ok: false, status: 400, error: 'invalid-spell-preparation' }
+      // Preparation cannot edit subclass choices or advancement-owned selections.
+      if (selectionKey !== 'spell-prepared') return { ok: false, status: 422, error: 'invalid-spell-preparation-selection' }
       const choices = structuredClone(plainObject(current.dnd5eClassChoices) ? current.dnd5eClassChoices : {})
       choices.classes = plainObject(choices.classes) ? choices.classes : {}
       choices.classes[classId] = plainObject(choices.classes[classId]) ? choices.classes[classId] : {}
@@ -2151,83 +2544,7 @@ export function applyPlayerCharacterCommand(currentState, rawCommand, member, op
       resources[resourceKey] = { ...resource, current: Math.max(0, Math.min(maximum, Math.floor(Number(command.current) || 0))), max: maximum }
       characters[index] = { ...current, classResources: resources }
     } else if (type === 'end-concentration') {
-      const combatState = plainObject(current.dnd5eCombatState)
-        ? structuredClone(current.dnd5eCombatState)
-        : undefined
-      const endedSpellId = boundedText(combatState?.concentrationSpellId, 180)
-      const targetIds = Array.isArray(combatState?.concentrationTargetIds)
-        ? combatState.concentrationTargetIds.filter((targetId) => typeof targetId === 'string').slice(0, 512)
-        : []
-      if (combatState) {
-        delete combatState.concentrationSpellId
-        delete combatState.concentrationSpellLevel
-        delete combatState.concentrationTargetIds
-        delete combatState.concentrationRoundsRemaining
-        delete combatState.concentrationStartedTurnKey
-        delete combatState.huntersMarkTargetId
-      }
-      characters[index] = {
-        ...current,
-        concentrating: false,
-        ...(combatState ? { dnd5eCombatState: combatState } : {}),
-      }
-      const sourceActorIds = new Set([
-        characterId,
-        ...(Array.isArray(options.concentrationSourceActorIds)
-          ? options.concentrationSourceActorIds.filter((actorId) => typeof actorId === 'string')
-          : []),
-      ])
-      const revertedCreatureForms = []
-      for (let characterIndex = 0; characterIndex < characters.length; characterIndex += 1) {
-        const candidate = characters[characterIndex]
-        const candidateState = plainObject(candidate?.dnd5eCombatState)
-          ? structuredClone(candidate.dnd5eCombatState)
-          : null
-        if (!candidateState) continue
-        const activeEffects = Array.isArray(candidateState.activeEffects) ? candidateState.activeEffects : []
-        const remainingEffects = activeEffects.filter((effect) => !(
-          effect?.duration?.type === 'concentration' &&
-          sourceActorIds.has(effect.duration.sourceActorId) &&
-          (!endedSpellId || !effect.duration.concentrationId || effect.duration.concentrationId === endedSpellId)
-        ))
-        const concentrationEffectsBySource = plainObject(candidateState.concentrationEffectsBySource)
-          ? Object.fromEntries(Object.entries(candidateState.concentrationEffectsBySource)
-            .filter(([sourceActorId]) => !sourceActorIds.has(sourceActorId)))
-          : null
-        const effectsChanged = remainingEffects.length !== activeEffects.length
-        const sourceLinksChanged = concentrationEffectsBySource != null &&
-          Object.keys(concentrationEffectsBySource).length !== Object.keys(candidateState.concentrationEffectsBySource).length
-        const creatureFormEnded = concentrationLinkedCreatureForm(candidateState, sourceActorIds)
-        if (creatureFormEnded) {
-          revertedCreatureForms.push({
-            characterId: candidate.id,
-            currentHp: candidate.currentHp,
-            maxHp: candidate.maxHp,
-            size: tokenSizeForDnd5eSizeRank(candidateState.wildShapeOriginalSizeRank),
-          })
-        }
-        if (!effectsChanged && !sourceLinksChanged && !creatureFormEnded) continue
-        if (effectsChanged) {
-          candidateState.activeEffects = remainingEffects.length > 0 ? remainingEffects : undefined
-          candidateState.conditions = remainingEffects.length > 0
-            ? projectedConditionsFromActiveEffects(remainingEffects)
-            : undefined
-        }
-        if (sourceLinksChanged) {
-          candidateState.concentrationEffectsBySource = Object.keys(concentrationEffectsBySource).length > 0
-            ? concentrationEffectsBySource
-            : undefined
-        }
-        const nextCandidateState = creatureFormEnded
-          ? clearConcentrationLinkedCreatureForm(candidateState)
-          : candidateState
-        characters[characterIndex] = {
-          ...candidate,
-          ...(effectsChanged ? { conditions: projectedConditionsFromActiveEffects(remainingEffects) } : {}),
-          dnd5eCombatState: nextCandidateState,
-        }
-      }
-      result = { character: characters[index], endedSpellId, targetIds, revertedCreatureForms }
+      result = endCharacterConcentration(characters, index, options)
     } else if (type === 'spend-hit-die') {
       if (options.combatActive === true) return { ok: false, status: 409, error: 'hit-die-combat-active' }
       const poolIndex = Number(command.poolIndex)
@@ -2307,7 +2624,7 @@ export function applyPlayerCharacterCommand(currentState, rawCommand, member, op
         { characters: [current], selectedId: current.id },
         { characters: [proposed], selectedId: proposed.id },
         member.memberId,
-        { combatActive: options.combatActive === true },
+        { combatActive: options.combatActive === true, subclassChoicePolicies: options.subclassChoicePolicies, expectedHitPointRoll },
       ).characters[0]
       if (playerAdvancementTransition(current, merged) !== 'append') return { ok: false, status: 422, error: 'invalid-level-up-result' }
       characters[index] = merged
@@ -2802,6 +3119,193 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
   })
 }
 
+export async function atomicMutateCampaignTimeAndMaps(ctx, updater, writerId, options = {}) {
+  return withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
+    await recoverSharedStateTransaction(ctx)
+    const [clockState, mapsState, geometryState, charactersState] = await Promise.all([
+      readSharedStateFile(ctx, 'campaign-time'), readSharedStateFile(ctx, 'maps'),
+      readSharedStateFile(ctx, 'map-geometry'), readSharedStateFile(ctx, 'characters'),
+    ])
+    const result = await updater(clockState.value)
+    if (!result?.ok || !result.changed) return result
+    const clockValidation = validateSharedStateShape('campaign-time', result.next)
+    if (!clockValidation.ok) return { ok: false, changed: false, status: 422, error: 'invalid-campaign-time-result' }
+    const currentMaps = Array.isArray(mapsState.value?.maps) ? mapsState.value.maps : []
+    const currentCharacters = charactersState.value?.characters ?? []
+    for(const scene of options.prepareOnly ? [] : geometryState.value?.maps??[]){
+      const map=currentMaps.find(map=>map.id===scene.mapId)
+      if(!map)continue
+      const pending=templeExpirySupportLoss(map,scene,result.next.worldMinute,(geometry,point)=>terrainElevationAtPoint(geometry,point))
+      if(pending.length)return {ok:false,changed:false,status:409,error:'temple-expiry-settlement-required',
+        pendingTempleExpiry:{mapId:map.id,tokenIds:pending,worldMinute:result.next.worldMinute}}
+    }
+    const breathing = planCampaignSubmergedBreathing({ maps: currentMaps, characters: currentCharacters,
+      previousClock: normalizeCampaignTimeState(clockState.value), nextClock: result.next })
+    const applyBreathing = (entity, update, character) => {
+      if (!update) return entity
+      const originalState = entity.dnd5eCombatState ?? {}
+      const wasAlive = (originalState.wildShapeFormId && !originalState.wildShapeRetainsHitPoints
+        ? originalState.wildShapeCurrentHp ?? (character ? entity.currentHp : entity.hp)
+        : character ? entity.currentHp : entity.hp) > 0
+      const state = update.revertedForm ? clearConcentrationLinkedCreatureForm(originalState) : originalState
+      if (update.revertedForm) entity = { ...entity,
+        ...(character && originalState.wildShapeRetainsHitPoints ? { tempHp: 0 } : {}),
+        ...(character ? { currentHp: originalState.wildShapeOriginalCurrentHp ?? entity.currentHp,
+          maxHp: originalState.wildShapeOriginalMaxHp ?? entity.maxHp } : {
+          hp: originalState.wildShapeOriginalCurrentHp ?? entity.hp, maxHp: originalState.wildShapeOriginalMaxHp ?? entity.maxHp,
+          poolId: originalState.wildShapeOriginalStatBlockId,
+          size: tokenSizeForDnd5eSizeRank(originalState.wildShapeOriginalSizeRank) ?? entity.size,
+        }) }
+      let effects = state.activeEffects ?? []
+      // Plain timed environmental buffs have no linked resources or aftermath to settle.
+      // Keep richer effects for their existing lifecycle processor rather than discarding it.
+      const plainKeys = new Set(['schemaVersion', 'id', 'definitionId', 'label', 'kind', 'standardCondition', 'legacyCondition',
+        'source', 'appliedAt', 'appliedRound', 'appliedTurnKey', 'duration', 'stackingKey', 'stackingPolicy', 'potency', 'visibility', 'tags', 'modifiers', 'suspendedBy'])
+      const removed = new Set(effects.filter(effect => update.expiredEffectIds?.includes(effect.id) &&
+        effect.duration?.type === 'rounds' && effect.modifiers?.environmentalCapabilities &&
+        Object.keys(effect.modifiers).every(key => key === 'environmentalCapabilities' || key === 'swimSpeedEqualsWalking') &&
+        Object.keys(effect).every(key => effect[key] === undefined || plainKeys.has(key))).map(effect => effect.id))
+      effects = effects.filter(effect => !removed.has(effect.id)).map(effect => {
+        if (!effect.suspendedBy?.some(id => removed.has(id))) return effect
+        const suspendedBy = effect.suspendedBy.filter(id => !removed.has(id))
+        return { ...effect, suspendedBy: suspendedBy.length ? suspendedBy : undefined }
+      })
+      const collapsed = update.collapsedAt != null && wasAlive
+      if (collapsed) for (const condition of ['unconscious', 'prone']) {
+        effects = [...effects.filter(effect => effect.id !== `suffocation:${condition}:${entity.id}`), {
+          schemaVersion: 1, id: `suffocation:${condition}:${entity.id}`, definitionId: `condition:${condition}`,
+          label: condition === 'prone' ? '倒地' : '昏迷', kind: 'condition', standardCondition: condition,
+          source: { kind: 'system', actorId: entity.id, rulesId: 'zero-hit-points' }, appliedAt: Date.now(),
+          duration: { type: 'permanent' }, stackingKey: `condition:${condition}`, stackingPolicy: 'refresh-duration',
+        }]
+      }
+      const conditions = projectedConditionsFromActiveEffects(effects)
+      return { ...entity, ...(character ? { conditions } : {}),
+        ...(collapsed ? character ? { currentHp: 0, deathSaveSuccesses: 0, deathSaveFailures: 0, deathSaveStable: false, concentrating: false } : { hp: 0 } : {}),
+        dnd5eCombatState: { ...state, activeEffects: effects, conditions, submergedBreathing: update.state,
+          submergedBreathingEffectDeadlines: update.effectDeadlines?.filter(entry => !removed.has(entry.effectId)),
+          ...(collapsed ? { concentrationSpellId: undefined, concentrationRoundsRemaining: undefined,
+            stableAtZero: undefined, raging: undefined } : {}) } }
+    }
+    let breathingMaps = currentMaps.map(map => ({ ...map, tokens: map.tokens.map(token =>
+      applyBreathing(token, breathing.updates.find(update => !update.characterId && update.mapId === map.id && update.tokenId === token.id), false)),
+      dnd5ePluginAreas: map.dnd5ePluginAreas?.filter(area => !breathing.endedSourceIds.includes(area.sourceTokenId) || !area.concentrationId) }))
+    const breathingCharacters = currentCharacters.map(character => applyBreathing(character,
+      breathing.updates.find(update => update.characterId === character.id), true))
+    breathingMaps = breathingMaps.map(map => ({ ...map, tokens: map.tokens.map(token => {
+      const update = breathing.updates.find(update => update.characterId && update.characterId === token.characterId && update.revertedForm)
+      if (!update) return token
+      const original = currentCharacters.find(character => character.id === update.characterId)?.dnd5eCombatState
+      const restored = breathingCharacters.find(character => character.id === update.characterId)
+      return { ...token, hp: restored.currentHp, maxHp: restored.maxHp,
+        poolId: original?.wildShapeOriginalStatBlockId,
+        size: tokenSizeForDnd5eSizeRank(original?.wildShapeOriginalSizeRank) ?? token.size,
+        dnd5eCombatState: token.dnd5eCombatState ? { ...clearConcentrationLinkedCreatureForm(token.dnd5eCombatState),
+          submergedBreathing: update.state } : undefined }
+    }) }))
+    for (const update of breathing.updates) {
+      if (update.collapsedAt == null) continue
+      if (!update.characterId) {
+        const original = currentMaps.find(map => map.id === update.mapId)?.tokens.find(token => token.id === update.tokenId)
+        if (!(original?.hp > 0)) continue
+        const sourceActorIds = new Set([update.tokenId])
+        const reverted = clearConcentrationFromCharacters(breathingCharacters, undefined, sourceActorIds, '', {
+          concentrationMaps: currentMaps, now: result.next.updatedAt,
+        })
+        breathingMaps = removeCharacterConcentrationEffectsFromMaps({ maps: breathingMaps }, undefined, '', reverted,
+          { worldMinute: result.next.worldMinute, sourceActorIds: [...sourceActorIds] }).next.maps
+        continue
+      }
+      const index = breathingCharacters.findIndex(character => character.id === update.characterId)
+      if (index < 0 || !(currentCharacters[index].currentHp > 0)) continue
+      const sourceIds = currentMaps.flatMap(map => map.tokens.filter(token => token.characterId === update.characterId).map(token => token.id))
+      const ended = endCharacterConcentration(breathingCharacters, index, {
+        concentrationSourceActorIds: sourceIds, concentrationMaps: currentMaps, now: result.next.updatedAt,
+      })
+      const cleanup = removeCharacterConcentrationEffectsFromMaps({ maps: breathingMaps }, update.characterId,
+        ended.endedSpellId, ended.revertedCreatureForms, { worldMinute: result.next.worldMinute })
+      breathingMaps = cleanup.next.maps
+    }
+    if (!breathing.updates.length) breathingMaps = currentMaps
+    let nextMaps = breathingMaps.map(map => Array.isArray(map?.tokens)
+      ? advancePersistentAreaSeconds(expireRestBoundAreas(expireDnd5eSummonLingerAtWorldMinute(map, result.next.worldMinute), result.next),normalizeCampaignTimeState(clockState.value),result.next) : map)
+    const expired = []
+    const nextGeometry = (geometryState.value?.maps ?? []).map(geometry => {
+      if (!geometry.structureLifetimes?.length) return geometry
+      const index = nextMaps.findIndex(map => map.id === geometry.mapId)
+      if (index < 0) throw new Error('structure-expiry-map-missing')
+      const ground = (scene, point) =>
+        terrainElevationAtPoint({...scene, obstacles: scene.obstacles.filter(obstacle => !geometryEntityDestroyed(obstacle) &&
+          !(obstacle.terrainRegion !== true && obstacle.traversal === 'ground' && (obstacle.terrainCostMultiplier ?? 1) > 1 && obstacle.heightFeet <= 0))}, point)
+      // A prepared transaction leaves temples intact for the Host's Headless
+      // fall/reaction plan. Other clock consequences are calculated normally.
+      const planned = options.prepareOnly
+        ? prepareStructureRemoval(nextMaps[index],geometry,(geometry.structureLifetimes??[]).filter(record=>
+          !(record.templeWard&&record.replacementGroup==='temple-of-the-gods')&&record.expiresWorldMinute!=null&&
+          record.expiresWorldMinute<=result.next.worldMinute).map(record=>record.id),ground)
+        : prepareStructureExpiry(nextMaps[index], geometry, result.next.worldMinute, [], ground)
+      nextMaps[index] = planned.map
+      expired.push(...planned.expiredIds.map(structureId => ({mapId: geometry.mapId, structureId})))
+      return planned.geometry
+    })
+    if (expired.length) nextMaps = nextMaps.map(map => expireStructureMapObjects(map, expired, token =>
+      (token.dnd5eCarriedObjects ?? []).map(item => ({id:'carried:'+item.id,label:item.label,type:'obstacle',size:1,x:token.x,y:token.y,
+        elevationFeet:token.elevationFeet,color:'',emoji:'',dnd5eObjectState:{...structuredClone(item.objectState),wornOrCarried:false,
+          inventoryItem:{...item.objectState.inventoryItem,receiptId:'carried:'+item.id}}}))))
+    let nextCharacters = breathingCharacters.map(character => expireStructureInventoryItems(character, expired))
+    // A character may have map copies. Only its current scene owns its observation history.
+    const observationMapByCharacter = new Map(nextCharacters.map(character => {
+      const scenes = nextMaps.filter(map => map.tokens?.some(token => token.characterId === character.id))
+      const scene = scenes.find(map => map.tokens.some(token => token.characterId === character.id && token.teleportationArrivalMapId === map.id)) ??
+        scenes.find(map => map.id === mapsState.value?.selectedId) ?? scenes[0]
+      return [character.id, scene?.id]
+    }))
+    nextMaps = nextMaps.map(map => {
+      if (!Array.isArray(map.tokens)) return map
+      const observed = recordServerMovementSightings({ map, characters: nextCharacters, clock: { ...result.next, worldSecondRemainder: result.next.worldSecondRemainder ?? 0 },
+        path: [{}], actorId: null, geometry: nextGeometry.find(geometry => geometry.mapId === map.id),
+        observerIds: map.tokens.filter(token => !token.characterId || observationMapByCharacter.get(token.characterId) === map.id).map(token => token.id),
+      })
+      nextCharacters = observed.characters
+      return observed.map
+    })
+    const geometryChanged = nextGeometry.some((scene,index) => scene !== geometryState.value.maps[index])
+    const charactersChanged = nextCharacters.some((character,index) => character !== charactersState.value.characters[index])
+    const mapsChanged = nextMaps.some((map, index) => map !== currentMaps[index])
+    const nextMapsState = mapsChanged ? { ...mapsState.value, maps: nextMaps } : mapsState.value
+    const mapValidation = mapsChanged ? validateSharedStateShape('maps', nextMapsState) : { ok: true }
+    if (!mapValidation.ok) {
+      return { ok: false, changed: false, status: 422, error: 'invalid-campaign-time-map-result', reason: mapValidation.reason }
+    }
+    const writes = [{ name: 'campaign-time', expectedRevision: sharedStateRevision(clockState.value), data: result.next }]
+    if (mapsChanged) writes.push({ name: 'maps', expectedRevision: sharedStateRevision(mapsState.value), data: nextMapsState })
+    if (geometryChanged) writes.push({name:'map-geometry',expectedRevision:sharedStateRevision(geometryState.value),data:{...geometryState.value,maps:nextGeometry}})
+    if (charactersChanged) writes.push({name:'characters',expectedRevision:sharedStateRevision(charactersState.value),data:{...charactersState.value,characters:nextCharacters}})
+    if(options.prepareOnly){
+      // Include stable snapshots even when unchanged: the Host may add fall damage.
+      for(const [name,stored,data]of [['maps',mapsState.value,nextMapsState],['map-geometry',geometryState.value,{...geometryState.value,maps:nextGeometry}],
+        ['characters',charactersState.value,{...charactersState.value,characters:nextCharacters}]]){
+        if(stored&&!writes.some(write=>write.name===name))writes.push({name,expectedRevision:sharedStateRevision(stored),data})
+      }
+      const combat=await readSharedStateFile(ctx,'combat')
+      const readRevisions=Object.fromEntries([['maps',mapsState.value],['map-geometry',geometryState.value],['characters',charactersState.value],['combat',combat.value]]
+        .filter(([name])=>!writes.some(write=>write.name===name)).map(([name,value])=>[name,sharedStateRevision(value)]))
+      return {ok:true,changed:false,prepared:true,plan:{writes,readRevisions,combat:combat.value??null}}
+    }
+    const written = await atomicWriteSharedStateTransactionUnlocked(ctx, writes, writerId, `campaign-time:${randomUUID()}`)
+    if (!written.ok) return { ok: false, changed: false, status: written.conflict ? 409 : 500,
+      error: written.conflict ? 'state-revision-conflict' : 'state-transaction-failed' }
+    return { ...result, previous: clockState.value,
+      next: written.entries.find(entry => entry.name === 'campaign-time').next,
+      geometryMutation: written.entries.some(entry => entry.name === 'map-geometry')
+        ? {ok:true,changed:true,previous:geometryState.value,next:written.entries.find(entry=>entry.name==='map-geometry').next} : undefined,
+      charactersMutation: written.entries.some(entry => entry.name === 'characters')
+        ? {ok:true,changed:true,previous:charactersState.value,next:written.entries.find(entry=>entry.name==='characters').next} : undefined,
+      mapsMutation: mapsChanged ? { ok: true, changed: true, previous: mapsState.value,
+        next: written.entries.find(entry => entry.name === 'maps').next } : undefined }
+  })
+}
+
 function mutateCombatLogState(current, mutation, now = Date.now()) {
   if (mutation?.operation === 'truncate-after') {
     const mapId = boundedText(mutation?.mapId, 160).trim()
@@ -3081,17 +3585,21 @@ export function mutateCombatInterruptQueue(
     }
     if (acceptedContribution?.kind === 'adjust-d20') {
       const adjustment = response.adjustment
+      const fixedAmount = acceptedEligibleModifier?.fixedAmount
+      const validAmount = fixedAmount != null
+        ? Number.isInteger(fixedAmount) && fixedAmount >= 1 && fixedAmount <= 100 &&
+          acceptedEligibleModifier.dieSides == null && adjustment?.roll === fixedAmount
+        : Number.isInteger(acceptedEligibleModifier?.dieSides) && acceptedEligibleModifier.dieSides >= 2 &&
+          acceptedEligibleModifier.dieSides <= 100 && Number.isInteger(adjustment?.roll) &&
+          adjustment.roll >= 1 && adjustment.roll <= acceptedEligibleModifier.dieSides
       if (
         !acceptedEligibleModifier || acceptedEligibleModifier.modifierKind !== 'adjust-d20' ||
         acceptedEligibleModifier.direction !== acceptedContribution.direction ||
         typeof acceptedEligibleModifier.sourceTokenId !== 'string' || !acceptedEligibleModifier.sourceTokenId ||
-        !Number.isInteger(acceptedEligibleModifier.dieSides) || acceptedEligibleModifier.dieSides < 2 ||
-        acceptedEligibleModifier.dieSides > 100 || !adjustment ||
+        !validAmount || !adjustment ||
         adjustment.sourceId !== acceptedEligibleModifier.sourceTokenId ||
         adjustment.featureId !== acceptedContribution.featureId ||
-        adjustment.direction !== acceptedContribution.direction ||
-        !Number.isInteger(adjustment.roll) || adjustment.roll < 1 ||
-        adjustment.roll > acceptedEligibleModifier.dieSides
+        adjustment.direction !== acceptedContribution.direction
       ) return { ok: false, status: 409, error: 'roll-adjustment-conflict' }
     } else if (response.adjustment != null) {
       return { ok: false, status: 400, error: 'unexpected-roll-adjustment' }
@@ -3285,7 +3793,7 @@ export function mutateCombatInterruptQueue(
     status,
     response: mutation?.response ?? current.response,
     ...(operation === 'rolling' && current.kind === 'roll-confirmation' && current.payload?.visibility !== 'dm-only'
-      ? { expiresAt: now + ROLL_CONFIRMATION_STAGE_TIMEOUT_MS }
+      ? { expiresAt: now + 120_000 }
       : {}),
     ...(operation === 'wait' ? { waitingSince: now, expiresAt: undefined } : {}),
     ...(operation === 'rollback' ? { rollbackReason: mutation?.rollbackReason ?? 'cancelled' } : {}),
@@ -3374,26 +3882,11 @@ function validActiveEffectInstance(effect) {
     ))
   )) return false
   if (effect.breakOn != null && (!Array.isArray(effect.breakOn) || effect.breakOn.some((trigger) =>
-    ![
-      'takes-damage',
-      'targeted-by-spell',
-      'targeted-by-attack',
-      'hit-by-attack',
-      'makes-attack',
-      'casts-spell',
-      'moves',
-      'spends-action',
-      'spends-bonus-action',
-      'spends-reaction',
-      'awakened',
-      'magical-healing',
-      'short-rest-complete',
-      'long-rest-complete',
-      'reduced-to-zero',
-    ].includes(trigger)
+    !ACTIVE_EFFECT_BREAK_TRIGGERS.includes(trigger)
   ))) return false
   if (effect.modifiers != null && (
     !plainObject(effect.modifiers) ||
+    (effect.modifiers.rollDiceModifiers != null && !normalizeDnd5eRollDiceModifiers(effect.modifiers.rollDiceModifiers)) ||
     (effect.modifiers.speedPenaltyFeet != null && (!Number.isFinite(effect.modifiers.speedPenaltyFeet) || effect.modifiers.speedPenaltyFeet < 0)) ||
     (effect.modifiers.preventReactions != null && typeof effect.modifiers.preventReactions !== 'boolean')
   )) return false
@@ -3402,6 +3895,8 @@ function validActiveEffectInstance(effect) {
 
 function validateActiveEffectState(state, projectedConditions) {
   if (!plainObject(state)) return null
+  if (state.submergedBreathing != null && !normalizeDnd5eSubmergedBreathing(state.submergedBreathing)) return 'invalid-submerged-breathing-state'
+  if (state.submergedBreathingEffectDeadlines != null && !normalizeSubmergedBreathingEffectDeadlines(state.submergedBreathingEffectDeadlines)) return 'invalid-submerged-effect-deadlines'
   if (state.activeEffects != null) {
     if (!Array.isArray(state.activeEffects)) return 'active-effects-not-array'
     const ids = new Set()
@@ -4130,7 +4625,11 @@ function characterOwnedByRoomMember(character, member) {
 }
 
 function projectUnidentifiedInventoryEntryForPlayer(entry) {
-  if (!plainObject(entry) || entry.identified !== false) return entry
+  if (!plainObject(entry)) return entry
+  if (entry.identified !== false) return entry.spellAlteration
+    ? { ...entry, spellAlteration: { ...entry.spellAlteration,
+      original: projectUnidentifiedInventoryEntryForPlayer({ ...entry.spellAlteration.original, spellAlteration: undefined }) } }
+    : entry
   const publicRarities = new Set([
     'common', 'uncommon', 'rare', 'very-rare', 'legendary', 'artifact', 'varies',
   ])
@@ -4166,6 +4665,7 @@ function projectUnidentifiedInventoryForPlayer(inventory) {
   return {
     ...inventory,
     entries: inventory.entries.map(projectUnidentifiedInventoryEntryForPlayer),
+    ...(Array.isArray(inventory.releasedObjects) ? { releasedObjects: inventory.releasedObjects.map(projectUnidentifiedInventoryEntryForPlayer) } : {}),
   }
 }
 
@@ -4181,6 +4681,20 @@ function projectOtherPlayerIdentifyCandidates(inventory) {
   }
 }
 
+function projectExposedInventorySurfaces(inventory) {
+  return (Array.isArray(inventory?.entries) ? inventory.entries : []).flatMap(entry => {
+    const profile = entry?.surfaceProfile
+    if (entry?.surfaceExposed !== true || entry.quantity !== 1 || entry.containerInstanceId || entry.condition?.destroyed || !plainObject(profile)) return []
+    const surfaceId = profile.surfaceId ?? `inventory:${entry.instanceId}`
+    if (typeof surfaceId !== 'string' || !surfaceId.trim() || surfaceId.length > 240 || /[\u0000-\u001f]/.test(surfaceId) ||
+      !['solid','sand','dust','loose-earth','gravel','stone','ice','snow','earth'].includes(profile.material) ||
+      ![profile.widthFeet,profile.lengthFeet,profile.heightFeet].every(n => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 100000) ||
+      !Number.isFinite(profile.rotationDegrees) || profile.rotationDegrees < 0 || profile.rotationDegrees >= 360) return []
+    return [{surfaceId,material:profile.material,widthFeet:profile.widthFeet,lengthFeet:profile.lengthFeet,
+      heightFeet:profile.heightFeet,rotationDegrees:profile.rotationDegrees}]
+  })
+}
+
 export function projectCharactersForRoomMember(value, member) {
   const characters = Array.isArray(value?.characters) ? value.characters : []
   return {
@@ -4189,14 +4703,32 @@ export function projectCharactersForRoomMember(value, member) {
       .filter((character) => characterOwnedByRoomMember(character, member) || character?.visibleToPlayers !== false)
       .map((character) => {
         const projected = { ...character }
+        projected.dnd5eExposedSurfaces = projectExposedInventorySurfaces(character.dnd5eInventory)
+        projected.dnd5eExposedEnchantmentItems = (character.dnd5eInventory?.entries ?? []).flatMap(entry => {
+          const profile = entry?.item?.equipment?.dnd5e
+          if (entry?.enchantmentExposed !== true || entry.quantity !== 1 || entry.containerInstanceId ||
+            entry.condition?.destroyed || entry.planarState === 'ethereal' || typeof entry.instanceId !== 'string' ||
+            !(profile?.kind === 'armor' || profile?.kind === 'weapon' && ['simple','martial'].includes(profile.category))) return []
+          return [{instanceId:entry.instanceId,kind:profile.kind,revision:character.dnd5eInventory.revision ?? 0,equipped:!!entry.equippedSlot}]
+        })
         delete projected.dmNotes
         if (characterOwnedByRoomMember(character, member)) {
           projected.dnd5eInventory = projectUnidentifiedInventoryForPlayer(projected.dnd5eInventory)
         } else {
           delete projected.notes
           delete projected.backstory
+          if (projected.dnd5eCombatState) {
+            projected.dnd5eCombatState = { ...projected.dnd5eCombatState }
+            delete projected.dnd5eCombatState.knownCreatureLocations
+            delete projected.dnd5eCombatState.damageTraitReports
+            delete projected.dnd5eCombatState.planarPortalReports
+            delete projected.dnd5eCombatState.recentCreatureSightings
+          }
           projected.dnd5eInventory = projectOtherPlayerIdentifyCandidates(projected.dnd5eInventory)
-          delete projected.equipment
+          // An omitted loadout is treated as a new character by the client and
+          // gains class starter gear on reload. Redact explicitly so viewing
+          // another character cannot invent armor (and its speed penalty).
+          projected.equipment = {}
           delete projected.classResources
           delete projected.dnd5eAbilityGeneration
           delete projected.dnd5eCreationRecommendation
@@ -4622,8 +5154,13 @@ function validCampaignRestFeatureD20Rolls(value) {
 }
 
 function validateCampaignTimeState(value) {
+  if (!validCampaignEnvironmentalExposures(value?.environmentalExposures, value?.worldMinute)) return 'invalid-environmental-exposures'
+  if (!validCampaignInteractions(value?.interactions, value?.worldMinute, value?.advances)) return 'invalid-campaign-interactions'
+  if (!validCampaignRestSessions(value?.restSessions,value?.worldMinute,value?.advances)) return 'invalid-rest-session-state'
+  if (!validCampaignRestLocations(value?.restLocations,value?.worldMinute)) return 'invalid-rest-locations'
   if (
     ![1, CAMPAIGN_TIME_SCHEMA_VERSION].includes(value?.schemaVersion) || !Number.isSafeInteger(value.worldMinute) || value.worldMinute < 0 ||
+    (value.worldSecondRemainder != null && (!Number.isSafeInteger(value.worldSecondRemainder) || value.worldSecondRemainder < 0 || value.worldSecondRemainder > 59)) ||
     !Array.isArray(value.timers) || value.timers.length > CAMPAIGN_TIME_TIMER_LIMIT ||
     !Array.isArray(value.advances) || value.advances.length > CAMPAIGN_TIME_ADVANCE_LIMIT ||
     !Number.isFinite(value.updatedAt) || value.updatedAt < 0
@@ -4652,6 +5189,7 @@ function validateCampaignTimeState(value) {
   const advanceIds = new Set()
   let previousTo = 0
   for (const advance of value.advances) {
+    if (!validCombatRoundCredits(advance?.combatRoundCredits, Number(advance?.minutes) * 10) || (advance?.combatRoundCredits !== undefined && advance?.kind !== 'advance')) return 'invalid-campaign-combat-round-credits'
     if (
       !plainObject(advance) || typeof advance.id !== 'string' || !advance.id || advance.id.length > 160 || advanceIds.has(advance.id) ||
       !['advance', 'short-rest', 'long-rest'].includes(advance.kind) ||
@@ -4747,6 +5285,8 @@ function advanceCampaignTimeState(base, minutes, reason, kind, now, options = {}
       worldMinute: toWorldMinute,
       timers,
       advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+      ...(base.interactions ? { interactions: interruptCampaignInteractionsForTimeAdvance(base.interactions, toWorldMinute) } : {}),
+      ...(base.restSessions ? { restSessions: interruptCampaignRestSessionsForTimeAdvance(base.restSessions,toWorldMinute) } : {}),
       updatedAt: now,
     },
     advance,
@@ -4754,9 +5294,43 @@ function advanceCampaignTimeState(base, minutes, reason, kind, now, options = {}
 }
 
 export function mutateCampaignTimeState(current, mutation, now, member, context = {}) {
-  const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
+  const isDm = typeof member?.memberId === 'string' && member.memberId.length > 0 &&
+    (member.memberId === context.host?.memberId || member.role === 'dm')
   if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
+  if (!validCampaignInteractions(current?.interactions, current?.worldMinute, current?.advances)) return { ok: false, status: 409, error: 'invalid-campaign-interactions' }
+  if (!validCampaignRestSessions(current?.restSessions,current?.worldMinute,current?.advances)) return {ok:false,status:409,error:'invalid-rest-session-state'}
+  if (!validCampaignRestLocations(current?.restLocations,current?.worldMinute)) return {ok:false,status:409,error:'invalid-rest-locations'}
+  if (!validCampaignEnvironmentalExposures(current?.environmentalExposures, current?.worldMinute)) return { ok: false, status: 409, error: 'invalid-environmental-exposures' }
   const base = normalizeCampaignTimeState(current)
+  if(mutation?.operation==='advance-seconds'){
+    if(!Number.isSafeInteger(mutation.seconds)||mutation.seconds<1||mutation.seconds>3600)return {ok:false,status:400,error:'invalid-campaign-seconds'}
+    const seconds=(base.worldSecondRemainder??0)+mutation.seconds,minutes=Math.floor(seconds/60)
+    const advanced=minutes>0?advanceCampaignTimeState(base,minutes,boundedText(mutation.reason,160)||'推进秒数','advance',now):undefined
+    if(minutes>0&&!advanced)return {ok:false,status:400,error:'campaign-time-overflow'}
+    return {ok:true,changed:true,...(advanced??{}),next:{...(advanced?.next??base),worldSecondRemainder:seconds%60,updatedAt:now}}
+  }
+  if(mutation?.operation==='complete-rest-session'){
+    const session=base.restSessions?.find(row=>row.id===mutation.id)
+    if(!session)return {ok:false,status:409,error:'rest-session-not-found'}
+    if(session.status==='completed')return {ok:true,changed:false,next:base}
+    if(session.status!=='active')return {ok:false,status:409,error:'rest-session-not-active'}
+    if(mutation.expectedWorldMinute!==base.worldMinute||base.worldMinute!==session.startedAtWorldMinute)return {ok:false,status:409,error:'stale-rest-session-clock'}
+    if(!Array.isArray(context.restCharacterIds)||session.characterIds.some(id=>context.restCharacterIds.filter(value=>value===id).length!==1))return {ok:false,status:409,error:'rest-participant-unavailable'}
+    const result=mutateCampaignTimeState(base,{operation:session.kind,beneficiaryCharacterIds:session.characterIds,reason:mutation.reason,
+      ignoreLongRestCooldown:mutation.ignoreLongRestCooldown,restRecoveryReports:mutation.restRecoveryReports,restFeatureD20Rolls:mutation.restFeatureD20Rolls},now,member,context)
+    if(!result.ok)return result
+    return {...result,next:{...result.next,restSessions:result.next.restSessions.map(row=>row.id===session.id?{
+      ...session,status:'completed',completedAtWorldMinute:result.advance.toWorldMinute,completionAdvanceId:result.advance.id}:row)}}
+  }
+  if (['start-rest-session','interrupt-rest-session'].includes(mutation?.operation)) return mutateCampaignRestSession(base,mutation,now,member.memberId,context.restCharacterIds)
+  if (['start-interaction', 'interrupt-interaction'].includes(mutation?.operation)) {
+    if (mutation.operation === 'start-interaction' && !base.interactions?.some(row => row.id === mutation.id)) {
+      if (mutation.expectedWorldMinute !== base.worldMinute) return { ok: false, status: 409, error: 'stale-interaction-clock' }
+      const issue = campaignInteractionReferenceIssue(mutation, context.interactionEntities)
+      if (issue) return { ok: false, status: 409, error: issue }
+    }
+    return mutateCampaignInteraction(base, mutation, now, member.memberId)
+  }
   if (mutation?.operation === 'advance' || mutation?.operation === 'short-rest' || mutation?.operation === 'long-rest') {
     const minutes = mutation.operation === 'long-rest'
       ? 8 * 60
@@ -4812,6 +5386,10 @@ export function mutateCampaignTimeState(current, mutation, now, member, context 
       restFeatureD20Rolls,
     })
     if (!advanced) return { ok: false, status: 400, error: 'campaign-time-overflow' }
+    if (kind === 'long-rest' && Array.isArray(context.restMaps) && Array.isArray(context.restCharacterIds)) {
+      const participants = context.restCharacterIds.filter(id => beneficiaryCharacterIds == null || beneficiaryCharacterIds.includes(id))
+      advanced.next.restLocations = recordCampaignLongRestLocations(base.restLocations, context.restMaps, participants, advanced.next.worldMinute)
+    }
     return {
       ok: true,
       changed: true,
@@ -4924,9 +5502,14 @@ function validDnd5eRoundLifecycle(value, usesExclusiveRoundBoundary = false, max
 function validDnd5ePersistentAreaLighting(value) {
   if (value == null) return true
   if (!plainObject(value) || !Number.isInteger(value.spellLevel) || value.spellLevel < 0 || value.spellLevel > 9) return false
+  if (value.kind === 'reduce-light') return Object.keys(value).every(key => ['kind', 'radiusFeet', 'spellLevel'].includes(key)) &&
+    Number.isInteger(value.radiusFeet) && value.radiusFeet >= 1 && value.radiusFeet <= 1_000
   if (value.kind === 'light') {
-    const allowed = new Set(['kind', 'brightRadiusFeet', 'dimRadiusFeet', 'color', 'spellLevel', 'suppressesMagicalDarknessThroughLevel'])
+    const allowed = new Set(['kind', 'brightRadiusFeet', 'dimRadiusFeet', 'color', 'spellLevel', 'sunlight', 'areaOnly', 'emission', 'suppressesMagicalDarknessThroughLevel'])
     return Object.keys(value).every((key) => allowed.has(key)) &&
+      (value.sunlight == null || value.sunlight === true) &&
+      (value.areaOnly == null || value.areaOnly === true) &&
+      (value.emission == null || (value.emission === 'rectangle-volume' && value.areaOnly !== true)) &&
       Number.isInteger(value.brightRadiusFeet) && value.brightRadiusFeet >= 0 && value.brightRadiusFeet <= 1_000 &&
       Number.isInteger(value.dimRadiusFeet) && value.dimRadiusFeet >= 0 && value.dimRadiusFeet <= 1_000 &&
       value.brightRadiusFeet + value.dimRadiusFeet > 0 && typeof value.color === 'string' && /^#[0-9a-f]{6}$/i.test(value.color) &&
@@ -4935,8 +5518,9 @@ function validDnd5ePersistentAreaLighting(value) {
         value.suppressesMagicalDarknessThroughLevel >= 0 && value.suppressesMagicalDarknessThroughLevel <= 9
       ))
   }
-  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel'])
+  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel', 'lightSuppressionScope'])
   return Object.keys(value).every((key) => allowed.has(key)) &&
+    (value.lightSuppressionScope == null || value.lightSuppressionScope === 'within-area') &&
     value.kind === 'magical-darkness' && Number.isInteger(value.radiusFeet) &&
     value.radiusFeet >= 1 && value.radiusFeet <= 1_000 &&
     (value.suppressesMagicalLightThroughLevel == null || (
@@ -4949,11 +5533,13 @@ function validDnd5ePersistentAreaVertical(value) {
   if (value == null) return true
   if (!plainObject(value)) return false
   if (value.mode === 'ground') return Object.keys(value).length === 1
-  const allowed = new Set(['mode', 'baseElevationFeet', 'heightFeet', 'anchorOffsetFeet'])
+  const allowed = new Set(['mode', 'baseElevationFeet', 'heightFeet', 'anchorOffsetFeet', 'shape', 'columns'])
   return value.mode === 'volume' && Object.keys(value).every((key) => allowed.has(key)) &&
-    Number.isInteger(value.baseElevationFeet) &&
+    (value.columns == null || (validPersistentAreaColumns(value.columns) && value.shape == null && value.anchorOffsetFeet == null)) &&
+    (value.shape == null || value.shape === 'sphere') &&
+    typeof value.baseElevationFeet === 'number' && Number.isFinite(value.baseElevationFeet) &&
     value.baseElevationFeet >= -1_000 && value.baseElevationFeet <= 10_000 &&
-    Number.isInteger(value.heightFeet) && value.heightFeet >= 1 && value.heightFeet <= 10_000 &&
+    typeof value.heightFeet === 'number' && Number.isFinite(value.heightFeet) && value.heightFeet >= 0.001 && value.heightFeet <= 10_000 &&
     (!Object.prototype.hasOwnProperty.call(value, 'anchorOffsetFeet') || (
       Number.isInteger(value.anchorOffsetFeet) &&
       value.anchorOffsetFeet >= -1_000 && value.anchorOffsetFeet <= 10_000
@@ -4962,6 +5548,9 @@ function validDnd5ePersistentAreaVertical(value) {
 
 function validTimedLightState(light) {
   if (!plainObject(light) || typeof light.enabled !== 'boolean' ||
+    (light.flame != null && typeof light.flame !== 'boolean') ||
+    (light.flameProtected != null && typeof light.flameProtected !== 'boolean') ||
+    (light.flameSize != null && !['torch-or-smaller', 'larger'].includes(light.flameSize)) ||
     !Number.isFinite(light.brightRadiusFeet) || light.brightRadiusFeet < 0 || light.brightRadiusFeet > 10_000 ||
     !Number.isFinite(light.dimRadiusFeet) || light.dimRadiusFeet < 0 || light.dimRadiusFeet > 10_000 ||
     typeof light.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(light.color) ||
@@ -5066,7 +5655,9 @@ function validSceneAction(action) {
   if (action.kind === 'audio') return ['play', 'stop'].includes(action.operation) && typeof action.loop === 'boolean' &&
     Number.isFinite(action.volume) && action.volume >= 0 && action.volume <= 1 &&
     (action.operation === 'stop' || (typeof action.assetId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(action.assetId)))
-  if (action.kind === 'teleport') return validSceneId(action.targetMapId) && Number.isFinite(action.x) && Number.isFinite(action.y) && typeof action.moveTriggeringToken === 'boolean'
+  if (action.kind === 'teleport') return validSceneId(action.targetMapId) && Number.isFinite(action.x) && Number.isFinite(action.y) && typeof action.moveTriggeringToken === 'boolean' &&
+    (action.isPortal == null || typeof action.isPortal === 'boolean') &&
+    (action.portalElevationFeet == null || (typeof action.portalElevationFeet === 'number' && Number.isFinite(action.portalElevationFeet)))
   return typeof action.title === 'string' && action.title.length > 0 && action.title.length <= 160 && typeof action.body === 'string' && action.body.length <= 4_000
 }
 
@@ -5174,6 +5765,18 @@ function validSceneInteractionPoint(point) {
     typeof reward.identified === 'boolean')
 }
 
+function validScenePortalSurvey(value) {
+  return plainObject(value) &&
+    [value.centerX, value.centerY, value.elevationFeet, value.radiusFeet].every(n => typeof n === 'number' && Number.isFinite(n)) &&
+    value.radiusFeet > 0 && value.radiusFeet <= 1_000_000 &&
+    Array.isArray(value.externalPortals) && value.externalPortals.length <= 100 &&
+    value.externalPortals.every(p => plainObject(p) &&
+      [p.eastFeet, p.northFeet, p.elevationFeet].every(n => typeof n === 'number' && Number.isFinite(n)) &&
+      typeof p.enabled === 'boolean' && typeof p.destinationPlane === 'string' &&
+      p.destinationPlane.trim().length > 0 && p.destinationPlane.length <= 120 &&
+      !/[\u0000-\u001f\u007f]/.test(p.destinationPlane))
+}
+
 function validateSceneOrchestrationState(value) {
   if (value.schemaVersion !== 1 || !Array.isArray(value.scenes) || value.scenes.length > 80 || !plainObject(value.runtime) ||
     !Array.isArray(value.runtime.pendingRuns) || value.runtime.pendingRuns.length > 50 ||
@@ -5193,6 +5796,7 @@ function validateSceneOrchestrationState(value) {
       typeof scene.name !== 'string' || !scene.name || scene.name.length > 160 ||
       typeof scene.description !== 'string' || scene.description.length > 2_000 ||
       typeof scene.environmentLabel !== 'string' || scene.environmentLabel.length > 300 ||
+      (scene.planarPortalSurvey != null && !validScenePortalSurvey(scene.planarPortalSurvey)) ||
       (scene.weather != null && !validSceneWeather(scene.weather)) ||
       !['none', 'discovery', 'danger', 'door', 'mystery', 'victory'].includes(scene.backgroundCue) ||
       (scene.backgroundAudioMode != null && !['inherit', 'override', 'silent'].includes(scene.backgroundAudioMode)) ||
@@ -5357,12 +5961,17 @@ function validateDnd5eResourceStates(name, value) {
     if (portraitLength > CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH) return 'character-portraits-too-large'
   }
   if (name === 'maps') {
+    if (value.deletedMapIds !== undefined && (!Array.isArray(value.deletedMapIds) ||
+      value.deletedMapIds.some(id => typeof id !== 'string' || !id.trim().length || id.length > 256))) return 'invalid-map-deletion-history'
     for (const map of value.maps ?? []) {
       if (!plainObject(map) || !Array.isArray(map.tokens)) continue
       const viewportNotesReason = validateMapViewportNotes(map.viewportNotes)
       if (viewportNotesReason) return viewportNotesReason
       for (const token of map.tokens) {
         if (!plainObject(token)) continue
+        if (token.dnd5eTraversalMode !== undefined && ![
+          'walk', 'climb', 'swim', 'fly', 'long-jump-running', 'long-jump-standing', 'fall',
+        ].includes(token.dnd5eTraversalMode)) return 'invalid-dnd5e-token-traversal-mode'
         for (const imageField of ['portraitImageId', 'tokenPortraitImageId']) {
           if (token[imageField] != null && (
             typeof token[imageField] !== 'string' ||
@@ -5419,8 +6028,32 @@ function validateDnd5eResourceStates(name, value) {
             (typeof area?.coreSpellId === 'string' && area.coreSpellId.length > 0)
           if (
             !validDnd5eRoundLifecycle(area, usesExclusiveRoundBoundary, usesExclusiveRoundBoundary ? 5_256_000 : 14_400) ||
+            (area.concealsFlameLightFromOutside != null && area.concealsFlameLightFromOutside !== true) ||
+            (area.endFlameExtinguishRadiusFeet != null && (!Number.isInteger(area.endFlameExtinguishRadiusFeet) ||
+              area.endFlameExtinguishRadiusFeet < 1 || area.endFlameExtinguishRadiusFeet > 1000)) ||
+            (area.restSessionId != null && !validRestAreaSessionId(area.restSessionId)) ||
+            (area.remainingExplorationSeconds != null && (!Number.isSafeInteger(area.remainingExplorationSeconds)||area.remainingExplorationSeconds<1||area.remainingExplorationSeconds>86400)) ||
+            (area.terrainClearing != null && (!validTerrainClearing(area.terrainClearing) ||
+              area.permanent !== true || area.vertical?.mode !== 'ground' || area.concentrationId != null ||
+              (area.anchorMode != null && area.anchorMode !== 'fixed'))) ||
+            (area.terrainClearingProgress != null && (!validTerrainClearing(area.terrainClearing) ||
+              !validTerrainClearingProgress(area.terrainClearingProgress, area.cells))) ||
             typeof area.label !== 'string' || !area.label || area.label.length > 120 ||
             !validDnd5ePersistentAreaLighting(area.lighting) ||
+            [area.rectGeometry?.pitchDegrees, area.rectGeometry?.rollDegrees].some(angle =>
+              angle != null && (typeof angle !== 'number' || !Number.isFinite(angle) || angle < -180 || angle > 180 ||
+                area.rectGeometry.gridAligned !== false || area.vertical?.mode !== 'volume' || area.vertical.shape === 'sphere')) ||
+            (area.lighting?.emission === 'rectangle-volume' && (
+              area.vertical?.mode !== 'volume' || area.vertical.shape === 'sphere' ||
+              !Number.isInteger(area.anchorCell?.col) || !Number.isInteger(area.anchorCell?.row) ||
+              area.rectGeometry?.gridAligned !== false ||
+              !Number.isFinite(area.rectGeometry.lengthFeet) || area.rectGeometry.lengthFeet <= 0 || area.rectGeometry.lengthFeet > 10000 ||
+              !Number.isFinite(area.rectGeometry.widthFeet) || area.rectGeometry.widthFeet <= 0 || area.rectGeometry.widthFeet > 10000 ||
+              !Number.isFinite(area.rectGeometry.direction?.dc) || !Number.isFinite(area.rectGeometry.direction?.dr) ||
+              Math.abs(Math.hypot(area.rectGeometry.direction.dc, area.rectGeometry.direction.dr) - 1) > 1e-6
+            )) ||
+            (area.visualRecognition != null && !validAreaVisualRecognition(area.visualRecognition)) ||
+            (area.illusionRecognition != null && !validAreaVisualRecognition(area.illusionRecognition)) ||
             !validDnd5ePersistentAreaVertical(area.vertical)
           ) return 'invalid-dnd5e-plugin-area'
         }
@@ -5469,6 +6102,8 @@ function validGeometryPoint(point) {
 }
 
 function validGeometryEntity(entity, kind) {
+  if (entity?.controlledWater != null && (kind !== 'obstacle' || normalizeControlledWaterState(entity.controlledWater)?.id !== entity.id)) return false
+  if (entity?.skyExposure != null && (kind !== 'obstacle' || entity.terrainRegion !== true || !['open','covered'].includes(entity.skyExposure))) return false
   if (
     !plainObject(entity) || entity.kind !== kind || typeof entity.id !== 'string' || !entity.id ||
     typeof entity.label !== 'string' || !Array.isArray(entity.points) ||
@@ -5489,7 +6124,7 @@ function validGeometryEntity(entity, kind) {
   )
   if (!validLegacyWallAttachment || !validStableWallAttachment) return false
   if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048 &&
-    (entity.material == null || ['stone', 'brick', 'wood', 'metal', 'natural'].includes(entity.material)) &&
+    (entity.material == null || ['stone', 'brick', 'wood', 'metal', 'natural', 'earth'].includes(entity.material)) &&
     (entity.edgeIds == null || (
       Array.isArray(entity.edgeIds) && entity.edgeIds.length === entity.points.length - 1 &&
       entity.edgeIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200) &&
@@ -5533,6 +6168,7 @@ function validGeometryEntity(entity, kind) {
 }
 
 function validGeometryLight(entity) {
+  if (entity?.controlledFlame != null && normalizeControlledFlameState(entity.controlledFlame)?.id !== entity.id) return false
   return plainObject(entity) && entity.kind === 'light' && typeof entity.id === 'string' && entity.id.length > 0 &&
     typeof entity.label === 'string' && Array.isArray(entity.points) && entity.points.length === 1 &&
     entity.points.every(validGeometryPoint) && typeof entity.enabled === 'boolean' &&
@@ -5836,6 +6472,15 @@ function spellLightingRadius(source) {
 }
 
 function spellLightingAffectsPoint(source, point, map, elevationFeet = 0) {
+  if (source.kind === 'light' && source.areaOnly) {
+    const area = map.dnd5ePluginAreas?.find(area => area.id === source.areaId)
+    if (!area) return false
+    const size = Math.max(1, Number(map.gridSize) || 1)
+    const col = Math.floor((point.x - (map.gridOffsetX ?? 0)) / size)
+    const row = Math.floor((point.y - (map.gridOffsetY ?? 0)) / size)
+    return area.cells.some(cell => cell.col === col && cell.row === row) &&
+      (area.vertical?.mode !== 'volume' || elevationFeet >= area.vertical.baseElevationFeet && elevationFeet < area.vertical.baseElevationFeet + area.vertical.heightFeet)
+  }
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
   const horizontalDistanceFeet = Math.hypot(
@@ -5864,13 +6509,21 @@ function mapSpellLightingSources(map, geometry) {
       const anchorToken = typeof area.anchorTokenId === 'string'
         ? (map.tokens ?? []).find((token) => token?.id === area.anchorTokenId)
         : null
-      const elevationFeet = anchorToken
+      const elevationFeet = !anchorToken && area.vertical?.mode === 'volume' && area.vertical.shape === 'sphere'
+        ? area.vertical.baseElevationFeet + area.vertical.heightFeet / 2
+        : lighting.kind === 'light' && !anchorToken && area.vertical?.mode === 'volume'
+        ? area.vertical.baseElevationFeet
+        : anchorToken
         ? tokenElevationFeet(geometry, anchorToken)
         : terrainElevationAtPoint(geometry, point)
       const spellLevel = Math.max(0, Math.floor(Number(lighting.spellLevel) || 0))
       if (lighting.kind === 'light') {
         return [{
           id: `spell-light:${area.id}`,
+          areaId: area.id,
+          areaOnly: lighting.areaOnly === true,
+          emissionArea: lighting.emission === 'rectangle-volume' ? area : undefined,
+          sunlight: lighting.sunlight === true,
           kind: 'light',
           point,
           elevationFeet,
@@ -5887,6 +6540,7 @@ function mapSpellLightingSources(map, geometry) {
       return [{
         id: `spell-darkness:${area.id}`,
         kind: 'magical-darkness',
+        lightSuppressionScope: lighting.lightSuppressionScope,
         point,
         elevationFeet,
         spellLevel,
@@ -5900,7 +6554,14 @@ function mapSpellLightingSources(map, geometry) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   return candidates.filter((candidate) => !candidates.some((other) => {
     if (other.id === candidate.id || other.kind === candidate.kind) return false
-    const distanceFeet = Math.hypot(
+    const extended = candidate.emissionArea ? candidate : other.emissionArea ? other : undefined
+    const opposite = extended === candidate ? other : candidate
+    const nearest = extended && rectangularLightOrigin(map, extended.emissionArea, { ...opposite.point, elevationFeet: opposite.elevationFeet })
+    const distanceFeet = nearest ? Math.hypot(
+      (nearest.x-opposite.point.x)/gridSize*feetPerCell,
+      (nearest.y-opposite.point.y)/gridSize*feetPerCell,
+      nearest.elevationFeet-opposite.elevationFeet,
+    ) : Math.hypot(
       candidate.point.x - other.point.x,
       candidate.point.y - other.point.y,
     ) / gridSize * feetPerCell
@@ -5909,6 +6570,7 @@ function mapSpellLightingSources(map, geometry) {
       ? other.kind === 'light' &&
           (other.suppressesMagicalDarknessThroughLevel ?? -1) >= candidate.spellLevel
       : other.kind === 'magical-darkness' &&
+          other.lightSuppressionScope !== 'within-area' &&
           (other.suppressesMagicalLightThroughLevel ?? -1) >= candidate.spellLevel
   }))
 }
@@ -5936,19 +6598,78 @@ function magicalDarknessObstacleSuppressed(obstacle, map, spellLighting) {
   })
 }
 
-function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked) {
-  const spellLighting = mapSpellLightingSources(map, geometry)
+function mapFlameLightConcealed(map, geometry, light, source, observer) {
+  return flameLightConcealed({ areas: map.dnd5ePluginAreas, light, source, observer, contains: (area, point) => {
+    const grid = Math.max(1, map.gridSize)
+    const col = Math.floor((point.x - (map.gridOffsetX ?? 0)) / grid), row = Math.floor((point.y - (map.gridOffsetY ?? 0)) / grid)
+    const elevation = point.elevationFeet ?? terrainElevationAtPoint(geometry, point)
+    if (!area.cells?.some(cell => cell.col === col && cell.row === row) || !persistentAreaVisionOverlapsHeight(map, geometry, area, elevation, 0.1)) return false
+    if (!area.occupantModifiers?.requiresLineOfEffectFromAnchor) return true
+    if (!area.anchorCell) return false
+    const anchor = { x: (map.gridOffsetX ?? 0) + (area.anchorCell.col + 0.5) * grid, y: (map.gridOffsetY ?? 0) + (area.anchorCell.row + 0.5) * grid }
+    const fromElevationFeet = area.vertical?.mode === 'volume' ? area.vertical.baseElevationFeet : terrainElevationAtPoint(geometry, anchor)
+    if (geometry && raycastGeometry({ compiled: compileGeometryCached(geometry), from: anchor, to: point, purpose: 'line-of-effect',
+      fromElevationFeet, toElevationFeet: elevation, fromEyeHeightFeet: 2.5, toEyeHeightFeet: 2.5, ignoreStart: true })) return false
+    return !persistentAreaBlocksRay({ map, from: anchor, to: point, purpose: 'line-of-effect', fromElevationFeet,
+      toElevationFeet: elevation, fromEyeHeightFeet: 2.5, toEyeHeightFeet: 2.5,
+      overlapsHeight: (blocker, base, height) => persistentAreaVisionOverlapsHeight(map, geometry, blocker, base, height),
+    })
+  } })
+}
+
+function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked, viewer) {
+  const illumination = mapBaseIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked, viewer)
+  if (illumination !== 'bright' && illumination !== 'dim') return illumination
+  const grid = Math.max(1, Number(map.gridSize) || 1)
+  const feet = Math.max(1, Number(map.feetPerCell) || 5)
+  const reduced = (map.dnd5ePluginAreas ?? []).some(area => {
+    if (area.lighting?.kind !== 'reduce-light') return false
+    const anchorId = area.anchorTokenId ?? (area.anchorMode === 'source-token' ? area.sourceTokenId : null)
+    const token = anchorId ? (map.tokens ?? []).find(entry => entry.id === anchorId) : null
+    if (anchorId && !token) return false
+    const cell = area.anchorCell ?? area.cells?.[0]
+    if (!token && !cell) return false
+    const source = token ?? { x: (Number(map.gridOffsetX) || 0) + (cell.col + 0.5) * grid,
+      y: (Number(map.gridOffsetY) || 0) + (cell.row + 0.5) * grid }
+    const sourceElevation = token ? tokenElevationFeet(geometry, token) : terrainElevationAtPoint(geometry, source)
+    return Math.hypot(Math.hypot(source.x - point.x, source.y - point.y) / grid * feet,
+      sourceElevation - elevationFeet) <= area.lighting.radiusFeet &&
+      !lineBlocked(source, point, sourceElevation, elevationFeet)
+  })
+  return reduced ? (illumination === 'bright' ? 'dim' : 'darkness') : illumination
+}
+
+function mapBaseIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked, viewer) {
+  const spellLighting = mapSpellLightingSources(map, geometry).map(source => {
+    if (source.kind !== 'light' || !source.emissionArea) return source
+    const origins = rectangularLightCandidateOrigins(map, source.emissionArea, { ...point, elevationFeet },
+      compileGeometryCached(geometry).segments.filter(segment => segment.blocksVision).flatMap(segment => [segment.a, segment.b]),
+      compileGeometryCached(geometry).segments.filter(segment => segment.blocksVision))
+    const visible=candidate=>!lineBlocked(candidate,point,candidate.elevationFeet,elevationFeet,source.areaId)
+    const found=origins.find(visible)
+    const origin=found?refineRectangularLightOrigin(map,source.emissionArea,{...point,elevationFeet},found,visible):origins[0]
+    return origin ? { ...source, point: { x: origin.x, y: origin.y }, elevationFeet: origin.elevationFeet } : source
+  })
+  const localDarkness = spellLighting.filter(source => source.kind === 'magical-darkness' &&
+    spellLightingAffectsPoint(source, point, map, elevationFeet))
+  const penetratingLights = localDarkness.length === 0 ? [] : spellLighting.filter(light => light.kind === 'light' &&
+    localDarkness.every(dark => dark.lightSuppressionScope === 'within-area' &&
+      light.spellLevel > (dark.suppressesMagicalLightThroughLevel ?? 9)) &&
+    spellLightingAffectsPoint(light, point, map, elevationFeet) &&
+    !lineBlocked(light.point, point, light.elevationFeet + 2.5, elevationFeet + 2.5, light.emissionArea ? light.areaId : undefined))
   const magicalDarkness = fogPointState(geometry?.darknessFog, point.x, point.y) === 'covered' || (geometry?.obstacles ?? []).some((obstacle) =>
     obstacle?.magicalDarkness === true &&
     Array.isArray(obstacle.points) &&
     geometryPointInPolygon(point, obstacle.points) &&
     geometryObstacleAffectsElevation(obstacle, elevationFeet) &&
     !magicalDarknessObstacleSuppressed(obstacle, map, spellLighting),
-  ) || spellLighting.some((source) =>
-    source.kind === 'magical-darkness' &&
-      spellLightingAffectsPoint(source, point, map, elevationFeet),
-  )
+  ) || (localDarkness.length > 0 && penetratingLights.length === 0)
   if (magicalDarkness) return 'magical-darkness'
+  if (localDarkness.length > 0) return penetratingLights.some(light => light.areaOnly || Math.hypot(
+    Math.hypot(light.point.x - point.x, light.point.y - point.y) /
+      Math.max(1, Number(map.gridSize) || 1) * Math.max(1, Number(map.feetPerCell) || 5),
+    light.elevationFeet - elevationFeet,
+  ) <= light.brightRadiusFeet) ? 'bright' : 'dim'
 
   const ambient = geometry?.vision?.ambientLight ?? 'bright'
   if (ambient === 'bright') return 'bright'
@@ -5961,6 +6682,8 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
     const distanceFeet = Math.hypot(point.x - source.x, point.y - source.y) / gridSize * feetPerCell
     const brightRadius = Math.max(0, Number(light.brightRadiusFeet) || 0)
     const dimRadius = brightRadius + Math.max(0, Number(light.dimRadiusFeet) || 0)
+    if ([{ ...point, elevationFeet }, ...(viewer ? [{ ...viewer, elevationFeet: tokenElevationFeet(geometry, viewer) }] : [])].some(observer =>
+      mapFlameLightConcealed(map, geometry, light, { ...source, elevationFeet: tokenElevationFeet(geometry, source) }, observer))) continue
     const sourceEye = tokenElevationFeet(geometry, source) + tokenHeightFeet(source) / 2
     if (distanceFeet > dimRadius || lineBlocked(source, point, sourceEye, elevationFeet + 2.5)) continue
     if (distanceFeet <= brightRadius) return 'bright'
@@ -5977,6 +6700,8 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
       terrainElevationAtPoint(geometry, sourcePoint),
       Number.isFinite(source.elevationFeet) ? Number(source.elevationFeet) : 0,
     )
+    if ([{ ...point, elevationFeet }, ...(viewer ? [{ ...viewer, elevationFeet: tokenElevationFeet(geometry, viewer) }] : [])].some(observer =>
+      mapFlameLightConcealed(map, geometry, source, { ...sourcePoint, elevationFeet: sourceBase }, observer))) continue
     if (distanceFeet > dimRadius || lineBlocked(sourcePoint, point, sourceBase + 2.5, elevationFeet + 2.5)) continue
     if (distanceFeet <= brightRadius) return 'bright'
     result = 'dim'
@@ -5985,11 +6710,11 @@ function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked
     if (
       source.kind !== 'light' ||
       !spellLightingAffectsPoint(source, point, map, elevationFeet) ||
-      lineBlocked(source.point, point, source.elevationFeet + 2.5, elevationFeet + 2.5)
+      lineBlocked(source.point, point, source.elevationFeet + (source.emissionArea ? 0 : 2.5), elevationFeet + (source.emissionArea ? 0 : 2.5), source.emissionArea ? source.areaId : undefined)
     ) continue
-    const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
-      gridSize * feetPerCell
-    if (distanceFeet <= source.brightRadiusFeet) return 'bright'
+    const distanceFeet = Math.hypot(Math.hypot(point.x - source.point.x, point.y - source.point.y) /
+      gridSize * feetPerCell, elevationFeet - source.elevationFeet)
+    if (source.areaOnly || distanceFeet <= source.brightRadiusFeet) return 'bright'
     result = 'dim'
   }
   return result
@@ -6005,13 +6730,95 @@ function tokenActiveEffects(token, characterById = null) {
   ]
 }
 
-function tokenPlanarPlane(token, characterById = null) {
-  return tokenActiveEffects(token, characterById).find((effect) =>
-    effect?.modifiers?.planarPhase?.plane === 'ethereal' ||
-    effect?.modifiers?.planarPhase?.plane === 'terrain')?.modifiers.planarPhase.plane ?? 'material'
+function tokenLocationKnownToCharacter(target, targetMap, maps, characterId, characterById) {
+  if (!characterId) return false
+  const observers = maps.flatMap(map => (map.tokens ?? []).filter(token => token.characterId === characterId).map(token => ({ token, map })))
+  if (observers.length !== 1) return false
+  const { token: observer, map: observerMap } = observers[0]
+  const active = token => {
+    // Character state wins over the map's duplicated snapshot, including an empty effect list.
+    const character = token.characterId ? characterById?.get(token.characterId) : null
+    if (token.characterId && !character) return []
+    const effects = character?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects ?? []
+    return effects.filter(effect =>
+      !(Array.isArray(effect?.suspendedBy) && effect.suspendedBy.length) && effect?.grantedActivityCharges?.current !== 0)
+  }
+  const sourceEffects = active(observer), targetEffects = active(target)
+  if ([...sourceEffects, ...targetEffects].some(effect => effect?.legacyCondition === 'banished' || effect?.standardCondition === 'banished')) return false
+  if (observerMap.id !== targetMap.id && (typeof observerMap.dnd5ePlane !== 'string' || !observerMap.dnd5ePlane.trim() ||
+    observerMap.dnd5ePlane.normalize('NFC').trim() !== targetMap.dnd5ePlane?.normalize('NFC').trim())) return false
+  const ethereal = effects => effects.some(effect => effect?.modifiers?.planarPhase?.plane === 'ethereal')
+  if (ethereal(sourceEffects) !== ethereal(targetEffects)) return false
+  return targetEffects.some(effect => effect?.modifiers?.locationKnownToSource === true &&
+    (effect.source?.characterId != null ? effect.source.characterId === characterId :
+      effect.source?.actorId === observer.id || effect.source?.actorId === characterId))
 }
 
-function persistentAreaVisionOverlapsHeight(map, geometry, area, eyeElevationFeet) {
+function redactSourceLocatedToken(token) {
+  return { id: token.id, type: 'enemy', x: token.x, y: token.y, size: 1,
+    elevationFeet: token.elevationFeet, label: '已定位生物', emoji: '◇', color: '#a78bfa',
+    showHpOnToken: false, showDetailOnToken: false, perceptionVisibility: 'detected-unseen', sourceLocationKnown: true }
+}
+function tokenInitialSpaceBoundaries(token, characterById = null) {
+  const active = tokenActiveEffects(token, characterById).filter(effect =>
+    !(Array.isArray(effect?.suspendedBy) && effect.suspendedBy.length) &&
+    effect?.grantedActivityCharges?.current !== 0)
+  const suppressions = active.flatMap(effect =>
+    (effect?.modifiers?.conditionImmunitiesBySourceMagic ?? []).filter(rule => rule?.suppressExisting === true))
+  return active.filter(effect => plainObject(effect?.initialSpaceBoundary) && !suppressions.some(rule => {
+    const condition = effect.standardCondition ?? effect.legacyCondition
+    return typeof condition === 'string' && (effect.source?.magical === true) === rule.sourceMagical &&
+      Array.isArray(rule.conditions) && rule.conditions.some(value =>
+        typeof value === 'string' && value.trim().toLowerCase() === condition.trim().toLowerCase())
+  }))
+    .map(effect => effect.initialSpaceBoundary)
+}
+
+function initialSpaceAllowsTarget(map, geometry, viewer, target, characterById = null) {
+  return tokenInitialSpaceBoundaries(viewer, characterById).every(boundary =>
+    boundary.mapId === map.id &&
+    [boundary.x,boundary.y,boundary.halfWidthUnits,boundary.bottomFeet,boundary.topFeet].every(Number.isFinite) &&
+    boundary.halfWidthUnits > 0 && boundary.topFeet > boundary.bottomFeet &&
+    Math.abs(target.x-boundary.x) <= boundary.halfWidthUnits + 1e-6 &&
+    Math.abs(target.y-boundary.y) <= boundary.halfWidthUnits + 1e-6 &&
+    tokenElevationFeet(geometry,target) >= boundary.bottomFeet - 1e-6 &&
+    tokenElevationFeet(geometry,target) <= boundary.topFeet + 1e-6)
+}
+
+function tokenPlanarPhase(token, characterById = null) {
+  const character = token.characterId ? characterById?.get(token.characterId) : null
+  const effects = character
+    ? character.dnd5eCombatState?.activeEffects ?? []
+    : token.dnd5eCombatState?.activeEffects ?? []
+  return effects.find(effect =>
+    !(Array.isArray(effect?.suspendedBy) && effect.suspendedBy.length) &&
+    effect?.grantedActivityCharges?.current !== 0 &&
+    ['ethereal', 'terrain'].includes(effect?.modifiers?.planarPhase?.plane))?.modifiers.planarPhase
+}
+
+function tokenPlanarPlane(token, characterById = null) {
+  return tokenPlanarPhase(token, characterById)?.plane ?? 'material'
+}
+
+/** Grid footprint and vertical interval distance, matching the Headless map range convention. */
+function planarSightDistanceFeet(map, geometry, viewer, target) {
+  const grid = Math.max(1, Number(map.gridSize) || 1)
+  const footprint = token => ({ '微型': 1, '小型': 1, '中型': 1, '大型': 2, '超大型': 3, '巨型': 4 }[token.creatureSize] ??
+    Math.max(1, Math.round(Number(token.size) || 1)))
+  const a = footprint(viewer), b = footprint(target)
+  const axis = (coordinate, offset) => {
+    const left = Math.round((viewer[coordinate] - (map[offset] ?? 0)) / grid - a / 2)
+    const right = Math.round((target[coordinate] - (map[offset] ?? 0)) / grid - b / 2)
+    return Math.max(0, right - (left + a - 1), left - (right + b - 1))
+  }
+  const av = tokenElevationFeet(geometry, viewer), bv = tokenElevationFeet(geometry, target)
+  return Math.max(
+    Math.max(axis('x', 'gridOffsetX'), axis('y', 'gridOffsetY')) * Math.max(1, Number(map.feetPerCell) || 5),
+    bv - (av + a * 5), av - (bv + b * 5),
+  )
+}
+
+function persistentAreaVisionOverlapsHeight(map, geometry, area, eyeElevationFeet, entityHeightFeet = 0) {
   if (!plainObject(area?.vertical) || area.vertical.mode === 'ground') return true
   const anchorToken = (
     area.anchorMode === 'source-token' ||
@@ -6025,7 +6832,7 @@ function persistentAreaVisionOverlapsHeight(map, geometry, area, eyeElevationFee
     ? tokenElevationFeet(geometry, anchorToken) + Number(area.vertical.anchorOffsetFeet)
     : Number(area.vertical.baseElevationFeet) || 0
   const heightFeet = Math.max(0, Number(area.vertical.heightFeet) || 0)
-  return eyeElevationFeet >= baseHeightFeet - 1e-7 &&
+  return (entityHeightFeet > 0 ? eyeElevationFeet + entityHeightFeet > baseHeightFeet + 1e-7 : eyeElevationFeet >= baseHeightFeet - 1e-7) &&
     eyeElevationFeet < baseHeightFeet + heightFeet - 1e-7
 }
 
@@ -6053,8 +6860,18 @@ function persistentAreaBlocksVisionRay(
   const steps = Math.max(2, Math.ceil(distance / Math.max(1, gridSize / 4)))
   for (const area of areas) {
     const blocksByObscuration = area?.obscuration?.kind === 'heavy' &&
-      !(area.obscuration.sourceCanSeeThrough === true && area.sourceTokenId === viewerId)
+      area.obscuration.scope !== 'source-token' &&
+      !(area.obscuration.sourceCanSeeThrough === true && area.sourceTokenId === viewerId) &&
+      !(Array.isArray(area.obscurationExcludedTokenIds) && area.obscurationExcludedTokenIds.includes(viewerId))
     if (area?.blocking?.vision !== true && !blocksByObscuration) continue
+    if (area.rectGeometry?.pitchDegrees || area.rectGeometry?.rollDegrees ||
+      area.rectGeometry && !area.rectGeometry.gridAligned && area.vertical?.mode==='volume' && !area.vertical.shape) {
+      if (persistentAreaBlocksRay({map:{...map,dnd5ePluginAreas:[{...area,blocking:{...area.blocking,vision:true}}]},
+        from,to,fromElevationFeet:fromEyeElevationFeet,toElevationFeet:toEyeElevationFeet,
+        fromEyeHeightFeet:0,toEyeHeightFeet:0,purpose:'vision',
+        overlapsHeight:(candidate,elevation)=>persistentAreaVisionOverlapsHeight(map,geometry,candidate,elevation)})) return true
+      continue
+    }
     if (area.stoneWall || area.forceWall) {
       if (stoneWallIntersects(area, map, from, to, fromEyeElevationFeet, toEyeElevationFeet)) return true
       continue
@@ -6068,6 +6885,7 @@ function persistentAreaBlocksVisionRay(
     const pointInside = (point, eyeElevationFeet) => {
       const key = `${Math.floor((point.x - offsetX) / gridSize)}:${Math.floor((point.y - offsetY) / gridSize)}`
       return cells.has(key) &&
+        groveVolumeOverlaps(area.groveVolume, point, eyeElevationFeet) &&
         persistentAreaVisionOverlapsHeight(map, geometry, area, eyeElevationFeet)
     }
     const fromInside = pointInside(from, fromEyeElevationFeet)
@@ -6091,7 +6909,9 @@ function persistentAreaBlocksVisionRay(
   return false
 }
 
-function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true, characterById = null) {
+function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true, characterById = null, perception = null) {
+  if (viewer.dnd5eSourceSightDisabled === true && !playerSpecialSenseRange(viewer, target, 'blindsight', map)) return false
+  if (!initialSpaceAllowsTarget(map, geometry, viewer, target, characterById)) return false
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
   const profile = compileDnd5eEffectiveVisionProfile({
@@ -6133,16 +6953,20 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
   if (distancePx > rangePx) return false
   const viewerPlane = tokenPlanarPlane(viewer, characterById)
   const targetPlane = tokenPlanarPlane(target, characterById)
+  const materialSightRangeFeet = tokenPlanarPhase(viewer, characterById)?.materialSightRangeFeet
+  const seesMaterial = viewerPlane === 'ethereal' && targetPlane === 'material' &&
+    Number.isFinite(materialSightRangeFeet) && materialSightRangeFeet > 0 && materialSightRangeFeet <= 10_000 &&
+    planarSightDistanceFeet(map, geometry, viewer, target) <= materialSightRangeFeet
   if (viewerPlane !== targetPlane && !(
-    viewerPlane === 'material' && targetPlane === 'ethereal' &&
-    playerSpecialSenseRange(viewer, target, 'truesight', map)
+    seesMaterial || (viewerPlane === 'material' && targetPlane === 'ethereal' &&
+    playerSpecialSenseRange(viewer, target, 'truesight', map))
   )) return false
   const fromElevation = tokenElevationFeet(geometry, viewer)
   const toElevation = tokenElevationFeet(geometry, target)
   const fromEyeElevation = fromElevation + tokenHeightFeet(viewer) / 2
   const toEyeElevation = toElevation + tokenHeightFeet(target) / 2
   const compiled = compileGeometryCached(geometry)
-  const lineBlocked = (from, to, sourceEyeElevation = 2.5, destinationEyeElevation = 2.5) =>
+  const lineBlocked = (from, to, sourceEyeElevation = 2.5, destinationEyeElevation = 2.5, emittingAreaId) =>
     !!raycastGeometry({
       compiled,
       from,
@@ -6152,7 +6976,7 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
       toElevationFeet: destinationEyeElevation,
       ignoreStart: true,
     }) || persistentAreaBlocksVisionRay(
-      map,
+      emittingAreaId ? { ...map, dnd5ePluginAreas: map.dnd5ePluginAreas?.filter(area => area.id !== emittingAreaId) } : map,
       geometry,
       from,
       to,
@@ -6163,9 +6987,24 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
   const targetSamples = tokenVisibilitySamples(target, gridSize)
   if (targetSamples.every((sample) => lineBlocked(viewer, sample, fromEyeElevation, toEyeElevation))) return false
   const illumination = lightingEnabled
-    ? mapIlluminationAtPoint(map, geometry, target, toElevation, lineBlocked)
+    ? mapIlluminationAtPoint(map, geometry, target, toElevation, lineBlocked, viewer)
     : 'bright'
   const distanceFeet = distancePx / gridSize * feetPerCell
+  if (profile.sightRangeLimitFeet != null && distanceFeet > Math.max(profile.sightRangeLimitFeet, profile.blindsightRangeFeet)) return false
+  if (profile.blindBeyondBlindsight && distanceFeet > Math.max(profile.blindsightRangeFeet, profile.truesightRangeFeet)) return false
+  if (viewer.id !== target.id && distanceFeet > profile.blindsightRangeFeet &&
+    (map.dnd5ePluginAreas ?? []).some(area => area.obscuration?.kind === 'heavy' &&
+      area.obscuration.scope === 'source-token' && area.sourceTokenId === target.id)) return false
+  if (perception) {
+    const character = characterById?.get(target.characterId)
+    perception.concealedFromDarkvision = dnd5eConcealedFromDarkvision({
+      concealment: dnd5eHasDarkvisionConcealment({ token: target, character }), illumination,
+      hasDarkvision: profile.darkvisionRangeFeet > 0 && distanceFeet <= profile.darkvisionRangeFeet,
+      alternativeSight: [profile.blindsightRangeFeet, profile.truesightRangeFeet, profile.darknessSightRangeFeet]
+        .some(range => range > 0 && distanceFeet <= range),
+      seeInvisible: viewerCanSeeInvisible(viewer, characterById), outlined: tokenIsOutlinedByFaerieFire(target),
+    })
+  }
   if (illumination === 'magical-darkness') {
     if (distanceFeet > Math.max(
       profile.magicalDarknessSightRangeFeet,
@@ -6226,6 +7065,7 @@ function tokenIsOutlinedByFaerieFire(token) {
 }
 
 function viewerCanSeeInvisible(viewer, characterById) {
+  if (viewer?.dnd5eSpellEffect?.visionFromSource === true && viewer.dnd5eSourceSeeInvisible === true && viewer.dnd5eSourceSightDisabled !== true) return true
   const character = typeof viewer?.characterId === 'string' ? characterById.get(viewer.characterId) : null
   const characterEffects = Array.isArray(character?.dnd5eCombatState?.activeEffects)
     ? character.dnd5eCombatState.activeEffects
@@ -6234,10 +7074,10 @@ function viewerCanSeeInvisible(viewer, characterById) {
     ? viewer.dnd5eCombatState.activeEffects
     : []
   return [...characterEffects, ...tokenEffects].some((effect) =>
-    effect?.modifiers?.seeInvisible === true ||
+    !(effect?.suspendedBy?.length > 0) && (effect?.modifiers?.seeInvisible === true ||
     effect?.definitionId === 'srd-5.1:spell:see-invisibility' ||
     effect?.source?.rulesId === 'see-invisibility' ||
-    effect?.source?.rulesId === 'srd-5.1:spell:see-invisibility',
+    effect?.source?.rulesId === 'srd-5.1:spell:see-invisibility'),
   )
 }
 
@@ -6350,14 +7190,46 @@ function redactUnseenToken(token) {
   }
 }
 
-function stripDisabledEnemyDetail(token) {
-  if (token?.type !== 'enemy' || token?.showDetailOnToken !== false) return token
-  const { playerVisibleEnemyDetail: _playerVisibleEnemyDetail, ...publicToken } = token
+function stripDisabledEnemyDetail(token, map) {
+  if (!plainObject(token)) return token
+  const { sourceLocationKnown: _untrustedSourceLocation, dnd5eOriginalAlignment: _originalAlignment, dnd5eGroveGuardian: _groveGuardian,
+    dnd5eGroveControl: _untrustedControl, ...withoutHistory } = token
+  const boundary = _groveGuardian && map?.dnd5ePluginAreas?.find(area =>
+    area.id === _groveGuardian.boundaryAreaId && area.sourceTokenId === _groveGuardian.sourceTokenId &&
+    area.effectGroup?.castId === _groveGuardian.castId && area.effectGroup.effectId === 'guardians')
+  if (boundary) withoutHistory.dnd5eGroveControl = { schemaVersion: 1, castId: _groveGuardian.castId,
+    boundaryAreaId: boundary.id, sourceTokenId: boundary.sourceTokenId }
+  if (token?.type !== 'enemy' || token?.showDetailOnToken !== false) return withoutHistory
+  const { playerVisibleEnemyDetail: _playerVisibleEnemyDetail, dnd5eAlignment: _alignment, ...publicToken } = withoutHistory
   return publicToken
+}
+
+export function recordServerMovementSightings(input) {
+  const geometry = input.geometry
+  return recordAcceptedMovementSightings({ ...input, canSee: (map, rawViewer, target, characterById) => {
+    const character = characterById.get(rawViewer.characterId)
+    const viewer = applyDnd5eEffectiveVisionProfile(rawViewer, compileDnd5eEffectiveVisionProfile({
+      token: rawViewer, character, fallbackRangeFeet: geometry?.vision?.defaultRangeFeet,
+    }))
+    if (target.visibilityMode === 'dm-only' || (character?.currentHp ?? viewer.hp ?? 1) <= 0) return false
+    const effects = tokenActiveEffects(viewer, characterById).filter(effect => !effect?.suspendedBy?.length)
+    const blinded = [viewer.conditions, viewer.dnd5eCombatState?.conditions, character?.conditions, character?.dnd5eCombatState?.conditions]
+      .some(conditions => conditions?.some(condition => condition === 'blinded')) ||
+      effects.some(effect => effect.standardCondition === 'blinded' || effect.legacyCondition === 'blinded')
+    const blindsight = playerSpecialSenseRange(viewer, target, 'blindsight', map)
+    if (blinded && !blindsight) return false
+    const perception = {}
+    if (!playerCanSeeToken(map, geometry, viewer, target, null, true, characterById, perception) || perception.concealedFromDarkvision) return false
+    const hidden = tokenHiddenCheckTotal(target)
+    if (hidden != null && passivePerceptionForViewer(viewer, characterById) < hidden) return false
+    return !tokenIsInvisible(target, characterById) || tokenIsOutlinedByFaerieFire(target) || blindsight ||
+      playerSpecialSenseRange(viewer, target, 'truesight', map) || viewerCanSeeInvisible(viewer, characterById)
+  } })
 }
 
 export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null, fogState = null, worldMinute = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
+  const roomTokens = value.maps.flatMap(map => Array.isArray(map?.tokens) ? map.tokens : [])
   const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
   const fogByMapId = new Map((fogState?.maps ?? []).map((fog) => [fog.mapId, fog]))
   const characterById = new Map((characterState?.characters ?? [])
@@ -6381,20 +7253,51 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
   // A portal changes only its traveler's scene, never the room-wide DM scene.
   const arrivalMap = resolvedActiveCharacterId && value.maps.find(map =>
     map.tokens?.some(token => token.characterId === resolvedActiveCharacterId && token.teleportationArrivalMapId === map.id))
+  // A concentration-bound remote viewpoint changes only its owner's projected
+  // scene. Require the live area and source concentration, not a stale token.
+  const observer = characterById.get(resolvedActiveCharacterId)
+  const observerConcentration = observer?.dnd5eCombatState?.concentrationSpellId
+  const observationMaps = resolvedActiveCharacterId && observerConcentration
+    ? value.maps.filter(map => map.tokens?.some(token => {
+      const effect = token.dnd5eSpellEffect
+      return effect?.visionFromSource === true && effect.shareVisionWithSource === true &&
+        effect.hiddenBody === true && effect.sourceCharacterId === resolvedActiveCharacterId &&
+        effect.concentrationId === observerConcentration &&
+        map.dnd5ePluginAreas?.some(area => area.anchorTokenId === token.id &&
+          area.sourceCharacterId === resolvedActiveCharacterId && area.concentrationId === observerConcentration &&
+          (area.expiresAtWorldMinute == null || typeof worldMinute === 'number' && worldMinute < area.expiresAtWorldMinute))
+    })) : []
+  const observationMap = observationMaps.length === 1 ? observationMaps[0] : null
   return {
     ...value,
-    ...(arrivalMap ? { selectedId: arrivalMap.id } : {}),
+    ...(observationMap ? { selectedId: observationMap.id } : arrivalMap ? { selectedId: arrivalMap.id } : {}),
     maps: value.maps.map((map) => {
-      if (!plainObject(map) || !Array.isArray(map.tokens)) return map
+      if (!plainObject(map)) return map
+      // Pending flight receipts hold the original private object snapshot and
+      // Host settlement data. Player views receive only ordinary scene tokens.
+      const { dnd5eObjectFlightDepartures: _hostFlights, ...publicMap } = map
+      map = publicMap
+      if (!Array.isArray(map.tokens)) return map
       const effectiveMap = {
         ...map,
         tokens: map.tokens.map((token) => {
           if (!plainObject(token)) return token
+          if (token.dnd5eCombatState?.damageTraitReports || token.dnd5eCombatState?.knownCreatureLocations || token.dnd5eCombatState?.planarPortalReports || token.dnd5eCombatState?.recentCreatureSightings) {
+            token = { ...token, dnd5eCombatState: { ...token.dnd5eCombatState } }
+            delete token.dnd5eCombatState.knownCreatureLocations
+            delete token.dnd5eCombatState.damageTraitReports
+            delete token.dnd5eCombatState.planarPortalReports
+            delete token.dnd5eCombatState.recentCreatureSightings
+          }
           const bounded = clampTokenToMap(map, token)
           const lightProjected = plainObject(bounded.lightSource) && !campaignLightActive(bounded.lightSource, worldMinute)
             ? { ...bounded, lightSource: { ...bounded.lightSource, enabled: false } }
             : bounded
-          return stripDisabledEnemyDetail(lightProjected)
+          return projectDnd5eSourceVisionSensor(stripDisabledEnemyDetail(lightProjected, map), {
+            sourceToken: resolveDnd5eVisionSensorSource(token, roomTokens),
+            character: characterById.get(token.dnd5eSpellEffect?.sourceCharacterId),
+            fallbackRangeFeet: geometryByMapId.get(map.id)?.vision?.defaultRangeFeet,
+          })
         }),
       }
       const rawGeometry = geometryByMapId.get(map.id)
@@ -6404,7 +7307,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             lights: (Array.isArray(rawGeometry.lights) ? rawGeometry.lights : []).map((light) =>
               plainObject(light) && !campaignLightActive(light, worldMinute)
                 ? { ...light, enabled: false }
-                : light),
+                : projectControlledFlameLight(light, worldMinute)),
           }
         : rawGeometry
       const fog = fogByMapId.get(map.id)
@@ -6441,20 +7344,64 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
               : manualFallbackRangeFeet,
           }),
         ))
-      const partyVisionShared = geometry?.vision?.sharePartyVision !== false
+      const personalSpaceRestricted = players.some(token => token.characterId === resolvedActiveCharacterId &&
+        tokenInitialSpaceBoundaries(token, characterById).length > 0)
+      const partyVisionShared = !personalSpaceRestricted && geometry?.vision?.sharePartyVision !== false
       const viewers = [...(!partyVisionShared
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players), ...sourceVisionEffects]
       const hasSpellObstruction = (effectiveMap.dnd5ePluginAreas ?? []).some(area =>
-        area?.obscuration?.kind === 'heavy' || area?.blocking?.vision || area?.lighting?.kind === 'magical-darkness')
+        area?.obscuration?.kind === 'heavy' || area?.blocking?.vision || area?.lighting?.kind === 'magical-darkness' || area?.lighting?.kind === 'reduce-light')
       const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
+        if (token.dnd5eSpellEffect?.linkedTargetProjection) {
+          if (personalSpaceRestricted && !players.filter(viewer => viewer.characterId === resolvedActiveCharacterId)
+            .some(viewer => initialSpaceAllowsTarget(effectiveMap, geometry, viewer, token, characterById))) return []
+          const visible = viewers.some(viewer => {
+            const character = characterById.get(viewer.characterId)
+            const effects = tokenActiveEffects(viewer, characterById).filter(effect => !effect?.suspendedBy?.length)
+            const blinded = viewer.dnd5eSourceSightDisabled === true ||
+              [viewer.conditions, viewer.dnd5eCombatState?.conditions, character?.conditions].some(conditions =>
+                conditions?.some(condition => ['blinded', '失明'].includes(String(condition).toLowerCase()))) ||
+              effects.some(effect => effect.standardCondition === 'blinded' || effect.legacyCondition === 'blinded')
+            if (blinded) return false
+            const seesInvisible = viewer.dnd5eSourceSeeInvisible === true || effects.some(effect =>
+              effect.modifiers?.seeInvisible === true || effect.definitionId === 'srd-5.1:spell:see-invisibility' ||
+              ['see-invisibility', 'srd-5.1:spell:see-invisibility'].includes(effect.source?.rulesId))
+            return (seesInvisible || playerSpecialSenseRange(viewer, token, 'truesight', effectiveMap)) &&
+              playerCanSeeToken(effectiveMap, geometry, viewer, token, null, true, characterById)
+          })
+          const owned = token.dnd5eSpellEffect.sourceCharacterId === resolvedActiveCharacterId
+          if (!owned && !visible) return []
+          return [{ ...token, dnd5eLinkedProjectionVisible: visible || undefined,
+            viewerControlled: owned && token.dnd5eSpellEffect.shareVisionWithSource === true }]
+        }
+        if (personalSpaceRestricted && token.characterId !== resolvedActiveCharacterId &&
+          !players.filter(viewer => viewer.characterId === resolvedActiveCharacterId)
+            .some(viewer => initialSpaceAllowsTarget(effectiveMap, geometry, viewer, token, characterById))) return []
+        const concealedFromViewer = (viewer) => {
+          if (!dnd5eHasDarkvisionConcealment({token, character: characterById.get(token.characterId)})) return false
+          const perception = {}
+          playerCanSeeToken(effectiveMap, geometry, viewer, token, manualFallbackRangeFeet,
+            dynamicVision || hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered',
+            characterById, perception)
+          return perception.concealedFromDarkvision === true
+        }
+        const sourceLocated = token.visibilityMode !== 'dm-only' && tokenLocationKnownToCharacter(token, map, value.maps, resolvedActiveCharacterId, characterById)
+        if (sourceLocated) {
+          const ownViewer = players.find(viewer => viewer.characterId === resolvedActiveCharacterId)
+          if (!ownViewer || tokenIsInvisible(token, characterById) || tokenHiddenCheckTotal(token) != null ||
+            fogPointState(fog, token.x, token.y) === 'covered' ||
+            fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered' ||
+            !playerCanSeeToken(effectiveMap, geometry, ownViewer, token, null, true, characterById)) return [redactSourceLocatedToken(token)]
+        }
         if (token.type === 'player') {
           const projectedPlayer = projectedPlayerById.get(token.id) ?? token
           const viewerControlled = resolvedActiveCharacterId != null &&
             token.characterId === resolvedActiveCharacterId
           const requiresPlanarPerception = token.characterId !== resolvedActiveCharacterId &&
-            tokenPlanarPlane(token, characterById) === 'ethereal'
+            (tokenPlanarPlane(token, characterById) === 'ethereal' ||
+              viewers.some(viewer => tokenPlanarPlane(viewer, characterById) !== tokenPlanarPlane(token, characterById)))
           const requiresSight = !viewerControlled && (requiresPlanarPerception || hasSpellObstruction || dynamicVision ||
             fogPointState(fog, token.x, token.y) === 'covered' || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered')
           const observingViewers = requiresSight
@@ -6469,11 +7416,11 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
               ))
             : viewers
           if (observingViewers.length === 0) return []
-          const invisibleButUnseen = tokenIsInvisible(token, characterById) &&
+          const invisibleButUnseen = observingViewers.every(concealedFromViewer) || (tokenIsInvisible(token, characterById) &&
             !observingViewers.some((viewer) =>
               playerSpecialSenseRange(viewer, token, 'blindsight', map) ||
               playerSpecialSenseRange(viewer, token, 'truesight', map) ||
-              viewerCanSeeInvisible(viewer, characterById))
+              viewerCanSeeInvisible(viewer, characterById)))
           // Friendly invisibility must never reuse the anonymous enemy marker.
           // The owner keeps their own Token for control. Party-shared vision
           // keeps allied Tokens identifiable; without it, unseen allies are
@@ -6484,7 +7431,63 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             viewerControlled,
           }]
         }
+        // Persistent bonded allies remain addressable by their owner after
+        // travelling to another scene. This grants no vision of that scene.
+        const summon = token.dnd5eSummon
+        const owner = resolvedActiveCharacterId ? characterById.get(resolvedActiveCharacterId) : null
+        // Fortress servants are bound objects, not summons. Their authorized
+        // commander needs the control anchor even when the servant is invisible.
+        // This does not add a viewer or reveal surrounding tokens.
+        const fortressBinding = token.dnd5eObjectState?.structureBinding
+        const commandedFortress = owner && fortressBinding?.mapId === map.id && token.type === 'obstacle' && token.hp > 0 &&
+          geometry?.structureLifetimes?.find(record => record.id === fortressBinding.structureId &&
+            record.replacementGroup === 'mighty-fortress' &&
+            Number.isSafeInteger(worldMinute) && worldMinute >= record.createdWorldMinute &&
+            (record.expiresWorldMinute == null || worldMinute < record.expiresWorldMinute) &&
+            [record.casterId, ...record.fortressServices?.authorizedCreatureIds ?? []].includes(resolvedActiveCharacterId) &&
+            record.fortressServices?.servants?.some(servant => servant.tokenId === token.id))
+        if (commandedFortress && token.visibilityMode !== 'dm-only') return [token]
+        const ownedBondedAlly = resolvedActiveCharacterId != null &&
+          summon?.sourceCharacterId === resolvedActiveCharacterId && summon.side === 'player' &&
+          summon.persistent === true && typeof summon.bondEffectId === 'string' &&
+          owner?.dnd5eCombatState?.activeEffects?.some(effect => effect.id === summon.bondEffectId)
+        if (ownedBondedAlly && token.visibilityMode !== 'dm-only') return [token]
+        // Hiding must not remove an owned, still-controlled summon from its
+        // controller's response. Retaining its anchor grants no extra viewers.
+        const ownedCommandedAlly = owner != null && resolvedActiveCharacterId != null &&
+          summon?.sourceCharacterId === resolvedActiveCharacterId && summon.side === 'player' &&
+          summon.controlEnded !== true &&
+          (summon.commandPolicy === 'persistent-order' || summon.commandPolicy === 'turn-order')
+        if (ownedCommandedAlly && token.visibilityMode !== 'dm-only') return [token]
+        // A living grove guardian has no summon record. Keep its control anchor
+        // for its caster, validating the authoritative boundary rather than the
+        // client-facing control hint. This does not add a vision source.
+        const guardian = map.tokens.find(source => source.id === token.id)?.dnd5eGroveGuardian
+        const ownedGroveGuardian = owner != null && guardian != null &&
+          effectiveMap.tokens.some(source => source.id === guardian.sourceTokenId &&
+            source.characterId === resolvedActiveCharacterId) &&
+          effectiveMap.dnd5ePluginAreas?.some(area =>
+            area.id === guardian.boundaryAreaId && area.sourceTokenId === guardian.sourceTokenId &&
+            area.effectGroup?.castId === guardian.castId && area.effectGroup.effectId === 'guardians')
+        if (ownedGroveGuardian && token.visibilityMode !== 'dm-only') return [token]
         const ownedSpellEffect = token.dnd5eSpellEffect?.sourceCharacterId === resolvedActiveCharacterId
+        // Sight/hearing sensors are invisible locations, not unseen
+        // creatures. Do not disclose an anonymous marker to ordinary viewers.
+        if (isDnd5eInvisibleVisionSensor(token)) {
+          const visible = token.visibilityMode !== 'dm-only' && viewers.some(viewer => {
+            const character = characterById.get(viewer.characterId)
+            const effects = tokenActiveEffects(viewer, characterById).filter(effect => !effect?.suspendedBy?.length)
+            const blinded = viewer.dnd5eSourceSightDisabled === true ||
+              [viewer.dnd5eCombatState?.conditions, character?.conditions, character?.dnd5eCombatState?.conditions].some(conditions =>
+                conditions?.some(condition => ['blinded', '失明'].includes(String(condition).toLowerCase()))) ||
+              effects.some(effect => effect.standardCondition === 'blinded' || effect.legacyCondition === 'blinded')
+            return !blinded && (viewerCanSeeInvisible(viewer, characterById) || playerSpecialSenseRange(viewer, token, 'truesight', effectiveMap)) &&
+              playerCanSeeToken(effectiveMap, geometry, viewer, token, null, true, characterById)
+          })
+          if (!ownedSpellEffect && !visible) return []
+          return [{ ...token, dnd5eSensorVisible: visible || undefined,
+            viewerControlled: ownedSpellEffect && token.dnd5eSpellEffect.shareVisionWithSource === true }]
+        }
         // The caster must retain the authoritative anchor for every entity it
         // owns, including invisible/hidden-body servants and source-only
         // entities.  Rendering still honors hiddenBody; retaining the Token is
@@ -6507,7 +7510,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         const fogState = manualFogActive ? fogPointState(fog, token.x, token.y) : 'neutral'
         const needVision = hasSpellObstruction || fogPointState(geometry?.darknessFog, token.x, token.y) === 'covered' || fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
         const observingViewers = viewers.filter((viewer) =>
-          !needVision ||
+          (!needVision && viewer.blindBeyondBlindsight !== true && compileDnd5eEffectiveVisionProfile({token:viewer,character:characterById?.get(viewer.characterId)}).sightRangeLimitFeet == null) ||
           playerCanSeeToken(
             effectiveMap,
             geometry,
@@ -6534,10 +7537,10 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
           playerSpecialSenseRange(viewer, token, 'truesight', map) ||
           viewerCanSeeInvisible(viewer, characterById),
         )
-        const invisibleButVisible =
+        const invisibleButVisible = observingViewers.every(concealedFromViewer) || (
           tokenIsInvisible(token, characterById) &&
           !tokenIsOutlinedByFaerieFire(token) &&
-          !specialSenseSeesInvisible
+          !specialSenseSeesInvisible)
         return [invisibleButVisible
           ? redactUnseenToken(token)
           : projectTokenTruesightPerception(token, observingViewers, map, characterById)]
@@ -6546,18 +7549,70 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       return {
         ...map,
         tokens,
+        dnd5eGroveAnnualCasting: undefined,
+        dnd5eGrovePasswordPrompts: (Array.isArray(map.dnd5ePluginAreas) ? map.dnd5ePluginAreas : [])
+          .filter(area => area?.grovePasswordDigest && area?.effectGroup?.castId)
+          .filter((area, index, all) => all.findIndex(other => other.effectGroup.castId === area.effectGroup.castId &&
+            other.pluginId === area.pluginId && other.sourceTokenId === area.sourceTokenId) === index)
+          .map(area => ({ areaId: area.id, castId: area.effectGroup.castId, pluginId: area.pluginId, sourceTokenId: area.sourceTokenId })),
+        dnd5eGroveDispelTargets: (Array.isArray(map.dnd5ePluginAreas) ? map.dnd5ePluginAreas : [])
+          .filter(area => area?.groveVolume && area?.effectGroup?.castId)
+          .filter((area, index, all) => all.findIndex(other => other.effectGroup.castId === area.effectGroup.castId &&
+            other.effectGroup.effectId === area.effectGroup.effectId && other.pluginId === area.pluginId && other.sourceTokenId === area.sourceTokenId) === index)
+          .map(area => ({ areaId: area.id, label: area.label, volume: area.groveVolume })),
         dnd5ePluginAreas: Array.isArray(map.dnd5ePluginAreas)
-          ? map.dnd5ePluginAreas.filter((area) =>
+          ? map.dnd5ePluginAreas.flatMap((area) =>
               // A fixed portal survives its caster moving to the destination.
               // Both rings are rendered from this source-map area, so filtering
               // it by caster visibility also erases the player's exit ring.
-              (!area?.sourceTokenId || visibleIds.has(area.sourceTokenId) ||
+              ((!area?.sourceTokenId || visibleIds.has(area.sourceTokenId) ||
+                (area?.anchorMode === 'effect-token' && tokens.some(token => token.id === area.anchorTokenId &&
+                  token.dnd5eLinkedProjectionVisible === true && token.dnd5eSpellEffect?.linkedTargetProjection &&
+                  token.dnd5eSpellEffect.sourceTokenId === area.sourceTokenId)) ||
+                (area?.anchorMode === 'effect-token' && typeof resolvedActiveCharacterId === 'string' &&
+                  area.sourceCharacterId === resolvedActiveCharacterId &&
+                  tokens.some(token => token.id === area.anchorTokenId &&
+                    token.dnd5eSpellEffect?.sourceCharacterId === resolvedActiveCharacterId &&
+                    token.dnd5eSpellEffect?.sourceTokenId === area.sourceTokenId)) ||
+                (area?.anchorMode === 'fixed' && plainObject(area.sourceLimit) &&
+                  typeof resolvedActiveCharacterId === 'string' && area.sourceCharacterId === resolvedActiveCharacterId) ||
+                (area?.anchorMode === 'fixed' && area?.effectGroup?.castId &&
+                  ['solid-fog', 'undergrowth', 'additional-gusts', 'additional-spike-growth', 'additional-wind-walls', 'guardians'].includes(area.effectGroup.effectId)) ||
                 (area?.coreSpellId === 'wall-of-stone' && area?.anchorMode === 'fixed') ||
                 (area?.coreSpellId === 'teleportation-circle' && area?.anchorMode === 'fixed' &&
                   plainObject(area.teleportationExit))) &&
               (area?.anchorMode !== 'effect-token' || visibleIds.has(area?.anchorTokenId)) &&
-              (area?.hiddenFromPlayers !== true || area?.sourceCharacterId === resolvedActiveCharacterId),
-            )
+              (area?.hiddenFromPlayers !== true || area?.sourceCharacterId === resolvedActiveCharacterId ||
+                typeof resolvedActiveCharacterId === 'string' && area?.visualRecognition?.knownTokenIds?.some(id => map.tokens?.some(token =>
+                  token.id === id && token.characterId === resolvedActiveCharacterId)))) ? [area] :
+              area?.lighting?.kind === 'reduce-light' ? (() => {
+                const id = area.anchorTokenId ?? (area.anchorMode === 'source-token' ? area.sourceTokenId : null)
+                const source = id ? map.tokens?.find(token => token.id === id) : null
+                if (id && !source) return []
+                const cell = area.anchorCell ?? area.cells?.[0]
+                if (!source && !cell) return []
+                const point = source ?? { x: (Number(map.gridOffsetX) || 0) + (cell.col + 0.5) * map.gridSize,
+                  y: (Number(map.gridOffsetY) || 0) + (cell.row + 0.5) * map.gridSize }
+                return [{ id: area.id, pluginId: 'system.light-reduction', featureId: 'lighting', label: '', color: '#000000',
+                  sourceCharacterId: '', sourceTokenId: '', createdRound: 0, expiresAfterRound: 1, permanent: true,
+                  lightingOnly: true, lighting: { kind: 'reduce-light', radiusFeet: area.lighting.radiusFeet, spellLevel: area.lighting.spellLevel },
+                  lightingOrigin: { x: point.x, y: point.y, elevationFeet: source ? tokenElevationFeet(geometry, source) : terrainElevationAtPoint(geometry, point) },
+                  cells: [{ col: Math.floor((point.x - (Number(map.gridOffsetX) || 0)) / Math.max(1, map.gridSize)),
+                    row: Math.floor((point.y - (Number(map.gridOffsetY) || 0)) / Math.max(1, map.gridSize)) }],
+                }]
+              })() : area?.concealsFlameLightFromOutside === true ? [{
+                id: area.id, pluginId: 'system.light-concealment', featureId: 'lighting', label: '', color: '#000000',
+                sourceCharacterId: '', sourceTokenId: '', createdRound: 0, expiresAfterRound: 1, permanent: true,
+                lightingOnly: true, concealsFlameLightFromOutside: true,
+                cells: area.cells, anchorCell: area.anchorCell, vertical: area.vertical,
+                occupantModifiers: area.occupantModifiers?.requiresLineOfEffectFromAnchor ? { requiresLineOfEffectFromAnchor: true } : undefined,
+              }] : [],
+            ).map(({ grovePasswordDigest, grovePasswordAvailable: _grovePasswordAvailable, visualRecognition, materialTransformation: _materialTransformation, ...publicArea }) => ({
+              ...publicArea, ...(grovePasswordDigest ? { grovePasswordAvailable: true } : {}),
+              ...(_materialTransformation ? { materialTransformationAvailable: true } : {}),
+              ...(typeof resolvedActiveCharacterId === 'string' && visualRecognition?.knownTokenIds?.some(id => map.tokens?.some(token =>
+                token.id === id && token.characterId === resolvedActiveCharacterId)) ? { hiddenFromPlayers: false } : {}),
+            }))
           : map.dnd5ePluginAreas,
       }
     }),
@@ -6666,7 +7721,7 @@ export function projectMapGeometryForPlayer(value, memberId = null, worldMinute 
         lights: (Array.isArray(map.lights) ? map.lights : []).map((light) =>
           plainObject(light) && !campaignLightActive(light, worldMinute)
             ? { ...light, enabled: false }
-            : light),
+            : projectControlledFlameLight(light, worldMinute)),
       }
     }),
   }
@@ -6760,6 +7815,7 @@ function validCombatCommandRecord(value) {
  * room state.
  */
 export function validateSharedStateShape(name, value) {
+  if (name === SHORT_REST_RECOVERY_RESOURCE && !validShortRestRecoveryJournal(value)) return { ok: false, reason: 'invalid-short-rest-recovery' }
   if (!plainObject(value)) return { ok: false, reason: 'state-must-be-object' }
   const requiredArrays = {
     characters: 'characters',
@@ -6785,6 +7841,12 @@ export function validateSharedStateShape(name, value) {
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
     return { ok: false, reason: `missing-array:${arrayField}` }
+  }
+  if (name === 'characters') {
+    for (const character of value.characters) {
+      const reason = inventoryAlterationIssue(character?.dnd5eInventory)
+      if (reason) return { ok: false, reason }
+    }
   }
   if (
     name === 'combat-log' &&
@@ -6981,6 +8043,7 @@ const DM_UNDOABLE_STATE = new Set([
   'scene-audio-playback',
   'room-journal',
   'dnd5e-shops',
+  SHORT_REST_RECOVERY_RESOURCE,
 ])
 
 function dmUndoJournalFile(ctx) {
@@ -7438,6 +8501,23 @@ async function collectCampaignPlugins(ctx, room) {
     plugins.push({ ...hosted, ...requirement, data: bytes.toString('base64') })
   }
   return plugins
+}
+
+async function roomSubclassChoicePolicies(ctx, room) {
+  const policies = []
+  for (const requirement of room?.requiredPlugins ?? []) {
+    const hosted = room.pluginFiles?.[requirement.id]
+    if (!hosted || hosted.integrity !== requirement.integrity || hosted.version !== requirement.version) {
+      throw new RoomProtocolError(409, 'plugin-file-not-found')
+    }
+    const bytes = await readFile(roomHostedPluginFile(ctx, room.id, requirement.id, hosted))
+    if (`sha256-${createHash('sha256').update(bytes).digest('base64')}` !== requirement.integrity) {
+      throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+    }
+    const text = bytes.toString('utf8').trimStart()
+    if (text.startsWith('{')) policies.push(...subclassChoicePoliciesFromPackage(JSON.parse(text)))
+  }
+  return policies
 }
 
 async function buildCampaignBundle(ctx, options = {}) {
@@ -10268,9 +11348,13 @@ const ROOM_RUNTIME_PROSE_KEYS = new Set([
   'reasons',
 ])
 
-function assertRoomRuntimeProjectionValue(value, key = '', depth = 0) {
+function assertRoomRuntimeProjectionValue(value, key = '', depth = 0, spellText = new WeakSet(), parent) {
   if (depth > 64) throw new RoomProtocolError(400, 'invalid-room-runtime-projection')
   if (typeof value === 'string') {
+    if (parent && spellText.has(parent) && ROOM_SPELL_TEXT_KEYS.has(key)) {
+      if (value.length > ROOM_SPELL_TEXT_MAX_LENGTH) throw new RoomProtocolError(403, 'room-spell-text-too-long')
+      return
+    }
     if (ROOM_RUNTIME_PROSE_KEYS.has(key) && value !== ROOM_RUNTIME_PROSE_PLACEHOLDER) {
       throw new RoomProtocolError(403, 'room-runtime-prose-not-reduced')
     }
@@ -10281,12 +11365,12 @@ function assertRoomRuntimeProjectionValue(value, key = '', depth = 0) {
     return
   }
   if (Array.isArray(value)) {
-    for (const entry of value) assertRoomRuntimeProjectionValue(entry, key, depth + 1)
+    for (const entry of value) assertRoomRuntimeProjectionValue(entry, key, depth + 1, spellText)
     return
   }
   if (!plainObject(value)) return
   for (const [childKey, entry] of Object.entries(value)) {
-    assertRoomRuntimeProjectionValue(entry, childKey, depth + 1)
+    assertRoomRuntimeProjectionValue(entry, childKey, depth + 1, spellText, value)
   }
 }
 
@@ -10317,6 +11401,23 @@ function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distribut
     parsed?.manifest?.distributionPolicy !== distributionPolicy
   ) throw new RoomProtocolError(403, 'plugin-not-room-distributable')
   if (distributionPolicy === 'room-ephemeral') {
+    if (parsed.manifest.roomSpellText != null && parsed.manifest.roomSpellText !== 'include') {
+      throw new RoomProtocolError(403, 'invalid-room-spell-text-policy')
+    }
+    if (parsed.manifest.roomContentText != null && parsed.manifest.roomContentText !== 'include') {
+      throw new RoomProtocolError(403, 'invalid-room-content-text-policy')
+    }
+    if (parsed.format === 'dndstars5e-unified-content') {
+      if (parsed.schemaVersion !== 1 || parsed.runtimeProjection !== ROOM_RUNTIME_PROJECTION ||
+        parsed.manifest.description !== ROOM_RUNTIME_PROSE_PLACEHOLDER ||
+        Object.keys(parsed).some(key => !['format', 'schemaVersion', 'manifest', 'assets', 'definitions', 'runtimeProjection'].includes(key)) ||
+        !Array.isArray(parsed.definitions) || parsed.definitions.length === 0 ||
+        parsed.definitions.some(definition => !plainObject(definition) || definition.source != null)) {
+        throw new RoomProtocolError(403, 'invalid-room-runtime-projection')
+      }
+      assertRoomRuntimeProjectionValue(parsed, '', 0, roomSpellTextObjects(parsed))
+      return
+    }
     if (
       parsed.format !== 'dndstars5e-content' ||
       parsed.schemaVersion !== 2 ||
@@ -10325,7 +11426,7 @@ function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distribut
       parsed?.manifest?.description !== ROOM_RUNTIME_PROSE_PLACEHOLDER ||
       parsed?.provenance?.sourceTitle !== ROOM_RUNTIME_PROSE_PLACEHOLDER
     ) throw new RoomProtocolError(403, 'invalid-room-runtime-projection')
-    assertRoomRuntimeProjectionValue(parsed)
+    assertRoomRuntimeProjectionValue(parsed, '', 0, roomSpellTextObjects(parsed))
   }
 }
 
@@ -12198,6 +13299,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
   }
 
   if (await handleRoomVoiceApi(req, res, parsed, ctx, { normalizeLobbyRoomCode, roomLobbyFile, lobbyRoomMember, roomMemberSessionAuthorized, roomPlayerPresence, RoomProtocolError, writeJson })) return true
+  if (await handleLongCastingOwnerApi(req, res, parsed, ctx, { normalizeLobbyRoomCode, roomLobbyFile, lobbyRoomMember, roomMemberSessionAuthorized, RoomProtocolError, writeJson, readBody, scopedContext, readSharedStateFile })) return true
 
   const protectedRoomMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(.+)$/)
   if (protectedRoomMatch && !['join', 'preview'].includes(protectedRoomMatch[2])) {
@@ -13276,6 +14378,8 @@ async function handlePlayerAiApi(req, res, parsed, ctx, authenticatedRoomMember)
  * 任何写锁超时（LockTimeoutError，statusCode=503）由内层 try/catch 映射为 503 fail-closed。
  */
 const handlePlayerExplorationMoveApi = createPlayerExplorationMoveApi({
+  recordMovementSightings: recordServerMovementSightings,
+  commit: atomicWriteSharedStateTransactionUnlocked,
   writeJson,
   readBody,
   withWriteLock,
@@ -13486,6 +14590,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       const combatActive = await sharedCombatIsActiveForAuthority(ctx)
+      const subclassChoicePolicies = await roomSubclassChoicePolicies(ctx, authenticatedRoom)
       const now = Date.now()
       const filePath = path.join(ctx.stateRoot, 'characters.json')
       const applyCommand = (state, mapsState) => {
@@ -13502,6 +14607,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           combatActive,
           now,
           concentrationSourceActorIds,
+          concentrationMaps: mapsState?.maps ?? [],
+          subclassChoicePolicies,
         })
         if (!applied.ok || !applied.changed) return applied
         if (currentRevision !== expectedRevision) {
@@ -13522,18 +14629,26 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const result = payload?.command?.type === 'end-concentration'
         ? await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
             await recoverSharedStateTransaction(ctx)
-            const [charactersState, mapsState] = await Promise.all([
+            const [charactersState, mapsState, combatState, campaignClock] = await Promise.all([
               readSharedStateFile(ctx, 'characters'),
               readSharedStateFile(ctx, 'maps'),
+              readSharedStateFile(ctx, 'combat'),
+              readCampaignTimeForProjection(ctx),
             ])
+            if (campaignClock.corrupted) return { ok: false, changed: false, status: 409, error: 'summon-time-unavailable', next: charactersState.value }
             const applied = applyCommand(charactersState.value, mapsState.value)
             if (!applied?.ok || !applied.changed) return applied
-            const mapCleanup = removeCharacterConcentrationEffectsFromMaps(
+            let mapCleanup
+            try { mapCleanup = removeCharacterConcentrationEffectsFromMaps(
               mapsState.value,
               boundedText(payload?.command?.characterId, 160),
               boundedText(applied.result?.endedSpellId, 180),
               applied.result?.revertedCreatureForms,
-            )
+              { round: combatState.value?.round, worldMinute: campaignClock.worldMinute },
+            ) } catch (error) {
+              if (!['summon-time-unavailable', 'Invalid summon linger policy', 'Invalid summon linger roll'].includes(error?.message)) throw error
+              return { ok: false, changed: false, status: 409, error: error.message, next: charactersState.value }
+            }
             if (mapCleanup.changed) {
               const mapsValidation = validateSharedStateShape('maps', mapCleanup.next)
               if (!mapsValidation.ok) {
@@ -13559,6 +14674,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
                 data: mapCleanup.next,
               })
             }
+            const cleanedCombat = mapCleanup.changed
+              ? concentrationInitiativeCleanup(combatState.value, mapsState.value, mapCleanup.next)
+              : combatState.value
+            if (cleanedCombat !== combatState.value) {
+              writes.push({ name: 'combat', expectedRevision: sharedStateRevision(combatState.value),
+                data: { ...cleanedCombat, updatedAt: Date.now() } })
+            }
             const written = await atomicWriteSharedStateTransactionUnlocked(
               ctx,
               writes,
@@ -13580,6 +14702,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               ...applied,
               next: committedCharacters,
               mapsChanged: mapCleanup.changed,
+              combatChanged: cleanedCombat !== combatState.value,
               removedEffectIds: mapCleanup.removedEffectIds,
             }
           })
@@ -13602,6 +14725,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
             id: `maps:${now}:${payload.command?.commandId}`,
             name: 'maps',
+            updatedAt: now,
+          })
+        }
+        if (result.combatChanged) {
+          publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `combat:${now}:${payload.command?.commandId}`,
+            name: 'combat',
             updatedAt: now,
           })
         }
@@ -13900,6 +15030,17 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       const writes = []
+      const readRevisions = payload?.readRevisions ?? {}
+      if (typeof readRevisions !== 'object' || Array.isArray(readRevisions) ||
+        Object.keys(readRevisions).length > SHARED_STATE_TRANSACTION_MAX_WRITES ||
+        Object.entries(readRevisions).some(([name, revision]) =>
+          safeName(name) !== name || !SHARED_STATE_TRANSACTION_READ_RESOURCES.has(name) ||
+          name === COMBAT_COMMAND_RECEIPT_RESOURCE || names.includes(name) ||
+          (name === 'room-journal' && submittedJournalMutations.length > 0) ||
+          !Number.isSafeInteger(revision) || revision < 0)) {
+        writeJson(res, 400, { error: 'invalid-state-transaction-read-revisions' })
+        return true
+      }
       for (let index = 0; index < submittedWrites.length; index += 1) {
         const submitted = submittedWrites[index]
         const name = names[index]
@@ -13993,6 +15134,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writes,
         req?.headers?.['x-stars-writer'],
         transactionId,
+        readRevisions,
       )
       if (result.conflict) {
         for (const entry of result.entries ?? []) {
@@ -14368,6 +15510,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         memberId: 'local-open-dm',
         role: 'dm',
       }
+      const prepareOnly=parsed.searchParams.get('prepare')==='1'
       await mkdir(ctx.stateRoot, { recursive: true })
       const body = await readBody(req)
       let mutation
@@ -14378,17 +15521,57 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       const room = await readRoomForCampaign(ctx)
-      const now = Date.now()
-      const filePath = path.join(ctx.stateRoot, 'campaign-time.json')
-      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
-        mutateCampaignTimeState(state, mutation, now, campaignTimeAuthority, { host: room?.host }),
-      )
-      if (!result?.ok) {
-        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+      if(prepareOnly&&campaignTimeAuthority.role!=='dm'&&campaignTimeAuthority.memberId!==room?.host?.memberId){
+        writeJson(res,403,{error:'forbidden'})
         return true
       }
+      const now = Date.now()
+      const result = await atomicMutateCampaignTimeAndMaps(ctx, async (state) => {
+        let interactionEntities
+        let restCharacterIds
+        let restMaps
+        if(['start-rest-session','complete-rest-session','long-rest'].includes(mutation?.operation)){
+          const charactersState=await readSharedStateFile(ctx,'characters')
+          restCharacterIds=(charactersState.value?.characters??[]).map(character=>character.id)
+          if (mutation.operation !== 'start-rest-session') {
+            const mapsState=await readSharedStateFile(ctx,'maps')
+            const geometryState=await readSharedStateFile(ctx,'map-geometry')
+            restMaps=(mapsState.value?.maps??[]).map(map=>({...map,tokens:(map.tokens??[]).map(token=>({...token,
+              elevationFeet:tokenElevationFeet(geometryState.value?.maps?.find(geometry=>geometry.mapId===map.id),token)}))}))
+          }
+        }
+        if (mutation?.operation === 'start-interaction') {
+          const [charactersState, mapsState] = await Promise.all([
+            readSharedStateFile(ctx, 'characters'), readSharedStateFile(ctx, 'maps'),
+          ])
+          const characters = Array.isArray(charactersState.value?.characters) ? charactersState.value.characters : []
+          const characterById = new Map(characters.map(character => [character.id, character]))
+          interactionEntities = characters.map(character => ({ id: character.id, effects: character.dnd5eCombatState?.activeEffects ?? [] }))
+          for (const map of mapsState.value?.maps ?? []) for (const token of map.tokens ?? []) {
+            const character = token.characterId ? characterById.get(token.characterId) : null
+            if (token.type === 'player' && token.characterId && !character) continue
+            // Match Headless projection: ordinary character-bound tokens carry
+            // mirrors, not a second independently authoritative effect list.
+            // Concatenating both lists rejects every mirrored preparation as
+            // ambiguous and can resurrect an effect removed from its character.
+            const owner = character && !token.dnd5eSimulacrum ? character : token
+            interactionEntities.push({ id: token.id, effects: owner.dnd5eCombatState?.activeEffects ?? [] })
+          }
+        }
+        return mutateCampaignTimeState(state, mutation, now, campaignTimeAuthority, { host: room?.host, interactionEntities, restCharacterIds, restMaps })
+      }, campaignTimeAuthority.memberId, {prepareOnly})
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed',
+          ...(result?.pendingTempleExpiry ? { pendingTempleExpiry: result.pendingTempleExpiry } : {}) })
+        return true
+      }
+      if(prepareOnly){writeJson(res,200,result);return true}
+      const clockUndoRequest = { ...req, headers: { ...req.headers, 'x-stars-undo-group': dmUndoTransactionId(req) } }
+      if (result.mapsMutation) await recordDmUndoMutation(clockUndoRequest, ctx, campaignTimeAuthority, 'maps', result.mapsMutation, '调整战役时间')
+      if (result.geometryMutation) await recordDmUndoMutation(clockUndoRequest, ctx, campaignTimeAuthority, 'map-geometry', result.geometryMutation, '调整战役时间')
+      if (result.charactersMutation) await recordDmUndoMutation(clockUndoRequest, ctx, campaignTimeAuthority, 'characters', result.charactersMutation, '调整战役时间')
       await recordDmUndoMutation(
-        req,
+        clockUndoRequest,
         ctx,
         campaignTimeAuthority,
         'campaign-time',
@@ -14396,7 +15579,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         '调整战役时间',
       )
       if (result.changed) {
-        for (const name of ['campaign-time', 'maps', 'map-geometry']) {
+        for (const name of ['campaign-time', 'maps', 'map-geometry', ...(result.charactersMutation ? ['characters'] : [])]) {
           publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
             id: `${name}:${now}:${Math.random().toString(36).slice(2)}`,
             name,
@@ -14752,8 +15935,29 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         const playerCharacterWrite = name === 'characters' && ctx.accessRole === 'player' && authenticatedRoomMember
         const combatActive = playerCharacterWrite ? await sharedCombatIsActiveForAuthority(ctx) : false
+        const subclassChoicePolicies = playerCharacterWrite ? await roomSubclassChoicePolicies(ctx, authenticatedRoom) : []
+        const putUndoTransactionId = dmUndoTransactionId(req)
         const writeResult = await withWriteLock(sharedStateTransactionLockPath(ctx), async () => {
           await recoverSharedStateTransaction(ctx)
+          if (name === 'maps' || (!playerCharacterWrite && ['characters', 'map-geometry'].includes(name))) {
+            const { value: current } = await readSharedStateFile(ctx, name)
+            const currentRevision = sharedStateRevision(current)
+            if (expectedRevision != null && expectedRevision !== currentRevision) {
+              return { ok: false, conflict: true, currentRevision, current }
+            }
+            if (expectedRevision == null && current && Number.isFinite(Number(parsedBody?.updatedAt)) &&
+              Number.isFinite(Number(current.updatedAt)) && Number(parsedBody.updatedAt) < Number(current.updatedAt)) {
+              return { ok: false, stale: true, currentRevision, current }
+            }
+            const result = await atomicWriteSharedStateTransactionUnlocked(ctx,
+              [{ name, expectedRevision: currentRevision, data: parsedBody }],
+              req?.headers?.['x-stars-writer'], `${name}-put:${randomUUID()}`)
+            if (!result.ok) return { ...result, currentRevision, current }
+            const entry = result.entries.find(entry => entry.name === name)
+            return { ok: true, current: entry.current, currentRevision: entry.currentRevision,
+              value: entry.next, revision: entry.revision, writtenAt: entry.writtenAt,
+              derivedEntries: result.entries.filter(entry => entry.name !== name) }
+          }
           return atomicWriteJsonStateCasLocked(filePath, parsedBody, {
             expectedRevision,
             writerId: req?.headers?.['x-stars-writer'],
@@ -14762,7 +15966,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
                   current,
                   incoming,
                   authenticatedRoomMember.memberId,
-                  { combatActive },
+                  { combatActive, subclassChoicePolicies },
                 )
               : undefined,
             validateIncoming: (candidate) => validateSharedStateShape(name, candidate),
@@ -14795,7 +15999,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           DM_UNDOABLE_STATE.has(name)
         ) {
           await appendDmUndoChange(ctx, {
-            transactionId: dmUndoTransactionId(req),
+            transactionId: putUndoTransactionId,
             label: dmUndoLabel(req, `更新 ${name}`),
             actorMemberId: authenticatedRoomMember.memberId,
             resource: name,
@@ -14807,6 +16011,19 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           })
         }
         const updatedAt = Number(parsedBody?.updatedAt)
+        for (const entry of writeResult.derivedEntries ?? []) {
+          if (ctx.accessRole === 'dm' && authenticatedRoomMember && DM_UNDOABLE_STATE.has(entry.name)) {
+            await appendDmUndoChange(ctx, {
+              transactionId: putUndoTransactionId, label: dmUndoLabel(req, `更新 ${name}`),
+              actorMemberId: authenticatedRoomMember.memberId, resource: entry.name,
+              before: entry.current, after: entry.next, beforeRevision: entry.currentRevision,
+              afterRevision: entry.revision, changedAt: entry.writtenAt,
+            })
+          }
+          publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `${entry.name}:${entry.revision}:${randomUUID()}`, name: entry.name, updatedAt: entry.writtenAt,
+          })
+        }
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `${name}:${Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now()}:${Math.random().toString(36).slice(2)}`,
           name,
@@ -15002,3 +16219,4 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 }
+

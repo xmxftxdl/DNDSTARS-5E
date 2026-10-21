@@ -1,3 +1,5 @@
+import type { Dnd5eActivityDefinitionV1 } from '../../rulesets/dnd5e/activities/dnd5eActivityContracts'
+
 export interface MapAoeTargetingSessionInput {
   coreAreaMove?: {
     characterId: string
@@ -112,23 +114,35 @@ export function spellAreaModifierSelectionActive(
 export function playerGrantedActivityAoeSelectActive(input: {
   isDM: boolean
   pluginArea?: {
+    source?: string
     persistentAreaId?: string
     activeEffectId?: string
   } | null
 }): boolean {
   if (input.isDM || !input.pluginArea) return false
-  return !!(input.pluginArea.persistentAreaId || input.pluginArea.activeEffectId)
+  // Initial imported features use the same Host-authorized placement flow as
+  // granted activities, even when exploration retains a post-combat UI lock.
+  return input.pluginArea.source === 'plugin' ||
+    !!(input.pluginArea.persistentAreaId || input.pluginArea.activeEffectId)
 }
 
 export function pluginAreaTargetingAllowsEmptyArea(input: {
   persistentArea?: unknown
   persistentAreaId?: string
   activeEffectId?: string
+  activity?: Pick<Dnd5eActivityDefinitionV1, 'outcomes'> & Partial<Pick<Dnd5eActivityDefinitionV1, 'target'>>
 }): boolean {
   return !!(
     input.persistentArea ||
     input.persistentAreaId ||
-    input.activeEffectId
+    input.activeEffectId ||
+    (input.activity?.target?.kind === 'area' &&
+      (input.activity.target.minimumTargets ?? 0) === 0 &&
+      input.activity.outcomes.some(outcome => outcome.operations.some(operation =>
+        operation.kind === 'damage' && operation.equipmentWeaponDamage))) ||
+    input.activity?.outcomes.some(outcome => outcome.operations.some(operation =>
+      operation.kind === 'create-persistent-area' || operation.kind === 'summon' || operation.kind === 'wither-map-vegetation' ||
+      operation.kind === 'control-map-water'))
   )
 }
 
@@ -192,8 +206,9 @@ export function mapSpellTargetIdsForAuthoritySubmission(input: {
   hasArea: boolean
   targetKind: string | undefined
   selectedTargetIds: readonly string[]
+  selectsAreaTargets?: boolean
 }): string[] {
-  if (input.hasArea && input.targetKind === 'area') return []
+  if (input.hasArea && input.targetKind === 'area' && !input.selectsAreaTargets) return []
   return [...new Set(input.selectedTargetIds)]
 }
 

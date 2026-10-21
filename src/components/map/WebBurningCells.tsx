@@ -5,22 +5,18 @@ import type { BattleMap, Dnd5ePluginArea } from '../../store/maps'
 import { usePrefersReducedMotion, useStatusAnimation, useTokenBadgeImage } from './mapEffectHooks'
 
 /** Real flame atlas, crossfaded with a shared clock and staggered cell phases. */
-export function WebBurningCells({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
+export function BurningAreaCells({ cells, map }: { cells: readonly {col:number;row:number}[]; map: BattleMap }) {
   const root = useRef<Konva.Group>(null)
   const time = useRef(0)
   const flame = useTokenBadgeImage('/assets/vfx/wall-of-fire-sprite-v2.webp')
   const reducedMotion = usePrefersReducedMotion()
   const grid = Math.max(1, map.gridSize)
-  const cells = useMemo(() => {
-    const remaining = new Set(area.cells.map(cell => `${cell.col}:${cell.row}`))
-    return (area.webState?.burningCells ?? []).filter(cell => remaining.has(`${cell.col}:${cell.row}`))
-  }, [area.cells, area.webState?.burningCells])
   useStatusAnimation(() => root.current?.getLayer() ?? null, frame => {
     time.current = frame?.time ?? 0
   }, { active: !reducedMotion && cells.length > 0 && !!flame, fps: 24 })
 
   if (!cells.length) return null
-  return <Group ref={root} listening={false} name="web-burning-cells">
+  return <Group ref={root} listening={false} name="burning-area-cells">
     {cells.map(cell => <Group key={`${cell.col}:${cell.row}`}
       x={map.gridOffsetX + cell.col * grid} y={map.gridOffsetY + cell.row * grid}>
       <Rect width={grid} height={grid} fill="#9a350d" opacity={0.2} />
@@ -53,4 +49,12 @@ export function WebBurningCells({ area, map }: { area: Dnd5ePluginArea; map: Bat
         stroke="#f4a348" opacity={0.8} strokeWidth={1} />
     </Group>)}
   </Group>
+}
+
+export function WebBurningCells({area,map}:{area:Dnd5ePluginArea;map:BattleMap}){
+  const cells = useMemo(() => {
+    const remaining = new Set(area.cells.map(cell => `${cell.col}:${cell.row}`))
+    return (area.webState?.burningCells ?? []).filter(cell => remaining.has(`${cell.col}:${cell.row}`))
+  }, [area.cells, area.webState?.burningCells])
+  return <BurningAreaCells cells={cells} map={map} />
 }

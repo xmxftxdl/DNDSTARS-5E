@@ -139,3 +139,9 @@ describe('legendary action end-turn window', () => {
     })
   })
 })
+
+it('offers native legendary fling as explicit target and placement instead of adjudication',()=>{
+ const ending=token({id:'hero',type:'player'}),kraken=token({id:'kraken',poolId:'srd-5.1:kraken'})
+ const candidates=dnd5eLegendaryActionWindowCandidates({map:map([ending,kraken]),endingTokenId:'hero'})
+ expect(candidates.find(c=>c.token.id==='kraken')?.actions.find(a=>a.id==='legendary-fling')).toMatchObject({windowExecution:'throw-placement',cost:1,automation:'headless'})
+})

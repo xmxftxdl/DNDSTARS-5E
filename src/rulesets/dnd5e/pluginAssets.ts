@@ -19,18 +19,12 @@ export interface RegisteredDnd5ePluginImageAsset {
 }
 
 const ID = /^[a-z0-9][a-z0-9._-]{0,99}$/
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
 const assets = new Map<string, RegisteredDnd5ePluginImageAsset>()
 
 function namespacedAssetId(pluginId: string, localId: string): string {
   if (!ID.test(pluginId) || !ID.test(localId)) throw new Error(`Invalid plugin image asset id: ${pluginId}:${localId}`)
   return `${pluginId}:${localId}`
-}
-
-function decodeBase64(value: string): Uint8Array {
-  if (!value || !BASE64.test(value)) throw new Error('Invalid plugin image asset base64')
-  const binary = globalThis.atob(value)
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
 function hasPrefix(bytes: Uint8Array, prefix: readonly number[]): boolean {
@@ -58,12 +52,21 @@ export function validateDnd5ePluginImageAsset(
   }
   if (typeof definition.dataBase64 !== 'string') throw new Error(`Invalid plugin image asset data: ${definition.id}`)
   const dataBase64 = definition.dataBase64.replace(/\s+/g, '')
-  const bytes = decodeBase64(dataBase64)
-  if (bytes.byteLength < 12 || bytes.byteLength > DND5E_PLUGIN_IMAGE_ASSET_MAX_BYTES) {
+  if (!dataBase64 || dataBase64.length % 4 !== 0 || !BASE64.test(dataBase64)) {
+    throw new Error('Invalid plugin image asset base64')
+  }
+  const padding = dataBase64.endsWith('==') ? 2 : dataBase64.endsWith('=') ? 1 : 0
+  const byteLength = dataBase64.length / 4 * 3 - padding
+  if (byteLength < 12 || byteLength > DND5E_PLUGIN_IMAGE_ASSET_MAX_BYTES) {
     throw new Error(`Plugin image asset size is outside the allowed range: ${definition.id}`)
   }
-  assertImageSignature(definition.mediaType, bytes)
-  return { byteLength: bytes.byteLength, dataBase64 }
+  // All image signatures fit in 12 bytes. The alphabet, padding and decoded
+  // length above validate the complete payload without allocating/copying
+  // hundreds of thousands of bytes per image on the browser's main thread.
+  const prefix = globalThis.atob(dataBase64.slice(0, 16))
+  const signature = Uint8Array.from(prefix, (character) => character.charCodeAt(0))
+  assertImageSignature(definition.mediaType, signature)
+  return { byteLength, dataBase64 }
 }
 
 export function registerDnd5ePluginImageAsset(

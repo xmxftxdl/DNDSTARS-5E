@@ -1,3 +1,4 @@
+import { isDnd5eBodyPartPresence } from './lethalBodyPart'
 import {
   type Dnd5eMonsterAction,
   type Dnd5eMonsterStatBlock,
@@ -424,7 +425,7 @@ function activeEffectRemovalIsValid(raw: unknown): boolean {
     ) &&
     (
       action.abilityCheck.skill == null ||
-      action.abilityCheck.skill === 'medicine'
+      action.abilityCheck.skill === 'medicine' || action.abilityCheck.skill === 'arcana' || action.abilityCheck.skill === 'athletics'
     ) &&
     finiteInteger(action.abilityCheck.dc, 1, 100)
 }
@@ -2171,7 +2172,7 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   }
   if (action.attack == null) return true
   const attack = action.attack
-  if (!isRecord(attack) || typeof attack.mode !== 'string' || !ATTACK_MODES.has(attack.mode) ||
+  if (!isRecord(attack) || (attack.naturalWeapon != null && typeof attack.naturalWeapon !== 'boolean') || typeof attack.mode !== 'string' || !ATTACK_MODES.has(attack.mode) ||
     !finiteInteger(attack.toHit, -100, 100) || !requiredText(attack.target, 500) ||
     !validateDamageList(
       attack.damage,
@@ -2238,8 +2239,13 @@ function traitShapeIsValid(raw: unknown): boolean {
       Array.isArray(raw.rule.excludedDamageTypes) && raw.rule.excludedDamageTypes.every((type) => DAMAGE_TYPE_VALUES.has(String(type))) &&
       typeof raw.rule.excludedOnCritical === 'boolean'
   }
+  if (raw.rule.kind === 'sunlight-sensitivity') return Object.keys(raw.rule).every(key => key === 'kind')
+  if (raw.rule.kind === 'sunlight-hypersensitivity') {
+    return Object.keys(raw.rule).every(key => key === 'kind' || key === 'radiantDamageAtTurnStart') &&
+      finiteInteger(raw.rule.radiantDamageAtTurnStart, 1, 1_000_000)
+  }
   if (raw.rule.kind === 'regeneration') {
-    return finiteInteger(raw.rule.amount, 1, 1_000_000) && typeof raw.rule.requiresPositiveHp === 'boolean' &&
+    return (raw.rule.suppressedInSunlight == null || raw.rule.suppressedInSunlight === true) && finiteInteger(raw.rule.amount, 1, 1_000_000) && typeof raw.rule.requiresPositiveHp === 'boolean' &&
       Array.isArray(raw.rule.suppressedByDamageTypes) && raw.rule.suppressedByDamageTypes.every((type) => DAMAGE_TYPE_VALUES.has(String(type))) &&
       typeof raw.rule.diesAtZeroWhenSuppressed === 'boolean'
   }
@@ -2257,6 +2263,12 @@ function traitShapeIsValid(raw: unknown): boolean {
       key === 'kind' || key === 'movementMode' || key === 'provokesOpportunityAttacks') &&
       raw.rule.movementMode === 'fly' &&
       raw.rule.provokesOpportunityAttacks === false
+  }
+  if (raw.rule.kind === 'keen-perception') {
+    return Object.keys(raw.rule).every(key => key === 'kind' || key === 'senses') &&
+      Array.isArray(raw.rule.senses) && raw.rule.senses.length > 0 && raw.rule.senses.length <= 3 &&
+      new Set(raw.rule.senses).size === raw.rule.senses.length &&
+      raw.rule.senses.every(sense => ['smell', 'hearing', 'sight'].includes(String(sense)))
   }
   if (raw.rule.kind === 'keen-sense') {
     return ['smell', 'hearing', 'sight'].includes(String(raw.rule.sense)) &&
@@ -2369,6 +2381,10 @@ function traitShapeIsValid(raw: unknown): boolean {
     return Object.keys(raw.rule).every((key) =>
       key === 'kind' || key === 'reactionRefresh') &&
       raw.rule.reactionRefresh === 'every-turn-start'
+  }
+  if (raw.rule.kind === 'dive-damage') {
+    return Object.keys(raw.rule).every(key => key === 'kind' || key === 'minimumStraightMovementFeet' || key === 'extraDamage') &&
+      finiteInteger(raw.rule.minimumStraightMovementFeet, 5, 10_000) && validateDamage(raw.rule.extraDamage)
   }
   if (raw.rule.kind === 'charge-damage') {
     const savingThrow = raw.rule.savingThrowOnHit
@@ -2638,7 +2654,8 @@ function persistentAreaRuleIsValid(raw: Record<string, unknown>): boolean {
     (raw.lighting == null || normalizeDnd5ePersistentAreaLighting(raw.lighting) != null) &&
     (raw.obscuration == null || (
       isRecord(raw.obscuration) &&
-      Object.keys(raw.obscuration).every((key) => key === 'kind' || key === 'sourceCanSeeThrough') &&
+      Object.keys(raw.obscuration).every((key) => key === 'kind' || key === 'sourceCanSeeThrough' || key === 'scope') &&
+      (raw.obscuration.scope == null || raw.obscuration.scope === 'source-token') &&
       (raw.obscuration.kind === 'light' || raw.obscuration.kind === 'heavy') &&
       (raw.obscuration.sourceCanSeeThrough == null ||
         typeof raw.obscuration.sourceCanSeeThrough === 'boolean')
@@ -2813,7 +2830,7 @@ export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eM
   if (action.kind === 'other') {
     const spellSelection = action.id === 'cantrip' ||
       /(?:^|-)cast-a-spell(?:-|$)/.test(action.id)
-    return action.automation === 'headless' && (action.rule || spellSelection)
+    return action.automation === 'headless' && (action.rule || spellSelection || action.innateSpellStep === true)
       ? 'headless'
       : action.automation === 'headless'
         ? 'invalid'
@@ -2943,6 +2960,7 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (raw.sourcePage != null && !finiteInteger(raw.sourcePage, 1, 10_000)) issues.push(issue(monsterId, '来源页码无效'))
   if (!SIZE_VALUES.has(String(raw.size)) || !requiredText(raw.creatureType, 120) || !requiredText(raw.alignment, 240)) issues.push(issue(monsterId, '体型、类型或阵营无效'))
   if (raw.subtypes != null && (!Array.isArray(raw.subtypes) || raw.subtypes.length > 32 || raw.subtypes.some((entry) => !requiredText(entry, 240)))) issues.push(issue(monsterId, '生物亚型无效'))
+  if (raw.bodyPartPresence != null && !isDnd5eBodyPartPresence(raw.bodyPartPresence)) issues.push(issue(monsterId, '身体结构事实无效'))
   if (!isRecord(raw.armorClass) || !finiteInteger(raw.armorClass.value, 1, 100)) issues.push(issue(monsterId, '护甲等级无效'))
   if (!isRecord(raw.hitPoints) || !finiteInteger(raw.hitPoints.average, 1, 1_000_000) ||
     typeof raw.hitPoints.dice !== 'string' || !DICE_PATTERN.test(raw.hitPoints.dice)) issues.push(issue(monsterId, '生命值或生命骰无效'))
@@ -2955,10 +2973,13 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (raw.savingThrows != null && (!isRecord(raw.savingThrows) || Object.entries(raw.savingThrows).some(([key, value]) => !ABILITY_KEYS.includes(key as typeof ABILITY_KEYS[number]) || !finiteInteger(value, -100, 100)))) issues.push(issue(monsterId, '豁免加值无效'))
   if (raw.skills != null && (!Array.isArray(raw.skills) || raw.skills.length > 64 || raw.skills.some((skill) => !isRecord(skill) || !requiredText(skill.key, 120) || !requiredText(skill.name, 240) || !finiteInteger(skill.bonus, -100, 100)))) issues.push(issue(monsterId, '技能数据无效'))
   if (!Array.isArray(raw.senses) || raw.senses.length > 32 || raw.senses.some((sense) => !isRecord(sense) || !requiredText(sense.name, 120) ||
-    (sense.distanceFeet != null && !finiteInteger(sense.distanceFeet, 0, 100_000)))) issues.push(issue(monsterId, '感官数据无效'))
+    (sense.distanceFeet != null && !finiteInteger(sense.distanceFeet, 0, 100_000)) ||
+    (sense.blindBeyond != null && (typeof sense.blindBeyond !== 'boolean' ||
+      (sense.blindBeyond && (!/blindsight|盲视/i.test(String(sense.name)) || !finiteInteger(sense.distanceFeet, 1, 100_000))))))) issues.push(issue(monsterId, '感官数据无效'))
   if (!finiteInteger(raw.passivePerception, 0, 100)) issues.push(issue(monsterId, '被动察觉无效'))
   if (!Array.isArray(raw.languages) || raw.languages.length > 64 || raw.languages.some((language) => !requiredText(language, 500))) issues.push(issue(monsterId, '语言数据无效'))
-  if (!isRecord(raw.challenge) || !requiredText(raw.challenge.rating, 16) || !finiteInteger(raw.challenge.xp, 0, 100_000_000)) issues.push(issue(monsterId, '挑战等级或经验值无效'))
+  if (!isRecord(raw.challenge) || !requiredText(raw.challenge.rating, 16) ||
+    !(raw.challenge.rating === '—' && raw.challenge.xp == null || finiteInteger(raw.challenge.xp, 0, 100_000_000))) issues.push(issue(monsterId, '挑战等级或经验值无效'))
   if (raw.legendaryResistanceUses != null && !finiteInteger(raw.legendaryResistanceUses, 0, 99)) {
     issues.push(issue(monsterId, '传奇抗性次数无效'))
   }

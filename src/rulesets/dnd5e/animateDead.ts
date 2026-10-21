@@ -46,7 +46,8 @@ export function dnd5eAnimateDeadRemainsKind(
   token: Token,
 ): 'bone-pile' | 'humanoid-corpse' | undefined {
   if (token.type !== 'obstacle' || token.dnd5eSpellEffect) return undefined
-  return normalizeDnd5eMapObjectStateV1(token.dnd5eObjectState)?.remains?.kind
+  const kind = normalizeDnd5eMapObjectStateV1(token.dnd5eObjectState)?.remains?.kind
+  return kind === 'bone-pile' || kind === 'humanoid-corpse' ? kind : undefined
 }
 
 export function dnd5eAnimateDeadControlledUndead(

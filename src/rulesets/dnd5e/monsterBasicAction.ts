@@ -1,3 +1,6 @@
+import type { Dnd5eActiveEffectSavingThrowRoll } from './activeEffects'
+import { dnd5eSavingThrowMode } from './passiveDefenses'
+import {resolveDnd5eActionWithEscapeEjection,type Dnd5eEscapeEjectionRolls} from './persistentAreaEscapeEjection'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap, Token } from '../../store/maps'
@@ -33,7 +36,9 @@ export interface PreparedDnd5eMonsterEscapeActiveEffect {
   effectId: string
   dc: number
   ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
-  skill?: 'athletics' | 'acrobatics'
+  skill?: 'athletics' | 'acrobatics' | 'medicine' | 'arcana'
+  removalAction?: true
+  rollKind?: 'ability-check' | 'saving-throw'
   rollMode: D20RollMode
 }
 
@@ -89,9 +94,18 @@ export function prepareDnd5eMonsterEscapeActiveEffect(input: {
   }
   const effect = combatant.classState.activeEffects?.find((candidate) =>
     candidate.id === input.effectId &&
-    candidate.escapeCheck?.economy === 'action')
-  if (!effect?.escapeCheck) return { ok: false, reason: 'invalid-effect' }
-  const option = dnd5eBestActiveEffectEscapeOption(combatant, effect.escapeCheck)
+    (candidate.escapeSavingThrow?.economy === 'action' || candidate.escapeCheck?.economy === 'action' || candidate.removal?.action?.economy === 'action' && !!candidate.removal.action.abilityCheck))
+  if (!effect) return { ok: false, reason: 'invalid-effect' }
+  const removalCheck = effect.escapeCheck || effect.escapeSavingThrow ? undefined : effect.removal?.action?.abilityCheck
+  const option = effect.escapeSavingThrow
+    ? { ability: effect.escapeSavingThrow.ability, skill: undefined,
+        mode: dnd5eSavingThrowMode(combatant, effect.escapeSavingThrow.ability, { effectVisible: true,
+          sourceIsSpell: effect.source.kind === 'spell', sourceIsMagical: effect.source.magical === true }) }
+    : effect.escapeCheck
+    ? dnd5eBestActiveEffectEscapeOption(combatant, effect.escapeCheck, effect.standardCondition === 'grappled')
+    : removalCheck ? { ability: removalCheck.ability, skill: removalCheck.skill,
+        mode: dnd5eAbilityCheckRollMode(combatant, removalCheck) } : undefined
+  if (!option) return { ok: false, reason: 'invalid-effect' }
   return {
     ok: true,
     prepared: {
@@ -101,7 +115,9 @@ export function prepareDnd5eMonsterEscapeActiveEffect(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       actor,
       effectId: effect.id,
-      dc: effect.escapeCheck.dc,
+      dc: effect.escapeSavingThrow?.dc ?? effect.escapeCheck?.dc ?? removalCheck!.dc,
+      rollKind: effect.escapeSavingThrow ? 'saving-throw' : 'ability-check',
+      ...(removalCheck ? {removalAction:true as const} : {}),
       ability: option.ability,
       skill: option.skill,
       rollMode: option.mode,
@@ -110,31 +126,21 @@ export function prepareDnd5eMonsterEscapeActiveEffect(input: {
 }
 
 export function resolvePreparedDnd5eMonsterEscapeActiveEffect(input: {
+  disadvantageNegationChoice?: Dnd5eActiveEffectSavingThrowRoll['disadvantageNegationChoice']
   prepared: PreparedDnd5eMonsterEscapeActiveEffect
   d20: number
   d20Second?: number
-}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
-  const result = resolveDnd5eHeadlessAction(input.prepared.state, {
-    type: 'escape-active-effect',
-    actorId: input.prepared.actor.id,
-    effectId: input.prepared.effectId,
-    d20: input.d20,
-    d20Second: input.d20Second,
-  })
-  return {
-    result,
-    application: result.ok
-      ? planDnd5eMapResultApplication({
-          state: result.state,
-          map: input.prepared.map,
-          characters: input.prepared.characters,
-          characterIdByCombatantId: input.prepared.characterIdByCombatantId,
-          events: [...result.events],
-        })
-      : undefined,
-  }
+  escapeEjectionRolls?: Readonly<Record<string,Dnd5eEscapeEjectionRolls>>
+  airborneFallDamageRollsByCombatantId?: Readonly<Record<string,readonly number[]>>
+}) {
+  const p=input.prepared
+  const resolution=resolveDnd5eActionWithEscapeEjection({before:p.state,map:p.map,characters:p.characters,
+    characterIdByCombatantId:p.characterIdByCombatantId,rolls:input.escapeEjectionRolls,
+    action:p.removalAction ? {type:'remove-active-effect',disadvantageNegationChoice:input.disadvantageNegationChoice,actorId:p.actor.id,targetId:p.actor.id,effectId:p.effectId,d20:input.d20,d20Second:input.d20Second} : {type:'escape-active-effect',disadvantageNegationChoice:input.disadvantageNegationChoice,actorId:p.actor.id,effectId:p.effectId,d20:input.d20,d20Second:input.d20Second,
+      airborneFallDamageRollsByCombatantId:input.airborneFallDamageRollsByCombatantId}})
+  return {...resolution,application:resolution.result.ok?planDnd5eMapResultApplication({state:resolution.result.state,
+    map:p.map,characters:p.characters,characterIdByCombatantId:p.characterIdByCombatantId,events:[...resolution.result.events]}):undefined}
 }
-
 export function resolveDnd5eMonsterEscapeActiveEffect(input: {
   combatId: string
   round?: number
@@ -218,7 +224,7 @@ export function prepareDnd5eMonsterEscapeGrapple(input: {
       movementRemaining: input.turnEconomy.movement.current,
     }
   }
-  const actorDefense = dnd5eBestGrappleDefense(combatant)
+  const actorDefense = dnd5eBestGrappleDefense(combatant, true)
   return {
     ok: true,
     prepared: {
@@ -232,6 +238,7 @@ export function prepareDnd5eMonsterEscapeGrapple(input: {
       actorRollMode: dnd5eAbilityCheckRollMode(combatant, {
         ability: actorDefense.skill === 'acrobatics' ? 'dex' : 'str',
         skill: actorDefense.skill,
+        grappleEscape: true,
       }),
       grapplerRollMode: dnd5eAbilityCheckRollMode(grapplerCombatant, {
         ability: 'str',
@@ -380,7 +387,7 @@ export function resolveDnd5eMonsterReleaseGrapple(input: {
   }
 }
 
-export function resolveDnd5eMonsterDodge(input: {
+function resolveDnd5eMonsterSimpleAction(input: {
   combatId: string
   round?: number
   map: BattleMap
@@ -388,7 +395,7 @@ export function resolveDnd5eMonsterDodge(input: {
   initiativeOrder: readonly InitiativeEntry[]
   actorTokenId: string
   turnEconomy?: Dnd5eTurnEconomyCounts
-}):
+}, help?: { targetId: string; helpKind: 'attack' | 'ability-check' }, movementAction?: 'dash' | 'disengage'):
   | { ok: true; actor: Token; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan }
   | { ok: false; reason: 'invalid-actor' | 'combatant-missing' } {
   const actor = input.map.tokens.find((token) =>
@@ -419,7 +426,7 @@ export function resolveDnd5eMonsterDodge(input: {
   }
   const result = resolveDnd5eHeadlessAction(
     { ...snapshot.state, initiativeIndex: actorIndex },
-    { type: 'dodge', actorId: actor.id },
+    help ? { type: 'help', actorId: actor.id, ...help } : { type: movementAction ?? 'dodge', actorId: actor.id },
   )
   return {
     ok: true,
@@ -436,3 +443,18 @@ export function resolveDnd5eMonsterDodge(input: {
       : undefined,
   }
 }
+
+export function resolveDnd5eMonsterDodge(input: Parameters<typeof resolveDnd5eMonsterSimpleAction>[0]) {
+  return resolveDnd5eMonsterSimpleAction(input)
+}
+
+export function resolveDnd5eMonsterMovementAction(input: Parameters<typeof resolveDnd5eMonsterSimpleAction>[0], action: 'dash' | 'disengage') {
+  return resolveDnd5eMonsterSimpleAction(input, undefined, action)
+}
+
+export function resolveDnd5eMonsterHelp(input: Parameters<typeof resolveDnd5eMonsterSimpleAction>[0] & {
+  targetTokenId: string; helpKind: 'attack' | 'ability-check'
+}) {
+  return resolveDnd5eMonsterSimpleAction(input, { targetId: input.targetTokenId, helpKind: input.helpKind })
+}
+

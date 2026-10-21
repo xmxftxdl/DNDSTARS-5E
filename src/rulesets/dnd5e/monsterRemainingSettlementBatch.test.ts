@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eMechanicalEffect, createDnd5eConditionEffect } from './activeEffects'
 import {
   createDnd5eCombatant,
   resolveDnd5eHeadlessAction,
@@ -133,7 +133,7 @@ describe('remaining structured monster weapon attacks', () => {
     })
   })
 
-  it('corrodes one concrete nonmagical armor instance', () => {
+  it.each([false, true])('corrodes only nonmagical armor, with temporary binding=%s', (enchanted) => {
     const action = catalogAction('black-pudding', 'pseudopod')
     const effect = effectOfKind(action, 'equipment-corrosion')
     const { result } = attackState({
@@ -142,6 +142,8 @@ describe('remaining structured monster weapon attacks', () => {
       targetPatch: {
         armorClass: 15,
         wearingArmor: true,
+        activityEquipment: {armor:{itemId:'chain-mail',inventoryInstanceId:'armor:chain',magical:false},armorCategory:'heavy',armorProficient:true,armorProficiencies:['heavy'],freeHands:2},
+        classState: {schemaVersion:2,activeEffects:enchanted?[createDnd5eMechanicalEffect({definitionId:'bound-armor',label:'Bound armor',targetId:'target',source:{kind:'feature',actorId:'caster'},modifiers:{armorEnchantment:{armorId:'chain-mail',inventoryInstanceId:'armor:chain',armorClassBonus:1}}})]:[]},
         equippedArmor: {
           instanceId: 'armor:chain',
           equipmentId: 'chain-mail',
@@ -153,16 +155,16 @@ describe('remaining structured monster weapon attacks', () => {
           destroyed: false,
         },
       },
-      rollPatch: { onHitEffectRolls: [{ effectId: effect.id }] },
+      rollPatch: { d20: 15, onHitEffectRolls: [{ effectId: effect.id }] },
     })
     expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
     if (!result.ok) return
     expect(result.state.combatants.target.equippedArmor).toMatchObject({
       instanceId: 'armor:chain',
-      armorClassPenalty: 1,
+      armorClassPenalty: enchanted ? 0 : 1,
       destroyed: false,
     })
-    expect(result.state.combatants.target.armorClass).toBe(14)
+    expect(result.state.combatants.target.armorClass).toBe(enchanted ? 15 : 14)
   })
 
   it('applies Darkmantle head wrapping only on an advantaged hit', () => {

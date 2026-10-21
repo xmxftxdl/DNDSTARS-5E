@@ -109,14 +109,21 @@ export type Dnd5eClassFeaturePayload =
   | { feature: 'feature-extra-action-teleport'; targetCell: GridCell }
 
 export interface Dnd5eAbilityCheckPayload {
+  /** Selection only; Host validates this owned sensor and the remote sound source. */
+  remoteHearing?: { sensorId: string; soundSourceTokenId: string }
+  toolId?: string
   /** Quick sheet check: report a total without adjudicating a difficulty. Requires dc=0 and no action cost. */
   totalOnly?: boolean
   ability: AbilityKey
   skill?: string
   /** Host-validated situational feature context selected before this check. */
-  context?: 'push-pull-lift-break' | 'interact-with-dragons' | 'climbing'
+  context?: 'push-pull-lift-break' | 'interact-with-dragons' | 'climbing' | 'sight' | 'hearing' | 'smell'
   /** Host token inspected by a Perception check; required for source-relative obscuration effects. */
   perceivedTargetId?: string
+  /** Creature this check specifically attempts to detect, independent of ability used. */
+  detectedCreatureId?: string
+  /** Exact persistent illusion examined with an action and INT Investigation. */
+  investigatedAreaId?: string
   mode?: 'normal' | 'advantage' | 'disadvantage'
   dc: number
   /** 部分检定由 DM 判定为一个动作；关闭时只进行检定，不消耗行动经济。 */
@@ -124,6 +131,8 @@ export interface Dnd5eAbilityCheckPayload {
 }
 
 export interface Dnd5ePluginActionPayload {
+  /** Optional pre-attack destination; Host checks the owned ability and selected Activity. */
+  attackActionTeleport?: { targetCell: GridCell; elevationFeet?: number }
   /** 完整的插件命名空间特性 ID，例如 com.example.rules:guardian-spark。 */
   featureId: string
   /**
@@ -153,6 +162,12 @@ export interface Dnd5eItemUsePayload {
 }
 
 export interface Dnd5eWeaponAttackOptions {
+  /** Optional destination only; Host derives the owned ability and range. */
+  attackActionTeleport?: { targetCell: GridCell; elevationFeet?: number }
+  /** Owned natural-weapon identifier only; Host rebuilds its attack profile. */
+  naturalWeaponId?: string
+  thrownAttack?: boolean
+  useSling?: boolean
   /** DM-only, single-transaction cover ruling. The Headless authority rejects this field on player requests. */
   coverOverride?: Dnd5eAttackCoverOverride
   /**
@@ -248,6 +263,14 @@ export interface Dnd5eAntipathySympathyConfigV1 {
 }
 
 export interface Dnd5eSpellCastPayload {
+  /** Player choice only; Host must independently verify a matching spell-specific grant. */
+  bonusActionCasting?: boolean
+  /** Selected material face; coordinates and material are reconstructed by Host. */
+  verticalSurface?: { entityId: string; edgeIndex: number; centerFraction: number }
+  /** Chosen Grove subeffect and point; Host resolves all spell facts from the area. */
+  dispelGroveArea?: { areaId: string; cell: { col: number; row: number } }
+  /** Only the chosen point is supplied; Host owns all restoration geometry. */
+  dispelMaterialArea?: { areaId: string; cell: { col: number; row: number } }
   /** Absolute area origin / aim elevation; omitted preserves terrain placement. */
   targetElevationFeet?: number
   spellId: string
@@ -279,6 +302,9 @@ export interface Dnd5eSpellCastPayload {
    * the source of the spell itself.
    */
   activityInventoryInstanceId?: string
+  /** Physical units selected across stacks; Host verifies the authored total and owner. */
+  activityInventorySelections?: { ownerId: string; instanceId: string; quantity: number; expectedRevision: number }[]
+  activityGroundInventorySelections?: { tokenId: string; quantity: number; expectedReceiptId: string; expectedQuantity: number }[]
   /**
    * Character whose inventory owns activityInventoryInstanceId. Identify may
    * target an unidentified item carried by any player character in the room;
@@ -318,9 +344,15 @@ export interface Dnd5eSpellCastPayload {
   areaTargetOrientation?: 0 | 1 | 2 | 3
   /** 通用可旋转长方形模板的自由角度；Host 会归一化为 0–359 度后重建覆盖格。 */
   areaTargetAngleDegrees?: number
+  areaTargetPitchDegrees?: number
+  areaTargetRollDegrees?: number
+  /** Object flight pitch, distinct from the selected object's absolute elevation. */
+  objectLaunchPitchDegrees?: number
   /** Casting-time dimensions for adjustable area templates; Host validates their declared min/max bounds. */
   areaTargetRadiusFeet?: number
   areaTargetWidthFeet?: number
+  /** Selected vertical extent; areaTargetHeightFeet is planar length. */
+  areaTargetVolumeHeightFeet?: number
   areaTargetHeightFeet?: number
   areaTargetLengthFeet?: number
   /** Wall of Fire uses host-validated geometry independent from the legacy four-way rectangle. */
@@ -384,6 +416,15 @@ export interface Dnd5eSpellCastPayload {
   higherSlotDamageType?: 'acid' | 'bludgeoning' | 'cold' | 'fire' | 'force' | 'lightning' | 'necrotic' | 'piercing' | 'poison' | 'psychic' | 'radiant' | 'slashing' | 'thunder'
   /** Closed choices declared by a unified spell Activity; the Host validates every id and option. */
   activityChoices?: Record<string, string>
+  companionHelpTargets?: Record<string, { targetId: string; helpKind: 'attack' | 'ability-check' }>
+  companionAttackTargets?: Record<string, string>
+  companionMovementDestinations?: Record<string, Record<string, import('../rulesets/dnd5e/companionMovementDestination').Dnd5eCompanionMovementDestination | null>>
+  companionTaskDescriptions?: Record<string, string>
+  companionReadyTriggers?: Record<string, string>
+  companionObjectInteractions?: Record<string, import('../rulesets/dnd5e/companionObjectInteraction').Dnd5eCompanionObjectInteraction>
+  companionGuardAreas?: Record<string, import('../rulesets/dnd5e/companionGuardArea').Dnd5eCompanionGuardArea>
+  activityTargetFormIds?: Record<string, string>
+  activityWillingTargetIds?: string[]
   /** Optional cast-time phrase for an Activity that explicitly accepts one, such as Arcane Lock. */
   secretPhrase?: string
   /** Spoken creature name required when True Resurrection creates a replacement body. */
@@ -613,6 +654,10 @@ export type Dnd5eAdjudicatedSpellCastingVariant =
   | 'plant-growth-8-hours'
 
 export interface Dnd5eAdjudicatedSpellPayload {
+  /** Host-owned feature grant using its declared resource instead of a spell slot. */
+  alternateResourceSpell?: { featureId: string; grantId: string }
+  /** Explicit mapped Temple of the Gods target, settled by the Host with Disintegrate. */
+  templeDisintegration?: import('../rulesets/dnd5e/templeDisintegrationDeclaration').Dnd5eTempleDisintegrationDeclaration
   /** Optional NPC markers chosen across room maps; validated by the Host. */
   telepathicBondTargets?: { mapId: string; tokenId: string }[]
   spellId: string
@@ -657,6 +702,7 @@ export interface Dnd5eAdjudicatedSpellPayload {
 }
 
 export interface Dnd5ePersistentAreaMovePayload {
+  targetElevationFeet?: number
   areaId: string
   targetCell: GridCell
   /**
@@ -699,12 +745,14 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string }
   | { kind: 'ready'; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetTokenId?: string }
   | { kind: 'use-object'; interactionId: string }
-  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; activityBasicActionGrantId?: string }
-  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; activityBasicActionGrantId?: string }
+  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; activityBasicActionGrantId?: string; attackActionTeleport?: { targetCell: GridCell; elevationFeet?: number } }
+  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; activityBasicActionGrantId?: string; attackActionTeleport?: { targetCell: GridCell; elevationFeet?: number } }
   | { kind: 'release-grapple'; targetTokenId: string }
+  | { kind: 'mount'; targetTokenId: string }
+  | { kind: 'dismount'; targetTokenId: string; direction?: import('../rulesets/dnd5e/mountedPlacement').Dnd5eDismountDirection }
   | { kind: 'escape-grapple'; targetTokenId: string }
   | { kind: 'escape-effect' }
-  | { kind: 'dismiss-effect'; effectId: string }
+  | { kind: 'dismiss-effect'; effectId: string; targetTokenId?: string }
   | { kind: 'set-flame-blade-manifestation'; effectId: string; manifested: boolean }
   | { kind: 'dismiss-warding-bond' }
   | { kind: 'wake'; targetTokenId: string }
@@ -726,6 +774,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-death-save'
     | 'dnd5e-weapon-attack'
     | 'dnd5e-fighter-feature'
+    | 'dnd5e-short-rest-recovery'
     | 'dnd5e-class-feature'
     | 'dnd5e-racial-action'
     | 'dnd5e-plugin-action'
@@ -748,6 +797,9 @@ export interface SharedPlayerActionState {
   targetCell?: GridCell
   /** 可旋转范围模板的四向朝向；仅作为请求，DM 会重新验证。 */
   targetOrientation?: 0 | 1 | 2 | 3
+  /** Explicit heading for a declared rotatable rectangular Activity, in [0, 360). */
+  targetAngleDegrees?: number
+  objectLaunchPitchDegrees?: number
   targetPosition?: { x: number; y: number }
   /** 穿过滚珠或铁蒺藜时声明半速谨慎移动；DM 按双倍移动消耗复核。 */
   dnd5eCarefulMovement?: boolean
@@ -756,6 +808,7 @@ export interface SharedPlayerActionState {
   /** 攀爬、游泳与跳跃由玩家声明，DM 按角色速度、力量和海拔重新计算。 */
   dnd5eTraversalMode?: Dnd5eTraversalMode
   targetElevationFeet?: number
+  dnd5eShortRestRecovery?: Pick<import('../rulesets/dnd5e/shortRestRecoveryAuthority').Dnd5eShortRestRecoveryCommand, 'advanceId' | 'poolIndex' | 'expectedPoolCurrent' | 'songOfRestBardId'>
   dnd5eFighterFeature?: 'second-wind' | 'action-surge'
   dnd5eClassFeature?: Dnd5eClassFeaturePayload
   dnd5eRacialAction?: Dnd5eRacialActionPayload

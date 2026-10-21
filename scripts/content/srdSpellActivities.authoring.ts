@@ -1725,7 +1725,21 @@ function symbolActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinit
   }
 }
 
+function findSteedActivities(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1[] {
+  const base=dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition,'headless-action')
+  const forms=DND5E_SRD_MONSTERS.filter(monster=>['warhorse','pony','camel','elk','mastiff'].includes(monster.slug))
+  const types=['celestial','fey','fiend'] as const
+  const dismissId='spell:find-steed:dismiss', telepathyId='spell:find-steed:telepathy'
+  const automation=automationCapabilityFromLegacyStatus('full')
+  return [{...base,target:{kind:'area',relation:'any',origin:'point',shape:'cube',placeRangeFeet:30,lengthFeet:5,widthFeet:5,heightFeet:5,maximumTargets:1},
+    choices:[{id:'form',label:'坐骑形态',options:forms.map(monster=>({id:monster.id,label:monster.name}))},{id:'creature-type',label:'坐骑类型',options:types.map(id=>({id,label:({celestial:'天界',fey:'妖精',fiend:'邪魔'})[id]}))},{id:'language',label:'坐骑理解的语言',optionsFrom:'actor-languages',options:[]}],
+    outcomes:forms.flatMap(monster=>types.map(type=>({id:`summon-${monster.slug}-${type}`,when:{kind:'all' as const,conditions:[{kind:'choice' as const,choiceId:'form',optionId:monster.id},{kind:'choice' as const,choiceId:'creature-type',optionId:type}]},operations:[{id:'summon-'+monster.slug+'-'+type,kind:'summon' as const,monsterId:monster.id,count:{kind:'constant' as const,value:1},timing:'immediate' as const,durationRounds:1,concentration:false,persistent:true,side:'ally' as const,bondKey:'steed',bondDismissActivityId:dismissId,bondActivityIds:[telepathyId],creatureTypeOverride:type,minimumIntelligence:6,understandsCasterLanguage:true,languageChoiceId:'language',telepathyRangeFeet:5280,shareSelfSpellsRangeFeet:5,shareSelfSpellsRequiresMounted:true}]}))),automation},
+    {schemaVersion:1,id:dismissId,name:'坐骑·解除召唤',legacySource:base.legacySource,activation:{kind:'action'},target:{kind:'self'},consumption:[{kind:'action-economy',economy:'action',amount:1,consumeOn:'resolve'}],choices:[{id:'mode',label:'契约处理',options:[{id:'dismiss',label:'暂时遣散（保留契约）'},{id:'release',label:'永久解除契约'}]}],outcomes:['dismiss','release'].map(mode=>({id:mode,when:{kind:'choice',choiceId:'mode',optionId:mode},operations:[{id:mode,kind:'dismiss-owned-summon',bondKey:'steed',releaseBond:mode==='release'}]})),automation},
+    {schemaVersion:1,id:telepathyId,name:'坐骑·心灵沟通',legacySource:base.legacySource,activation:{kind:'free'},target:{kind:'creature',relation:'any',count:1,rangeFeet:5280,requiresLineOfSight:false},requirements:[{kind:'owned-companion',subject:'target',bondKey:'steed'}],outcomes:[{id:'communicate',when:{kind:'always'},operations:[{id:'communicate',kind:'open-communication',target:'target',medium:'telepathy',requiresTargetLanguage:false,allowsImmediateReply:true}]}],automation}]
+}
+
 function partialActivity(spell: RegisteredDnd5ePluginSpell): Dnd5eActivityDefinitionV1 {
+  if(spell.id==='find-steed')return findSteedActivities(spell)[0]
   if (spell.id === 'alter-self') {
     const base = dnd5eActivityFromSpellDefinition(spell as Dnd5ePluginSpellDefinition, 'headless-action')
     const modes = [
@@ -6741,6 +6755,7 @@ export function dnd5eSrdAuditedPartialContentDefinitionsV1(): readonly Registere
     payload: structuredClone(spell),
     activities: [
       partialActivity(spell),
+      ...(spell.id==='find-steed'?findSteedActivities(spell).slice(1):[]),
       ...(['contingency', 'shapechange', 'tree-stride', 'detect-magic', 'detect-thoughts', 'geas'].includes(spell.id)
         ? auditedTriggeredActivities(spell)
         : []),

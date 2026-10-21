@@ -1,5 +1,10 @@
+import { DruidGroveRootingControls } from './DruidGroveRootingControls'
+import {MapObjectSurfaceEditor} from './MapObjectSurfaceEditor'
+import { DND5E_DAMAGE_TYPES, DND5E_DAMAGE_TYPE_LABELS } from '../../rulesets/dnd5e/damageTypes'
 import { Package, Trash2, X } from 'lucide-react'
 import type { Token } from '../../store/maps'
+import {authorDnd5eMapInventoryItem,dnd5eMapPhysicalItemTemplates} from '../../rulesets/dnd5e/mapInventoryItemAuthoring'
+import {dnd5eInventoryItemTemplate} from '../../rulesets/dnd5e/items'
 import {
   normalizeDnd5eMapObjectStateV1,
   type Dnd5eMapObjectStateV1,
@@ -11,8 +16,10 @@ import {
 
 interface Dnd5eMapObjectDetailPanelProps {
   token: Token
+  creatureTokens?: readonly Token[]
   onUpdate: (patch: Partial<Token>) => void
   onDelete: () => void
+  onSettleGroveRooting?: (canRoot: boolean) => Promise<void>
   onClose: () => void
 }
 
@@ -41,9 +48,11 @@ function formatWorldMinute(worldMinute: number): string {
 
 export default function Dnd5eMapObjectDetailPanel({
   token,
+  creatureTokens = [],
   onUpdate,
   onDelete,
   onClose,
+  onSettleGroveRooting,
 }: Dnd5eMapObjectDetailPanelProps) {
   const objectState = normalizeDnd5eMapObjectStateV1(token.dnd5eObjectState) ?? { schemaVersion: 1 as const }
   const consumable = objectState.consumable
@@ -51,6 +60,10 @@ export default function Dnd5eMapObjectDetailPanel({
   const sequester = objectState.sequester
   const creation = objectState.creation
   const waterContainer = objectState.waterContainer
+  const physicalTemplates = dnd5eMapPhysicalItemTemplates()
+  const inventoryItem = objectState.inventoryItem
+  const inventoryTemplate = inventoryItem && dnd5eInventoryItemTemplate(inventoryItem.templateId)
+  const inventoryEditingDisabled = !!(creation || sequester || token.dnd5eSummon || token.dnd5eSpellEffect)
   const animateObjects = objectState.animateObjects ?? {
     size: token.size >= 4 ? 'gargantuan' as const : token.size >= 3 ? 'huge' as const : token.size >= 2 ? 'large' as const : 'medium' as const,
     mobility: 'walk' as const,
@@ -106,7 +119,9 @@ export default function Dnd5eMapObjectDetailPanel({
             kind: 'humanoid-corpse' as const,
             creatureSize: purpose.startsWith('small') ? 'small' as const : 'medium' as const,
           }
-        : undefined
+        : purpose === 'creature-corpse'
+          ? { kind: 'creature-corpse' as const, creatureSize: 'medium' as const }
+          : undefined
     const nextWaterContainer = purpose === 'water-container'
       ? waterContainer ?? { schemaVersion: 1 as const, open: true, capacityGallons: 50, waterGallons: 0 }
       : undefined
@@ -119,6 +134,7 @@ export default function Dnd5eMapObjectDetailPanel({
           : nextConsumable,
         remains: nextRemains,
         waterContainer: nextWaterContainer,
+        vegetation: purpose === 'living-vegetation' ? 'living' : purpose === 'dead-vegetation' ? 'dead' : undefined,
       },
     })
   }
@@ -158,6 +174,25 @@ export default function Dnd5eMapObjectDetailPanel({
             className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300/40"
           />
         </label>
+        <section className="rounded-xl border border-amber-300/20 bg-amber-500/[0.05] p-3" data-testid="map-inventory-item-authoring">
+          <p className="text-xs font-semibold text-amber-100">场景物品</p>
+          <p className="mt-1 text-[11px] leading-5 text-amber-100/65">标记场景中已有的物品及数量，供法术选择。物品仍留在地图上。</p>
+          <label className="mt-2 block text-[11px] text-slate-400">物品种类
+            <select aria-label="地图物件物品种类" value={inventoryItem?.templateId ?? ''} disabled={inventoryEditingDisabled}
+              onChange={event=>{const patch=authorDnd5eMapInventoryItem(token,event.target.value,inventoryItem?.quantity??1);if(patch)onUpdate(patch)}}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-sm text-slate-100">
+              <option value="">未标记物品</option>
+              {inventoryItem && !physicalTemplates.some(item=>item.id===inventoryItem.templateId) && <option value={inventoryItem.templateId}>{inventoryTemplate?.name??'物品资料不可用'}</option>}
+              {physicalTemplates.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          {inventoryItem && <label className="mt-2 block text-[11px] text-slate-400">数量
+            <input type="number" min={1} max={1000} step={1} aria-label="地图物件物品数量" value={inventoryItem.quantity} disabled={inventoryEditingDisabled}
+              onChange={event=>{const patch=authorDnd5eMapInventoryItem(token,inventoryItem.templateId,Number(event.target.value));if(patch)onUpdate(patch)}}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-sm text-slate-100" />
+          </label>}
+          {inventoryItem && <p className="mt-2 text-xs text-amber-100" role="status">当前物品：{inventoryTemplate?.name??'物品资料不可用'} × {inventoryItem.quantity}</p>}
+        </section>
         <label className="block text-xs text-slate-400">
           物件体型 / 占地
           <select
@@ -213,6 +248,77 @@ export default function Dnd5eMapObjectDetailPanel({
               />
             </label>
           </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="text-[11px] text-slate-400">
+              护甲等级（AC）
+              <input type="number" min={1} max={40} step={1} aria-label="地图物件护甲等级"
+                placeholder="未设置" value={objectState.combatProfile?.armorClass ?? ''}
+                onChange={event => {
+                  const value = event.target.value
+                  const armorClass = Number(value)
+                  if (value !== '' && (!Number.isInteger(armorClass) || armorClass < 1 || armorClass > 40)) return
+                  onUpdate({ dnd5eObjectState: { ...objectState, combatProfile: value === '' ? undefined : { ...objectState.combatProfile, armorClass } } })
+                }}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-sm text-slate-100" />
+            </label>
+            <label className="text-[11px] text-slate-400">
+              伤害阈值
+              <input type="number" min={0} max={1000000} step={1} aria-label="地图物件伤害阈值"
+                disabled={!objectState.combatProfile} placeholder="无" value={objectState.combatProfile?.damageThreshold ?? ''}
+                onChange={event => {
+                  if (!objectState.combatProfile) return
+                  const value = event.target.value, damageThreshold = value === '' ? undefined : Number(value)
+                  if (damageThreshold != null && (!Number.isInteger(damageThreshold) || damageThreshold < 0 || damageThreshold > 1000000)) return
+                  onUpdate({ dnd5eObjectState: { ...objectState, combatProfile: { ...objectState.combatProfile, damageThreshold } } })
+                }}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-sm text-slate-100 disabled:opacity-40" />
+            </label>
+          </div>
+          <details className="mt-2 rounded-lg border border-white/10 p-2 text-xs text-slate-300">
+            <summary className="cursor-pointer">物件伤害防御</summary>
+            <fieldset disabled={!objectState.combatProfile} className="mt-2 disabled:opacity-40">
+              <table className="w-full text-center">
+                <thead><tr><th scope="col" className="text-left">伤害类型</th><th scope="col">免疫</th><th scope="col">抗性</th><th scope="col">易伤</th></tr></thead>
+                <tbody>{DND5E_DAMAGE_TYPES.map(type => <tr key={type}>
+                  <th scope="row" className="py-1 text-left font-normal">{DND5E_DAMAGE_TYPE_LABELS[type]}</th>
+                  {(['damageImmunities','damageResistances','damageVulnerabilities'] as const).map((key,index) => <td key={key}>
+                    <input type="checkbox" aria-label={`物件${DND5E_DAMAGE_TYPE_LABELS[type]}${['免疫','抗性','易伤'][index]}`}
+                      checked={objectState.combatProfile?.[key]?.includes(type) === true}
+                      onChange={event => {
+                        const profile = objectState.combatProfile
+                        if (!profile) return
+                        const values = profile[key] ?? []
+                        const next = event.target.checked ? [...new Set([...values,type])] : values.filter(value => value !== type)
+                        onUpdate({ dnd5eObjectState: { ...objectState, combatProfile: { ...profile, [key]: next } } })
+                      }} />
+                  </td>)}
+                </tr>)}</tbody>
+              </table>
+            </fieldset>
+          </details>
+          {objectState.groundImpact && <p className="mt-2 text-xs text-amber-200" role="status">
+            最近撞地：物件与地表各受到 {objectState.groundImpact.damage} 点钝击伤害。物件耐久已结算；地表未记录耐久，不自动改变地形。
+          </p>}
+          <MapObjectSurfaceEditor key={token.id} value={objectState.surfaceProfile}
+            onChange={surfaceProfile=>onUpdate({dnd5eObjectState:{...objectState,surfaceProfile}})}/>
+          <label className="mt-2 block text-[11px] text-slate-400">
+            物件总重量（磅）
+            <input
+              type="number"
+              min={0}
+              step="any"
+              aria-label="地图物件重量（磅）"
+              placeholder="未记录"
+              value={objectState.weightPounds ?? ''}
+              onChange={(event) => {
+                const value = event.target.value
+                const weightPounds = value === '' ? undefined : Number(value)
+                if (weightPounds != null && (!Number.isFinite(weightPounds) || weightPounds < 0)) return
+                onUpdate({ dnd5eObjectState: { ...objectState, schemaVersion: 1, weightPounds } })
+              }}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-sm text-slate-100"
+            />
+          </label>
           <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
             <input
               type="checkbox"
@@ -230,10 +336,25 @@ export default function Dnd5eMapObjectDetailPanel({
               aria-label="物件被穿戴或携带"
               checked={objectState.wornOrCarried === true}
               onChange={(event) => onUpdate({
-                dnd5eObjectState: { ...objectState, schemaVersion: 1, wornOrCarried: event.target.checked },
+                dnd5eObjectState: { ...objectState, schemaVersion: 1, wornOrCarried: event.target.checked, carrierTokenId: event.target.checked ? objectState.carrierTokenId : undefined },
               })}
             />
             被穿戴或携带（不属于无人持有物件）
+          </label>
+          {objectState.wornOrCarried && <label className="mt-2 block text-xs text-slate-300">携带者
+            <select aria-label="物件携带者" value={objectState.carrierTokenId ?? ''}
+              onChange={event=>onUpdate({dnd5eObjectState:{...objectState,schemaVersion:1,carrierTokenId:event.target.value || undefined}})}
+              className="mt-1 w-full rounded-lg bg-void-950 px-2 py-1.5">
+              <option value="">未指定</option>
+              {objectState.carrierTokenId && !creatureTokens.some(token=>token.id===objectState.carrierTokenId) && <option value={objectState.carrierTokenId}>原携带者（不在当前地图）</option>}
+              {creatureTokens.filter(token=>token.type!=='obstacle').map(token=><option key={token.id} value={token.id}>{token.label}</option>)}
+            </select>
+          </label>}
+          <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" aria-label="物件固定在物体或表面上"
+              checked={objectState.attached ?? animateObjects.mobility==='fixed'}
+              onChange={event=>onUpdate({dnd5eObjectState:{...objectState,schemaVersion:1,attached:event.target.checked}})} />
+            固定在其他物体或表面上
           </label>
         </section>
         <section className="rounded-xl border border-violet-300/20 bg-violet-500/[0.06] p-3">
@@ -266,6 +387,19 @@ export default function Dnd5eMapObjectDetailPanel({
           </p>
         </section>
         <label className="block text-xs text-slate-400">
+          自然地物
+          <select aria-label="地图自然地物" value={objectState.naturalFeature ?? ''}
+            onChange={event => onUpdate({ ...(event.target.value === 'undergrowth' ? { obstacleKind: 'marker' as const } : {}), dnd5eObjectState: { ...objectState, schemaVersion: 1,
+              naturalFeature: event.target.value ? event.target.value as Dnd5eMapObjectStateV1['naturalFeature'] : undefined } })}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-100">
+            <option value="">未标记</option>
+            <option value="tree">树木</option>
+            <option value="undergrowth">草丛／灌木</option>
+            <option value="rock">岩石</option>
+          </select>
+          <span className="mt-1 block">按物件占据的范围参与自然效果。草丛／灌木设为可通行标记；实体阻挡仍可用地图障碍绘制。岩石是否固定或被携带仍按物件属性判断。</span>
+        </label>
+        <label className="block text-xs text-slate-400">
           物件用途
           <select
             aria-label="地图物件用途"
@@ -273,20 +407,28 @@ export default function Dnd5eMapObjectDetailPanel({
               ? 'bone-pile'
               : remains?.kind === 'humanoid-corpse'
                 ? `${remains.creatureSize}-humanoid-corpse`
-                : waterContainer
+                : remains?.kind === 'creature-corpse' ? 'creature-corpse' : waterContainer
                   ? 'water-container'
-                  : consumable?.kind ?? 'none'}
+                  : objectState.vegetation ? `${objectState.vegetation}-vegetation` : consumable?.kind ?? 'none'}
             onChange={(event) => updatePurpose(event.target.value)}
             className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300/40"
           >
             <option value="none">普通物件</option>
+            <option value="living-vegetation">活植物（非生物，如树木、灌木）</option>
+            <option value="dead-vegetation">枯死植物</option>
             {Object.entries(KIND_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             <option value="water-container">敞开／封闭储水容器（造水／枯水术）</option>
             <option value="bone-pile">骨骸堆（操纵死尸 → 骷髅）</option>
             <option value="small-humanoid-corpse">小型类人生物尸体（操纵死尸 → 僵尸）</option>
             <option value="medium-humanoid-corpse">中型类人生物尸体（操纵死尸 → 僵尸）</option>
+            <option value="creature-corpse">其他生物尸体（葬礼；不自动满足操纵死尸）</option>
           </select>
         </label>
+        <DruidGroveRootingControls key={token.id} token={token} onSettle={onSettleGroveRooting} />
+        {objectState.vegetation ? <p data-testid="map-vegetation-state" className="rounded-lg border border-emerald-300/20 px-3 py-2 text-xs text-emerald-100">
+          {objectState.vegetation === 'dead' ? '植物已枯死；实体与耐久保留。' : '活植物；可受植物枯死效果影响。'}
+          {objectState.magical ? ' 此物体具有魔法性质，不受非魔法植物枯死效果影响。' : ''}
+        </p> : null}
         {waterContainer ? <section className="rounded-xl border border-cyan-300/20 bg-cyan-500/[0.06] p-3 text-xs text-cyan-50" data-testid="water-container-state">
           <p className="font-semibold">储水容器</p>
           <label className="mt-2 flex items-center gap-2 text-xs text-slate-200">
@@ -340,12 +482,24 @@ export default function Dnd5eMapObjectDetailPanel({
           <p className="mt-2 text-[11px] text-cyan-100/70">当前：{waterContainer.waterGallons}/{waterContainer.capacityGallons} 加仑 · {waterContainer.open ? '敞开' : '封闭'}</p>
         </section> : null}
         {remains ? <section className="rounded-xl border border-rose-300/20 bg-rose-500/[0.06] p-3 text-xs text-rose-100">
-          <p className="font-semibold">操纵死尸遗骸目标</p>
+          <p className="font-semibold">{remains.kind === 'creature-corpse' ? '葬礼尸体目标' : '操纵死尸遗骸目标'}</p>
           <p className="mt-1 text-[11px] leading-5 text-rose-100/75">
             {remains.kind === 'bone-pile'
               ? '被法术选中并成功结算后，此物件会被消耗并在原格生成一具骷髅。'
-              : `${remains.creatureSize === 'small' ? '小型' : '中型'}类人生物尸体；被法术选中后会在原格生成一具僵尸。`}
+              : remains.kind === 'creature-corpse'
+                ? '明确标记的生物尸体，可作为葬礼目标；不会据此推断为小型或中型类人生物。'
+                : `${remains.creatureSize === 'small' ? '小型' : '中型'}类人生物尸体；被法术选中后会在原格生成一具僵尸。`}
           </p>
+          {remains.kind === 'creature-corpse' ? <label className="mt-2 block">
+            尸体原体型
+            <select aria-label="尸体原体型" value={remains.creatureSize}
+              onChange={event => onUpdate({ dnd5eObjectState: { ...objectState, schemaVersion: 1,
+                remains: { ...remains, creatureSize: event.target.value as NonNullable<Dnd5eMapObjectStateV1['remains']>['creatureSize'] } } })}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-3 py-2">
+              <option value="tiny">微型</option><option value="small">小型</option><option value="medium">中型</option>
+              <option value="large">大型</option><option value="huge">巨型</option><option value="gargantuan">超巨型</option>
+            </select>
+          </label> : null}
         </section> : null}
         {consumable ? <section className="rounded-xl border border-amber-300/15 bg-amber-500/[0.05] p-3">
           <p className="text-xs font-semibold text-amber-100">DM 场景污染</p>

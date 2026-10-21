@@ -6,6 +6,7 @@ import type {
 } from '../../types/character'
 import {
   applyDnd5eLevelAdvancement,
+  dnd5eAdvancementLockedChoiceKeys,
   buildDnd5eLevelAdvancementPlan,
   dnd5eLevelAdvancementGrantedFeatures,
   reviseDnd5eLevelAdvancement,
@@ -14,6 +15,38 @@ import {
 } from './levelAdvancement'
 import { DND5E_DECLARATIVE_CLASS_SCHEMA_VERSION, type DeclarativeClassDefinitionV1 } from './declarativeClass'
 import { dnd5eCharacterHasPluginFeature, registerDnd5eRulesPlugin } from './pluginApi'
+import { migrateCharacterToDnd5e } from './character'
+
+it('uses the destination fighter level for imported growing subclass choices, preserving multiclass levels', () => {
+  let subclassId = ''
+  const dispose = registerDnd5eRulesPlugin({
+    manifest: { id: 'test.growing-fighter-choice', name: 'Growing choices', version: '1.0.0', apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+    setup(api) { subclassId = api.registerDeclarativeSubclass({ schemaVersion: 1, id: 'chooser', classId: 'fighter', name: 'Chooser', summary: 'Synthetic',
+      abilities: [{ schemaVersion: 1, id: 'summary', name: 'Summary', description: 'Synthetic', level: 3,
+        trigger: { kind: 'passive' }, targeting: { kind: 'self' }, effects: [], automation: 'manual' }],
+      choiceGroups: [{ id: 'options', name: 'Options', level: 3, maxSelections: 2,
+        maxSelectionsByLevel: [{ level: 7, maxSelections: 3 }],
+        options: ['a', 'b', 'c'].map(id => ({ id, name: id, summary: 'Synthetic' })) }],
+    }) },
+  })
+  try {
+    const key = `${subclassId}/options`
+    for (const wizard of [0, 8]) {
+      const actor = fighter({ level: 6 + wizard, dnd5eClassLevels: { fighter: 6, ...(wizard ? { wizard } : {}) },
+        dnd5eClassChoices: { fighter: { subclass: subclassId, fightingStyles: ['archery'], extensionChoices: { [key]: ['a', 'b'] } } } })
+      const plan = buildDnd5eLevelAdvancementPlan(actor, 'fighter', 1, subclassId)!
+      expect(plan.choiceRequirements).toContainEqual(expect.objectContaining({ key, targetLimit: 3, additionalRequired: 1 }))
+      const decision = { schemaVersion: 1 as const, classId: 'fighter' as const, subclassId, levelsGained: 1,
+        hitPointMethod: 'fixed' as const, hitPointRolls: [], asiChoices: [], fighterSubclassSelections: { [key]: ['c'] } }
+      const result = applyDnd5eLevelAdvancement(actor, decision)
+      expect(result.ok, result.ok ? '' : result.reason).toBe(true); if (!result.ok) continue
+      expect(result.character.dnd5eClassLevels).toMatchObject({ fighter: 7, ...(wizard ? { wizard } : {}) })
+      expect(result.character.level).toBe(7 + wizard)
+      expect(result.character.dnd5eClassChoices?.fighter?.extensionChoices?.[key]).toEqual(['a', 'b', 'c'])
+    }
+  } finally { dispose() }
+})
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -247,12 +280,16 @@ describe('D&D 5e level advancement transaction', () => {
   it('applies plugin subclass build advancements atomically with the level-up receipt', () => {
     const pluginId = 'test.subclass-build-choices'
     let subclassId = ''
+    let movementFeatureId = ''
     const dispose = registerDnd5eRulesPlugin({
       manifest: {
         id: pluginId, name: '子职构筑协议测试', version: '1.0.0', apiVersion: 2,
         rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0-1.0',
       },
       setup(api) {
+        movementFeatureId = api.registerFeature({ id: 'quick-standing', name: 'Quick standing',
+          summary: 'Synthetic passive', description: 'Synthetic passive', automation: 'full',
+          staticModifiers: { standFromProneMovementCostFeet: 5 } })
         subclassId = api.registerSubclass({
           id: 'lore-keeper', classId: 'rogue', name: '典籍守护者', summary: '验证子职固定授予与选择。',
           features: [{
@@ -288,7 +325,7 @@ describe('D&D 5e level advancement transaction', () => {
             id: 'lore-keeper-armor',
             level: 3,
             kind: 'build-grant',
-            grants: [{ kind: 'proficiency', category: 'armor', id: 'medium' }],
+            grants: [{ kind: 'proficiency', category: 'armor', id: 'medium' }, { kind: 'feature', featureId: movementFeatureId }],
           }],
         })
       },
@@ -302,6 +339,7 @@ describe('D&D 5e level advancement transaction', () => {
         hitPointDice: [{ sides: 8, current: 2, max: 2 }], maxHp: 17, currentHp: 17,
       })
       const contentId = `${subclassId}:level-3`
+      expect(migrateCharacterToDnd5e(rogue).standFromProneMovementCostFeet).toBeUndefined()
       const plan = buildDnd5eLevelAdvancementPlan(rogue, 'rogue', 1, subclassId)
       expect(plan?.contentAdvancements).toEqual([
         expect.objectContaining({
@@ -336,6 +374,8 @@ describe('D&D 5e level advancement transaction', () => {
       expect(result.ok).toBe(true)
       if (!result.ok) return
       expect(result.character.skills).toContain('arcana')
+      expect(dnd5eCharacterHasPluginFeature(result.character, movementFeatureId)).toBe(true)
+      expect(migrateCharacterToDnd5e(result.character).standFromProneMovementCostFeet).toBe(5)
       expect(result.character.dnd5eContentChoices).toMatchObject({
         [contentId]: {
           selections: { 'lore-keeper-training': ['arcana'] },
@@ -557,4 +597,44 @@ describe('D&D 5e level advancement transaction', () => {
     expect(levelSix.abilities.str).toBe(13)
     expect(levelSix.dnd5eFeatIds).toContain('srd5.1:grappler')
   })
+})
+
+
+it('replaces declared subclass choices only in their own class advancement plan', () => {
+  let subclassId = ''
+  const dispose = registerDnd5eRulesPlugin({
+    manifest: { id: 'test.level-choice-replacement', name: 'Choice policy', version: '1.0.0', apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Test', license: 'CC0-1.0' },
+    setup(api) {
+      subclassId = api.registerSubclass({ id: 'weather', classId: 'barbarian', name: 'Weather', summary: 'Synthetic choice policy',
+        features: [{ id: 'weather-choice', level: 3, name: 'Weather', description: 'Choose weather' }],
+        choiceGroups: [{ id: 'environment', level: 3, name: 'Environment', maxSelections: 1, replaceOnClassLevelGain: true,
+          options: ['sand', 'water', 'snow'].map(id => ({ id, name: id, summary: id })) }] })
+    },
+  })
+  try {
+    const key = `${subclassId}/environment`
+    const hero = fighter({ charClass: '野蛮人', level: 5, dnd5eClassLevels: { barbarian: 5 },
+      dnd5eClassChoices: { classes: { barbarian: { subclass: subclassId, selections: { [key]: ['sand'] } } } } })
+    expect(dnd5eAdvancementLockedChoiceKeys(hero).has(`barbarian:class:${key}`)).toBe(true)
+    expect(buildDnd5eLevelAdvancementPlan(hero, 'barbarian', 1)?.choiceRequirements)
+      .toContainEqual(expect.objectContaining({ key, replaceable: true, currentSelections: ['sand'], additionalRequired: 0 }))
+    const decision: Dnd5eLevelAdvancementDecisionV1 = { schemaVersion: 1, classId: 'barbarian', levelsGained: 1,
+      hitPointMethod: 'fixed', hitPointRolls: [], asiChoices: [] }
+    const kept = applyDnd5eLevelAdvancement(hero, decision)
+    expect(kept.ok).toBe(true)
+    if (kept.ok) expect(kept.character.dnd5eClassChoices?.classes?.barbarian?.selections?.[key]).toEqual(['sand'])
+    const changed = applyDnd5eLevelAdvancement(hero, { ...decision, classChoiceSelections: { [key]: ['snow'] } })
+    expect(changed.ok).toBe(true)
+    if (changed.ok) {
+      expect(changed.character.dnd5eClassChoices?.classes?.barbarian?.selections?.[key]).toEqual(['snow'])
+      expect(dnd5eAdvancementLockedChoiceKeys(changed.character).has(`barbarian:class:${key}`)).toBe(true)
+    }
+    for (const choices of [['sand', 'snow'], ['invalid']]) {
+      expect(applyDnd5eLevelAdvancement(hero, { ...decision, classChoiceSelections: { [key]: choices } }))
+        .toEqual({ ok: false, reason: 'invalid-class-choice' })
+    }
+    expect(buildDnd5eLevelAdvancementPlan(hero, 'fighter', 1)?.choiceRequirements.some(r => r.key === key)).toBe(false)
+    expect(applyDnd5eLevelAdvancement(hero, { ...decision, classId: 'fighter', classChoiceSelections: { [key]: ['snow'] } }).ok).toBe(false)
+  } finally { dispose() }
 })

@@ -1,3 +1,7 @@
+import { resolveDnd5eActionWithDamageReactions } from './damageReactionFlow'
+import { automationCapabilityFromLegacyStatus } from '../../domain/automation/automationCapability'
+import { registerDnd5eActivityPackage } from './activities/dnd5eActivityRegistry'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   parseDnd5eDeclarativeRulesPackageV1,
@@ -450,6 +454,46 @@ describe('Host-authoritative post-spell random table', () => {
     }))
   })
 
+  it.each(['own', 'foreign', 'suspended', 'resistant', 'vulnerable', 'invalid-save', 'invalid-damage'] as const)(
+    'keeps random-table shared dice separate from recipient source bonuses: %s', mode => {
+      const input = pendingState(0)
+      input.combatants.nearby.classState.activeEffects = [createDnd5eMechanicalEffect({
+        definitionId: 'source-bonus', label: 'Source bonus', targetId: 'nearby',
+        source: { kind: 'feature', actorId: mode === 'foreign' ? 'far' : 'actor' },
+        modifiers: { damageRollsBySourceBonus: 3 },
+      })]
+      if (mode === 'suspended') input.combatants.nearby.classState.activeEffects[0].suspendedBy = ['antimagic']
+      if (mode === 'resistant') input.combatants.nearby.damageResistances = ['fire']
+      if (mode === 'vulnerable') input.combatants.nearby.damageVulnerabilities = ['fire']
+      const before = structuredClone(input)
+      const action = { type: 'resolve-post-spell-random-table' as const, actorId: 'actor', featureId: TABLE_FEATURE_ID,
+        tableRoll: 42, resolution: { schemaVersion: 1 as const,
+          targetIds: ['actor', 'nearby'], targetSavingThrows: [{ targetId: 'actor', d20: 1 },
+            { targetId: 'nearby', d20: mode === 'invalid-save' ? 21 : 20 }],
+          effectRolls: Array(8).fill(mode === 'invalid-damage' ? 7 : 1) } }
+      const result = resolveDnd5eHeadlessAction(input, action)
+      const invalid = mode.startsWith('invalid')
+      expect(result.ok, JSON.stringify(result)).toBe(!invalid)
+      if (!result.ok) {
+        expect(result.reason).toBe('invalid-dice')
+        expect(result.state).toEqual(before)
+      } else {
+        expect(result.state.combatants.actor.currentHp).toBe(32)
+        expect(result.state.combatants.nearby.currentHp).toBe(40 - ({ own: 5, foreign: 4, suspended: 4,
+          resistant: 2, vulnerable: 10, 'invalid-save': 0, 'invalid-damage': 0 })[mode])
+        expect(result.state.combatants.far.currentHp).toBe(40)
+        expect(result.state.combatants.actor.classResources[LINKED_USE_RESOURCE_ID].current).toBe(1)
+        expect(result.state.combatants.actor.classState.postSpellRandomTableCheck).toBeUndefined()
+        expect(result.events.filter(event => event.type === 'damage-roll-bonus-applied')).toHaveLength(
+          ['foreign', 'suspended'].includes(mode) ? 0 : 1)
+        const replayState = JSON.parse(JSON.stringify(result.state))
+        const replay = resolveDnd5eHeadlessAction(replayState, action)
+        expect(replay.ok).toBe(false)
+        expect(replay.state).toEqual(replayState)
+      }
+      expect(input).toEqual(before)
+    })
+
   it('forces the table and restores the linked expended use', () => {
     const input = pendingState(0)
     const resolved = resolveDnd5eHeadlessAction(input, {
@@ -609,4 +653,59 @@ describe('Host-authoritative post-spell random table', () => {
       7,
     )).toBeUndefined()
   })
+  it.each(['failed-save', 'successful-save', 'decline', 'immune'])('opens elemental reaction before table damage defenses: %s', async mode => {
+  const packageId = 'test.stored-reaction'
+  const automation = automationCapabilityFromLegacyStatus('full')
+  const registration = registerDnd5eActivityPackage({ packageId, packageVersion: '1.0.0', activities: [{
+    schemaVersion: 1, id: 'ward', name: 'Synthetic ward', activation: { kind: 'reaction' }, target: { kind: 'self' },
+    legacySource: { kind: 'feature', id: 'ward' }, automation,
+    invocation: { kind: 'triggered', event: 'before-damage', confirmation: 'actor-choice' },
+    requirements: [{ kind: 'damage-type', damageTypes: ['fire','acid'] }],
+    consumption: [{ kind: 'action-economy', economy: 'reaction', amount: 1, consumeOn: 'resolve' }],
+    effects: [{ schemaVersion: 1, id: 'defense', name: 'Defense', stacking: 'replace',
+      duration: { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-start' },
+      modifiers: [{ kind: 'damage-resistance', damageType: 'fire' }, { kind: 'damage-resistance', damageType: 'acid' }] },
+    { schemaVersion: 1, id: 'charge', name: 'Stored follow-up', stacking: 'replace',
+      duration: { kind: 'rounds', rounds: 1, expiresAt: 'source-turn-end' },
+      suspendWhileEffectId: 'defense', grants: ['follow-up'], grantsSingleUse: true }],
+    outcomes: [{ id: 'ward', when: { kind: 'always' }, operations: [
+      { id: 'defense', kind: 'apply-effect', target: 'actor', effectId: 'defense' },
+      { id: 'charge', kind: 'apply-effect', target: 'actor', effectId: 'charge' },
+    ] }],
+  }, {
+    schemaVersion: 1, id: 'follow-up', name: 'Synthetic follow-up', activation: { kind: 'free' }, automation,
+    legacySource: { kind: 'feature', id: 'ward' }, requiresEffectGrant: true,
+    invocation: { kind: 'triggered', event: 'attack-hit', confirmation: 'automatic' },
+    target: { kind: 'creature', relation: 'any', count: 1 },
+    requirements: [{ kind: 'attack-delivery', delivery: 'melee' }, { kind: 'turn-owner', owner: 'actor' }],
+    outcomes: [{ id: 'hit', when: { kind: 'always' }, operations: [
+      { id: 'extra', kind: 'damage', target: 'target', damageType: 'fire', amount: { kind: 'constant', value: 3 } },
+    ] }],
+  }] })
+
+    try {
+      const input = pendingState()
+      input.combatants.nearby.pluginFeatureIds = [packageId + ':ward']
+      input.combatants.nearby.concentrating = true
+      if (mode === 'immune') input.combatants.nearby.damageImmunities = ['fire']
+      const original = structuredClone(input)
+      let prompts = 0
+      const result = await resolveDnd5eActionWithDamageReactions({ state: input,
+        charactersByCombatantId: {}, combatRevision: 1, authorityUnchanged: () => true,
+        confirm: async () => { prompts++; return { accepted: mode !== 'decline' } },
+        roll: async () => { throw Error('No reaction dice') },
+        action: { type: 'resolve-post-spell-random-table', actorId: 'actor', featureId: TABLE_FEATURE_ID,
+          triggerRoll: 1, tableRoll: 42, resolution: { schemaVersion: 1, targetIds: ['actor', 'nearby'],
+            targetSavingThrows: [{ targetId: 'actor', d20: 1 }, { targetId: 'nearby', d20: mode === 'successful-save' ? 20 : 1 }],
+            effectRolls: Array(8).fill(2) } } })
+      expect(result.ok, JSON.stringify(result)).toBe(true)
+      expect(prompts).toBe(mode === 'immune' ? 0 : 1)
+      expect(result.state.combatants.nearby.currentHp).toBe(mode === 'immune' ? 40 : mode === 'decline' ? 24 : mode === 'successful-save' ? 36 : 32)
+      expect(result.state.combatants.nearby.turn.reactionAvailable).toBe(mode === 'decline' || mode === 'immune')
+      expect(result.state.combatants.nearby.classState.activeEffects?.filter(effect => effect.grantedActivities?.length) ?? []).toHaveLength(mode === 'decline' || mode === 'immune' ? 0 : 1)
+      expect(result.events.filter(event => event.type === 'concentration-check-required' && event.targetId === 'nearby')).toHaveLength(mode === 'immune' ? 0 : 1)
+      expect(input).toEqual(original)
+    } finally { registration.dispose() }
+  })
+
 })

@@ -6,6 +6,7 @@ import {
   parseDnd5eTrackableDefinitionIdV1,
 } from './dnd5eActivityIdentity'
 import { listDnd5eTrackableDefinitionsV1 } from './dnd5eTrackableCatalog'
+import { dnd5eActivityTriggerContextsFromCombatEventV1 } from './dnd5eActivityTriggerWindows'
 
 const state = {
   combatants: {
@@ -19,6 +20,22 @@ function action(value: Record<string, unknown>): Dnd5eHeadlessObservedAction {
 }
 
 describe('D&D 5e stable activity identities', () => {
+  it('keeps nested execution events bounded and stable across redelivery batches', () => {
+    const combat = { ...state, combatId: 'test', round: 1 } as Dnd5eHeadlessCombatState
+    const event = { type: 'activity-resolved', actorId: 'wizard', targetIds: [], sourceKind: 'spell',
+      sourceId: 'test:spell', activityId: 'launch', executionId: 'cast' } as const
+    let executionId = 'cast'
+    for (let depth = 0; depth < 20; depth += 1) {
+      const original = dnd5eActivityTriggerContextsFromCombatEventV1(combat, { ...event, executionId }, 0, 'original')[0]
+      const replay = dnd5eActivityTriggerContextsFromCombatEventV1(combat, { ...event, executionId }, 19, 'redelivery')[0]
+      const other = dnd5eActivityTriggerContextsFromCombatEventV1(combat, { ...event, executionId: `${executionId}:other` }, 0, 'original')[0]
+      expect(replay.eventId).toBe(original.eventId)
+      expect(other.eventId).not.toBe(original.eventId)
+      expect(original.eventId.length).toBeLessThan(100)
+      expect(original.source.executionId).toBe(executionId)
+      executionId = `activity-trigger:${original.eventId}:test:followup`
+    }
+  })
   it('creates deterministic ids and preserves kind boundaries', () => {
     expect(dnd5eTrackableDefinitionIdV1({ namespace: 'srd-5.1', kind: 'spell', localId: 'fireball' }))
       .toBe('dnd5e-2014:srd-5.1:spell:fireball')

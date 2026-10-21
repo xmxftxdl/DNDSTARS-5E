@@ -457,7 +457,7 @@ describe('structured monster Teleport and Invisibility', () => {
     }
   })
 
-  it('keeps flyers airborne and routes an unsupported aerial arrival through deterministic fall dice', () => {
+  it.each([false, true])('keeps flyers airborne and requires unsupported arrival fall dice (flight=%s)', flying => {
     const heroToken = token({
       id: 'hero', label: 'Hero', type: 'player', characterId: 'hero-character', x: 155,
     })
@@ -473,8 +473,22 @@ describe('structured monster Teleport and Invisibility', () => {
     })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
+    if (flying) prepared.prepared.state.combatants.marilith.movementSpeeds = { walk: 40, fly: 40 }
+    const before = structuredClone(prepared.prepared.state)
     const preview = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared })
+    if (flying) {
+      expect(preview.result.ok).toBe(true)
+      expect(preview.airborneFalls).toEqual([])
+      expect(preview.result.state.combatants.marilith).toMatchObject({ currentHp: 100, elevationFeet: 20, airborne: true })
+      return
+    }
     expect(preview.result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    expect(preview.result.state).toEqual(before)
+    const invalid = resolvePreparedDnd5eMonsterSpecialAction({ prepared: prepared.prepared,
+      airborneFallDamageRollsByCombatantId: { [marilithToken.id]: [3, 7] } })
+    expect(invalid.result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    expect(invalid.result.state).toEqual(before)
+    expect(prepared.prepared.state).toEqual(before)
     expect(preview.airborneFalls).toEqual([expect.objectContaining({
       combatantId: marilithToken.id,
       fallDistanceFeet: 20,

@@ -18,6 +18,10 @@ export interface Dnd5eSpellMaterialComponent {
   minimumTotalValueGp?: number
   /** Some spell bodies require the component to be worn before casting. */
   mustBeEquipped?: boolean
+  /** Require an explicit, not-yet-reached campaign-clock expiry on this instance. */
+  requiresExpiry?: boolean
+  /** Bind the newly created caster effect to this physical, nonconsumed material. */
+  bindEffectId?: string
   consumed: boolean
 }
 
@@ -29,6 +33,9 @@ export interface Dnd5eSpellMaterialOption {
 export interface Dnd5eSpellMaterialRequirement {
   label: string
   options: readonly Dnd5eSpellMaterialOption[]
+  /** Explicitly permit the ordinary focus/pouch alternative for noncostly, nonconsumed ingredients. */
+  allowFocusSubstitution?: boolean
+  consumptionTiming?: 'cast' | 'spell-end'
 }
 
 export interface Dnd5eSpellMaterialAllocation {
@@ -38,6 +45,8 @@ export interface Dnd5eSpellMaterialAllocation {
   unitValueGp: number
   consumed: boolean
   mustBeEquipped?: boolean
+  requiresExpiry?: boolean
+  bindEffectId?: string
 }
 
 export interface Dnd5eSpellMaterialConsumptionPlan {
@@ -45,6 +54,7 @@ export interface Dnd5eSpellMaterialConsumptionPlan {
   requirementLabel: string
   optionLabel: string
   allocations: readonly Dnd5eSpellMaterialAllocation[]
+  consumptionTiming?: 'cast' | 'spell-end'
 }
 
 /** Human-readable audit details for the exact material allocation bound at cast preparation. */
@@ -59,7 +69,7 @@ export function dnd5eSpellMaterialPlanLogDetails(
     ...plan.allocations.map((allocation) => {
       const entry = entries.find((candidate) => candidate.instanceId === allocation.instanceId)
       const label = entry?.item.name ?? allocation.tag
-      const disposition = allocation.consumed ? '结算时已消耗' : '施法后保留'
+      const disposition = allocation.consumed ? plan.consumptionTiming === 'spell-end' ? '已预留，法术结束时消耗' : '结算时已消耗' : '施法后保留'
       const equipped = allocation.mustBeEquipped ? '｜施法前已穿戴' : ''
       return `施法材料：${label} ×${allocation.quantity}｜每单位 ${allocation.unitValueGp.toLocaleString('en-US')} gp${equipped}｜${disposition}`
     }),
@@ -327,12 +337,25 @@ export function dnd5eCoreSpellMaterialRequirement(
   return CORE_REQUIREMENTS[normalizedSpellId]
 }
 
-function entryUnitValueGp(entry: Dnd5eInventoryEntry): number {
+/** Reserved structural component tag; a hand-written material label cannot turn a bow into a melee weapon. */
+function physicalMeleeWeapon(entry: Dnd5eInventoryEntry): boolean {
+  const weapon = entry.item.equipment?.dnd5e
+  return !entry.condition?.destroyed && weapon?.kind === 'weapon' && weapon.mode === 'melee' &&
+    (weapon.category === 'simple' || weapon.category === 'martial') && !weapon.vanishesAfterRelease
+}
+
+function entryUnitValueGp(entry: Dnd5eInventoryEntry, tag?: string): number {
+  if (tag === 'physical-melee-weapon') {
+    const cost = entry.item.cost
+    if (!physicalMeleeWeapon(entry) || !cost || !Number.isFinite(cost.amount) || cost.amount < 0) return 0
+    return cost.amount * ({ cp: 0.01, sp: 0.1, ep: 0.5, gp: 1, pp: 10 }[cost.currency] ?? 0)
+  }
   const value = entry.item.spellcastingMaterial?.unitValueGp
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
 }
 
 function entryHasTag(entry: Dnd5eInventoryEntry, tag: string): boolean {
+  if (tag === 'physical-melee-weapon') return physicalMeleeWeapon(entry)
   return entry.item.spellcastingMaterial?.tags.some((candidate) => candidate === tag) === true
 }
 
@@ -346,7 +369,7 @@ function minimumValueAllocation(
   const minimumUnits = requirement.quantity == null
     ? 0
     : Math.max(1, Math.floor(requirement.quantity))
-  const maximumUnitValueGp = Math.max(0, ...candidates.map(entryUnitValueGp))
+  const maximumUnitValueGp = Math.max(0, ...candidates.map(entry => entryUnitValueGp(entry, requirement.tag)))
   const maximumUsefulValueGp = minimumTotalValueGp +
     maximumUnitValueGp * Math.max(1, minimumUnits) - 1
   type AllocationState = {
@@ -361,7 +384,7 @@ function minimumValueAllocation(
 
   for (const entry of candidates) {
     const available = remaining.get(entry.instanceId) ?? 0
-    const unitValueGp = entryUnitValueGp(entry)
+    const unitValueGp = entryUnitValueGp(entry, requirement.tag)
     if (available < 1 || unitValueGp <= 0) continue
     const maximumUsefulQuantity = Math.min(
       available,
@@ -401,14 +424,17 @@ function planOption(
   const remaining = new Map(entries.map((entry) => [entry.instanceId, Math.max(0, Math.floor(entry.quantity))]))
   const allocations: Dnd5eSpellMaterialAllocation[] = []
   for (const requirement of option.components) {
+    if (requirement.bindEffectId && (requirement.consumed || (requirement.quantity ?? 1) !== 1)) return undefined
     const candidates = entries
       .filter((entry) =>
         entry.quantity > 0 && entry.identified !== false && entryHasTag(entry, requirement.tag) &&
-        entryUnitValueGp(entry) >= (requirement.minimumUnitValueGp ?? 0) &&
+        (!requirement.bindEffectId || entry.quantity === 1) &&
+        (!requirement.requiresExpiry || entry.expiresAtWorldMinute != null) &&
+        entryUnitValueGp(entry, requirement.tag) >= (requirement.minimumUnitValueGp ?? 0) &&
         (!requirement.mustBeEquipped || entry.equippedSlot != null),
       )
       .sort((left, right) =>
-        entryUnitValueGp(left) - entryUnitValueGp(right) ||
+        entryUnitValueGp(left, requirement.tag) - entryUnitValueGp(right, requirement.tag) ||
         left.acquiredAt - right.acquiredAt ||
         left.instanceId.localeCompare(right.instanceId),
       )
@@ -419,7 +445,7 @@ function planOption(
     for (const entry of candidates) {
       const available = remaining.get(entry.instanceId) ?? 0
       if (available < 1 || (unitsNeeded <= 0 && valueNeeded <= 0)) continue
-      const unitValueGp = entryUnitValueGp(entry)
+      const unitValueGp = entryUnitValueGp(entry, requirement.tag)
       const plannedQuantity = minimumValueQuantities?.get(entry.instanceId)
       if (minimumValueQuantities && plannedQuantity == null) continue
       const forUnits = minimumValueQuantities ? 0 : (unitsNeeded > 0 ? unitsNeeded : 0)
@@ -438,6 +464,8 @@ function planOption(
         unitValueGp,
         consumed: requirement.consumed,
         mustBeEquipped: requirement.mustBeEquipped || undefined,
+        requiresExpiry: requirement.requiresExpiry || undefined,
+        ...(requirement.bindEffectId ? { bindEffectId: requirement.bindEffectId } : {}),
       })
       unitsNeeded = Math.max(0, unitsNeeded - quantity)
       valueNeeded = Math.max(0, valueNeeded - quantity * unitValueGp)
@@ -448,23 +476,32 @@ function planOption(
 }
 
 export function dnd5eSpellMaterialConsumptionPlan(
-  actor: Pick<Character, 'dnd5eInventory'>,
+  actor: Pick<Character, 'dnd5eInventory' | 'dnd5eWorldTimeAppliedMinute'>,
   requirement: Dnd5eSpellMaterialRequirement,
 ): Dnd5eSpellMaterialConsumptionPlan | undefined {
   const inventory = actor.dnd5eInventory
   if (!inventory) return undefined
   for (const option of requirement.options) {
-    const allocations = planOption(inventory.entries, option)
+    const allocations = planOption(inventory.entries.filter(entry => materialEntryIsCurrent(entry, actor.dnd5eWorldTimeAppliedMinute)), option)
     if (allocations) {
       return {
         expectedInventoryRevision: inventory.revision ?? 0,
         requirementLabel: requirement.label,
         optionLabel: option.label,
         allocations,
+        ...(requirement.consumptionTiming ? { consumptionTiming: requirement.consumptionTiming } : {}),
       }
     }
   }
   return undefined
+}
+
+function materialEntryIsCurrent(entry: Dnd5eInventoryEntry, worldMinute: number | undefined): boolean {
+  if (entry.condition?.destroyed || entry.planarState === 'ethereal') return false
+  return entry.expiresAtWorldMinute == null || (
+    Number.isSafeInteger(entry.expiresAtWorldMinute) && entry.expiresAtWorldMinute >= 0 &&
+    Number.isSafeInteger(worldMinute) && worldMinute! >= 0 && worldMinute! < entry.expiresAtWorldMinute
+  )
 }
 
 export function applyDnd5eSpellMaterialConsumption(
@@ -472,6 +509,7 @@ export function applyDnd5eSpellMaterialConsumption(
   plan: Dnd5eSpellMaterialConsumptionPlan,
   expectedInventoryRevision = plan.expectedInventoryRevision,
 ): Dnd5eSpellMaterialSettlement {
+  if (plan.consumptionTiming === 'spell-end') return { ok: false, character, reason: 'material-unavailable' }
   const inventory = character.dnd5eInventory
   if (!inventory) return { ok: false, character, reason: 'inventory-untracked' }
   if ((inventory.revision ?? 0) !== expectedInventoryRevision) {
@@ -485,8 +523,10 @@ export function applyDnd5eSpellMaterialConsumption(
     )
     const entry = inventory.entries.find((candidate) => candidate.instanceId === allocation.instanceId)
     if (
-      !entry || entry.identified === false || !entryHasTag(entry, allocation.tag) ||
-      entryUnitValueGp(entry) < allocation.unitValueGp ||
+      !entry || !materialEntryIsCurrent(entry, character.dnd5eWorldTimeAppliedMinute) || entry.identified === false || !entryHasTag(entry, allocation.tag) ||
+      (allocation.bindEffectId && (allocation.consumed || allocation.quantity !== 1 || entry.quantity !== 1)) ||
+      (allocation.requiresExpiry && entry.expiresAtWorldMinute == null) ||
+      entryUnitValueGp(entry, allocation.tag) < allocation.unitValueGp ||
       (allocation.mustBeEquipped && entry.equippedSlot == null)
     ) return { ok: false, character, reason: 'material-unavailable' }
   }

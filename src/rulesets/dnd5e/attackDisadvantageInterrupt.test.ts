@@ -13,6 +13,7 @@ const SUBCLASS_ID = `${PLUGIN_ID}:light-domain`
 const FEATURE_ID = `${SUBCLASS_ID}.warding-flare`
 const FORCE_MISS_FEATURE_ID = `${SUBCLASS_ID}.illusory-self`
 const FOLLOW_UP_FEATURE_ID = `${SUBCLASS_ID}.entropic-ward`
+const NO_ADVANTAGE_FEATURE_ID = `${SUBCLASS_ID}.no-advantage-defense`
 const RESOURCE_ID = `${PLUGIN_ID}:warding-flare-uses`
 
 const definition: DeclarativeSubclassDefinitionV1 = {
@@ -64,6 +65,11 @@ const definition: DeclarativeSubclassDefinitionV1 = {
     },
     effects: [],
     automation: 'full',
+  }, {
+    schemaVersion: 1, id: 'no-advantage-defense', name: 'Conditional defense', description: 'Synthetic',
+    level: 1, trigger: { kind: 'before-attack-roll' }, cost: { economy: 'reaction' },
+    targeting: { kind: 'single-creature', relation: 'enemy' }, effects: [], automation: 'full',
+    mechanic: { kind: 'attack-disadvantage-interrupt', protects: 'self', requiresNoAdvantage: true },
   }],
 }
 
@@ -81,6 +87,30 @@ describe('generic attack disadvantage Interrupt', () => {
   })
 
   afterAll(() => dispose?.())
+
+  it.each(['normal', 'advantage', 'disadvantage', 'cancelled'] as const)('checks %s before adding the conditional defense disadvantage', mode => {
+    const make = (id: string, controller: 'dm' | 'player', initiative: number) => createDnd5eCombatant({
+      id, name: id, controller, initiative, abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      proficiencyBonus: 2, armorClass: 15, currentHp: 30, maxHp: 30, temporaryHp: 0,
+      speed: 30, position: { x: 0, y: 0 }, concentrating: false,
+      classId: 'cleric', level: 1, classLevels: { cleric: 1 }, subclassIds: { cleric: SUBCLASS_ID },
+      pluginFeatureIds: controller === 'player' ? [NO_ADVANTAGE_FEATURE_ID] : [],
+    })
+    const state = startDnd5eHeadlessCombat('conditional-defense', [make('attacker', 'dm', 20), make('defender', 'player', 10)])
+    state.combatants.defender.dodging = mode === 'cancelled'
+    const original = structuredClone(state)
+    const result = resolveDnd5eHeadlessAction(state, { type: 'attack', actorId: 'attacker', targetId: 'defender',
+      attackModifier: 5, d20: 18, d20Second: 2, mode: mode === 'cancelled' ? 'advantage' : mode,
+      protectionReactionActorId: 'defender', damage: { count: 1, sides: 6, bonus: 0, rolls: [3] } })
+    expect(result.ok, result.ok ? '' : result.reason).toBe(mode !== 'advantage')
+    if (result.ok) {
+      expect(result.state.combatants.defender.turn.reactionAvailable).toBe(false)
+      expect(result.events.find(event => event.type === 'attack-resolved')).toMatchObject({
+        rollMode: mode === 'cancelled' ? 'normal' : 'disadvantage', d20: mode === 'cancelled' ? 18 : 2,
+      })
+    }
+    expect(state).toEqual(original)
+  })
 
   it('spends the declared reaction and resource and imposes disadvantage', () => {
     const attacker = createDnd5eCombatant({

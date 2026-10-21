@@ -1,25 +1,73 @@
 import { wallArmorClass, wallDamageAfterDefenses } from './wallObjectRules'
+import { dnd5eEntityDestructionTerrain } from './entityDestructionTerrain'
 import type { Character } from '../../types/character'
 import type { BattleMap, Token } from '../../store/maps'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { ejectDnd5ePasswallOccupants } from './pluginAreas'
 import { stoneWallCells } from './stoneWall'
+import { reconcileDnd5eEndedAreaCaptives } from './persistentAreaEnd'
+import type { Dnd5eCombatEvent } from './headlessCombatEngine'
+import {restoreMaterialVolumeTransformation} from './materialVolumeTransformation'
+import type {MapGeometryState} from '../../lib/mapGeometry'
 
 export interface DmPersistentAreaRemoval {
+  /** Must be committed together with map when a reversible terrain area ends. */
+  geometry?: MapGeometryState
   map: BattleMap
   character?: Character
   sourceToken?: Token
   label: string
   concentrationEnded: boolean
+  /** Complete affected roster, including captive targets rather than only the caster. */
+  characters?: readonly Character[]
+  events?: readonly Dnd5eCombatEvent[]
 }
 
 export interface DmPersistentAreaEntityAttackResolution extends DmPersistentAreaRemoval {
   outcome: 'miss' | 'hit' | 'destroyed'
   attackTotal: number
-  armorClass: number
+  armorClass: number | null
   damage: number
-  hitPointsBefore: number
-  hitPointsAfter: number
+  hitPointsBefore: number | null
+  hitPointsAfter: number | null
+}
+
+export interface DmPersistentAreaEntityImpactResolution extends DmPersistentAreaRemoval {
+  /** Present only when the independent projection resolved a requested save. */
+  savingThrow?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; dc: number; succeeded: true; automatic: true }
+  /** Includes custom conditions: immunity is not limited to the SRD list. */
+  immuneConditions?: readonly string[]
+}
+
+/** Direct impact damage has no attack roll, but shares destruction and immunity rules. */
+export function resolvePersistentAreaEntityImpact(input: {
+  map: BattleMap; characters: readonly Character[]; areaId: string; panelId?: string
+  damage: number; damageType: string; round?: number
+  savingThrow?: { ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'; dc: number }
+  conditions?: readonly string[]
+}): DmPersistentAreaEntityImpactResolution | undefined {
+  if (!Number.isInteger(input.damage) || input.damage < 0) return undefined
+  if (input.panelId != null && input.panelId !== 'entity' &&
+    !input.map.dnd5ePluginAreas?.find(candidate => candidate.id === input.areaId)?.stoneWall) return undefined
+  if (input.savingThrow && (!['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(input.savingThrow.ability) ||
+    !Number.isFinite(input.savingThrow.dc) || input.savingThrow.dc < 0)) return undefined
+  if (input.conditions?.some(condition => typeof condition !== 'string' || !condition.trim())) return undefined
+  const area = input.map.dnd5ePluginAreas?.find(candidate => candidate.id === input.areaId)
+  if (!area) return undefined
+  if (area.projectionDefense === 'untouchable-illusion') return {
+    map: input.map, label: area.label, concentrationEnded: false,
+    ...(input.savingThrow ? { savingThrow: { ...input.savingThrow, succeeded: true as const, automatic: true as const } } : {}),
+    ...(input.conditions ? { immuneConditions: [...new Set(input.conditions)] } : {}),
+  }
+  // This impact entry point cannot settle saves or conditions for physical
+  // entities yet. Reject rather than silently discard part of an operation.
+  if (input.savingThrow || input.conditions?.length) return undefined
+  if (area.coreSpellId === 'wall-of-force') return { map: input.map, label: area.label, concentrationEnded: false }
+  if (!area.stoneWall && !area.entityProfile) return undefined
+  return resolvePersistentAreaEntityAttackByDm({ ...input,
+    attackTotal: area.stoneWall ? wallArmorClass(area) : area.entityProfile!.armorClass,
+    damage: area.stoneWall ? input.damage : wallDamageAfterDefenses(area, input.damage, input.damageType),
+  })
 }
 
 function withoutMatchingConcentration<T extends { concentrating?: boolean; conditions?: Character['conditions']; dnd5eCombatState?: Character['dnd5eCombatState'] }>(
@@ -80,6 +128,9 @@ export function removePersistentAreaByDm(input: {
   map: BattleMap
   characters: readonly Character[]
   areaId: string
+  round?: number
+  /** Supplying geometry explicitly opts into committing the returned geometry. */
+  geometry?: MapGeometryState
 }): DmPersistentAreaRemoval | undefined {
   const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === input.areaId)
   if (!area) return undefined
@@ -91,12 +142,36 @@ export function removePersistentAreaByDm(input: {
       )
     : undefined
   const removedAreas = (input.map.dnd5ePluginAreas ?? [])
-    .filter((candidate) => candidate.id === area.id || (!!effectToken &&
+    .filter((candidate) => candidate.id === area.id || (!!area.effectGroup &&
+      candidate.effectGroup?.castId === area.effectGroup.castId &&
+      candidate.effectGroup.effectId === area.effectGroup.effectId &&
+      candidate.pluginId === area.pluginId && candidate.featureId === area.featureId &&
+      candidate.sourceCharacterId === area.sourceCharacterId && candidate.sourceTokenId === area.sourceTokenId) || (!!effectToken &&
       candidate.anchorMode === 'effect-token' && candidate.anchorTokenId === effectToken.id))
   const removedAreaIds = new Set(removedAreas.map((candidate) => candidate.id))
+  for(let changed=true;changed;){
+    changed=false
+    for(const candidate of input.map.dnd5ePluginAreas??[]){
+      if(candidate.linkedParentAreaId&&removedAreaIds.has(candidate.linkedParentAreaId)&&!removedAreaIds.has(candidate.id)){
+        removedAreaIds.add(candidate.id);removedAreas.push(candidate);changed=true
+      }
+    }
+  }
+  const removedEffectTokenIds = new Set(removedAreas.flatMap(candidate =>
+    candidate.anchorMode === 'effect-token' && candidate.anchorTokenId &&
+    input.map.tokens.some(token => token.id === candidate.anchorTokenId && token.dnd5eSpellEffect)
+      ? [candidate.anchorTokenId] : []))
+  let restoredGeometry:MapGeometryState|undefined
+  for(const candidate of removedAreas){
+    if(!candidate.materialTransformation)continue
+    const current=restoredGeometry??input.geometry
+    if(!current||current.mapId!==input.map.id)return undefined
+    restoredGeometry=restoreMaterialVolumeTransformation(current,candidate.materialTransformation)
+    if(!restoredGeometry)return undefined
+  }
   // Old shared maps may predate concentrationId. Only fall back to the core
   // spell id when it is also the caster's current concentration identity.
-  const recordedConcentrationId = area.permanent ? undefined : area.concentrationId ?? area.coreSpellId
+  const recordedConcentrationId = area.permanent || area.linkedParentAreaId ? undefined : area.concentrationId ?? area.coreSpellId
   const character = sourceCharacter
     ? withoutMatchingConcentration(sourceCharacter, recordedConcentrationId, area.sourceTokenId)
     : undefined
@@ -104,17 +179,24 @@ export function removePersistentAreaByDm(input: {
     ? withoutMatchingConcentration(sourceToken, recordedConcentrationId, area.sourceTokenId)
     : undefined
   const concentrationEnded = character !== sourceCharacter || nextSourceToken !== sourceToken
-  return {
-    map: ejectDnd5ePasswallOccupants({
+  const removedMap = ejectDnd5ePasswallOccupants({
       ...input.map,
       dnd5ePluginAreas: (input.map.dnd5ePluginAreas ?? []).filter((candidate) =>
         !removedAreaIds.has(candidate.id)),
       tokens: input.map.tokens
-        .filter((candidate) => candidate.id !== effectToken?.id)
+        .filter((candidate) => !removedEffectTokenIds.has(candidate.id))
         .map((candidate) => candidate.id === nextSourceToken?.id ? nextSourceToken : candidate),
-    }, removedAreas),
-    character,
-    sourceToken: nextSourceToken,
+    }, removedAreas)
+  const released = reconcileDnd5eEndedAreaCaptives({ before: input.map, after: removedMap,
+    characters: character ? input.characters.map(candidate => candidate.id === character.id ? character : candidate) : input.characters,
+    round: input.round ?? area.createdRound })
+  return {
+    map: released.map,
+    ...(restoredGeometry ? {geometry:restoredGeometry} : {}),
+    characters: released.characters,
+    events: released.events,
+    character: character ? released.characters.find(candidate => candidate.id === character.id) ?? character : undefined,
+    sourceToken: nextSourceToken ? released.map.tokens.find(candidate => candidate.id === nextSourceToken.id) ?? nextSourceToken : undefined,
     label: area.label,
     concentrationEnded,
   }
@@ -129,6 +211,7 @@ export function resolvePersistentAreaEntityAttackByDm(input: {
   map: BattleMap
   characters: readonly Character[]
   areaId: string
+  round?: number
   panelId?: string
   attackTotal: number
   damage: number
@@ -136,6 +219,12 @@ export function resolvePersistentAreaEntityAttackByDm(input: {
 }): DmPersistentAreaEntityAttackResolution | undefined {
   const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === input.areaId)
   if (area?.coreSpellId === 'wall-of-force') return undefined
+  if (area?.projectionDefense === 'untouchable-illusion') {
+    if (!Number.isInteger(input.attackTotal) || !Number.isInteger(input.damage) || input.damage < 0 ||
+      (input.panelId != null && input.panelId !== 'entity')) return undefined
+    return { map: input.map, label: area.label, concentrationEnded: false, outcome: 'miss',
+      attackTotal: input.attackTotal, armorClass: null, damage: 0, hitPointsBefore: null, hitPointsAfter: null }
+  }
   if (area?.stoneWall) {
     const panel = area.stoneWall.panels.find(candidate => candidate.id === input.panelId && candidate.hitPoints > 0)
     if (!panel || !Number.isInteger(input.attackTotal) || !Number.isInteger(input.damage) || input.damage < 0) return undefined
@@ -168,7 +257,7 @@ export function resolvePersistentAreaEntityAttackByDm(input: {
     }
   }
   const profile = area?.entityProfile
-  if (!area || !profile || !Number.isInteger(input.attackTotal) || !Number.isInteger(input.damage) || input.damage < 1) {
+  if (!area || !profile || !Number.isInteger(input.attackTotal) || !Number.isInteger(input.damage) || input.damage < 0) {
     return undefined
   }
   const hitPointsBefore = area.entityCurrentHitPoints ?? profile.hitPoints
@@ -183,14 +272,16 @@ export function resolvePersistentAreaEntityAttackByDm(input: {
     hitPointsBefore,
     hitPointsAfter: hitPointsBefore,
   }
-  if (input.attackTotal < profile.armorClass) return base
+  if (profile.attacksAutomaticallyMiss || input.attackTotal < profile.armorClass) return base
 
-  const damage = Math.max(1, input.damage)
+  const damage = Math.max(0, input.damage)
   const hitPointsAfter = Math.max(0, hitPointsBefore - damage)
   if (hitPointsAfter === 0) {
     const removed = removePersistentAreaByDm(input)
+    const debris = dnd5eEntityDestructionTerrain(area, input.map)
     return removed ? {
       ...removed,
+      map: debris ? { ...removed.map, dnd5ePluginAreas: [...(removed.map.dnd5ePluginAreas ?? []), debris] } : removed.map,
       outcome: 'destroyed',
       attackTotal: input.attackTotal,
       armorClass: profile.armorClass,

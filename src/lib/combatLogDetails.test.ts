@@ -11,6 +11,29 @@ import {
 } from './combatLogDetails'
 
 describe('formatDnd5eCombatLogDetails', () => {
+  it('names the companion and original requester in a completed order report',()=>{
+    expect(formatDnd5eCombatLogDetails([{type:'companion-order-completed',actorId:'devil',sourceOwnerId:'wizard',command:'dodge'}],{resolveName:id=>id==='devil'?'魔鬼':'法师'})).toContain('魔鬼向法师报告：闪避命令已完成。')
+  })
+  it('reports ambient Grove magic without leaking an artificial target or inventing a visible aura', () => {
+    const event: Dnd5eCombatEvent = {type: 'spell-detection-updated', actorId: 'hero', spellId: 'detect-magic', mode: 'magic',
+      presences: [{targetId: 'map-magic:private-map:private-cast', distanceFeet: 0,
+        categories: ['magic', 'magic-area'], sourceRulesIds: ['private-plugin:druid-grove'], auraVisible: false}]}
+    const options = {resolveName: (id: string) => id === 'hero' ? '探测者' : id}
+    const sensed = formatDnd5eCombatLogDetails([event], options).join(' ')
+    expect(sensed).toContain('感知到魔法存在')
+    expect(sensed).not.toContain('private-')
+    const revealed = formatDnd5eCombatLogDetails([{...event, revealAuras: true}], options).join(' ')
+    expect(revealed).toContain('当前没有可见的承载魔法目标可显化灵光')
+    expect(revealed).not.toContain('private-')
+  })
+  it.each(['size-rule-success', 'dm-adjusted-automatic-failure', 'willing-failure', 'dm-adjusted-automatic-success', 'environmental-immunity-success'] as const)('does not present an automatic area result as a d20 roll: %s', automaticOutcome => {
+    const details = formatDnd5eCombatLogDetails([{
+      type: 'saving-throw-resolved', targetId: 'target', ability: 'str', d20: 0, modifier: 0,
+      total: 18, dc: 18, success: ['size-rule-success','dm-adjusted-automatic-success','environmental-immunity-success'].includes(automaticOutcome), automaticOutcome,
+    }], { resolveName: () => 'Target' })
+    expect(details.join(' ')).toContain('无需掷骰')
+    expect(details.join(' ')).not.toContain('d20 0')
+  })
   it('explains immunity without inventing a saving throw result', () => {
     expect(formatDnd5eCombatLogDetails([{
       type: 'spell-save-skipped-damage-immunity', actorId: 'wizard', targetId: 'minotaur',
@@ -864,6 +887,15 @@ describe('formatDnd5eCombatLogDetails', () => {
         values: [2, 7, 4, 8],
       }],
     }], { resolveName })).toContain('艾莉雅 → 恐狼｜再生术治疗骰 4d8 [2, 7, 4, 8] +15 = 36')
+  })
+
+  it('labels damage formula totals separately from healing and applied hit-point damage', () => {
+    expect(formatDnd5eCombatLogDetails([{
+      type: 'activity-formula-roll-resolved', actorId: 'hero', executorId: 'wolf', targetId: 'wolf',
+      activityId: 'synthetic-damage', operationId: 'damage', kind: 'damage', damageType: 'fire',
+      total: 3, formulaAdjustment: -4,
+      dice: [{ rollId: 'damage', count: 2, sides: 6, submittedCount: 2, rawValues: [3, 4], values: [3, 4] }],
+    }], { resolveName })).toContain('艾莉雅 → 恐狼｜未命名规则项（编号：synthetic-damage）伤害骰 2d6 [3, 4] -4 = 3')
   })
 
   it('labels a cantrip as slot-free instead of inventing a 0-level spell slot', () => {

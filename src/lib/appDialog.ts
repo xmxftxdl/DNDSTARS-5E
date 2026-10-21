@@ -18,6 +18,7 @@ export interface AppDialogOptions {
 }
 
 export interface AppPromptOptions extends AppDialogOptions {
+  surfaceDrawing?: boolean
   defaultValue?: string
   placeholder?: string
 }
@@ -84,6 +85,7 @@ export interface AppMultiChoiceOptions extends AppDialogOptions {
 }
 
 export interface AppDialogRequest extends AppDialogOptions {
+  surfaceDrawing?: boolean
   id: number
   kind: AppDialogKind
   defaultValue?: string
@@ -205,6 +207,7 @@ export async function showAppPrompt(
     ...options,
     defaultValue: promptOptions?.defaultValue ?? defaultValue,
     placeholder: promptOptions?.placeholder,
+    surfaceDrawing: promptOptions?.surfaceDrawing,
   })
   return typeof result === 'string' ? result : null
 }

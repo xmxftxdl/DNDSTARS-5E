@@ -12,9 +12,17 @@ import type { Dnd5eSrdSpellDefinition } from './spells'
 
 /** Pure result contract shared by planning, workers and map settlement. */
 export interface Dnd5eMonsterTurnPlan {
+  /** Host random target checkpoint identity for this declaration. */
+  randomTargetTransactionId?: string
   moved: boolean
   dashed?: boolean
+  disengaged?: boolean
   dodged?: boolean
+  commandedReady?: true
+  commandedHide?: true
+  commandedObjectInteraction?: string
+  help?: { targetTokenId: string; helpKind: 'attack' | 'ability-check' }
+  commandedSpecialAttack?: { targetTokenId: string; kind: 'grapple' | 'shove-prone' | 'shove-push' }
   nimbleEscape?: 'disengage'
   moveApSpent?: number
   newPosition?: { x: number; y: number }

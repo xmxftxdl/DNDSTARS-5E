@@ -3,6 +3,7 @@ import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import {
   dnd5ePersistentAreaAffectsTokenVerticallyAt,
   dnd5ePersistentAreaOccupantModifiersAt,
+  dnd5eTokenIntersectsPersistentAreaAt,
 } from './persistentAreaGeometry'
 
 const map: BattleMap = {
@@ -50,6 +51,16 @@ function legacyArea(coreSpellId: string): Dnd5ePluginArea {
     expiresAfterRound: 10,
   }
 }
+
+it('keeps continuous Large-body sphere contact despite a rounded grid footprint', () => {
+  const area: Dnd5ePluginArea = {...legacyArea('test-sphere'),
+    cells: Array.from({length:9}, (_, i) => ({col:i % 3 - 1,row:Math.floor(i / 3) - 1})),
+    vertical:{mode:'volume',shape:'sphere',baseElevationFeet:0,heightFeet:10}}
+  const large: Token = {...token(0),size:2,x:25,y:5}
+  expect(dnd5eTokenIntersectsPersistentAreaAt(large,map,area,large)).toBe(true)
+  expect(dnd5eTokenIntersectsPersistentAreaAt(large,map,area,{x:25.01,y:5})).toBe(false)
+  expect(dnd5eTokenIntersectsPersistentAreaAt(large,map,area,large,area.cells,30)).toBe(false)
+})
 
 describe('legacy persistent-area vertical migration', () => {
   it('infers the finite Moonbeam column instead of an unbounded Z column', () => {

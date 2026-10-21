@@ -35,11 +35,33 @@ function combatant(effects: Dnd5eInventoryHeadlessEffectSnapshot[]) {
     abilities, proficiencyBonus: 2, armorClass: 16, currentHp: 20, maxHp: 20,
     temporaryHp: 0, speed: 30, position: { x: 0, y: 0 }, concentrating: false,
     inventoryHeadlessEffects: effects,
+    inventoryResourceSnapshots: effects.map((entry) => ({ instanceId: entry.instanceId, resources: structuredClone(entry.resources) })),
     inventoryRevision: 0,
   })
 }
 
 describe('inventory Headless runtime V1', () => {
+  it.each([
+    { cancelled: true, doubles: true, rolls: [4, 5], valid: true },
+    { cancelled: true, doubles: true, rolls: [4], valid: true },
+    { cancelled: false, doubles: true, rolls: [4, 5], valid: false },
+    { cancelled: true, doubles: false, rolls: [4, 5], valid: false },
+    { cancelled: true, doubles: true, rolls: [4, 99], valid: false },
+    { cancelled: true, doubles: true, rolls: [4, 5, 6], valid: false },
+  ])('validates cancelled critical item damage before consuming charges: %j', ({ cancelled, doubles, rolls, valid }) => {
+    const actor = combatant([snapshot({ schemaVersion: 1, id: 'flame-hit', kind: 'on-hit-bonus-damage',
+      trigger: 'after-attack-hit', appliesTo: 'attacks-with-this-weapon', damage: { count: 1, sides: 6, bonus: 2 },
+      damageType: 'fire', doubleDiceOnCritical: doubles, oncePerTurn: true, resourceId: 'charges', resourceCost: 1 })])
+    const before = structuredClone(actor), key = dnd5eInventoryEffectRollKey('item-1', 'flame-hit')
+    const result = resolveDnd5eOnHitBonusDamage({ combatant: actor, weaponId: 'plugin:weapon', inheritedDamageType: 'slashing',
+      critical: false, criticalCancelled: cancelled, turnKey: 'combat:1:hero', rolls: { [key]: rolls } })
+    expect(result.ok).toBe(valid)
+    if (valid) {
+      expect(result.components[0].total).toBe(6)
+      expect(actor.inventoryResourceSnapshots?.[0].resources.charges.current).toBe(3)
+      expect(actor.inventoryRevision).toBe(1)
+    } else expect(actor).toEqual(before)
+  })
   it('derives and validates on-hit bonus damage rolls, then spends the instance resource', () => {
     const effect = snapshot({
       schemaVersion: 1,
@@ -72,6 +94,8 @@ describe('inventory Headless runtime V1', () => {
       components: [{ total: 11, type: 'fire', application: { kind: 'on-hit-bonus-damage' } }],
     })
     expect(actor.inventoryHeadlessEffects?.[0].resources.charges.current).toBe(3)
+    expect(actor.inventoryResourceSnapshots?.[0].resources.charges.current).toBe(3)
+    expect(effect.resources.charges.current).toBe(4)
     expect(actor.inventoryRevision).toBe(1)
     expect(dnd5eOnHitBonusDamageRequirements({
       combatant: actor, weaponId: 'plugin:weapon', critical: false, turnKey: 'combat:1:hero',

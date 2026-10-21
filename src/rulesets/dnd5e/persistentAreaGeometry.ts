@@ -1,11 +1,23 @@
+import { gasExcludedAt } from './gasExclusion'
+import { rectangularPrismOverlapsBox } from '../../../shared/rectangular-prism.mjs'
+import {clipAbovePlane} from '../../lib/heightPlane'
+import {partitionByConvexPolygon,polygonSignedArea} from '../../lib/convexPolygonPartition'
+import {triangulateSimplePolygon} from '../../lib/triangulateSimplePolygon'
+import {dnd5eWallSurfaceIntersectsFootprint} from './wallSurfaceSections'
+import { dnd5eNormalGroundTerrainAt } from './normalGroundTerrain'
+import { annularAreaOverlapsBox } from '../../../shared/annular-area-geometry.mjs'
+import { persistentAreaHeightSlices } from '../../../shared/persistent-area-columns.mjs'
+import { groveAreaFootprintOverlaps } from '../../../shared/grove-volume.mjs'
 import {
   cellKey,
   tokenCenterForAnchorCell,
   tokenOccupiedCellsAt,
+  tokenFootprintCells,
   type GridCell,
 } from '../../lib/gridCombat'
 import {
   mapGeometryRuntimeForMap,
+  mapGeometryLineOfEffectBlocked,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
@@ -14,6 +26,15 @@ import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import { getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
 import { dnd5eTokenHeightFeet } from './verticalCombatGeometry'
 import { dnd5eTokenHasWebWalker } from './webTraits'
+
+export function dnd5ePersistentWardProtectedFrom(map:BattleMap,token:Token):string[] {
+  const footprint=tokenOccupiedCellsAt(token,map,token)
+  return [...new Set((map.dnd5ePluginAreas??[]).flatMap(area=>{
+    if(!area.blocking?.protectsOccupantsFromRestrictedTokens)return []
+    const cells=new Set(area.cells.map(cellKey))
+    return footprint.every(cell=>cells.has(cellKey(cell)))?[...(area.blocking.restrictedTokenIds??[])]:[]
+  }))]
+}
 
 function inferredLegacyCoreAreaVertical(
   area: Dnd5ePluginArea,
@@ -58,8 +79,25 @@ export function dnd5ePersistentAreaAffectsTokenVerticallyAt(input: {
   position: { x: number; y: number }
   elevationFeet?: number
 }): boolean {
+  if(input.area.materialFallVolumes){
+    const geometry=mapGeometryRuntimeForMap(input.map.id)
+    const bottom=mapGeometryTokenElevation(geometry,{...input.token,...input.position,elevationFeet:input.elevationFeet??input.token.elevationFeet})
+    const top=bottom+dnd5eTokenHeightFeet(input.token)
+    const half=tokenFootprintCells(input.token)*input.map.gridSize/2,{x,y}=input.position
+    const box=[{x:x-half,y:y-half},{x:x+half,y:y-half},{x:x+half,y:y+half},{x:x-half,y:y+half}]
+    return input.area.materialFallVolumes.some(volume=>bottom<volume.topFeet-1e-4&&top>volume.bottomFeet+1e-4&&
+      triangulateSimplePolygon(volume.points)?.some(triangle=>{
+        const clipped=partitionByConvexPolygon(triangle,box)
+        const exposed=clipped&&(volume.bottomPlane?clipAbovePlane(clipped.inside,{xSlope:0,ySlope:0,offset:top-1e-4},volume.bottomPlane):clipped.inside)
+        return exposed&&Math.abs(polygonSignedArea(exposed))>1e-7
+      }))
+  }
   const vertical = input.area.vertical ?? inferredLegacyCoreAreaVertical(input.area, input.map)
   if (!vertical) return true
+  if (vertical.mode === 'volume' && vertical.columns) {
+    return persistentAreaHeightSlices(input.area).some(area =>
+      dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.position, area.cells, input.elevationFeet))
+  }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const positionedToken = {
     ...input.token,
@@ -69,9 +107,12 @@ export function dnd5ePersistentAreaAffectsTokenVerticallyAt(input: {
       : input.token.elevationFeet,
   }
   const tokenBottom = mapGeometryTokenElevation(geometry, positionedToken)
+  const groveIntersects = (base: number, height: number) => groveAreaFootprintOverlaps(input.area.groveVolume,
+    input.area.cells, input.map, input.position, tokenFootprintCells(input.token) * input.map.gridSize / 2, base, height)
   if (vertical.mode === 'ground') {
     const ground = mapGeometryTerrainElevationAtPoint(geometry, input.position)
-    return Math.abs(tokenBottom - ground) <= 1e-4
+    return Math.abs(tokenBottom - ground) <= 1e-4 &&
+      groveIntersects(ground, 0)
   }
   const anchorToken = input.area.anchorMode === 'source-token' || input.area.anchorMode === 'target-token' || input.area.anchorMode === 'effect-token'
     ? input.map.tokens.find((candidate) =>
@@ -82,15 +123,18 @@ export function dnd5ePersistentAreaAffectsTokenVerticallyAt(input: {
     : vertical.baseElevationFeet
   const volumeTop = volumeBase + vertical.heightFeet
   const tokenTop = tokenBottom + dnd5eTokenHeightFeet(input.token)
-  if (input.area.symbol?.activated && input.area.anchorCell) {
-    const center = tokenCenterForAnchorCell(input.area.anchorCell, { size: 1 }, input.map)
-    const centerZ = vertical.baseElevationFeet + 60
+  const overlapBase = Math.max(tokenBottom, volumeBase)
+  if (!groveIntersects(overlapBase, Math.min(tokenTop, volumeTop) - overlapBase)) return false
+  if ((vertical.shape === 'sphere' || input.area.symbol?.activated) && input.area.anchorCell) {
+    const center = anchorToken ?? tokenCenterForAnchorCell(input.area.anchorCell, { size: 1 }, input.map)
+    const radius = vertical.shape === 'sphere' ? vertical.heightFeet / 2 : 60
+    const centerZ = volumeBase + radius
     const halfSizeFeet = input.token.size * (input.map.feetPerCell ?? 5) / 2
     const scale = (input.map.feetPerCell ?? 5) / input.map.gridSize
     const dx = Math.max(0, Math.abs(input.position.x - center.x) * scale - halfSizeFeet)
     const dy = Math.max(0, Math.abs(input.position.y - center.y) * scale - halfSizeFeet)
     const dz = Math.max(0, tokenBottom - centerZ, centerZ - tokenTop)
-    return dx * dx + dy * dy + dz * dz <= 60 * 60
+    return dx * dx + dy * dy + dz * dz <= radius * radius
   }
 
   const restsOnMagicalTopBoundary =
@@ -167,7 +211,43 @@ export function dnd5eTokenIntersectsPersistentAreaAt(
   cells: readonly GridCell[] = area.cells,
   elevationFeet?: number,
 ): boolean {
+  const gasBottom = elevationFeet ?? mapGeometryTokenElevation(mapGeometryRuntimeForMap(map.id), {...token,...position})
+  if (gasExcludedAt(map, area, position, gasBottom, gasBottom + dnd5eTokenHeightFeet(token), tokenFootprintCells(token)*map.gridSize/2)) return false
   const areaCells = new Set(cells.map(cellKey))
+  if (area.rectGeometry?.pitchDegrees || area.rectGeometry?.rollDegrees) {
+    const half = tokenFootprintCells(token) * map.gridSize / 2
+    return cells.some(cell => {
+      const left = map.gridOffsetX + cell.col * map.gridSize, top = map.gridOffsetY + cell.row * map.gridSize
+      const minimum = {x:Math.max(left,position.x-half),y:Math.max(top,position.y-half),elevationFeet:gasBottom}
+      const maximum = {x:Math.min(left+map.gridSize,position.x+half),y:Math.min(top+map.gridSize,position.y+half),
+        elevationFeet:gasBottom+dnd5eTokenHeightFeet(token)}
+      return minimum.x < maximum.x && minimum.y < maximum.y && rectangularPrismOverlapsBox(map,area,minimum,maximum)
+    })
+  }
+  if (area.circularGeometry?.innerRadiusFeet != null &&
+    !annularAreaOverlapsBox(area,map,position,tokenFootprintCells(token)*map.gridSize/2)) return false
+  if (area.vertical?.mode === 'volume' && area.vertical.columns) {
+    return persistentAreaHeightSlices(area).some(slice => slice.cells.some(cell => areaCells.has(cellKey(cell))) &&
+      dnd5eTokenIntersectsPersistentAreaAt(token, map, slice, position, slice.cells, elevationFeet))
+  }
+  if(area.wallSurfaceSections!=null){
+    const bottom=elevationFeet??mapGeometryTokenElevation(mapGeometryRuntimeForMap(map.id),{...token,...position})
+    return dnd5eWallSurfaceIntersectsFootprint({area:{...area,cells:[...cells]},map,position,
+      halfSizePixels:tokenFootprintCells(token)*map.gridSize/2,bottomFeet:bottom,topFeet:bottom+dnd5eTokenHeightFeet(token)})
+  }
+  // Sphere movement contacts use continuous body bounds. Snapping a Large
+  // creature's footprint to grid cells can discard a valid tangent contact
+  // and leave an already captured creature behind when the sphere continues.
+  if (area.vertical?.mode === 'volume' && area.vertical.shape === 'sphere' && area.anchorCell) {
+    return dnd5ePersistentAreaAffectsTokenVerticallyAt({area,map,token,position,elevationFeet})
+  }
+  if (area.circularGeometry && area.movement?.carryRestrainedTargets && area.anchorCell) {
+    const scale=map.gridSize/(map.feetPerCell??5),half=tokenFootprintCells(token)*map.gridSize/2
+    const cx=map.gridOffsetX+(area.anchorCell.col+.5)*map.gridSize,cy=map.gridOffsetY+(area.anchorCell.row+.5)*map.gridSize
+    const distance=Math.hypot(Math.max(0,Math.abs(position.x-cx)-half),Math.max(0,Math.abs(position.y-cy)-half))/scale
+    return distance <= area.circularGeometry.radiusFeet+1e-7 &&
+      dnd5ePersistentAreaAffectsTokenVerticallyAt({area,map,token,position,elevationFeet})
+  }
   return tokenOccupiedCellsAt(token, map, position).some((cell) => areaCells.has(cellKey(cell))) &&
     dnd5ePersistentAreaAffectsTokenVerticallyAt({
       area,
@@ -218,6 +298,11 @@ export function dnd5eTokenFullyContainedInPersistentAreaAt(
     ? mapGeometryTokenElevation(geometry, anchorToken) + Number(vertical.anchorOffsetFeet)
     : vertical.baseElevationFeet
   const tokenTop = tokenBottom + dnd5eTokenHeightFeet(token)
+  if (vertical.columns) {
+    return tokenOccupiedCellsAt(token, map, position).every(cell => vertical.columns!.some(column =>
+      column.col === cell.col && column.row === cell.row && tokenBottom >= column.baseElevationFeet - 1e-4 &&
+      tokenTop <= column.baseElevationFeet + column.heightFeet + 1e-4))
+  }
   return tokenBottom >= volumeBase - 1e-4 && tokenTop <= volumeBase + vertical.heightFeet + 1e-4
 }
 
@@ -228,6 +313,9 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
   position: { x: number; y: number }
   elevationFeet?: number
 }): {
+  abilityCheckRules: import('./abilityCheckRules').Dnd5eAbilityCheckRule[]
+  skillCheckBonuses: Record<string, number>
+  savingThrowAdvantages: import('../../lib/dnd').AbilityKey[]
   preventsVerbalComponents: boolean
   suppressesMagic: boolean
   spellSuppressionAreas: readonly { areaId: string; maximumSpellLevel: number }[]
@@ -235,6 +323,7 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
   damageResistances: readonly import('./damageTypes').Dnd5eDamageType[]
   damageVulnerabilities: readonly import('./damageTypes').Dnd5eDamageType[]
   conditionImmunities: readonly import('./conditions').Dnd5eStandardConditionId[]
+  conditionSources: readonly { areaId: string; label: string; sourceTokenId: string; conditions: readonly import('./conditions').Dnd5eStandardConditionId[] }[]
   attacksAgainstOccupantDisadvantageCreatureTypes: readonly string[]
   attacksAgainstOccupantDisadvantageSources: readonly {
     areaId: string
@@ -253,6 +342,8 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
   spellTargetingImmunitySchools: readonly import('./spellbook').Dnd5eSpellbookSchoolId[]
   successfulSpellSaveNegatesDamage: boolean
   hitPointMaximumReductionImmunity: boolean
+  halvesFallingDamage: boolean
+  verticalJumpBonusFeet: number
   magicallyHeldAloft: boolean
   preventsRangedWeaponAttacks: boolean
   concentrationSavingThrowDisadvantage: boolean
@@ -261,6 +352,8 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
     speechUnderstoodBy?: 'any-creature-knowing-a-language'
   }
 } {
+  const savingThrowAdvantages = new Set<import('../../lib/dnd').AbilityKey>()
+  const skillBonusGroups = new Map<string, Record<string, number>>()
   let preventsVerbalComponents = false
   let suppressesMagic = false
   const spellSuppressionAreas: { areaId: string; maximumSpellLevel: number }[] = []
@@ -268,6 +361,7 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
   const damageResistances = new Set<import('./damageTypes').Dnd5eDamageType>()
   const damageVulnerabilities = new Set<import('./damageTypes').Dnd5eDamageType>()
   const conditionImmunities = new Set<import('./conditions').Dnd5eStandardConditionId>()
+  const conditionSources: { areaId: string; label: string; sourceTokenId: string; conditions: readonly import('./conditions').Dnd5eStandardConditionId[] }[] = []
   const attacksAgainstOccupantDisadvantageCreatureTypes = new Set<string>()
   const attacksAgainstOccupantDisadvantageSources: {
     areaId: string
@@ -286,8 +380,11 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
   const spellTargetingImmunitySchools = new Set<import('./spellbook').Dnd5eSpellbookSchoolId>()
   let successfulSpellSaveNegatesDamage = false
   let hitPointMaximumReductionImmunity = false
+  let halvesFallingDamage = false
+  let verticalJumpBonusFeet = 0
   let magicallyHeldAloft = false
   let preventsRangedWeaponAttacks = false
+  const abilityCheckRules: import('./abilityCheckRules').Dnd5eAbilityCheckRule[] = []
   let concentrationSavingThrowDisadvantage = false
   let understandSpoken: 'all' | undefined
   let speechUnderstoodBy: 'any-creature-knowing-a-language' | undefined
@@ -295,6 +392,8 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
     if ((!area.occupantModifiers && !area.hallow) ||
       !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map)) continue
     const modifiers = area.occupantModifiers ?? {}
+    if (modifiers.relation && (!input.map.tokens.some(token => token.id === area.sourceTokenId) ||
+      !dnd5ePersistentAreaAllowsTarget({ ...area, relation: modifiers.relation }, input.token, input.map))) continue
     const contained = modifiers.containment === 'fully-contained'
       ? dnd5eTokenFullyContainedInPersistentAreaAt(
           input.token, input.map, area, input.position, input.elevationFeet,
@@ -302,7 +401,44 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
       : dnd5eTokenIntersectsPersistentAreaAt(
           input.token, input.map, area, input.position, area.cells, input.elevationFeet,
         )
+    if (modifiers.abilityCheckRadiusFeet && area.anchorCell) {
+      const geometry = mapGeometryRuntimeForMap(input.map.id)
+      const center = tokenCenterForAnchorCell(area.anchorCell, { size: 1 }, input.map)
+      const vertical = area.vertical
+      const centerZ = vertical?.mode === 'volume'
+        ? vertical.baseElevationFeet + (vertical.shape === 'sphere' ? vertical.heightFeet / 2 : 0)
+        : mapGeometryTerrainElevationAtPoint(geometry, center)
+      const bottom = input.elevationFeet ?? mapGeometryTokenElevation(geometry, { ...input.token, ...input.position })
+      const top = bottom + dnd5eTokenHeightFeet(input.token)
+      const scale = (input.map.feetPerCell ?? 5) / input.map.gridSize
+      const halfSize = tokenFootprintCells(input.token) * (input.map.feetPerCell ?? 5) / 2
+      const dx = Math.max(0, Math.abs(input.position.x - center.x) * scale - halfSize)
+      const dy = Math.max(0, Math.abs(input.position.y - center.y) * scale - halfSize)
+      const dz = Math.max(0, bottom - centerZ, centerZ - top)
+      if (dx * dx + dy * dy + dz * dz <= modifiers.abilityCheckRadiusFeet ** 2 &&
+        (!modifiers.requiresLineOfEffectFromAnchor || !mapGeometryLineOfEffectBlocked({ geometry, map: input.map,
+          from: center, to: input.position, fromElevationFeet: centerZ, toElevationFeet: bottom }))) {
+        abilityCheckRules.push(...modifiers.abilityCheckRules ?? [])
+      }
+    }
     if (!contained) continue
+    if (modifiers.requiresLineOfEffectFromAnchor) {
+      if (!area.anchorCell) continue
+      const geometry = mapGeometryRuntimeForMap(input.map.id)
+      const from = tokenCenterForAnchorCell(area.anchorCell, { size: 1 }, input.map)
+      if (mapGeometryLineOfEffectBlocked({ geometry, map: input.map, from, to: input.position,
+        fromElevationFeet: area.vertical?.mode === 'volume'
+          ? area.vertical.baseElevationFeet + (area.vertical.shape === 'sphere' ? area.vertical.heightFeet / 2 : 0)
+          : mapGeometryTerrainElevationAtPoint(geometry, from),
+        toElevationFeet: input.elevationFeet ?? mapGeometryTokenElevation(geometry, input.token) })) continue
+    }
+    for (const ability of modifiers.savingThrowAdvantages ?? []) savingThrowAdvantages.add(ability)
+    if (!modifiers.abilityCheckRadiusFeet) abilityCheckRules.push(...modifiers.abilityCheckRules ?? [])
+    const groupId = area.coreSpellId ? `spell:${area.coreSpellId}` : JSON.stringify([area.pluginId, area.featureId])
+    const bonuses = skillBonusGroups.get(groupId) ?? {}
+    for (const [skill, bonus] of Object.entries(modifiers.skillCheckBonuses ?? {})) bonuses[skill] = Math.max(bonuses[skill] ?? 0, bonus)
+    skillBonusGroups.set(groupId, bonuses)
+    if (modifiers.conditions?.length) conditionSources.push({ areaId: area.id, label: area.label, sourceTokenId: area.sourceTokenId, conditions: modifiers.conditions })
     preventsVerbalComponents ||= modifiers.preventsVerbalComponents === true
     suppressesMagic ||= modifiers.suppressesMagic === true
     if (modifiers.suppressesSpellsThroughLevel != null) {
@@ -335,6 +471,8 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
     }
     successfulSpellSaveNegatesDamage ||= modifiers.successfulSpellSaveNegatesDamage === true
     hitPointMaximumReductionImmunity ||= modifiers.hitPointMaximumReductionImmunity === true
+    halvesFallingDamage ||= modifiers.halvesFallingDamage === true
+    verticalJumpBonusFeet = Math.max(verticalJumpBonusFeet, modifiers.verticalJumpBonusFeet ?? 0)
     magicallyHeldAloft ||= modifiers.magicallyHeldAloft === true
     preventsRangedWeaponAttacks ||= modifiers.preventsRangedWeaponAttacks === true
     concentrationSavingThrowDisadvantage ||= modifiers.concentrationSavingThrowDisadvantage === true
@@ -355,7 +493,12 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
       }
     }
   }
+  const skillCheckBonuses: Record<string, number> = {}
+  for (const group of skillBonusGroups.values()) for (const [skill, bonus] of Object.entries(group)) skillCheckBonuses[skill] = (skillCheckBonuses[skill] ?? 0) + bonus
   return {
+    abilityCheckRules,
+    skillCheckBonuses,
+    savingThrowAdvantages: [...savingThrowAdvantages],
     preventsVerbalComponents,
     suppressesMagic,
     spellSuppressionAreas,
@@ -363,6 +506,7 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
     damageResistances: [...damageResistances],
     damageVulnerabilities: [...damageVulnerabilities],
     conditionImmunities: [...conditionImmunities],
+    conditionSources,
     attacksAgainstOccupantDisadvantageCreatureTypes: [...attacksAgainstOccupantDisadvantageCreatureTypes],
     attacksAgainstOccupantDisadvantageSources,
     conditionImmunitiesBySourceCreatureType,
@@ -371,6 +515,8 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
     spellTargetingImmunitySchools: [...spellTargetingImmunitySchools],
     successfulSpellSaveNegatesDamage,
     hitPointMaximumReductionImmunity,
+    halvesFallingDamage,
+    verticalJumpBonusFeet,
     magicallyHeldAloft,
     preventsRangedWeaponAttacks,
     concentrationSavingThrowDisadvantage,
@@ -378,6 +524,64 @@ export function dnd5ePersistentAreaOccupantModifiersAt(input: {
       ? { understandSpoken, speechUnderstoodBy }
       : undefined,
   }
+}
+
+function movementSourceConditionSatisfied(area: Dnd5ePluginArea, map: BattleMap, token: Token): boolean {
+  if (area.movementExcludesSource && token.id === area.sourceTokenId) return false
+  if (!area.movementRequiresGroundedSource) return true
+  const source = map.tokens.find(token => token.id === area.sourceTokenId)
+  if (!source) return false
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  return Math.abs(mapGeometryTokenElevation(geometry, source) -
+    mapGeometryTerrainElevationAtPoint(geometry, source)) <= 1e-4
+}
+
+/** Ground cover restricts movement cost only, leaving the area's other triggers unchanged. */
+function movementGroundCoverSatisfied(area: Dnd5ePluginArea, map: BattleMap, token: Token, position: {x:number;y:number}): boolean {
+  const cover = area.movementGroundCover
+  if (!cover) return true
+  if (!dnd5ePersistentAreaAllowsTarget({...area, relation:cover.relation}, token, map)) return false
+  const geometry=mapGeometryRuntimeForMap(map.id)
+  const elevation=mapGeometryTokenElevation(geometry,{...token,...position})
+  if(Math.abs(elevation-mapGeometryTerrainElevationAtPoint(geometry,position))>1e-4) return false
+  if(dnd5eNormalGroundTerrainAt(map,position,elevation,token)) return false
+  const occupied=new Set(tokenOccupiedCellsAt(token,map,position).map(cellKey))
+  return map.tokens.some(object=>{
+    if(object.type!=='obstacle'||object.dnd5eObjectState?.naturalFeature!==cover.feature) return false
+    if(Math.abs(mapGeometryTokenElevation(geometry,object)-mapGeometryTerrainElevationAtPoint(geometry,object))>1e-4) return false
+    const objectCells=new Set(tokenOccupiedCellsAt(object,map,object).map(cellKey))
+    return persistentAreaHeightSlices(area).some(slice=>slice.cells.some(cell=>{
+      if(!occupied.has(cellKey(cell))||!objectCells.has(cellKey(cell)))return false
+      const center=tokenCenterForAnchorCell(cell,{size:1},map)
+      const ground=mapGeometryTerrainElevationAtPoint(geometry,center)
+      const vertical=slice.vertical
+      if(vertical?.mode==='volume'){
+        const anchor=slice.anchorMode&&slice.anchorMode!=='fixed'?map.tokens.find(t=>t.id===(slice.anchorTokenId??slice.sourceTokenId)):undefined
+        const bottom=anchor&&Number.isFinite(vertical.anchorOffsetFeet)?mapGeometryTokenElevation(geometry,anchor)+Number(vertical.anchorOffsetFeet):vertical.baseElevationFeet
+        if(ground<bottom-1e-4||ground>=bottom+vertical.heightFeet-1e-4)return false
+      }
+      return dnd5eTokenIntersectsPersistentAreaAt({...token,size:1},map,slice,center,[cell],ground)
+    }))
+  })
+}
+
+/** Grid-step environmental surcharge; distinct from difficult terrain and speed reduction. */
+export function dnd5ePersistentAreaDirectionalMovementCostAt(input: {
+  map: BattleMap; token: Token; from: { x: number; y: number }; to: { x: number; y: number }
+}): number {
+  const dc = input.to.x - input.from.x, dr = input.to.y - input.from.y
+  if (Math.hypot(dc, dr) <= 1e-9) return 0
+  let additionalFeetPerFoot = 0
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    const rule = area.directionalMovementCost
+    if (!rule || dc * rule.direction.dc + dr * rule.direction.dr >= -1e-9 ||
+      !movementSourceConditionSatisfied(area, input.map, input.token) ||
+      !movementGroundCoverSatisfied(area, input.map, input.token, input.to) ||
+      !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map) ||
+      !dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.to)) continue
+    additionalFeetPerFoot = Math.max(additionalFeetPerFoot, rule.additionalFeetPerFoot)
+  }
+  return additionalFeetPerFoot
 }
 
 export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
@@ -389,7 +593,10 @@ export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
   for (const area of input.map.dnd5ePluginAreas ?? []) {
     if (
       (area.coreSpellId === 'web' && dnd5eTokenHasWebWalker(input.token)) ||
+      !movementSourceConditionSatisfied(area, input.map, input.token) ||
+      !movementGroundCoverSatisfied(area, input.map, input.token, input.position) ||
       (area.movementCostMultiplier ?? 1) <= 1 ||
+      (area.vertical?.mode === 'ground' && area.coreSpellId !== 'spirit-guardians' && dnd5eNormalGroundTerrainAt(input.map, input.position, input.token.elevationFeet ?? mapGeometryTerrainElevationAtPoint(mapGeometryRuntimeForMap(input.map.id), input.position), input.token)) ||
       !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map) ||
       !dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.position)
     ) continue
@@ -415,7 +622,10 @@ export function dnd5ePersistentAreaDifficultTerrainMultiplierAt(input: {
     if (
         area.coreSpellId === 'spirit-guardians' ||
         (area.coreSpellId === 'web' && dnd5eTokenHasWebWalker(input.token)) ||
+      !movementSourceConditionSatisfied(area, input.map, input.token) ||
+      !movementGroundCoverSatisfied(area, input.map, input.token, input.position) ||
       (area.movementCostMultiplier ?? 1) <= 1 ||
+      (area.vertical?.mode === 'ground' && area.coreSpellId !== 'spirit-guardians' && dnd5eNormalGroundTerrainAt(input.map, input.position, input.token.elevationFeet ?? mapGeometryTerrainElevationAtPoint(mapGeometryRuntimeForMap(input.map.id), input.position), input.token)) ||
       !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map) ||
       !dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.position)
     ) continue
@@ -433,7 +643,10 @@ export function dnd5ePersistentAreaSpeedCostMultiplierAt(input: {
   for (const area of input.map.dnd5ePluginAreas ?? []) {
     if (
       area.coreSpellId !== 'spirit-guardians' ||
+      !movementSourceConditionSatisfied(area, input.map, input.token) ||
+      !movementGroundCoverSatisfied(area, input.map, input.token, input.position) ||
       (area.movementCostMultiplier ?? 1) <= 1 ||
+      (area.vertical?.mode === 'ground' && area.coreSpellId !== 'spirit-guardians' && dnd5eNormalGroundTerrainAt(input.map, input.position, input.token.elevationFeet ?? mapGeometryTerrainElevationAtPoint(mapGeometryRuntimeForMap(input.map.id), input.position), input.token)) ||
       !dnd5ePersistentAreaAllowsTarget(area, input.token, input.map) ||
       !dnd5eTokenIntersectsPersistentAreaAt(input.token, input.map, area, input.position)
     ) continue

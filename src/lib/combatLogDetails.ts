@@ -1,4 +1,5 @@
 import { presentCombatLogEvent } from './combatLogEventPresentation'
+import { DND5E_TOOL_CHOICES } from '../rulesets/dnd5e/buildChoiceCatalogs'
 import { additionalCombatLogDetails } from './combatLogAdditionalEvents'
 import type { AbilityKey } from './dnd'
 import { dnd5eConditionLabel } from '../rulesets/dnd5e/conditions'
@@ -83,6 +84,7 @@ const REMOVAL_REASON_LABELS: Record<string, string> = {
   'hit-by-attack': '被攻击命中',
   'makes-attack': '发动攻击',
   'casts-spell': '施放法术',
+  'forces-saving-throw': '迫使其他生物豁免',
   moves: '发生移动',
   dm: 'DM 移除',
   healed: '获得治疗',
@@ -180,6 +182,7 @@ function magicMissileDetails(
       ...(projectile.featureBonus > 0
         ? [`强化塑能（智力）${signed(projectile.featureBonus)}`]
         : []),
+      ...(projectile.targetBonus ? [`伤害骰加值 ${signed(projectile.targetBonus)}`] : []),
     ].join(' ')
     if (projectile.outcome === 'shielded') {
       return `#${index + 1} → ${targetName}：${rollExpression}，被护盾术免疫`
@@ -498,6 +501,8 @@ function rawEventDetails(
         : ''
       return [`${resolveName(event.actorId)}｜${event.itemName} 减免 ${event.amount} 点伤害${roll}`]
     }
+    case 'damage-roll-bonus-applied':
+      return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜伤害骰加值 ${signed(event.amount)}`]
     case 'healing-applied':
       return [`${resolveName(event.targetId)}｜恢复 ${event.amount} 点生命值｜${hpChange(event.hpBefore, event.hpAfter)}`]
     case 'activity-formula-roll-resolved': {
@@ -509,14 +514,30 @@ function rawEventDetails(
         `${die.count}d${die.sides} [${die.values.join(', ')}]`).join(' + ')
       const adjustment = event.formulaAdjustment === 0 ? '' : ` ${signed(event.formulaAdjustment)}`
       return [
-        `${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${activityName}治疗骰 ${dice}${adjustment} = ${event.total}`,
+        `${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${activityName}${event.kind === 'damage' ? '伤害骰' : '治疗骰'} ${dice}${adjustment} = ${event.total}`,
       ]
     }
     case 'temporary-hit-points-gained':
       return [`${resolveName(event.actorId)}｜本次提供 ${event.offered} 点临时 HP｜净增加 ${event.amount}｜当前 ${event.current}`]
     case 'saving-throw-resolved':
+      if (event.automaticOutcome === 'willing-failure') return [
+        `${resolveName(event.targetId)}｜自愿放弃豁免｜${ABILITY_LABELS[event.ability]}豁免失败（无需掷骰）`,
+      ]
+      if (event.automaticOutcome === 'dm-adjusted-automatic-success') return [
+        `${resolveName(event.targetId)}｜DM 调整自动结果｜${ABILITY_LABELS[event.ability]}豁免成功（无需掷骰）`,
+      ]
+      if (event.automaticOutcome === 'size-rule-success') return [
+        `${resolveName(event.targetId)}｜符合体型规则｜${ABILITY_LABELS[event.ability]}豁免自动成功（无需掷骰）`,
+      ]
+      if (event.automaticOutcome === 'dm-adjusted-automatic-failure') return [
+        `${resolveName(event.targetId)}｜DM 调整自动结果｜${ABILITY_LABELS[event.ability]}豁免失败（无需掷骰）`,
+      ]
       return [
-        event.automaticOutcome === 'allied-unresisted-failure'
+        event.automaticOutcome === 'environmental-immunity-success'
+          ? `${resolveName(event.targetId)}｜环境防护｜${ABILITY_LABELS[event.ability]}豁免自动成功（无需掷骰）`
+          : event.automaticOutcome === 'source-charm-failure'
+          ? `${resolveName(event.targetId)}｜被本次能力来源魅惑｜${ABILITY_LABELS[event.ability]}豁免自动失败（无需掷骰）`
+          : event.automaticOutcome === 'allied-unresisted-failure'
           ? `${resolveName(event.targetId)}｜同阵营目标未抵抗｜${ABILITY_LABELS[event.ability]}豁免自动视为失败（d20 ${event.d20} ${signed(event.modifier)} = ${event.total} 未参与判定）`
           : event.automaticOutcome === 'condition-immunity-success'
             ? `${resolveName(event.targetId)}｜相应状态免疫｜${ABILITY_LABELS[event.ability]}豁免自动成功（d20 ${event.d20} ${signed(event.modifier)} = ${event.total} 未参与判定）`
@@ -531,6 +552,7 @@ function rawEventDetails(
         'turn-start': '回合开始',
         'turn-end': '回合结束',
         'source-turn-start': '来源回合开始',
+        'source-turn-end': '来源回合结束',
         'on-detonate': '区域引爆',
       }[event.timing]
       const save = event.saveSuccess == null
@@ -546,7 +568,8 @@ function rawEventDetails(
           ? `｜发出声音警报（${event.notification.audibleRadiusFeet} 尺内可听）`
           : ''
       return [
-        `${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜持续区域 ${event.triggerId}（${timing}）${save}${damage}${condition}${notification}`,
+        `${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜持续区域 ${event.triggerId}（${timing}）${save}${damage}${condition}${notification}${event.healingRoll || event.healing ? `｜实际治疗 ${event.healing ?? 0}` : ''}`,
+        ...(event.healingRoll ? [`治疗骰 ${event.healingRoll.rolls.length}d${event.healingRoll.sides}（${event.healingRoll.rolls.join(' + ')}）${signed(event.healingRoll.modifier)} = ${event.healingRoll.total}`] : []),
         ...persistentAreaDamageDetails(
           event,
           resolveName,
@@ -634,7 +657,7 @@ function rawEventDetails(
     }
     case 'ability-check-resolved':
       return [
-        `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.skill ? `（${event.skill}）` : ''}检定 d20 ${event.d20} ${signed(event.modifier)} = ${event.total}${event.dc === undefined ? '' : ` vs DC ${event.dc}`}｜${event.success === undefined ? event.mode === 'advantage' ? '优势' : event.mode === 'disadvantage' ? '劣势' : '普通' : event.success ? '成功' : '失败'}`,
+        `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.toolId ? `（${DND5E_TOOL_CHOICES.find(tool => tool.id === event.toolId)?.label ?? event.toolId}）` : event.skill ? `（${event.skill}）` : ''}检定 d20 ${event.d20} ${signed(event.modifier)} = ${event.total}${event.dc === undefined ? '' : ` vs DC ${event.dc}`}｜${event.success === undefined ? event.mode === 'advantage' ? '优势' : event.mode === 'disadvantage' ? '劣势' : '普通' : event.success ? '成功' : '失败'}`,
       ]
     case 'turn-resource-spent':
       return [`${resolveName(event.actorId)}｜消耗${event.amount && event.amount !== 1 ? ` ${event.amount} 点` : ''}${resourceLabel(event.resource)}`]
@@ -646,6 +669,11 @@ function rawEventDetails(
       return [`${resolveName(event.actorId)}｜消耗${resourceLabel(event.resourceKey)}｜剩余 ${event.current}/${event.max}`]
     case 'class-resource-restored':
       return [`${resolveName(event.actorId)}｜恢复${resourceLabel(event.resourceKey)}｜当前 ${event.current}/${event.max}`]
+    case 'companion-order-completed': {
+      if (event.command === 'task' && event.taskDescription) return [`${resolveName(event.actorId)}向${resolveName(event.sourceOwnerId)}报告：任务已完成——${event.taskDescription}`]
+      const labels: Record<string,string>={attack:'攻击',dash:'疾走',disengage:'撤离',dodge:'闪避',help:'协助',hide:'躲藏','use-object':'使用物品',ready:'预备动作'}
+      return [`${resolveName(event.actorId)}向${resolveName(event.sourceOwnerId)}报告：${labels[event.command] ?? event.command}命令已完成。`]
+    }
     case 'class-state-changed':
       return [`${resolveName(event.actorId)}｜${classStateLabel(event.stateKey)}${event.active ? '生效' : '结束'}${event.value == null ? '' : `｜数值 ${event.value}`}${event.targetId ? `｜目标 ${resolveName(event.targetId)}` : ''}`]
     case 'creature-transformation-unaffected':
@@ -684,6 +712,9 @@ function rawEventDetails(
     case 'slow-delayed-spell-wasted':
       return [`${resolveName(event.actorId)}｜缓慢术延迟的 ${event.spellId} 未能完成，法术浪费｜${event.reason}`]
     case 'spell-detection-updated': {
+      if (event.mode === 'undead-presence') {
+        return [`${resolveName(event.actorId)}｜亡灵感知｜范围内${event.presences.length ? '感知到' : '未感知到'}亡灵存在；不揭示身份或能力`]
+      }
       const spellName = DND5E_SRD_SPELL_NAMES_ZH[event.spellId]
         ?? getDnd5eSrdCombatSpell(event.spellId)?.name
         ?? event.spellId
@@ -761,7 +792,9 @@ function rawEventDetails(
     case 'optional-bonus-die-used':
       return [`${resolveName(event.targetId)}｜${event.rollKind === 'saving-throw' ? '豁免' : '属性检定'}奖励骰：${event.label} d${event.dieSides}=${event.roll}｜已消耗`]
     case 'active-effect-removed':
-      return [`${resolveName(event.targetId)}｜效果结束：${event.logContext?.effect?.label ?? effectDefinitionLabel(event.definitionId)}｜${REMOVAL_REASON_LABELS[event.reason] ?? event.reason}`]
+      return [`${resolveName(event.targetId)}｜效果结束：${event.logContext?.effect?.label ?? effectDefinitionLabel(event.definitionId)}｜${REMOVAL_REASON_LABELS[event.reason] ?? event.reason}`,
+        ...(event.logContext?.effect?.onEndAwareness === 'charmed-by-source' && event.logContext.effect.standardCondition === 'charmed'
+          ? [`${resolveName(event.targetId)}知道自己曾被${event.logContext.effect.source.actorName || (event.logContext.effect.source.actorId ? resolveName(event.logContext.effect.source.actorId) : '来源生物')}魅惑。`] : [])]
     case 'active-effect-save-required':
       return [`${resolveName(event.targetId)}｜需进行${ABILITY_LABELS[event.ability]}豁免 DC ${event.dc}（${event.timing === 'target-turn-start' ? '回合开始' : event.timing === 'target-turn-end' ? '回合结束' : '受到伤害'}${event.mode === 'advantage' ? '，优势' : event.mode === 'disadvantage' ? '，劣势' : ''}）`]
     case 'active-effect-save-resolved':
@@ -812,6 +845,8 @@ function rawEventDetails(
           event.sourceCastingProhibited ? `原施法者被封锁 ${event.durationRounds} 轮` : '',
         ].filter(Boolean).join('、')}`,
       ]
+    case 'source-action-interrupted':
+      return [`${resolveName(event.actorId)}尝试阻止 ${resolveName(event.sourceId)} ${event.actionKind === 'teleport' ? '传送' : '施法'}｜${event.interrupted ? '豁免失败，本次效果被阻止' : '豁免成功，继续结算'}`]
     case 'undead-fortitude-resolved':
       return [`${resolveName(event.targetId)}｜亡灵坚韧 ${event.total} vs DC ${event.dc}｜${event.success ? '保留 1 HP' : '失败'}`]
     case 'relentless-rage-resolved':
@@ -869,7 +904,7 @@ export function formatDnd5eSecretCombatOutcomeDetails(
           ? [`${resolveName(event.actorId)}｜${event.itemName}减免 ${event.amount} 点伤害`]
           : []
       case 'activity-formula-roll-resolved':
-        return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜治疗结算 ${event.total} 点`]
+        return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜${event.kind === 'damage' ? '伤害骰合计' : '治疗结算'} ${event.total} 点`]
       case 'saving-throw-resolved':
         return [
           `${resolveName(event.targetId)}｜${ABILITY_LABELS[event.ability]}豁免结果：${event.success ? '成功' : '失败'}`,
@@ -902,7 +937,7 @@ export function formatDnd5eSecretCombatOutcomeDetails(
       }
       case 'ability-check-resolved':
         return [
-          `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.skill ? `（${event.skill}）` : ''}检定结果：${event.success == null ? '已结算' : event.success ? '成功' : '失败'}`,
+          `${resolveName(event.actorId)}｜${ABILITY_LABELS[event.ability]}${event.toolId ? `（${DND5E_TOOL_CHOICES.find(tool => tool.id === event.toolId)?.label ?? event.toolId}）` : event.skill ? `（${event.skill}）` : ''}检定结果：${event.success == null ? '已结算' : event.success ? '成功' : '失败'}`,
         ]
       case 'slow-spell-delay-resolved':
         return [`${resolveName(event.actorId)}｜缓慢术施法延迟检定已完成：${event.delayed ? `${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId} 延迟至下回合` : `${getDnd5eSrdCombatSpell(event.spellId)?.name ?? event.spellId} 正常施放`}`]

@@ -1,3 +1,4 @@
+import { dnd5eInherentFeatureLightEffects } from '../../rulesets/dnd5e/inherentFeatureLight'
 import { memo, useMemo } from 'react'
 import type { SpellStatusTokenMark, StandardConditionTokenMark } from '../../components/map/MapCanvas'
 import { spellStatusTokenTooltip, standardConditionTokenTooltip } from '../../components/map/tokenStatusTooltip'
@@ -11,10 +12,13 @@ import {
   normalizeDnd5eActiveEffects,
 } from '../../application/combat/dnd5eCombatRules'
 import { dnd5eTokenStatusMarkersFromActiveEffects } from '../../rulesets/dnd5e/tokenStatusMarkers'
+import { dnd5eCharacterHasPluginFeature, dnd5ePluginFeatureDefinition } from '../../rulesets/dnd5e/plugins/pluginContentCatalog'
 import { dnd5eActiveEmittedLight } from '../../rulesets/dnd5e/activeEffects'
-import { dnd5eTokenIntersectsPersistentAreaAt } from '../../rulesets/dnd5e/persistentAreaGeometry'
+import { liveDnd5eMapInventoryBoundEffects } from '../../rulesets/dnd5e/mapInventoryBoundEffects'
+import { projectDnd5eMapAreaStatusEffects } from '../../rulesets/dnd5e/mapBridge'
+import { dnd5eTokenIntersectsPersistentAreaAt, dnd5ePersistentAreaOccupantModifiersAt } from '../../rulesets/dnd5e/persistentAreaGeometry'
 import type { BattleMap, Token } from '../../store/maps'
-import { projectCharacterTokenPresentations } from '../../store/maps'
+import { projectCharacterTokenPresentations, useMapStore } from '../../store/maps'
 import { useSceneOrchestrationStore } from '../../store/sceneOrchestration'
 import { buildDnd5eConcentrationTokenMarks } from '../../pages/maps/concentrationTokenMarks'
 import {
@@ -155,6 +159,7 @@ export function buildMapViewportPresentation(
   map: BattleMap,
   characters: ReturnType<typeof useMapViewportCharacters>,
   gridCalibrationDraft?: MapViewportGridCalibrationDraft | null,
+  roomTokens: readonly Token[] = map.tokens,
 ): MapViewportPresentation {
   const charactersById = new Map(characters.map((character) => [character.id, character]))
   const statusBorderColor = (sourceActorId?: string) => {
@@ -163,7 +168,7 @@ export function buildMapViewportPresentation(
     const colors = dnd5eCharacterPresentationColors(source)
     return colors.classId ? colors.accentColor : '#ffffff'
   }
-  const projectedTokens = projectCharacterTokenPresentations(map.tokens, characters)
+  const projectedTokens = projectCharacterTokenPresentations(map.tokens, characters, roomTokens)
   const displayMap = projectedTokens === map.tokens ? map : { ...map, tokens: projectedTokens }
   const canvasMap = gridCalibrationDraft?.mapId === displayMap.id
     ? (() => {
@@ -186,7 +191,19 @@ export function buildMapViewportPresentation(
   const standardConditionTokenMarks: StandardConditionTokenMark[] = []
   const spellEffectStatusTokenMarks: SpellStatusTokenMark[] = []
   const emittedLightByTokenId: Record<string, NonNullable<Token['lightSource']>> = {}
+  const effectsByTokenId: Record<string, NonNullable<Token['dnd5eCombatState']>['activeEffects']> = {}
   const etherealTokenIds: string[] = []
+  const areaStatusEffects = projectDnd5eMapAreaStatusEffects(map, characters)
+  const rageMarks = map.tokens.flatMap(source => {
+    const sourceCharacter = linkedCharacter(source, charactersById)
+    const state = sourceCharacter?.dnd5eCombatState ?? source.dnd5eCombatState
+    const mark = state?.rageAttackMark
+    if (!state?.raging || !mark) return []
+    const feature = dnd5ePluginFeatureDefinition(mark.featureId)
+    if (feature?.automation !== 'full' || feature.declarativeAbility?.mechanic?.kind !== 'rage-first-hit-protection' ||
+      (sourceCharacter && !dnd5eCharacterHasPluginFeature(sourceCharacter, feature.id))) return []
+    return [{ source, sourceCharacter, mark, feature }]
+  })
 
   for (const token of map.tokens) {
     const character = linkedCharacter(token, charactersById)
@@ -194,15 +211,30 @@ export function buildMapViewportPresentation(
     const hitPoints = tokenPresentationHitPoints(token, character)
     if (hitPoints) hpByToken[token.id] = hitPoints
 
-    const effects = normalizeDnd5eActiveEffects([
+    const effects = areaStatusEffects[token.id] ?? dnd5eInherentFeatureLightEffects(character, normalizeDnd5eActiveEffects([
       ...(character?.dnd5eCombatState?.activeEffects ?? []),
       ...(token.dnd5eCombatState?.activeEffects ?? []),
-    ])
+    ]))
+    // Canvas visibility consumes token effects; character-owned effects must use
+    // the same projection as status badges, including area suppression.
+    if (effects.length || token.dnd5eCombatState?.activeEffects?.length) effectsByTokenId[token.id] = effects
     const conditions = dnd5eActiveStandardConditions({
       conditions: dnd5eConditionsFromActiveEffects(effects),
     })
     if (conditions.length > 0) dnd5eConditionsByToken[token.id] = conditions
-    const emittedLight = dnd5eActiveEmittedLight(effects)
+    const physicalItemEffects = liveDnd5eMapInventoryBoundEffects([
+      ...(token.dnd5eObjectState?.inventoryItem?.boundEffects ?? []),
+      ...(token.dnd5eCarriedObjects ?? []).flatMap(item => item.objectState.inventoryItem?.boundEffects ?? []),
+    ], map, characters)
+    const itemMagicSuppressed = physicalItemEffects.length > 0 && (token.type === 'obstacle'
+      // Unattended magic objects are suppressed too; creature eligibility excludes obstacles.
+      ? map.dnd5ePluginAreas?.some(area => area.occupantModifiers?.suppressesMagic &&
+          dnd5eTokenIntersectsPersistentAreaAt(token, map, area, token))
+      : dnd5ePersistentAreaOccupantModifiersAt({ map, token, position: token }).suppressesMagic)
+    const emittedLight = dnd5eActiveEmittedLight([...effects, ...physicalItemEffects.map(effect => ({ ...effect,
+      suspendedBy: [...(effect.suspendedBy ?? []).filter(id => id !== 'persistent-area:antimagic'),
+        ...(itemMagicSuppressed ? ['persistent-area:antimagic'] : [])],
+    }))])
     if (emittedLight) {
       const existing = token.lightSource
       const existingOuter = existing?.enabled
@@ -264,6 +296,17 @@ export function buildMapViewportPresentation(
         detailDescription: area.coreSpellId === 'tiny-hut'
           ? '小屋术范围内：穹顶阻挡外来生物与跨边界法术。施法者离开后结束。'
           : '传送法阵入口：移动进入法阵后传送到 DM 指定的出口。',
+      })
+    }
+    for (const { source, sourceCharacter, mark, feature } of rageMarks) {
+      if (mark.targetId !== token.id) continue
+      const colors = dnd5eCharacterPresentationColors(sourceCharacter)
+      statusMarkers.push({
+        schemaVersion: 1, id: `rage-attack-mark:${source.id}:${feature.id}`, statusId: 'marked',
+        source: 'headless', mechanical: true, sourceActorId: source.id,
+        sourceLabel: sourceCharacter?.name ?? source.label, label: feature.name,
+        detailDescription: '攻击来源之外的目标时具有劣势；攻击命中其他生物时，该生物对本次攻击伤害具有抗性。持续至来源下回合开始或狂暴结束。',
+        backgroundColor: colors.statusBackgroundColor, borderColor: colors.accentColor, glowColor: colors.glowColor,
       })
     }
     if (statusMarkers.length > 0) dnd5eTokenStatusMarkersByToken[token.id] = statusMarkers
@@ -370,12 +413,17 @@ export function buildMapViewportPresentation(
     }))
   }
   return {
-    map: Object.keys(emittedLightByTokenId).length > 0
+    map: Object.keys(emittedLightByTokenId).length > 0 || Object.keys(effectsByTokenId).length > 0
       ? {
           ...canvasMap,
-          tokens: canvasMap.tokens.map((token) => emittedLightByTokenId[token.id]
-            ? { ...token, lightSource: emittedLightByTokenId[token.id] }
-            : token),
+          tokens: canvasMap.tokens.map((token) => {
+            const effects = effectsByTokenId[token.id]
+            const light = emittedLightByTokenId[token.id]
+            return effects || light ? { ...token,
+              ...(effects ? { dnd5eCombatState: { ...token.dnd5eCombatState, activeEffects: effects } } : {}),
+              ...(light ? { lightSource: light } : {}),
+            } : token
+          }),
         }
       : canvasMap,
     tokenBorderPresentations: buildDnd5eTokenBorderPresentations(displayMap.tokens, [...characters]),
@@ -407,11 +455,13 @@ function MapViewportLayerComponent({
 }: MapViewportLayerProps) {
   const worldMinute = useBrowserSceneWorldMinute()
   const characters = useMapViewportCharacters(map.tokens, rulesRevision)
+  const roomMaps = useMapStore(state => state.maps)
+  const roomTokens = useMemo(() => [...roomMaps.filter(entry => entry.id !== map.id).flatMap(entry => entry.tokens), ...map.tokens], [roomMaps, map])
   const orchestratedScene = useSceneOrchestrationStore((state) =>
     state.shared.scenes.find((candidate) => candidate.mapId === map.id))
   const presentation = useMemo(
-    () => buildMapViewportPresentation(map, characters, gridCalibrationDraft),
-    [characters, gridCalibrationDraft, map],
+    () => buildMapViewportPresentation(map, characters, gridCalibrationDraft, roomTokens),
+    [characters, gridCalibrationDraft, map, roomTokens],
   )
 
   const shelteredCircles = useMemo(() => (presentation.map.dnd5ePluginAreas ?? []).flatMap(area =>

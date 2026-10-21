@@ -12,6 +12,26 @@ function fixture(slug='minotaur',actionIndex=0) {
  return {map,characters:[],actorTokenId:'monster',areaId:'wall',panelId:'panel-1',actionIndex,resourceKind:'action' as const,economy:createDnd5eTurnEconomyCounts('turn')}
 }
 describe('monster wall weapon attacks',()=>{
+ it('allows weapon attacks against a projection without inventing AC or HP',()=>{
+  const input=fixture(),area=input.map.dnd5ePluginAreas![0]
+  delete area.stoneWall
+  area.anchorCell={col:2,row:3};area.cells=[1,2,3].flatMap(col=>[2,3,4].map(row=>({col,row})));area.projectionDefense='untouchable-illusion';input.panelId='entity'
+  expect(prepareMonsterWallAttack(input)).toMatchObject({ok:true,armorClass:null,panel:{hitPoints:null,maxHitPoints:null},resource:'action'})
+  input.map.tokens[0].y=0
+  expect(prepareMonsterWallAttack(input).ok).toBe(false)
+  input.map.tokens[0].y=75
+  input.economy.action.current=0
+  expect(prepareMonsterWallAttack(input).ok).toBe(false)
+ })
+  it('targets independent pillar entities with the monster weapon profile',()=>{
+   const input=fixture(),area=input.map.dnd5ePluginAreas![0]
+   delete area.stoneWall
+   area.anchorCell={col:2,row:2};area.cells=[area.anchorCell];area.entityProfile={armorClass:5,hitPoints:30,cannotAttack:true,invisible:false}
+   input.panelId='entity'
+   expect(prepareMonsterWallAttack(input)).toMatchObject({ok:true,armorClass:5,panel:{hitPoints:30},entries:[{attack:{toHit:6}}]})
+   input.economy.action.current=0
+   expect(prepareMonsterWallAttack(input).ok).toBe(false)
+  })
  it('uses minotaur greataxe +6 and 2d12+4 without a character sheet',()=>{
   const result=prepareMonsterWallAttack(fixture());expect(result.ok).toBe(true);if(!result.ok)return
   expect(result.entries).toHaveLength(1)
@@ -50,3 +70,20 @@ describe('monster wall weapon attacks',()=>{
 })
 
 it("uses ice wall AC12 for monsterWallAttack",()=>{const input=fixture();input.map.dnd5ePluginAreas![0].coreSpellId="wall-of-ice";expect(prepareMonsterWallAttack(input)).toMatchObject({ok:true,armorClass:12})})
+
+it('uses a frozen section position and height for monster weapon reach',()=>{
+ const input=fixture(),area=input.map.dnd5ePluginAreas![0]
+ delete area.stoneWall;area.coreSpellId=undefined
+ area.anchorCell={col:10,row:2};area.rectGeometry={lengthFeet:30,widthFeet:1,gridAligned:false,direction:{dc:1,dr:0}}
+ area.cells=Array.from({length:9},(_,i)=>({col:7+i,row:2}))
+ area.vertical={mode:'volume',baseElevationFeet:0,heightFeet:20}
+ area.wallSurfaceSections=[{startFeet:0,endFeet:5,bottomFeet:0,topFeet:5}]
+ area.entityProfile={armorClass:5,hitPoints:15,cannotAttack:true,invisible:false}
+ input.map.tokens[0].x=375
+ input.panelId='entity'
+ expect(prepareMonsterWallAttack(input)).toMatchObject({ok:true,armorClass:5})
+ area.wallSurfaceSections=[{startFeet:0,endFeet:5,bottomFeet:15,topFeet:20}]
+ expect(prepareMonsterWallAttack(input).ok).toBe(false)
+ area.wallSurfaceSections=[]
+ expect(prepareMonsterWallAttack(input).ok).toBe(false)
+})

@@ -2731,7 +2731,7 @@ describe('P2 — 房间规则包原子升级', () => {
 })
 
 describe('房间临时内容合集', () => {
-  it('只接受正文裁剪后的 V2 包，并在 DM 关闭房间时删除托管文件', async () => {
+  it.each(['legacy', 'native', 'content-text', 'native-content-text', 'invalid-content-text-prompt', 'spell-text', 'native-spell-text', 'invalid-spell-text-length', 'invalid-spell-text-scope', 'invalid-marker', 'invalid-prose', 'invalid-source'] as const)('接受房间运行包与明确共享的法术说明，并在 DM 关闭房间时删除托管文件: %s', async mode => {
     const createResponse = await fetch(`${offServer.base}/api/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2777,7 +2777,37 @@ describe('房间临时内容合集', () => {
         abilityGenerationMethods: [], headlessActions: [], subclasses: [], monsters: [],
       },
     }
-    const bytes = Buffer.from(JSON.stringify(runtimePackage))
+    const nativePackage = {
+      format: 'dndstars5e-unified-content', schemaVersion: 1,
+      runtimeProjection: mode === 'invalid-marker' ? undefined : 'room-runtime-mechanics',
+      manifest: runtimePackage.manifest, assets: [], definitions: [{
+        schemaVersion: 1, namespace: pluginId, id: 'test', version: '1.0.0', kind: 'feature', name: 'Test',
+        description: mode === 'invalid-prose' ? 'Unreduced source text' : placeholder,
+        ...(mode === 'invalid-source' ? { source: { title: 'Private book' } } : {}),
+        payload: { id: 'test', name: 'Test', summary: placeholder, description: placeholder, automation: 'manual' },
+      }],
+    }
+    const selectedPackage = ['legacy', 'content-text', 'invalid-content-text-prompt', 'spell-text', 'invalid-spell-text-length', 'invalid-spell-text-scope'].includes(mode)
+      ? runtimePackage : nativePackage
+    if (mode.includes('spell-text')) {
+      Object.assign(selectedPackage.manifest, { roomSpellText: 'include' })
+      const description = mode === 'invalid-spell-text-length' ? '字'.repeat(20_001) : '中文法术说明。'.repeat(100)
+      if (selectedPackage === runtimePackage) {
+        Object.assign(runtimePackage.content, { spells: [{ id: 'test', name: '测试', description }] })
+        if (mode === 'invalid-spell-text-scope') Object.assign(runtimePackage.content, { features: [{ description }] })
+      } else {
+        Object.assign(nativePackage.definitions[0], { kind: 'spell', description, payload: { id: 'test', name: '测试', description } })
+      }
+    }
+    if (mode.includes('content-text')) {
+      Object.assign(selectedPackage.manifest, { roomContentText: 'include' })
+      const description = '中文能力说明。'.repeat(100)
+      if (selectedPackage === runtimePackage) {
+        Object.assign(runtimePackage.content, { subclasses: [{ summary: '子职摘要', abilities: [{ description,
+          ...(mode === 'invalid-content-text-prompt' ? { prompt: 'Private prompt' } : {}) }] }] })
+      } else Object.assign(nativePackage.definitions[0], { description, payload: { summary: '特性摘要', description } })
+    }
+    const bytes = Buffer.from(JSON.stringify(selectedPackage))
     const integrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
     const memberHeaders = {
       'X-Stars-Member': created.member.memberId,
@@ -2801,10 +2831,21 @@ describe('房间临时内容合集', () => {
         body: bytes,
       },
     )
+    if (mode.startsWith('invalid')) {
+      expect(upload.status).toBe(403)
+      await fetch(`${offServer.base}/api/rooms/${created.roomId}/close`, { method: 'POST',
+        headers: { ...memberHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId: created.member.memberId }) })
+      return
+    }
     expect(upload.status).toBe(200)
     expect(await upload.json()).toMatchObject({
       plugins: [{ id: pluginId, distributionPolicy: 'room-ephemeral' }],
     })
+    if (mode.includes('spell-text') || mode.includes('content-text')) {
+      const download = await fetch(`${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}`, { headers: memberHeaders })
+      expect(download.status).toBe(200)
+      expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
+    }
     const pluginDirectory = path.join(offServer.sharedRoot, 'lobby', 'plugins', created.roomId)
     expect(await readdir(pluginDirectory)).toHaveLength(1)
 
@@ -3809,7 +3850,9 @@ describe('room privacy projections and event channel ACLs', () => {
     expect(projectedCharacters.characters[0]).not.toHaveProperty('dmNotes')
     expect(projectedCharacters.characters[1]).not.toHaveProperty('notes')
     expect(projectedCharacters.characters[1]).not.toHaveProperty('backstory')
-    expect(projectedCharacters.characters[1]).not.toHaveProperty('equipment')
+    // Empty equipment prevents client normalization from inventing default armor,
+    // while still withholding every private equipment item.
+    expect(projectedCharacters.characters[1].equipment).toEqual({})
     expect(projectedCharacters.characters[1]).not.toHaveProperty('classResources')
 
     expect((await fetch(`${offServer.base}/api/state/dice${query}`, {

@@ -1,4 +1,4 @@
-import { wallArmorClass } from './wallObjectRules'
+import {persistentEntityAttackPanel,persistentEntityAttackArmorClass,persistentProjectionAttackPoint} from './persistentEntityAttackTarget'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
@@ -39,7 +39,7 @@ export function prepareMonsterWallAttack(input: {
   const token = map.tokens.find(t=>t.id===input.actorTokenId)
   const monster = token?.poolId && (getDnd5eSrdMonster(token.poolId) ?? getDnd5eSrdMonsterBySlug(token.poolId))
   const area = map.dnd5ePluginAreas?.find(a=>a.id===input.areaId)
-  const panel = area?.stoneWall?.panels.find(p=>p.id===input.panelId && p.hitPoints>0)
+  const panel = persistentEntityAttackPanel(area,input.panelId)
   if (!token || !monster || !area || !panel) return fail('目标或怪物已不存在。')
   const conditions=dnd5eConditionsFromActiveEffects(token.dnd5eCombatState?.activeEffects,token.dnd5eCombatState?.conditions)
   if ((token.hp ?? monster.hitPoints.average)<=0 || dnd5eConditionIncapacitated({conditions})) return fail('怪物当前无法攻击。')
@@ -57,12 +57,15 @@ export function prepareMonsterWallAttack(input: {
   const a={x:map.gridOffsetX+(panel.start.col+.5)*grid,y:map.gridOffsetY+(panel.start.row+.5)*grid}
   const b={x:map.gridOffsetX+(panel.end.col+.5)*grid,y:map.gridOffsetY+(panel.end.row+.5)*grid}
   const dx=b.x-a.x,dy=b.y-a.y,t=Math.max(0,Math.min(1,((token.x-a.x)*dx+(token.y-a.y)*dy)/Math.max(1,dx*dx+dy*dy)))
-  const point={x:a.x+dx*t,y:a.y+dy*t}
   const geometry=mapGeometryRuntimeForMap(map.id), elevation=mapGeometryTokenElevation(geometry,token)
-  const base=area.vertical?.mode==='volume'?area.vertical.baseElevationFeet:0
-  const distance=Math.max(0,Math.max(Math.abs(point.x-token.x),Math.abs(point.y-token.y))/grid*feet-Math.max(0,(token.size-1)*feet/2),base-elevation,elevation-base-10)
-  const rayMap={...map,dnd5ePluginAreas:map.dnd5ePluginAreas?.map(candidate=>candidate.id===area.id?{...candidate,stoneWall:{...candidate.stoneWall!,panels:candidate.stoneWall!.panels.filter(p=>p.id!==panel.id)}}:candidate)}
-  if(mapGeometryLineOfEffectBlocked({map:rayMap,geometry,from:token,to:point,fromElevationFeet:elevation,toElevationFeet:Math.max(base,Math.min(base+10,elevation))}))return fail('另一面墙或障碍物挡住了攻击路径。')
+  const aim=persistentProjectionAttackPoint(map,area,{...token,elevationFeet:elevation})
+  if(area.wallSurfaceSections!=null&&!aim)return fail('目标没有可攻击的剩余墙面。')
+  const point:{x:number;y:number;elevationFeet?:number}=aim??{x:a.x+dx*t,y:a.y+dy*t}
+  const base=point.elevationFeet??(area.vertical?.mode==='volume'?area.vertical.baseElevationFeet:0)
+  const targetHeight=point.elevationFeet!=null?0:panel.id==='entity'&&area.vertical?.mode==='volume'?area.vertical.heightFeet:10
+  const distance=Math.max(0,Math.max(Math.abs(point.x-token.x),Math.abs(point.y-token.y))/grid*feet-Math.max(0,(token.size-1)*feet/2),base-elevation,elevation-base-targetHeight)
+   const rayMap={...map,dnd5ePluginAreas:map.dnd5ePluginAreas?.flatMap(candidate=>candidate.id!==area.id?[candidate]:panel.id==='entity'?[]:[{...candidate,stoneWall:{...candidate.stoneWall!,panels:candidate.stoneWall!.panels.filter(p=>p.id!==panel.id)}}])}
+  if(mapGeometryLineOfEffectBlocked({map:rayMap,geometry,from:token,to:point,fromElevationFeet:elevation,toElevationFeet:Math.max(base,Math.min(base+targetHeight,elevation))}))return fail('另一面墙或障碍物挡住了攻击路径。')
   const snapshot=createDnd5eMapCombatSnapshot({combatId:map.id,map,characters:input.characters,initiativeOrder:[]})
   const actor=snapshot.state.combatants[token.id]
   const frightened=actor && dnd5eFrightenedAttackDisadvantage(snapshot.state,actor)
@@ -72,7 +75,7 @@ export function prepareMonsterWallAttack(input: {
     const disadvantage=frightened || conditions.some(c=>['blinded','poisoned','restrained','prone'].includes(c)) || attack.mode==='ranged' && (threatened || distance>(attack.rangeFeet?.normal??Infinity))
     return {action:child,attack,mode:input.rollMode??(disadvantage?'disadvantage' as const:'normal' as const)}
   })
-  if(entries.some(e=>distance>(e.attack.mode==='melee'?(e.attack.reachFeet??5):(e.attack.rangeFeet?.long??0))))return fail('墙段超出所选攻击的触及或射程。')
+  if(entries.some(e=>distance>(e.attack.mode==='melee'?(e.attack.reachFeet??5):(e.attack.rangeFeet?.long??0))+1e-6))return fail('墙段超出所选攻击的触及或射程。')
   const siege=monster.traits.some(trait=>/^siege monster$/i.test(trait.name.trim()) || trait.name==='攻城怪物')
-  return {ok:true as const,armorClass:wallArmorClass(area),token,monster,area,panel,action,entries,resource,resourceActions,siege,label:`${area.label} · 第 ${area.stoneWall!.panels.indexOf(panel)+1} 段`}
+  return {ok:true as const,armorClass:persistentEntityAttackArmorClass(area),token,monster,area,panel,action,entries,resource,resourceActions,siege,label:panel.id==='entity'?area.label:`${area.label} · 第 ${area.stoneWall!.panels.findIndex(candidate=>candidate.id===panel.id)+1} 段`}
 }

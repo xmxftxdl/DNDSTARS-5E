@@ -17,11 +17,15 @@ import { useCampaignTimeStore } from '../store/campaignTime'
 import {
   completeDnd5eCampaignLongRest,
   completeDnd5eCampaignShortRest,
+  completeDnd5eCampaignRestSession,
 } from '../store/campaignLongRest'
 import { useCharacterStore } from '../store/characters'
+import CampaignInteractionsPanel from './CampaignInteractionsPanel'
+import CampaignEnvironmentalExposurePanel from './CampaignEnvironmentalExposurePanel'
 
 export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const [open, setOpen] = useState(false)
+  const [exposureDicePending, setExposureDicePending] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [customAmount, setCustomAmount] = useState(10)
@@ -85,6 +89,11 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
           restCharacterIds,
           ignoreLongRestCooldown,
         ))
+  }
+  const beginRestSession = () => {
+    if(!restCharacterIds.length || busy)return
+    void run(()=>mutate({operation:'start-rest-session',id:crypto.randomUUID(),kind:restKind,
+      characterIds:[...restCharacterIds],expectedWorldMinute:clock.worldMinute}))
   }
   const createTimer = () => {
     const character = characters.find((entry) => entry.id === timerCharacterId)
@@ -152,7 +161,7 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
         {visibleTimers.some((timer) => timer.status === 'expired') && <span className="h-2 w-2 rounded-full bg-amber-400" />}
       </button>
       {open && createPortal(
-        <div className="fixed inset-0 z-[350] flex items-center justify-center bg-black/75 p-4" onMouseDown={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[350] flex items-center justify-center bg-black/75 p-4" style={{ visibility: exposureDicePending ? 'hidden' : undefined }} onMouseDown={() => setOpen(false)}>
           <div className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-white/10 bg-slate-950 p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -165,6 +174,8 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
 
             {isDm && (
               <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <CampaignInteractionsPanel />
+                <CampaignEnvironmentalExposurePanel onDicePending={setExposureDicePending} />
                 <section className="rounded-2xl border border-violet-300/15 bg-violet-500/[0.035] p-4 md:col-span-2">
                   <h3 className="text-sm font-semibold text-slate-200">手动设定当前时间</h3>
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -185,6 +196,7 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
                 <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
                   <h3 className="text-sm font-semibold text-slate-200">推进时间</h3>
                   <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button type="button" disabled={busy} onClick={() => void run(() => mutate({operation:'advance-seconds',seconds:6,reason:'DM 推进六秒'}))} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300 hover:border-violet-400/30 hover:bg-violet-500/10 disabled:opacity-50">+6 秒</button>
                     {[{ label: '+10 分钟', minutes: 10 }, { label: '+1 小时', minutes: 60 }, { label: '+8 小时', minutes: 480 }, { label: '+1 天', minutes: 1_440 }].map((entry) => (
                       <button key={entry.minutes} type="button" disabled={busy} onClick={() => void advance(entry.minutes, entry.label)} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300 hover:border-violet-400/30 hover:bg-violet-500/10 disabled:opacity-50">{entry.label}</button>
                     ))}
@@ -267,6 +279,10 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
                     </label>
                   )}
 
+                  <button type="button" disabled={busy || restCharacterIds.length===0} onClick={beginRestSession}
+                    className="mt-4 w-full rounded-xl border border-indigo-300/25 bg-indigo-500/15 px-3 py-2.5 text-sm font-semibold text-indigo-100 disabled:opacity-40">
+                    开始休息，暂不推进时间
+                  </button>
                   <button
                     type="button"
                     disabled={busy || restCharacterIds.length === 0 || (restKind === 'long-rest' && blockedSelectedLongRests > 0 && !ignoreLongRestCooldown)}
@@ -285,6 +301,21 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
               </div>
             )}
 
+            {!!clock.restSessions?.length && <section className="mt-4 rounded-2xl border border-indigo-300/15 bg-indigo-500/[0.035] p-4">
+              <h3 className="text-sm font-semibold text-slate-200">休息会话</h3>
+              <p className="mt-1 text-xs text-slate-500">完成时推进对应休息时间并结算收益；打断不会发放收益。普通时间推进会打断进行中的会话。</p>
+              <div className="mt-3 space-y-2">{[...clock.restSessions].reverse().filter((session,index)=>session.status==='active'||index<5).map(session=><div
+                key={session.id} data-testid={`campaign-rest-session-${session.id}`} className="rounded-xl border border-white/10 bg-black/15 p-3">
+                <div className="text-xs font-semibold text-slate-200">{session.kind==='long-rest'?'长休':'短休'} · {session.status==='active'?'进行中':session.status==='completed'?'已完成':'已打断'}</div>
+                <p className="mt-1 text-xs text-slate-400">{session.characterIds.map(id=>characters.find(character=>character.id===id)?.name??'未知角色').join('、')}</p>
+                {isDm && session.status==='active' && <div className="mt-2 flex gap-2">
+                  <button type="button" disabled={busy} onClick={()=>void run(()=>completeDnd5eCampaignRestSession(session.id))}
+                    className="rounded-lg bg-indigo-500/25 px-3 py-2 text-xs text-indigo-100 disabled:opacity-40">完成本次休息</button>
+                  <button type="button" disabled={busy} onClick={()=>void run(()=>mutate({operation:'interrupt-rest-session',id:session.id,expectedWorldMinute:clock.worldMinute}))}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 disabled:opacity-40">打断本次休息</button>
+                </div>}
+              </div>)}</div>
+            </section>}
             <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
               <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-200">计时器与专注提醒</h3><span className="text-[11px] text-slate-500">{visibleTimers.length} 项</span></div>
               <div className="mt-3 space-y-2">

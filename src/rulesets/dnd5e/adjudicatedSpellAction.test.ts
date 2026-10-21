@@ -1,4 +1,9 @@
 import { planDnd5eMapResultApplication } from './mapBridge'
+import { registerDnd5eRulesPlugin } from './pluginApi'
+import {createEmptyMapGeometry,setMapGeometryRuntime} from '../../lib/mapGeometry'
+import {prepareDnd5eTempleStructure} from './templeStructure'
+import {resolveDnd5eTempleDisintegration} from './templeDisintegrationAction'
+import {dnd5eSpellAuthorityResolutionContext} from '../../pages/maps/spellSettlementCoordinator'
 import { createDnd5eMechanicalEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
@@ -19,6 +24,7 @@ import {
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from './items'
 import { dnd5eEffectiveOptionalMovementSpeed, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
 import { validateSharedStateShape } from '../../../scripts/shared-server-core.mjs'
+import { dnd5eWishUndeadCopy } from './wish'
 
 function wizard(spellId: string): Character {
   return {
@@ -78,6 +84,282 @@ function fixture() {
 }
 
 describe('DM-adjudicated spell deterministic-cost transaction', () => {
+  it.each(['granted', 'below-level', 'wrong-subclass', 'expanded-only'] as const)(
+    'checks automatic subclass spell ownership at commit (%s)', mode => {
+      const input = fixture()
+      input.spell.id = 'amber-bolt'
+      input.actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-prepared': ['amber-bolt'] } } } }
+      input.action.dnd5eAdjudicatedSpell!.spellId = 'amber-bolt'
+      let subclassId = ''
+      const dispose = registerDnd5eRulesPlugin({
+        manifest: { id: 'test.auto-prepared-commit', name: 'Test', version: '1.0.0', apiVersion: 2,
+          rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+        setup(api) {
+          subclassId = api.registerSubclass({ id: 'school', classId: 'wizard', name: 'School', summary: 'Synthetic',
+            features: [{ id: 'study', level: 2, name: 'Study', description: 'Synthetic spell grant.' }],
+            spellLists: [{ id: 'school-spells', name: 'School spells', mode: mode === 'expanded-only' ? 'expanded-list' : 'always-prepared',
+              entries: [{ classLevel: mode === 'below-level' ? 6 : 2, spellIds: [input.spell.id] }] }] })
+        },
+      })
+      try {
+        const prepared = prepareDnd5eAdjudicatedSpell(input)
+        expect(prepared.ok).toBe(true)
+        if (!prepared.ok) throw Error(prepared.reason)
+        const state = structuredClone(prepared.prepared.state)
+        const actor = state.combatants[input.actorToken.id]
+        actor.classSelections = {}
+        actor.classSelectionsByClass = { wizard: {} }
+        actor.subclassIds = { wizard: mode === 'wrong-subclass' ? 'missing:school' : subclassId }
+        const result = resolveDnd5eHeadlessAction(state, { type: 'adjudicated-spell', actorId: actor.id,
+          castingClassId: 'wizard', spellId: input.spell.id, spellName: input.spell.name,
+          spellLevel: 1, slotLevel: 1, castingTime: 'action', effects: [] })
+        expect(result.ok, result.ok ? undefined : result.reason).toBe(mode === 'granted')
+        expect(result.state.combatants[actor.id].classResources['dnd5e-spell-slot-1'].current)
+          .toBe(mode === 'granted' ? 0 : 1)
+        expect(state.combatants[actor.id].classResources['dnd5e-spell-slot-1'].current).toBe(1)
+      } finally { dispose() }
+    })
+  it.each([false,true])('uses an owned alternate resource on the native adjudicated route (narrative=%s)', narrativeOnly => {
+    let featureId=''
+    const dispose=registerDnd5eRulesPlugin({manifest:{id:'test.native-resource-cast',name:'Test',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+      featureId=api.registerFeature({id:'cast',name:'Cast',summary:'Synthetic',description:'Synthetic',automation:'full',
+        declarativeAbility:{schemaVersion:1,id:'cast',name:'Cast',description:'Synthetic',level:1,trigger:{kind:'active-use'},targeting:{kind:'self'},effects:[],automation:'full',
+          mechanic:{kind:'alternate-resource-spellcasting',classId:'barbarian',ability:'wis',resourceId:'dnd5e-ki',resourceScope:'core',ignoreMaterialComponents:true,
+            grants:[{id:'omen',spellId:'augury',castAtLevel:2,resourceCost:1}]}}})
+    }})
+    try{
+      const input=fixture()
+      input.actor.charClass='野蛮人';input.actor.dnd5eClassLevels={barbarian:5};input.actor.dnd5eClassChoices={classes:{}}
+      input.actor.equipment={};input.actor.dnd5ePluginFeatureIds=[featureId]
+      input.actor.classResources={'dnd5e-ki':{current:1,max:1}}
+      input.spell=dnd5eSpellbookEntries([]).find(s=>s.id==='augury')!
+      input.action.dnd5eAdjudicatedSpell={spellId:'augury',slotLevel:2,alternateResourceSpell:{featureId,grantId:'omen'},...(narrativeOnly?{narrativeOnly:true}:{})}
+      const prepared=prepareDnd5eAdjudicatedSpell(input)
+      expect(prepared.ok,JSON.stringify(prepared)).toBe(true)
+      if(!prepared.ok)throw Error(prepared.reason)
+      expect(prepared.prepared.spellMaterialPlan).toBeUndefined()
+      expect(prepared.prepared.elapsedCastingMinutes).toBe(1)
+      expect(prepared.prepared.state.combatants['wizard-token'].classSelections).toEqual({})
+      const result=resolvePreparedDnd5eAdjudicatedSpell({prepared:prepared.prepared,response:{decision:'approved',effects:[]}})
+      expect(result.result.ok).toBe(true)
+      expect(result.result.state.combatants['wizard-token'].classResources['dnd5e-ki'].current).toBe(0)
+      expect(result.result.state.combatants['wizard-token'].classResources['dnd5e-spell-slot-2']).toBeUndefined()
+      for(const mode of ['unowned','empty','silenced','wrong-grant','ritual','class-override'] as const){
+        const bad=structuredClone(input)
+        if(mode==='unowned')bad.actor.dnd5ePluginFeatureIds=[]
+        if(mode==='empty')bad.actor.classResources!['dnd5e-ki'].current=0
+        if(mode==='silenced')bad.actor.conditions=['silenced']
+        if(mode==='wrong-grant')bad.action.dnd5eAdjudicatedSpell!.alternateResourceSpell!.grantId='foreign'
+        if(mode==='ritual')bad.action.dnd5eAdjudicatedSpell!.ritual=true
+        if(mode==='class-override')bad.action.dnd5eAdjudicatedSpell!.castingClassId='wizard'
+        bad.characters=[bad.actor]
+        expect(prepareDnd5eAdjudicatedSpell(bad).ok,mode).toBe(false)
+      }
+    }finally{dispose()}
+  })
+  it.each(['shapechange','wild-shape','polymorph'] as const)('preserves the casting distinction for %s', mode => {
+    const input=fixture()
+    input.actor.dnd5eCombatState={wildShapeFormId:'srd-5.1:imp',wildShapeMode:mode,wildShapeCurrentHp:10,wildShapeRoundsRemaining:10}
+    const result=prepareDnd5eAdjudicatedSpell(input)
+    if(mode==='shapechange')expect(result.ok,result.ok?undefined:result.reason).toBe(true)
+    else expect(result).toMatchObject({ok:false,reason:'wild-shape-spellcasting-unavailable'})
+  })
+  it.each([[false,false],[true,false],[false,true],[true,true]])('plans Disintegrate against a temple with atomic costs and roof falls (roof=%s, exploration=%s)',(roof,exploration)=>{
+    const input=fixture(),spell=dnd5eSpellbookEntries([]).find(entry=>entry.id==='disintegrate')!
+    input.actor.level=11;input.actor.dnd5eClassLevels={wizard:11}
+    input.actor.dnd5eClassChoices={classes:{wizard:{selections:{'spell-prepared':[spell.id,'feather-fall']}}}}
+    input.actor.classResources={'dnd5e-spell-slot-6':{current:1,max:1},'dnd5e-spell-slot-1':{current:1,max:4}}
+    input.action.dnd5eAdjudicatedSpell={spellId:spell.id,castingClassId:'wizard',slotLevel:6,
+      templeDisintegration:{schemaVersion:1,entityId:'temple:test:north-left',point:{x:210,y:100,elevationFeet:5}}}
+    if(exploration){
+      input.action.combatId=undefined
+      const context=dnd5eSpellAuthorityResolutionContext({combatActive:false,map:input.map,actorTokenId:input.actorToken.id,initiativeOrder:[]})
+      input.initiativeOrder=[...context.initiativeOrder]
+    }
+    const built=prepareDnd5eTempleStructure({map:input.map,geometry:createEmptyMapGeometry(input.map.id),origin:{x:200,y:100},widthFeet:20,depthFeet:20,heightFeet:15,
+      elevationFeet:0,rotationDegrees:0,structureId:'temple:test',casterId:'builder',authorizedCreatureIds:[],worldMinute:0,createdAt:1,
+      hostileCreatureTypes:['fiend'],lighting:'bright',sourceSaveDc:18,sourceWisdomModifier:5})
+    if(!built.ok)throw Error(built.reason)
+    if(roof){input.enemy.x=300;input.enemy.y=200;input.enemy.elevationFeet=15}
+    try{
+      setMapGeometryRuntime([built.geometry])
+      const p=prepareDnd5eAdjudicatedSpell({...input,spell})
+      expect(p.ok,p.ok?undefined:p.reason).toBe(true);if(!p.ok)throw Error(p.reason)
+      const before=structuredClone(p.prepared)
+      expect(resolvePreparedDnd5eAdjudicatedSpell({prepared:p.prepared,response:{decision:'approved',effects:[]}}).result.ok).toBe(false)
+      const declaration=input.action.dnd5eAdjudicatedSpell!.templeDisintegration!
+      for(const payload of [
+        {...input.action.dnd5eAdjudicatedSpell,narrativeOnly:true},
+        {...input.action.dnd5eAdjudicatedSpell,ritual:true},
+        {...input.action.dnd5eAdjudicatedSpell,spellId:'fireball'},
+        {...input.action.dnd5eAdjudicatedSpell,templeDisintegration:{...declaration,rangeFeet:9999}},
+        {...input.action.dnd5eAdjudicatedSpell,templeDisintegration:{...declaration,point:{...declaration.point,x:NaN}}},
+        {...input.action.dnd5eAdjudicatedSpell,templeDisintegration:{...declaration,entityId:' temple:test:north-left'}},
+      ])expect(prepareDnd5eAdjudicatedSpell({...input,spell,action:{...input.action,dnd5eAdjudicatedSpell:payload as never}})).toMatchObject({ok:false,reason:'invalid-action'})
+      const castInput={prepared:p.prepared,geometry:built.geometry,targetEntityId:'temple:test:north-left',targetPosition:{x:210,y:100},targetElevationFeet:5,worldMinute:100}
+      const pending=resolveDnd5eTempleDisintegration(castInput)
+      expect(resolveDnd5eTempleDisintegration({...castInput,targetEntityId:'temple:test:south'})).toMatchObject({ok:false,reason:'temple-disintegration-target-mismatch'})
+      if(roof){
+        expect(pending).toMatchObject({ok:false,reason:'invalid-dice'})
+        expect('application' in pending).toBe(false)
+      }
+      const resolved=roof?resolveDnd5eTempleDisintegration({...castInput,airborneFallDamageRollsByCombatantId:{'enemy-token':[4]}}):pending
+      expect(resolved.ok,JSON.stringify(resolved)).toBe(true);if(!resolved.ok)throw Error(resolved.reason)
+      expect(resolved.geometry.structureLifetimes).toEqual([])
+      expect(resolved.result.state.combatants['wizard-token'].turn.actionAvailable).toBe(false)
+      expect(resolved.application.characters[0].classResources?.['dnd5e-spell-slot-6']?.current).toBe(0)
+      expect(resolved.application.map.tokens.find(token=>token.id==='enemy-token')?.hp).toBe(roof?26:30)
+      if(roof){
+        const feathered=resolveDnd5eTempleDisintegration({...castInput,solidExitFeatherFallChoices:[{casterId:'wizard-token',targetIds:['enemy-token']}]})
+        expect(feathered.ok,JSON.stringify(feathered)).toBe(true);if(!feathered.ok)throw Error(feathered.reason)
+        expect(feathered.application.map.tokens.find(token=>token.id==='enemy-token')?.hp).toBe(30)
+        expect(feathered.application.characters[0].classResources?.['dnd5e-spell-slot-1']?.current).toBe(0)
+        expect(feathered.result.state.combatants['wizard-token'].turn.reactionAvailable).toBe(false)
+        expect(feathered.geometry.structureLifetimes).toEqual([])
+        expect(resolveDnd5eTempleDisintegration({...castInput,solidExitFeatherFallChoices:[{casterId:'wizard-token',targetIds:['missing'] }]}).ok).toBe(false)
+      }
+      expect(p.prepared).toEqual(before)
+      if(!roof){
+        const featureId='test.temple-interrupt:watcher.stop',usesId='test.temple-interrupt:decl-watcher-stop-uses'
+        const dispose=registerDnd5eRulesPlugin({manifest:{id:'test.temple-interrupt',name:'Watcher',version:'1.0.0',apiVersion:2,
+          rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},setup(api){
+          api.registerDeclarativeSubclass({schemaVersion:1,id:'watcher',classId:'ranger',name:'Watcher',summary:'Synthetic',abilities:[{
+            schemaVersion:1,id:'stop',name:'Stop',description:'Synthetic',level:11,trigger:{kind:'before-spell-effect'},
+            cost:{economy:'reaction',uses:1},targeting:{kind:'self'},limits:{uses:{kind:'fixed',value:1},reset:'short-rest'},
+            effects:[],automation:'full',mechanic:{kind:'source-action-interruption',events:['spell-cast'],rangeFeet:60,saveAbility:'wis',dcAbility:'wis'},
+          }]})
+        }})
+        try{
+          for(const die of [1,20,21]){
+            const intercepted=structuredClone(p.prepared)
+            Object.assign(intercepted.state.combatants['enemy-token'],{classId:'ranger',level:11,classLevels:{ranger:11},
+              subclassIds:{ranger:'test.temple-interrupt:watcher'},pluginFeatureIds:[featureId]})
+            intercepted.state.combatants['enemy-token'].classResources[usesId]={current:1,max:1}
+            const snapshot=structuredClone(intercepted)
+            const outcome=resolveDnd5eTempleDisintegration({...castInput,prepared:intercepted,
+              sourceActionInterruptionReaction:{actorId:'enemy-token',featureId,savingThrowD20:die}})
+            expect(intercepted).toEqual(snapshot)
+            expect(outcome.ok,JSON.stringify(outcome)).toBe(die!==21)
+            if(!outcome.ok){expect(outcome.application).toBeUndefined();continue}
+            expect(outcome.geometry.structureLifetimes).toHaveLength(die===1?1:0)
+            if(die===1)expect(outcome.geometry).toEqual(built.geometry)
+            expect(outcome.application.characters[0].classResources?.['dnd5e-spell-slot-6']?.current).toBe(0)
+            expect(outcome.result.state.combatants['enemy-token'].classResources[usesId].current).toBe(0)
+            expect(outcome.result.events).toContainEqual(expect.objectContaining({type:'source-action-interrupted',interrupted:die===1}))
+          }
+        }finally{dispose()}
+        const rejected=resolveDnd5eTempleDisintegration({...castInput,counterspellReaction:{actorId:'missing-reactor',slotLevel:6}})
+        expect(rejected).toMatchObject({ok:false,reason:'invalid-class-feature'})
+        expect(rejected.application).toBeUndefined()
+        expect(p.prepared).toEqual(before)
+        expect(built.geometry.structureLifetimes).toHaveLength(1)
+        for(const [slotLevel,abilityCheckTotal,success] of [[6,undefined,true],[3,16,true],[3,15,false]] as const){
+          const countered=structuredClone(p.prepared)
+          countered.state.combatants['enemy-token']={...structuredClone(countered.state.combatants['wizard-token']),id:'enemy-token',controller:'dm',position:{x:125,y:25},
+            classSelections:{'spell-prepared':['counterspell']},classSelectionsByClass:{wizard:{'spell-prepared':['counterspell']}},
+            classResources:{'dnd5e-spell-slot-6':{current:1,max:1},'dnd5e-spell-slot-3':{current:1,max:3}}}
+          const outcome=resolveDnd5eTempleDisintegration({...castInput,prepared:countered,counterspellReaction:{actorId:'enemy-token',slotLevel,abilityCheckTotal}})
+          expect(outcome.ok,JSON.stringify(outcome)).toBe(true);if(!outcome.ok)throw Error(outcome.reason)
+          expect(outcome.result.events).toContainEqual(expect.objectContaining({type:'counterspell-resolved',success}))
+          expect(outcome.geometry.structureLifetimes).toHaveLength(success?1:0)
+          expect(outcome.application.characters[0].classResources?.['dnd5e-spell-slot-6']?.current).toBe(0)
+          expect(outcome.result.state.combatants['enemy-token'].classResources[`dnd5e-spell-slot-${slotLevel}`].current).toBe(0)
+          expect(outcome.result.state.combatants['enemy-token'].turn.reactionAvailable).toBe(false)
+        }
+      }
+      const exhausted=structuredClone(p.prepared)
+      exhausted.state.combatants['wizard-token'].classResources['dnd5e-spell-slot-6'].current=0
+      expect(resolveDnd5eTempleDisintegration({...castInput,prepared:exhausted}).ok).toBe(false)
+      const spent=structuredClone(p.prepared)
+      spent.state.combatants['wizard-token'].turn.actionAvailable=false
+      expect(resolveDnd5eTempleDisintegration({...castInput,prepared:spent}).ok).toBe(false)
+      const interrupted=structuredClone(p.prepared)
+      const pain=createDnd5eMechanicalEffect({definitionId:'pain',label:'Pain',targetId:'wizard-token',source:{kind:'spell'},spellcastingSave:{ability:'con',dc:18}})
+      interrupted.state.combatants['wizard-token'].classState.activeEffects=[pain]
+      const fizzled=resolveDnd5eTempleDisintegration({...castInput,prepared:interrupted,spellcastingSavingThrows:[{effectId:pain.id,d20:1}]})
+      expect(fizzled.ok,JSON.stringify(fizzled)).toBe(true);if(!fizzled.ok)throw Error(fizzled.reason)
+      expect(fizzled.geometry).toEqual(built.geometry)
+      expect(fizzled.application.characters[0].classResources?.['dnd5e-spell-slot-6']?.current).toBe(0)
+      expect(fizzled.result.state.combatants['wizard-token'].turn.actionAvailable).toBe(false)
+      expect(fizzled.application.map.tokens.find(token=>token.id==='enemy-token')?.hp).toBe(30)
+    }finally{setMapGeometryRuntime([])}
+  })
+  it.each([1, 20, undefined])('settles the caster saving throw before adjudicated effects: %s', d20 => {
+    const input = fixture()
+    const preparation = prepareDnd5eAdjudicatedSpell(input)
+    expect(preparation.ok).toBe(true)
+    if (!preparation.ok) return
+    const prepared = preparation.prepared
+    const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain',
+      targetId: input.actorToken.id, source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+    prepared.state.combatants[input.actorToken.id].classState.activeEffects = [pain]
+    const before = structuredClone(prepared.state)
+    const resolved = resolvePreparedDnd5eAdjudicatedSpell({ prepared,
+      spellcastingSavingThrows: d20 == null ? undefined : [{ effectId: pain.id, d20 }],
+      response: { decision: 'approved', effects: [{ targetTokenId: input.enemy.id, operation: 'damage', amount: 7 }] },
+    })
+    expect(prepared.state).toEqual(before)
+    expect(resolved.result.ok).toBe(d20 != null)
+    if (d20 == null) {
+      expect(resolved.application).toBeUndefined()
+      return
+    }
+    expect(resolved.result.state.combatants[input.enemy.id].currentHp).toBe(d20 === 20 ? 23 : 30)
+    expect(resolved.result.state.combatants[input.actorToken.id].classResources['dnd5e-spell-slot-1'].current).toBe(0)
+    expect(resolved.result.events.filter(event => event.type === 'saving-throw-resolved')).toHaveLength(1)
+    expect(resolved.application).toBeDefined()
+  })
+  it.each(['animate-dead', 'create-undead'] as const)('Wish copies %s through a protected corpse using its copied level and only one ninth-level slot', copiedId => {
+    const input = fixture()
+    input.spell = dnd5eSpellbookEntries([]).find(entry => entry.id === 'wish')!
+    input.actor.level = 20
+    input.actor.dnd5eClassLevels = { wizard: 20 }
+    input.actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-prepared': ['wish'] } } } }
+    input.actor.classResources = { 'dnd5e-spell-slot-9': { current: 1, max: 1 } }
+    const corpse: Token = { id: 'warded-corpse', label: 'Protected corpse', type: 'obstacle', x: 75, y: 25,
+      size: 1, color: '', emoji: '', dnd5eObjectState: { schemaVersion: 1,
+        remains: { kind: 'humanoid-corpse', creatureSize: 'medium' },
+        undeadCreationProtection: { schemaVersion: 1, minimumPower: 'wish', sourceTokenId: 'cleric',
+          sourceActivityId: 'ceremony', sourcePackageId: 'test.ceremony', spellLevel: 1,
+          createdWorldMinute: 100, expiresAtWorldMinute: 20000 } },
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [createDnd5eMechanicalEffect({ definitionId: 'funeral', label: 'Funeral',
+        targetId: 'warded-corpse', source: { kind: 'spell', rulesId: 'ceremony' },
+        duration: { type: 'rounds', remainingRounds: 100800, tickOn: 'source-turn-end' }, undeadCreationProtection: { minimumPower: 'wish' } })] } }
+    input.map.tokens.push(corpse)
+    input.action.combatId = undefined
+    const copied = dnd5eSpellbookEntries([]).find(entry => entry.id === copiedId)!
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'wish', slotLevel: 9,
+      wish: { schemaVersion: 1, mode: 'duplicate-spell', spellId: copiedId, spellName: copied.name, spellLevel: copied.level },
+      animateDead: { schemaVersion: 1, mode: 'animate', ...(copiedId === 'create-undead' ? { undeadKind: 'ghoul' as const } : {}),
+        targets: [{ tokenId: corpse.id, targetName: corpse.label, remainsKind: 'humanoid-corpse' }] } }
+    const initial = structuredClone(input.actor)
+    expect(dnd5eWishUndeadCopy(input.action.dnd5eAdjudicatedSpell.wish)).toMatchObject({ spellId: copiedId, spellLevel: copied.level })
+    const prepared = prepareDnd5eAdjudicatedSpell({ ...input, worldMinute: 1000 })
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+    if (!prepared.ok) throw Error('Wish preparation failed')
+    const settled = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared, worldMinute: 1000,
+      response: { decision: 'approved', effects: [], animateDead: { schemaVersion: 1, targetsConfirmed: true } } })
+    expect(settled.result.ok, JSON.stringify(settled.result)).toBe(true)
+    expect(settled.application!.map.tokens.some(token => token.id === corpse.id)).toBe(false)
+    const summon = settled.application!.map.tokens.find(token => token.dnd5eSummon?.featureId === `spell:${copiedId}`)!
+    expect(summon.poolId).toBe(copiedId === 'create-undead' ? 'srd-5.1:ghoul' : 'srd-5.1:zombie')
+    expect(summon.dnd5eSummon!.controlExpiresAtWorldMinute).toBe(2440)
+    expect(settled.result.state.combatants[input.actorToken.id].classResources['dnd5e-spell-slot-9'].current).toBe(0)
+    expect(input.actor).toEqual(initial)
+    const tooMany = structuredClone(input.action.dnd5eAdjudicatedSpell)
+    const excess = copiedId === 'animate-dead' ? 2 : 4
+    tooMany.animateDead!.targets = Array.from({ length: excess }, (_, i) => ({ tokenId: `extra-${i}`,
+      targetName: `Extra ${i}`, remainsKind: 'humanoid-corpse' as const }))
+    const moreMap = { ...input.map, tokens: [...input.map.tokens, ...tooMany.animateDead!.targets.map(target => ({
+      ...corpse, id: target.tokenId, label: target.targetName }))] }
+    expect(prepareDnd5eAdjudicatedSpell({ ...input, map: moreMap,
+      action: { ...input.action, dnd5eAdjudicatedSpell: tooMany }, worldMinute: 1000 }).ok).toBe(false)
+    const forged = { ...input.action.dnd5eAdjudicatedSpell, wish: { ...input.action.dnd5eAdjudicatedSpell.wish!, spellLevel: 9 } }
+    expect(prepareDnd5eAdjudicatedSpell({ ...input, action: { ...input.action, dnd5eAdjudicatedSpell: forged as typeof input.action.dnd5eAdjudicatedSpell }, worldMinute: 1000 }).ok).toBe(false)
+    input.spell = copied
+    input.action.dnd5eAdjudicatedSpell = { ...input.action.dnd5eAdjudicatedSpell, spellId: copiedId }
+    expect(prepareDnd5eAdjudicatedSpell({ ...input, worldMinute: 1000 }).ok).toBe(false)
+  })
   it('casts Teleport without selecting travelers or requesting manual effects', () => {
     const input = fixture()
     input.characters = [{ ...wizard('teleport'), level: 13,
@@ -961,6 +1243,34 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
     expect(result.application?.characters[0].classResources?.['dnd5e-spell-slot-3'].current).toBe(1)
   })
 
+  it.each([1, 20, undefined])('requires the caster save for narrative Sending: %s', d20 => {
+    const input = fixture()
+    input.spell = dnd5eSpellbookEntries([]).find(entry => entry.id === 'sending')!
+    input.actor.level = 20
+    input.actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-prepared': ['sending'] } } } }
+    input.actor.classResources = { 'dnd5e-spell-slot-3': { current: 2, max: 3 } }
+    input.actor.equipment = { offHand: { id: 'focus', name: '奥术法器', slot: 'mainWeapon', spellcastingFocusClassIds: ['wizard'] } }
+    input.action.dnd5eAdjudicatedSpell = { spellId: 'sending', slotLevel: 3, narrativeOnly: true }
+    const prepared = prepareDnd5eAdjudicatedSpell(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const pain = createDnd5eMechanicalEffect({ definitionId: 'pain', label: 'Pain',
+      targetId: input.actorToken.id, source: { kind: 'spell' }, spellcastingSave: { ability: 'con', dc: 18 } })
+    prepared.prepared.state.combatants[input.actorToken.id].classState.activeEffects = [pain]
+    const result = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared,
+      spellcastingSavingThrows: d20 == null ? undefined : [{ effectId: pain.id, d20 }],
+      response: { decision: 'approved', effects: [] } })
+    if (d20 == null) {
+      expect(result.result.ok).toBe(false)
+      expect(result.application).toBeUndefined()
+      return
+    }
+    expect(result.result.events.filter(event => event.type === 'spellcasting-prevented')).toHaveLength(d20 === 1 ? 1 : 0)
+    expect(result.result.events.filter(event => event.type === 'saving-throw-resolved')).toHaveLength(1)
+    expect(result.result.ok).toBe(true)
+    expect(result.application?.characters[0].classResources?.['dnd5e-spell-slot-3'].current).toBe(1)
+  })
+
   it('requires a bounded Sending declaration and spends an upcast slot without inventing scaling', () => {
     const input = fixture()
     input.spell = dnd5eSpellbookEntries([]).find((entry) => entry.id === 'sending')!
@@ -1259,6 +1569,31 @@ describe('DM-adjudicated spell deterministic-cost transaction', () => {
       },
       worldMinute: 1_001,
     }).result.ok).toBe(false)
+
+    // A ward added after approval preparation must still prevent the entire batch.
+    remains[1].dnd5eObjectState!.undeadCreationProtection = { schemaVersion: 1, minimumPower: 'wish',
+      sourceTokenId: input.actorToken.id, sourceActivityId: 'funeral', sourcePackageId: 'test.funeral',
+      spellLevel: 1, createdWorldMinute: 100, expiresAtWorldMinute: 10180 }
+    expect(prepareDnd5eAdjudicatedSpell({ ...input, worldMinute: 10179 }).ok).toBe(false)
+    expect(prepareDnd5eAdjudicatedSpell({ ...input, worldMinute: 10180 }).ok).toBe(true)
+    expect(resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared,
+      response: { decision: 'approved', effects: [], animateDead: { schemaVersion: 1, targetsConfirmed: true } },
+      worldMinute: 10179 }).result.ok).toBe(false)
+    delete remains[1].dnd5eObjectState!.undeadCreationProtection
+    const ward = createDnd5eMechanicalEffect({ definitionId: 'funeral', label: 'Funeral',
+      source: { kind: 'spell', actorId: input.actorToken.id, rulesId: 'ceremony' }, targetId: remains[1].id,
+      undeadCreationProtection: { minimumPower: 'wish' },
+      duration: { type: 'rounds', remainingRounds: 100800, tickOn: 'source-turn-end' } })
+    remains[1].dnd5eCombatState = { activeEffects: [ward] }
+    expect(prepareDnd5eAdjudicatedSpell(input).ok).toBe(false)
+    const beforeProtected = structuredClone(prepared.prepared.state)
+    const protectedResult = resolvePreparedDnd5eAdjudicatedSpell({ prepared: prepared.prepared,
+      response: { decision: 'approved', effects: [], animateDead: { schemaVersion: 1, targetsConfirmed: true } },
+      worldMinute: 1_001 })
+    expect(protectedResult.result.ok).toBe(false)
+    expect(prepared.prepared.state).toEqual(beforeProtected)
+    expect(input.actor.classResources['dnd5e-spell-slot-4']?.current).toBe(1)
+    remains[1].dnd5eCombatState = undefined
 
     const resolved = resolvePreparedDnd5eAdjudicatedSpell({
       prepared: prepared.prepared,
@@ -2208,4 +2543,32 @@ it('restores a Slow-delayed player declaration from shared character and token s
   expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
   expect(result.result.state.combatants[actor.id].classState.slowSpellGate).toBeUndefined()
   expect(result.application!.characters[0].classResources!['dnd5e-spell-slot-1'].current).toBe(0)
+})
+
+it('settles chosen aura healing after adjudicated slot healing and rejects forged recipients atomically', () => {
+  const input = fixture()
+  input.actor.currentHp = 10
+  input.enemy.hp = 10
+  input.map.dnd5ePluginAreas = [{ id: 'unicorn', pluginId: 'test', featureId: 'aura', label: 'Aura', color: '#fff',
+    sourceTokenId: input.actorToken.id, sourceCharacterId: input.actor.id,
+    cells: [{ col: 2, row: 0 }], anchorCell: { col: 2, row: 0 }, createdRound: 1, expiresAfterRound: 100,
+    sourceSlotSpellHealing: { amount: 3 } }]
+  const ready = prepareDnd5eAdjudicatedSpell(input)
+  expect(ready.ok, ready.ok ? undefined : ready.reason).toBe(true); if (!ready.ok) return
+  const response = { decision: 'approved' as const, effects: [{ targetTokenId: input.actorToken.id, operation: 'healing' as const, amount: 5 }] }
+  const base = resolvePreparedDnd5eAdjudicatedSpell({ prepared: ready.prepared, response })
+  expect(base.result.ok, JSON.stringify(base.result.events)).toBe(true)
+  expect(base.result.events.some(event => event.type === 'healing-applied')).toBe(true)
+  const result = resolvePreparedDnd5eAdjudicatedSpell({ prepared: ready.prepared, response,
+    sourceSlotSpellHealingTargets: [{ areaId: 'unicorn', targetIds: [input.enemy.id] }] })
+  expect(result.result.ok, result.result.ok ? undefined : result.result.reason).toBe(true)
+  expect(result.result.state.combatants[input.enemy.id].currentHp).toBe(13)
+  expect(result.result.state.combatants[input.actorToken.id].currentHp).toBe(15)
+  expect(result.result.state.combatants[input.actorToken.id].classResources['dnd5e-spell-slot-1'].current).toBe(0)
+  const invalid = resolvePreparedDnd5eAdjudicatedSpell({ prepared: ready.prepared, response,
+    sourceSlotSpellHealingTargets: [{ areaId: 'unicorn', targetIds: [input.actorToken.id] }] })
+  expect(invalid.result.ok).toBe(false)
+  expect(invalid.result.state.combatants[input.actorToken.id].currentHp).toBe(10)
+  expect(invalid.result.state.combatants[input.enemy.id].currentHp).toBe(10)
+  expect(invalid.result.state.combatants[input.actorToken.id].classResources['dnd5e-spell-slot-1'].current).toBe(1)
 })

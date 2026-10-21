@@ -1,3 +1,4 @@
+import { dnd5eEffectiveCharacterMovementProfile } from '../../rulesets/dnd5e/characterMovement'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { X, Shield, Footprints, HeartPulse, Sparkles, Trash2, Eye, Dices, PackageOpen, ArrowUp } from 'lucide-react'
 import type { Token } from '../../store/maps'
@@ -29,10 +30,11 @@ import {
   classResourceDisplayLabel,
   getClassResource,
 } from '../../lib/classResources'
-import { dnd5eEffectiveWalkingSpeed, dnd5eSpellSaveDc, getDnd5eSrdMonster, normalizeDnd5eInventory } from '../../rulesets/dnd5e'
+import {  dnd5eSpellSaveDc, getDnd5eSrdMonster, normalizeDnd5eInventory } from '../../rulesets/dnd5e'
 import { dnd5eTruePolymorphObjectFormFromEffects } from '../../rulesets/dnd5e/truePolymorphObjectForms'
 
 interface CharacterDetailPanelProps {
+  mapArmorClassBonus?: number
   token: Token
   character: Character
   onSetHitPoints: (input: {
@@ -66,6 +68,7 @@ interface CharacterDetailPanelProps {
 }
 
 export default function CharacterDetailPanel({
+  mapArmorClassBonus = 0,
   token,
   character,
   onSetHitPoints,
@@ -241,7 +244,7 @@ export default function CharacterDetailPanel({
     ? 0
     : (abilityRows.find((ability) => ability.key === 'dex')?.modifier ?? 0) +
       (activeCreatureForm ? 0 : character.initiativeBonus ?? 0)
-  const speed = activeObjectForm ? 0 : activeCreatureForm?.speed.walk ?? dnd5eEffectiveWalkingSpeed(character)
+  const speed = activeObjectForm ? 0 : dnd5eEffectiveCharacterMovementProfile(character).walkSpeed
   const spellSaveDc = dnd5eSpellSaveDc(character) ?? character.saveDC
   const [pendingHitPoints, setPendingHitPoints] = useState<{
     currentHp: number
@@ -597,7 +600,7 @@ export default function CharacterDetailPanel({
             <Shield className="h-4 w-4 text-sky-400" />
             <div>
               <p className="text-[10px] text-slate-500">AC</p>
-              <p className="text-sm font-semibold text-slate-100">{activeCreatureForm?.armorClass.value ?? getEffectiveAc(character)}</p>
+              <p data-testid="map-character-armor-class" className="text-sm font-semibold text-slate-100">{(activeCreatureForm?.armorClass.value ?? getEffectiveAc(character)) + mapArmorClassBonus}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">

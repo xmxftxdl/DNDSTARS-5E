@@ -1,3 +1,5 @@
+import { prepareDnd5eRandomTargetFeatureAction } from './randomFeatureTargets'
+import { createDnd5eConditionEffect } from './activeEffects'
 import { describe, expect, it } from 'vitest'
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
@@ -20,6 +22,243 @@ import {
 } from './pluginFeatureAction'
 
 const ABILITIES = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
+
+it.each(['ordered', 'empty', 'heavy', 'held', 'missing', 'up', 'down', 'invalid-pitch', 'forged-height'] as const)('derives a feature object flight from the Host map: %s', async mode => {
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+  const automation = automationCapabilityFromLegacyStatus('full'), namespace = 'test.object-flight-feature', featureId = `${namespace}:launch`
+  const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+    manifest: { id: namespace, name: 'Object flight fixture', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, assets: [],
+    definitions: [{ schemaVersion: 1, namespace, version: '1.0.0', kind: 'feature', id: 'launch', name: 'Launch', automation,
+      payload: { id: 'launch', name: 'Launch', summary: 'Synthetic', description: 'Synthetic', automation: 'full' },
+      activities: [{ schemaVersion: 1, id: 'launch', name: 'Launch', activation: { kind: 'action' }, automation,
+        legacySource: { kind: 'feature', id: 'launch' },
+        target: { kind: 'area', relation: 'any', origin: 'point', shape: 'rect', widthFeet: 5, lengthFeet: 5, heightFeet: 5, placeRangeFeet: 60, rotatable: true, includeSelf: true },
+        checks: [{ id: 'save', kind: 'saving-throw', ability: 'dex', dc: { kind: 'constant', value: 15 }, rollId: 'save', scope: 'per-target', stopAfterFirstFailure: true }],
+        outcomes: [{ id: 'flight', when: { kind: 'always' }, operations: [{ id: 'flight', kind: 'launch-map-object',
+          savingThrowCheckId: 'save', amount: { kind: 'constant', value: 6 }, damageType: 'bludgeoning',
+          limits: { minimumWeightPounds: 1, maximumWeightPounds: 5, additionalWeightPoundsPerSlot: 5, baseSlotLevel: 1, distanceFeet: 90 } }] }],
+      }] }],
+  }))!
+  expect(bundle).toBeTruthy()
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle))
+  try {
+    setMapGeometryRuntime([])
+    const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] }), near = character('near'), far = character('far')
+    const object: Token = { id: 'stone', label: 'Stone', x: 125, y: 25, color: '#fff', emoji: '', size: 1, type: 'obstacle', hp: 20, maxHp: 20,
+      dnd5eObjectState: { schemaVersion: 1, weightPounds: mode === 'heavy' ? 10 : 5, wornOrCarried: mode === 'held' } }
+    const map: BattleMap = { id: 'map-1', name: 'Map', width: 2000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+      tokens: [{ ...token('hero-token', 'hero', 25), y: 225 }, ...(mode === 'missing' ? [] : [object]),
+        ...(mode === 'empty' ? [] : [token('far-token', 'far', 425), token('near-token', 'near', 225)])] }
+    const request: SharedPlayerActionState = { ...action(featureId), targetCell: { col: 2, row: 0 }, targetOrientation: 0, targetTokenIds: ['far-token', 'near-token'] }
+    if (mode === 'up' || mode === 'down') {
+      object.elevationFeet = 10
+      request.objectLaunchPitchDegrees = mode === 'up' ? 90 : -90
+    }
+    if (mode === 'invalid-pitch') request.objectLaunchPitchDegrees = 91
+    if (mode === 'forged-height') {
+      object.elevationFeet = 100
+      request.targetElevationFeet = 0
+    }
+    const ready = prepareDnd5ePluginFeatureAction({ action: request, map, characters: [hero, near, far],
+      initiativeOrder: map.tokens.filter(t => t.type !== 'obstacle').map((t, i) => ({ tokenId: t.id, label: t.label, emoji: '', color: '', roll: 20 - i })) })
+    expect(ready.ok, JSON.stringify(ready)).toBe(['ordered', 'empty', 'up', 'down'].includes(mode))
+    if (ready.ok) {
+      expect(ready.prepared.headlessAction.targetIds).toEqual(mode === 'ordered' ? ['near-token', 'far-token'] : [])
+      expect(ready.prepared.targetTokens.map(t => t.id)).toEqual(mode === 'ordered' ? ['near-token', 'far-token'] : [])
+      expect(ready.prepared.headlessAction.activityAreaPlacement?.angleDegrees).toBe(0)
+      if (mode === 'up' || mode === 'down') {
+        expect(ready.prepared.headlessAction.activityAreaPlacement?.objectLaunchPitchDegrees).toBe(request.objectLaunchPitchDegrees)
+        expect(ready.prepared.headlessAction.activityAreaPlacement?.elevationFeet).toBe(10)
+      }
+    }
+    expect(object.hp).toBe(20)
+    expect(object.x).toBe(125)
+  } finally { dispose(); setMapGeometryRuntime([]) }
+})
+
+it.each(['random-minimum', 'random', 'second', 'zero', 'duplicate', 'outside', 'wall-blocked', 'wall-near'] as const)('settles a selective feature area through the real map facade: %s', async mode => {
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+  const automation = automationCapabilityFromLegacyStatus('full'), namespace = 'test.selective-feature', featureId = `${namespace}:pulse`
+  const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+    manifest: { id: namespace, name: 'Synthetic selection', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, assets: [],
+    definitions: [{ schemaVersion: 1, namespace, version: '1.0.0', kind: 'feature', id: 'pulse', name: 'Pulse', automation,
+      payload: { id: 'pulse', name: 'Pulse', summary: 'Synthetic', description: 'Synthetic', automation: 'full' },
+      activities: [{ schemaVersion: 1, id: 'pulse', name: 'Pulse', activation: { kind: 'action' }, automation,
+        legacySource: { kind: 'feature', id: 'pulse' }, target: { kind: 'area', origin: 'point', shape: 'sphere', relation: 'any',
+          placeRangeFeet: 60, radiusFeet: 10, selection: 'choose-any', maximumTargets: mode==='random-minimum'?2:1, minimumTargets:mode==='random-minimum'?2:0 },
+        consumption: [{ kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' }],
+        outcomes: [{ id: 'hp', when: { kind: 'always' }, operations: [{ id: 'hp', kind: 'temporary-hit-points', target: 'all-targets', amount: { kind: 'constant', value: 3 } }] }],
+      }] }],
+  }))!
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle))
+  try {
+    const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
+    if(mode.startsWith('random'))hero.dnd5eCombatState={activeEffects:[createDnd5eMechanicalEffect({definitionId:'test:random',label:'Random',targetId:'hero-token',source:{kind:'spell'},modifiers:{randomVisibleCreatureTargets:true,perceiveVisibleCreaturesAsHostile:true}})]}
+    const ally = character('ally'), second = character('second'), outside = character('outside')
+    const map: BattleMap = { id: 'map-1', name: 'Map', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25), token('ally-token', 'ally', 75), token('second-token', 'second', 125), token('outside-token', 'outside', 425)] }
+    if (mode.startsWith('wall-')) {
+      const geometry = createEmptyMapGeometry(map.id, 1)
+      geometry.walls.push({ id: 'wall', kind: 'wall', label: 'Wall', points: [{ x: 100, y: 0 }, { x: 100, y: 500 }],
+        blocksVision: false, blocksMovement: false, blocksLineOfEffect: true, baseHeightFeet: 0, heightFeet: 100, createdAt: 1 })
+      setMapGeometryRuntime([geometry])
+    }
+    const selected = mode==='random-minimum'?['second-token','ally-token']:mode === 'zero' ? [] : mode === 'wall-near' ? ['ally-token'] : mode === 'outside' ? ['outside-token'] : mode === 'duplicate' ? ['second-token', 'second-token'] : ['second-token']
+    const request = { ...action(featureId), targetTokenIds: selected, targetCell: { col: 1, row: 0 } }
+    const prepared = prepareDnd5eRandomTargetFeatureAction({ chooseRandomTarget:(i,ids)=>{expect([...ids].sort()).toEqual(i===0?['ally-token','second-token']:['ally-token']);return mode==='random-minimum'?(i===0?'second-token':'ally-token'):'ally-token'}, action: request, map, characters: [hero, ally, second, outside],
+      initiativeOrder: map.tokens.map((entry, i) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - i })) })
+    expect(prepared.ok, prepared.ok ? '' : prepared.reason).toBe(mode === 'random-minimum' || mode === 'random' || mode === 'second' || mode === 'zero' || mode === 'wall-near')
+    if (prepared.ok) {
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })
+      expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+      expect(resolved.result.state.combatants['second-token'].temporaryHp).toBe(mode === 'random-minimum' || mode === 'second' ? 3 : 0)
+      expect(resolved.result.state.combatants['ally-token'].temporaryHp).toBe(mode.startsWith('random') || mode === 'wall-near' ? 3 : 0)
+      expect(resolved.result.state.combatants['hero-token'].turn.actionAvailable).toBe(false)
+    }
+  } finally { setMapGeometryRuntime([]); dispose() }
+})
+
+it.each(['legacy', 'native', 'native-feat', 'native-inferred', 'native-feat-inferred'] as const)('exports and reinstalls a complete alteration module (%s), then settles its compiled feature through the map facade', async format => {
+  const { exportLegacyDnd5eStarMod, readLegacyDnd5eStarMod } = await import('./starModAdapter')
+  const { DND5E_CONTENT_PACKAGE_FORMAT, DND5E_CONTENT_PACKAGE_SCHEMA_VERSION, dnd5eRulesPluginFromContentPackageV2 } = await import('./contentPackageV2')
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { dnd5ePluginFeatureActionFromActivityV1 } = await import('./activities/dnd5eActivityFeatureActionAdapter')
+  const { normalizeCharacter } = await import('../../store/characters')
+  const { applyDnd5eInventoryMutation } = await import('./items')
+  const pluginId = 'test.archive-alteration'
+  let featureId = `${pluginId}:alter`
+  const contentKind = format.startsWith('native-feat') ? 'feat' : 'feature'
+  const activity: import('./activities/dnd5eActivityContracts').Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'alter', name: 'Alter', activation: { kind: 'action' }, target: { kind: 'self' },
+    legacySource: { kind: contentKind, id: 'alter' }, automation: automationCapabilityFromLegacyStatus('full'),
+    consumption: [{ kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' }],
+    effects: [{ schemaVersion: 1, id: 'life', name: 'Lifetime', stacking: 'replace', duration: { kind: 'permanent' }, modifiers: [] }],
+    outcomes: [{ id: 'apply', when: { kind: 'always' }, operations: [
+      { id: 'life', kind: 'apply-effect', target: 'actor', effectId: 'life' },
+      { id: 'alter', kind: 'alter-inventory-item', target: 'actor', originalTemplateIds: ['srd-5.1:item:gold-dust-25gp'],
+        templateId: 'srd-5.1:item:goodberry', quantity: { kind: 'constant', value: 3 }, sourceEffectId: 'life' },
+    ] }] }
+  const original: import('./contentPackageV2').Dnd5eContentPackageV2 = {
+    format: DND5E_CONTENT_PACKAGE_FORMAT, schemaVersion: DND5E_CONTENT_PACKAGE_SCHEMA_VERSION,
+    manifest: { id: pluginId, name: 'Synthetic alteration archive', version: '1.0.0', apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0', distributionPolicy: 'local-only', contentCategory: 'mixed' },
+    provenance: { edition: '2014', contentMode: 'incremental', sourceTitle: 'Synthetic test fixture' }, assets: [],
+    content: { races: [], backgrounds: [], feats: [], spells: [], items: [], subclasses: [], monsters: [], headlessActions: [], abilityGenerationMethods: [],
+      features: [{ id: 'alter', name: 'Alter', summary: 'Synthetic', description: 'Synthetic archive route', automation: 'full', action: dnd5ePluginFeatureActionFromActivityV1(activity) }],
+      activities: [activity] },
+  }
+  if (contentKind === 'feat') {
+    original.content.feats = original.content.features
+    original.content.features = []
+  }
+  const before = structuredClone(original)
+  const missing = structuredClone(original)
+  missing.content.activities = []
+  await expect(exportLegacyDnd5eStarMod(missing)).rejects.toThrow('缺少 Headless')
+  const unsupported = structuredClone(original)
+  unsupported.content.activities![0].outcomes[0].operations = [{ id: 'invoke', kind: 'invoke-activity',
+    activityId: 'other', target: 'actor', repeat: { kind: 'constant', value: 1 } }]
+  await expect(exportLegacyDnd5eStarMod(unsupported)).rejects.toThrow('缺少 Headless')
+  const decoded = await readLegacyDnd5eStarMod(await exportLegacyDnd5eStarMod(original))
+  expect(decoded).toBeDefined()
+  expect(original).toEqual(before)
+  expect(decoded!.package.content.activities).toEqual([activity])
+  let plugin = dnd5eRulesPluginFromContentPackageV2(decoded!.package)
+  if (format !== 'legacy') {
+    const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+    const { exportDnd5eStarMod, readDnd5eStarMod } = await import('./starModAdapter')
+    const payload = structuredClone([...original.content.features, ...original.content.feats][0])
+    if (format.endsWith('inferred')) delete payload.action
+    const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+      manifest: original.manifest, assets: [], definitions: [{ schemaVersion: 1, namespace: pluginId, version: '1.0.0',
+        kind: contentKind, id: 'alter', name: 'Alter', description: 'Synthetic archive route',
+        automation: automationCapabilityFromLegacyStatus('full'), payload, activities: [activity] }] }))!
+    const sourceBundle = structuredClone(bundle)
+    const installed = await readDnd5eStarMod(await exportDnd5eStarMod(bundle))
+    plugin = dnd5eRulesPluginFromUnifiedContentBundleV1(installed.bundle)
+    expect(bundle).toEqual(sourceBundle)
+    if (format.endsWith('inferred')) expect((installed.bundle.definitions[0].payload as typeof payload).action).toBeUndefined()
+  }
+  const dispose = registerDnd5eRulesPlugin(plugin)
+  try {
+    if (contentKind === 'feat') featureId = (await import('./pluginApi')).dnd5ePluginFeatDefinition(`${pluginId}:alter`)!.featureId
+    const hero = applyDnd5eInventoryMutation([normalizeCharacter({ ...character('hero'), dnd5ePluginFeatureIds: [featureId],
+      ...(contentKind === 'feat' ? { dnd5eFeatIds: [`${pluginId}:alter`] } : {}),
+      equipment: {}, dnd5eInventory: { schemaVersion: 3, entries: [] } })],
+      { type: 'grant', characterId: 'hero', templateId: 'srd-5.1:item:gold-dust-25gp', quantity: 5 }).characters[0]
+    const map: BattleMap = { id: 'map-1', name: 'Test', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25)] }
+    for (const stale of [false, true]) {
+      const request = { ...action(featureId), targetTokenId: 'hero-token', dnd5ePluginAction: { featureId, payload: {
+        activityInventoryCharacterId: 'hero', activityInventoryInstanceId: hero.dnd5eInventory!.entries[0].instanceId,
+        expectedActivityInventoryRevision: (hero.dnd5eInventory!.revision ?? 0) + (stale ? 1 : 0) } } }
+      const prepared = prepareDnd5ePluginFeatureAction({ action: request, map, characters: [hero],
+        initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }] })
+      if (!prepared.ok) throw new Error(prepared.reason)
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })
+      expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(!stale)
+      if (stale) { expect(resolved.application).toBeUndefined(); continue }
+      const inventory = resolved.application!.characterPatches!.hero.dnd5eInventory!
+      expect(inventory.entries.reduce((sum, entry) => sum + entry.quantity, 0)).toBe(5)
+      const altered = inventory.entries.find(entry => entry.spellAlteration)!
+      expect(altered).toMatchObject({ quantity: 3, sourceEffectOwnerId: 'hero' })
+      expect(resolved.application!.characters[0].dnd5eCombatState?.activeEffects?.some(effect => effect.tags?.includes(altered.sourceEffectTag!))).toBe(true)
+    }
+    expect(hero.dnd5eInventory!.entries).toHaveLength(1)
+  } finally { dispose() }
+})
+
+it('routes a real rest feature request through Host authorization and preserves its receipt with the applied effect', async () => {
+  const { registerDnd5eActivityPackage } = await import('./activities/dnd5eActivityRegistry')
+  const { compileDnd5eActivityHeadlessAction } = await import('./activities/dnd5eActivityHeadlessCompiler')
+  const { dnd5ePluginFeatureActionFromActivityV1 } = await import('./activities/dnd5eActivityFeatureActionAdapter')
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { normalizeCharacter } = await import('../../store/characters')
+  const { reconcileDnd5eCharacterCampaignTime } = await import('./campaignTimeRules')
+  const { applyDnd5eInventoryMutation } = await import('./items')
+  const activity: import('./activities/dnd5eActivityContracts').Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'bless', name: 'Rest blessing', activation: { kind: 'free' }, target: { kind: 'self' },
+    invocation: { kind: 'triggered', event: 'long-rest-complete', confirmation: 'actor-choice', retention: 'single-event' },
+    legacySource: { kind: 'feature', id: 'bless' }, automation: automationCapabilityFromLegacyStatus('full'),
+    effects: [{ schemaVersion: 1, id: 'bound', name: 'Blessed armor', stacking: 'replace', duration: { kind: 'permanent' }, breakOn: ['source-long-rest-complete'], modifiers: [{ kind: 'armor-enchantment', itemSelection: 'inventory-item', requiresNonmagical: true, armorClassBonus: { kind: 'constant', value: 1 } }] }],
+    outcomes: [{ id: 'apply', when: { kind: 'always' }, operations: [{ id: 'bind', kind: 'apply-effect', target: 'actor', effectId: 'bound' }] }],
+  }
+  const pluginId = 'test.rest-route', featureId = `${pluginId}:bless`
+  const registration = registerDnd5eActivityPackage({ packageId: pluginId, packageVersion: '1.0.0', activities: [activity] })
+  const dispose = registerDnd5eRulesPlugin({ manifest: { id: pluginId, name: 'Rest', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) { api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity)); api.registerFeature({ id: 'bless', name: 'Rest', description: 'Test', summary: 'Test', automation: 'full', action: dnd5ePluginFeatureActionFromActivityV1(activity) }) } })
+  try {
+    const clock: import('../../lib/campaignTime').SharedCampaignTimeState = { schemaVersion: 2, worldMinute: 480, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], updatedAt: 1, advances: [{ id: 'rest-480', kind: 'long-rest', fromWorldMinute: 0, toWorldMinute: 480, minutes: 480, reason: 'Test', dawnsCrossed: 0, expiredTimerIds: [], createdAt: 1, beneficiaryCharacterIds: ['hero'] }] }
+    const source = normalizeCharacter({ ...character('hero'), dnd5ePluginFeatureIds: [featureId], dnd5eWorldTimeAppliedMinute: 0, equipment: {}, dnd5eInventory: { schemaVersion: 1, entries: [] } })
+    const granted = applyDnd5eInventoryMutation([source], { type: 'grant', characterId: 'hero', templateId: 'srd-5.1:equipment:dnd5e-chain-mail', quantity: 1 }).characters[0]
+    const hero = reconcileDnd5eCharacterCampaignTime(granted, clock).character
+    const map: BattleMap = { id: 'map-1', name: 'Rest', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25)] }
+    const request = { ...action(featureId), targetTokenId: 'hero-token', dnd5ePluginAction: { featureId, payload: { restEventId: hero.dnd5eRestActivityWindow!.eventId, activityInventoryCharacterId: 'hero', activityInventoryInstanceId: hero.dnd5eInventory!.entries[0].instanceId, expectedActivityInventoryRevision: hero.dnd5eInventory!.revision ?? 0 } } }
+    const prepare = (owner = hero) => prepareDnd5ePluginFeatureAction({ action: request, map, characters: [owner], initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }] })
+    const prepared = prepare()
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+    if (!prepared.ok) throw Error('prepare failed')
+    expect((await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })).result.ok).toBe(false)
+    expect((await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared, restAuthority: { clock: { ...clock, worldMinute: 481 }, combatRevision: 3 } })).result.ok).toBe(false)
+    const declined = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared, restAuthority: { clock, combatRevision: 3 }, authoritativePayload: { restEventId: hero.dnd5eRestActivityWindow!.eventId, restDecision: 'decline' } })
+    expect(declined.result.ok).toBe(true)
+    expect(declined.result.state).toBe(prepared.prepared.state)
+    expect(declined.application?.characterPatches?.hero?.dnd5eRestActivityWindow?.receipts).toEqual({ '["test.rest-route","bless"]': 'declined' })
+    const afterDecline = prepare(declined.application!.characters.find(entry => entry.id === 'hero')!)
+    if (!afterDecline.ok) throw Error('declined state preparation failed')
+    expect((await resolvePreparedDnd5ePluginFeatureAction({ prepared: afterDecline.prepared, restAuthority: { clock, combatRevision: 4 } })).result.ok).toBe(false)
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared, restAuthority: { clock, combatRevision: 3 } })
+    expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+    expect(resolved.application?.characterPatches?.hero?.dnd5eRestActivityWindow?.receipts).toEqual({ '["test.rest-route","bless"]': 'used' })
+    const committed = resolved.application!.characters.find(entry => entry.id === 'hero')!
+    expect(committed.dnd5eCombatState?.activeEffects?.some(effect => effect.label === 'Blessed armor')).toBe(true)
+    const replay = prepare(committed)
+    expect(replay.ok).toBe(true)
+    if (replay.ok) expect((await resolvePreparedDnd5ePluginFeatureAction({ prepared: replay.prepared, restAuthority: { clock, combatRevision: 4 } })).result.ok).toBe(false)
+    expect(hero.dnd5eRestActivityWindow!.receipts).toEqual({})
+  } finally { dispose(); registration.dispose() }
+})
 
 function character(id: string, patch: Partial<Character> = {}): Character {
   return {
@@ -799,6 +1038,52 @@ describe('D&D 5e plugin feature authority action', () => {
         hostDistanceFeetByTargetId: { 'enemy-token': 5 },
       })
 
+      // Range is measured from the owned area, independently of caster proximity.
+      for (const [targetCol, expectedDistance, allowed] of [[26, 30, true], [27, 35, false], [1, 95, false]] as const) {
+        const remoteMap = { ...map, width: 2000,
+          tokens: [heroToken, { ...enemyToken, x: targetCol * 50 + 25 }],
+          dnd5ePluginAreas: map.dnd5ePluginAreas!.map(area => ({ ...area, cells: [{ col: 20, row: 0 }], anchorCell: { col: 20, row: 0 } })),
+        }
+        const boundary = prepareDnd5ePluginFeatureAction({ action: requested, map: remoteMap, characters: [hero, enemy], initiativeOrder })
+        expect(boundary.ok, JSON.stringify(boundary)).toBe(allowed)
+        if (boundary.ok) {
+          expect(boundary.prepared.distanceFeet).toBe(expectedDistance)
+          expect(boundary.prepared.headlessAction.hostDistanceFeetByTargetId).toEqual({ 'enemy-token': expectedDistance })
+        } else expect(boundary.reason).toBe('target-out-of-range')
+      }
+      // Grant range includes height separation from the nearest face, not just XY cells.
+      for (const [baseElevationFeet, elevationFeet, allowed, expectedDistance] of [[0, 40, true, 30], [0, 41, false, 31], [50, 15, true, 30], [50, 14, false, 31]] as const) {
+        const raisedMap: BattleMap = { ...map,
+          tokens: [heroToken, { ...enemyToken, elevationFeet }],
+          dnd5ePluginAreas: map.dnd5ePluginAreas!.map(area => ({ ...area,
+            vertical: { mode: 'volume', baseElevationFeet, heightFeet: 10 } })),
+        }
+        const result = prepareDnd5ePluginFeatureAction({ action: requested, map: raisedMap, characters: [hero, enemy], initiativeOrder })
+        expect(result.ok, JSON.stringify({ elevationFeet, result })).toBe(allowed)
+        if (result.ok) expect(result.prepared.distanceFeet).toBe(expectedDistance)
+        else expect(result.reason).toBe('target-out-of-range')
+      }
+      const empty = prepareDnd5ePluginFeatureAction({ action: requested, map: { ...map,
+        dnd5ePluginAreas: map.dnd5ePluginAreas!.map(area => ({ ...area, cells: [] })),
+      }, characters: [hero, enemy], initiativeOrder })
+      expect(empty.ok).toBe(false)
+
+      // A stale persisted area must not authorize controls after expiry, even
+      // if map cleanup has not run yet. World time takes precedence over rounds.
+      for (const [worldMinute, round, permanent, allowed] of [
+        [59, 99, false, true], [60, 1, false, false],
+        [61, 1, false, false], [61, 99, true, true],
+        [undefined, 11, false, false], [undefined, 10, false, true],
+      ] as const) {
+        const expires = prepareDnd5ePluginFeatureAction({
+          action: { ...requested, round }, worldMinute,
+          map: { ...map, dnd5ePluginAreas: map.dnd5ePluginAreas!.map(area => ({
+            ...area, expiresAtWorldMinute: 60, permanent: permanent || undefined,
+          })) }, characters: [hero, enemy], initiativeOrder,
+        })
+        expect(expires.ok, JSON.stringify({worldMinute,round,permanent,expires})).toBe(allowed)
+      }
+
       const consumedMap = {
         ...map,
         dnd5ePluginAreas: map.dnd5ePluginAreas?.map((area) => ({
@@ -823,7 +1108,7 @@ describe('D&D 5e plugin feature authority action', () => {
     }
   })
 
-  it('replays a Worker condition with Host-provided airborne fall dice', async () => {
+  it.each(['legacy', 'materials'] as const)('replays a Worker condition with Host-provided airborne fall dice (%s)', async boundaryMode => {
     const pluginId = 'com.example.worker-airborne'
     const featureId = `${pluginId}:drop-flyer`
     const manifest = {
@@ -877,7 +1162,15 @@ describe('D&D 5e plugin feature authority action', () => {
     const dispose = registerDnd5eRulesPlugin(activateDnd5ePluginSandbox(session))
     try {
       const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
-      const enemy = character('enemy', { dnd5eMovementSpeeds: { fly: 60 } })
+      const { applyDnd5eInventoryMutation } = await import('./items')
+      const { createDnd5eDamageReactionMaterialLedger } = await import('./damageReactionMaterialLedger')
+      const { dnd5eSpellMaterialConsumptionPlan } = await import('./spellMaterials')
+      const enemy = applyDnd5eInventoryMutation([character('enemy', { dnd5eMovementSpeeds: { fly: 60 } })], { type: 'grant', characterId: 'enemy', templateId: 'srd-5.1:item:gold-dust-25gp', quantity: 1 }).characters[0]
+      const originalEnemy = structuredClone(enemy)
+      const ledger = createDnd5eDamageReactionMaterialLedger({ 'enemy-token': enemy })
+      const materialPlan = dnd5eSpellMaterialConsumptionPlan(enemy, { label: 'Powder', options: [{ label: 'Powder', components: [{ tag: 'gold-dust', label: 'Powder', quantity: 1, consumed: true }] }] })!
+      ledger.settle('synthetic-boundary', 'enemy-token', materialPlan)
+      const materialChanges = ledger.finish()
       const heroToken = token('hero-token', hero.id, 25)
       const enemyToken = {
         ...token('enemy-token', enemy.id, 125, 'enemy'),
@@ -901,8 +1194,23 @@ describe('D&D 5e plugin feature authority action', () => {
       expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
       if (!prepared.ok) return
 
+      let boundaryCalls=0
+      const resolveDamageBoundary: NonNullable<Parameters<typeof resolvePreparedDnd5ePluginFeatureAction>[0]['resolveDamageBoundary']> = async (state,resolve) => {
+        boundaryCalls++
+        expect(workerResolveCount).toBe(1)
+        await Promise.resolve()
+        return resolve(state)
+      }
+      const boundaries = boundaryMode === 'legacy' ? { resolveDamageBoundary } : {
+        resolveMaterialDamageBoundary: async <Result,>(state: Parameters<typeof resolveDamageBoundary>[0], resolve: (state: Parameters<typeof resolveDamageBoundary>[0]) => Result, succeeded: (result: Result) => boolean) => {
+          const result = await resolveDamageBoundary(state, resolve)
+          expect(typeof succeeded(result)).toBe('boolean')
+          return { result, materialChanges }
+        },
+      }
       const preview = await resolvePreparedDnd5ePluginFeatureAction({
         prepared: prepared.prepared,
+        ...boundaries,
       })
       expect(preview.result).toMatchObject({ ok: false, reason: 'invalid-dice' })
       expect(preview.application).toBeUndefined()
@@ -916,6 +1224,7 @@ describe('D&D 5e plugin feature authority action', () => {
 
       const settled = await resolvePreparedDnd5ePluginFeatureAction({
         prepared: prepared.prepared,
+        ...boundaries,
         airborneFallDamageRollsByCombatantId: { [enemyToken.id]: [2, 3, 4] },
       })
       expect(settled.result.ok, settled.result.ok ? undefined : settled.result.reason).toBe(true)
@@ -928,6 +1237,11 @@ describe('D&D 5e plugin feature authority action', () => {
         elevationFeet: 0,
       })
       expect(workerResolveCount).toBe(1)
+      expect(boundaryCalls).toBe(2)
+      expect(enemy).toEqual(originalEnemy)
+      const inventory = settled.application!.characters.find(candidate => candidate.id === enemy.id)!.dnd5eInventory!
+      expect(inventory.entries.some(entry => entry.instanceId === materialPlan.allocations[0].instanceId)).toBe(boundaryMode === 'legacy')
+      if (boundaryMode === 'materials') expect(settled.application!.characterPatches?.enemy.dnd5eInventory).toEqual(inventory)
     } finally {
       dispose()
     }
@@ -1020,6 +1334,10 @@ describe('D&D 5e plugin feature authority action', () => {
               label: '守护区域', color: '#22c55e', durationRounds: 3, concentration: true,
               vertical: { mode: 'volume', heightFeet: 20 },
               visual: { preset: 'toxic-cloud', intensity: 'strong' },
+              triggers: [{ id: 'hold', label: 'Synthetic restraint', timing: 'on-enter',
+                condition: { condition: 'restrained', duration: { expiresAt: 'target-turn-end-save',
+                  saveAbility: 'dex', saveDc: 'source-save-dc' },
+                  escapeCheck: { ability: 'str', dc: 'source-save-dc', economy: 'action' } } }],
             },
           },
         })
@@ -1078,6 +1396,9 @@ describe('D&D 5e plugin feature authority action', () => {
           concentrationId: 'plugin-area:plugin-action-1', expiresAfterRound: 3,
           vertical: { mode: 'volume', baseElevationFeet: 30, heightFeet: 20 },
           visual: { preset: 'toxic-cloud', intensity: 'strong' },
+          triggers: [expect.objectContaining({ condition: expect.objectContaining({
+            duration: expect.objectContaining({ saveDc: 10 }), escapeCheck: expect.objectContaining({ dc: 10 }),
+          }) })],
         }),
       ])
       expect(resolved.application?.characters.find((entry) => entry.id === hero.id)).toMatchObject({
@@ -1530,6 +1851,26 @@ describe('D&D 5e plugin feature authority action', () => {
 })
 
 describe('插件事务提交重基线', () => {
+  it('preserves the explicit rest receipt through rebasing and the character commit adapter', async () => {
+    const { applyDnd5eCombatResultApplication, mergeDnd5eCombatCharacterResult } = await import('../../pages/maps/commitDnd5eCombatResult')
+    const hero = character('hero')
+    hero.dnd5eRestActivityWindow = {schemaVersion:1,characterId:hero.id,event:'long-rest-complete',eventId:'rest:long-rest-complete:480',completedWorldMinute:480,receipts:{}}
+    const window = {...hero.dnd5eRestActivityWindow,receipts:{'["test.rest","bless"]':'used' as const}}
+    const baseMap = {id:'map-1',name:'Map',width:500,height:500,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[token('hero-token',hero.id,25)]} as BattleMap
+    const patch = {dnd5eRestActivityWindow:window,currentHp:7}
+    const result = rebaseDnd5ePluginFeatureApplication({baseMap,baseCharacters:[hero],latestMap:baseMap,latestCharacters:[hero],application:{
+      map:baseMap,characters:[{...hero,...patch}],changedCharacterIds:[hero.id],changedTokenIds:[],characterPatches:{[hero.id]:patch},
+    }})
+    expect(result.ok).toBe(true)
+    if(!result.ok)throw Error('rebase failed')
+    let committed=hero
+    applyDnd5eCombatResultApplication({application:result.application,mapId:baseMap.id,applicationMode:'map',applyMap:()=>{},applyToken:()=>{},
+      applyCharacter:(_id,resolved,delta)=>{committed=mergeDnd5eCombatCharacterResult(hero,resolved,delta)},
+    })
+    expect(committed.currentHp).toBe(7)
+    expect(committed.dnd5eRestActivityWindow?.receipts).toEqual(window.receipts)
+    expect(hero.dnd5eRestActivityWindow.receipts).toEqual({})
+  })
   it('保留等待期间发生在无关 Token 上的移动与 HP 更新', () => {
     const hero = character('hero')
     const enemy = character('enemy')
@@ -1593,4 +1934,375 @@ describe('插件事务提交重基线', () => {
       latestCharacters: [hero],
     })).toEqual({ ok: false, reason: 'plugin-commit-conflict' })
   })
+})
+
+it('preserves granted rectangular Activity dimensions and validates anchor rays before spending resources', async () => {
+  const { registerDnd5eActivityPackage, getRegisteredDnd5eActivity } = await import('./activities/dnd5eActivityRegistry')
+  const { compileDnd5eActivityHeadlessAction } = await import('./activities/dnd5eActivityHeadlessCompiler')
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const pluginId = 'local.granted-rect', activityId = 'make-wall', featureId = pluginId + ':effect-control.' + activityId
+  const registration = registerDnd5eActivityPackage({ packageId: pluginId, packageVersion: '1.0.0', activities: [{
+    schemaVersion: 1, id: activityId, name: 'Make wall', activation: { kind: 'action', cost: 1 },
+    target: { kind: 'area', relation: 'any', origin: 'point', shape: 'rect', placeRangeFeet: 90, lengthFeet: 30, widthFeet: 10, heightFeet: 5, maximumTargets: 8, requiresLineOfSight: true },
+    outcomes: [{ id: 'create', when: { kind: 'always' }, operations: [{ id: 'wall', kind: 'create-persistent-area', label: 'Wall', durationRounds: 10, concentration: false }] }],
+    automation: automationCapabilityFromLegacyStatus('full'),
+  }] })
+  const disposePlugin = registerDnd5eRulesPlugin({
+    manifest: { id: pluginId, name: 'Grant', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0' },
+    setup(api) { api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(getRegisteredDnd5eActivity(pluginId, activityId)!)) },
+  })
+  try {
+    const effect = createDnd5eMechanicalEffect({ id: 'grant', definitionId: 'grant', label: 'Grant', kind: 'buff', source: { kind: 'spell', pluginId }, targetId: 'hero-token', duration: { type: 'permanent' }, grantedActivities: [activityId] })
+    const hero = character('hero', { dnd5eCombatState: { activeEffects: [effect] } })
+    const caster = token('hero-token', hero.id, 25)
+    const map: BattleMap = { id: 'map-1', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true, tokens: [caster, { ...token('inside', '', 175, 'enemy'), characterId: undefined, elevationFeet: 12, hp: 20, maxHp: 20 }, { ...token('above', '', 175, 'enemy'), characterId: undefined, elevationFeet: 30, hp: 20, maxHp: 20 }] }
+    const request = { ...action(featureId), targetTokenId: undefined, targetCell: { col: 3, row: 0 }, targetElevationFeet: 10, dnd5ePluginAction: { featureId, payload: { activeEffectId: effect.id } } }
+    const initiativeOrder = map.tokens.map((t, i) => ({ tokenId: t.id, label: '', emoji: '', color: '', roll: 20-i }))
+    const prepare = () => prepareDnd5ePluginFeatureAction({ action: request, map, characters: [hero], initiativeOrder })
+    setMapGeometryRuntime([])
+    const prepared = prepare(); expect(prepared.ok, JSON.stringify(prepared)).toBe(true)
+    if (prepared.ok) {
+      expect(prepared.prepared.targetTokens.map(t => t.id)).toEqual(['inside'])
+      expect(prepared.prepared.headlessAction.activityAreaPlacement).toMatchObject({ lengthFeet: 30, widthFeet: 10, heightFeet: 5, elevationFeet: 10 })
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })
+      expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+    }
+    const before = JSON.stringify({ hero, map, request })
+    for (const blocksVision of [true, false]) {
+      const geometry = createEmptyMapGeometry(map.id, 1)
+      geometry.walls.push({ id: 'wall', kind: 'wall', label: 'Wall', points: [{ x: 100, y: 0 }, { x: 100, y: 500 }], blocksVision, blocksMovement: false, blocksLineOfEffect: !blocksVision, baseHeightFeet: 0, heightFeet: 100, createdAt: 1 })
+      setMapGeometryRuntime([geometry])
+      expect(prepare()).toEqual({ ok: false, reason: 'invalid-target' })
+    }
+    expect(JSON.stringify({ hero, map, request })).toBe(before)
+    setMapGeometryRuntime([])
+    const original = getRegisteredDnd5eActivity(pluginId, activityId)!
+    if (original.target.kind !== 'area') throw Error('fixture')
+    registration.dispose()
+    const grounded = registerDnd5eActivityPackage({ packageId: pluginId, packageVersion: '1.0.0', activities: [{
+      ...original, target: { ...original.target, placementSurface: 'ground' },
+    }] })
+    try {
+      expect(prepare()).toEqual({ ok: false, reason: 'invalid-target' })
+      request.targetElevationFeet = 0
+      expect(prepare().ok).toBe(true)
+    } finally { grounded.dispose() }
+  } finally { setMapGeometryRuntime([]); disposePlugin(); registration.dispose() }
+})
+
+
+it('checks the live turn for granted own-turn controls before opening the player action', async () => {
+ const {registerDnd5eActivityPackage,getRegisteredDnd5eActivity}=await import('./activities/dnd5eActivityRegistry')
+ const {compileDnd5eActivityHeadlessAction}=await import('./activities/dnd5eActivityHeadlessCompiler')
+ const {automationCapabilityFromLegacyStatus}=await import('../../domain/automation/automationCapability')
+ const pluginId='test.granted-turn',activityId='enhance',featureId=`${pluginId}:effect-control.${activityId}`
+ const registration=registerDnd5eActivityPackage({packageId:pluginId,packageVersion:'1.0.0',activities:[{
+  schemaVersion:1,id:activityId,name:'Enhance',activation:{kind:'free'},target:{kind:'self'},
+  requirements:[{kind:'turn-owner',owner:'actor'}],automation:automationCapabilityFromLegacyStatus('full'),
+  outcomes:[{id:'grant',when:{kind:'always'},operations:[{id:'hp',kind:'temporary-hit-points',target:'actor',amount:{kind:'constant',value:3}}]}],
+ }]})
+ const dispose=registerDnd5eRulesPlugin({manifest:{id:pluginId,name:'Turn grant',version:'1.0.0',apiVersion:2,rulesetId:'dnd5e-2014-srd-5.1',publisher:'Tests',license:'CC0'},
+  setup(api){api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(getRegisteredDnd5eActivity(pluginId,activityId)!))}})
+ try{
+  const effect=createDnd5eMechanicalEffect({id:'grant',definitionId:'grant',label:'Grant',source:{kind:'spell',pluginId,actorId:'hero-token'},targetId:'hero-token',grantedActivities:[activityId]})
+  const hero=character('hero',{dnd5eCombatState:{activeEffects:[effect]}})
+  const map:BattleMap={id:'map-1',name:'Turn',width:500,height:500,gridSize:50,gridOffsetX:0,gridOffsetY:0,feetPerCell:5,showGrid:true,tokens:[token('hero-token','hero',25),{...token('other','',75,'enemy'),characterId:undefined,hp:20,maxHp:20}]}
+  const initiativeOrder=map.tokens.map((t,i)=>({tokenId:t.id,label:t.label,emoji:t.emoji,color:t.color,roll:20-i}))
+  const request={...action(featureId),targetTokenId:'hero-token',dnd5ePluginAction:{featureId,payload:{activeEffectId:effect.id,currentTurnActorId:'hero-token'}}}
+  const prepare=(initiativeIndex:number,combatId:string|undefined)=>prepareDnd5ePluginFeatureAction({map,characters:[hero],initiativeOrder,action:{...request,initiativeIndex,combatId}})
+  const ready=prepare(0,'combat-1');expect(ready.ok,JSON.stringify(ready)).toBe(true)
+  if(!ready.ok)throw Error('own turn rejected')
+  const resolved=await resolvePreparedDnd5ePluginFeatureAction({prepared:ready.prepared})
+  expect(resolved.result.ok).toBe(true)
+  expect(resolved.result.state.combatants['hero-token'].temporaryHp).toBe(3)
+  expect(prepare(1,'combat-1')).toEqual({ok:false,reason:'feature-unavailable'})
+  expect(prepare(0,undefined)).toEqual({ok:false,reason:'feature-unavailable'})
+  expect(hero.tempHp).toBe(0)
+ }finally{dispose();registration.dispose()}
+})
+
+it.each(['registered', 'archive', 'archive-inferred', 'archive-local'] as const)('registers a timed crafting feature and settles real prepared requests with a persisted ritual: %s', async mode => {
+  const { registerDnd5eActivityPackage } = await import('./activities/dnd5eActivityRegistry')
+  const { compileDnd5eActivityHeadlessAction, dnd5eActivityHeadlessCompatibility } = await import('./activities/dnd5eActivityHeadlessCompiler')
+  const { dnd5ePluginFeatureActionFromActivityV1 } = await import('./activities/dnd5eActivityFeatureActionAdapter')
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { normalizeCharacter } = await import('../../store/characters')
+  const { applyDnd5eInventoryMutation, normalizeDnd5eInventory } = await import('./items')
+  const pluginId = 'test.crafting-route', featureId = `${pluginId}:craft`
+  const activity: import('./activities/dnd5eActivityContracts').Dnd5eActivityDefinitionV1 = {
+    schemaVersion: 1, id: 'craft', name: 'Craft', activation: { kind: 'hour', value: 1 }, target: { kind: 'self' },
+    legacySource: { kind: 'feature', id: 'craft' }, automation: automationCapabilityFromLegacyStatus('full'),
+    consumption: [{ kind: 'resource', resourceId: 'dnd5e-channel-divinity', amount: { kind: 'constant', value: 1 }, consumeOn: 'resolve' }],
+    outcomes: [{ id: 'craft', when: { kind: 'always' }, operations: [{ id: 'craft', kind: 'exchange-inventory-items', target: 'actor',
+      templateId: mode === 'archive-local' ? 'product' : `${pluginId}:product`, quantity: { kind: 'constant', value: 1 }, sceneRangeFeet: 5,
+      policy: { inputTags: ['test:metal'], outputTags: ['test:metal'], maximumValueCp: 10000, maximumInclusive: false, requiresOriginal: false } }] }],
+  }
+  expect(dnd5eActivityHeadlessCompatibility(activity)).toEqual({ supported: true, reasons: [] })
+  const { dnd5eActivityAutomationAnalysisV1 } = await import('./plugins/pluginMechanicsRegistry')
+  expect(dnd5eActivityAutomationAnalysisV1(activity).capability.level).toBe('full')
+  expect(dnd5eActivityAutomationAnalysisV1({ ...activity, activation: { kind: 'action' } }).capability.level).not.toBe('full')
+  expect(dnd5eActivityHeadlessCompatibility({ ...activity, activation: { kind: 'action' } }).supported).toBe(false)
+  expect(dnd5ePluginFeatureActionFromActivityV1(activity)?.economy).toBe('none')
+  const registration = mode === 'registered' ? registerDnd5eActivityPackage({ packageId: pluginId, packageVersion: '1.0.0', activities: [activity] }) : undefined
+  let plugin: Parameters<typeof registerDnd5eRulesPlugin>[0] = { manifest: { id: pluginId, name: 'Craft', version: '1.0.0', apiVersion: 2,
+    rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, setup(api) {
+      api.registerItem({ id: 'product', name: 'Metal product', description: 'Synthetic', rulesText: 'Synthetic', category: 'adventuring-gear', icon: 'generic', stackable: true,
+        spellcastingMaterial: { tags: ['test:metal'], unitValueGp: 5 } })
+      api.registerHeadlessAction(compileDnd5eActivityHeadlessAction(activity))
+      api.registerFeature({ id: 'craft', name: 'Craft', description: 'Test', summary: 'Test', automation: 'full', action: dnd5ePluginFeatureActionFromActivityV1(activity) })
+    } }
+  if (mode !== 'registered') {
+    const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+    const { exportDnd5eStarMod, readDnd5eStarMod } = await import('./starModAdapter')
+    const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+      manifest: { ...plugin.manifest, distributionPolicy: 'local-only', contentCategory: 'mixed' }, assets: [], definitions: [
+        { schemaVersion: 1, namespace: pluginId, version: '1.0.0', kind: 'feature', id: 'craft', name: 'Craft',
+          automation: automationCapabilityFromLegacyStatus('full'), activities: [activity],
+          payload: { id: 'craft', name: 'Craft', description: 'Synthetic', summary: 'Synthetic', automation: 'full',
+            ...(mode === 'archive' ? { action: dnd5ePluginFeatureActionFromActivityV1(activity) } : {}) } },
+        { schemaVersion: 1, namespace: pluginId, version: '1.0.0', kind: 'item', id: 'product', name: 'Metal product',
+          automation: automationCapabilityFromLegacyStatus('full'),
+          payload: { id: 'product', name: 'Metal product', description: 'Synthetic', rulesText: 'Synthetic', category: 'adventuring-gear', icon: 'generic', stackable: true,
+            spellcastingMaterial: { tags: ['test:metal'], unitValueGp: 5 } } },
+      ] }))!
+    expect(bundle).toBeDefined()
+    const original = structuredClone(bundle)
+    const decoded = await readDnd5eStarMod(await exportDnd5eStarMod(bundle))
+    expect(bundle).toEqual(original)
+    expect(decoded.bundle.definitions.find(definition => definition.kind === 'feature')?.activities).toEqual([activity])
+    plugin = dnd5eRulesPluginFromUnifiedContentBundleV1(decoded.bundle)
+  }
+  const dispose = registerDnd5eRulesPlugin(plugin)
+  try {
+    let hero = normalizeCharacter(character('hero', { dnd5ePluginFeatureIds: [featureId], equipment: {},
+      classResources: { 'dnd5e-channel-divinity': { current: 1, max: 1 } }, dnd5eInventory: { schemaVersion: 3, entries: [] } }))
+    hero = applyDnd5eInventoryMutation([hero], { type: 'adjust-currency', characterId: 'hero', currency: 'gp', delta: 5 }).characters[0]
+    const map: BattleMap = { id: 'map-1', name: 'Craft', width: 500, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25)] }
+    const selection = { expectedInventoryRevision: normalizeDnd5eInventory(hero).revision, inputs: [], coins: [{ currency: 'gp', amount: 5 }] }
+    const prepare = (owner: Character, decision: string, selected: typeof selection, ritualId?: string) => prepareDnd5ePluginFeatureAction({
+      map, characters: [owner], initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }],
+      action: { ...action(featureId), id: `craft-${decision}`, combatId: undefined, targetTokenId: 'hero-token',
+        dnd5ePluginAction: { featureId, payload: JSON.parse(JSON.stringify({ inventoryExchangeRitual: { decision, selection: selected, ...(ritualId ? { ritualId } : {}) } })) } },
+    })
+    const begin = prepare(hero, 'begin', selection)
+    expect(begin.ok, JSON.stringify(begin)).toBe(true)
+    if (!begin.ok) throw Error(begin.reason)
+    const { resolveDnd5eHeadlessAction } = await import('./headlessCombatEngine')
+    const direct = resolveDnd5eHeadlessAction(begin.prepared.state, begin.prepared.headlessAction)
+    expect(direct.ok).toBe(false)
+    expect(begin.prepared.state.combatants['hero-token'].classResources['dnd5e-channel-divinity'].current).toBe(1)
+    const started = await resolvePreparedDnd5ePluginFeatureAction({ prepared: begin.prepared,
+      inventoryExchangeAuthority: { worldMinute: 100, combatRevision: 0, combatActive: false } })
+    expect(started.result.ok, JSON.stringify(started.result)).toBe(true)
+    const pending = normalizeCharacter(JSON.parse(JSON.stringify(started.application!.characters[0])))
+    expect(pending.classResources?.['dnd5e-channel-divinity'].current).toBe(1)
+    expect(pending.dnd5eInventory?.currency?.gp).toBe(5)
+    const record = pending.dnd5eInventory!.pendingExchangeRitual!
+    const complete = prepare(pending, 'complete', { ...selection, expectedInventoryRevision: record.inventoryRevision,
+      targetCell: { col: 1, row: 0 } } as typeof selection, record.commandId)
+    expect(complete.ok, JSON.stringify(complete)).toBe(true)
+    if (!complete.ok) throw Error(complete.reason)
+    const finished = await resolvePreparedDnd5ePluginFeatureAction({ prepared: complete.prepared,
+      inventoryExchangeAuthority: { worldMinute: 160, combatRevision: 1, combatActive: false } })
+    expect(finished.result.ok, JSON.stringify(finished.result)).toBe(true)
+    expect(finished.application?.characters[0].classResources?.['dnd5e-channel-divinity'].current).toBe(0)
+    expect(finished.application?.characters[0].dnd5eInventory?.currency?.gp).toBe(0)
+    expect(finished.application?.map.tokens).toHaveLength(2)
+  } finally { dispose(); registration?.dispose() }
+})
+
+it.each([1, 2])('randomizes an enemy-targeted imported feature with %s selected recipients', async count => {
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+  const automation = automationCapabilityFromLegacyStatus('full'), namespace = 'test.random-feature', featureId = `${namespace}:pulse`
+  const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+    manifest: { id: namespace, name: 'Random feature', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, assets: [],
+    definitions: [{ schemaVersion: 1, namespace, version: '1.0.0', kind: 'feature', id: 'pulse', name: 'Pulse', automation,
+      payload: { id: 'pulse', name: 'Pulse', summary: 'Synthetic', description: 'Synthetic', automation: 'full' },
+      activities: [{ schemaVersion: 1, id: 'pulse', name: 'Pulse', activation: { kind: 'action' }, automation,
+        legacySource: { kind: 'feature', id: 'pulse' }, target: { kind: 'creature', relation: 'enemy', count, rangeFeet: 30 },
+        consumption: [{ kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' }],
+        outcomes: [{ id: 'damage', when: { kind: 'always' }, operations: [{ id: 'damage', kind: 'damage', target: 'target',
+          amount: { kind: 'constant', value: 3 }, damageType: 'force' }] }],
+      }] }],
+  }))!
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle))
+  try {
+    const effect = createDnd5eMechanicalEffect({ id: 'random', definitionId: 'test:random', label: 'Random', source: { kind: 'spell' },
+      targetId: 'hero-token', modifiers: { randomVisibleCreatureTargets: true, perceiveVisibleCreaturesAsHostile: true } })
+    const hero = character('hero', { dnd5ePluginFeatureIds: [featureId], dnd5eCombatState: { activeEffects: [effect] } })
+    const ally = character('ally'), enemy = character('enemy'), other = character('other'), hidden = character('hidden'), far = character('far')
+    hidden.dnd5eCombatState = { activeEffects: [createDnd5eConditionEffect({ id: 'invisible', targetId: 'hidden-token', condition: 'invisible', source: { kind: 'dm' } })] }
+    const map: BattleMap = { id: 'map-1', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25), token('ally-token', 'ally', 75),
+        token('enemy-token', 'enemy', 125, 'enemy'), token('other-token', 'other', 175, 'enemy'),
+        token('hidden-token', 'hidden', 225), token('far-token', 'far', 825)] }
+    const request = { ...action(featureId), targetTokenId: 'enemy-token', targetTokenIds: count === 1 ? ['enemy-token'] : ['enemy-token', 'other-token'] }
+    const input = { action: request, map, characters: [hero, ally, enemy, other, hidden, far],
+      initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }] }
+    const pools: string[][] = []
+    const ready = prepareDnd5eRandomTargetFeatureAction({ ...input, chooseRandomTarget: (occurrence, candidates) => {
+      pools.push([...candidates].sort()); return occurrence === 0 ? 'ally-token' : 'enemy-token'
+    } })
+    expect(ready.ok, JSON.stringify({ ready, pools })).toBe(true)
+    if (!ready.ok) throw Error(ready.reason)
+    expect(pools[0]).toEqual(['ally-token', 'enemy-token', 'other-token'])
+    if (count === 2) expect(pools[1]).toEqual(['enemy-token', 'other-token'])
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: ready.prepared })
+    expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+    expect(resolved.result.state.combatants['ally-token'].currentHp).toBe(17)
+    if (count === 2) expect(resolved.result.state.combatants['enemy-token'].currentHp).toBe(17)
+    expect(resolved.result.state.combatants['hero-token'].turn.actionAvailable).toBe(false)
+    expect(resolved.result.state.initiativeOrder).toEqual(['hero-token'])
+    expect(ally.currentHp).toBe(20)
+    expect(map.tokens[1].type).toBe('player')
+    effect.suspendedBy = ['antimagic-test']
+    let choices = 0
+    const ordinary = prepareDnd5eRandomTargetFeatureAction({ ...input, chooseRandomTarget: () => { choices++; return 'ally-token' } })
+    expect(ordinary.ok, JSON.stringify(ordinary)).toBe(true)
+    expect(choices).toBe(0)
+    if (ordinary.ok) expect(ordinary.prepared.targetToken.id).toBe('enemy-token')
+  } finally { dispose() }
+})
+
+it('filters random feature candidates by minimum range and separation before choosing', async () => {
+  const count = 2
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+  const automation = automationCapabilityFromLegacyStatus('full'), namespace = 'test.random-feature', featureId = `${namespace}:pulse`
+  const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+    manifest: { id: namespace, name: 'Random feature', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, assets: [],
+    definitions: [{ schemaVersion: 1, namespace, version: '1.0.0', kind: 'feature', id: 'pulse', name: 'Pulse', automation,
+      payload: { id: 'pulse', name: 'Pulse', summary: 'Synthetic', description: 'Synthetic', automation: 'full' },
+      activities: [{ schemaVersion: 1, id: 'pulse', name: 'Pulse', activation: { kind: 'action' }, automation,
+        legacySource: { kind: 'feature', id: 'pulse' }, target: { kind: 'creature', relation: 'enemy', count, rangeFeet: 30, minimumRangeFeet: 10, maximumTargetSeparationFeet: 5 },
+        consumption: [{ kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' }],
+        outcomes: [{ id: 'damage', when: { kind: 'always' }, operations: [{ id: 'damage', kind: 'damage', target: 'target',
+          amount: { kind: 'constant', value: 3 }, damageType: 'force' }] }],
+      }] }],
+  }))!
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle))
+  try {
+    const effect = createDnd5eMechanicalEffect({ id: 'random', definitionId: 'test:random', label: 'Random', source: { kind: 'spell' },
+      targetId: 'hero-token', modifiers: { randomVisibleCreatureTargets: true, perceiveVisibleCreaturesAsHostile: true } })
+    const hero = character('hero', { dnd5ePluginFeatureIds: [featureId], dnd5eCombatState: { activeEffects: [effect] } })
+    const ally = character('ally'), enemy = character('enemy'), other = character('other'), hidden = character('hidden'), far = character('far')
+    hidden.dnd5eCombatState = { activeEffects: [createDnd5eConditionEffect({ id: 'invisible', targetId: 'hidden-token', condition: 'invisible', source: { kind: 'dm' } })] }
+    const map: BattleMap = { id: 'map-1', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25), token('ally-token', 'ally', 75),
+        token('enemy-token', 'enemy', 125, 'enemy'), token('other-token', 'other', 175, 'enemy'),
+        token('hidden-token', 'hidden', 225), token('far-token', 'far', 275)] }
+    const request = { ...action(featureId), targetTokenId: 'enemy-token', targetTokenIds: ['enemy-token', 'other-token'] }
+    const input = { action: request, map, characters: [hero, ally, enemy, other, hidden, far],
+      initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }] }
+    const pools: string[][] = []
+    const ready = prepareDnd5eRandomTargetFeatureAction({ ...input, chooseRandomTarget: (occurrence, candidates) => {
+      pools.push([...candidates].sort()); return occurrence === 0 ? 'enemy-token' : 'other-token'
+    } })
+    expect(ready.ok, JSON.stringify({ ready, pools })).toBe(true)
+    if (!ready.ok) throw Error(ready.reason)
+    expect(pools[0]).toEqual(['enemy-token', 'far-token', 'other-token'])
+    expect(pools[1]).toEqual(['other-token'])
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: ready.prepared })
+    expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+    expect(resolved.result.state.combatants['ally-token']).toBeUndefined()
+    expect(resolved.result.state.combatants['other-token'].currentHp).toBe(17)
+    if (count === 2) expect(resolved.result.state.combatants['enemy-token'].currentHp).toBe(17)
+    expect(resolved.result.state.combatants['hero-token'].turn.actionAvailable).toBe(false)
+    expect(resolved.result.state.initiativeOrder).toEqual(['hero-token'])
+    expect(ally.currentHp).toBe(20)
+    expect(map.tokens[1].type).toBe('player')
+    effect.suspendedBy = ['antimagic-test']
+    let choices = 0
+    const ordinary = prepareDnd5eRandomTargetFeatureAction({ ...input, chooseRandomTarget: () => { choices++; return 'ally-token' } })
+    expect(ordinary.ok, JSON.stringify(ordinary)).toBe(true)
+    expect(choices).toBe(0)
+    if (ordinary.ok) expect(ordinary.prepared.targetToken.id).toBe('enemy-token')
+  } finally { dispose() }
+})
+
+it('measures random feature candidates from the authoritative bound item holder', async () => {
+  const count = 2
+  const { automationCapabilityFromLegacyStatus } = await import('../../domain/automation/automationCapability')
+  const { parseDnd5eUnifiedContentBundleV1, dnd5eRulesPluginFromUnifiedContentBundleV1 } = await import('./unifiedContent')
+  const automation = automationCapabilityFromLegacyStatus('full'), namespace = 'test.random-feature', featureId = `${namespace}:pulse`
+  const bundle = parseDnd5eUnifiedContentBundleV1(JSON.stringify({ format: 'dndstars5e-unified-content', schemaVersion: 1,
+    manifest: { id: namespace, name: 'Random feature', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' }, assets: [],
+    definitions: [{ schemaVersion: 1, namespace, version: '1.0.0', kind: 'feature', id: 'pulse', name: 'Pulse', automation,
+      payload: { id: 'pulse', name: 'Pulse', summary: 'Synthetic', description: 'Synthetic', automation: 'full' },
+      activities: [{ schemaVersion: 1, id: 'pulse', name: 'Pulse', activation: { kind: 'action' }, automation,
+        legacySource: { kind: 'feature', id: 'pulse' }, target: { kind: 'creature', relation: 'enemy', count, rangeFeet: 30, minimumRangeFeet: 5, maximumTargetSeparationFeet: 5, effectOrigin: {effectId: 'weapon-light', rangeFeet: 10} },
+        consumption: [{ kind: 'action-economy', economy: 'action', amount: 1, consumeOn: 'resolve' }],
+        outcomes: [{ id: 'damage', when: { kind: 'always' }, operations: [{ id: 'damage', kind: 'damage', target: 'target',
+          amount: { kind: 'constant', value: 3 }, damageType: 'force' }] }],
+      }] }],
+  }))!
+  const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromUnifiedContentBundleV1(bundle))
+  try {
+    const effect = createDnd5eMechanicalEffect({ id: 'random', definitionId: 'test:random', label: 'Random', source: { kind: 'spell' },
+      targetId: 'hero-token', modifiers: { randomVisibleCreatureTargets: true, perceiveVisibleCreaturesAsHostile: true } })
+    const hero = character('hero', { dnd5ePluginFeatureIds: [featureId], dnd5eCombatState: { activeEffects: [effect] } })
+    const ally = character('ally'), enemy = character('enemy'), other = character('other'), hidden = character('hidden'), far = character('far')
+    ally.dnd5eCombatState = {activeEffects:[createDnd5eMechanicalEffect({definitionId:'weapon-light',label:'Light',targetId:'ally-token',source:{kind:'spell',actorId:'hero-token'},duration:{type:'permanent'},modifiers:{weaponEnchantment:{weaponId:'sword',inventoryInstanceId:'bound-sword',attackAndDamageBonus:0}}})]}
+    hidden.dnd5eCombatState = { activeEffects: [createDnd5eConditionEffect({ id: 'invisible', targetId: 'hidden-token', condition: 'invisible', source: { kind: 'dm' } })] }
+    const map: BattleMap = { id: 'map-1', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0,
+      feetPerCell: 5, showGrid: true, tokens: [token('hero-token', 'hero', 25), token('ally-token', 'ally', 825),
+        token('enemy-token', 'enemy', 875, 'enemy'), token('other-token', 'other', 925, 'enemy'),
+        token('hidden-token', 'hidden', 225), token('far-token', 'far', 275)] }
+    const request = { ...action(featureId), targetTokenId: 'enemy-token', targetTokenIds: ['enemy-token', 'other-token'] }
+    const input = { action: request, map, characters: [hero, ally, enemy, other, hidden, far],
+      initiativeOrder: [{ tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 }] }
+    const pools: string[][] = []
+    const ready = prepareDnd5eRandomTargetFeatureAction({ ...input, chooseRandomTarget: (occurrence, candidates) => {
+      pools.push([...candidates].sort()); return occurrence === 0 ? 'enemy-token' : 'other-token'
+    } })
+    expect(ready.ok, JSON.stringify({ ready, pools })).toBe(true)
+    if (!ready.ok) throw Error(ready.reason)
+    expect(pools[0]).toEqual(['enemy-token', 'other-token'])
+    expect(pools[1]).toEqual(['other-token'])
+    const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: ready.prepared })
+    expect(resolved.result.ok, JSON.stringify(resolved.result)).toBe(true)
+    expect(resolved.result.state.combatants['ally-token'].currentHp).toBe(20)
+    expect(resolved.result.state.combatants['other-token'].currentHp).toBe(17)
+    if (count === 2) expect(resolved.result.state.combatants['enemy-token'].currentHp).toBe(17)
+    expect(resolved.result.state.combatants['hero-token'].turn.actionAvailable).toBe(false)
+    expect(resolved.result.state.initiativeOrder).toEqual(['hero-token'])
+    expect(ally.currentHp).toBe(20)
+    expect(map.tokens[1].type).toBe('player')
+    effect.suspendedBy = ['antimagic-test']
+    let choices = 0
+    const ordinary = prepareDnd5eRandomTargetFeatureAction({ ...input, chooseRandomTarget: () => { choices++; return 'ally-token' } })
+    expect(ordinary.ok, JSON.stringify(ordinary)).toBe(true)
+    expect(choices).toBe(0)
+    if (ordinary.ok) expect(ordinary.prepared.targetToken.id).toBe('enemy-token')
+  } finally { dispose() }
+})
+
+it('commits explicit summon removal with its dropped item while preserving unrelated concurrent changes', async () => {
+  const {applyDnd5eCombatResultApplication}=await import('../../pages/maps/commitDnd5eCombatResult')
+  const old={...token('old-summon','',75,'npc'),characterId:undefined}
+  const unrelated=token('other','',125,'npc')
+  const drop={...token('carried:stone','',75,'npc'),type:'obstacle' as const,characterId:undefined}
+  const baseMap={id:'map-removal',name:'Map',width:500,height:500,gridSize:50,gridOffsetX:0,gridOffsetY:0,showGrid:true,tokens:[old,unrelated]} as BattleMap
+  const application={map:{...baseMap,tokens:[unrelated,drop]},characters:[],changedTokenIds:[old.id,drop.id],changedCharacterIds:[]}
+  const latestMap={...baseMap,tokens:[old,{...unrelated,x:225}]}
+  const input={baseMap,baseCharacters:[],application,latestMap,latestCharacters:[],removedTokenIds:[old.id]}
+  const before=JSON.stringify(input)
+  const result=rebaseDnd5ePluginFeatureApplication(input)
+  expect(result.ok).toBe(true)
+  if(!result.ok)throw Error('explicit removal rejected')
+  let committed:BattleMap|undefined
+  applyDnd5eCombatResultApplication({application:result.application,mapId:baseMap.id,applicationMode:'map',applyMap:(_id,map)=>{committed=map},applyToken:()=>{},applyCharacter:()=>{}})
+  expect(committed!.tokens.map(item=>item.id).sort()).toEqual([drop.id,unrelated.id].sort())
+  expect(committed!.tokens.find(item=>item.id===unrelated.id)?.x).toBe(225)
+  expect(JSON.stringify(input)).toBe(before)
+  for(const invalid of [
+    {...input,removedTokenIds:undefined},
+    {...input,removedTokenIds:['missing']},
+    {...input,latestMap:{...latestMap,tokens:[{...old,x:175},unrelated]}},
+    {...input,latestMap:{...latestMap,tokens:[unrelated]}},
+    {...input,latestMap:{...latestMap,tokens:[old,unrelated,drop]}},
+    {...input,application:{...application,map:baseMap}},
+  ])expect(rebaseDnd5ePluginFeatureApplication(invalid)).toEqual({ok:false,reason:'plugin-commit-conflict'})
 })

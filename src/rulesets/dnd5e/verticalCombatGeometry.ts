@@ -30,6 +30,11 @@ const COLUMN_HEIGHT_BY_SPELL: Readonly<Record<string, number>> = {
   thunderwave: 15,
 }
 
+/** The same declared column extent used for creature and environmental exposure. */
+export function dnd5eInstantAoeColumnHeightFeet(spellId: string): number | undefined {
+  return COLUMN_HEIGHT_BY_SPELL[spellId]
+}
+
 const DND5E_CREATURE_SIZE_BY_RANK = [
   '微型',
   '小型',
@@ -194,17 +199,17 @@ function constrainLinearValueAtMost(
  * The existing square-grid template remains the authoritative XY broad phase;
  * this is its narrow phase in the vertical plane through the template axis.
  */
-function pitchedSelfAreaIntersectsToken(input: {
+export function dnd5ePitchedAreaVerticalInterval(input: {
   area: Extract<SkillAoeTargeting, { shape: 'line' | 'cone' }>
   map: BattleMap
-  targetToken: Token
+  targetToken: Pick<Token, 'x' | 'y'>
   targetBottom: number
   targetHeight: number
   effectOrigin: { x: number; y: number }
   effectOriginElevationFeet: number
   effectAim: { x: number; y: number }
   effectAimElevationFeet: number
-}): boolean | undefined {
+}): MutableVerticalInterval | null | undefined {
   const pixelsPerCell = Math.max(1, input.map.gridSize)
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const pixelsToFeet = feetPerCell / pixelsPerCell
@@ -242,7 +247,7 @@ function pitchedSelfAreaIntersectsToken(input: {
     tOffset,
     0,
     input.area.lengthFeet,
-  )) return false
+  )) return null
 
   const pCoefficient = horizontalCosine
   const pOffset = -verticalSine * horizontalForwardFeet -
@@ -254,7 +259,7 @@ function pitchedSelfAreaIntersectsToken(input: {
       pOffset,
       -input.area.widthFeet / 2,
       input.area.widthFeet / 2,
-    )
+    ) ? vertical : null
   }
 
   // 2014 cone width at axial distance t equals t. Its vertical half-width is
@@ -264,13 +269,13 @@ function pitchedSelfAreaIntersectsToken(input: {
     pCoefficient - tCoefficient / 2,
     pOffset - tOffset / 2,
     0,
-  )) return false
+  )) return null
   return constrainLinearValueAtMost(
     vertical,
     -pCoefficient - tCoefficient / 2,
     -pOffset - tOffset / 2,
     0,
-  )
+  ) ? vertical : null
 }
 
 /**
@@ -278,6 +283,19 @@ function pitchedSelfAreaIntersectsToken(input: {
  * Horizontal membership remains owned by `cellsForAoe`; this function only
  * answers whether the creature's occupied vertical interval intersects it.
  */
+export function dnd5eAreaVerticalExtentIntersectsToken(input: {
+  geometry?: MapGeometryState
+  targetToken: Token
+  elevationFeet: number
+  heightFeet: number
+}): boolean {
+  return Number.isFinite(input.heightFeet) && input.heightFeet > 0 && intervalOverlaps(
+    mapGeometryTokenElevation(input.geometry, input.targetToken),
+    dnd5eTokenHeightFeet(input.targetToken), input.elevationFeet,
+    input.elevationFeet + input.heightFeet,
+  )
+}
+
 export function dnd5eInstantAoeAffectsTokenVertically(input: {
   spellId: string
   area: SkillAoeTargeting
@@ -287,6 +305,8 @@ export function dnd5eInstantAoeAffectsTokenVertically(input: {
   targetToken: Token
   effectOrigin: { x: number; y: number }
   effectOriginElevationFeet: number
+  /** Explicit vertical extent of a declared Activity box/cylinder. */
+  effectHeightFeet?: number
   /** Selected aim point for self-origin line/cone pitch. */
   effectAim?: { x: number; y: number }
   /** Absolute elevation of the selected aim point. */
@@ -294,6 +314,11 @@ export function dnd5eInstantAoeAffectsTokenVertically(input: {
 }): boolean {
   const targetBottom = mapGeometryTokenElevation(input.geometry, input.targetToken)
   const targetHeight = dnd5eTokenHeightFeet(input.targetToken)
+
+  if (input.effectHeightFeet != null) {
+    return dnd5eAreaVerticalExtentIntersectsToken({ geometry: input.geometry, targetToken: input.targetToken,
+      elevationFeet: input.effectOriginElevationFeet, heightFeet: input.effectHeightFeet })
+  }
 
   if (GROUND_AREA_SPELLS.has(input.spellId)) {
     const ground = mapGeometryTerrainElevationAtPoint(
@@ -313,7 +338,7 @@ export function dnd5eInstantAoeAffectsTokenVertically(input: {
     )
   }
 
-  if (input.area.origin === 'self') {
+  if (input.area.origin === 'self' || input.area.shape === 'cone') {
     if (
       (input.area.shape === 'line' || input.area.shape === 'cone') &&
       input.effectAim != null &&
@@ -322,7 +347,7 @@ export function dnd5eInstantAoeAffectsTokenVertically(input: {
       Number.isFinite(input.effectAim.y) &&
       Number.isFinite(input.effectAimElevationFeet)
     ) {
-      const pitchedIntersection = pitchedSelfAreaIntersectsToken({
+      const pitchedIntersection = dnd5ePitchedAreaVerticalInterval({
         area: input.area,
         map: input.map,
         targetToken: input.targetToken,
@@ -333,12 +358,12 @@ export function dnd5eInstantAoeAffectsTokenVertically(input: {
         effectAim: input.effectAim,
         effectAimElevationFeet: input.effectAimElevationFeet,
       })
-      if (pitchedIntersection != null) return pitchedIntersection
+      if (pitchedIntersection !== undefined) return pitchedIntersection !== null
     }
-    const sourceBottom = mapGeometryTokenElevation(input.geometry, input.sourceToken)
+    const sourceBottom = input.area.origin === 'point' ? input.effectOriginElevationFeet : mapGeometryTokenElevation(input.geometry, input.sourceToken)
     const verticalGap = dnd5eVerticalIntervalDistanceFeet(
       sourceBottom,
-      dnd5eTokenHeightFeet(input.sourceToken),
+      input.area.origin === 'point' ? 0 : dnd5eTokenHeightFeet(input.sourceToken),
       targetBottom,
       targetHeight,
     )

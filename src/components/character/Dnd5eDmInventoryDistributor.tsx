@@ -1,3 +1,5 @@
+import { listDnd5eInstalledMonsters } from '../../rulesets/dnd5e/monsters'
+import { dnd5eCreatureSubtypeMatches } from '../../rulesets/dnd5e/persistentAreaCreatureFilter'
 import { useMemo, useState, useSyncExternalStore } from 'react'
 import { Gift, PackagePlus, Search } from 'lucide-react'
 import { DND5E_SRD_ITEM_TEMPLATES } from '../../rulesets/dnd5e/items'
@@ -59,6 +61,8 @@ export default function Dnd5eDmInventoryDistributor({
   const [identified, setIdentified] = useState(true)
   const [filter, setFilter] = useState('')
   const [notice, setNotice] = useState('')
+  const [boundDevilId,setBoundDevilId]=useState('')
+  const devils=listDnd5eInstalledMonsters().filter(monster=>dnd5eCreatureSubtypeMatches(monster.subtypes,'devil'))
   const pluginRevision = useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
     dnd5eRulesPluginRegistrySnapshot,
@@ -97,6 +101,7 @@ export default function Dnd5eDmInventoryDistributor({
       templateId: validTemplateId,
       quantity,
       identified: selectedTemplate?.magicItem ? identified : true,
+      ...(boundDevilId ? {summonBinding:{tagPrefix:'infernal-talisman',monsterId:boundDevilId}} : {}),
     })
     setNotice(
       result.inventory?.ok
@@ -119,6 +124,15 @@ export default function Dnd5eDmInventoryDistributor({
         </div>
         <span className="rounded-lg border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] text-slate-500">{allTemplates.length} 个模板</span>
       </div>
+
+      <label className="mt-3 block space-y-1 text-xs text-slate-400">
+        <span>邪符绑定（可选）</span>
+        <select aria-label="邪符绑定" value={boundDevilId} onChange={event=>setBoundDevilId(event.target.value)} className="block w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-slate-100">
+          <option value="">普通物品，不绑定</option>
+          {devils.map(monster=><option key={monster.id} value={monster.id}>{monster.name}</option>)}
+        </select>
+        <span className="block">绑定后可用于召唤对应魔鬼。具体个体请先在怪物资料中单独登记，再选择该个体。</span>
+      </label>
 
       {selectedTemplate?.magicItem && (
         <label className="mt-3 inline-flex items-center gap-2 rounded-lg border border-fuchsia-300/10 bg-fuchsia-500/[0.04] px-3 py-2 text-xs text-fuchsia-100/80">

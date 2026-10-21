@@ -110,9 +110,10 @@ describe('catalog area actions execute each save and resource branch', () => {
     for (const target of targets) {
       expect(result.events).toContainEqual(expect.objectContaining({ type: 'saving-throw-resolved', targetId: target.id,
         ability: variant.ability, dc: variant.dc, success: successful }))
-      const damagePerSelection = components.reduce((total, damage) => total + (successful
-        ? variant.damageOnSuccessfulSave === 'half' ? Math.floor(Math.max(0, damage.count + damage.bonus) / 2) : 0
-        : Math.max(0, damage.count + damage.bonus)), 0)
+      const rawPool = components.reduce((total, damage) => total + Math.max(0, damage.count + damage.bonus), 0)
+      const damagePerSelection = successful
+        ? variant.damageOnSuccessfulSave === 'half' ? Math.floor(rawPool / 2) : 0
+        : rawPool
       const expectedDamage = damagePerSelection * targetIds.filter(id => id === target.id).length
       expect(before.combatants[target.id].currentHp - result.state.combatants[target.id].currentHp).toBe(expectedDamage)
       if (variant.conditionOnFailedSave) expect(result.state.combatants[target.id].conditions.includes(variant.conditionOnFailedSave.condition))

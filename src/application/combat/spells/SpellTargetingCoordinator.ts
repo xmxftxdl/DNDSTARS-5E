@@ -106,6 +106,11 @@ export function buildSpellTargetingSubmission(
     racialInnate: targeting.racialInnate,
     alternateResourceSpell: targeting.alternateResourceSpell,
     slotLevel: targeting.slotLevel,
+    activityInventoryInstanceId: targeting.activityInventoryInstanceId,
+    activityInventorySelections: targeting.activityInventorySelections,
+    activityGroundInventorySelections: targeting.activityGroundInventorySelections,
+    activityInventoryCharacterId: targeting.activityInventoryCharacterId,
+    expectedActivityInventoryRevision: targeting.expectedActivityInventoryRevision,
     activityChoices: targeting.activityChoices
       ? { ...targeting.activityChoices }
       : undefined,
@@ -127,6 +132,7 @@ export function buildSpellTargetingSubmission(
     targetTokenIds,
     areaTargetCell: usesAreaTargeting ? input.areaTargetCell : undefined,
     targetElevationFeet: usesAreaTargeting ? targeting.targetElevationFeet : undefined,
+    verticalSurface: usesAreaTargeting && targeting.verticalSurface ? {...targeting.verticalSurface} : undefined,
     areaTargetCells: usesAreaTargeting && input.areaTargetCells?.length
       ? input.areaTargetCells.map((cell) => ({ ...cell }))
       : undefined,
@@ -135,9 +141,13 @@ export function buildSpellTargetingSubmission(
       : undefined,
     areaTargetOrientation: usesAreaTargeting ? input.areaTargetOrientation : undefined,
     areaTargetAngleDegrees: usesAreaTargeting ? input.areaTargetAngleDegrees : undefined,
+    areaTargetPitchDegrees: usesAreaTargeting ? targeting.areaTargetPitchDegrees : undefined,
+    areaTargetRollDegrees: usesAreaTargeting ? targeting.areaTargetRollDegrees : undefined,
+    objectLaunchPitchDegrees: usesAreaTargeting ? targeting.objectLaunchPitchDegrees : undefined,
     areaTargetRadiusFeet: usesAreaTargeting ? targeting.areaTargetRadiusFeet : undefined,
     areaTargetWidthFeet: usesAreaTargeting ? targeting.areaTargetWidthFeet : undefined,
     areaTargetHeightFeet: usesAreaTargeting ? targeting.areaTargetHeightFeet : undefined,
+    areaTargetVolumeHeightFeet: usesAreaTargeting ? targeting.areaTargetVolumeHeightFeet : undefined,
     areaTargetLengthFeet: usesAreaTargeting ? targeting.areaTargetLengthFeet : undefined,
     ...input.spellSpecificPayload,
     higherSlotDamageType: targeting.higherSlotDamageType,
@@ -152,6 +162,7 @@ export function buildSpellTargetingSubmission(
       ? [...targeting.targetTokenIds]
       : undefined,
     overchannel: targeting.overchannel || undefined,
+    bonusActionCasting: targeting.bonusActionCasting || undefined,
     damageMaximizationFeatureId: targeting.damageMaximizationFeatureId,
     empowered: targeting.empowered || undefined,
     draconicResistance: targeting.draconicResistance || undefined,

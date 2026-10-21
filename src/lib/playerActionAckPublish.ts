@@ -32,6 +32,7 @@ export type PlayerActionAckResourceWriter = <T>(
 ) => Promise<SharedResourceSaveResult>
 
 export interface PublishPlayerActionAckInput {
+  expectedRevisions?: Readonly<Record<string, number>>
   ack: SharedPlayerActionAckState
   snapshots?: PlayerActionAuthoritativeSnapshots
   processed?: SharedPlayerActionProcessedState
@@ -87,6 +88,7 @@ function sameCombatSettlementBoundary(
 }
 
 export async function publishPlayerActionAckWithSnapshots({
+  expectedRevisions,
   ack,
   snapshots,
   processed,
@@ -96,6 +98,7 @@ export async function publishPlayerActionAckWithSnapshots({
   loadSharedResource,
   publishAck,
 }: PublishPlayerActionAckInput): Promise<void> {
+  if (expectedRevisions && !commitSharedResources) throw new Error('authoritative-atomic-commit-required')
   const requireSaved = (name: string, result: SharedResourceSaveResult): void => {
     if (result.status === 'saved') return
     throw new Error(`authoritative-resource-save-rejected:${name}:${result.status}`)
@@ -142,12 +145,19 @@ export async function publishPlayerActionAckWithSnapshots({
     ...(processed ? [{ name: 'player-action-processed', data: processed }] : []),
     { name: 'player-action-ack', data: ack },
   ]
+  for (const write of writes) {
+    if (expectedRevisions?.[write.name] != null) write.expectedRevision = expectedRevisions[write.name]
+  }
 
   if (commitSharedResources) {
+    const writtenNames = new Set(writes.map(write => write.name))
+    const readRevisions = Object.fromEntries(Object.entries(expectedRevisions ?? {})
+      .filter(([name]) => !writtenNames.has(name)))
     const transactionOptions = {
       ...undoOptions,
       transactionId: `player-action:${ack.actionId}`,
       roomJournalMutations,
+      ...(Object.keys(readRevisions).length ? { readRevisions } : {}),
     }
     const observeCommittedAck = async (): Promise<SharedPlayerActionAckState | null> => {
       if (!loadSharedResource) return null
@@ -180,7 +190,7 @@ export async function publishPlayerActionAckWithSnapshots({
       // conflicting resource and the durable initiative boundary is identical;
       // a real turn/order change remains fail-closed.
       let retryAfterCombatRevisionRefresh = false
-      if (isSingleCombatRevisionConflict(firstError) && snapshots?.combat && loadSharedResource) {
+      if (expectedRevisions?.combat == null && isSingleCombatRevisionConflict(firstError) && snapshots?.combat && loadSharedResource) {
         const durableCombat = await loadSharedResource<SharedCombatState>('combat').catch(() => null)
         retryAfterCombatRevisionRefresh = sameCombatSettlementBoundary(snapshots.combat, durableCombat)
       }

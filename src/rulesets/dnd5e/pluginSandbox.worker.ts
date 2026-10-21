@@ -1,5 +1,6 @@
 type SandboxOperation =
   | { kind: 'grant-temporary-hit-points' | 'heal'; targetId: string; amount: number }
+  | { kind: 'deal-rolled-damage'; targetId: string; rollId: string; multiplier: 0.5 | 1 | 2 }
   | { kind: 'deal-damage'; targetId: string; amount: number; damageType: string }
   | {
       kind: 'apply-standard-condition'
@@ -456,6 +457,13 @@ async function resolveAction(message: SandboxMessageEvent['data']): Promise<void
       operations.push({ kind: 'deal-damage', targetId, amount: normalized, damageType })
       return normalized
     }
+    const dealRolledDamage = (targetId: unknown, rollId: unknown, multiplier: unknown = 1): void => {
+      if (typeof targetId !== 'string' || !targetId || typeof rollId !== 'string' || !rollId ||
+        (multiplier !== 0.5 && multiplier !== 1 && multiplier !== 2)) {
+        throw new Error('Headless rolled damage reference is invalid')
+      }
+      operations.push({ kind: 'deal-rolled-damage', targetId, rollId, multiplier })
+    }
     const changeResource = (kind: 'spend-resource' | 'restore-resource', resourceId: unknown, amount: unknown = 1): boolean => {
       if (typeof resourceId !== 'string' || !resourceId) throw new Error('Headless resource id is invalid')
       if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 1 || amount > 1_000_000) {
@@ -481,6 +489,7 @@ async function resolveAction(message: SandboxMessageEvent['data']): Promise<void
         recordOperation('grant-temporary-hit-points', targetId, amount),
       heal: (targetId: unknown, amount: unknown) => recordOperation('heal', targetId, amount),
       dealDamage,
+      dealRolledDamage,
       applyStandardCondition,
       spendResource: (resourceId: unknown, amount?: unknown) => changeResource('spend-resource', resourceId, amount),
       restoreResource: (resourceId: unknown, amount?: unknown) => changeResource('restore-resource', resourceId, amount),

@@ -1,7 +1,18 @@
+import {normalizeDnd5eMapObjectSurface,type Dnd5eMapObjectSurface} from './mapObjectSurface'
+import { normalizeDnd5eStructureObjectBinding, type Dnd5eStructureObjectBinding } from './structureObjectBinding'
+import { dnd5eEquipmentMergedBySpellForm } from './mergedFormEquipment'
+import { getDnd5eSrdMonster } from './monsters'
+import { normalizeDnd5eWaterContainerStateV1, type Dnd5eWaterContainerStateV1 } from './createOrDestroyWater'
+import { dnd5eCharacterMaximizeHealingDice } from './characterCompanionHealing'
+import { type Dnd5eOwnedCompanionMapContext } from './ownedCompanionProximity'
+import { normalizeDnd5eInventoryExchangeRitual } from './inventoryExchangeRitualState'
+import { restoreDnd5eInventoryItem, releaseDnd5eAlteredProjectile } from './inventoryItemAlteration'
+import {ammunitionKindForWeaponId, dnd5eAmmunitionEntryAccessible} from './ammunitionBindings'
 import type { Character } from '../../types/character'
 import type { CharacterEquipment, EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type {
   Dnd5eInventory,
+  Dnd5eSpellMaterialEscrow,
   Dnd5eAmmunitionKind,
   Dnd5eCurrencyWallet,
   Dnd5eInventoryEntry,
@@ -15,9 +26,12 @@ import type {
 import { DND5E_INVENTORY_SCHEMA_VERSION } from '../../types/inventory'
 import { healDnd5eInventoryTarget } from './inventoryHealing'
 import { dnd5eInventoryPassiveEffects } from './inventoryPassiveEffects'
+import { reconcileDnd5eInventoryEffectBindings } from './inventoryEffectBindings'
+import { settleDnd5eAmmunitionDrawQuota } from './ammunitionDrawQuota'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import { equipmentSlotAcceptsItemSlot, isEquipmentSlot } from '../../lib/equipmentDefaults'
-import { dnd5eActiveCarryingCapacityMultiplier } from './activeEffects'
+import { dnd5eActiveAmmunitionEnchantment } from './activeEffects'
+import { dnd5eCarryingCapacityPounds } from './carryingCapacity'
 import {
   appendRollLedgerEntry,
   commitCombatTransaction,
@@ -43,6 +57,8 @@ const EMPTY_CURRENCY: Dnd5eCurrencyWallet = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 
 
 const CONTAINER_CAPACITY_WEIGHT_LB: Readonly<Record<string, number>> = {
   backpack: 30,
+  quiver: 1,
+  'crossbow-bolt-case': 1.5,
   chest: 300,
   'map-scroll-case': 1,
   'alms-box': 5,
@@ -57,15 +73,7 @@ const AMMUNITION_KIND_BY_ITEM_ID: Readonly<Record<string, Dnd5eAmmunitionKind>> 
   'blowgun-needles': 'blowgun-needle',
 }
 
-const AMMUNITION_KIND_BY_WEAPON_ID: Readonly<Record<string, Dnd5eAmmunitionKind>> = {
-  'dnd5e-longbow': 'arrow',
-  'dnd5e-shortbow': 'arrow',
-  'dnd5e-light-crossbow': 'crossbow-bolt',
-  'dnd5e-hand-crossbow': 'crossbow-bolt',
-  'dnd5e-heavy-crossbow': 'crossbow-bolt',
-  'dnd5e-sling': 'sling-bullet',
-  'dnd5e-blowgun': 'blowgun-needle',
-}
+
 
 function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
@@ -243,12 +251,25 @@ export const DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemp
       cost: detail ? { amount: detail.amount, currency: detail.currency } : undefined,
       stackable: false,
       equipment: { ...equipment },
+      // Explicit physical facts, not inferred from price or weapon category.
+      spellcastingMaterial: [
+        'dnd5e-longsword', 'dnd5e-greataxe', 'dnd5e-rapier', 'dnd5e-mace',
+        'dnd5e-scimitar', 'dnd5e-scimitar-offhand', 'dnd5e-shortsword', 'dnd5e-shortsword-offhand',
+        'dnd5e-dagger', 'dnd5e-dagger-offhand', 'dnd5e-handaxe', 'dnd5e-handaxe-offhand',
+        'dnd5e-javelin', 'dnd5e-light-hammer', 'dnd5e-sickle', 'dnd5e-spear', 'dnd5e-dart',
+        'dnd5e-warhammer', 'dnd5e-greatsword', 'dnd5e-battleaxe', 'dnd5e-flail',
+        'dnd5e-glaive', 'dnd5e-halberd', 'dnd5e-lance', 'dnd5e-maul', 'dnd5e-morningstar',
+        'dnd5e-pike', 'dnd5e-trident', 'dnd5e-war-pick', 'dnd5e-chain-mail', 'dnd5e-scale-mail',
+      ].includes(equipment.id)
+        ? { tags: ['material:contains-metal'] } : undefined,
       source: SRD_SOURCE,
     }
   })
 
 export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
   gear('backpack', '背包', 'Backpack', 'container', 'backpack', 5, 2, 'gp', '可容纳至多 1 立方尺或 30 磅装备；绑在背包外侧的物品不计入该容量。'),
+  gear('quiver', '箭袋', 'Quiver', 'container', 'generic', 1, 1, 'gp', '容纳 20 支箭。可把库存中的箭装入此容器，供武器攻击和容器附魔使用。'),
+  gear('crossbow-bolt-case', '弩矢匣', 'Case, crossbow bolt', 'container', 'generic', 1, 1, 'gp', '容纳 20 支弩矢。可把库存中的弩矢装入此容器。'),
   gear('bedroll', '铺盖', 'Bedroll', 'adventuring-gear', 'bedroll', 7, 1, 'gp', '旅行休息使用的铺盖。具体环境与休息条件由 DM 裁定。'),
   gear('rope-hempen-50-feet', '麻绳（50 尺）', 'Rope, hempen (50 feet)', 'adventuring-gear', 'rope', 10, 1, 'gp', '50 尺长；拥有 2 点生命值，可用 DC 17 力量检定扯断。'),
   gear('torch', '火把', 'Torch', 'adventuring-gear', 'torch', 1, 1, 'cp', '燃烧 1 小时，发出 20 尺明亮光照及其外 20 尺微光。用火把近战命中时造成 1 点火焰伤害。', {
@@ -299,7 +320,8 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('component-pouch', '材料包', 'Component pouch', 'container', 'generic', 2, 25, 'gp', '存放施展法术所需、未标明价格且不会被消耗的材料成分。'),
   gear('arcane-focus', '奥术法器', 'Arcane focus', 'adventuring-gear', 'spellcasting-focus', 1, 10, 'gp', '奥术施法职业可用作法术材料成分替代物；使用时必须持在手中。它是施法法器，不是魔法物品，也不是武器。', undefined, handheldFocus('arcane-focus', '奥术法器')),
   gear('druidic-focus', '德鲁伊法器', 'Druidic focus', 'adventuring-gear', 'generic', 1, 1, 'gp', '德鲁伊可用作法术材料成分替代物；使用时必须持在手中。', undefined, handheldFocus('druidic-focus', '德鲁伊法器')),
-  gear('holy-symbol', '圣徽', 'Holy symbol', 'adventuring-gear', 'generic', 1, 5, 'gp', '牧师和圣武士可用作法术材料成分替代物。'),
+  {...gear('holy-symbol', '圣徽', 'Holy symbol', 'adventuring-gear', 'generic', 1, 5, 'gp', '牧师和圣武士可用作法术材料成分替代物。'),
+    spellcastingMaterial: {tags: ['holy-symbol'], unitValueGp: 5}},
   gear('spellbook', '法术书', 'Spellbook', 'adventuring-gear', 'generic', 3, 50, 'gp', '法师记录已知法术的书册。'),
   gear('thieves-tools', '盗贼工具', "Thieves' tools", 'tool', 'generic', 1, 25, 'gp', '开锁与拆除陷阱使用的专用工具。'),
   gear('bagpipes', '风笛', 'Bagpipes', 'tool', 'generic', 6, 30, 'gp', '一种乐器；吟游诗人用其作为施法法器时必须持用。', undefined, handheldFocus('bagpipes', '风笛')),
@@ -485,10 +507,28 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
   const revision = Number.isSafeInteger(raw?.revision) && Number(raw?.revision) >= 0
     ? Number(raw?.revision)
     : 0
+  const escrowIds = new Set<string>()
+  const spellMaterialEscrows: Dnd5eSpellMaterialEscrow[] = (Array.isArray(raw?.spellMaterialEscrows) ? raw.spellMaterialEscrows : []).flatMap(record => {
+    if (!record || ![record.id, record.sourceSpellId, record.sourceEffectId].every(value =>
+      typeof value === 'string' && value.trim().length > 0 && value.length <= 300) ||
+      typeof record.label !== 'string' || record.label.length > 500 || escrowIds.has(record.id) ||
+      !['reserved', 'consumed'].includes(record.status) || !Array.isArray(record.entries)) return []
+    escrowIds.add(record.id)
+    const entries = record.status === 'consumed' ? [] : normalizeDnd5eInventory({ ...character, equipment: {},
+      dnd5eInventory: { schemaVersion: 3, entries: record.entries },
+    }).entries.map(entry => ({ ...entry, equippedSlot: undefined, containerInstanceId: undefined }))
+    return [{ id: record.id, sourceSpellId: record.sourceSpellId, sourceEffectId: record.sourceEffectId,
+      label: record.label, status: record.status, entries }]
+  })
   const entries: Dnd5eInventoryEntry[] = (raw?.entries ?? [])
-    .filter((entry) => entry && typeof entry.instanceId === 'string' && typeof entry.templateId === 'string')
+    .filter((entry) => entry && typeof entry.instanceId === 'string' && typeof entry.templateId === 'string' &&
+      (entry.surfaceProfile == null || !!normalizeDnd5eMapObjectSurface(entry.surfaceProfile)) &&
+      (entry.structureBinding == null || !!normalizeDnd5eStructureObjectBinding(entry.structureBinding)))
     .map((entry) => {
       const item = cloneItemTemplate(inventoryTemplateForStoredEntry(entry))
+      if (item.equipment?.dnd5e?.kind === 'weapon' && item.equipment.dnd5e.usesSourceSpellcastingAbility && Number.isInteger(entry.sourceSpellcastingModifier)) {
+        item.equipment = {...item.equipment,dnd5e:{...item.equipment.dnd5e,sourceSpellcastingModifier:entry.sourceSpellcastingModifier}}
+      }
       const quantity = Math.max(1, Math.floor(Number(entry.quantity) || 1))
       const resources = normalizeInventoryResources(item, quantity, entry.resources, entry.remainingCharges)
       return {
@@ -513,6 +553,12 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
         contaminants: [...new Set((entry.contaminants ?? []).filter(
           (value): value is 'poison' | 'disease' => value === 'poison' || value === 'disease',
         ))],
+        waterContainer: normalizeDnd5eWaterContainerStateV1(entry.waterContainer),
+        surfaceProfile: normalizeDnd5eMapObjectSurface(entry.surfaceProfile),
+        enchantmentExposed: entry.enchantmentExposed === true && quantity === 1 && !entry.containerInstanceId && !entry.condition?.destroyed ? true : undefined,
+        surfaceExposed: entry.surfaceExposed === true && quantity === 1 && !entry.containerInstanceId &&
+          !entry.condition?.destroyed && normalizeDnd5eMapObjectSurface(entry.surfaceProfile) ? true : undefined,
+        structureBinding: normalizeDnd5eStructureObjectBinding(entry.structureBinding),
         planarState: entry.planarState === 'ethereal' ? 'ethereal' :
           entry.planarState === 'material' ? 'material' : undefined,
         linkedSpellAuthorityRecordId: typeof entry.linkedSpellAuthorityRecordId === 'string' &&
@@ -558,6 +604,10 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     if (!equipped || equipped.id !== entry.item.equipment?.id) entry.equippedSlot = undefined
   }
   normalizeContainerLinks(entries)
+  const releasedObjects = Array.isArray(raw?.releasedObjects) && raw.releasedObjects.length
+    ? normalizeDnd5eInventory({ ...character, equipment: {}, dnd5eInventory: { schemaVersion: 3,
+      entries: raw.releasedObjects.filter(entry => !entry.spellAlteration && !entry.sourceEffectTag),
+    } }).entries.map(entry => ({ ...entry, equippedSlot: undefined, containerInstanceId: undefined })) : []
   return {
     schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
     revision,
@@ -565,6 +615,9 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     currency,
     authorityGrantReceipts,
     authorityUseReceipts,
+    pendingExchangeRitual: normalizeDnd5eInventoryExchangeRitual(raw?.pendingExchangeRitual),
+    ...(spellMaterialEscrows.length ? { spellMaterialEscrows } : {}),
+    ...(releasedObjects.length ? { releasedObjects } : {}),
   }
 }
 
@@ -597,9 +650,7 @@ export function dnd5eInventoryLoad(character: Character): Dnd5eInventoryLoad {
   const currencyWeightLb = Object.values(inventory.currency ?? EMPTY_CURRENCY).reduce((sum, amount) => sum + amount, 0) / 50
   const strength = Math.max(1, Math.floor(character.abilities?.str ?? 10))
   const totalWeightLb = itemWeightLb + currencyWeightLb
-  const carryingCapacityLb = strength * 15 * dnd5eActiveCarryingCapacityMultiplier(
-    character.dnd5eCombatState?.activeEffects,
-  ) * dnd5eRageFeatureCarryingCapacityMultiplier(character)
+  const carryingCapacityLb = dnd5eCarryingCapacityPounds(strength, dnd5eRageFeatureCarryingCapacityMultiplier(character), character.dnd5eCombatState?.activeEffects)
   const encumberedThresholdLb = strength * 5
   const heavilyEncumberedThresholdLb = strength * 10
   const status = totalWeightLb > carryingCapacityLb
@@ -622,7 +673,7 @@ export function dnd5eInventoryLoad(character: Character): Dnd5eInventoryLoad {
 }
 
 export function dnd5eWeaponAmmunitionKind(equipmentId: string | undefined): Dnd5eAmmunitionKind | undefined {
-  return equipmentId ? AMMUNITION_KIND_BY_WEAPON_ID[equipmentId] : undefined
+  return ammunitionKindForWeaponId(equipmentId)
 }
 
 /** 权威攻击事务使用：只在攻击成功进入结算后扣除一枚对应弹药。 */
@@ -630,10 +681,31 @@ export function consumeDnd5eWeaponAmmunition(
   character: Character,
   equipmentId: string | undefined,
 ): { ok: true; character: Character; instanceId?: string } | { ok: false; character: Character; reason: 'ammunition-unavailable' } {
-  const kind = dnd5eWeaponAmmunitionKind(equipmentId)
+  const consumedWeapon = character.dnd5eInventory?.entries.find(entry=>entry.item.equipment?.id===equipmentId && entry.item.equipment?.dnd5e?.kind==='weapon' && entry.item.equipment.dnd5e.consumesQuantityOnAttack)
+  if (consumedWeapon) {
+    if (!dnd5eInventoryEntryIsActive(consumedWeapon) || !dnd5eAmmunitionEntryAccessible(consumedWeapon, character.dnd5eInventory!.entries)) return {ok:false,character,reason:'ammunition-unavailable'}
+    if (consumedWeapon.spellAlteration) {
+      const released = releaseDnd5eAlteredProjectile(character, consumedWeapon.instanceId)
+      return released.ok ? { ok: true, character: released.character, instanceId: consumedWeapon.instanceId }
+        : { ok: false, character, reason: 'ammunition-unavailable' }
+    }
+    const next = consumedWeapon.quantity > 1 ? {...character,dnd5eInventory:inventoryWithEntries(normalizeDnd5eInventory(character),character.dnd5eInventory!.entries.map(entry=>entry.instanceId===consumedWeapon.instanceId?{...entry,quantity:entry.quantity-1}:entry))} : removeItem(character,consumedWeapon,1)
+    return {ok:true,character:next,instanceId:consumedWeapon.instanceId}
+  }
+  const weapon = character.dnd5eInventory?.entries.find(entry=>entry.item.equipment?.id===equipmentId)?.item.equipment
+    ?? Object.values(character.equipment??{}).find(item=>item?.id===equipmentId)
+  const kind = dnd5eWeaponAmmunitionKind(weapon?.baseEquipmentId??equipmentId)
   if (!kind) return { ok: true, character }
   const inventory = normalizeDnd5eInventory(character)
-  const ammunition = inventory.entries.find((entry) => entry.item.ammunitionKind === kind && entry.quantity > 0)
+  const ammunitionBinding = dnd5eActiveAmmunitionEnchantment(character.dnd5eCombatState?.activeEffects,equipmentId)?.modifiers?.weaponEnchantment
+  const containerId = ammunitionBinding?.ammunitionContainer ? ammunitionBinding.inventoryInstanceId : undefined
+  // Normalization repairs broken container links; do not turn an inaccessible
+  // source stack into loose ammunition as a side effect of an attack.
+  const sourceEntries = character.dnd5eInventory?.entries ?? inventory.entries
+  const ammunition = inventory.entries.find((entry) => entry.item.ammunitionKind === kind &&
+    dnd5eAmmunitionEntryAccessible(sourceEntries.find(source=>source.instanceId===entry.instanceId) ?? entry, sourceEntries) &&
+    (!containerId || entry.containerInstanceId===containerId) &&
+    (!ammunitionBinding?.ammunitionStack || entry.instanceId === ammunitionBinding.inventoryInstanceId))
   if (!ammunition) return { ok: false, character, reason: 'ammunition-unavailable' }
   return { ok: true, character: removeItem(character, ammunition, 1), instanceId: ammunition.instanceId }
 }
@@ -842,7 +914,7 @@ export function dnd5eAttunedItemCount(character: Character): number {
 }
 
 export function dnd5eInventoryEntryIsActive(entry: Dnd5eInventoryEntry): boolean {
-  if (entry.planarState === 'ethereal') return false
+  if (entry.planarState === 'ethereal' || entry.releasedByCharacterId) return false
   if (entry.item.magicItem && entry.identified === false) return false
   return entry.item.magicItem?.attunement !== 'required' || entry.attuned === true
 }
@@ -874,14 +946,14 @@ export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate, useA
 export function applyDnd5eInventoryMutation(
   characters: readonly Character[],
   mutation: Dnd5eInventoryMutation,
-  options: { turnEconomy?: Dnd5eTurnEconomyCounts; transaction?: CombatTransaction } = {},
+  options: { turnEconomy?: Dnd5eTurnEconomyCounts; transaction?: CombatTransaction; healingContext?: Dnd5eOwnedCompanionMapContext; effectRemovalTarget?: import('./activeEffects').Dnd5eActiveEffectProjection } = {},
 ): Dnd5eInventoryMutationResult & { transaction?: CombatTransaction } {
-  const mutationResult = applyDnd5eInventoryMutationInternal(characters, mutation, { turnEconomy: options.turnEconomy })
+  const mutationResult = applyDnd5eInventoryMutationInternal(characters, mutation, options)
   const result = mutationResult.ok
     ? {
         ...mutationResult,
         characters: reconcileDnd5eContingencyInventory(
-          reconcileDnd5eWardingBondInventory(mutationResult.characters),
+          reconcileDnd5eWardingBondInventory(settleDnd5eAmmunitionDrawQuota(characters, mutationResult.characters, mutation)),
         ),
       }
     : mutationResult
@@ -897,6 +969,7 @@ export function applyDnd5eInventoryMutation(
       ? dnd5eInventoryEntryUseAction(entry, mutation.useActionId)
       : undefined
     const dice = use?.effect.kind === 'healing' ? use.effect.dice : undefined
+    const recipient = characters.find(candidate => candidate.id === (mutation.targetCharacterId ?? mutation.characterId))
     if (
       dice && mutation.healingRolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= dice.sides) &&
       !transaction.rollLedger.entries.some((candidate) => candidate.id === `${transaction!.id}:item-healing`)
@@ -905,7 +978,8 @@ export function applyDnd5eInventoryMutation(
         id: `${transaction.id}:item-healing`,
         kind: 'healing',
         label: entry?.item.name ?? 'item healing',
-        dice: { sides: dice.sides, values: [...mutation.healingRolls] },
+        dice: { sides: dice.sides, values: mutation.healingRolls.map(roll =>
+          dnd5eCharacterMaximizeHealingDice(recipient, options.healingContext) ? dice.sides : roll) },
         modifier: dice.bonus,
         visibility: 'public',
         sourceId: mutation.characterId,
@@ -962,13 +1036,32 @@ export function applyDnd5eInventoryGrantBundle(
   }))
   if (validated.some((entry) => !entry.quantity)) return failed(characters, 'invalid-quantity')
   if (validated.some((entry) => !entry.template)) return failed(characters, 'template-not-found')
+  if (validated.some(({grant,template,quantity}) => grant.equipToFreeHand != null &&
+    (grant.equipToFreeHand !== true || quantity !== 1 || template?.equipment?.dnd5e?.kind !== 'weapon')))
+    return failed(characters, 'invalid-target')
+  if (validated.some(({ grant }) => grant.contaminants != null && (
+    !Array.isArray(grant.contaminants) || grant.contaminants.length > 2 ||
+    grant.contaminants.some(value => value !== 'poison' && value !== 'disease')
+  ))) return failed(characters, 'invalid-target')
   if (validated.some(({ grant }) =>
     (grant.expiresAtWorldMinute != null && (
       !Number.isSafeInteger(grant.expiresAtWorldMinute) || grant.expiresAtWorldMinute < 0
     )) ||
+    (grant.sourceSpellcastingModifier != null && (!Number.isInteger(grant.sourceSpellcastingModifier) || grant.sourceSpellcastingModifier < -5 || grant.sourceSpellcastingModifier > 10)) ||
+    (grant.sourceEffectTag != null && !/^item-lease:[a-f0-9-]{36}$/.test(grant.sourceEffectTag)) ||
     (grant.generatedByRulesId != null &&
       !/^[a-z0-9][a-z0-9._:-]{0,199}$/.test(grant.generatedByRulesId)),
   )) return failed(characters, 'invalid-quantity')
+  for (const {grant} of validated) {
+    if (grant.maximumPerSource == null) continue
+    if (!Number.isInteger(grant.maximumPerSource) || grant.maximumPerSource < 1 || grant.maximumPerSource > 100 || !grant.sourceEffectTag) return failed(characters,'invalid-quantity')
+    const existing = characters.flatMap(character => character.dnd5eInventory?.entries ?? []).filter(entry=>entry.sourceEffectTag===grant.sourceEffectTag).reduce((sum,entry)=>sum+entry.quantity,0)
+    const pending = input.grants.filter(entry=>entry.sourceEffectTag===grant.sourceEffectTag).reduce((sum,entry)=>sum+entry.quantity,0)
+    if (existing + pending > grant.maximumPerSource) return failed(characters,'invalid-quantity')
+  }
+  if (validated.some(({ grant }) => grant.waterContainer != null && (!normalizeDnd5eWaterContainerStateV1(grant.waterContainer) || grant.quantity !== 1))) return failed(characters, 'invalid-target')
+  if (validated.some(({grant})=>grant.surfaceProfile != null && !normalizeDnd5eMapObjectSurface(grant.surfaceProfile))) return failed(characters, 'invalid-target')
+  if (validated.some(({ grant }) => grant.structureBinding != null && !normalizeDnd5eStructureObjectBinding(grant.structureBinding))) return failed(characters, 'invalid-target')
   const currencyGrants = (input.currencyGrants ?? []).map((grant) => ({
     currency: grant.currency,
     amount: Number(grant.amount),
@@ -982,11 +1075,29 @@ export function applyDnd5eInventoryGrantBundle(
 
   let next = withNormalizedInventory(characters[sourceIndex])
   for (const entry of validated) {
+    const hand = entry.grant.equipToFreeHand
+      ? (['mainWeapon','offHand'] as const).find(slot => !next.equipment?.[slot] &&
+        (entry.template!.equipment?.allowedSlots ?? [entry.template!.equipment!.slot]).includes(slot))
+      : undefined
+    if (entry.grant.equipToFreeHand && !hand) return failed(characters, 'invalid-target')
+    const previousIds = new Set(next.dnd5eInventory?.entries.map(item => item.instanceId))
     next = addItem(next, entry.template!, entry.quantity!, {
       identified: entry.grant.identified ?? true,
       expiresAtWorldMinute: entry.grant.expiresAtWorldMinute,
       generatedByRulesId: entry.grant.generatedByRulesId,
+      sourceEffectTag: entry.grant.sourceEffectTag,
+      sourceEffectOwnerId: entry.grant.sourceEffectTag ? input.characterId : undefined,
+      sourceSpellcastingModifier: entry.grant.sourceSpellcastingModifier,
+      contaminants: entry.grant.contaminants,
+      waterContainer: entry.grant.waterContainer,
+      surfaceProfile: entry.grant.surfaceProfile,
+      structureBinding: entry.grant.structureBinding,
     })
+    if (hand) {
+      const created = next.dnd5eInventory?.entries.find(item => !previousIds.has(item.instanceId))
+      if (!created) return failed(characters, 'invalid-target')
+      next = equipEntry(next, created, hand)
+    }
   }
   const inventory = normalizeDnd5eInventory(next)
   const currency = { ...EMPTY_CURRENCY, ...inventory.currency }
@@ -1506,11 +1617,12 @@ export function applyDnd5eInstantSummonsSapphireDispel(
 function applyDnd5eInventoryMutationInternal(
   characters: readonly Character[],
   mutation: Dnd5eInventoryMutation,
-  options: { turnEconomy?: Dnd5eTurnEconomyCounts } = {},
+  options: { turnEconomy?: Dnd5eTurnEconomyCounts; healingContext?: Dnd5eOwnedCompanionMapContext; effectRemovalTarget?: import('./activeEffects').Dnd5eActiveEffectProjection } = {},
 ): Dnd5eInventoryMutationResult {
   const sourceIndex = characters.findIndex((character) => character.id === mutation.characterId)
   if (sourceIndex < 0) return failed(characters, 'character-not-found')
   const source = withNormalizedInventory(characters[sourceIndex])
+  if (mutation.type === 'use' && dnd5eEquipmentMergedBySpellForm(source)) return failed(characters, 'item-inactive')
 
   if (
     mutation.type === 'use' || mutation.type === 'identify' ||
@@ -1537,7 +1649,12 @@ function applyDnd5eInventoryMutationInternal(
     if (!quantity) return failed(characters, 'invalid-quantity')
     const template = dnd5eInventoryItemTemplate(mutation.templateId)
     if (!template) return failed(characters, 'template-not-found')
-    const next = addItem(source, template, quantity, { identified: mutation.identified ?? true })
+    const binding=mutation.summonBinding
+    if(binding && (typeof binding.tagPrefix!=='string' || typeof binding.monsterId!=='string' || !/^[-a-z0-9.]{1,64}$/.test(binding.tagPrefix) || !getDnd5eSrdMonster(binding.monsterId))) return failed(characters,'template-not-found')
+    const boundTemplate: Dnd5eInventoryItemTemplate = binding ? {...structuredClone(template),
+      id:`bound-item:${crypto.randomUUID()}`,name:`${template.name}（${getDnd5eSrdMonster(binding.monsterId)!.name}）`,stackable:false,
+      spellcastingMaterial:{...template.spellcastingMaterial,tags:[...(template.spellcastingMaterial?.tags??[]),`${binding.tagPrefix}:${binding.monsterId}`]}} : template
+    const next = addItem(source, boundTemplate, quantity, { identified: mutation.identified ?? true })
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 获得 ${template.name} ×${quantity}。`)
   }
 
@@ -1563,11 +1680,12 @@ function applyDnd5eInventoryMutationInternal(
     const quantity = validQuantity(mutation.quantity)
     if (!quantity) return failed(characters, 'invalid-quantity')
     if (quantity > entry.quantity) return failed(characters, 'insufficient-quantity')
-    const next = removeItem(source, entry, quantity)
+    const next = entry.sourceEffectTag && entry.item.equipment?.dnd5e?.kind === 'weapon' && entry.item.equipment.dnd5e.vanishesAfterRelease ? releaseDnd5eTemporaryWeapon(source,entry.item.equipment.id) : removeItem(source, entry, quantity)
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 丢弃 ${entry.item.name} ×${quantity}。`)
   }
 
   if (mutation.type === 'transfer') {
+    if (entry.releasedByCharacterId) return failed(characters,'invalid-target')
     if (mutation.targetCharacterId === source.id) return failed(characters, 'same-character')
     const targetIndex = characters.findIndex((character) => character.id === mutation.targetCharacterId)
     if (targetIndex < 0) return failed(characters, 'target-not-found')
@@ -1575,7 +1693,9 @@ function applyDnd5eInventoryMutationInternal(
     if (!quantity) return failed(characters, 'invalid-quantity')
     if (quantity > entry.quantity) return failed(characters, 'insufficient-quantity')
     const target = withNormalizedInventory(characters[targetIndex])
-    if (entry.linkedSpellAuthorityRecordId || entry.linkedSpellFocusAuthorityRecordId) {
+    const boundLifetime = characters.some(owner => owner.dnd5eCombatState?.activeEffects?.some(effect =>
+      effect.removal?.onInventoryInstanceDestroyed === entry.instanceId))
+    if (boundLifetime || entry.spellAlteration || entry.linkedSpellAuthorityRecordId || entry.linkedSpellFocusAuthorityRecordId || source.dnd5eCombatState?.activeEffects?.some(effect => !effect.modifiers?.weaponEnchantment?.ammunitionStack && (effect.modifiers?.weaponEnchantment?.inventoryInstanceId ?? effect.modifiers?.armorEnchantment?.inventoryInstanceId) === entry.instanceId)) {
       // A spell link belongs to one physical object, never to a duplicated or
       // merged template stack. Preserve its stable instance and Host markers.
       if (quantity !== entry.quantity) return failed(characters, 'invalid-quantity')
@@ -1583,13 +1703,18 @@ function applyDnd5eInventoryMutationInternal(
       if (targetInventory.entries.some((candidate) => candidate.instanceId === entry.instanceId)) {
         return failed(characters, 'invalid-target')
       }
-      const nextSource = removeItem(source, entry, quantity)
+      const contents=entry.item.category==='container' ? source.dnd5eInventory!.entries.filter(candidate=>candidate.containerInstanceId===entry.instanceId) : []
+      if (contents.some(content => targetInventory.entries.some(candidate => candidate.instanceId === content.instanceId))) return failed(characters, 'invalid-target')
+      let nextSource = removeItem(source, entry, quantity)
+      for(const content of contents) nextSource=removeItem(nextSource,content,content.quantity)
       const nextTarget = {
         ...target,
         dnd5eInventory: inventoryWithEntries(targetInventory, [
           ...targetInventory.entries,
+          ...contents.map(content=>({...content,equippedSlot:undefined})),
           {
             ...entry,
+            enchantmentExposed: undefined,
             equippedSlot: undefined,
             containerInstanceId: undefined,
           },
@@ -1606,9 +1731,44 @@ function applyDnd5eInventoryMutationInternal(
       identified: entry.identified !== false,
       expiresAtWorldMinute: entry.expiresAtWorldMinute,
       generatedByRulesId: entry.generatedByRulesId,
+      sourceEffectTag: entry.sourceEffectTag,
+      sourceEffectOwnerId: entry.sourceEffectOwnerId,
+      sourceSpellcastingModifier: entry.sourceSpellcastingModifier,
+      contaminants: entry.contaminants,
+      waterContainer: entry.waterContainer,
+      surfaceProfile: entry.surfaceProfile,
+      structureBinding: entry.structureBinding,
     })
     const afterSource = replaceAt(characters, sourceIndex, nextSource)
     return succeeded(replaceAt(afterSource, targetIndex, nextTarget), `${source.name} 将 ${entry.item.name} ×${quantity} 转交给 ${target.name}。`)
+  }
+
+  if (mutation.type === 'set-enchantment-exposure') {
+    const profile = entry.item.equipment?.dnd5e
+    if (typeof mutation.exposed !== 'boolean' || mutation.exposed && (entry.quantity !== 1 ||
+      entry.containerInstanceId || entry.condition?.destroyed || entry.planarState === 'ethereal' ||
+      !(profile?.kind === 'armor' || profile?.kind === 'weapon' && ['simple', 'martial'].includes(profile.category)))) return failed(characters, 'invalid-target')
+    if ((entry.enchantmentExposed === true) === mutation.exposed) return succeeded(characters, '物品出示状态未改变。')
+    const next = { ...source, dnd5eInventory: inventoryWithEntries(source.dnd5eInventory!,
+      source.dnd5eInventory!.entries.map(candidate => candidate.instanceId === entry.instanceId
+        ? { ...candidate, enchantmentExposed: mutation.exposed ? true as const : undefined } : candidate)) }
+    return succeeded(replaceAt(characters, sourceIndex, next), mutation.exposed ? '已出示物品供附魔选择。' : '已停止出示附魔物品。')
+  }
+
+  if (mutation.type === 'set-surface-exposure') {
+    if (typeof mutation.exposed !== 'boolean') return failed(characters, 'invalid-target')
+    const exposedProfile = entry.surfaceProfile && normalizeDnd5eMapObjectSurface({
+      ...entry.surfaceProfile, surfaceId: entry.surfaceProfile.surfaceId ?? `inventory:${entry.instanceId}`,
+    })
+    if (mutation.exposed && (entry.quantity !== 1 || entry.containerInstanceId || entry.condition?.destroyed ||
+      !exposedProfile)) return failed(characters, 'invalid-target')
+    if ((entry.surfaceExposed === true) === mutation.exposed && (!mutation.exposed || entry.surfaceProfile?.surfaceId)) return succeeded(characters, `${entry.item.name} 的展示状态未改变。`)
+    const next = { ...source, dnd5eInventory: inventoryWithEntries(source.dnd5eInventory!,
+      source.dnd5eInventory!.entries.map(candidate => candidate.instanceId === entry.instanceId
+        ? { ...candidate, surfaceExposed: mutation.exposed ? true as const : undefined,
+          surfaceProfile: mutation.exposed ? exposedProfile : candidate.surfaceProfile } : candidate)) }
+    return succeeded(replaceAt(characters, sourceIndex, next), mutation.exposed
+      ? `${source.name} 展示了 ${entry.item.name}。` : `${source.name} 收起了 ${entry.item.name}。`)
   }
 
   if (mutation.type === 'equip') {
@@ -1770,7 +1930,8 @@ function applyDnd5eInventoryMutationInternal(
       return failed(characters, 'container-cycle')
     }
     const moved = inventory.entries.map((candidate) => candidate.instanceId === entry.instanceId
-      ? { ...candidate, containerInstanceId: target?.instanceId, equippedSlot: target ? undefined : candidate.equippedSlot }
+      ? { ...candidate, containerInstanceId: target?.instanceId, equippedSlot: target ? undefined : candidate.equippedSlot,
+          surfaceExposed: target ? undefined : candidate.surfaceExposed }
       : candidate)
     if (target && directContainerContentsWeight(moved, target.instanceId) > (target.item.containerCapacityWeightLb ?? 0)) {
       return failed(characters, 'container-capacity')
@@ -1814,17 +1975,38 @@ function applyDnd5eInventoryMutationInternal(
   let spellSlotLevel: number | undefined
   let spellSlotsRecovered: number | undefined
   let requiresDmAdjudication: string | undefined
+  let effectRemovalTargetProjection: Dnd5eInventoryMutationResult['effectRemovalTargetProjection']
   if (use.effect.kind === 'healing') {
     const rolls = mutation.healingRolls
     const { count, sides, bonus } = use.effect.dice
     if (!rolls || rolls.length !== count || rolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > sides)) {
       return failed(characters, 'invalid-rolls')
     }
-    healingRolled = rolls.reduce((sum, roll) => sum + roll, bonus)
+    healingRolled = dnd5eCharacterMaximizeHealingDice(target, options.healingContext)
+      ? count * sides + bonus : rolls.reduce((sum, roll) => sum + roll, bonus)
     const healed = healDnd5eInventoryTarget(target, healingRolled)
     healingApplied = healed.applied
     nextTarget = healed.character
     if (targetIndex === sourceIndex) nextSource = nextTarget
+  } else if (use.effect.kind === 'remove-active-effects') {
+    const keys = use.effect.stackingKeys
+    const effects = normalizeDnd5eActiveEffects(options.effectRemovalTarget
+      ? options.effectRemovalTarget.activeEffects : target.dnd5eCombatState?.activeEffects)
+    const removed = effects.filter((effect) => effect.stackingKey != null && keys.includes(effect.stackingKey))
+    if (removed.length === 0) return failed(characters, 'invalid-target')
+    const remaining = effects.filter((effect) => !removed.includes(effect))
+    const projection = projectDnd5eActiveEffectState(remaining)
+    const removedConditions = new Set(projectDnd5eActiveEffectState(removed).conditions)
+    const conditions = [...new Set([...(options.effectRemovalTarget?.conditions ?? target.conditions ?? []).filter((condition) => !removedConditions.has(condition)), ...projection.conditions])]
+    if (options.effectRemovalTarget) {
+      effectRemovalTargetProjection = { ...projection, conditions }
+    } else {
+      nextTarget = { ...target,
+        conditions,
+        dnd5eCombatState: { ...target.dnd5eCombatState, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: projection.activeEffects },
+      }
+      if (targetIndex === sourceIndex) nextSource = nextTarget
+    }
   } else if (use.effect.kind === 'spell-slot-recovery') {
     if (targetIndex !== sourceIndex) return failed(characters, 'invalid-target')
     const selectedLevel = mutation.spellSlotLevel
@@ -1902,6 +2084,7 @@ function applyDnd5eInventoryMutationInternal(
     spellSlotLevel,
     spellSlotsRecovered,
     requiresDmAdjudication,
+    effectRemovalTargetProjection,
     spentEconomy: use.economy === 'none' ? undefined : use.economy,
   }
 }
@@ -1936,9 +2119,21 @@ function gear(
     stackable: equipment ? false : category !== 'container',
     containerCapacityWeightLb: CONTAINER_CAPACITY_WEIGHT_LB[id],
     ammunitionKind: AMMUNITION_KIND_BY_ITEM_ID[id],
-    use,
+    use: id === 'holy-water-flask' ? undefined : use,
+    useActions: id === 'holy-water-flask' && use ? [
+      { ...use, id: 'attack', label: '泼洒或投掷攻击' },
+      { id: 'cleanse-spores', label: '浇淋圣水：清除孢子', economy: 'action', consumeQuantity: 1,
+        targeting: { kind: 'creature', rangeFeet: 5, includeSelf: true },
+        effect: { kind: 'remove-active-effects', stackingKeys: ['monster-area:vrock-spores'] } },
+    ] : undefined,
     equipment,
-    spellcastingMaterial,
+    spellcastingMaterial: [
+      'arrows', 'crossbow-bolts', 'sling-bullets', 'blowgun-needles',
+      'crowbar', 'hammer', 'piton', 'bell', 'mess-kit', 'thieves-tools',
+      'ball-bearings-bag', 'caltrops-bag', 'hunting-trap',
+    ].includes(id)
+      ? { ...spellcastingMaterial, tags: [...(spellcastingMaterial?.tags ?? []), 'material:contains-metal'] }
+      : spellcastingMaterial,
     source: SRD_SOURCE,
   }
 }
@@ -2017,17 +2212,23 @@ function addItem(
   character: Character,
   item: Dnd5eInventoryItemTemplate,
   quantity: number,
-  options: { identified?: boolean; expiresAtWorldMinute?: number; generatedByRulesId?: string } = {},
+  options: { identified?: boolean; expiresAtWorldMinute?: number; generatedByRulesId?: string; sourceEffectTag?: string; sourceEffectOwnerId?: string; sourceSpellcastingModifier?: number; contaminants?: readonly ('poison' | 'disease')[]; waterContainer?: Dnd5eWaterContainerStateV1; structureBinding?: Dnd5eStructureObjectBinding; surfaceProfile?: Dnd5eMapObjectSurface } = {},
 ): Character {
   const inventory = normalizeDnd5eInventory(character)
   const entries = [...inventory.entries]
   if (item.stackable) {
     const identified = item.magicItem ? options.identified !== false : true
     const existingIndex = entries.findIndex((entry) =>
+      !entry.waterContainer && !options.waterContainer && !entry.surfaceProfile && !options.surfaceProfile &&
+      entry.structureBinding?.mapId === options.structureBinding?.mapId &&
+      entry.structureBinding?.structureId === options.structureBinding?.structureId &&
       entry.templateId === item.id && !entry.equippedSlot && !entry.containerInstanceId &&
       (entry.identified !== false) === identified &&
+      ['poison', 'disease'].every(value =>
+        Boolean((entry.contaminants as readonly string[] | undefined)?.includes(value)) ===
+        Boolean((options.contaminants as readonly string[] | undefined)?.includes(value))) &&
       entry.expiresAtWorldMinute === options.expiresAtWorldMinute &&
-      entry.generatedByRulesId === options.generatedByRulesId)
+      entry.generatedByRulesId === options.generatedByRulesId && entry.sourceEffectTag === options.sourceEffectTag && entry.sourceEffectOwnerId === options.sourceEffectOwnerId && entry.sourceSpellcastingModifier === options.sourceSpellcastingModifier)
     if (existingIndex >= 0) {
       const existing = entries[existingIndex]
       entries[existingIndex] = {
@@ -2281,7 +2482,7 @@ function newEntry(
   item: Dnd5eInventoryItemTemplate,
   quantity: number,
   identified = true,
-  options: { expiresAtWorldMinute?: number; generatedByRulesId?: string } = {},
+  options: { expiresAtWorldMinute?: number; generatedByRulesId?: string; sourceEffectTag?: string; sourceEffectOwnerId?: string; sourceSpellcastingModifier?: number; contaminants?: readonly ('poison' | 'disease')[]; waterContainer?: Dnd5eWaterContainerStateV1; structureBinding?: Dnd5eStructureObjectBinding; surfaceProfile?: Dnd5eMapObjectSurface } = {},
 ): Dnd5eInventoryEntry {
   return {
     instanceId: inventoryId(),
@@ -2291,8 +2492,15 @@ function newEntry(
     resources: createInventoryResources(item, quantity),
     identified,
     acquiredAt: Date.now(),
+    waterContainer: normalizeDnd5eWaterContainerStateV1(options.waterContainer),
+    surfaceProfile: normalizeDnd5eMapObjectSurface(options.surfaceProfile),
+    structureBinding: normalizeDnd5eStructureObjectBinding(options.structureBinding),
+    contaminants: options.contaminants?.length ? [...new Set(options.contaminants)] : undefined,
     expiresAtWorldMinute: options.expiresAtWorldMinute,
     generatedByRulesId: options.generatedByRulesId,
+    sourceEffectTag: options.sourceEffectTag,
+    sourceEffectOwnerId: options.sourceEffectOwnerId,
+    sourceSpellcastingModifier: options.sourceSpellcastingModifier,
   }
 }
 
@@ -2315,6 +2523,9 @@ export function expireDnd5eInventoryItemsAtWorldMinute(
         : entry)),
   }
 }
+
+/** Same serialized removal is used by the player exploration server. */
+export {expireStructureInventoryItems as expireDnd5eStructureInventoryItems} from '../../../shared/structure-inventory-cleanup.mjs'
 
 function consumeItemCharge(character: Character, entry: Dnd5eInventoryEntry): Character {
   const result = spendDnd5eInventoryResource(character, entry.instanceId, 'uses', 1)
@@ -2446,6 +2657,7 @@ function inventoryWithEntries(inventory: Dnd5eInventory, entries: Dnd5eInventory
     currency: normalizeCurrency(inventory.currency),
     authorityGrantReceipts: [...(inventory.authorityGrantReceipts ?? [])],
     authorityUseReceipts: [...(inventory.authorityUseReceipts ?? [])],
+    ...(inventory.spellMaterialEscrows?.length ? { spellMaterialEscrows: structuredClone(inventory.spellMaterialEscrows) } : {}),
   }
 }
 
@@ -2540,7 +2752,7 @@ function failed(characters: readonly Character[], reason: NonNullable<Dnd5eInven
 }
 
 function succeeded(characters: readonly Character[], message: string): Dnd5eInventoryMutationResult {
-  return { ok: true, characters: characters.map(character => {
+  return { ok: true, characters: reconcileDnd5eInventoryEffectBindings(characters).map(character => {
     const hasProjection = character.dnd5eCombatState?.activeEffects?.some(effect => effect.id.startsWith('inventory-equipped-passive:'))
     const hasDeclaration = character.dnd5eInventory?.entries.some(entry => entry.item.headlessEffects?.some(effect => effect.kind === 'equipped-passive'))
     if (!hasProjection && !hasDeclaration) return character
@@ -2548,4 +2760,39 @@ function succeeded(characters: readonly Character[], message: string): Dnd5eInve
       schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: dnd5eInventoryPassiveEffects(character),
     } }
   }), message }
+}
+
+/** Called with the complete Host set of live effect tags after resolving a transaction. */
+export function expireDnd5eSourceBoundInventory(character: Character, liveEffectTags: ReadonlySet<string>, knownSourceOwnerIds?: ReadonlySet<string>): Character {
+  let next = character
+  for (const entry of character.dnd5eInventory?.entries ?? []) {
+    if (entry.sourceEffectTag && (!knownSourceOwnerIds || (!!entry.sourceEffectOwnerId && knownSourceOwnerIds.has(entry.sourceEffectOwnerId))) && !liveEffectTags.has(entry.sourceEffectTag)) {
+      if (entry.spellAlteration) {
+        const restored = restoreDnd5eInventoryItem(next, entry.instanceId, entry.sourceEffectTag)
+        if (restored.ok) next = restored.character
+      } else next = removeItem(next, entry, entry.quantity)
+    }
+  }
+  return next === character ? character : succeeded([next], '来源效果结束').characters[0]
+}
+
+/** Reconcile after every member's effects have settled; absent owners remain unknown. */
+export function expireDnd5eSourceBoundInventoryRoster(characters: readonly Character[]): Character[] {
+  const liveTags = new Set(characters.flatMap(character =>
+    (character.dnd5eCombatState?.activeEffects ?? []).flatMap(effect => effect.tags ?? [])))
+  const knownOwners = new Set(characters.map(character => character.id))
+  return characters.map(character => expireDnd5eSourceBoundInventory(character, liveTags, knownOwners))
+}
+
+/** Mark released spell weapons without prematurely permitting their recall. */
+export function releaseDnd5eTemporaryWeapon(character: Character, weaponId: string): Character {
+  const entry = character.dnd5eInventory?.entries.find(entry=>entry.item.equipment?.id===weaponId && entry.sourceEffectTag)
+  if (!entry || entry.item.equipment?.dnd5e?.kind !== 'weapon' || !entry.item.equipment.dnd5e.vanishesAfterRelease) return character
+  const next=unequipEntry(character,entry)
+  return {...next,dnd5eInventory:{...next.dnd5eInventory!,entries:next.dnd5eInventory!.entries.map(candidate=>candidate.instanceId===entry.instanceId?{...candidate,releasedByCharacterId:character.id}:candidate)}}
+}
+export function expireDnd5eReleasedWeapons(character: Character, endedCharacterIds: ReadonlySet<string>): Character {
+  let next=character
+  for (const entry of character.dnd5eInventory?.entries??[]) if(entry.releasedByCharacterId && endedCharacterIds.has(entry.releasedByCharacterId)) next=removeItem(next,entry,entry.quantity)
+  return next===character ? character : succeeded([next],'临时武器消失').characters[0]
 }

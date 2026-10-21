@@ -1,4 +1,5 @@
 import { useMemo, useState, useSyncExternalStore, type ComponentType, type DragEvent } from 'react'
+import SpellMaterialEscrows from './SpellMaterialEscrows'
 import {
   Cable,
   ChevronDown,
@@ -35,6 +36,7 @@ import {
   normalizeDnd5eInventory,
 } from '../../rulesets/dnd5e/items'
 import { planDnd5eInventoryUse } from '../../rulesets/dnd5e/inventoryUsePlanning'
+import { normalizeDnd5eMapObjectSurface } from '../../rulesets/dnd5e/mapObjectSurface'
 import { dnd5eArmorProficient, dnd5eWeaponProficient } from '../../rulesets/dnd5e/equipment'
 import { dnd5eMartialSpellSynergyForCharacter } from '../../rulesets/dnd5e/martialSpellSynergy'
 import { getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e/spells'
@@ -458,6 +460,7 @@ export default function EquipmentTab({
           <span className="rounded-lg border border-white/8 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-400">全部物品统一浏览</span>
         </div>
 
+        <SpellMaterialEscrows records={inventory.spellMaterialEscrows} />
         <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3" data-testid="inventory-browser-toolbar">
           <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_150px]">
             <label className="relative">
@@ -709,6 +712,18 @@ export default function EquipmentTab({
               </p>
             </div>
             {editable && <div className="mr-16 flex flex-wrap gap-2">
+              {selected.item.equipment && <ActionButton icon={HandHelping} disabled={pending}
+                onClick={() => run({type:'set-enchantment-exposure',characterId:character.id,instanceId:selected.instanceId,exposed:!selected.enchantmentExposed})}
+              >{selected.enchantmentExposed ? '停止出示附魔物品' : '出示物品供附魔'}</ActionButton>}
+              {(selected.surfaceExposed || (selected.quantity === 1 && !selected.containerInstanceId &&
+                !selected.condition?.destroyed && normalizeDnd5eMapObjectSurface(selected.surfaceProfile))) && (
+                <ActionButton
+                  icon={HandHelping}
+                  disabled={pending}
+                  onClick={() => run({ type: 'set-surface-exposure', characterId: character.id,
+                    instanceId: selected.instanceId, exposed: !selected.surfaceExposed })}
+                >{selected.surfaceExposed ? '收起展示物品' : '展示物品表面'}</ActionButton>
+              )}
               {selected.item.equipment && !selected.equippedSlot && selected.identified !== false && (
                 <ActionButton
                   icon={Shield}

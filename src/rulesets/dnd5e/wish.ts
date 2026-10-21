@@ -42,6 +42,13 @@ export function dnd5eWishDuplicateSpellFromInput(value: string) {
       spell.englishName.toLocaleLowerCase() === input
     ))
 }
+/** Canonical copied effect level, independent of Wish's ninth-level resource cost. */
+export function dnd5eWishUndeadCopy(value: unknown): { spellId: 'animate-dead' | 'create-undead'; spellLevel: number } | undefined {
+  const declaration = normalizeDnd5eWishDeclarationV1(value)
+  return declaration?.mode === 'duplicate-spell' &&
+    (declaration.spellId === 'animate-dead' || declaration.spellId === 'create-undead')
+    ? { spellId: declaration.spellId, spellLevel: declaration.spellLevel } : undefined
+}
 
 export function normalizeDnd5eWishDeclarationV1(value: unknown): Dnd5eWishDeclarationV1 | undefined {
   const raw = record(value)

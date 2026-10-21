@@ -1,3 +1,4 @@
+import { dnd5ePersistentAreaFlightCapableTokenIds, dnd5ePersistentAreaSizeRanks } from '../../rulesets/dnd5e/pluginAreaTransactions'
 import {
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
@@ -30,6 +31,8 @@ export async function coordinateForcedMovementPersistentAreas(input: {
   tokenId: string
   round: number
   turnKey: string
+  /** Host-approved teleportation has two endpoints and no traversed cells. */
+  transportMode?: 'teleport'
   settleCandidates(input: {
     candidates: readonly Dnd5ePersistentAreaTriggerCandidate[]
     map: BattleMap
@@ -65,7 +68,8 @@ export async function coordinateForcedMovementPersistentAreas(input: {
     input.afterMap,
   )
   const forcedPathCells = dnd5eMovementPathCells(fromCell, toCell)
-  const forcedPath = forcedPathCells.length === 1 && Math.abs(beforeElevationFeet - afterElevationFeet) > 1e-4
+  const forcedPath = input.transportMode === 'teleport' ||
+    (forcedPathCells.length === 1 && Math.abs(beforeElevationFeet - afterElevationFeet) > 1e-4)
     ? [
         { x: beforeToken.x, y: beforeToken.y },
         { x: afterToken.x, y: afterToken.y },
@@ -76,15 +80,20 @@ export async function coordinateForcedMovementPersistentAreas(input: {
     return beforeElevationFeet + (afterElevationFeet - beforeElevationFeet) * ratio
   })
   const movement = {
+    transportMode: input.transportMode,
     token: beforeToken,
     to: { x: afterToken.x, y: afterToken.y },
     path: forcedPath,
     pathElevationsFeet: forcedPathElevationsFeet,
   }
+  const flightCapableTokenIds = dnd5ePersistentAreaFlightCapableTokenIds({ map: input.afterMap, characters: input.characters, round: input.round })
+  const sizeRanksByTokenId = dnd5ePersistentAreaSizeRanks({ map: input.afterMap, characters: input.characters, round: input.round })
   const candidates = [
     ...collectDnd5ePersistentAreaTriggers({
       map: input.afterMap,
       timing: 'on-enter',
+      sizeRanksByTokenId,
+      flightCapableTokenIds,
       round: input.round,
       turnKey: input.turnKey,
       movement,
@@ -92,6 +101,7 @@ export async function coordinateForcedMovementPersistentAreas(input: {
     ...collectDnd5ePersistentAreaTriggers({
       map: input.afterMap,
       timing: 'on-move-distance',
+      sizeRanksByTokenId,
       round: input.round,
       turnKey: input.turnKey,
       movement,

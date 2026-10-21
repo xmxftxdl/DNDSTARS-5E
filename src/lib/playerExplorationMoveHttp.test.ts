@@ -55,7 +55,7 @@ afterAll(async () => {
 })
 
 describe('player exploration movement HTTP authority', () => {
-  it('persists two moves and returns the second coordinate after a fresh GET', async () => {
+  it.each([[false,false],[true,false],[true,true]])('persists movement and atomically removes fortress items (bound=%s, return=%s)', async (withFortressItems,returnsInside) => {
     const createResponse = await fetch(`${base}/api/rooms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,6 +100,19 @@ describe('player exploration movement HTTP authority', () => {
       body: JSON.stringify(data),
     })
     expect((await put('combat', { active: false, updatedAt: 1 })).status).toBe(200)
+    const {normalizeCharacter}=await import('../store/characters')
+    const {applyDnd5eInventoryGrantBundle}=await import('../rulesets/dnd5e/items')
+    const hero=normalizeCharacter({id:'hero',name:'Hero',charClass:'战士',equipment:{},maxHp:12,currentHp:12,dnd5eInventory:{schemaVersion:3,entries:[]}})
+    const grant=applyDnd5eInventoryGrantBundle([hero],{characterId:'hero',receiptId:'exploration-fortress',grants:[
+      {templateId:'srd-5.1:item:potion-of-healing',quantity:1,structureBinding:{schemaVersion:1,mapId:'map-1',structureId:'keep'}},
+      {templateId:'srd-5.1:item:potion-of-healing',quantity:2}]})
+    expect(grant.ok).toBe(true)
+    if(withFortressItems){
+      const {createEmptyMapGeometry}=await import('./mapGeometry')
+      expect((await put('map-geometry',{schemaVersion:3,maps:[{...createEmptyMapGeometry('map-1',1),structureLifetimes:[{
+        id:'keep',casterId:'caster',createdWorldMinute:0,expiresWorldMinute:10080,entityIds:['wall'],
+        objectBoundary:{points:[{x:0,y:0},{x:125,y:0},{x:125,y:125},{x:0,y:125}],bottomFeet:0,topFeet:30}}]}],updatedAt:1})).status).toBe(200)
+    }
     expect((await put('characters', {
       characters: [{
         id: 'hero',
@@ -109,6 +122,7 @@ describe('player exploration movement HTTP authority', () => {
         currentHp: 12,
         maxHp: 12,
         conditions: [],
+        ...(withFortressItems?{dnd5eInventory:grant.characters[0].dnd5eInventory}:{}),
       }],
       selectedId: 'hero',
       updatedAt: 1,
@@ -141,6 +155,7 @@ describe('player exploration movement HTTP authority', () => {
       requestId: string,
       expectedPosition: { x: number; y: number },
       targetPosition: { x: number; y: number },
+      route = [expectedPosition,targetPosition],
     ) => fetch(`${base}/api/state/maps/player-exploration-move${query}`, {
       method: 'PATCH',
       headers: playerHeaders,
@@ -152,7 +167,7 @@ describe('player exploration movement HTTP authority', () => {
         characterId: 'hero',
         expectedPosition,
         targetPosition,
-        path: [expectedPosition, targetPosition],
+        path: route,
       }),
     })
     const first = await move('exploration:test:move-1', { x: 50, y: 50 }, { x: 100, y: 50 })
@@ -161,11 +176,19 @@ describe('player exploration movement HTTP authority', () => {
       position: { x: 100, y: 50 },
       revision: 2,
     })
-    const second = await move('exploration:test:move-2', { x: 100, y: 50 }, { x: 150, y: 100 })
+    const readRoster=()=>fetch(`${base}/api/state/characters${query}`,{headers:dmHeaders}).then(response=>response.json())
+    const beforeExit=await readRoster()
+    if(withFortressItems)expect(beforeExit.characters[0].dnd5eInventory.entries).toHaveLength(2)
+    const stale=await move('exploration:stale',{x:50,y:50},{x:150,y:100})
+    expect(stale.status).toBe(409)
+    expect(await readRoster()).toEqual(beforeExit)
+    const finalPosition=returnsInside?{x:100,y:50}:{x:150,y:100}
+    const second = await move('exploration:test:move-2', { x: 100, y: 50 }, finalPosition,
+      returnsInside?[{x:100,y:50},{x:150,y:100},{x:100,y:50}]:undefined)
     expect(second.status).toBe(200)
     await expect(second.json()).resolves.toMatchObject({
-      position: { x: 150, y: 100 },
-      revision: 3,
+      position: finalPosition,
+      revision: returnsInside?2:3,
     })
 
     const refreshed = await fetch(`${base}/api/state/maps${query}`, {
@@ -174,9 +197,13 @@ describe('player exploration movement HTTP authority', () => {
     }).then((response) => response.json()) as {
       maps: Array<{ tokens: Array<{ id: string; x: number; y: number }> }>
     }
-    expect(refreshed.maps[0].tokens.find((token) => token.id === 'hero-token')).toMatchObject({
-      x: 150,
-      y: 100,
-    })
+    expect(refreshed.maps[0].tokens.find((token) => token.id === 'hero-token')).toMatchObject(finalPosition)
+    const afterExit=await readRoster()
+    if(withFortressItems){
+      expect(afterExit._sync.revision).toBe(2)
+      expect(afterExit.characters[0].dnd5eInventory.entries).toHaveLength(1)
+      expect(afterExit.characters[0].dnd5eInventory.entries[0].quantity).toBe(2)
+      expect(afterExit.characters[0].dnd5eInventory.entries[0].structureBinding).toBeUndefined()
+    }else expect(afterExit).toEqual(beforeExit)
   })
 })

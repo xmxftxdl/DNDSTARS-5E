@@ -1,6 +1,7 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import { dnd5eEquippedEffectTotal } from './equipmentEffects'
+import { dnd5eCarryingCapacityPounds } from './carryingCapacity'
 import {
   dnd5eActiveSpeedBonus,
   dnd5eActiveSpeedMaximum,
@@ -53,12 +54,17 @@ export interface Dnd5eClassChoiceOption {
   id: string
   name: string
   summary: string
+  description?: string
   minimumClassLevel?: number
   requiresPactBoon?: 'blade' | 'chain' | 'tome'
   requiresKnownSpell?: string
+  /** Semantic prerequisite identities; class ownership is supplied by the choice group. */
+  ruleCapabilityIds?: readonly string[]
 }
 
 export interface Dnd5eClassChoiceGroup {
+  /** Replace at most one existing selection when this class gains a level. */
+  replaceOnClassLevelGain?: boolean
   id: string
   level: number
   name: string
@@ -672,7 +678,7 @@ const ELDRITCH_INVOCATIONS: Dnd5eClassChoiceGroup = {
       'whispers-of-the-grave': { minimumClassLevel: 9 },
       'witch-sight': { minimumClassLevel: 15 },
     }
-    return { id, name, summary, ...requirements[id] }
+    return { id, name, summary, ...requirements[id], ...(id === 'sign-of-ill-omen' ? { ruleCapabilityIds: ['dnd5e:curse'] } : {}) }
   }),
 }
 
@@ -938,7 +944,8 @@ export function dnd5eWizardArcaneRecoveryLevels(level: number): number {
 /** 以角色存档中的种族基础速度为基准，应用职业带来的步行速度修正。 */
 export function dnd5eWalkingSpeed(
   character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel'> &
-    Partial<Pick<Character, 'abilities' | 'race' | 'dnd5eRaceId'>>,
+    Partial<Pick<Character, 'abilities' | 'race' | 'dnd5eRaceId' | 'dnd5eCombatState'>>,
+  ignoreCarriedLoad = false,
 ): number {
   const base = Math.max(0, Math.floor(character.speed))
   const armor = character.equipment?.armor?.dnd5e
@@ -966,13 +973,13 @@ export function dnd5eWalkingSpeed(
   }
   speed += dnd5eEquippedEffectTotal(character, 'speedBonusFeet')
   speed = Math.max(0, speed)
-  if (character.abilities) {
+  if (character.abilities && !ignoreCarriedLoad) {
     const itemWeight = character.dnd5eInventory?.entries.reduce(
       (sum, entry) => sum + Math.max(0, Number(entry.item.weightLb) || 0) * Math.max(1, Number(entry.quantity) || 1),
       0,
     ) ?? 0
     const coinCount = Object.values(character.dnd5eInventory?.currency ?? {}).reduce((sum, amount) => sum + Math.max(0, Number(amount) || 0), 0)
-    if (itemWeight + coinCount / 50 > Math.max(1, character.abilities.str) * 15) return 0
+    if (itemWeight + coinCount / 50 > dnd5eCarryingCapacityPounds(character.abilities.str, 1, character.dnd5eCombatState?.activeEffects)) return 0
   }
   const exhaustion = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
   if (exhaustion >= 5) return 0
@@ -985,7 +992,7 @@ export function dnd5eEffectiveWalkingSpeed(
 ): number {
   const effects = character.dnd5eCombatState?.activeEffects
   const override = dnd5eActiveSpeedOverride(effects)
-  if (override != null) return Math.max(0, Math.floor(override))
+  if (override != null) return Math.max(0, Math.floor(Math.min(override, dnd5eActiveSpeedMaximum(effects) ?? Infinity)))
   const adjusted = Math.max(
     0,
     dnd5eWalkingSpeed(character) -
@@ -996,7 +1003,7 @@ export function dnd5eEffectiveWalkingSpeed(
   const multiplied = Math.max(0, Math.floor(adjusted * dnd5eActiveSpeedMultiplier(effects)))
   const minimum = dnd5eActiveSpeedMinimum(effects)
   const maximum = dnd5eActiveSpeedMaximum(effects)
-  return Math.max(minimum, maximum == null ? multiplied : Math.min(maximum, multiplied))
+  return Math.min(maximum ?? Infinity, Math.max(minimum, multiplied))
 }
 
 function isSrdThief(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>, minimumLevel: number): boolean {

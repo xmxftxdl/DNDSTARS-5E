@@ -2,6 +2,7 @@ import type { Dnd5eMapResultPlan } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 import type { BattleMap, Token } from '../../store/maps'
 import type { SharedCampaignTimeState } from '../../lib/campaignTime'
+import { expireDnd5eSourceBoundInventoryRoster } from '../../rulesets/dnd5e/items'
 import {
   compensateDnd5eCompletedLongCastEffects,
   reconcileDnd5eCharacterCampaignTime,
@@ -24,6 +25,7 @@ interface Dnd5eCombatResultApplicationPort {
    */
   applyMap?: (mapId: string, map: BattleMap) => void
   applicationMode?: 'entities' | 'map'
+  applySpentReaction?: (tokenId: string, round: number) => void
 }
 
 interface Dnd5eCombatResultCommitInput extends Dnd5eCombatResultApplicationPort {
@@ -68,6 +70,32 @@ export function mergeDnd5eCharacterPatchIntoResult(
   }
 }
 
+/** Preserve map-handoff deltas when the entity commit already has Headless patches. */
+export function mergeDnd5eMapTokenChangesIntoResult(
+  application: Dnd5eMapResultPlan,
+  map: BattleMap,
+): Dnd5eMapResultPlan {
+  if (map.id !== application.map.id) throw new Error('combat-result-map-mismatch')
+  const before = new Map(application.map.tokens.map(token => [token.id, token]))
+  const tokenPatches = { ...application.tokenPatches }
+  const changedTokenIds = new Set(application.changedTokenIds)
+  for (const token of map.tokens) {
+    const prior = before.get(token.id)
+    if (!prior) continue // New entities are committed by the structural map path.
+    const patch: Partial<Token> = {}
+    for (const key of new Set([...Object.keys(prior), ...Object.keys(token)])) {
+      const field = key as keyof Token
+      if (JSON.stringify(prior[field]) !== JSON.stringify(token[field])) {
+        Object.assign(patch, { [field]: token[field] })
+      }
+    }
+    if (!Object.keys(patch).length) continue
+    tokenPatches[token.id] = { ...tokenPatches[token.id], ...patch }
+    changedTokenIds.add(token.id)
+  }
+  return { ...application, map, tokenPatches, changedTokenIds: [...changedTokenIds] }
+}
+
 /**
  * Headless transactions carry a full character snapshot, but class choices are
  * durable character-sheet data rather than combat-owned state. A transaction
@@ -83,7 +111,52 @@ export function mergeDnd5eCombatCharacterResult(
   return {
     ...resolved,
     dnd5eClassChoices: current.dnd5eClassChoices,
+    dnd5eRestActivityWindow: current.dnd5eRestActivityWindow,
   }
+}
+
+/** Only records established by this completed cast begin at its completion clock. */
+export function rebaseDnd5eCompletedBenefitHistoryApplication(
+  application: Dnd5eMapResultPlan,
+  recordIdsByCharacterId: ReadonlyMap<string, ReadonlySet<string>>,
+  recordIdsByTokenId: ReadonlyMap<string, ReadonlySet<string>>,
+  completionWorldMinute: number,
+): Dnd5eMapResultPlan {
+  if (!Number.isSafeInteger(completionWorldMinute) || completionWorldMinute < 0) throw new Error('invalid-benefit-completion-clock')
+  const rebase = <T extends { spellAuthorityRecords?: Record<string, import('../../rulesets/dnd5e/spellAuthorityState').Dnd5eSpellAuthorityRecordV1> }>(
+    state: T | undefined, selectors: ReadonlySet<string> | undefined,
+  ): T | undefined => {
+    if (!state?.spellAuthorityRecords || !selectors?.size) return state
+    let changed = false
+    const records = Object.fromEntries(Object.entries(state.spellAuthorityRecords).map(([id, record]) => {
+      if (!selectors.has(id) || record.kind !== 'benefit-history' || record.createdWorldMinute === completionWorldMinute) return [id, record]
+      if (record.createdWorldMinute > completionWorldMinute) throw new Error('benefit-completion-clock-before-record')
+      changed = true
+      return [id, { ...record, createdWorldMinute: completionWorldMinute }]
+    }))
+    return changed ? { ...state, spellAuthorityRecords: records } : state
+  }
+  let result = application
+  for (const character of application.characters) {
+    const selectors = recordIdsByCharacterId.get(character.id)
+    const materialized = { ...character, ...application.characterPatches?.[character.id] }
+    const state = rebase(materialized.dnd5eCombatState, selectors)
+    if (selectors?.size && state !== character.dnd5eCombatState) result = mergeDnd5eCharacterPatchIntoResult(result, character.id, { dnd5eCombatState: state })
+  }
+  const tokenPatches = { ...result.tokenPatches }
+  const changedTokenIds = new Set(result.changedTokenIds)
+  let tokenChanged = false
+  const tokens = result.map.tokens.map(token => {
+    const selectors = recordIdsByTokenId.get(token.id)
+    const materialized = { ...token, ...result.tokenPatches?.[token.id] }
+    const state = rebase(materialized.dnd5eCombatState, selectors)
+    if (!selectors?.size || state === token.dnd5eCombatState) return token
+    tokenChanged = true
+    changedTokenIds.add(token.id)
+    tokenPatches[token.id] = { ...tokenPatches[token.id], dnd5eCombatState: state }
+    return { ...materialized, dnd5eCombatState: state }
+  })
+  return tokenChanged ? { ...result, map: { ...result.map, tokens }, tokenPatches, changedTokenIds: [...changedTokenIds] } : result
 }
 
 /**
@@ -98,16 +171,17 @@ export function compensateDnd5eCompletedLongCastApplication(
   completionClock: SharedCampaignTimeState,
   completedConcentrationSpellIdByCharacterId: ReadonlyMap<string, string> = new Map(),
   effectIdsByTokenId: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+  ageAllActors = false,
 ): Dnd5eMapResultPlan {
   if (
     elapsedCastingMinutes < 1 ||
     (
-      effectIdsByCharacterId.size === 0 &&
+      !ageAllActors && effectIdsByCharacterId.size === 0 &&
       completedConcentrationSpellIdByCharacterId.size === 0 &&
       effectIdsByTokenId.size === 0
     )
   ) return application
-  const characters = application.characters.map((character) => {
+  const timedCharacters = application.characters.map((character) => {
     const materialized = application.characterPatches?.[character.id]
       ? { ...character, ...application.characterPatches[character.id] }
       : character
@@ -129,7 +203,7 @@ export function compensateDnd5eCompletedLongCastApplication(
     const activeEffects = (compensated.dnd5eCombatState?.activeEffects ?? []).map((effect) => {
       if (
         !effect.periodicHealing ||
-        (!completedEffectSelectors.has(effect.id) && !completedEffectSelectors.has(effect.definitionId))
+        (!completedEffectSelectors?.has(effect.id) && !completedEffectSelectors?.has(effect.definitionId))
       ) return effect
       suppressedPeriodicHealing = true
       return { ...effect, periodicHealing: undefined }
@@ -147,6 +221,11 @@ export function compensateDnd5eCompletedLongCastApplication(
       currentHp: withoutCompletedPeriodicHealing.currentHp,
     }
   })
+  const characters = expireDnd5eSourceBoundInventoryRoster(timedCharacters)
+  const inventoryChanged = characters.filter((character, index) => character !== timedCharacters[index])
+  const inventoryPatches = Object.fromEntries(inventoryChanged.map(character => [character.id, {
+    dnd5eInventory: character.dnd5eInventory, equipment: character.equipment, dnd5eCombatState: character.dnd5eCombatState,
+  }]))
   const compensatedCharacterById = new Map(characters.map((character) => [character.id, character]))
   const characterPatches = application.characterPatches
     ? Object.fromEntries(Object.entries(application.characterPatches).map(([characterId, patch]) => {
@@ -170,7 +249,7 @@ export function compensateDnd5eCompletedLongCastApplication(
 
   const compensateToken = (token: Token): Token => {
     const completedEffectSelectors = effectIdsByTokenId.get(token.id)
-    if (!completedEffectSelectors?.size) return token
+    if (!completedEffectSelectors?.size && (!ageAllActors || token.characterId)) return token
     const syntheticCharacter = {
       id: token.id,
       name: token.label,
@@ -184,7 +263,7 @@ export function compensateDnd5eCompletedLongCastApplication(
     } as Character
     const compensated = compensateDnd5eCompletedLongCastEffects(
       syntheticCharacter,
-      [...completedEffectSelectors],
+      [...(completedEffectSelectors ?? [])],
       elapsedCastingMinutes,
     )
     let reconciled = reconcileDnd5eCharacterCampaignTime(compensated, completionClock).character
@@ -195,7 +274,7 @@ export function compensateDnd5eCompletedLongCastApplication(
     const activeEffects = (compensated.dnd5eCombatState?.activeEffects ?? []).map((effect) => {
       if (
         !effect.periodicHealing ||
-        (!completedEffectSelectors.has(effect.id) && !completedEffectSelectors.has(effect.definitionId))
+        (!completedEffectSelectors?.has(effect.id) && !completedEffectSelectors?.has(effect.definitionId))
       ) return effect
       suppressedPeriodicHealing = true
       return { ...effect, periodicHealing: undefined }
@@ -243,8 +322,11 @@ export function compensateDnd5eCompletedLongCastApplication(
     ...application,
     map: { ...application.map, tokens },
     characters,
-    characterPatches,
-    tokenPatches,
+    changedCharacterIds: unique([...application.changedCharacterIds, ...inventoryChanged.map(character => character.id), ...(ageAllActors ? characters.map(character => character.id) : [])]),
+    changedTokenIds: ageAllActors ? unique([...application.changedTokenIds, ...tokens.filter(token => !token.characterId).map(token => token.id)]) : application.changedTokenIds,
+    characterPatches: ageAllActors ? Object.fromEntries(characters.map(character => [character.id, { ...characterPatches?.[character.id], ...character }]))
+      : inventoryChanged.length ? { ...characterPatches, ...Object.fromEntries(inventoryChanged.map(character => [character.id, { ...characterPatches?.[character.id], ...inventoryPatches[character.id] }])) } : characterPatches,
+    tokenPatches: ageAllActors ? Object.fromEntries(tokens.filter(token => !token.characterId || tokenPatches?.[token.id]).map(token => [token.id, { ...tokenPatches?.[token.id], ...token }])) : tokenPatches,
   }
 }
 
@@ -268,6 +350,10 @@ function prepareCommit(input: Pick<Dnd5eCombatResultApplicationPort, 'applicatio
   }
   if (new Set(input.application.map.tokens.map((token) => token.id)).size !== input.application.map.tokens.length) {
     throw new Error('combat-result-token-duplicate')
+  }
+  const spent = input.application.spentReactions
+  if (spent && (!Number.isInteger(spent.round) || spent.round < 1 || spent.tokenIds.some(id => !tokenById.has(id)))) {
+    throw new Error('combat-result-reaction-receipt-invalid')
   }
   return { characterIds, tokenIds, characterById, tokenById }
 }
@@ -298,6 +384,9 @@ export function applyDnd5eCombatResultApplication(
         input.application.tokenPatches?.[tokenId],
       )
     }
+  }
+  if (input.application.spentReactions) for (const id of unique(input.application.spentReactions.tokenIds)) {
+    input.applySpentReaction?.(id, input.application.spentReactions.round)
   }
   return { mapId: input.mapId, characterIds: prepared.characterIds, tokenIds: prepared.tokenIds }
 }

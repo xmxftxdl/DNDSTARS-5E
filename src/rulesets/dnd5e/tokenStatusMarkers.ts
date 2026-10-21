@@ -1,3 +1,5 @@
+import { dnd5eActiveEffectMechanicalDescription } from './activeEffectPresentation'
+import type { Dnd5eActiveEffectDuration, Dnd5eActiveEffectModifiers } from './activeEffects'
 import {
   DND5E_STANDARD_CONDITION_IDS,
   DND5E_STANDARD_CONDITIONS,
@@ -380,6 +382,9 @@ const LEGACY_EFFECT_TOKEN_STATUS_MARKERS: Readonly<Record<string, Dnd5eTacticalT
 }
 
 interface Dnd5eTokenStatusMarkerActiveEffectProjection {
+  sourceAttitude?: 'friendly'
+  modifiers?: Dnd5eActiveEffectModifiers
+  duration?: Dnd5eActiveEffectDuration
   id: string
   tags?: readonly string[]
   definitionId?: string
@@ -678,7 +683,7 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
     const dedicatedSpell = batchSpell ?? (['time-stop', 'tiny-hut', 'tongues', 'true-seeing', 'true-strike', 'vampiric-touch', 'teleportation-circle'] as const)
       .find(id => [effect.source?.rulesId, effect.definitionId, effect.legacyCondition].some(value =>
         value?.includes(id) || id === 'time-stop' && value?.startsWith('activity-extra-turns:suspension:')))
-    const statusId = dedicatedSpell ?? (isTelekinesis ? 'telekinesis' : /(?:^|:)faerie-fire(?:$|:)/.test(effect.source?.rulesId ?? '') ||
+    const statusId = effect.definitionId === 'awareness:charmed-by-source' ? 'marked' : dedicatedSpell ?? (isTelekinesis ? 'telekinesis' : /(?:^|:)faerie-fire(?:$|:)/.test(effect.source?.rulesId ?? '') ||
       /(?:^|:)faerie-fire(?:$|:)/.test(effect.definitionId ?? '')
       ? 'faerie-fire' : effect.source?.rulesId === 'suggestion' || /(?:^|:)suggestion(?:$|:)/.test(effect.definitionId ?? '')
       ? 'suggestion' : effect.source?.rulesId === 'telepathic-bond' || effect.definitionId === 'srd-5.1:spell:telepathic-bond' || effect.legacyCondition === 'telepathic-bond'
@@ -719,6 +724,9 @@ export function dnd5eTokenStatusMarkersFromActiveEffects(
         detailDescription: '被施法者锁定：施法者下一回合对该目标的第一次攻击检定具有优势；该次攻击后或专注结束时移除此标记。',
       } : {}),
       activeEffectId: effect.id,
+      ...((statusId === 'marked' || statusId.startsWith('custom:') || effect.modifiers?.optionalBonusDie) &&
+        dnd5eActiveEffectMechanicalDescription(effect)
+        ? { detailDescription: dnd5eActiveEffectMechanicalDescription(effect) } : {}),
       sourceActorId: effect.source?.actorId,
       sourceLabel: effect.source?.actorName ?? effect.source?.label ?? effect.source?.rulesId,
       mechanical: true,

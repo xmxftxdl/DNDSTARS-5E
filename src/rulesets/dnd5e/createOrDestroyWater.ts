@@ -114,8 +114,8 @@ export function normalizeDnd5eWaterContainerStateV1(
   const raw = record(value)
   if (
     !raw || raw.schemaVersion !== 1 || typeof raw.open !== 'boolean' ||
-    !Number.isInteger(raw.capacityGallons) || Number(raw.capacityGallons) < 1 || Number(raw.capacityGallons) > 10_000 ||
-    !Number.isInteger(raw.waterGallons) || Number(raw.waterGallons) < 0 ||
+    !Number.isFinite(raw.capacityGallons) || Number(raw.capacityGallons) <= 0 || Number(raw.capacityGallons) > 10_000 ||
+    !Number.isFinite(raw.waterGallons) || Number(raw.waterGallons) < 0 ||
     Number(raw.waterGallons) > Number(raw.capacityGallons)
   ) return undefined
   return {

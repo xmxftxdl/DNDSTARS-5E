@@ -52,6 +52,15 @@ function fnv1a(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
+/** Bounded identity for nested Host executions; never truncate a parent receipt. */
+export function dnd5eExecutionEventKey(executionId: string): string {
+  let hash = 0x6c62272e07bb014262b821756295c58dn
+  for (const byte of new TextEncoder().encode(executionId)) {
+    hash = BigInt.asUintN(128, (hash ^ BigInt(byte)) * 0x1000000000000000000013bn)
+  }
+  return hash.toString(16).padStart(32, '0')
+}
+
 function safeSegment(value: string, maximumLength: number): string {
   const normalized = value.trim().toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '.')

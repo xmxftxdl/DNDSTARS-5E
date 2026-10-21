@@ -1,4 +1,13 @@
+import { validDnd5eInherentFeatureLight } from './inherentFeatureLightContract'
+import { effectiveDnd5eActiveEffects } from './activeEffects'
+import { normalizeDnd5eOwnedCompanionProximityRules } from './ownedCompanionProximity'
+import { validateResourceRestRecovery, type ResourceRestRecovery, type CombatStartResourceRecovery, validateCombatStartResourceRecovery } from '../../lib/resourceRestRecovery'
 import type { ClassResourceReset } from '../../lib/classDefinitionTypes'
+import { cloneDnd5eIndependentSpellGrants, cloneDnd5eFeatureClassRequirements, type Dnd5eFeatureClassRequirement, type Dnd5eIndependentSpellGrant } from './independentSpellGrants'
+import { cloneDnd5eFeatureChoiceRequirements, type Dnd5eFeatureChoiceRequirement } from './featureChoiceRequirements'
+import { cloneDnd5eKnownSpellRequirements } from './featureSpellRequirements'
+import { cloneDnd5eFeatureEligibility, type Dnd5eFeatureEligibility } from './featureEligibility'
+import { cloneDnd5eFeatureRuleCapabilities, type Dnd5eFeatureRuleCapability } from './featureRuleCapabilities'
 import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import {
@@ -33,6 +42,7 @@ import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaVisual,
+  normalizeDnd5ePersistentAreaTriggerDeclaration,
 } from './persistentAreaTypes'
 import { validateDnd5eWorkshopDamageFormulaV1 } from './workshopDamageFormula'
 import { dnd5eAttacksPerAttackAction, dnd5eDruidWildShapeLimits, type Dnd5eClassId } from './classes'
@@ -193,6 +203,10 @@ export interface Dnd5ePluginFighterResource {
   isAvailable?: (character: Character) => boolean
   max(character: Character): number
   resetOn: ClassResourceReset
+  restoreOnCombatStart?: boolean
+  restRecovery?: ResourceRestRecovery
+  combatStartRecovery?: CombatStartResourceRecovery
+  initialCurrent?: number
 }
 
 export interface Dnd5ePluginFighterSubclass {
@@ -210,6 +224,19 @@ export interface Dnd5ePluginFighterSubclass {
 export type { Dnd5ePluginEffectDuration } from './persistentAreaTypes'
 
 export interface Dnd5ePluginFeatureDefinition {
+  /** Owned, namespaced uses; available only while this feature is owned and qualified. */
+  resources?: readonly Dnd5ePluginFeatResourceDefinition[]
+  /** Available only while the character owns and qualifies for this feature. */
+  spellGrants?: readonly Dnd5eIndependentSpellGrant[]
+  /** Eligibility only; does not register subclass ownership or grant class levels. */
+  classRequirements?: readonly Dnd5eFeatureClassRequirement[]
+  /** Eligibility only; checks existing authoritative class selections, never grants them. */
+  classChoiceRequirements?: readonly Dnd5eFeatureChoiceRequirement[]
+  /** All listed spells must be learned; catalog access alone is insufficient. */
+  requiredKnownSpellIds?: readonly string[]
+  /** Additional deterministic AND/OR prerequisites. */
+  eligibility?: Dnd5eFeatureEligibility
+  ruleCapabilities?: readonly Dnd5eFeatureRuleCapability[]
   id: string
   name: string
   summary: string
@@ -249,19 +276,26 @@ export interface Dnd5ePluginResourceDefinition {
   /** 每级最大值表；数组不足 20 项时沿用最后一个值。 */
   maximum: number | readonly number[]
   resetOn: ClassResourceReset
+  restoreOnCombatStart?: boolean
+  restRecovery?: ResourceRestRecovery
+  combatStartRecovery?: CombatStartResourceRecovery
+  initialCurrent?: number
 }
 
 export interface Dnd5ePluginSubclassChoiceGroup {
+  /** Replace at most one existing selection when this class gains a level. */
+  replaceOnClassLevelGain?: boolean
   id: string
   level: number
   name: string
   description?: string
   maxSelections: number
   maxSelectionsByLevel?: readonly { level: number; maxSelections: number }[]
-  options: readonly { id: string; name: string; summary: string }[]
+  options: readonly { id: string; name: string; summary: string; description?: string }[]
 }
 
 export interface Dnd5ePluginSubclassFeature {
+  ruleCapabilityIds?: readonly string[]
   id: string
   level: number
   name: string
@@ -362,6 +396,10 @@ export interface Dnd5ePluginFeatResourceDefinition {
   shortLabel?: string
   maximum: number
   resetOn: ClassResourceReset
+  restoreOnCombatStart?: boolean
+  restRecovery?: ResourceRestRecovery
+  combatStartRecovery?: CombatStartResourceRecovery
+  initialCurrent?: number
   /** Add this maximum to an existing same-id resource instead of taking the larger value. */
   stacking?: 'maximum' | 'additive'
 }
@@ -660,13 +698,16 @@ function clonePluginRolls(
   actionId: string,
 ): Dnd5ePluginDiceRollDeclaration[] | undefined {
   if (rolls == null) return undefined
-  if (!Array.isArray(rolls) || rolls.length > 16) throw new Error(`Invalid plugin dice declarations: ${actionId}`)
+  // Choice-dependent pools are declarations, not simultaneous rolls. Four
+  // multiclass Hit Die sizes with 1–10 selectable dice need 40 declarations.
+  if (!Array.isArray(rolls) || rolls.length > 64) throw new Error(`Invalid plugin dice declarations: ${actionId}`)
   const seen = new Set<string>()
   return rolls.map((roll) => {
     if (
       !validId(roll.id) || seen.has(roll.id) || typeof roll.label !== 'string' || !roll.label.trim() ||
-      !finiteInteger(roll.count, 1, 12) || !finiteInteger(roll.sides, 2, 100) ||
+      !finiteInteger(roll.count, 1, 1_000) || !finiteInteger(roll.sides, 2, 100) ||
       !finiteInteger(roll.modifier ?? 0, -1_000_000, 1_000_000) ||
+      (roll.damageType != null && !DND5E_DAMAGE_TYPES.includes(roll.damageType)) ||
       (roll.rerollValues != null && (
         !Array.isArray(roll.rerollValues) || roll.rerollValues.length < 1 ||
         roll.rerollValues.length >= roll.sides ||
@@ -679,6 +720,7 @@ function clonePluginRolls(
     return {
       id: roll.id,
       label: roll.label.trim(),
+      ...(roll.damageType ? { damageType: roll.damageType } : {}),
       count: roll.count,
       sides: roll.sides,
       modifier: roll.modifier ?? 0,
@@ -719,10 +761,10 @@ function clonePluginTargeting(targeting: Dnd5ePluginTargeting, featureId: string
   if (dimensions.some((value) => value != null && (!Number.isFinite(value) || value < 0 || value > 10_000))) {
     throw new Error(`Invalid plugin area dimensions: ${featureId}`)
   }
-  if (!finiteInteger(targeting.maximumTargets ?? 64, 1, 256)) {
+  if (targeting.maximumTargets != null && !finiteInteger(targeting.maximumTargets, 1, 256)) {
     throw new Error(`Invalid plugin area target limit: ${featureId}`)
   }
-  return { ...targeting, maximumTargets: targeting.maximumTargets ?? 64, template: { ...template } }
+  return { ...targeting, template: { ...template } }
 }
 
 function clonePluginInterrupt(
@@ -766,7 +808,7 @@ function clonePersistentAreaTriggers(
       !validId(trigger.id) || seen.has(trigger.id) ||
       typeof trigger.label !== 'string' || !trigger.label.trim() ||
       trigger.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
-      !['on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end', 'source-turn-start', 'on-detonate'].includes(trigger.timing) ||
+      !['on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end', 'source-turn-start', 'source-turn-end', 'on-detonate'].includes(trigger.timing) ||
       (trigger.timing === 'on-move-distance' && !finiteInteger(trigger.movementIntervalFeet, 1, 1_000)) ||
       (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) ||
       (!trigger.damage && !trigger.condition)
@@ -782,6 +824,8 @@ function clonePersistentAreaTriggers(
     const savingThrow = trigger.savingThrow
     if (savingThrow && (
       !ABILITY_KEYS.includes(savingThrow.ability) ||
+      (savingThrow.allowWillingFailure !== undefined && typeof savingThrow.allowWillingFailure !== 'boolean') ||
+      (savingThrow.automaticSuccessMinimumSizeRank !== undefined && !finiteInteger(savingThrow.automaticSuccessMinimumSizeRank, 0, 5)) ||
       !(savingThrow.dc === 'source-save-dc' || finiteInteger(savingThrow.dc, 1, 40)) ||
       !['none', 'half'].includes(savingThrow.onSuccess)
     )) throw new Error(`Invalid plugin persistent area save: ${featureId}:${trigger.id}`)
@@ -793,9 +837,12 @@ function clonePersistentAreaTriggers(
         !['source-next-turn-start', 'source-turn-end', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save', 'permanent'].includes(duration.expiresAt) ||
         (duration.remainingRounds != null && !finiteInteger(duration.remainingRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS)) ||
         (duration.saveAbility != null && !ABILITY_KEYS.includes(duration.saveAbility)) ||
-        (duration.saveDc != null && !finiteInteger(duration.saveDc, 1, 40)) ||
+        (duration.saveDc != null && duration.saveDc !== 'source-save-dc' && !finiteInteger(duration.saveDc, 1, 40)) ||
         (duration.expiresAt === 'target-turn-end-save' && (!duration.saveAbility || !duration.saveDc))
       ) throw new Error(`Invalid plugin persistent area condition: ${featureId}:${trigger.id}`)
+      if (!normalizeDnd5ePersistentAreaTriggerDeclaration(trigger)) {
+        throw new Error(`Invalid plugin persistent area condition: ${featureId}:${trigger.id}`)
+      }
     }
     return {
       ...trigger,
@@ -804,7 +851,8 @@ function clonePersistentAreaTriggers(
       oncePerTurn: trigger.oncePerTurn === true,
       damage: damage ? { ...damage, modifier: damage.modifier ?? 0 } : undefined,
       savingThrow: savingThrow ? { ...savingThrow } : undefined,
-      condition: condition ? { ...condition, duration: { ...condition.duration } } : undefined,
+      condition: condition ? { ...condition, duration: { ...condition.duration },
+        escapeCheck: condition.escapeCheck ? { ...condition.escapeCheck } : undefined } : undefined,
       dmAdjustable: trigger.dmAdjustable === true,
     }
   })
@@ -841,7 +889,8 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
         damage: trigger.damage ? { ...trigger.damage } : undefined,
         savingThrow: trigger.savingThrow ? { ...trigger.savingThrow } : undefined,
         condition: trigger.condition
-          ? { ...trigger.condition, duration: { ...trigger.condition.duration } }
+          ? { ...trigger.condition, duration: { ...trigger.condition.duration },
+            escapeCheck: trigger.condition.escapeCheck ? { ...trigger.condition.escapeCheck } : undefined }
           : undefined,
       })),
     } : undefined,
@@ -870,7 +919,7 @@ function ownedPluginAssetId(pluginId: string, value: unknown, label: string): st
   return assetId
 }
 
-function cloneStaticCombatModifiers(
+export function cloneStaticCombatModifiers(
   value: Dnd5ePluginStaticCombatModifiers | undefined,
   label: string,
 ): Dnd5ePluginStaticCombatModifiers | undefined {
@@ -878,12 +927,30 @@ function cloneStaticCombatModifiers(
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`Invalid plugin static combat modifiers: ${label}`)
   }
+  if (value.inherentLight != null && !validDnd5eInherentFeatureLight(value.inherentLight)) throw new Error('Invalid inherent light: ' + label)
+  const maximizeHealingDiceNearCompanion = normalizeDnd5eOwnedCompanionProximityRules(value.maximizeHealingDiceNearCompanion)
+  if (value.maximizeHealingDiceNearCompanion != null && !maximizeHealingDiceNearCompanion) throw new Error(`Invalid plugin companion healing: ${label}`)
+  if (value.skillCheckAbilityBonuses != null && (!Array.isArray(value.skillCheckAbilityBonuses) ||
+    !value.skillCheckAbilityBonuses.length || value.skillCheckAbilityBonuses.length > 32 ||
+    value.skillCheckAbilityBonuses.some(rule => !rule || typeof rule !== 'object' ||
+      Object.keys(rule).some(key => !['skill','ability','bonusAbility'].includes(key)) ||
+      !SKILLS.some(skill => skill.key === rule.skill) ||
+      !['str','dex','con','int','wis','cha'].includes(rule.bonusAbility) ||
+      (rule.ability != null && !['str','dex','con','int','wis','cha'].includes(rule.ability))))) {
+    throw new Error('Invalid plugin skillCheckAbilityBonuses: '+label)
+  }
   const numeric: Array<[keyof Dnd5ePluginStaticCombatModifiers, number, number]> = [
+    ['unarmoredArmorClassBase', 0, 30],
     ['armorClassBonus', -20, 20],
     ['initiativeBonus', -20, 20],
     ['speedBonusFeet', -500, 500],
+    ['swimSpeedMinimumFeet', 0, 1000],
     ['savingThrowBonus', -20, 20],
     ['darkvisionRangeFeet', 0, 10_000],
+    ['darkvisionIfAbsentFeet', 0, 10_000],
+    ['darkvisionExistingBonusFeet', 0, 10_000],
+    ['darkvisionRacialFallbackFeet', 0, 10_000],
+    ['darkvisionRacialBonusFeet', 0, 10_000],
     ['hitPointsPerLevelBonus', 0, 100],
     ['passivePerceptionBonus', -100, 100],
     ['passiveInvestigationBonus', -100, 100],
@@ -897,18 +964,32 @@ function cloneStaticCombatModifiers(
     ['spellSavingThrowAdvantageWithinFeet', 0, 10_000],
     ['combatManeuverDieSidesOverride', 4, 12],
   ]
+  if (value.initiativeBonusFromAbility != null &&
+    !['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(value.initiativeBonusFromAbility)) {
+    throw new Error(`Invalid plugin static combat modifier initiativeBonusFromAbility: ${label}`)
+  }
+  if (value.existingMovementSpeedBonuses != null) {
+    const bonuses = value.existingMovementSpeedBonuses
+    if (!bonuses || typeof bonuses !== 'object' || Array.isArray(bonuses) || !Object.keys(bonuses).length ||
+      Object.entries(bonuses).some(([mode, bonus]) => !['walk', 'climb', 'swim', 'fly'].includes(mode) || !finiteInteger(bonus, 1, 1000))) {
+      throw new Error(`Invalid plugin static combat modifier existingMovementSpeedBonuses: ${label}`)
+    }
+  }
   for (const [key, minimum, maximum] of numeric) {
     const candidate = value[key]
     if (candidate != null && !finiteInteger(candidate, minimum, maximum)) {
       throw new Error(`Invalid plugin static combat modifier ${key}: ${label}`)
     }
   }
-  for (const key of [
+  const booleans = [
+    'unarmoredArmorClassAllowsShield',
     'cannotBeSurprisedWhileConscious',
     'unseenAttackersDoNotGainAdvantage',
+    'invisibleToDarkvision',
     'ignoreLongRangeRangedWeaponDisadvantage',
     'ignoreNearbyHostileRangedAttackDisadvantage',
     'ignoreLoadingWeaponProperty',
+    'swimSpeedEqualsWalking', 'canBreatheWater',
     'allowNonLightTwoWeaponFighting',
     'mountedMeleeAdvantageAgainstSmallerUnmounted',
     'redirectMountedCreatureAttacksToRider',
@@ -918,7 +999,9 @@ function cloneStaticCombatModifiers(
     'preventOpportunityAttacksFromMeleeAttackTargets',
     'opportunityAttacksIgnoreDisengage',
     'opportunityAttackHitStopsMovement',
+    'opportunityAttacksOnMoveWithinReach',
     'ignoreDifficultTerrainWhileDashing',
+    'grappleEscapeAdvantage',
     'ignoreSpellAttackCoverBonus',
     'imposeConcentrationCheckDisadvantageOnDamage',
     'meleeWeaponDamageRerollOncePerTurn',
@@ -927,7 +1010,13 @@ function cloneStaticCombatModifiers(
     'opportunityAttackSpellReplacement',
     'ignoreOccupiedHandsForSomaticComponents',
     'retainHiddenOnRangedWeaponMiss',
-  ] as const) {
+  ] as const
+  const allowed = new Set<string>([...numeric.map(([key]) => key), ...booleans,
+    'maximizeHealingDiceNearCompanion',
+    'skillCheckAbilityBonuses', 'initiativeBonusFromAbility', 'existingMovementSpeedBonuses', 'naturalWeapons', 'opportunityAttacksOnEnterReachWeaponIds', 'damageResistances', 'damageImmunities', 'conditionImmunities'])
+  allowed.add('inherentLight')
+  for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`Unknown plugin static combat modifier ${key}: ${label}`)
+  for (const key of booleans) {
     if (value[key] != null && typeof value[key] !== 'boolean') {
       throw new Error(`Invalid plugin static combat modifier ${key}: ${label}`)
     }
@@ -954,6 +1043,14 @@ function cloneStaticCombatModifiers(
     return [...new Set(values)]
   }
   const damageResistances = damageList(value.damageResistances, 'damageResistances')
+  if (value.naturalWeapons != null && (!Array.isArray(value.naturalWeapons) || value.naturalWeapons.length < 1 || value.naturalWeapons.length > 8 ||
+    value.naturalWeapons.some(weapon => !weapon || typeof weapon.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,79}$/.test(weapon.id) ||
+      typeof weapon.name !== 'string' || !weapon.name.trim() || weapon.name.length > 120 ||
+      ![4, 6, 8, 10, 12].includes(weapon.damageDieSides) || !['bludgeoning', 'piercing', 'slashing'].includes(weapon.damageType) ||
+      (weapon.magical != null && typeof weapon.magical !== 'boolean')) ||
+    new Set(value.naturalWeapons.map(weapon => weapon.id)).size !== value.naturalWeapons.length)) {
+    throw new Error(`Invalid natural weapons: ${label}`)
+  }
   const damageImmunities = damageList(value.damageImmunities, 'damageImmunities')
   let conditionImmunities: string[] | undefined
   if (value.conditionImmunities != null) {
@@ -964,11 +1061,24 @@ function cloneStaticCombatModifiers(
     conditionImmunities = [...new Set(value.conditionImmunities.map((entry) => entry.trim()))]
   }
   return {
+    ...(value.inherentLight ? { inherentLight: { ...value.inherentLight } } : {}),
+    ...(maximizeHealingDiceNearCompanion ? { maximizeHealingDiceNearCompanion } : {}),
+    ...(value.unarmoredArmorClassBase != null ? { unarmoredArmorClassBase: value.unarmoredArmorClassBase } : {}),
+    ...(value.naturalWeapons ? { naturalWeapons: value.naturalWeapons.map(weapon => ({ ...weapon })) } : {}),
+    ...(value.unarmoredArmorClassAllowsShield === true ? { unarmoredArmorClassAllowsShield: true } : {}),
     ...(value.armorClassBonus != null ? { armorClassBonus: value.armorClassBonus } : {}),
+    ...(value.skillCheckAbilityBonuses ? {skillCheckAbilityBonuses:value.skillCheckAbilityBonuses.map(rule=>({...rule}))} : {}),
     ...(value.initiativeBonus != null ? { initiativeBonus: value.initiativeBonus } : {}),
+    ...(value.initiativeBonusFromAbility != null ? { initiativeBonusFromAbility: value.initiativeBonusFromAbility } : {}),
+    ...(value.existingMovementSpeedBonuses != null ? { existingMovementSpeedBonuses: { ...value.existingMovementSpeedBonuses } } : {}),
+    ...(value.swimSpeedMinimumFeet != null ? { swimSpeedMinimumFeet: value.swimSpeedMinimumFeet } : {}),
     ...(value.speedBonusFeet != null ? { speedBonusFeet: value.speedBonusFeet } : {}),
     ...(value.savingThrowBonus != null ? { savingThrowBonus: value.savingThrowBonus } : {}),
     ...(value.darkvisionRangeFeet != null ? { darkvisionRangeFeet: value.darkvisionRangeFeet } : {}),
+    ...(value.darkvisionIfAbsentFeet != null ? { darkvisionIfAbsentFeet: value.darkvisionIfAbsentFeet } : {}),
+    ...(value.darkvisionExistingBonusFeet != null ? { darkvisionExistingBonusFeet: value.darkvisionExistingBonusFeet } : {}),
+    ...(value.darkvisionRacialFallbackFeet != null ? { darkvisionRacialFallbackFeet: value.darkvisionRacialFallbackFeet } : {}),
+    ...(value.darkvisionRacialBonusFeet != null ? { darkvisionRacialBonusFeet: value.darkvisionRacialBonusFeet } : {}),
     ...(value.hitPointsPerLevelBonus != null ? { hitPointsPerLevelBonus: value.hitPointsPerLevelBonus } : {}),
     ...(value.passivePerceptionBonus != null ? { passivePerceptionBonus: value.passivePerceptionBonus } : {}),
     ...(value.passiveInvestigationBonus != null ? { passiveInvestigationBonus: value.passiveInvestigationBonus } : {}),
@@ -977,9 +1087,12 @@ function cloneStaticCombatModifiers(
       : {}),
     ...(value.cannotBeSurprisedWhileConscious === true ? { cannotBeSurprisedWhileConscious: true } : {}),
     ...(value.unseenAttackersDoNotGainAdvantage === true ? { unseenAttackersDoNotGainAdvantage: true } : {}),
+    ...(value.invisibleToDarkvision === true ? { invisibleToDarkvision: true } : {}),
     ...(value.ignoreLongRangeRangedWeaponDisadvantage === true ? { ignoreLongRangeRangedWeaponDisadvantage: true } : {}),
     ...(value.ignoreNearbyHostileRangedAttackDisadvantage === true ? { ignoreNearbyHostileRangedAttackDisadvantage: true } : {}),
     ...(value.ignoreLoadingWeaponProperty === true ? { ignoreLoadingWeaponProperty: true } : {}),
+    ...(value.swimSpeedEqualsWalking === true ? { swimSpeedEqualsWalking: true } : {}),
+    ...(value.canBreatheWater === true ? { canBreatheWater: true } : {}),
     ...(value.allowNonLightTwoWeaponFighting === true ? { allowNonLightTwoWeaponFighting: true } : {}),
     ...(value.ignoreRangedWeaponCoverBonus === true ? { ignoreRangedWeaponCoverBonus: true } : {}),
     ...(value.mediumArmorDexterityCapBonus != null ? { mediumArmorDexterityCapBonus: value.mediumArmorDexterityCapBonus } : {}),
@@ -1003,12 +1116,16 @@ function cloneStaticCombatModifiers(
     ...(value.opportunityAttackHitStopsMovement === true
       ? { opportunityAttackHitStopsMovement: true }
       : {}),
+    ...(value.opportunityAttacksOnMoveWithinReach === true
+      ? { opportunityAttacksOnMoveWithinReach: true }
+      : {}),
     ...(opportunityAttacksOnEnterReachWeaponIds
       ? { opportunityAttacksOnEnterReachWeaponIds }
       : {}),
     ...(value.ignoreDifficultTerrainWhileDashing === true
       ? { ignoreDifficultTerrainWhileDashing: true }
       : {}),
+    ...(value.grappleEscapeAdvantage === true ? { grappleEscapeAdvantage: true } : {}),
     ...(value.climbWithoutSpeedCostMultiplier != null ? { climbWithoutSpeedCostMultiplier: value.climbWithoutSpeedCostMultiplier } : {}),
     ...(value.runningJumpMinimumApproachFeet != null
       ? { runningJumpMinimumApproachFeet: value.runningJumpMinimumApproachFeet }
@@ -1117,6 +1234,10 @@ function toFighterSubclassDefinition(
         (resource.isAvailable?.(character) ?? true),
       max: resource.max,
       resetOn: resource.resetOn,
+          restoreOnCombatStart: resource.restoreOnCombatStart,
+          initialCurrent: resource.initialCurrent,
+          combatStartRecovery: resource.combatStartRecovery ? structuredClone(resource.combatStartRecovery) : undefined,
+          restRecovery: resource.restRecovery ? structuredClone(resource.restRecovery) : undefined,
     }
   })
   return {
@@ -1196,8 +1317,30 @@ export function registerDnd5eRulesPlugin(
       if (definition.sourceFeatId != null || definition.grantedByFeat != null) {
         throw new Error(`Feat ownership markers are Host-only: ${featureId}`)
       }
+      const resources = definition.resources?.map(resource => {
+        validateResourceRestRecovery(resource.restRecovery)
+      validateCombatStartResourceRecovery(resource.combatStartRecovery)
+        if (!validId(resource.id) || typeof resource.label !== 'string' || !resource.label.trim() ||
+          (resource.shortLabel != null && (typeof resource.shortLabel !== 'string' || !resource.shortLabel.trim())) ||
+          !finiteInteger(resource.maximum, 1, 1_000_000) ||
+          !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn) ||
+          (resource.initialCurrent != null && !finiteInteger(resource.initialCurrent, 0, 1_000_000)) ||
+          (resource.restoreOnCombatStart != null && typeof resource.restoreOnCombatStart !== 'boolean') ||
+          (resource.stacking != null && !['maximum', 'additive'].includes(resource.stacking))) {
+          throw new Error(`Invalid plugin feature resource: ${featureId}`)
+        }
+        return {...resource, combatStartRecovery: resource.combatStartRecovery ? structuredClone(resource.combatStartRecovery) : undefined,
+          restRecovery: resource.restRecovery ? structuredClone(resource.restRecovery) : undefined, id: namespacedId(id, resource.id), label: resource.label.trim(), shortLabel: resource.shortLabel?.trim() || undefined}
+      })
+      if (resources && (resources.length < 1 || resources.length > 16 || new Set(resources.map(resource => resource.id)).size !== resources.length)) throw new Error(`Invalid plugin feature resources: ${featureId}`)
       const iconAssetId = ownedPluginAssetId(id, definition.iconAssetId, featureId)
       const staticModifiers = cloneStaticCombatModifiers(definition.staticModifiers, featureId)
+      const spellGrants = cloneDnd5eIndependentSpellGrants(definition.spellGrants, featureId)
+      const classRequirements = cloneDnd5eFeatureClassRequirements(definition.classRequirements, featureId)
+      const classChoiceRequirements = cloneDnd5eFeatureChoiceRequirements(definition.classChoiceRequirements, featureId)
+      const requiredKnownSpellIds = cloneDnd5eKnownSpellRequirements(definition.requiredKnownSpellIds, featureId)
+      const eligibility = cloneDnd5eFeatureEligibility(definition.eligibility, featureId)
+      const ruleCapabilities = cloneDnd5eFeatureRuleCapabilities(definition.ruleCapabilities, featureId)
       const passiveEffects = cloneDnd5ePluginFeaturePassiveEffects(definition.passiveEffects, featureId)
       if (definition.declarativeAbility) {
         validateDeclarativeSubclassAbilityV1(definition.declarativeAbility, `Plugin feature ${featureId}`)
@@ -1286,8 +1429,15 @@ export function registerDnd5eRulesPlugin(
       const registered: RegisteredDnd5ePluginFeature = {
         ...definition,
         id: featureId,
+        resources,
         ...(iconAssetId ? { iconAssetId } : {}),
         ...(staticModifiers ? { staticModifiers } : {}),
+        ...(spellGrants ? { spellGrants } : {}),
+        ...(classRequirements ? { classRequirements } : {}),
+        ...(classChoiceRequirements ? { classChoiceRequirements } : {}),
+        ...(requiredKnownSpellIds ? { requiredKnownSpellIds } : {}),
+        ...(eligibility ? { eligibility } : {}),
+        ...(ruleCapabilities ? { ruleCapabilities } : {}),
         ...(passiveEffects ? { passiveEffects } : {}),
         minimumLevel,
         action,
@@ -1329,6 +1479,11 @@ export function registerDnd5eRulesPlugin(
         throw new Error(`Invalid plugin feat any-ability prerequisite: ${featId}`)
       }
       const raceIds = prerequisite?.raceIds == null ? undefined : [...new Set(prerequisite.raceIds)]
+      const raceSizes = prerequisite?.raceSizes
+      if (raceSizes != null && (!Array.isArray(raceSizes) || !raceSizes.length || raceSizes.length > 2 ||
+        raceSizes.some(size => size !== 'small' && size !== 'medium'))) {
+        throw new Error(`Invalid plugin feat ancestry size prerequisite: ${featId}`)
+      }
       if (raceIds && (
         raceIds.length < 1 || raceIds.length > 32 ||
         raceIds.some((raceId) => typeof raceId !== 'string' || !raceId.trim() || raceId.length > 160)
@@ -1344,11 +1499,15 @@ export function registerDnd5eRulesPlugin(
         throw new Error(`Invalid plugin feat spellcasting prerequisite: ${featId}`)
       }
       const featResources = definition.resources?.map((resource) => {
+        validateResourceRestRecovery(resource.restRecovery)
+      validateCombatStartResourceRecovery(resource.combatStartRecovery)
         if (
           !validId(resource.id) || typeof resource.label !== 'string' || !resource.label.trim() ||
           (resource.shortLabel != null && (typeof resource.shortLabel !== 'string' || !resource.shortLabel.trim())) ||
           !finiteInteger(resource.maximum, 1, 1_000_000) ||
           !['combat', 'short-rest', 'long-rest'].includes(resource.resetOn) ||
+          (resource.initialCurrent != null && !finiteInteger(resource.initialCurrent, 0, 1_000_000)) ||
+          (resource.restoreOnCombatStart != null && typeof resource.restoreOnCombatStart !== 'boolean') ||
           (resource.stacking != null && !['maximum', 'additive'].includes(resource.stacking))
         ) throw new Error(`Invalid plugin feat resource: ${featId}:${resource.id}`)
         return {
@@ -1357,6 +1516,10 @@ export function registerDnd5eRulesPlugin(
           shortLabel: resource.shortLabel?.trim() || undefined,
           maximum: resource.maximum,
           resetOn: resource.resetOn,
+          restoreOnCombatStart: resource.restoreOnCombatStart,
+          initialCurrent: resource.initialCurrent,
+          combatStartRecovery: resource.combatStartRecovery ? structuredClone(resource.combatStartRecovery) : undefined,
+          restRecovery: resource.restRecovery ? structuredClone(resource.restRecovery) : undefined,
           ...(resource.stacking ? { stacking: resource.stacking } : {}),
         }
       })
@@ -1384,7 +1547,7 @@ export function registerDnd5eRulesPlugin(
       if (definition.declarativeAbility?.mechanic?.kind === 'd20-choice-reroll') {
         const ownedResourceIds = new Set(definition.resources?.map((resource) => resource.id) ?? [])
         const costs = definition.declarativeAbility.cost?.resources ?? []
-        if (costs.length < 1 || costs.some((cost) =>
+        if (costs.some((cost) =>
           cost.scope === 'core' || !ownedResourceIds.has(cost.resourceId))) {
           throw new Error(`Choice reroll feat must spend its own declared resource: ${featId}`)
         }
@@ -1419,6 +1582,7 @@ export function registerDnd5eRulesPlugin(
           ...(raceIds?.length ? { raceIds } : {}),
           ...(armorProficiencies?.length ? { armorProficiencies } : {}),
           ...(prerequisite.spellcasting != null ? { spellcasting: prerequisite.spellcasting } : {}),
+          ...(raceSizes ? { raceSizes: [...new Set(raceSizes)] } : {}),
         } : undefined,
         resources: featResources,
         advancements,
@@ -1437,6 +1601,8 @@ export function registerDnd5eRulesPlugin(
       return featId
     },
     registerResource(definition) {
+      validateResourceRestRecovery(definition.restRecovery)
+      validateCombatStartResourceRecovery(definition.combatStartRecovery)
       assertAcceptingContributions()
       const resourceId = namespacedId(id, definition.id)
       if (pluginResources.has(resourceId)) throw new Error(`Plugin resource already registered: ${resourceId}`)
@@ -1445,6 +1611,8 @@ export function registerDnd5eRulesPlugin(
         typeof definition.label !== 'string' || !definition.label.trim() ||
         (definition.shortLabel != null && (typeof definition.shortLabel !== 'string' || !definition.shortLabel.trim())) ||
         !finiteInteger(definition.minimumLevel ?? 1, 1, 20) ||
+        (definition.initialCurrent != null && !finiteInteger(definition.initialCurrent, 0, 1_000_000)) ||
+        (definition.restoreOnCombatStart != null && typeof definition.restoreOnCombatStart !== 'boolean') ||
         !['combat', 'short-rest', 'long-rest'].includes(definition.resetOn)
       ) throw new Error(`Invalid plugin resource definition: ${resourceId}`)
       const maximum = Array.isArray(definition.maximum)
@@ -1466,6 +1634,8 @@ export function registerDnd5eRulesPlugin(
       }
       const registered: RegisteredDnd5ePluginResource = {
         ...definition,
+        combatStartRecovery: definition.combatStartRecovery ? structuredClone(definition.combatStartRecovery) : undefined,
+        restRecovery: definition.restRecovery ? structuredClone(definition.restRecovery) : undefined,
         id: resourceId,
         label: definition.label.trim(),
         shortLabel: definition.shortLabel?.trim(),
@@ -1511,6 +1681,7 @@ export function registerDnd5eRulesPlugin(
         const highestMaximum = maximumByLevel?.at(-1)?.maxSelections ?? group.maxSelections
         if (
           !validId(group.id) || choiceGroupIds.has(group.id) ||
+          (group.replaceOnClassLevelGain != null && typeof group.replaceOnClassLevelGain !== 'boolean') ||
           !finiteInteger(group.level, 1, 20) || !finiteInteger(group.maxSelections, 1, 64) ||
           typeof group.name !== 'string' || !group.name.trim() || !Array.isArray(group.options) ||
           (group.description != null && typeof group.description !== 'string') ||
@@ -1532,7 +1703,8 @@ export function registerDnd5eRulesPlugin(
         const options = group.options.map((option) => {
           if (
             !validId(option.id) || optionIds.has(option.id) || typeof option.name !== 'string' || !option.name.trim() ||
-            typeof option.summary !== 'string' || !option.summary.trim()
+            typeof option.summary !== 'string' || !option.summary.trim() ||
+            (option.description != null && (typeof option.description !== 'string' || option.description.length > 20_000))
           ) throw new Error(`Invalid plugin subclass choice option: ${subclassId}:${group.id}`)
           optionIds.add(option.id)
           return { ...option, name: option.name.trim(), summary: option.summary.trim() }
@@ -1580,6 +1752,13 @@ export function registerDnd5eRulesPlugin(
           sourceClassId: definition.classId,
           sourceSubclassId: subclassId,
           grantedBySubclass: true,
+          ruleCapabilities: feature.ruleCapabilityIds?.map((id: string) => ({ id, classId: definition.classId })),
+          staticModifiers: feature.declarativeAbility?.mechanic?.kind === 'passive-defense' ? {
+            opportunityAttacksOnMoveWithinReach: feature.declarativeAbility.mechanic.opportunityAttacksOnMoveWithinReach,
+            opportunityAttackHitStopsMovement: feature.declarativeAbility.mechanic.opportunityAttackHitStopsMovement,
+            canBreatheWater: feature.declarativeAbility.mechanic.canBreatheWater,
+            swimSpeedMinimumFeet: feature.declarativeAbility.mechanic.swimSpeedMinimumFeet,
+          } : undefined,
           declarativeAbility: feature.declarativeAbility,
           automationReasons: feature.automationReasons,
         })
@@ -1682,6 +1861,9 @@ export function registerDnd5eRulesPlugin(
           })
         }
         const hostManagedClosedSubclass =
+          ability.mechanic?.kind === 'rage-death-deferral' ||
+          ability.mechanic?.kind === 'missed-weapon-attack-reroll' ||
+          ability.mechanic?.kind === 'rage-saving-throw-reroll' ||
           ability.mechanic?.kind === 'martial-spell-synergy' ||
           ability.mechanic?.kind === 'rage-feature' ||
           ability.mechanic?.kind === 'opening-attack' ||
@@ -1692,8 +1874,14 @@ export function registerDnd5eRulesPlugin(
           ability.mechanic?.kind === 'spell-damage-max-die-bonus' ||
           ability.mechanic?.kind === 'stored-d20-replacement' ||
           ability.mechanic?.kind === 'attacks-per-action' ||
+          ability.mechanic?.kind === 'attack-action-defense' || ability.mechanic?.kind === 'attack-action-speed' ||
+          ability.mechanic?.kind === 'flurry-extra-attacks' ||
+          ability.mechanic?.kind === 'd20-disadvantage-negation' ||
           ability.mechanic?.kind === 'weapon-damage-rider' ||
           ability.mechanic?.kind === 'spell-damage-ability-modifier' ||
+          ability.mechanic?.kind === 'spell-healing-dice-maximum' ||
+          ability.mechanic?.kind === 'spell-range-minimum' ||
+          ability.mechanic?.kind === 'spell-optional-bonus-action' ||
           ability.mechanic?.kind === 'spell-ability-check-bonus' ||
           ability.mechanic?.kind === 'spell-interception' ||
           ability.mechanic?.kind === 'spell-target-expansion' ||
@@ -1793,6 +1981,7 @@ export function registerDnd5eRulesPlugin(
           name: ability.name,
           description: ability.description,
           iconAssetId: ability.iconAssetId,
+          ruleCapabilityIds: ability.ruleCapabilityIds ? [...ability.ruleCapabilityIds] : undefined,
           automation: compatibility.effective,
           canModifyEnemyD20: ability.canModifyEnemyD20 === true,
           action,
@@ -1839,6 +2028,10 @@ export function registerDnd5eRulesPlugin(
             resource.maximumByClassLevel,
           ),
           resetOn: resource.resetOn,
+          restoreOnCombatStart: resource.restoreOnCombatStart,
+          initialCurrent: resource.initialCurrent,
+          combatStartRecovery: resource.combatStartRecovery ? structuredClone(resource.combatStartRecovery) : undefined,
+          restRecovery: resource.restRecovery ? structuredClone(resource.restRecovery) : undefined,
         })
         const registered = pluginResources.get(resourceId)
         if (registered) {
@@ -2334,6 +2527,9 @@ function cloneRegisteredStaticModifiers(
 ): Dnd5ePluginStaticCombatModifiers | undefined {
   return value ? {
     ...value,
+    inherentLight: value.inherentLight ? { ...value.inherentLight } : undefined,
+    maximizeHealingDiceNearCompanion: normalizeDnd5eOwnedCompanionProximityRules(value.maximizeHealingDiceNearCompanion),
+    existingMovementSpeedBonuses: value.existingMovementSpeedBonuses ? { ...value.existingMovementSpeedBonuses } : undefined,
     opportunityAttacksOnEnterReachWeaponIds: value.opportunityAttacksOnEnterReachWeaponIds
       ? [...value.opportunityAttacksOnEnterReachWeaponIds]
       : undefined,
@@ -2349,6 +2545,36 @@ export function dnd5ePluginFeaturesAvailableForCharacter(
   return registeredDnd5ePluginFeatures().filter((feature) =>
     dnd5ePluginFeatureAvailableForCharacter(feature, character),
   )
+}
+
+/** Passive permission belongs to the creature being restored, never the caster. */
+export function dnd5eCharacterHasRevivalMaterialWaiver(character: Character): boolean {
+  return dnd5ePluginFeaturesAvailableForCharacter(character).some(feature =>
+    feature.automation === 'full' && feature.declarativeAbility?.mechanic?.kind === 'revival-material-waiver' &&
+    dnd5eCharacterHasPluginFeature(character, feature.id))
+}
+
+/** A persisted failure count is not confirmed death while this owned capability defers it. */
+export function dnd5eCharacterRageDeathDeferralActive(character: Character): boolean {
+  return character.dnd5eCombatState?.raging === true &&
+    character.dnd5eCombatState.deathRound == null &&
+    (character.exhaustionLevel ?? 0) < 6 &&
+    dnd5ePluginFeaturesAvailableForCharacter(character).some(feature => feature.automation === 'full' &&
+      feature.declarativeAbility?.mechanic?.kind === 'rage-death-deferral' && dnd5eCharacterHasPluginFeature(character, feature.id))
+}
+
+/** Zero-HP action permission; pending acceptance alone never enables controls. */
+export function dnd5eCharacterCanActAtZeroHitPoints(character: Character): boolean {
+  const state = character.dnd5eCombatState
+  return dnd5eCharacterRageDeathDeferralActive(character) ||
+    (state?.zeroHitPointExtraTurn?.phase === 'active' &&
+      state.deathRound == null && (character.deathSaveFailures ?? 0) < 3 &&
+      (character.exhaustionLevel ?? 0) < 6)
+}
+
+export function dnd5eCharacterHasDeferredRageDeath(character: Character): boolean {
+  return dnd5eCharacterRageDeathDeferralActive(character) &&
+    character.dnd5eCombatState?.declarativeUsedTurnKeys?.['rage-deferred-death'] === 'pending'
 }
 
 export function dnd5eEnemyD20ModifierFeaturesForCharacter(
@@ -2374,6 +2600,27 @@ export function dnd5eSpellAttackRangeMultiplierForCharacter(character: Character
     ) return maximum
     return Math.max(maximum, feature.staticModifiers?.spellAttackRangeMultiplier ?? 1)
   }, 1)
+}
+
+export function dnd5eSpellWithRangeForCharacter<T extends { id: string; rangeFeet: number }>(
+  spell: T | undefined, character: Character | undefined,
+): T | undefined {
+  if (!spell || !character) return spell
+  const rangeFeet = registeredDnd5ePluginFeatures().reduce((range, feature) => {
+    const mechanic = feature.declarativeAbility?.mechanic
+    if (feature.automation !== 'full' || mechanic?.kind !== 'spell-range-minimum' ||
+      !mechanic.spellIds.includes(spell.id) || !dnd5eCharacterHasPluginFeature(character, feature.id) ||
+      !dnd5ePluginFeatureAvailableForCharacter(feature, character)) return range
+    return Math.max(range, mechanic.rangeFeet)
+  }, spell.rangeFeet)
+  return rangeFeet === spell.rangeFeet ? spell : { ...spell, rangeFeet }
+}
+
+export function dnd5eOptionalSpellBonusActionForCharacter(character: Character, spellId: string): boolean {
+  return registeredDnd5ePluginFeatures().some(feature => feature.automation === 'full' &&
+    feature.declarativeAbility?.mechanic?.kind === 'spell-optional-bonus-action' &&
+    feature.declarativeAbility.mechanic.spellIds.includes(spellId) &&
+    dnd5eCharacterHasPluginFeature(character, feature.id) && dnd5ePluginFeatureAvailableForCharacter(feature, character))
 }
 
 type Dnd5eAlternateResourceSpellcastingMechanic = Extract<
@@ -2768,6 +3015,8 @@ export function dnd5eD20ChoiceRerollFeaturesForCharacter(
   character: Character,
   rollKind: Dnd5eD20ChoiceRerollRollKind,
   scope: Dnd5eD20ChoiceRerollScope,
+  adoptedD20?: number,
+  context?: { rollMode?: 'normal' | 'advantage' | 'disadvantage'; attackAbility?: AbilityKey },
 ): readonly Dnd5eD20ChoiceRerollFeature[] {
   if (scope === 'attack-against-self' && rollKind !== 'attack') return []
   return registeredDnd5ePluginFeatures().flatMap((feature) => {
@@ -2778,6 +3027,14 @@ export function dnd5eD20ChoiceRerollFeaturesForCharacter(
       mechanic?.kind !== 'd20-choice-reroll' ||
       !mechanic.rollKinds.includes(rollKind) ||
       !mechanic.scopes.includes(scope) ||
+      (mechanic.requiresAdvantage === true && context?.rollMode !== 'advantage') ||
+      (context?.rollMode === 'advantage' && mechanic.requiresAdvantage !== true) ||
+      (context?.rollMode === 'disadvantage') ||
+      (mechanic.attackAbilities != null && (!context?.attackAbility || !mechanic.attackAbilities.includes(context.attackAbility))) ||
+      (mechanic.triggerD20Values != null && (
+        adoptedD20 == null || !Number.isInteger(adoptedD20) || adoptedD20 < 1 || adoptedD20 > 20 ||
+        !mechanic.triggerD20Values.includes(adoptedD20)
+      )) ||
       !dnd5eCharacterHasPluginFeature(character, feature.id)
     ) return []
     const resourceCosts = (ability?.cost?.resources ?? []).map((cost) => ({
@@ -2787,7 +3044,6 @@ export function dnd5eD20ChoiceRerollFeaturesForCharacter(
       amount: cost.amount,
     }))
     if (
-      resourceCosts.length < 1 ||
       resourceCosts.some((cost) =>
         (character.classResources?.[cost.resourceKey]?.current ?? 0) < cost.amount)
     ) return []
@@ -2799,8 +3055,11 @@ export function dnd5eD20ChoiceRerollFeaturesForCharacter(
  * Returns the strongest core or imported Extra Attack declaration. Imported
  * features are passive data; the client cannot supply an attack count.
  */
-export function dnd5eEffectiveAttacksPerAttackAction(character: Character): number {
+export function dnd5eEffectiveAttacksPerAttackAction(character: Character, ownTurn = true): number {
   let attacks = dnd5eAttacksPerAttackAction(character)
+  for (const effect of effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects)) {
+    attacks = Math.max(attacks, effect.modifiers?.attackActionMinimum ?? 1)
+  }
   for (const feature of registeredDnd5ePluginFeatures()) {
     const mechanic = feature.declarativeAbility?.mechanic
     if (
@@ -2809,7 +3068,9 @@ export function dnd5eEffectiveAttacksPerAttackAction(character: Character): numb
     ) continue
     attacks = Math.max(attacks, mechanic.attacks)
   }
-  return attacks
+  const additional = ownTurn ? effectiveDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects)
+    .reduce((sum, effect) => sum + (effect.modifiers?.ownTurnAttackActionBonus ?? 0), 0) : 0
+  return attacks + additional
 }
 
 export interface Dnd5eDeclarativeAttackIntentDefinition {
@@ -2906,7 +3167,7 @@ export function dnd5eDeclarativeAttackIntentDefinition(
 ): Dnd5eDeclarativeAttackIntentDefinition | undefined {
   const feature = pluginFeatures.get(featureId)
   const ability = feature?.declarativeAbility
-  const hostManagedAttackModifier = ability?.mechanic?.kind === 'damage-roll-maximization' ||
+  const hostManagedAttackModifier = ability?.mechanic?.kind === 'advantage-for-extra-attack' || ability?.mechanic?.kind === 'damage-roll-maximization' ||
     ability?.mechanic?.kind === 'attack-tradeoff'
   const componentIsFullyAutomated = feature?.automation === 'full' ||
     (feature?.automation === 'partial' && ability?.automation === 'full' &&
@@ -2987,7 +3248,7 @@ function declarativeFeatureRollPlan(
   critical: boolean,
 ): Dnd5eDeclarativeAttackIntentRollPlan {
   const ability = feature.declarativeAbility
-  const hostManagedAttackModifier = ability?.mechanic?.kind === 'damage-roll-maximization' ||
+  const hostManagedAttackModifier = ability?.mechanic?.kind === 'advantage-for-extra-attack' || ability?.mechanic?.kind === 'damage-roll-maximization' ||
     ability?.mechanic?.kind === 'attack-tradeoff'
   if (!ability || (!feature.action && !hostManagedAttackModifier)) {
     return { ok: false, reason: 'invalid-plugin-action' }
@@ -3224,3 +3485,6 @@ export function dnd5eDeclarativeTriggeredActions(
     }]
   })
 }
+
+
+

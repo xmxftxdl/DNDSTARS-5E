@@ -32,6 +32,7 @@ describe('Move Earth area size controls', () => {
       area: {
         shape: 'rect', origin: 'point', widthFeet: 30, heightFeet: 30,
         minimumWidthFeet: 5, minimumHeightFeet: 5, gridAligned: true,
+        volumeHeightFeet: 20, minimumVolumeHeightFeet: 5,
         placeRangeFeet: 120, rotatable: false,
       },
     }
@@ -43,6 +44,7 @@ describe('Move Earth area size controls', () => {
     expect(html).toContain('adjustable-area-targeting-controls')
     expect(html).toContain('法术范围宽度')
     expect(html).toContain('法术范围长度')
+    expect(html).toContain('法术范围垂直高度')
     expect(html).not.toContain('幻影形态')
     expect(html).not.toContain('触发条件依据')
   })

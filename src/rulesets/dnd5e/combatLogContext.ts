@@ -9,7 +9,7 @@ export interface Dnd5eCombatLogContext {
   actionType?: string
   sourceActorId?: string
   sourceName?: string
-  effect?: Pick<Dnd5eActiveEffectInstance, 'label' | 'source' | 'duration' | 'standardCondition'>
+  effect?: Pick<Dnd5eActiveEffectInstance, 'label' | 'source' | 'duration' | 'standardCondition' | 'onEndAwareness'>
   /** Facts from the same target's preceding authoritative events; no inferred causal link. */
   precedingOutcomes?: readonly string[]
 }
@@ -21,7 +21,7 @@ export function registeredCombatLogName(id: string): string | undefined {
 }
 
 export function effectCombatLogContext(effect: Dnd5eActiveEffectInstance): Dnd5eCombatLogContext {
-  return { effect: structuredClone({ label: effect.label, source: effect.source, duration: effect.duration, standardCondition: effect.standardCondition }) }
+  return { effect: structuredClone({ label: effect.label, source: effect.source, duration: effect.duration, standardCondition: effect.standardCondition, onEndAwareness: effect.onEndAwareness }) }
 }
 
 /** Capture registered names before plugin unloads or future state changes. */

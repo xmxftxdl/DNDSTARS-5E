@@ -561,3 +561,64 @@ describe('map geometry pathfinding', () => {
     expect(tree.truncated).toBe(true)
   })
 })
+
+
+describe('material-specific difficult terrain exemption', () => {
+  it('ignores only ice and snow in route and range preview, retaining overlapping terrain and independent costs', () => {
+    const map = battleMap({ height: 50, width: 100 })
+    const destination = { x: 75, y: 25 }
+    for (const material of ['ice', 'snow', 'sand', undefined] as const) {
+      for (const overlap of [false, true]) {
+        const state = geometry()
+        const region = {
+          id: 'surface', kind: 'obstacle' as const, label: 'Surface',
+          points: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }],
+          blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none' as const,
+          traversal: 'ground' as const, heightFeet: 0, baseHeightFeet: 0,
+          terrainCostMultiplier: 2, surfaceMaterial: material, createdAt: 1,
+        }
+        state.obstacles.push(region)
+        if (overlap) state.obstacles.push({ ...region, id: 'other-terrain', surfaceMaterial: undefined })
+        const options = { map, geometry: state, token: map.tokens[0], ignoreDifficultTerrainMaterials: ['ice', 'snow'] as const }
+        const expected = !overlap && (material === 'ice' || material === 'snow') ? 5 : 10
+        expect(findMapGeometryPath({ ...options, to: destination })?.movementCostFeet).toBe(expected)
+        expect(createMapGeometryPathTree(options).pathTo(destination)?.movementCostFeet).toBe(expected)
+        const additional = { ...options, additionalDifficultTerrainMultiplier: () => 2, additionalSpeedCostMultiplier: () => 2 }
+        expect(findMapGeometryPath({ ...additional, to: destination })?.movementCostFeet).toBe(20)
+        expect(createMapGeometryPathTree(additional).pathTo(destination)?.movementCostFeet).toBe(20)
+      }
+    }
+  })
+})
+
+
+it.each(['stone','earth','wood','metal','brick','natural',undefined] as const)('traverses only declared solid material %s without mutating the map', material => {
+  const map = battleMap({width:150,height:50})
+  const state = geometry()
+  state.walls.push({id:'barrier',kind:'wall',label:'Barrier',points:[{x:75,y:0},{x:75,y:50}],material,
+    blocksMovement:true,blocksVision:true,blocksLineOfEffect:true,baseHeightFeet:0,heightFeet:10,createdAt:1})
+  const before = JSON.stringify(state)
+  const options = {map,geometry:state,token:map.tokens[0],passThroughSolidMaterials:['earth','stone'] as const}
+  const to = {x:125,y:25}
+  const expected = material==='earth'||material==='stone'
+  expect(!!findMapGeometryPath({...options,to})).toBe(expected)
+  expect(!!createMapGeometryPathTree(options).pathTo(to)).toBe(expected)
+  expect(JSON.stringify(state)).toBe(before)
+})
+
+it('retains closed door and creature collisions when traversing stone', () => {
+  const map = battleMap({width:150,height:50})
+  const state = geometry()
+  state.walls.push({id:'stone',kind:'wall',label:'Stone',material:'stone',points:[{x:75,y:0},{x:75,y:50}],
+    blocksMovement:true,blocksVision:true,blocksLineOfEffect:true,baseHeightFeet:0,heightFeet:10,createdAt:1})
+  state.doors.push({id:'door',kind:'door',label:'Door',points:[{x:100,y:0},{x:100,y:50}],state:'closed',
+    secret:false,blocksMovement:true,blocksVision:true,blocksLineOfEffect:true,baseHeightFeet:0,heightFeet:10,createdAt:1})
+  const options = {map,geometry:state,token:map.tokens[0],passThroughSolidMaterials:['stone'] as const}
+  const to = {x:125,y:25}
+  expect(findMapGeometryPath({...options,to})).toBeUndefined()
+  expect(createMapGeometryPathTree(options).pathTo(to)).toBeUndefined()
+  state.doors=[]
+  map.tokens.push(token({id:'enemy',type:'enemy',x:125}))
+  expect(findMapGeometryPath({...options,to})).toBeUndefined()
+  expect(createMapGeometryPathTree(options).pathTo(to)).toBeUndefined()
+})

@@ -30,12 +30,20 @@ const targeting: Dnd5eSpellTargetingSession = {
 }
 
 describe('SpellTargetingCoordinator', () => {
+  it.each([-90, -35, 0, 45, 90])('preserves launch pitch %s only for an area selection', pitch => {
+    const draft = { ...targeting, objectLaunchPitchDegrees: pitch,
+      area: { shape: 'rect' as const, origin: 'point' as const, widthFeet: 5, heightFeet: 5, rotatable: true } }
+    expect(buildSpellTargetingSubmission({ targeting: draft, selectedTargetIds: [],
+      areaTargetCell: { col: 2, row: 2 } }).objectLaunchPitchDegrees).toBe(pitch)
+    expect(buildSpellTargetingSubmission({ targeting: { ...draft, area: undefined },
+      selectedTargetIds: ['enemy-1'] }).objectLaunchPitchDegrees).toBeUndefined()
+  })
   it('preserves the chosen altitude for all area anchors and omits it for single targets', () => {
-    const draft = { ...targeting, spellId: 'fireball', targetElevationFeet: 35,
+    const draft = { ...targeting, spellId: 'fireball', targetElevationFeet: 35, areaTargetVolumeHeightFeet: 10,
       area: { shape: 'circle' as const, origin: 'point' as const, radiusFeet: 20 } }
     expect(buildSpellTargetingSubmission({ targeting: draft, selectedTargetIds: [],
       areaTargetCell: { col: 2, row: 2 }, areaTargetCells: [{ col: 2, row: 2 }, { col: 6, row: 2 }],
-    })).toMatchObject({ targetElevationFeet: 35, areaTargetCells: [{ col: 2, row: 2 }, { col: 6, row: 2 }] })
+    })).toMatchObject({ targetElevationFeet: 35, areaTargetVolumeHeightFeet: 10, areaTargetCells: [{ col: 2, row: 2 }, { col: 6, row: 2 }] })
     expect(buildSpellTargetingSubmission({ targeting: { ...draft, area: undefined },
       selectedTargetIds: ['enemy-1'],
     }).targetElevationFeet).toBeUndefined()
@@ -91,6 +99,8 @@ describe('SpellTargetingCoordinator', () => {
         spellId: 'local.rules:rotating-wall',
         area: { shape: 'rect', origin: 'point', widthFeet: 60, heightFeet: 5, placeRangeFeet: 120, rotatable: true },
         areaTargetAngleDegrees: 37,
+        areaTargetPitchDegrees: 45,
+        areaTargetRollDegrees: -30,
       },
       selectedTargetIds: ['enemy-1'],
       currentTokenId: 'actor-1',
@@ -100,6 +110,8 @@ describe('SpellTargetingCoordinator', () => {
     expect(payload).toMatchObject({
       areaTargetCell: { col: 8, row: 3 },
       areaTargetAngleDegrees: 37,
+      areaTargetPitchDegrees: 45,
+      areaTargetRollDegrees: -30,
     })
   })
 

@@ -6,6 +6,7 @@ import type { Dnd5eSpellTargetingSession } from '../../application/combat/spells
 import type { BattleMap, Token } from '../../store/maps'
 import { wallOfFireTargetingCells } from './wallOfFireTargeting'
 import { resolveSpellAreaObstruction } from '../../rulesets/dnd5e/spellAreaObstruction'
+import { objectLaunchTargetingPlan } from './objectLaunchTargeting'
 
 /** Spatial candidates only; targeting policy and creature state are checked by the caller. */
 export function spellAreaSpatialTargets(input: {
@@ -19,8 +20,14 @@ export function spellAreaSpatialTargets(input: {
 }): Token[] {
   const { targeting, map, geometry, source, casterCell, anchor, rotation } = input
   if (!targeting.area) return []
+  const flight = objectLaunchTargetingPlan({ targeting, map, geometry, anchor })
+  if (flight) return flight.ok ? flight.plan.creatures.flatMap(contact => {
+    const token = map.tokens.find(candidate => candidate.id === contact.tokenId)
+    return token ? [token] : []
+  }) : []
   const area = resolveAoeDimensions(targeting.area, {
     radiusFeet: targeting.areaTargetRadiusFeet, widthFeet: targeting.areaTargetWidthFeet,
+    volumeHeightFeet: targeting.areaTargetVolumeHeightFeet,
     heightFeet: targeting.areaTargetHeightFeet, lengthFeet: targeting.areaTargetLengthFeet,
   })
   if (!area) return []
@@ -29,18 +36,18 @@ export function spellAreaSpatialTargets(input: {
     ...(area.shape === 'rect' && area.rotatable && targeting.spellId !== 'wall-of-fire'
       ? { rectAngleDegrees: targeting.areaTargetAngleDegrees ?? 0 } : {}),
   })
-  const cells = wallOfFireTargetingCells(targeting, anchor, map) ?? cellsForAoe(area, orientFrom, anchor)
+  const cells = wallOfFireTargetingCells(targeting, anchor, map) ?? cellsForAoe(area, orientFrom, anchor, map.feetPerCell)
   const aim = { x: map.gridOffsetX + (anchor.col + 0.5) * map.gridSize,
     y: map.gridOffsetY + (anchor.row + 0.5) * map.gridSize }
   const aimElevation = targeting.targetElevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, aim)
   const origin = area.origin === 'point' ? aim : source
   const elevation = area.origin === 'point' ? aimElevation : mapGeometryTokenElevation(geometry, source)
-  const obstruction = resolveSpellAreaObstruction({ spellId: targeting.spellId, map, geometry, cells, area, origin, elevationFeet: elevation })
+  const obstruction = resolveSpellAreaObstruction({ spellId: targeting.spellId, map, geometry, cells, area, origin, elevationFeet: elevation, heightFeet: area.volumeHeightFeet })
   return tokensInCells(map, map.tokens, cells).filter((target) =>
     target.type !== 'obstacle' && target.type !== 'npc' &&
     dnd5eInstantAoeAffectsTokenVertically({
       spellId: targeting.spellId, area, map, geometry, sourceToken: source, targetToken: target,
-      effectOrigin: origin, effectOriginElevationFeet: elevation,
+      effectOrigin: origin, effectOriginElevationFeet: elevation, effectHeightFeet: area.volumeHeightFeet,
       effectAim: aim, effectAimElevationFeet: aimElevation,
     }) && obstruction.affectsToken(target))
 }

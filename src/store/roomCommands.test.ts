@@ -515,7 +515,7 @@ describe('concentration ending planning', () => {
     expect(plan.characters[0]?.dnd5eCombatState?.concentrationSpellId).toBe('fly')
   })
 
-  it('ending Polymorph concentration restores the target character and token footprint', () => {
+  it.each([false, true])('ending form concentration restores the character and footprint (retained HP: %s)', retained => {
     const caster = {
       ...normalizeCharacter({ id: 'caster', name: 'Wizard', level: 8 }),
       concentrating: true,
@@ -528,8 +528,10 @@ describe('concentration ending planning', () => {
       ...normalizeCharacter({ id: 'target', name: 'Target', level: 8 }),
       currentHp: 31,
       maxHp: 40,
+      tempHp: retained ? 22 : 0,
       dnd5eCombatState: {
         wildShapeFormId: 'srd-5.1:brown-bear',
+        wildShapeRetainsHitPoints: retained,
         wildShapeMode: 'polymorph' as const,
         wildShapeSourceActorId: 'caster-token',
         wildShapeSourceActivityId: 'spell:polymorph',
@@ -554,7 +556,7 @@ describe('concentration ending planning', () => {
     })
 
     expect(plan.status).toBe('ended')
-    expect(plan.characters[1]).toMatchObject({ currentHp: 31, maxHp: 40 })
+    expect(plan.characters[1]).toMatchObject({ currentHp: 31, maxHp: 40, tempHp: 0 })
     expect(plan.characters[1]?.dnd5eCombatState).not.toHaveProperty('wildShapeFormId')
     expect(plan.maps[0]?.tokens[1]).toMatchObject({ hp: 31, maxHp: 40, size: 1 })
   })
@@ -775,6 +777,25 @@ describe('spell effect removal planning', () => {
 })
 
 describe('DM active-effect replacement', () => {
+  it('retains end-awareness after a DM removal and lets the DM later clear the knowledge record',async()=>{
+    const effect=createDnd5eConditionEffect({id:'charm-audit',condition:'charmed',targetId:'wizard-token',
+      source:{kind:'spell',actorId:'archmage-token',actorName:'Archmage',magical:true},
+      onEndAwareness:'charmed-by-source',sourceAttitude:'friendly',duration:{type:'rounds',remainingRounds:600,tickOn:'target-turn-start'},appliedAt:1})
+    const characters=useCharacterStore.getState().characters.map(c=>({...c,conditions:['charmed'],dnd5eCombatState:{activeEffects:[effect]}}))
+    useCharacterStore.setState({characters})
+    const maps=useMapStore.getState().maps.map(m=>({...m,tokens:m.tokens.map(t=>t.id==='wizard-token'?{...t,dnd5eCombatState:{activeEffects:[effect]}}:t)}))
+    useMapStore.setState({maps})
+    const command={characterId:'wizard-character',mapId:'map-linked-active-effects',tokenId:'wizard-token',activeEffects:[]}
+    expect(await replaceRoomCombatantActiveEffects(command)).toEqual({status:'applied'})
+    const saved=useCharacterStore.getState().characters[0].dnd5eCombatState?.activeEffects
+    expect(saved).toHaveLength(1)
+    expect(saved![0]).toMatchObject({definitionId:'awareness:charmed-by-source',source:{actorId:'archmage-token',magical:false}})
+    expect(useMapStore.getState().maps[0].tokens[0].dnd5eCombatState?.activeEffects).toEqual(saved)
+    expect(useCharacterStore.getState().characters[0].conditions).not.toContain('charmed')
+    expect(await replaceRoomCombatantActiveEffects(command)).toEqual({status:'applied'})
+    expect(useCharacterStore.getState().characters[0].dnd5eCombatState?.activeEffects).toBeUndefined()
+    expect(useMapStore.getState().maps[0].tokens[0].dnd5eCombatState?.activeEffects).toBeUndefined()
+  })
   beforeEach(() => {
     const banished = createDnd5eMechanicalEffect({
       definitionId: 'srd-5.1:spell:banishment',

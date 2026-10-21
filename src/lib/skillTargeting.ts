@@ -10,16 +10,24 @@ import {
 
 export type AoeOrigin = 'self' | 'point'
 
-export interface CircleAoeTargeting {
+interface AoeVolumeTargeting {
+  /** Vertical extent, independent of the two-dimensional footprint. */
+  volumeHeightFeet?: number
+  minimumVolumeHeightFeet?: number
+}
+
+export interface CircleAoeTargeting extends AoeVolumeTargeting {
   shape: 'circle'
   origin: AoeOrigin
   radiusFeet: number
+  /** Hollow cylinder footprint; thickness extends inward from the radius. */
+  wallThicknessFeet?: number
   /** When present, the caster may choose a radius between this value and radiusFeet. */
   minimumRadiusFeet?: number
   placeRangeFeet?: number
 }
 
-export interface RectAoeTargeting {
+export interface RectAoeTargeting extends AoeVolumeTargeting {
   shape: 'rect'
   origin: 'point'
   widthFeet: number
@@ -33,7 +41,7 @@ export interface RectAoeTargeting {
   rotatable?: boolean
 }
 
-export interface LineAoeTargeting {
+export interface LineAoeTargeting extends AoeVolumeTargeting {
   shape: 'line'
   origin: 'self'
   widthFeet: number
@@ -44,9 +52,11 @@ export interface LineAoeTargeting {
   aimRangeFeet?: number
 }
 
-export interface ConeAoeTargeting {
+export interface ConeAoeTargeting extends AoeVolumeTargeting {
   shape: 'cone'
-  origin: 'self'
+  origin: AoeOrigin
+  placeRangeFeet?: number
+  rotatable?: boolean
   lengthFeet: number
   minimumLengthFeet?: number
   /** 瞄准点相对施法者的最远距离（尺）；不设则不限制 */
@@ -55,18 +65,33 @@ export interface ConeAoeTargeting {
 
 export type SkillAoeTargeting = CircleAoeTargeting | RectAoeTargeting | LineAoeTargeting | ConeAoeTargeting
 
+/** Adapt physical distances to the legacy five-foot geometry primitives. */
+function aoeInDefaultGridUnits(aoe: SkillAoeTargeting, feetPerCell: number): SkillAoeTargeting {
+  const factor=DND_FEET_PER_CELL/Math.max(1,feetPerCell)
+  if(factor===1)return aoe
+  const scaled={...aoe}
+  for(const key of ['radiusFeet','wallThicknessFeet','widthFeet','heightFeet','lengthFeet','placeRangeFeet','aimRangeFeet'] as const){
+    const values=scaled as unknown as Record<string,unknown>
+    const value=values[key]
+    if(typeof value==='number')values[key]=value*factor
+  }
+  return scaled
+}
+
 export interface SkillAoeDimensionSelection {
+  volumeHeightFeet?: number
   radiusFeet?: number
   widthFeet?: number
   heightFeet?: number
   lengthFeet?: number
 }
 
-function selectedDimension(value: number | undefined, minimum: number | undefined, maximum: number): number | null {
+function selectedDimension(value: number | undefined, minimum: number | undefined, maximum: number, gridAligned = true): number | null {
   if (value == null) return maximum
   const lower = minimum ?? maximum
   const stepFeet = minimum != null && minimum % DND_FEET_PER_CELL !== 0 ? DND_FEET_PER_CELL / 2 : DND_FEET_PER_CELL
-  if (!Number.isFinite(value) || value % stepFeet !== 0) return null
+  const fixedAuthoredDimension = minimum == null && value === maximum
+  if (!Number.isFinite(value) || (gridAligned && !fixedAuthoredDimension && value % stepFeet !== 0)) return null
   if (value < lower || value > maximum) return null
   return value
 }
@@ -76,13 +101,19 @@ export function resolveAoeDimensions(
   aoe: SkillAoeTargeting,
   selection: SkillAoeDimensionSelection = {},
 ): SkillAoeTargeting | null {
+  if (selection.volumeHeightFeet != null && aoe.volumeHeightFeet == null) return null
+  if (aoe.volumeHeightFeet != null) {
+    const volumeHeightFeet = selectedDimension(selection.volumeHeightFeet, aoe.minimumVolumeHeightFeet, aoe.volumeHeightFeet, !(aoe.shape === 'rect' && aoe.gridAligned === false))
+    if (volumeHeightFeet == null) return null
+    aoe = { ...aoe, volumeHeightFeet }
+  }
   if (aoe.shape === 'circle') {
     const radiusFeet = selectedDimension(selection.radiusFeet, aoe.minimumRadiusFeet, aoe.radiusFeet)
     return radiusFeet == null ? null : { ...aoe, radiusFeet }
   }
   if (aoe.shape === 'rect') {
-    const widthFeet = selectedDimension(selection.widthFeet, aoe.minimumWidthFeet, aoe.widthFeet)
-    const heightFeet = selectedDimension(selection.heightFeet, aoe.minimumHeightFeet, aoe.heightFeet)
+    const widthFeet = selectedDimension(selection.widthFeet, aoe.minimumWidthFeet, aoe.widthFeet, aoe.gridAligned === true)
+    const heightFeet = selectedDimension(selection.heightFeet, aoe.minimumHeightFeet, aoe.heightFeet, aoe.gridAligned === true)
     return widthFeet == null || heightFeet == null ? null : { ...aoe, widthFeet, heightFeet }
   }
   if (aoe.shape === 'line') {
@@ -207,7 +238,7 @@ function cellTouchesCircle(cell: GridCell, center: GridCell, radiusCells: number
   return distance <= radiusCells
 }
 
-function cellTouchesOrientedRect(
+export function cellTouchesOrientedRect(
   cell: GridCell,
   center: { x: number; y: number },
   dir: { x: number; y: number },
@@ -391,9 +422,10 @@ export function cellsInRect(
   return uniqueCells(cells)
 }
 
-export function gridAlignedRectBounds(anchor: GridCell, widthFeet: number, heightFeet: number) {
-  const widthCells = feetToDimensionCells(widthFeet)
-  const heightCells = feetToDimensionCells(heightFeet)
+export function gridAlignedRectBounds(anchor: GridCell, widthFeet: number, heightFeet: number, feetPerCell = DND_FEET_PER_CELL) {
+  const factor = DND_FEET_PER_CELL / Math.max(1, feetPerCell)
+  const widthCells = feetToDimensionCells(widthFeet * factor)
+  const heightCells = feetToDimensionCells(heightFeet * factor)
   return {
     firstCol: anchor.col - Math.floor((widthCells - 1) / 2),
     firstRow: anchor.row - Math.floor((heightCells - 1) / 2),
@@ -406,16 +438,31 @@ export function cellsForAoe(
   aoe: SkillAoeTargeting,
   casterCell: GridCell,
   anchorCell: GridCell,
+  feetPerCell = DND_FEET_PER_CELL,
 ): GridCell[] {
+  aoe = aoeInDefaultGridUnits(aoe, feetPerCell)
   switch (aoe.shape) {
     case 'circle': {
       const center = aoe.origin === 'self' ? casterCell : anchorCell
+      if (aoe.wallThicknessFeet != null) {
+        const outer=aoe.radiusFeet/DND_FEET_PER_CELL,inner=(aoe.radiusFeet-aoe.wallThicknessFeet)/DND_FEET_PER_CELL
+        if (!(inner>=0&&outer>inner)) return []
+        const extent=Math.ceil(outer+.5),cells:GridCell[]=[]
+        for(let row=-extent;row<=extent;row++)for(let col=-extent;col<=extent;col++){
+          const near=Math.hypot(Math.max(0,Math.abs(col)-.5),Math.max(0,Math.abs(row)-.5))
+          const far=Math.hypot(Math.abs(col)+.5,Math.abs(row)+.5)
+          if(near<outer&&far>inner)cells.push({col:center.col+col,row:center.row+row})
+        }
+        return cells
+      }
       return cellsInCircleRadius(center, aoe.radiusFeet)
     }
     case 'line':
       return cellsInLine(casterCell, anchorCell, aoe.widthFeet, aoe.lengthFeet)
     case 'cone':
-      return cellsInCone(casterCell, anchorCell, aoe.lengthFeet)
+      return aoe.origin === 'point'
+        ? cellsInCone(anchorCell, { col: 2 * anchorCell.col - casterCell.col, row: 2 * anchorCell.row - casterCell.row }, aoe.lengthFeet)
+        : cellsInCone(casterCell, anchorCell, aoe.lengthFeet)
     case 'rect':
       if (aoe.gridAligned) {
         const { widthCells, heightCells, firstCol, firstRow } = gridAlignedRectBounds(anchorCell, aoe.widthFeet, aoe.heightFeet)
@@ -434,7 +481,7 @@ export function aoeOrientFromCell(
   anchorCell: GridCell,
   opts?: { rectRotation?: number; rectAngleDegrees?: number },
 ): GridCell {
-  if (aoe.shape !== 'rect' || !aoe.rotatable) return casterCell
+  if ((aoe.shape !== 'rect' && !(aoe.shape === 'cone' && aoe.origin === 'point')) || !aoe.rotatable) return casterCell
   if (Number.isFinite(opts?.rectAngleDegrees)) {
     const radians = ((Number(opts?.rectAngleDegrees) - 90) * Math.PI) / 180
     return {
@@ -456,7 +503,9 @@ export function canPlaceAoe(
   aoe: SkillAoeTargeting,
   casterCell: GridCell,
   anchorCell: GridCell,
+  feetPerCell = DND_FEET_PER_CELL,
 ): boolean {
+  aoe = aoeInDefaultGridUnits(aoe, feetPerCell)
   switch (aoe.shape) {
     case 'circle':
       // A self-origin circle is centered on the caster. It is not a freely
@@ -469,6 +518,7 @@ export function canPlaceAoe(
       if (aoe.aimRangeFeet == null) return true
       return cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.aimRangeFeet)
     case 'cone':
+      if (aoe.origin === 'point') return aoe.placeRangeFeet == null || cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.placeRangeFeet)
       if (aoe.aimRangeFeet == null) return true
       return cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.aimRangeFeet)
     case 'rect':

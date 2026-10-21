@@ -1,5 +1,9 @@
+import { mapForSolidMaterialTraversal, mapGeometryForSolidMaterialTraversal, type MapTraversableSolidMaterial } from './mapSolidMaterialTraversal'
 import { mapClimbSupported } from './mapClimbing'
-import { createMapTokenOccupancy } from './mapTokenOccupancy'
+import {mapGeometryForEtherealTravel} from './mapEtherealGeometry'
+import { mapStairWalkingEdges, type MapStairWalkingEdge } from './mapStairPaths'
+import { dnd5eEntitySupportElevation } from '../rulesets/dnd5e/entitySupport'
+import { createMapTokenOccupancy, mapTokenSweepBlocked } from './mapTokenOccupancy'
 import {
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
@@ -7,6 +11,7 @@ import {
   type GridCell,
 } from './gridCombat'
 import {
+  mapGeometryFootprintTerrainSamples,
   mapGeometryObstacleAffectsElevation,
   mapGeometryObstacleIsGroundSurfaceOverlay,
   mapGeometryDoorLockState,
@@ -18,8 +23,31 @@ import {
   mapGeometrySegmentsIntersect,
   mapGeometryTerrainElevationAtPoint,
   type MapGeometryState,
+  type MapGeometrySurfaceMaterial,
 } from './mapGeometry'
 import type { BattleMap, Token } from '../store/maps'
+import { dnd5eNormalGroundTerrainAt } from '../rulesets/dnd5e/normalGroundTerrain'
+
+/** Keep a horizontal walking route inside explicitly traversable authored terrain. */
+function solidTerrainTraversalElevation(input: {
+  map: BattleMap; geometry?: MapGeometryState; token: Token
+  passThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
+}, position: { x: number; y: number }, elevationFeet: number): number | undefined {
+  if (!input.passThroughSolidMaterials?.length) return undefined
+  const buried = mapGeometryFootprintTerrainSamples({ geometry: input.geometry, at: position,
+    halfSizePixels: Math.max(1, input.map.gridSize * Math.max(1, input.token.size) / 2) })
+    .filter(surface => elevationFeet < surface.elevationFeet - 1e-7)
+  return buried.length && buried.every(({ material }) =>
+    (material === 'earth' || material === 'stone') && input.passThroughSolidMaterials!.includes(material))
+    ? elevationFeet : undefined
+}
+
+function solidTerrainStep(input: Parameters<typeof solidTerrainTraversalElevation>[0],
+  from: { x: number; y: number }, to: { x: number; y: number }, fromHeight: number, toHeight: number): boolean {
+  const lower = Math.min(fromHeight, toHeight)
+  return solidTerrainTraversalElevation(input, from, lower) != null &&
+    solidTerrainTraversalElevation(input, to, lower) != null
+}
 
 export interface MapPathResult {
   points: Array<{ x: number; y: number }>
@@ -27,6 +55,8 @@ export interface MapPathResult {
   cells: GridCell[]
   distanceFeet: number
   movementCostFeet: number
+  /** Preserve fractional cost for movement split at reaction checkpoints. */
+  unroundedMovementCostFeet?: number
   doorsToOpen: string[]
 }
 
@@ -45,6 +75,7 @@ export interface MapGeometryPathTree {
 }
 
 export interface MapGeometryPathTreeInput {
+  canTraverseEdge?: (from: { x: number; y: number }, to: { x: number; y: number }) => boolean
   map: BattleMap
   geometry?: MapGeometryState
   token: Token
@@ -60,15 +91,19 @@ export interface MapGeometryPathTreeInput {
   ignoreTokens?: boolean
   /** Ignores walls, doors, solid obstacles and terrain surfaces on the Material Plane. */
   ignoreGeometryCollision?: boolean
+  passThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
   /** Tokens whose occupied cells may be traversed but never used as a final destination. */
   passThroughTokenIds?: readonly string[]
   maximumVisited?: number
   /** Ignores difficult-terrain multipliers while retaining independent speed-cost effects. */
   ignoreDifficultTerrain?: boolean
+  ignoreDifficultTerrainMaterials?: readonly MapGeometrySurfaceMaterial[]
   /** Stops expanding routes whose weighted horizontal cost exceeds this. */
   maximumMovementCostFeet?: number
   additionalDifficultTerrainMultiplier?: (token: Token, position: { x: number; y: number }) => number
   additionalSpeedCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
+  /** Per-foot surcharge, added to terrain cost before independent speed reduction. */
+  additionalMovementCostPerFoot?: (token: Token, from: { x: number; y: number }, to: { x: number; y: number }) => number
   /** @deprecated Use the classified callbacks above; retained for extension compatibility. */
   additionalCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
 }
@@ -79,6 +114,26 @@ interface PathNode {
   estimate: number
   elevationFeet: number
   previous?: string
+  stepDistanceFeet?: number
+}
+
+function stairDirections(edges: MapStairWalkingEdge[], map: BattleMap, token: Token, position: {x:number;y:number}, elevation: number) {
+  return edges.flatMap(stair => {
+    const dx=stair.to.x-stair.from.x,dy=stair.to.y-stair.from.y,length=Math.hypot(dx,dy)
+    // Grid-aligned flights can be authored as one long segment. Visit every crossed cell.
+    if(Math.abs(dx)>1e-4 && Math.abs(dy)>1e-4 && Math.abs(Math.abs(dx)-Math.abs(dy))>1e-4)return []
+    const t=((position.x-stair.from.x)*dx+(position.y-stair.from.y)*dy)/(length*length)
+    if(t < -1e-7 || t>=1-1e-7 || Math.hypot(position.x-stair.from.x-dx*t,position.y-stair.from.y-dy*t)>1e-4)return []
+    const expected=stair.from.elevationFeet+(stair.to.elevationFeet-stair.from.elevationFeet)*t
+    if(Math.abs(expected-elevation)>1e-4)return []
+    const from=tokenAnchorCellFromPixel(position.x,position.y,token,map),dc=Math.abs(dx)<1e-4?0:Math.sign(dx),dr=Math.abs(dy)<1e-4?0:Math.sign(dy)
+    const center=tokenCenterForAnchorCell({col:from.col+dc,row:from.row+dr},token,map)
+    const nextT=((center.x-stair.from.x)*dx+(center.y-stair.from.y)*dy)/(length*length)
+    if(nextT>1+1e-7)return []
+    const to={...center,elevationFeet:stair.from.elevationFeet+(stair.to.elevationFeet-stair.from.elevationFeet)*nextT}
+    const distanceFeet=Math.max(map.feetPerCell??5,Math.abs(to.elevationFeet-elevation))
+    return [{dc,dr,stair:{...stair,from:{...position,elevationFeet:elevation},to,distanceFeet}}]
+  })
 }
 
 const directions = [-1, 0, 1].flatMap((dc) => [-1, 0, 1].flatMap((dr) =>
@@ -87,6 +142,11 @@ const directions = [-1, 0, 1].flatMap((dc) => [-1, 0, 1].flatMap((dr) =>
 
 function key(cell: GridCell) {
   return `${cell.col},${cell.row}`
+}
+
+/** Occupancy still uses cell keys; route history must distinguish stories at the same cell. */
+function nodeKey(cell: GridCell, elevationFeet: number) {
+  return `${key(cell)}@${elevationFeet}`
 }
 
 function geometryWithOpenableDoors(
@@ -105,7 +165,7 @@ function geometryWithOpenableDoors(
     : geometry
 }
 
-function terrainMultiplierAtPoint(
+export function terrainMultiplierAtPoint(
   geometry: MapGeometryState | undefined,
   point: { x: number; y: number },
   options: {
@@ -114,6 +174,9 @@ function terrainMultiplierAtPoint(
     elevationFeet: number
     tokenHeightFeet: number
     ignoreDifficultTerrain?: boolean
+    ignoreDifficultTerrainMaterials?: readonly MapGeometrySurfaceMaterial[]
+    map?: BattleMap
+    token?: Token
   },
 ): number {
   let multiplier = 1
@@ -125,7 +188,10 @@ function terrainMultiplierAtPoint(
     } else if (!mapGeometryObstacleAffectsElevation(obstacle, options.elevationFeet, options.tokenHeightFeet)) {
       continue
     }
-    const terrainMultiplier = options.ignoreDifficultTerrain
+    const normalizedGround = mapGeometryObstacleIsGroundSurfaceOverlay(obstacle) &&
+      dnd5eNormalGroundTerrainAt(options.map, point, options.elevationFeet, options.token, geometry)
+    const terrainMultiplier = (normalizedGround || options.ignoreDifficultTerrain || (obstacle.surfaceMaterial != null &&
+      options.ignoreDifficultTerrainMaterials?.includes(obstacle.surfaceMaterial)))
       ? 1
       : Math.max(1, obstacle.terrainCostMultiplier ?? 1)
     const traversalMultiplier = obstacle.traversal === 'climb' && !options.canClimb
@@ -138,7 +204,14 @@ function terrainMultiplierAtPoint(
   return multiplier
 }
 
+function standingSurfaceElevation(map: BattleMap, geometry: MapGeometryState | undefined, token: Token, position: { x: number; y: number }, ignoreEntities?: boolean) {
+  const terrain = mapGeometryTerrainElevationAtPoint(geometry, position)
+  return ignoreEntities ? terrain : dnd5eEntitySupportElevation({ map, geometry, token: { ...token, ...position },
+    terrainElevationFeet: terrain, elevationFeet: Math.max(terrain, token.elevationFeet ?? terrain) })
+}
+
 export function findMapGeometryPath(input: {
+  canTraverseEdge?: (from: { x: number; y: number }, to: { x: number; y: number }) => boolean
   map: BattleMap
   geometry?: MapGeometryState
   token: Token
@@ -154,19 +227,24 @@ export function findMapGeometryPath(input: {
   ignoreTokens?: boolean
   /** Ignores walls, doors, solid obstacles and terrain surfaces on the Material Plane. */
   ignoreGeometryCollision?: boolean
+  passThroughSolidMaterials?: readonly MapTraversableSolidMaterial[]
   /** Tokens whose occupied cells may be traversed but never used as a final destination. */
   passThroughTokenIds?: readonly string[]
   allowOccupiedDestination?: boolean
   maximumVisited?: number
   /** Ignores difficult-terrain multipliers while retaining independent speed-cost effects. */
   ignoreDifficultTerrain?: boolean
+  ignoreDifficultTerrainMaterials?: readonly MapGeometrySurfaceMaterial[]
   /** Additional difficult-terrain sources do not stack with each other. */
   additionalDifficultTerrainMultiplier?: (token: Token, position: { x: number; y: number }) => number
   /** Speed/cost modifiers stack with difficult terrain. */
   additionalSpeedCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
+  /** Per-foot surcharge, added to terrain cost before independent speed reduction. */
+  additionalMovementCostPerFoot?: (token: Token, from: { x: number; y: number }, to: { x: number; y: number }) => number
   /** @deprecated Use the classified callbacks above; retained for extension compatibility. */
   additionalCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
 }): MapPathResult | undefined {
+  input = { ...input, map: mapForSolidMaterialTraversal(input.map, input.passThroughSolidMaterials) }
   const gridSize = Math.max(1, input.map.gridSize)
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const columns = Math.max(1, Math.ceil(input.map.width / gridSize))
@@ -174,11 +252,11 @@ export function findMapGeometryPath(input: {
   const start = tokenAnchorCellFromPixel(input.token.x, input.token.y, input.token, input.map)
   const destination = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
   const pathGeometry = input.ignoreGeometryCollision
-    ? undefined
-    : geometryWithOpenableDoors(input.geometry, input.allowOpenUnlockedDoors)
+    ? mapGeometryForEtherealTravel(input.geometry)
+    : geometryWithOpenableDoors(mapGeometryForSolidMaterialTraversal(input.geometry, input.passThroughSolidMaterials), input.allowOpenUnlockedDoors)
   const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
   const destinationPosition = tokenCenterForAnchorCell(destination, input.token, input.map)
-  const startTerrainElevation = mapGeometryTerrainElevationAtPoint(pathGeometry, startPosition)
+  const startTerrainElevation = standingSurfaceElevation(input.map, pathGeometry, input.token, startPosition, input.ignoreGeometryCollision)
   const storedStartElevation = Number.isFinite(input.token.elevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
     : startTerrainElevation
@@ -188,15 +266,21 @@ export function findMapGeometryPath(input: {
   const targetElevation = Number.isFinite(input.targetElevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.targetElevationFeet!))
     : input.canFly ? startElevation : undefined
+  if (targetElevation != null && targetElevation < mapGeometryTerrainElevationAtPoint(input.geometry, destinationPosition) - 1e-7 &&
+    !input.ignoreGeometryCollision && solidTerrainTraversalElevation(input, destinationPosition, targetElevation) == null) return undefined
   const maximumTerrainStepFeet = Math.max(0, input.maximumTerrainStepFeet ?? 10)
   const tokenHeightFeet = Math.max(5, Math.max(1, input.token.size) * 5)
-  const elevationAtPosition = (position: { x: number; y: number }, isDestination = false) => {
+  const stairs = input.ignoreGeometryCollision ? [] : mapStairWalkingEdges(input.map,pathGeometry,input.token.size*feetPerCell)
+  const elevationAtPosition = (position: { x: number; y: number }, isDestination = false, currentElevation = startElevation) => {
     if (input.canFly && targetElevation != null) {
       // 三维移动采用明确顺序：先在起点升降至声明高度，再水平飞行。
       // 这样同一条移动不会因拆成“升高 + 平移”而得到不同的墙体碰撞结果。
       return targetElevation
     }
-    const terrainElevation = mapGeometryTerrainElevationAtPoint(pathGeometry, position)
+    const terrainElevation = standingSurfaceElevation(input.map, pathGeometry, stairs.length ? {...input.token,elevationFeet:currentElevation} : input.token, position, input.ignoreGeometryCollision)
+    const solidElevation = !input.climbVerticalSurfaces
+      ? solidTerrainTraversalElevation(input, position, targetElevation ?? startElevation) : undefined
+    if (solidElevation != null) return solidElevation
     if (input.climbVerticalSurfaces && targetElevation != null) {
       const height = Math.max(terrainElevation, targetElevation)
       // Approach a cliff on the ground before climbing; do not project its
@@ -212,9 +296,9 @@ export function findMapGeometryPath(input: {
   if ((input.canFly || input.climbVerticalSurfaces) && targetElevation != null && tokenOccupiedCellsAt(input.token, input.map, startPosition)
     .some(cell => blockingOccupied(Math.min(startElevation, targetElevation), Math.max(startElevation, targetElevation) + tokenHeightFeet).has(key(cell)))) return undefined
   const nodes = new Map<string, PathNode>()
-  nodes.set(key(start), { cell: start, cost: 0, estimate: 0, elevationFeet: startElevation })
+  nodes.set(nodeKey(start, startElevation), { cell: start, cost: 0, estimate: 0, elevationFeet: startElevation })
   const open = new PathAStarOpenHeap(nodes, destination)
-  open.pushOrUpdate(key(start))
+  open.pushOrUpdate(nodeKey(start, startElevation))
   const maximumVisited = Math.max(100, input.maximumVisited ?? 20_000)
   let visited = 0
 
@@ -222,22 +306,27 @@ export function findMapGeometryPath(input: {
     visited += 1
     const currentKey = open.pop()!
     const current = nodes.get(currentKey)!
-    if (current.cell.col === destination.col && current.cell.row === destination.row) {
+    if (current.cell.col === destination.col && current.cell.row === destination.row &&
+      (!stairs.length || input.canFly || input.climbVerticalSurfaces || targetElevation == null || Math.abs(current.elevationFeet-targetElevation)<1e-4)) {
       const cells: GridCell[] = []
       const elevationsFeet: number[] = []
+      const stepDistances: number[] = []
       let cursor: PathNode | undefined = current
       while (cursor) {
         cells.push(cursor.cell)
         elevationsFeet.push(cursor.elevationFeet)
+        stepDistances.push(cursor.stepDistanceFeet??0)
         cursor = cursor.previous ? nodes.get(cursor.previous) : undefined
       }
       cells.reverse()
       elevationsFeet.reverse()
+      stepDistances.reverse()
       if (cells.length === 1) {
         const finalElevation = elevationAtPosition(destinationPosition, true)
         if (input.climbVerticalSurfaces
           ? !mapClimbSupported(pathGeometry, input.map, input.token, startPosition, destinationPosition, startElevation, finalElevation)
-          : !input.canFly && Math.abs(finalElevation - startElevation) > maximumTerrainStepFeet) return undefined
+          : !input.canFly && Math.abs(finalElevation - startElevation) > maximumTerrainStepFeet &&
+            !solidTerrainStep(input, startPosition, destinationPosition, startElevation, finalElevation)) return undefined
         if (!input.allowOccupiedDestination && tokenOccupiedCellsAt(input.token, input.map, destinationPosition)
           .some(cell => occupied(finalElevation).has(key(cell)))) return undefined
         if (mapGeometryPlacementBlocked({
@@ -256,7 +345,7 @@ export function findMapGeometryPath(input: {
       for (let index = 1; index < points.length; index += 1) {
         const from = points[index - 1]
         const to = points[index]
-        distanceFeet += feetPerCell + (input.climbVerticalSurfaces ? Math.abs(elevationsFeet[index] - elevationsFeet[index - 1]) : 0)
+        distanceFeet += stepDistances[index]
         for (const door of input.ignoreGeometryCollision ? [] : input.geometry?.doors ?? []) {
           if (
             mapGeometryDoorOpenState(door) === 'closed' &&
@@ -277,20 +366,44 @@ export function findMapGeometryPath(input: {
           ) * Math.max(1, input.additionalSpeedCostMultiplier?.(verticalToken, destinationPosition) ?? 1,
             input.additionalCostMultiplier?.(verticalToken, destinationPosition) ?? 1)
         : 1
-      return { points, elevationsFeet, cells, distanceFeet, movementCostFeet: Math.ceil(current.cost + (cells.length === 1 ? distanceFeet * verticalMultiplier : 0)), doorsToOpen: [...doorsToOpen] }
+      const solidVerticalDistance = cells.length === 1 && !input.canFly && !input.climbVerticalSurfaces &&
+        solidTerrainTraversalElevation(input, destinationPosition, elevationsFeet[0]) != null
+        ? Math.abs(elevationsFeet[0] - startElevation) : 0
+      if (solidVerticalDistance > 0) {
+        if (mapGeometryMovementBlocked({ geometry: pathGeometry, map: input.map, token: input.token,
+          to: destinationPosition, fromElevationFeet: startElevation, toElevationFeet: elevationsFeet[0],
+          minimumPassageGapInches: input.minimumPassageGapInches }).blocked) return undefined
+        distanceFeet = solidVerticalDistance
+        const multiplier = Math.max(terrainMultiplierAtPoint(pathGeometry, destinationPosition,
+          { ...input, elevationFeet: elevationsFeet[0], tokenHeightFeet }),
+          input.ignoreDifficultTerrain ? 1 : input.additionalDifficultTerrainMultiplier?.(verticalToken, destinationPosition) ?? 1) *
+          Math.max(1, input.additionalSpeedCostMultiplier?.(verticalToken, destinationPosition) ?? 1,
+            input.additionalCostMultiplier?.(verticalToken, destinationPosition) ?? 1)
+        const movementCostFeet = Math.ceil(solidVerticalDistance * multiplier)
+        points.unshift({ ...startPosition }); cells.unshift({ ...start }); elevationsFeet.unshift(startElevation)
+        return { points, elevationsFeet, cells, distanceFeet, movementCostFeet, unroundedMovementCostFeet:solidVerticalDistance*multiplier, doorsToOpen: [...doorsToOpen] }
+      }
+      const unroundedMovementCostFeet=current.cost + (cells.length === 1 ? distanceFeet * verticalMultiplier : 0)
+      return { points, elevationsFeet, cells, distanceFeet, movementCostFeet: Math.ceil(unroundedMovementCostFeet), unroundedMovementCostFeet, doorsToOpen: [...doorsToOpen] }
     }
 
     const currentPosition = tokenCenterForAnchorCell(current.cell, input.token, input.map)
-    directionLoop: for (const direction of directions) {
+    const choices: {dc:number;dr:number;stair?:MapStairWalkingEdge}[]=[...directions,...stairDirections(stairs,input.map,input.token,currentPosition,current.elevationFeet)]
+    directionLoop: for (const direction of choices) {
       const next = { col: current.cell.col + direction.dc, row: current.cell.row + direction.dr }
       if (next.col < 0 || next.row < 0 || next.col >= columns || next.row >= rows) continue
       const position = tokenCenterForAnchorCell(next, input.token, input.map)
+      if (input.canTraverseEdge && !input.canTraverseEdge(currentPosition, position)) continue
       const placed = { ...input.token, ...position }
       const isDestination = next.col === destination.col && next.row === destination.row
-      const nextElevation = elevationAtPosition(position, isDestination)
-      if (input.climbVerticalSurfaces
+      const nextElevation = direction.stair?.to.elevationFeet ?? elevationAtPosition(position, isDestination,current.elevationFeet)
+      if(direction.stair && mapTokenSweepBlocked({map:input.map,geometry:pathGeometry,mover:input.token,from:currentPosition,to:position,
+        fromElevationFeet:current.elevationFeet,toElevationFeet:nextElevation,ignoreTokens:input.ignoreTokens,excludedIds:input.passThroughTokenIds}))continue
+      if(!direction.stair && Math.abs(nextElevation-current.elevationFeet)>1e-4 && choices.some(choice=>choice.stair && choice.dc===direction.dc && choice.dr===direction.dr && Math.abs(choice.stair.to.elevationFeet-nextElevation)<1e-4))continue
+      if (!direction.stair && (input.climbVerticalSurfaces
         ? !mapClimbSupported(pathGeometry, input.map, input.token, currentPosition, position, current.elevationFeet, nextElevation)
-        : !input.canFly && Math.abs(nextElevation - current.elevationFeet) > maximumTerrainStepFeet) continue
+        : !input.canFly && Math.abs(nextElevation - current.elevationFeet) > maximumTerrainStepFeet &&
+          !solidTerrainStep(input, currentPosition, position, current.elevationFeet, nextElevation))) continue
       if ((!isDestination || !input.allowOccupiedDestination) &&
         tokenOccupiedCellsAt(placed, input.map, placed).some((cell) =>
           (isDestination ? occupied(nextElevation) : blockingOccupied(nextElevation)).has(key(cell)))) continue
@@ -311,7 +424,7 @@ export function findMapGeometryPath(input: {
         elevationFeet: nextElevation,
         minimumPassageGapInches: input.minimumPassageGapInches,
       }).blocked) continue
-      if (direction.dc !== 0 && direction.dr !== 0) {
+      if (!direction.stair && direction.dc !== 0 && direction.dr !== 0) {
         // A diagonal may not squeeze through the corner between two occupied
         // cells or wall edges. Requiring both orthogonal approaches to be open
         // also makes the preview path identical to the authoritative route.
@@ -322,15 +435,17 @@ export function findMapGeometryPath(input: {
         const occupiedCorners = cornerCells.map((cornerCell) => {
           const cornerPosition = tokenCenterForAnchorCell(cornerCell, input.token, input.map)
           const cornerToken = { ...input.token, ...cornerPosition }
-          return tokenOccupiedCellsAt(cornerToken, input.map, cornerToken).some((cell) => blockingOccupied(elevationAtPosition(cornerPosition)).has(key(cell)))
+          return tokenOccupiedCellsAt(cornerToken, input.map, cornerToken).some((cell) => blockingOccupied(elevationAtPosition(cornerPosition,false,current.elevationFeet)).has(key(cell)))
         })
         if (occupiedCorners.every(Boolean)) continue directionLoop
         for (const cornerCell of cornerCells) {
           const cornerPosition = tokenCenterForAnchorCell(cornerCell, input.token, input.map)
-          const cornerElevation = elevationAtPosition(cornerPosition)
+          const cornerElevation = elevationAtPosition(cornerPosition,false,current.elevationFeet)
           if (!input.canFly && !input.climbVerticalSurfaces && (
-            Math.abs(cornerElevation - current.elevationFeet) > maximumTerrainStepFeet ||
-            Math.abs(nextElevation - cornerElevation) > maximumTerrainStepFeet
+            (Math.abs(cornerElevation - current.elevationFeet) > maximumTerrainStepFeet &&
+              !solidTerrainStep(input, currentPosition, cornerPosition, current.elevationFeet, cornerElevation)) ||
+            (Math.abs(nextElevation - cornerElevation) > maximumTerrainStepFeet &&
+              !solidTerrainStep(input, cornerPosition, position, cornerElevation, nextElevation))
           )) continue directionLoop
           if (input.climbVerticalSurfaces && (
             !mapClimbSupported(pathGeometry, input.map, input.token, currentPosition, cornerPosition, current.elevationFeet, cornerElevation) ||
@@ -358,7 +473,9 @@ export function findMapGeometryPath(input: {
           }
         }
       }
-      const stepDistanceFeet = feetPerCell + (input.climbVerticalSurfaces ? Math.abs(nextElevation - current.elevationFeet) : 0)
+      const stepDistanceFeet = direction.stair?.distanceFeet ?? (input.climbVerticalSurfaces ? feetPerCell + Math.abs(nextElevation - current.elevationFeet)
+        : solidTerrainStep(input, currentPosition, position, current.elevationFeet, nextElevation)
+          ? Math.max(feetPerCell, Math.abs(nextElevation - current.elevationFeet)) : feetPerCell)
       const stepToken = { ...input.token, elevationFeet: nextElevation }
       const difficultTerrainMultiplier = Math.max(
         terrainMultiplierAtPoint(pathGeometry, position, {
@@ -375,9 +492,10 @@ export function findMapGeometryPath(input: {
         input.additionalSpeedCostMultiplier?.(stepToken, position) ?? 1,
         input.additionalCostMultiplier?.(stepToken, position) ?? 1,
       )
-      const multiplier = difficultTerrainMultiplier * speedCostMultiplier
+      const surcharge = Math.max(0, input.additionalMovementCostPerFoot?.(stepToken, currentPosition, position) ?? 0)
+      const multiplier = (difficultTerrainMultiplier + surcharge) * speedCostMultiplier
       const nextCost = current.cost + stepDistanceFeet * multiplier
-      const nextKey = key(next)
+      const nextKey = nodeKey(next, nextElevation)
       const previous = nodes.get(nextKey)
       if (previous && previous.cost <= nextCost) continue
       nodes.set(nextKey, {
@@ -388,6 +506,7 @@ export function findMapGeometryPath(input: {
         estimate: Math.max(Math.abs(destination.col - next.col), Math.abs(destination.row - next.row)) * feetPerCell,
         elevationFeet: nextElevation,
         previous: currentKey,
+        stepDistanceFeet,
       })
       open.pushOrUpdate(nextKey)
     }
@@ -557,6 +676,7 @@ class PathMinHeap {
 export function createMapGeometryPathTree(
   input: MapGeometryPathTreeInput,
 ): MapGeometryPathTree {
+  input = { ...input, map: mapForSolidMaterialTraversal(input.map, input.passThroughSolidMaterials) }
   if (input.climbVerticalSurfaces) return {
     visitedCells: 0, truncated: false,
     pathTo(to) {
@@ -575,13 +695,10 @@ export function createMapGeometryPathTree(
     input.map,
   )
   const pathGeometry = input.ignoreGeometryCollision
-    ? undefined
-    : geometryWithOpenableDoors(input.geometry, input.allowOpenUnlockedDoors)
+    ? mapGeometryForEtherealTravel(input.geometry)
+    : geometryWithOpenableDoors(mapGeometryForSolidMaterialTraversal(input.geometry, input.passThroughSolidMaterials), input.allowOpenUnlockedDoors)
   const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
-  const startTerrainElevation = mapGeometryTerrainElevationAtPoint(
-    pathGeometry,
-    startPosition,
-  )
+  const startTerrainElevation = standingSurfaceElevation(input.map, pathGeometry, input.token, startPosition, input.ignoreGeometryCollision)
   const storedStartElevation = Number.isFinite(input.token.elevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
     : startTerrainElevation
@@ -591,6 +708,7 @@ export function createMapGeometryPathTree(
   const flightElevation = input.canFly && Number.isFinite(input.targetElevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.targetElevationFeet!))
     : input.canFly ? startElevation : undefined
+  const stairs = input.ignoreGeometryCollision ? [] : mapStairWalkingEdges(input.map,pathGeometry,input.token.size*feetPerCell)
   const maximumTerrainStepFeet = Math.max(
     0,
     input.maximumTerrainStepFeet ?? 10,
@@ -599,8 +717,9 @@ export function createMapGeometryPathTree(
     ? Math.max(0, input.maximumMovementCostFeet!)
     : Number.POSITIVE_INFINITY
   const tokenHeightFeet = Math.max(5, Math.max(1, input.token.size) * 5)
-  const elevationAtPosition = (position: { x: number; y: number }) =>
-    flightElevation ?? mapGeometryTerrainElevationAtPoint(pathGeometry, position)
+  const elevationAtPosition = (position: { x: number; y: number }, currentElevation = startElevation) =>
+    flightElevation ?? solidTerrainTraversalElevation(input, position, input.targetElevationFeet ?? startElevation) ??
+      standingSurfaceElevation(input.map, pathGeometry, stairs.length ? {...input.token,elevationFeet:currentElevation} : input.token, position, input.ignoreGeometryCollision)
   const occupied = createMapTokenOccupancy(input.map, input.geometry, input.token, input.ignoreTokens)
   const blockingOccupied = createMapTokenOccupancy(input.map, input.geometry, input.token,
     input.ignoreTokens, input.passThroughTokenIds)
@@ -611,13 +730,13 @@ export function createMapGeometryPathTree(
   const nodes = new Map<string, PathNode>()
   const queue = new PathMinHeap()
   let queueOrder = 0
-  nodes.set(key(start), {
+  nodes.set(nodeKey(start, startElevation), {
     cell: start,
     cost: 0,
     estimate: 0,
     elevationFeet: startElevation,
   })
-  queue.push({ nodeKey: key(start), cost: 0, order: queueOrder++ })
+  queue.push({ nodeKey: nodeKey(start, startElevation), cost: 0, order: queueOrder++ })
   const maximumVisited = Math.max(100, input.maximumVisited ?? 20_000)
   let visited = 0
 
@@ -631,7 +750,8 @@ export function createMapGeometryPathTree(
       input.token,
       input.map,
     )
-    directionLoop: for (const direction of directions) {
+    const choices: {dc:number;dr:number;stair?:MapStairWalkingEdge}[]=[...directions,...stairDirections(stairs,input.map,input.token,currentPosition,current.elevationFeet)]
+    directionLoop: for (const direction of choices) {
       const next = {
         col: current.cell.col + direction.dc,
         row: current.cell.row + direction.dr,
@@ -641,11 +761,16 @@ export function createMapGeometryPathTree(
         next.col >= columns || next.row >= rows
       ) continue
       const position = tokenCenterForAnchorCell(next, input.token, input.map)
+      if (input.canTraverseEdge && !input.canTraverseEdge(currentPosition, position)) continue
       const placed = { ...input.token, ...position }
-      const nextElevation = elevationAtPosition(position)
+      const nextElevation = direction.stair?.to.elevationFeet ?? elevationAtPosition(position,current.elevationFeet)
+      if(direction.stair && mapTokenSweepBlocked({map:input.map,geometry:pathGeometry,mover:input.token,from:currentPosition,to:position,
+        fromElevationFeet:current.elevationFeet,toElevationFeet:nextElevation,ignoreTokens:input.ignoreTokens,excludedIds:input.passThroughTokenIds}))continue
+      if(!direction.stair && Math.abs(nextElevation-current.elevationFeet)>1e-4 && choices.some(choice=>choice.stair && choice.dc===direction.dc && choice.dr===direction.dr && Math.abs(choice.stair.to.elevationFeet-nextElevation)<1e-4))continue
       if (
-        !input.canFly &&
-        Math.abs(nextElevation - current.elevationFeet) > maximumTerrainStepFeet
+        !direction.stair && !input.canFly &&
+        Math.abs(nextElevation - current.elevationFeet) > maximumTerrainStepFeet &&
+        !solidTerrainStep(input, currentPosition, position, current.elevationFeet, nextElevation)
       ) continue
       if (
         tokenOccupiedCellsAt(placed, input.map, placed)
@@ -663,7 +788,7 @@ export function createMapGeometryPathTree(
         fromElevationFeet: current.elevationFeet,
         toElevationFeet: nextElevation,
       }).blocked) continue
-      if (direction.dc !== 0 && direction.dr !== 0) {
+      if (!direction.stair && direction.dc !== 0 && direction.dr !== 0) {
         const cornerCells = [
           { col: current.cell.col + direction.dc, row: current.cell.row },
           { col: current.cell.col, row: current.cell.row + direction.dr },
@@ -676,7 +801,7 @@ export function createMapGeometryPathTree(
           )
           const cornerToken = { ...input.token, ...cornerPosition }
           return tokenOccupiedCellsAt(cornerToken, input.map, cornerToken)
-            .some((cell) => blockingOccupied(elevationAtPosition(cornerPosition)).has(key(cell)))
+            .some((cell) => blockingOccupied(elevationAtPosition(cornerPosition,current.elevationFeet)).has(key(cell)))
         })
         if (occupiedCorners.every(Boolean)) continue directionLoop
         for (const cornerCell of cornerCells) {
@@ -685,10 +810,12 @@ export function createMapGeometryPathTree(
             input.token,
             input.map,
           )
-          const cornerElevation = elevationAtPosition(cornerPosition)
+          const cornerElevation = elevationAtPosition(cornerPosition,current.elevationFeet)
           if (!input.canFly && !input.climbVerticalSurfaces && (
-            Math.abs(cornerElevation - current.elevationFeet) > maximumTerrainStepFeet ||
-            Math.abs(nextElevation - cornerElevation) > maximumTerrainStepFeet
+            (Math.abs(cornerElevation - current.elevationFeet) > maximumTerrainStepFeet &&
+              !solidTerrainStep(input, currentPosition, cornerPosition, current.elevationFeet, cornerElevation)) ||
+            (Math.abs(nextElevation - cornerElevation) > maximumTerrainStepFeet &&
+              !solidTerrainStep(input, cornerPosition, position, cornerElevation, nextElevation))
           )) continue directionLoop
           const cornerToken = {
             ...input.token,
@@ -732,10 +859,13 @@ export function createMapGeometryPathTree(
         input.additionalSpeedCostMultiplier?.(stepToken, position) ?? 1,
         input.additionalCostMultiplier?.(stepToken, position) ?? 1,
       )
+      const surcharge = Math.max(0, input.additionalMovementCostPerFoot?.(stepToken, currentPosition, position) ?? 0)
+      const stepDistanceFeet = direction.stair?.distanceFeet ?? (solidTerrainStep(input, currentPosition, position, current.elevationFeet, nextElevation)
+        ? Math.max(feetPerCell, Math.abs(nextElevation - current.elevationFeet)) : feetPerCell)
       const nextCost = current.cost +
-        feetPerCell * difficultTerrainMultiplier * speedCostMultiplier
+        stepDistanceFeet * (difficultTerrainMultiplier + surcharge) * speedCostMultiplier
       if (nextCost > maximumMovementCostFeet + 1e-4) continue
-      const nextKey = key(next)
+      const nextKey = nodeKey(next, nextElevation)
       const previous = nodes.get(nextKey)
       if (previous && previous.cost <= nextCost) continue
       nodes.set(nextKey, {
@@ -744,12 +874,20 @@ export function createMapGeometryPathTree(
         estimate: 0,
         elevationFeet: nextElevation,
         previous: queued.nodeKey,
+        stepDistanceFeet,
       })
       queue.push({ nodeKey: nextKey, cost: nextCost, order: queueOrder++ })
     }
   }
 
   const truncated = queue.size > 0
+  const destinations = new Map<string, PathNode>()
+  for (const node of nodes.values()) {
+    if(stairs.length && !input.canFly && !input.climbVerticalSurfaces && input.targetElevationFeet!=null && Math.abs(node.elevationFeet-input.targetElevationFeet)>1e-4)continue
+    const cellKey = key(node.cell)
+    const previous = destinations.get(cellKey)
+    if (!previous || node.cost < previous.cost) destinations.set(cellKey, node)
+  }
   return {
     visitedCells: visited,
     truncated,
@@ -760,30 +898,36 @@ export function createMapGeometryPathTree(
         input.token,
         input.map,
       )
-      const destinationNode = nodes.get(key(destination))
+      const destinationNode = destinations.get(key(destination))
       if (!destinationNode) return undefined
       const destinationPosition = tokenCenterForAnchorCell(
         destination,
         input.token,
         input.map,
       )
+      if (input.targetElevationFeet != null &&
+        input.targetElevationFeet < mapGeometryTerrainElevationAtPoint(input.geometry, destinationPosition) - 1e-7 &&
+        !input.ignoreGeometryCollision && solidTerrainTraversalElevation(input, destinationPosition, input.targetElevationFeet) == null) return undefined
       const destinationToken = { ...input.token, ...destinationPosition }
       if (tokenOccupiedCellsAt(destinationToken, input.map, destinationToken)
-        .some((cell) => occupied(elevationAtPosition(destinationPosition)).has(key(cell)))) return undefined
+        .some((cell) => occupied(destinationNode.elevationFeet).has(key(cell)))) return undefined
       const cells: GridCell[] = []
       const elevationsFeet: number[] = []
+      const stepDistances: number[] = []
       let cursor: PathNode | undefined = destinationNode
       while (cursor) {
         cells.push(cursor.cell)
         elevationsFeet.push(cursor.elevationFeet)
+        stepDistances.push(cursor.stepDistanceFeet??0)
         cursor = cursor.previous ? nodes.get(cursor.previous) : undefined
       }
       cells.reverse()
       elevationsFeet.reverse()
+      stepDistances.reverse()
       // Match findMapGeometryPath's single-cell vertical movement semantics:
       // a flyer can change elevation without changing its anchor cell.
-      if (cells.length === 1 && flightElevation != null) {
-        elevationsFeet[0] = flightElevation
+      if (cells.length === 1 && (flightElevation != null || input.passThroughSolidMaterials?.length)) {
+        elevationsFeet[0] = elevationAtPosition(destinationPosition)
       }
       const destinationElevation =
         elevationsFeet.at(-1) ?? destinationNode.elevationFeet
@@ -817,12 +961,31 @@ export function createMapGeometryPathTree(
           ) doorsToOpen.add(door.id)
         }
       }
+      const solidVerticalDistance = cells.length === 1 && !input.canFly &&
+        solidTerrainTraversalElevation(input, destinationPosition, destinationElevation) != null
+        ? Math.abs(destinationElevation - startElevation) : 0
+      if (solidVerticalDistance > 0) {
+        if (mapGeometryMovementBlocked({ geometry: pathGeometry,
+          map: input.map, token: input.token, to: destinationPosition, fromElevationFeet: startElevation,
+          toElevationFeet: destinationElevation, minimumPassageGapInches: input.minimumPassageGapInches }).blocked) return undefined
+        const verticalToken = { ...input.token, elevationFeet: destinationElevation }
+        const multiplier = Math.max(terrainMultiplierAtPoint(pathGeometry, destinationPosition,
+          { ...input, elevationFeet: destinationElevation, tokenHeightFeet }),
+          input.ignoreDifficultTerrain ? 1 : input.additionalDifficultTerrainMultiplier?.(verticalToken, destinationPosition) ?? 1) *
+          Math.max(1, input.additionalSpeedCostMultiplier?.(verticalToken, destinationPosition) ?? 1,
+            input.additionalCostMultiplier?.(verticalToken, destinationPosition) ?? 1)
+        const movementCostFeet = Math.ceil(solidVerticalDistance * multiplier)
+        if (movementCostFeet > maximumMovementCostFeet) return undefined
+        points.unshift({ ...startPosition }); cells.unshift({ ...start }); elevationsFeet.unshift(startElevation)
+        return { points, elevationsFeet, cells, distanceFeet: solidVerticalDistance, movementCostFeet, unroundedMovementCostFeet:solidVerticalDistance*multiplier, doorsToOpen: [...doorsToOpen] }
+      }
       return {
         points,
         elevationsFeet,
         cells,
-        distanceFeet: Math.max(0, cells.length - 1) * feetPerCell,
+        distanceFeet: stepDistances.reduce((sum,distance)=>sum+distance,0),
         movementCostFeet: Math.ceil(destinationNode.cost),
+        unroundedMovementCostFeet: destinationNode.cost,
         doorsToOpen: [...doorsToOpen],
       }
     },

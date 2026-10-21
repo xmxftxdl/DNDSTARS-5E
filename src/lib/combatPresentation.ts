@@ -1408,6 +1408,7 @@ export async function publishSpellBannerPresentation(input: {
   }
   await refreshCombatPresentationClock()
   const createdAt = combatPresentationServerNow()
+  try {
   await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
     schemaVersion: 1,
     type: 'spell-banner',
@@ -1415,6 +1416,11 @@ export async function publishSpellBannerPresentation(input: {
     createdAt,
     expiresAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS + 500,
   })
+  } catch (error) {
+    // Presentation delivery must not reject the authoritative spell action.
+    console.warn('[combat-presentation] spell banner delivery failed', error)
+    return { completesAt: combatPresentationServerNow() }
+  }
   return { completesAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS }
 }
 

@@ -27,6 +27,21 @@ function token(patch: Partial<Token>): Token {
 }
 
 describe('combat token liveness', () => {
+  it('keeps an active zero-HP extra turn controllable, but not a pending, ended or dead one', () => {
+    const subject = { id: 'samurai', currentHp: 0, maxHp: 100,
+      dnd5eCombatState: { zeroHitPointExtraTurn: { featureId: 'test:zero', slotId: 'extra', phase: 'active' } },
+    } as Character
+    const pawn = token({ characterId: subject.id })
+    expect(isTokenAlive(pawn, [JSON.parse(JSON.stringify(subject))])).toBe(true)
+    subject.dnd5eCombatState!.zeroHitPointExtraTurn!.phase = 'pending'
+    expect(isTokenAlive(pawn, [subject])).toBe(false)
+    subject.dnd5eCombatState!.zeroHitPointExtraTurn!.phase = 'active'
+    subject.deathSaveFailures = 3
+    expect(isTokenAlive(pawn, [subject])).toBe(false)
+    subject.deathSaveFailures = 0
+    delete subject.dnd5eCombatState!.zeroHitPointExtraTurn
+    expect(isTokenAlive(pawn, [subject])).toBe(false)
+  })
   it('keeps a Blinked creature alive while marking its token unavailable on the material plane', () => {
     const blinked = token({ id: 'wizard-token', characterId: 'wizard' })
     const banished = createDnd5eMechanicalEffect({
@@ -212,4 +227,20 @@ describe('combat token liveness', () => {
       characters,
     )).toMatchObject({ ended: true, reason: 'enemies-defeated' })
   })
+})
+
+it('waits for committed hostile arrivals before declaring all enemies defeated', () => {
+  const units=[token({id:'ally',type:'npc',hp:10,maxHp:10}),token({id:'enemy',type:'enemy',hp:0,maxHp:10})]
+  const arrival: import('../rulesets/dnd5e/activities/dnd5eDelayedSummonQueue').Dnd5eDelayedSummonEntry = {
+    schemaVersion:1,id:'arrival',combatId:'current',status:'pending',sourceTokenId:'ally',queuedRound:1,queuedAfterTurnKey:'first',queuedAfterTurnSequence:1,
+    request:{packageId:'test',actionId:'raise',actorId:'ally',selection:{},
+      activity:{schemaVersion:1,id:'raise',name:'Raise',activation:{kind:'action'},target:{kind:'self'},outcomes:[],
+        automation:{schemaVersion:1,level:'full',supportedPhases:[],manualPhases:[],limitations:[]}},
+      handoffs:{persistentAreas:[],movements:[],invocations:[],summons:[{kind:'summon',operationId:'spawn',monsterId:'srd-5.1:zombie',side:'enemy',count:1,timing:'source-next-turn-start',durationRounds:1,concentration:false}]}}
+  }
+  expect(checkCombatOutcome(units,[],{combatId:'current',delayedSummons:[arrival]})).toEqual({ended:false})
+  for(const status of ['completed','cancelled','blocked'] as const) {
+    expect(checkCombatOutcome(units,[],{combatId:'current',delayedSummons:[{...arrival,status}]})).toMatchObject({ended:true,winner:'ally'})
+  }
+  expect(checkCombatOutcome(units,[],{combatId:'other',delayedSummons:[arrival]})).toMatchObject({ended:true,winner:'ally'})
 })

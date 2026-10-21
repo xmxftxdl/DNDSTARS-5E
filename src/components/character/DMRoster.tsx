@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock3, Eye, LoaderCircle, MoonStar, RefreshCw, ShieldCheck, Trash2, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { assignableRoomCharactersForPlayer, roomCharactersOwnedByMembers } from '../../lib/playerView'
@@ -14,7 +14,7 @@ import { pruneInitiativeForValidTokens } from '../../lib/initiativeRoster'
 import type { SharedMapsState } from '../../store/maps'
 import { browserRuntime } from '../../adapters/browser/browserRuntime'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
-import CharacterSheet from './CharacterSheet'
+const CharacterSheet = lazy(() => import('./CharacterSheet'))
 
 export default function DMRoster() {
   const roomSession = useMemo(() => getRoomSession(), [])
@@ -509,7 +509,9 @@ function DmCharacterInspector({
           </button>
         </div>
         <div className="p-4 sm:p-6">
-          <CharacterSheet id={characterId} isDM readOnly allowAdvancementRevision />
+          <Suspense fallback={<p className="p-4 text-sm text-slate-400" role="status">正在加载角色卡…</p>}>
+            <CharacterSheet id={characterId} isDM readOnly allowAdvancementRevision />
+          </Suspense>
         </div>
       </div>
     </div>,

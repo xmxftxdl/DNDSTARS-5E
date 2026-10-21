@@ -47,7 +47,7 @@ export function raycastGeometry(input: {
   compiled?: CompiledGeometry
   from: KernelPoint
   to: KernelPoint
-  purpose: 'vision' | 'movement' | 'line-of-effect'
+  purpose: 'vision' | 'movement' | 'line-of-effect' | 'opaque-cover'
   fromElevationFeet?: number
   toElevationFeet?: number
   fromEyeHeightFeet?: number

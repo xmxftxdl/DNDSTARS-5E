@@ -1,8 +1,12 @@
+import { dnd5eActivityCommunicationSaveSucceeds } from './dnd5eActivityCommunicationSave'
+import { dnd5eCombatantCanHearSource } from '../audibility'
 import type { D20RollMode } from '../../contracts'
-import { dnd5eAbilityCheckRollMode, type Dnd5eCombatant } from '../headlessCombatEngine'
-import { dnd5eClassDefinition } from '../classes'
-import { getDnd5eSrdMonster } from '../monsters'
-import { dnd5eOpposedCheckSourceAbility } from './dnd5eFormula'
+import { dnd5eCombatantEnvironmentalImmunities, type Dnd5eEnvironmentalHazard } from '../environmentalProtection'
+import { dnd5eActivityAttackAbility } from './dnd5eAttackAbility'
+import { dnd5eOpposedHostRollModes } from './dnd5eActivityOpposedChecks'
+import { dnd5eActivitySaveExcludesCreatureType, dnd5eActivityExcludesTarget, dnd5eActivityTargetImmunities, dnd5eActivityCreatureTypeMatches } from './dnd5eActivityTargetExclusions'
+import type { AbilityKey } from '../../../lib/dnd'
+import type { Dnd5eCombatant, Dnd5eHeadlessCombatState } from '../headlessCombatEngine'
 import { dnd5eFleshToStoneTargetHasFlesh } from '../fleshToStone'
 import { dnd5eSavingThrowMode } from '../passiveDefenses'
 import type {
@@ -17,15 +21,22 @@ export interface Dnd5eActivityRollTargetV1 {
   name?: string
   controller?: 'player' | 'players' | 'dm'
   creatureType?: string
+  conditionImmunities?: readonly string[]
+  environmentalImmunities?: readonly Dnd5eEnvironmentalHazard[]
+  abilities?: Partial<Record<AbilityKey, number>>
   sizeRank?: number
   /** Host-derived source-relative audibility for effects that only affect hearers. */
   canHearActivitySource?: boolean
+  languages?: readonly string[]
+  elevationFeet?: number
+  groundElevationFeet?: number
 }
 
 function activityTargetNeedsPerTargetRoll(
   activity: Dnd5eActivityDefinitionV1,
   target: Dnd5eActivityRollTargetV1,
 ): boolean {
+  if (dnd5eActivityExcludesTarget(activity.target, target)) return false
   // Divine Word lets the caster select any visible creature, but only a
   // creature that can hear the word makes the Charisma save. Keep the target
   // in the submitted selection while omitting its inapplicable dice request.
@@ -51,11 +62,12 @@ function combineRollModes(modes: readonly (D20RollMode | undefined)[]): D20RollM
   return active[0] ?? 'normal'
 }
 
-function savingThrowModeForTarget(input: {
+export function savingThrowModeForTarget(input: {
   check: Extract<Dnd5eActivityCheckV1, { kind: 'saving-throw' }>
   actor: Dnd5eActivityRollTargetV1
   target: Dnd5eActivityRollTargetV1
   hostSavingThrowMode: (targetId: string, check: Extract<Dnd5eActivityCheckV1, { kind: 'saving-throw' }>) => D20RollMode
+  saveFactsByTargetId?: import('./dnd5eActivitySaveFacts').Dnd5eActivitySaveFactsV1
 }): D20RollMode {
   const { check, actor, target } = input
   const declared = check.rollMode ?? 'normal'
@@ -64,8 +76,11 @@ function savingThrowModeForTarget(input: {
     : declared
   const creatureTypeMode = check.rollModeByCreatureType && target.creatureType &&
     check.rollModeByCreatureType.creatureTypes.some((type) =>
-      type.trim().toLocaleLowerCase() === target.creatureType!.trim().toLocaleLowerCase())
+      dnd5eActivityCreatureTypeMatches(type, target.creatureType!))
     ? check.rollModeByCreatureType.mode
+    : undefined
+  const statBlockMode = target.statBlockId && check.rollModeByStatBlock?.statBlockIds.includes(target.statBlockId)
+    ? check.rollModeByStatBlock.mode
     : undefined
   const sizeMode = check.rollModeBySizeRank && target.sizeRank != null &&
     (check.rollModeBySizeRank.minimum == null || target.sizeRank >= check.rollModeBySizeRank.minimum) &&
@@ -80,7 +95,9 @@ function savingThrowModeForTarget(input: {
   // Keep the dice recipe aligned with the executor's final check mode. This is
   // especially important for host-derived saves: reserving 2d20 unconditionally
   // made ordinary saves look like advantage even though the second die was ignored.
-  return combineRollModes([baseMode, creatureTypeMode, sizeMode, opposedMode])
+  const factMode=check.rollModeByHostFact&&input.saveFactsByTargetId?.[target.id]?.[check.rollModeByHostFact.id]===true?
+    check.rollModeByHostFact.mode:undefined
+  return combineRollModes([baseMode, creatureTypeMode, statBlockMode, sizeMode, opposedMode,factMode])
 }
 
 function selectedSavingThrowAbility(
@@ -100,16 +117,25 @@ export function dnd5eActivityHostSavingThrowModeV1(input: {
   target: Dnd5eCombatant
   check: Extract<Dnd5eActivityCheckV1, { kind: 'saving-throw' }>
   sourceDistanceFeet?: number
+  state?: Dnd5eHeadlessCombatState
+  grantingAreaId?: string
 }): D20RollMode {
-  const sourceIsSpell = input.activity.legacySource?.kind === 'spell'
+  const sourceIsSpell = input.activity.legacySource?.kind === 'spell' || input.activity.spellInvocation != null
+  const grantingArea = input.grantingAreaId ? input.state?.companionScene?.map.dnd5ePluginAreas?.find(area =>
+    area.id === input.grantingAreaId && area.sourceTokenId === input.actor.id &&
+    area.grantedActivities?.some(grant => grant.activityId === input.activity.id)) : undefined
+  const recognizedIllusion = input.check.advantageIfIllusionRecognized === true &&
+    grantingArea?.illusionRecognition?.knownTokenIds.includes(input.target.id) === true
   return dnd5eSavingThrowMode(
     input.target,
     selectedSavingThrowAbility(input.target, input.check),
     {
       effectVisible: true,
+      recognizedIllusion,
       sourceCreatureType: input.actor.creatureType,
+      sourceActorId: input.actor.id,
       sourceIsSpell,
-      sourceIsMagical: sourceIsSpell,
+      sourceIsMagical: sourceIsSpell || input.activity.legacySource?.magical === true,
       sourceDistanceFeet: input.sourceDistanceFeet,
       // A condition immunity declared on the save is also the authoritative
       // condition the spell is attempting to impose. Passing it through lets
@@ -129,10 +155,15 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
   declarations: readonly Dnd5ePluginPerTargetDiceRollDeclaration[] | undefined
   actor: Dnd5eActivityRollTargetV1
   targets: readonly Dnd5eActivityRollTargetV1[]
+  projectileTargetIds?: readonly string[]
   choices?: Readonly<Record<string, string>>
+  /** Host-only, already settled pre-save weapon counter outcomes. */
+  weaponCounterattackSuccessCheckKeys?: ReadonlySet<string>
+  saveFactsByTargetId?: import('./dnd5eActivitySaveFacts').Dnd5eActivitySaveFactsV1
   combatants?: Readonly<Record<string, Dnd5eCombatant>>
   hostSavingThrowMode: (targetId: string, check: Extract<Dnd5eActivityCheckV1, { kind: 'saving-throw' }>) => D20RollMode
   hostAttackRollMode: (targetId: string, delivery?: 'melee' | 'ranged') => D20RollMode
+  spellcastingAbility?: AbilityKey
   hostAbilityCheckMode?: (
     check: Extract<Dnd5eActivityCheckV1, { kind: 'ability-check' | 'skill-check' | 'concentration-check' }>,
   ) => D20RollMode
@@ -140,7 +171,7 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
   const allChecks = input.activity.checks ?? []
   const checks = allChecks.filter((check) =>
     !(
-      (check.kind === 'saving-throw' || check.kind === 'attack-roll') &&
+      'appliesWhenChoice' in check &&
       check.appliesWhenChoice &&
       !check.appliesWhenChoice.optionIds.includes(input.choices?.[check.appliesWhenChoice.choiceId] ?? '')
     ))
@@ -150,14 +181,51 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
       : check.kind === 'opposed-ability-check'
         ? [check.rollId, check.opposedRollId]
         : [check.rollId]))
-  const rollTargets = input.targets.filter((target) => activityTargetNeedsPerTargetRoll(input.activity, target))
+  const rollTargets = input.targets.filter((target) => {
+    const host = input.combatants?.[target.id]
+    return activityTargetNeedsPerTargetRoll(input.activity, host ? {
+      ...target, elevationFeet: host.elevationFeet, groundElevationFeet: host.groundElevationFeet,
+      conditionImmunities: dnd5eActivityTargetImmunities(input.activity, host, input.combatants?.[input.actor.id]),
+    } : target)
+  })
   return (input.declarations ?? []).filter((declaration) => !inactiveRollIds.has(declaration.id))
-    .flatMap((declaration) => rollTargets.map((target) => {
+    .flatMap((declaration) => {
     const check = checks.find((candidate) =>
       candidate.scope === 'per-target' && (
         candidate.rollId === declaration.id ||
         (candidate.kind === 'opposed-ability-check' && candidate.opposedRollId === declaration.id)
       ))
+    const perProjectile = check && 'perProjectile' in check && check.perProjectile === true
+    if (perProjectile && !input.projectileTargetIds?.length) throw new Error('activity-projectile-order-missing')
+    const occurrences = perProjectile
+      ? input.projectileTargetIds!.flatMap((id, projectileOccurrenceIndex) => {
+          if (!input.targets.some(target => target.id === id)) throw new Error('activity-projectile-target-missing')
+          const target = rollTargets.find(target => target.id === id)
+          return target ? [{ target, projectileOccurrenceIndex }] : []
+        })
+      : rollTargets.map(target => ({ target, projectileOccurrenceIndex: undefined }))
+    return occurrences.filter(({ target, projectileOccurrenceIndex }) => {
+      if (check?.kind === 'saving-throw') {
+        const key = `${check.id}${projectileOccurrenceIndex == null ? '' : `:projectile:${projectileOccurrenceIndex}`}:${target.id}`
+        if (input.weaponCounterattackSuccessCheckKeys?.has(key)) return false
+        const source = input.combatants?.[input.actor.id]
+        const host = input.combatants?.[target.id]
+        const communicationTarget = host && source ? { languages: host.languages, canHearActivitySource: target.canHearActivitySource ?? dnd5eCombatantCanHearSource(host, source) } : target
+        if (dnd5eActivityCommunicationSaveSucceeds(check, source ?? input.actor, communicationTarget)) return false
+      }
+      if (check?.kind === 'saving-throw' && dnd5eActivitySaveExcludesCreatureType(check, input.combatants?.[target.id]?.creatureType ?? target.creatureType)) return false
+      if (check?.kind === 'saving-throw' && check.environmentalHazard) {
+        const host = input.combatants?.[target.id]
+        const protections = host ? dnd5eCombatantEnvironmentalImmunities(host) : target.environmentalImmunities
+        if (protections?.includes(check.environmentalHazard)) return false
+      }
+      if (check?.kind !== 'saving-throw' || !check.automaticSuccessIfConditionImmune) return true
+      const host = input.combatants?.[target.id]
+      const immunities = host
+        ? dnd5eActivityTargetImmunities(input.activity, host, input.combatants?.[input.actor.id])
+        : target.conditionImmunities
+      return !immunities?.includes(check.automaticSuccessIfConditionImmune)
+    }).map(({ target, projectileOccurrenceIndex }) => {
     let count = declaration.count
     let acceptedCounts: readonly number[] | undefined
     let d20RollKind: Dnd5ePluginDiceRollDeclaration['d20RollKind']
@@ -167,20 +235,20 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
       const declared = (sourceSide ? check.sourceRollMode : check.targetRollMode) ?? 'normal'
       const combatant = input.combatants?.[sourceSide ? input.actor.id : target.id]
       let baseMode: D20RollMode = declared === 'host-derived' ? 'normal' : declared
-      if (declared === 'host-derived' && combatant) {
-        const option = sourceSide
-          ? { ability: dnd5eOpposedCheckSourceAbility(check.sourceAbility, {
-              spellcastingAbility: (combatant.classId ? dnd5eClassDefinition(combatant.classId)?.spellcasting?.ability : undefined) ??
-                (combatant.statBlockId ? getDnd5eSrdMonster(combatant.statBlockId)?.spellcasting?.ability : undefined),
-            }) }
-          : check.targetOptions[0]!
-        baseMode = dnd5eAbilityCheckRollMode(combatant, option)
+      let hostFinalMode: D20RollMode | undefined
+      if (combatant) {
+        const source = input.combatants?.[input.actor.id]
+        const defender = input.combatants?.[target.id]
+        if (source && defender) {
+          const modes = dnd5eOpposedHostRollModes(check, source, defender)
+          hostFinalMode = sourceSide ? modes.source : modes.target
+        }
       }
       const sizeRule = sourceSide ? check.sourceRollModeByTargetSizeRank : undefined
       const sizeMode = sizeRule && target.sizeRank != null &&
         (sizeRule.minimum == null || target.sizeRank >= sizeRule.minimum) &&
         (sizeRule.maximum == null || target.sizeRank <= sizeRule.maximum) ? sizeRule.mode : undefined
-      d20RollMode = combineRollModes([baseMode, sizeMode])
+      d20RollMode = hostFinalMode ?? combineRollModes([baseMode, sizeMode])
       d20RollKind = 'ability-check'
       count = d20RollMode === 'normal' ? 1 : 2
       // Accept already-open requests created before opposed recipes were mode-aware.
@@ -191,6 +259,7 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
         actor: input.actor,
         target,
         hostSavingThrowMode: input.hostSavingThrowMode,
+        saveFactsByTargetId: input.saveFactsByTargetId,
       })
       d20RollKind = 'saving-throw'
       d20RollMode = mode
@@ -222,17 +291,19 @@ export function dnd5eActivityPerTargetRollDeclarationsV1(input: {
     }
     return {
       ...declaration,
-      id: `${declaration.id}:${target.id}`,
-      label: `${target.name?.trim() || target.id} · ${declaration.label}`,
+      id: `${declaration.id}${projectileOccurrenceIndex == null ? '' : `:projectile:${projectileOccurrenceIndex}`}:${target.id}`,
+      label: `${target.name?.trim() || target.id} · ${declaration.label}${projectileOccurrenceIndex == null ? '' : ` · ${projectileOccurrenceIndex + 1}`}`,
       count,
       ...(check?.kind === 'opposed-ability-check' ? { ownerOnlyPresentation: true } : {}),
       rollerTokenId: check?.kind === 'saving-throw' ||
         (check?.kind === 'opposed-ability-check' && check.opposedRollId === declaration.id) ? target.id : input.actor.id,
       ...(d20RollKind ? { d20RollKind } : {}),
       ...(d20RollMode ? { d20RollMode } : {}),
+      attackAbility: check?.kind === 'attack-roll' ? dnd5eActivityAttackAbility(check.attackBonus, input.spellcastingAbility) : undefined,
       ...(acceptedCounts ? { acceptedCounts } : {}),
     }
-  }))
+    })
+  })
 }
 
 /**
@@ -245,15 +316,41 @@ export function filterDnd5eConditionalActivityRollDeclarationsV1(input: {
   activity: Dnd5eActivityDefinitionV1
   declarations: readonly Dnd5ePluginDiceRollDeclaration[]
   successfulCheckKeys: ReadonlySet<string>
+  /** Full Host order, including targets whose dice have already been collected. */
+  orderedTargetIds?: readonly string[]
+  orderedProjectileTargetIds?: readonly string[]
+  savingThrowResult?: (checkId: string, targetId: string, projectileOccurrenceIndex?: number) => boolean | undefined
+  targetSpeedFeet?: (targetId: string) => number | undefined
   rolls?: Readonly<Record<string, { total: number }>>
 }): Dnd5ePluginDiceRollDeclaration[] {
   return input.declarations.filter((declaration) => {
     const check = (input.activity.checks ?? []).find((candidate) =>
-      candidate.scope === 'per-target' && declaration.id.startsWith(`${candidate.rollId}:`))
+      candidate.scope === 'per-target' ? declaration.id.startsWith(`${candidate.rollId}:`) : declaration.id === candidate.rollId)
     if (!check) return true
-    const targetId = declaration.id.slice(check.rollId.length + 1)
+    const targetSuffix = check.scope === 'per-target' ? declaration.id.slice(check.rollId.length + 1) : undefined
+    const projectile = 'perProjectile' in check && check.perProjectile ? /^projectile:(\d+):(.+)$/.exec(targetSuffix ?? '') : null
+    if ('perProjectile' in check && check.perProjectile && !projectile) return false
+    const targetId = projectile?.[2] ?? targetSuffix
+    if (check.kind === 'saving-throw' && check.stopAfterFirstFailure) {
+      const ordered = projectile ? input.orderedProjectileTargetIds : input.orderedTargetIds
+      const index = projectile ? Number(projectile[1]) : targetId == null ? -1 : ordered?.indexOf(targetId) ?? -1
+      if (!ordered || index < 0 || ordered[index] !== targetId || !ordered.slice(0, index).every((id, previousIndex) =>
+        input.savingThrowResult?.(check.id, id, projectile ? previousIndex : undefined) === true)) return false
+    }
+    if (check.kind === 'random-roll' && check.minimumTargetSpeedFeet != null) {
+      const speed = targetId == null ? undefined : input.targetSpeedFeet?.(targetId)
+      if (speed == null || !Number.isFinite(speed) || speed < check.minimumTargetSpeedFeet) return false
+    }
+    if (check.kind === 'random-roll' && check.appliesWhenSave) {
+      const result = targetId == null ? undefined : input.savingThrowResult?.(check.appliesWhenSave.checkId, targetId)
+      if (result == null || result !== (check.appliesWhenSave.result === 'success')) return false
+    }
     if (check.kind === 'saving-throw' && check.appliesWhenCheck) {
-      return input.successfulCheckKeys.has(`${check.appliesWhenCheck.checkId}:${targetId}`)
+      const prerequisite = input.activity.checks?.find(candidate => candidate.id === check.appliesWhenCheck!.checkId)
+      const occurrence = prerequisite && 'perProjectile' in prerequisite && prerequisite.perProjectile ? projectile?.[1] : undefined
+      if (prerequisite && 'perProjectile' in prerequisite && prerequisite.perProjectile && occurrence == null) return false
+      return input.successfulCheckKeys.has(targetId == null ? check.appliesWhenCheck.checkId :
+        `${check.appliesWhenCheck.checkId}${occurrence == null ? '' : `:projectile:${occurrence}`}:${targetId}`)
     }
     if (check.kind === 'random-roll' && check.appliesWhenCheckTotal) {
       const prerequisite = (input.activity.checks ?? []).find((candidate) =>
@@ -263,7 +360,7 @@ export function filterDnd5eConditionalActivityRollDeclarationsV1(input: {
         ? `${prerequisite.rollId}:${targetId}`
         : prerequisite.rollId
       const total = input.rolls?.[prerequisiteRollId]?.total
-      return total != null &&
+      return total != null && Number.isFinite(total) &&
         (check.appliesWhenCheckTotal.minimum == null || total >= check.appliesWhenCheckTotal.minimum) &&
         (check.appliesWhenCheckTotal.maximum == null || total <= check.appliesWhenCheckTotal.maximum)
     }

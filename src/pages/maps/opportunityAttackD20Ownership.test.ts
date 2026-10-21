@@ -8,8 +8,8 @@ const workspaceSource = readFileSync(
 
 describe('opportunity attack d20 ownership wiring', () => {
   it('attributes the d20 to the attacking token instead of the active-turn target', () => {
-    const start = workspaceSource.indexOf('const resolveDnd5eOpportunityAttackForMove')
-    const end = workspaceSource.indexOf('const resolveDnd5eOpportunityAttacksForMove', start)
+    const start = workspaceSource.indexOf('const collectDnd5ePreparedOpportunityRolls')
+    const end = workspaceSource.indexOf('const resolveDnd5eOpportunityAttackForMove', start)
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
 
@@ -17,5 +17,7 @@ describe('opportunity attack d20 ownership wiring', () => {
     expect(opportunityAttackFlow).toContain('rollerTokenId: attackerToken.id')
     expect(opportunityAttackFlow).toContain('rollerCharacterId: attackerCharacter?.id')
     expect(opportunityAttackFlow).toContain('existingRollMode: attack.attackMode')
+    const callerEnd = workspaceSource.indexOf('const resolveDnd5eOpportunityAttacksForMove', end)
+    expect(workspaceSource.slice(end, callerEnd)).toContain('await collectDnd5ePreparedOpportunityRolls(attack)')
   })
 })

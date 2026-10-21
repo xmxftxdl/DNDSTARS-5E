@@ -192,6 +192,7 @@ export interface Dnd5eMonsterAttackTraitContext {
   movementDistanceFeet?: number
   movementWasStraight?: boolean
   movementTowardTarget?: boolean
+  diveDistanceFeet?: number
 }
 
 function dnd5eMonsterTargetIsCurrentlySurprised(
@@ -260,7 +261,7 @@ export function dnd5eMonsterAssassinateAutomaticCritical(
 }
 
 export interface Dnd5eMonsterTraitDamageDefinition {
-  traitId: 'sneak-attack' | 'martial-advantage' | 'charge-damage'
+  traitId: 'sneak-attack' | 'martial-advantage' | 'charge-damage' | 'dive-damage'
   traitName: string
   damage: Dnd5eMonsterDamage
 }
@@ -296,6 +297,11 @@ export function dnd5eMonsterTraitDamageDefinitions(
   if (!monster || !inheritedType || !context.turnKey) return []
   const definitions: Dnd5eMonsterTraitDamageDefinition[] = []
   for (const trait of monster.traits) {
+    if (trait.automation === 'headless' && trait.rule?.kind === 'dive-damage' && attack.mode === 'melee' &&
+      (context.diveDistanceFeet ?? 0) >= trait.rule.minimumStraightMovementFeet) {
+      definitions.push({ traitId: 'dive-damage', traitName: trait.name, damage: trait.rule.extraDamage })
+      continue
+    }
     if (
       trait.automation === 'headless' &&
       trait.rule?.kind === 'charge-damage' &&

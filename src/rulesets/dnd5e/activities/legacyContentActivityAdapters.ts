@@ -69,12 +69,21 @@ const HEADLESS_EVENT_MECHANIC_KINDS = new Set<NonNullable<DeclarativeSubclassAbi
   'post-spell-random-table-choice',
   'spell-damage-max-die-bonus',
   'attacks-per-action',
+  'attack-action-defense',
+  'attack-action-speed',
+  'flurry-extra-attacks',
+  'missed-weapon-attack-reroll',
+  'd20-disadvantage-negation',
   'weapon-damage-rider',
   'spell-damage-ability-modifier',
+  'spell-healing-dice-maximum',
+  'spell-range-minimum',
+  'spell-optional-bonus-action',
   'spell-ability-check-bonus',
   'spell-interception',
   'spell-target-expansion',
   'damage-roll-maximization',
+  'advantage-for-extra-attack',
   'passive-defense',
   'reaction-weapon-attack',
   'death-prevention',
@@ -87,6 +96,7 @@ const HEADLESS_EVENT_MECHANIC_KINDS = new Set<NonNullable<DeclarativeSubclassAbi
   'alternate-resource-spellcasting',
   'granted-die-combat-options',
   'attack-retarget-interrupt',
+  'critical-hit-cancellation',
   'creature-form-eligibility',
   'creature-form-control',
   'bonus-weapon-attack',
@@ -649,8 +659,8 @@ function declarativeTarget(targeting: DeclarativeSubclassTargetingV1): Dnd5eActi
 }
 
 function declarativeTriggerEvent(trigger: DeclarativeSubclassAbilityV1['trigger']): Dnd5eTriggerEventV1 | undefined {
-  if (trigger.kind === 'active-use' || trigger.kind === 'before-spell-effect') return undefined
-  const events: Record<Exclude<DeclarativeSubclassAbilityV1['trigger']['kind'], 'active-use' | 'before-spell-effect'>, Dnd5eTriggerEventV1> = {
+  if (trigger.kind === 'active-use' || trigger.kind === 'before-spell-effect' || trigger.kind === 'before-saving-throw' || trigger.kind === 'passive') return undefined
+  const events: Record<Exclude<DeclarativeSubclassAbilityV1['trigger']['kind'], 'active-use' | 'before-spell-effect' | 'before-saving-throw' | 'passive'>, Dnd5eTriggerEventV1> = {
     'before-attack-roll': 'before-attack-roll', 'after-attack-roll': 'after-attack-roll',
     'after-attack-hit': 'attack-hit', 'after-attack-miss': 'attack-missed', 'after-d20-roll': 'd20-roll-resolved',
     'before-damage-taken': 'before-damage', 'after-damage-taken': 'after-damage',
@@ -1095,3 +1105,6 @@ export function dnd5eActivitiesFromMonster(monster: Dnd5eMonsterStatBlock): read
   ]
   return collections.flatMap(([collection, actions]) => actions.map((action) => dnd5eActivityFromMonsterAction(monster, action, collection)))
 }
+
+
+

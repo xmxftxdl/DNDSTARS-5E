@@ -1,4 +1,21 @@
+import { createCampaignTimeReconciliationRetry } from '../lib/campaignTimeReconciliationRetry'
+import { commitCampaignTimeCreatureProjection } from '../lib/campaignTimeCreatureCommit'
+import { commitCampaignEtherealReturns } from '../lib/campaignEtherealReturnCommit'
+import { settleBrowserEtherealExpiry } from '../composition/browserEtherealExpiry'
+import { dnd5eActivePlanarPhase } from '../rulesets/dnd5e/activeEffects'
+import { commitDnd5eExplorationSummons } from '../rulesets/dnd5e/activities/dnd5eExplorationSummonCommit'
+import { dnd5eDreamContactRosterKey } from '../rulesets/dnd5e/dreamContact'
+import { browserSharedRoomService } from '../composition/browserSharedRoomService'
+import { appRoomAuthorityScheduler } from '../lib/roomAuthorityScheduler'
+import { campaignUnappliedEffectMinutes, characterCombatClockKey, tokenCombatClockKey } from '../../shared/combat-round-credits.mjs'
+import { expireDnd5eMapRemainsProtection } from '../rulesets/dnd5e/mapRemainsProtection'
+import { transferNewlyDroppedSurfaceAreas } from '../rulesets/dnd5e/surfaceAreaTransfer'
+import { expireDnd5eGroundInventoryAlterations } from '../rulesets/dnd5e/mapInventoryAlteration'
+import { reconcileDnd5eCampaignForms } from '../rulesets/dnd5e/campaignFormReconciliation'
+import { reconcileDnd5eSummonSourceDeathsAcrossMaps } from '../rulesets/dnd5e/mapBridge'
+import { expireRestBoundAreas } from '../../shared/rest-bound-areas.mjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { expireDnd5eSummonLingerAtWorldMinute } from '../../shared/summon-linger.mjs'
 import { BellRing, CheckCircle2, Coffee, MoonStar, X } from 'lucide-react'
 import {
   formatCampaignTime,
@@ -95,7 +112,7 @@ export function campaignTimeCharacterReconciliationKey(
   roomId: string,
   clock: SharedCampaignTimeState,
 ): string {
-  return `${roomId}:${clock.worldMinute}:${clock.advances.at(-1)?.id ?? ''}:${clock.updatedAt}`
+  return `${roomId}:${clock.worldMinute}:${clock.worldSecondRemainder ?? 0}:${clock.advances.at(-1)?.id ?? ''}:${clock.updatedAt}`
 }
 
 export function projectDnd5eCampaignTimeAirborneTokens(input: {
@@ -125,7 +142,7 @@ export function projectDnd5eCampaignTimeAirborneTokens(input: {
       airborneCharacterIds.add(character.id)
       const appliedMinute = character.dnd5eWorldTimeAppliedMinute
       const elapsedMinutes = Number.isSafeInteger(appliedMinute)
-        ? Math.max(0, input.clock.worldMinute - appliedMinute!)
+        ? campaignUnappliedEffectMinutes(input.clock, appliedMinute!, characterCombatClockKey(character.id))
         : 0
       const descentDistanceFeet = dnd5eCampaignTimeControlledDescentDistanceFeet(
         character,
@@ -170,7 +187,7 @@ export function projectDnd5eCampaignTimeCreatureTokens(input: {
         : sourceMinutes.length > 0
           ? Math.min(...sourceMinutes)
           : input.clock.worldMinute
-      const elapsedMinutes = Math.max(0, input.clock.worldMinute - baselineMinute)
+      const elapsedMinutes = campaignUnappliedEffectMinutes(input.clock, baselineMinute, tokenCombatClockKey(map.id, token.id))
       let nextToken = token
       if (
         token.dnd5eSummon?.persistent === true &&
@@ -243,7 +260,13 @@ export function projectDnd5eCampaignTimeCreatedObjects(input: {
       changed = true
       return false
     })
-    return tokens.length === map.tokens.length ? map : { ...map, tokens }
+    const protectedTokens = tokens.map(token => {
+      const next = expireDnd5eMapRemainsProtection(token, input.worldMinute)
+      if (next !== token) changed = true
+      return next
+    })
+    return tokens.length === map.tokens.length && protectedTokens.every((token, index) => token === map.tokens[index])
+      ? map : { ...map, tokens: protectedTokens }
   })
   return { maps, changed, removedTokenIds }
 }
@@ -260,10 +283,30 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
   const seenTimerIds = useRef(new Set<string>())
   const seenRestIds = useRef(readRestReceipts())
   const restBaselineReady = useRef(false)
+  const [reconciliationRetry, setReconciliationRetry] = useState(0)
+  const reconciliationRetryQueue = useRef(createCampaignTimeReconciliationRetry())
+  const reconciliationScope = useRef(0)
   const characterReconciliationKeyRef = useRef<string | null>(null)
   const creatureTokenReconciliationKeyRef = useRef<string | null>(null)
   const roomSession = getRoomSession()
   const currentRoomId = roomSession?.roomId ?? '__local__'
+  useEffect(() => {
+    reconciliationScope.current += 1
+    return () => { reconciliationScope.current += 1; reconciliationRetryQueue.current.cancel() }
+  }, [currentRoomId, isDm])
+  const explorationSummonReceipts = maps.flatMap(map=>(map.dnd5eDelayedSummons??[])
+    .filter(entry=>entry.status==='pending' && (entry.dueWorldSecond!=null || entry.dueAfterCombatWorldSecond!=null))
+    .map(entry=>`${map.id}:${entry.id}:${entry.dueWorldSecond??entry.dueAfterCombatWorldSecond}`)).join('|')
+  useEffect(() => {
+    if (!isDm || !explorationSummonReceipts || hydratedRoomId !== currentRoomId || !hasHydratedSharedCharactersForCurrentRoom()) return
+    void appRoomAuthorityScheduler.run(`exploration-summons:${currentRoomId}:${clock.worldMinute}:${clock.worldSecondRemainder??0}:${explorationSummonReceipts}`,async()=>{
+      const current=()=> (getRoomSession()?.roomId ?? '__local__')===currentRoomId
+      if (!current()) return
+      const changed=await commitDnd5eExplorationSummons({loadResource:browserSharedRoomService.loadSharedResource,
+        saveResourcesAtomically:browserSharedRoomService.saveSharedResourcesAtomically},current)
+      if (changed && current()) await Promise.all([useMapStore.getState().loadShared({force:true}),useCharacterStore.getState().loadShared({force:true})])
+    }).catch(error=>console.error('Failed to settle exploration delayed summons',error))
+  },[isDm,currentRoomId,hydratedRoomId,clock.worldMinute,clock.worldSecondRemainder,explorationSummonReceipts])
   const playerOwnedCharacterIds = useMemo(() => {
     if (roomSession?.role !== 'player') return new Set<string>()
     return new Set(roomOwnedPlayerCharacters(characters, roomSession.roomId, roomSession.memberId)
@@ -274,7 +317,7 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
     // Both stores are persisted locally. On a document reload they initially
     // contain old browser snapshots, so reconciling either one before both room
     // resources hydrate can overwrite newer authoritative character state.
-    const reconciliationKey = campaignTimeCharacterReconciliationKey(currentRoomId, clock)
+    const reconciliationKey = `${campaignTimeCharacterReconciliationKey(currentRoomId, clock)}:${dnd5eDreamContactRosterKey(characters)}`
     const creatureTokenKey = `${currentRoomId}:${clock.worldMinute}:${maps
       .flatMap((map) => map.tokens)
       .filter((token) => !token.characterId && token.type !== 'obstacle')
@@ -293,11 +336,24 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
     )) {
       // Character/map store updates are also dependencies of this effect so
       // hydration can open the gate. Once one authoritative clock snapshot has
-      // entered reconciliation, those ordinary updates must not start another
+      // entered reconciliation, ordinary updates (except dream sleep/lifetime
+      // transitions captured in the key) must not start another
       // shared-character reload inside a long-cast atomic commit window.
       characterReconciliationKeyRef.current = reconciliationKey
       creatureTokenReconciliationKeyRef.current = creatureTokenKey
+      const scope = reconciliationScope.current
       void (async () => {
+        if (useCharacterStore.getState().characters.some(character =>
+          dnd5eActivePlanarPhase(character.dnd5eCombatState?.activeEffects).plane === 'ethereal')) {
+          const changed = await commitCampaignEtherealReturns({
+            loadResource: browserSharedRoomService.loadSharedResource,
+            saveResourcesAtomically: browserSharedRoomService.saveSharedResourcesAtomically,
+          }, settleBrowserEtherealExpiry, () => scope === reconciliationScope.current &&
+            (getRoomSession()?.roomId ?? '__local__') === currentRoomId)
+          if (scope !== reconciliationScope.current) return
+          if (changed) await Promise.all([useMapStore.getState().loadShared({ force: true }),
+            useCharacterStore.getState().loadShared({ force: true })])
+        }
         const currentMaps = useMapStore.getState().maps
         const permanence = completeDnd5eWallOfStoneForCampaignTime({
           maps: currentMaps,
@@ -316,33 +372,39 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
           await mapStore.saveSharedNow()
         }
         const mapStore = useMapStore.getState()
-        let expiryCharacters: readonly Character[] = useCharacterStore.getState().characters
+        const charactersBeforeExpiry = useCharacterStore.getState().characters
+        let expiryCharacters: readonly Character[] = charactersBeforeExpiry
+        const mapsBeforeExpiry = mapStore.maps
+        const expiryMaps = [...mapsBeforeExpiry]
         let expiredAnyArea = false
-        for (const currentMap of mapStore.maps) {
-          const expiredMap = expireDnd5ePluginAreasAtWorldMinute(currentMap, clock.worldMinute)
+        for (const currentMap of mapsBeforeExpiry) {
+          const expiredMap = expireDnd5eSummonLingerAtWorldMinute(
+            expireRestBoundAreas(expireDnd5ePluginAreasAtWorldMinute(currentMap, clock.worldMinute), clock), clock.worldMinute)
           if (expiredMap === currentMap) continue
           const reconciled = reconcileDnd5ePluginAreasAndConcentrationOnMap(
             currentMap,
             expiryCharacters,
             0,
             expiredMap,
+            expiryMaps,
           )
-          mapStore.applyAuthorityMapUpdate(currentMap.id, {
-            dnd5ePluginAreas: reconciled.map.dnd5ePluginAreas,
-            tokens: reconciled.map.tokens,
-          })
-          if (reconciled.characters !== expiryCharacters) {
-            for (const character of reconciled.characters) {
-              const previous = expiryCharacters.find((candidate) => candidate.id === character.id)
-              if (previous && JSON.stringify(previous) !== JSON.stringify(character)) {
-                useCharacterStore.getState().applyAuthorityUpdate(character.id, character)
-              }
-            }
-            expiryCharacters = reconciled.characters
-          }
+          expiryMaps[expiryMaps.findIndex(map => map.id === currentMap.id)] = reconciled.map
+          expiryCharacters = reconciled.characters
           expiredAnyArea = true
         }
-        if (expiredAnyArea) await mapStore.saveSharedNow()
+        if (expiredAnyArea) {
+          const transferredMaps = transferNewlyDroppedSurfaceAreas(mapsBeforeExpiry,expiryMaps,clock.worldMinute)
+          for (const map of transferredMaps) {
+            if (map === mapsBeforeExpiry.find(previous => previous.id === map.id)) continue
+            mapStore.applyAuthorityMapUpdate(map.id,{dnd5ePluginAreas:map.dnd5ePluginAreas,tokens:map.tokens})
+          }
+          for (const character of expiryCharacters) {
+            const previous = charactersBeforeExpiry.find(candidate => candidate.id === character.id)
+            if (previous && JSON.stringify(previous) !== JSON.stringify(character))
+              useCharacterStore.getState().applyAuthorityUpdate(character.id,character)
+          }
+          await mapStore.saveSharedNow()
+        }
         const createdObjectProjection = projectDnd5eCampaignTimeCreatedObjects({
           maps: useMapStore.getState().maps,
           worldMinute: clock.worldMinute,
@@ -356,19 +418,21 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
           }
           await mapStore.saveSharedNow()
         }
-        const creatureTokenProjection = projectDnd5eCampaignTimeCreatureTokens({
-          maps: useMapStore.getState().maps,
-          characters: useCharacterStore.getState().characters,
-          clock,
-        })
-        if (creatureTokenProjection.changed) {
-          const mapStore = useMapStore.getState()
-          for (const projectedMap of creatureTokenProjection.maps) {
-            const currentMap = mapStore.maps.find((map) => map.id === projectedMap.id)
-            if (currentMap === projectedMap) continue
-            mapStore.applyAuthorityMapUpdate(projectedMap.id, { tokens: projectedMap.tokens })
+        if (roomSession) {
+          await commitCampaignTimeCreatureProjection({
+            loadResource: browserSharedRoomService.loadSharedResource,
+            saveResourcesAtomically: browserSharedRoomService.saveSharedResourcesAtomically,
+          }, projectDnd5eCampaignTimeCreatureTokens, () => getRoomSession()?.roomId === currentRoomId)
+          if (getRoomSession()?.roomId !== currentRoomId) return
+          await useMapStore.getState().loadShared({ force: true })
+        } else {
+          const projection = projectDnd5eCampaignTimeCreatureTokens({
+            maps: useMapStore.getState().maps, characters: useCharacterStore.getState().characters, clock,
+          })
+          if (projection.changed) {
+            for (const map of projection.maps) useMapStore.getState().applyAuthorityMapUpdate(map.id, { tokens: map.tokens })
+            await useMapStore.getState().saveSharedNow()
           }
-          await mapStore.saveSharedNow()
         }
         const airborneProjection = projectDnd5eCampaignTimeAirborneTokens({
           maps: useMapStore.getState().maps,
@@ -379,6 +443,25 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
         await useCharacterStore.getState().reconcileCampaignTimeAndSave(clock, {
           airborneCharacterIds: airborneProjection.airborneCharacterIds,
         })
+        // Timed controller expiry must also release dependents on unopened
+        // scenes (for example a captive corpse's revival restriction).
+        const lifetimeMaps = useMapStore.getState().maps
+        const lifetimeCharacters = useCharacterStore.getState().characters
+        const lifetimes = reconcileDnd5eSummonSourceDeathsAcrossMaps({ maps: lifetimeMaps,
+          characters: lifetimeCharacters, round: 0, worldMinute: clock.worldMinute })
+        let lifetimeMapsChanged = false, lifetimeCharactersChanged = false
+        for (const character of lifetimes.characters) {
+          if (character === lifetimeCharacters.find(previous => previous.id === character.id)) continue
+          useCharacterStore.getState().applyAuthorityUpdate(character.id, character)
+          lifetimeCharactersChanged = true
+        }
+        for (const map of lifetimes.maps) {
+          if (map === lifetimeMaps.find(previous => previous.id === map.id)) continue
+          useMapStore.getState().applyAuthorityMapUpdate(map.id, { tokens: map.tokens, dnd5ePluginAreas: map.dnd5ePluginAreas })
+          lifetimeMapsChanged = true
+        }
+        if (lifetimeCharactersChanged) await useCharacterStore.getState().saveSharedNow()
+        if (lifetimeMapsChanged) await useMapStore.getState().saveSharedNow()
         if (airborneProjection.descendedCharacterIds.size > 0) {
           const mapStore = useMapStore.getState()
           for (const projectedMap of airborneProjection.maps) {
@@ -389,6 +472,32 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
           await mapStore.saveSharedNow()
         }
         useMapStore.getState().expireTimedLights(clock.worldMinute)
+        let formsChanged = false
+        for (const currentMap of useMapStore.getState().maps) {
+          const roster = useCharacterStore.getState().characters
+          const restored = reconcileDnd5eCampaignForms(currentMap, roster, useMapStore.getState().maps)
+          if (restored.map === currentMap) continue
+          for (const character of restored.characters) {
+            if (character !== roster.find(previous => previous.id === character.id)) {
+              useCharacterStore.getState().applyAuthorityUpdate(character.id, character)
+            }
+          }
+          useMapStore.getState().applyAuthorityMapUpdate(currentMap.id, { tokens: restored.map.tokens })
+          formsChanged = true
+        }
+        if (formsChanged) {
+          await useCharacterStore.getState().saveSharedNow()
+          await useMapStore.getState().saveSharedNow()
+        }
+        const groundMapStore = useMapStore.getState()
+        let groundChanged = false
+        for (const currentMap of groundMapStore.maps) {
+          const restored = expireDnd5eGroundInventoryAlterations(currentMap, useCharacterStore.getState().characters)
+          if (restored === currentMap) continue
+          groundMapStore.applyAuthorityMapUpdate(restored.id, { tokens: restored.tokens })
+          groundChanged = true
+        }
+        if (groundChanged) await groundMapStore.saveSharedNow()
         useMapGeometryStore.getState().expireTimedLights(clock.worldMinute)
       })().catch((error) => {
         if (characterReconciliationKeyRef.current === reconciliationKey) {
@@ -397,10 +506,17 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
         if (creatureTokenReconciliationKeyRef.current === creatureTokenKey) {
           creatureTokenReconciliationKeyRef.current = null
         }
+        if (error instanceof Error && error.message.includes('state-transaction-conflict') && scope === reconciliationScope.current &&
+          (getRoomSession()?.roomId ?? '__local__') === currentRoomId) {
+          reconciliationRetryQueue.current.schedule(() => {
+            if (scope === reconciliationScope.current && (getRoomSession()?.roomId ?? '__local__') === currentRoomId)
+              setReconciliationRetry(value => value + 1)
+          })
+        }
         console.error('[campaign-time] reconciliation failed', error)
       })
     }
-  }, [characters, clock, currentRoomId, geometryMaps, hydratedRoomId, isDm, maps])
+  }, [characters, clock, currentRoomId, geometryMaps, hydratedRoomId, isDm, maps, reconciliationRetry])
 
   useEffect(() => {
     if (notification) return

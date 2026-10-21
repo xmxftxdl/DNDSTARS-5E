@@ -1,3 +1,5 @@
+import { dnd5eCharacterMaximizeHealingDice } from './characterCompanionHealing'
+import { type Dnd5eOwnedCompanionMapContext } from './ownedCompanionProximity'
 import type { Character } from '../../types/character'
 import { dnd5eClassDefinition } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
@@ -364,6 +366,7 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
 export function resolveDnd5eShortRestHitDice(input: {
   character: Character
   spends: readonly Dnd5eShortRestHitDieSpend[]
+  healingContext?: Dnd5eOwnedCompanionMapContext
   songOfRest?: { dieSides: 6 | 8 | 10 | 12; roll: number }
 }): Dnd5eShortRestHitDiceResult {
   if (!isDnd5e2014Character(input.character)) throw new RangeError('Character is not using D&D 5e 2014')
@@ -372,6 +375,7 @@ export function resolveDnd5eShortRestHitDice(input: {
     current: Math.max(0, Math.floor(pool.current)),
     max: Math.max(0, Math.floor(pool.max)),
   })) ?? []
+  const maximizeDice = dnd5eCharacterMaximizeHealingDice(input.character, input.healingContext)
   const spentByPool = new Map<number, number>()
   let hitDiceSpent = 0
   let hitDiceHealing = 0
@@ -394,7 +398,7 @@ export function resolveDnd5eShortRestHitDice(input: {
       if (!Number.isInteger(roll) || roll < 1 || roll > pool.sides) throw new RangeError('Invalid Hit Die roll')
       hitDiceHealing += Math.max(
         0,
-        roll + constitutionModifier,
+        (maximizeDice ? pool.sides : roll) + constitutionModifier,
         constitutionModifier * minimumHealingMultiplier,
       )
       hitDiceSpent += 1
@@ -409,7 +413,7 @@ export function resolveDnd5eShortRestHitDice(input: {
     if (![6, 8, 10, 12].includes(dieSides) || !Number.isInteger(roll) || roll < 1 || roll > dieSides) {
       throw new RangeError('Invalid Song of Rest roll')
     }
-    songOfRestHealing = roll
+    songOfRestHealing = maximizeDice ? dieSides : roll
   }
   for (const [poolIndex, spent] of spentByPool) {
     pools[poolIndex] = { ...pools[poolIndex], current: pools[poolIndex].current - spent }

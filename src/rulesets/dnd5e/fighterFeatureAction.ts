@@ -37,6 +37,7 @@ export interface PreparedDnd5eFighterFeature {
 }
 
 export function prepareDnd5eFighterFeature(input: {
+  worldMinute?: number
   action: SharedPlayerActionState
   map: BattleMap
   characters: readonly Character[]
@@ -62,6 +63,7 @@ export function prepareDnd5eFighterFeature(input: {
     return { ok: false, reason: 'bonus-action-unavailable' }
   }
   const snapshot = createDnd5eMapCombatSnapshot({
+    worldMinute: input.worldMinute,
     combatId: action.combatId ?? `map-${input.map.id}`,
     round: action.round,
     turnSlotId: input.initiativeOrder[action.initiativeIndex]?.slotId,

@@ -24,6 +24,19 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('SRD 5.1 ability checks', () => {
+  it('shows temporary skill expertise without changing permanent proficiency', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId:'test:temporary-expertise',label:'Temporary expertise',targetId:'hero',
+      source:{kind:'spell',actorId:'caster',rulesId:'synthetic'},
+      modifiers:{skillExpertise:['stealth','sleightOfHand']},
+    })
+    const hero=character({level:5,skills:['stealth','sleightOfHand'],dnd5eCombatState:{activeEffects:[effect]}})
+    expect(dnd5eSkillCheckModifier(hero,'stealth')).toBe(8)
+    expect(dnd5eSkillCheckModifier(hero,'sleightOfHand')).toBe(8)
+    expect(dnd5eSkillCheckModifier({...hero,skills:[]},'stealth')).toBe(2)
+    expect(dnd5eSkillCheckModifier({...hero,dnd5eCombatState:{activeEffects:[{...effect,suspendedBy:['antimagic']}]}},'stealth')).toBe(5)
+    expect(hero.skills).toEqual(['stealth','sleightOfHand'])
+  })
   it('applies Jack of All Trades and Remarkable Athlete only to unproficient checks', () => {
     const bard = character({ charClass: '吟游诗人', level: 5 })
     const champion = character({

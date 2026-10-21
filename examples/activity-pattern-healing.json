@@ -1,0 +1,22 @@
+{
+  "features": [
+    {
+      "id": "pattern-healing-demo",
+      "name": "接口测试：恢复生命",
+      "summary": "纯测试内容，恢复目标 6 点生命。",
+      "description": "用于验证声明式接口的导入、Host 结算与模块导出，不属于任何扩展原文。",
+      "automation": "partial"
+    }
+  ],
+  "activityPatterns": [
+    {
+      "schemaVersion": 1,
+      "id": "pattern-healing-demo",
+      "name": "接口测试：恢复生命",
+      "source": { "kind": "feature", "id": "pattern-healing-demo" },
+      "pattern": "roll-effect",
+      "target": { "kind": "creature", "relation": "any", "count": 1, "rangeFeet": 30 },
+      "result": { "kind": "healing", "amount": { "kind": "constant", "value": 6 } }
+    }
+  ]
+}

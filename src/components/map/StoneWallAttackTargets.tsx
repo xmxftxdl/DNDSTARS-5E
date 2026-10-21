@@ -1,6 +1,7 @@
 import { stoneWallPanels } from '../../rulesets/dnd5e/stoneWall'
+import {persistentEntityAttackPanel,persistentEntityAttackArmorClass} from '../../rulesets/dnd5e/persistentEntityAttackTarget'
 import { useState } from 'react'
-import { Group, Line, Text, Circle } from 'react-konva'
+import { Group, Line, Text, Circle, Rect } from 'react-konva'
 import type { BattleMap } from '../../store/maps'
 import { stoneWallPanelPlacement } from './stoneWallPlacement'
 import { iceWallFromCells, wallArmorClass } from '../../rulesets/dnd5e/wallObjectRules'
@@ -9,6 +10,23 @@ export function StoneWallAttackTargets({ map, onSelect, isDM = false }: { map: B
   const [hover, setHover] = useState<string>()
   return <Group>
     {map.dnd5ePluginAreas?.filter(a => isDM || !a.hiddenFromPlayers).flatMap(area => {
+      const entity=persistentEntityAttackPanel(area,'entity')
+      if(entity){
+        const x=map.gridOffsetX+(entity.start.col+.5)*map.gridSize,y=map.gridOffsetY+(entity.start.row+.5)*map.gridSize
+        return [<Group key={area.id}>
+          {area.projectionDefense ? area.cells.map(cell => <Rect key={`${cell.col}:${cell.row}`}
+            x={map.gridOffsetX+cell.col*map.gridSize} y={map.gridOffsetY+cell.row*map.gridSize}
+            width={map.gridSize} height={map.gridSize} fill="#fb7185" opacity={hover===area.id ? .5:.3}
+            onMouseEnter={()=>setHover(area.id)} onMouseLeave={()=>setHover(undefined)}
+            onMouseDown={e=>{e.cancelBubble=true}} onTouchStart={e=>{e.cancelBubble=true}}
+            onClick={e=>{e.cancelBubble=true;onSelect(area.id,'entity')}} onTap={e=>{e.cancelBubble=true;onSelect(area.id,'entity')}}/>) : <Circle x={x} y={y} radius={(area.circularGeometry?.radiusFeet??(map.feetPerCell??5)/2)/(map.feetPerCell??5)*map.gridSize}
+            fill="#fb7185" opacity={hover===area.id ? .5:.3} stroke="#fbbf24" strokeWidth={2}
+            onMouseEnter={()=>setHover(area.id)} onMouseLeave={()=>setHover(undefined)}
+            onMouseDown={e=>{e.cancelBubble=true}} onTouchStart={e=>{e.cancelBubble=true}}
+            onClick={e=>{e.cancelBubble=true;onSelect(area.id,'entity')}} onTap={e=>{e.cancelBubble=true;onSelect(area.id,'entity')}}/>}
+          {hover===area.id&&<Text x={x-125} y={y-40} width={250} align="center" text={area.projectionDefense ? `${area.label} · 攻击自动失手` : `${area.label} · AC ${persistentEntityAttackArmorClass(area)} · ${entity.hitPoints}/${entity.maxHitPoints} HP`} fill="#fef3c7" fontSize={13} listening={false}/>}
+        </Group>]
+      }
       const force = area.coreSpellId === 'wall-of-force'
       if(force && area.forceShell && area.anchorCell) {
         const x=map.gridOffsetX+(area.anchorCell.col+.5)*map.gridSize,y=map.gridOffsetY+(area.anchorCell.row+.5)*map.gridSize

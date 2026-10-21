@@ -345,6 +345,12 @@ export async function sha256Integrity(bytes: ArrayBuffer): Promise<string> {
   return `sha256-${window.btoa(binary)}`
 }
 
+type PluginInspectionSummary = Omit<Awaited<ReturnType<Dnd5eRulesPluginHost['inspectFile']>>, 'bytes' | 'fileName' | 'integrity'>
+// Cache only small summaries, never package bytes, images or executable workers.
+// A fresh digest is still required for every caller-provided byte buffer.
+const inspectionSummaries = new Map<string, PluginInspectionSummary>()
+const MAX_INSPECTION_SUMMARIES = 16
+
 async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string): ReturnType<Dnd5eRulesPluginHost['inspectFile']> {
   if (bytes.byteLength < 1) throw new Error('插件文件为空')
   if (getRoomSession() && isStarModArchive(bytes)) {
@@ -355,10 +361,16 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string): ReturnT
     } finally { terminatePluginArtifact(original) }
   }
   const integrity = await sha256Integrity(bytes)
+  const cached = inspectionSummaries.get(integrity)
+  if (cached) {
+    inspectionSummaries.delete(integrity)
+    inspectionSummaries.set(integrity, cached)
+    return { ...structuredClone(cached), fileName, integrity, bytes }
+  }
   const artifact = await loadPluginArtifact(bytes)
   try {
     assertPluginId(artifact.manifest.id)
-    return {
+    const result: Awaited<ReturnType<Dnd5eRulesPluginHost['inspectFile']>> = {
       manifest: { ...artifact.manifest },
       fileName,
       integrity,
@@ -378,6 +390,20 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string): ReturnT
         }),
       } : {}),
     }
+    if (artifact.kind !== 'worker') {
+      const summary: PluginInspectionSummary = {
+        manifest: result.manifest,
+        ...(result.contentSummary ? { contentSummary: result.contentSummary } : {}),
+        ...(result.automationCoverage ? { automationCoverage: result.automationCoverage } : {}),
+        ...(result.provenance ? { provenance: result.provenance } : {}),
+        ...(result.starModManifest ? { starModManifest: result.starModManifest } : {}),
+      }
+      inspectionSummaries.set(integrity, structuredClone(summary))
+      if (inspectionSummaries.size > MAX_INSPECTION_SUMMARIES) {
+        inspectionSummaries.delete(inspectionSummaries.keys().next().value!)
+      }
+    }
+    return result
   } finally {
     terminatePluginArtifact(artifact)
   }
