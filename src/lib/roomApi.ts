@@ -22,10 +22,11 @@ import {
 } from './roomSession'
 
 const ROOM_REQUEST_TIMEOUT_MS = 5_000
+const ROOM_PLUGIN_UPLOAD_TIMEOUT_MS = 180_000
 
-async function fetchRoomCandidate(url: string, init?: RequestInit): Promise<Response> {
+async function fetchRoomCandidate(url: string, init?: RequestInit, timeoutMs = ROOM_REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
-  const timeout = globalThis.setTimeout(() => controller.abort(), ROOM_REQUEST_TIMEOUT_MS)
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs)
   try {
     return await fetch(url, { ...init, signal: controller.signal })
   } finally {
@@ -289,7 +290,7 @@ export async function requestRoomVoiceAccess(session: RoomSession): Promise<Disa
   )
 }
 
-async function roomBinaryRequest(path: string, init?: RequestInit): Promise<Response> {
+async function roomBinaryRequest(path: string, init?: RequestInit, timeoutMs = ROOM_REQUEST_TIMEOUT_MS): Promise<Response> {
   const account = getAccountSession()
   let reachedServer = false
   for (const api of sharedLobbyApiCandidates()) {
@@ -301,13 +302,19 @@ async function roomBinaryRequest(path: string, init?: RequestInit): Promise<Resp
           ...currentRoomCredentialHeaders(),
           ...(init?.headers ?? {}),
         },
-      })
+      }, timeoutMs)
       reachedServer = true
       if (response.ok) return response
       const body = await response.json().catch(() => ({})) as { error?: string }
       throw new RoomApiError(body.error ?? 'request-failed', response.status)
     } catch (error) {
       if (error instanceof RoomApiError) throw error
+      // A timed-out upload may already have reached the server; do not replay it.
+      if (timeoutMs === ROOM_PLUGIN_UPLOAD_TIMEOUT_MS && error instanceof Error && error.name === 'AbortError') {
+        const timeoutError = new RoomApiError('plugin-upload-timeout')
+        timeoutError.message = roomApiErrorMessage(timeoutError)
+        throw timeoutError
+      }
       void error
     }
   }
@@ -592,6 +599,7 @@ export async function uploadRoomPlugin(input: {
       },
       body: input.bytes,
     },
+    ROOM_PLUGIN_UPLOAD_TIMEOUT_MS,
   )
   return response.json() as Promise<RoomRulesSnapshot>
 }
@@ -637,6 +645,7 @@ export async function stageRoomPlugin(input: {
       },
       body: input.bytes,
     },
+    ROOM_PLUGIN_UPLOAD_TIMEOUT_MS,
   )
   return response.json() as Promise<RoomRulesSnapshot>
 }
@@ -746,6 +755,7 @@ export async function closeRoom(session: RoomSession): Promise<void> {
 export function roomApiErrorMessage(error: unknown): string {
   const code = error instanceof RoomApiError ? error.code : 'request-failed'
   const messages: Record<string, string> = {
+    'plugin-upload-timeout': '规则包上传超时，请检查网络并确认房间规则包状态后重试。',
     'account-required': '请先注册或登录星痕账号，再创建或加入房间。',
     'invalid-account-session': '账号会话已经失效，请返回大厅重新登录。',
     'invalid-room-session': '房间会话已经失效，请重新加入房间。',
@@ -785,3 +795,4 @@ export function roomApiErrorMessage(error: unknown): string {
   }
   return messages[code] ?? messages['request-failed']
 }
+

@@ -7,10 +7,14 @@ import {
   requestRoomVoiceAccess,
   RoomApiError,
   roomHeartbeatErrorIsTerminal,
+  stageRoomPlugin,
+  uploadRoomPlugin,
+  roomApiErrorMessage,
 } from './roomApi'
 import type { RoomSession } from './roomSession'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -25,6 +29,44 @@ const voiceTestSession: RoomSession = {
   displayName: 'DM',
   createdAt: 1,
 }
+
+describe('rule package upload deadlines', () => {
+  const input = {
+    session: voiceTestSession,
+    id: 'local.test', version: '1.0.0', stateSchemaVersion: 1,
+    integrity: 'test', name: 'Test', publisher: 'Local', license: 'Private',
+    distributionPolicy: 'room-ephemeral' as const,
+    fileName: 'test.dndstars5e', bytes: new ArrayBuffer(8),
+  }
+
+  it.each([stageRoomPlugin, uploadRoomPlugin])('allows slow package uploads beyond five seconds', async (upload) => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      setTimeout(() => resolve(new Response(JSON.stringify({ rulesRevision: 2 }))), 6_000)
+    })))
+    const result = upload(input)
+    await vi.advanceTimersByTimeAsync(6_000)
+    await expect(result).resolves.toEqual({ rulesRevision: 2 })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reports upload timeout without replaying a possibly accepted upload', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const outcome = stageRoomPlugin(input).catch(error => error)
+    await vi.advanceTimersByTimeAsync(180_000)
+    const error = await outcome
+    expect(error).toBeInstanceOf(RoomApiError)
+    expect(error.code).toBe('plugin-upload-timeout')
+    expect(roomApiErrorMessage(error)).toContain('规则包上传超时')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
 
 describe('room voice API routing', () => {
   it('does not duplicate the /api prefix for status and token requests', async () => {
@@ -148,3 +190,4 @@ describe('room roster payload migration', () => {
     })
   })
 })
+
