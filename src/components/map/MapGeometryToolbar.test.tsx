@@ -1,12 +1,14 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import MapGeometryToolbar from './MapGeometryToolbar'
 
 describe('MapGeometryToolbar', () => {
   it('offers selection as the default editing path for imported geometry', () => {
-    const html = renderToStaticMarkup(createElement(MapGeometryToolbar, {
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/campaign/test%20campaign/maps']}>
+      <Routes><Route path="/campaign/:campaignId/maps" element={createElement(MapGeometryToolbar, {
       mapId: 'map-1',
       geometry: createEmptyMapGeometry('map-1', 1),
       editMode: true,
@@ -26,10 +28,11 @@ describe('MapGeometryToolbar', () => {
       onDiagnosticsEnabledChange: () => undefined,
       onDetectionCandidatesChange: () => undefined,
       onCreateMapFromUvtt: async () => undefined,
-    }))
+    })} /></Routes></MemoryRouter>)
 
     expect(html).toContain('<option value="select" selected="">选择／编辑</option>')
     expect(html).toContain('<option value="wall">墙</option>')
+    expect(html).toContain('href="/campaign/test%20campaign/dm-tools/map-converter"')
     expect(html).not.toContain('aria-label="全图天气规则"')
     expect(html).toContain('aria-label="高空空间规则"')
     expect(html).toContain('<option value="confined">受限／无法容纳</option>')

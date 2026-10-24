@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   MessageSquareText,
   NotebookTabs,
+  ScanLine,
   Store,
   Swords,
   Users,
@@ -25,6 +26,7 @@ const dmAssistantItems = [
   { to: '/dm-tools/simulation', label: '战斗 AI 模拟', icon: Bot },
   { to: '/dm-tools/workshop', label: '自定义工坊', icon: Hammer },
   { to: '/dm-tools/prep', label: '备团助手', icon: NotebookTabs },
+  { to: '/dm-tools/map-converter', label: 'AI 地图转换', icon: ScanLine },
 ]
 
 const playerNavItems = navItems.filter((item) =>

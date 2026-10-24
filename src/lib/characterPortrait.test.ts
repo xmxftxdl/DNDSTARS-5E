@@ -3,6 +3,7 @@ import {
   CHARACTER_INITIATIVE_PORTRAIT_HEIGHT,
   CHARACTER_INITIATIVE_PORTRAIT_WIDTH,
   CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH,
+  characterPortraitBlob,
   drawCharacterPortraitCrop,
   isCharacterPortraitDataUrl,
   normalizeCharacterInitiativePortrait,
@@ -12,6 +13,22 @@ import {
 } from './characterPortrait'
 
 describe('character portrait persistence boundary', () => {
+  it('decodes portrait bytes locally without a data URL network request', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+    try {
+      for (const type of ['png', 'jpeg', 'webp']) {
+        const blob = characterPortraitBlob(`data:image/${type};base64,AAEC/w==`)
+        expect(blob.type).toBe(`image/${type}`)
+        expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([0, 1, 2, 255])
+      }
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(() => characterPortraitBlob('https://example.test/npc.png')).toThrow('画像数据无效')
+      expect(() => characterPortraitBlob('data:text/html;base64,YWJj')).toThrow('画像数据无效')
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
   it('accepts supported compact image data URLs and rejects unsafe values', () => {
     const valid = 'data:image/webp;base64,YWJjZA=='
     expect(isCharacterPortraitDataUrl(valid)).toBe(true)

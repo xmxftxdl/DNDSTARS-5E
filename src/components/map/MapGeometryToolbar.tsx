@@ -4,6 +4,7 @@ import { MapGeometryDurabilityFields } from './MapGeometryDurabilityFields'
 import { MapMagicDetectionBarrierFields } from './MapMagicDetectionBarrierFields'
 import { ControlledFlameFields, controlledFlameBaseLightPatch } from './ControlledFlameFields'
 import { useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import {
   BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, Lightbulb, LockKeyhole,
   Mountain, Package, Redo2, Square, Trash2, Undo2, Upload, WandSparkles,
@@ -168,6 +169,7 @@ export default function MapGeometryToolbar({
   onDetectionCandidatesChange,
   onCreateMapFromUvtt,
 }: MapGeometryToolbarProps) {
+  const { campaignId } = useParams<{ campaignId: string }>()
   const importInputRef = useRef<HTMLInputElement>(null)
   const imageDetectionInputRef = useRef<HTMLInputElement>(null)
   const detectionRequestRef = useRef(0)
@@ -256,6 +258,12 @@ export default function MapGeometryToolbar({
         <BrickWall className="h-3.5 w-3.5" />
         几何
       </button>
+
+      {campaignId && <Link to={`/campaign/${encodeURIComponent(campaignId)}/dm-tools/map-converter`}
+        title="上传地图图片，自动识别墙体并转换为 UVTT"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-cyan-200 hover:bg-cyan-500/15">
+        <WandSparkles className="h-3.5 w-3.5" />AI 地图转换
+      </Link>}
 
       {editMode && (
         <>
