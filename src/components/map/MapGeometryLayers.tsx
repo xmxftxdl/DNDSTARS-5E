@@ -231,7 +231,7 @@ export function MapGeometryLayer({
           return (
             <Group
               key={entity.id}
-              listening={(entityEditListening || (editMode && tool === 'wall')) && !isDraft}
+              listening={entityEditListening && !isDraft}
               onMouseDown={selectEntity}
             >
               {segments.map((segment, index) => (
@@ -254,7 +254,7 @@ export function MapGeometryLayer({
                   />
                 </Group>
               ))}
-              {selected && editMode && (tool === 'select' || tool === 'wall') && !isDraft && (
+              {selected && editMode && tool === 'select' && !isDraft && (
                 <GeometryEditHandles entity={entity} inv={inv} onPointsChange={onPointsChange} />
               )}
             </Group>
