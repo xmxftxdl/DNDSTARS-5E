@@ -15727,7 +15727,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             data = await readFile(sourcePath, 'utf8')
           }
         } catch {
-          res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.writeHead(parsed.searchParams.get('missing') === 'null' ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end('null')
           return true
         }
@@ -15742,7 +15742,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         if (value?._deleted === true) {
           const revision = sharedStateRevision(value)
-          res.writeHead(404, {
+          res.writeHead(parsed.searchParams.get('missing') === 'null' ? 200 : 404, {
             'Content-Type': 'application/json; charset=utf-8',
             'X-Stars-State-Revision': String(revision),
           })
