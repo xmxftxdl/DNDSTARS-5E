@@ -39,6 +39,7 @@ import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
 import FighterProgressionPanel from './FighterProgressionPanel'
 import Dnd5eClassProgressionPanel from './Dnd5eClassProgressionPanel'
+import AcquiredFeatsPanel from './AcquiredFeatsPanel'
 import Dnd5eSpellbookPanel from './Dnd5eSpellbookPanel'
 import EquipmentTab from './EquipmentTab'
 import CharacterPortraitEditor from './CharacterPortraitEditor'
@@ -284,6 +285,7 @@ export default function CharacterSheet({
           {hasSpellbookTab && <CharacterTab active={activeTab === 'spellbook'} onClick={() => setSelectedTab('spellbook')}>法术书</CharacterTab>}
       </nav>
 
+      {activeTab === 'class' && <AcquiredFeatsPanel character={c} />}
       {(activeTab === 'class' || activeTab === 'spellbook') && <SpellSlotResourceEditor character={c} />}
 
       {activeTab === 'class' && (
