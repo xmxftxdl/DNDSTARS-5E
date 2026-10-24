@@ -3,7 +3,7 @@ import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import { nearestWallEndpoint, snapGeometryDrawingPoint } from './wallEndpointSnap'
 
 const geometry = createEmptyMapGeometry('map')
-geometry.walls.push({ id: 'wall', kind: 'wall', label: 'wall', createdAt: 1, points: [{ x: 103, y: 107 }, { x: 203, y: 207 }, { x: 303, y: 307 }], blocksVision: true, blocksMovement: true, blocksLineOfEffect: true })
+geometry.walls.push({ id: 'wall', kind: 'wall', label: 'wall', createdAt: 1, baseHeightFeet: 0, heightFeet: 10, points: [{ x: 103, y: 107 }, { x: 203, y: 207 }, { x: 303, y: 307 }], blocksVision: true, blocksMovement: true, blocksLineOfEffect: true })
 const options = { geometry, tool: 'wall' as const, scale: 1, snapToGrid: false, gridSize: 50 }
 describe('wall endpoint snapping', () => {
   it('connects to exact off-grid wall vertices with grid snapping disabled or enabled', () => {

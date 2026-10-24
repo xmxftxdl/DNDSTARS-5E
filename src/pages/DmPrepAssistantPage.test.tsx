@@ -30,6 +30,8 @@ describe('DmPrepAssistantPage', () => {
     expect(html).toContain('max-w-[1800px]')
     expect(html).toContain('保存本次备团')
     expect(html).toContain('尚未导入模组资料')
+    expect(html).toContain('AI 地图转换')
+    expect(html).not.toContain('id="map-ai-heading"')
   })
 
   it('把现有工具入口绑定到当前战役', () => {
@@ -39,6 +41,7 @@ describe('DmPrepAssistantPage', () => {
     expect(html).toContain('/campaign/campaign%20with%20spaces/dm-tools/workshop')
     expect(html).toContain('/campaign/campaign%20with%20spaces/dm-tools/simulation')
     expect(html).toContain('/campaign/campaign%20with%20spaces/communications')
+    expect(html).toContain('/campaign/campaign%20with%20spaces/dm-tools/map-converter')
   })
 
   it('把 AI 导入与任务收拢到独立复核入口', () => {

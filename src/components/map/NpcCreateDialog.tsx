@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ImagePlus, User, X } from 'lucide-react'
-import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { characterPortraitBlob, createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { deleteImage, putImage } from '../../lib/imageStore'
 
 export interface NpcCreationDetails {
@@ -52,7 +52,7 @@ export default function NpcCreateDialog({ onCreate, onClose }: {
     try {
       if (portrait) {
         imageId = `npc_portrait_${crypto.randomUUID()}`
-        const blob = await (await fetch(portrait)).blob()
+        const blob = characterPortraitBlob(portrait)
         if (!await putImage(imageId, blob)) throw new Error('画像未能上传到房间，请重试。')
       }
       if (!mounted.current) throw new Error('已取消添加 NPC。')

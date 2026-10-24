@@ -35,6 +35,7 @@ const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
 const DmPrepAssistantPage = lazy(() => import('./pages/DmPrepAssistantPage'))
+const MapConverterPage = lazy(() => import('./pages/MapConverterPage'))
 const DmWorkshopPage = lazy(() => import('./pages/DmWorkshopPage'))
 const ActiveRulesExtensionsPage = lazy(() => import('./pages/ActiveRulesExtensionsPage'))
 const MapsPage = lazy(() => import('./pages/MapsPage'))
@@ -502,6 +503,10 @@ export default function App() {
             <Route
               path="/campaign/:campaignId/dm-tools/workshop"
               element={lazyPage('自定义工坊', <DmWorkshopPage />)}
+            />
+            <Route
+              path="/campaign/:campaignId/dm-tools/map-converter"
+              element={lazyPage('AI 地图转换', <MapConverterPage />)}
             />
             <Route
               path="/campaign/:campaignId/dm-tools/prep"

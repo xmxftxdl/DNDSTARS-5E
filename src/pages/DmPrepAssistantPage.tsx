@@ -29,7 +29,6 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { AiProviderSelectionV1 } from '../../shared/ai-provider.mjs'
 import AiProviderSelector from '../components/dm/AiProviderSelector'
-import DmMapAnalysisPanel from '../components/dm/DmMapAnalysisPanel'
 import DmPrepWorkspaceShell, { type DmPrepWorkspaceSection } from '../components/dm/DmPrepWorkspaceShell'
 import DmSessionPrepDashboard from '../components/dm/DmSessionPrepDashboard'
 import DmSessionLifecyclePanel from '../components/dm/DmSessionLifecyclePanel'
@@ -701,6 +700,7 @@ export default function DmPrepAssistantPage() {
     <div className="mx-auto w-full max-w-[1800px]">
       <PageHeader
         title="备团助手"
+        actions={<Link to={`${campaignBasePath}/dm-tools/map-converter`} className="rounded-xl bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20">AI 地图转换</Link>}
         description="从模组 PDF 到可运行场景，再把语音、玩家行为和战斗记录沉淀为持续更新的战役档案。"
       />
 
@@ -789,7 +789,6 @@ export default function DmPrepAssistantPage() {
                   sourceTarget={pdfSourceTarget}
                 />
               )}
-              {workspaceSection === 'resources' && <DmMapAnalysisPanel aiProviderSelection={aiProviderSelection} />}
             </div>
           ) : (
             <DmSessionPrepDashboard
@@ -1221,8 +1220,6 @@ export default function DmPrepAssistantPage() {
           </div>
         )}
       </section>
-
-      <DmMapAnalysisPanel aiProviderSelection={aiProviderSelection} />
 
       <section className="mb-5 grid gap-4 lg:grid-cols-2">
         <article className="rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.035] p-5">
