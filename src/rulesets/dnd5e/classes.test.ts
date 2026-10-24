@@ -84,7 +84,7 @@ describe('SRD 5.1 class catalog', () => {
     expect(dnd5eAllClassChoiceGroups(dnd5eClassDefinition('ranger')!).map((group) => group.id)).toEqual([
       'favored-enemy', 'favored-terrain', 'fighting-style', 'hunters-prey', 'defensive-tactics', 'multiattack', 'superior-hunters-defense',
     ])
-    expect(dnd5eAllClassChoiceGroups(dnd5eClassDefinition('warlock')!).find((group) => group.id === 'eldritch-invocations')?.options).toHaveLength(32)
+    expect(dnd5eAllClassChoiceGroups(dnd5eClassDefinition('warlock')!).find((group) => group.id === 'eldritch-invocations')?.options).toHaveLength(33)
   })
 
   it('uses the best Extra Attack source instead of the starting class', () => {
@@ -108,6 +108,11 @@ describe('SRD 5.1 class catalog', () => {
       } } } },
     }
     expect(dnd5eClassChoiceOptionAvailable(level4, 'warlock', option('agonizing-blast'))).toBe(true)
+    expect(option('grasp-of-hadar').name).toBe('哈达之握')
+    expect(dnd5eClassChoiceOptionAvailable(level4, 'warlock', option('grasp-of-hadar'))).toBe(true)
+    expect(dnd5eClassChoiceOptionAvailable({ level: 5, dnd5eClassChoices: {
+      classes: { warlock: { selections: { 'spell-cantrips': ['mage-hand'] } } },
+    } }, 'warlock', option('grasp-of-hadar'))).toBe(false)
     expect(dnd5eClassChoiceOptionAvailable(level4, 'warlock', option('thirsting-blade'))).toBe(false)
     expect(dnd5eClassChoiceOptionAvailable({ ...level4, level: 5 }, 'warlock', option('thirsting-blade'))).toBe(true)
     expect(dnd5eClassChoiceOptionAvailable({
