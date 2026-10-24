@@ -7,6 +7,17 @@ export interface CharacterExportFile {
   character: Character
 }
 
+export function prepareDmCharacterImport(character: Partial<Character>, roomId: string): Partial<Character> {
+  return {
+    ...character,
+    roomId,
+    roomMemberId: undefined,
+    ownerAccountId: undefined,
+    player: 'DM 待分配',
+    visibleToPlayers: true,
+  }
+}
+
 export function makeCharacterExport(character: Character): CharacterExportFile {
   return {
     schema: 'stars-character',
