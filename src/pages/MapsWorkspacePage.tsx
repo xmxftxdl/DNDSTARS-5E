@@ -1,3 +1,5 @@
+import { MapGeometryEditorTabs } from '../components/map/MapGeometryEditorTabs'
+import { useSceneMapOverlays } from './maps/useSceneMapOverlays'
 import { planEldritchBlastMovement } from './maps/eldritchBlastMovement'
 import { dnd5eOptionalBonusDieSourceEligible } from '../rulesets/dnd5e/optionalBonusDieEligibility'
 import { collectDnd5eActivityRetainedSaveChoice } from './maps/dnd5eActivityRetainedSaveChoice'
@@ -5666,42 +5668,7 @@ export default function MapsWorkspacePage() {
     ? displayActiveMap?.tokens.find((token) =>
         token.characterId === delegatedSavingThrow.targetCharacterId)
     : undefined
-  const sceneTriggerZones = useMemo(() => activeMapId
-    ? activeMapScenes.flatMap((scene) => scene.triggers.map((trigger) => ({
-        sceneId: scene.id,
-        triggerId: trigger.id,
-        name: trigger.name,
-        enabled: trigger.enabled,
-        region: trigger.region,
-      })))
-    : [], [activeMapId, activeMapScenes])
-  const visibleSceneTriggerZones = useMemo(
-    () => sceneEditorVisible || mapTravelEditing ? sceneTriggerZones : [],
-    [sceneEditorVisible, mapTravelEditing, sceneTriggerZones],
-  )
-  const sceneInteractionPoints = useMemo(() => activeMapId
-    ? activeMapScenes.flatMap((scene) => scene.interactionPoints.map((point) => ({
-        ...point,
-        sceneId: scene.id,
-      })))
-        .filter((point) => isDM
-          ? point.enabled || sceneEditorVisible
-          : point.enabled && point.visibleToPlayers)
-    : [], [activeMapId, activeMapScenes, isDM, sceneEditorVisible])
-  const sceneTeleportDestinations = useMemo(() => activeMapId && (sceneEditorVisible || mapTravelEditing)
-    ? orchestratedScenes.flatMap((scene) => scene.triggers.flatMap((trigger) =>
-        trigger.actions.flatMap((action) => action.kind === 'teleport' && action.targetMapId === activeMapId
-          ? [{
-              sceneId: scene.id,
-              triggerId: trigger.id,
-              actionId: action.id,
-              name: `${scene.name} · ${trigger.name}`,
-              enabled: trigger.enabled && action.enabled,
-              x: action.x,
-              y: action.y,
-            }]
-          : [])))
-    : [], [activeMapId, orchestratedScenes, sceneEditorVisible, mapTravelEditing])
+  const { visibleSceneTriggerZones, sceneInteractionPoints, sceneTeleportDestinations } = useSceneMapOverlays(activeMapId, activeMapScenes, orchestratedScenes, sceneEditorVisible, mapTravelEditing, isDM)
   const applySharedCombatStateEvent = useLatestCallback((state: SharedCombatState | null) => {
     applySharedCombatState(state)
   })
@@ -51349,12 +51316,8 @@ export default function MapsWorkspacePage() {
 
               </>)}
               {mapToolPanel === 'geometry' && (<>
-                  <div role="tablist" aria-label="墙体与几何编辑内容" className="mb-2 flex w-full gap-1">
-                    <button type="button" role="tab" aria-selected={geometryEditorSection === 'structure'}
-                      onClick={() => { setGeometryEditorSection('structure'); setSceneDrawTarget(null); setGeometryEditMode(true) }}
-                      className={`rounded-lg px-3 py-2 text-xs ${geometryEditorSection === 'structure' ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400'}`}>墙体编辑</button>
-                    <button type="button" role="tab" aria-selected={geometryEditorSection === 'travel'}
-                      onClick={() => {
+                  <MapGeometryEditorTabs section={geometryEditorSection} onStructure={() => { setGeometryEditorSection('structure'); setSceneDrawTarget(null); setGeometryEditMode(true) }}
+                    onTravel={() => {
                         setGeometryEditorSection('travel')
                         setSceneEditorVisible(false)
                         setSceneDrawTarget(null)
@@ -51368,8 +51331,7 @@ export default function MapsWorkspacePage() {
                         setMapTabletopTool('none')
                         selectGeometryEntity(null)
                       }}
-                      className={`rounded-lg px-3 py-2 text-xs ${geometryEditorSection === 'travel' ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400'}`}>地图跳转</button>
-                  </div>
+                  />
                   {geometryEditorSection === 'travel' && <div key={activeMap.id} ref={setTravelEditorHost} className="max-h-[65vh] w-[min(400px,calc(100vw-3rem))] overflow-y-auto" />}
                   {geometryEditorSection === 'structure' && activeGeometry && (
                     <MapGeometryToolbar
