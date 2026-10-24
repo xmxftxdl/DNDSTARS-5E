@@ -20,7 +20,7 @@ import {
 import { getRoomSession } from '../lib/roomSession'
 import { characterCreationDraftKey, clearCharacterCreationDraft, copyCharacterCreationDraft, hasCharacterCreationDraft, readCharacterCreationDraft, writeCharacterCreationDraft } from '../lib/characterCreationDraft'
 import type { Character } from '../types/character'
-import { characterExportFileName, makeCharacterExport, parseCharacterExport } from '../lib/characterTransfer'
+import { characterExportFileName, makeCharacterExport, parseCharacterExport, prepareDmCharacterImport } from '../lib/characterTransfer'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { declarativeClassContentBindingV1 } from '../rulesets/dnd5e/declarativeClass'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
@@ -211,11 +211,17 @@ export default function CharactersPage() {
   }
 
   const importCharacterFile = async (file: File) => {
+    if (isDM && roomSession?.role !== 'dm') {
+      await showAppAlert('请先进入 DM 房间，再导入角色。')
+      return
+    }
     try {
       const parsed = JSON.parse(await file.text())
       const character = parseCharacterExport(parsed)
       if (!character) throw new Error('Invalid character JSON')
-      const id = importCharacter(character)
+      const id = importCharacter(isDM && roomSession?.role === 'dm'
+        ? prepareDmCharacterImport(character, roomSession.roomId)
+        : character)
       if (!isDM) {
         setAssignedPlayerCharacterId(id, playerSlot)
       }
@@ -297,14 +303,7 @@ export default function CharactersPage() {
 
   const confirmExcelImport = (character: Parameters<typeof importCharacter>[0]) => {
     const id = importCharacter(isDM && roomSession?.role === 'dm'
-      ? {
-          ...character,
-          roomId: roomSession.roomId,
-          roomMemberId: undefined,
-          ownerAccountId: undefined,
-          player: 'DM 待分配',
-          visibleToPlayers: true,
-        }
+      ? prepareDmCharacterImport(character, roomSession.roomId)
       : character)
     if (!isDM) setAssignedPlayerCharacterId(id, playerSlot)
     select(id)
@@ -434,6 +433,25 @@ export default function CharactersPage() {
             )}
             {isDM && (
               <>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    if (file) void importCharacterFile(file)
+                    event.currentTarget.value = ''
+                  }}
+                />
+                <button
+                  onClick={() => importFileRef.current?.click()}
+                  disabled={roomSession?.role !== 'dm'}
+                  className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Upload className="h-4 w-4" />
+                  导入角色 JSON
+                </button>
                 <input
                   ref={excelImportFileRef}
                   type="file"
