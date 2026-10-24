@@ -4715,6 +4715,43 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(dnd5eMetamagicCost('twinned', 7)).toBe(7)
   })
 
+  it.each(['success', 'twice', 'wrong-direction', 'too-far', 'used-turn', 'next-turn', 'other-turn', 'miss'])('settles Grasp of Hadar with authoritative limits: %s', (scenario) => {
+    const warlock = character('warlock', '邪术师', {
+      level: 5,
+      abilities: { str: 10, dex: 14, con: 14, int: 10, wis: 10, cha: 16 },
+      dnd5eClassChoices: { classes: { warlock: { subclass: 'fiend', selections: {
+        'spell-cantrips': ['eldritch-blast'],
+        'eldritch-invocations': ['grasp-of-hadar'],
+      } } } },
+    })
+    const enemy = token('enemy', 'enemy', 275)
+    const input = fixture(warlock, 'eldritch-blast', 0, enemy)
+    input.action.dnd5eSpellCast!.projectileTargetIds = [enemy.id, enemy.id]
+    input.action.dnd5eSpellCast!.targetTokenIds = [enemy.id]
+    input.action.dnd5eSpellCast!.graspOfHadar = true
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const state = prepared.prepared.state
+    const actorId = prepared.prepared.actorToken.id
+    if (scenario === 'used-turn' || scenario === 'next-turn') {
+      state.combatants[actorId].classState.graspOfHadarTurnKey =
+        [state.combatId, state.round, state.initiativeSlotIds?.[state.initiativeIndex] ?? state.turnSlotId ?? state.initiativeOrder[state.initiativeIndex] ?? actorId].join(':')
+    }
+    if (scenario === 'next-turn') state.round += 1
+    if (scenario === 'other-turn') state.initiativeOrder = state.initiativeOrder.map((id, index) => index === state.initiativeIndex ? enemy.id : id)
+    const pull = { graspOfHadarPullTo: { x: scenario === 'wrong-direction' ? 375 : scenario === 'too-far' ? 125 : 175, y: 25 }, graspOfHadarPullDistanceFeet: scenario === 'too-far' ? 15 : 10 }
+    const result = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [], targetAttacks: [
+      { targetId: enemy.id, d20: scenario === 'miss' ? 1 : 10, effectRolls: scenario === 'miss' ? [] : [4], ...pull },
+      { targetId: enemy.id, d20: 10, effectRolls: [4], ...(scenario === 'twice' ? { graspOfHadarPullTo: {x:75,y:25}, graspOfHadarPullDistanceFeet:10 } : {}) },
+    ] }).result
+    expect(result.ok).toBe(scenario === 'success' || scenario === 'next-turn')
+    if (!result.ok) return
+    expect(result.state.combatants[enemy.id].position).toEqual({ x: 175, y: 25 })
+    expect(result.events.filter(event => event.type === 'moved')).toHaveLength(1)
+    expect(result.state.combatants[actorId].classState.graspOfHadarTurnKey).toBeTruthy()
+  })
+
   it('resolves every Eldritch Blast beam separately with Agonizing and Repelling Blast', () => {
     const warlock = character('warlock', '邪术师', {
       level: 5,

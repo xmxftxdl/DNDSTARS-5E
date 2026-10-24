@@ -296,3 +296,8 @@ describe('SpellTargetingCoordinator', () => {
     expect(parseAreaExemptionSelection('caster', candidates)).toBeUndefined()
   })
 })
+
+it('preserves the armed Grasp of Hadar option in the submitted player spell request', () => {
+  const payload=buildSpellTargetingSubmission({targeting:{...targeting,spellId:'eldritch-blast',graspOfHadar:true},selectedTargetIds:['enemy-1']})
+  expect(payload.graspOfHadar).toBe(true)
+})

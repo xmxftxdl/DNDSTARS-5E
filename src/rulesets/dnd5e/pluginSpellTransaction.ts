@@ -1144,7 +1144,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   if (overchannel && !canOverchannel) return { ok: false, reason: 'invalid-action' }
   if (
     payload.empowered === true || payload.draconicResistance === true ||
-    payload.repellingBlast === true || payload.metamagic != null
+    payload.repellingBlast === true || payload.graspOfHadar === true || payload.metamagic != null
   ) return { ok: false, reason: 'invalid-action' }
   const suppliedSculptedTargetIds = payload.sculptedTargetIds ?? []
   const sculptedTargetIds = [...new Set(suppliedSculptedTargetIds)]

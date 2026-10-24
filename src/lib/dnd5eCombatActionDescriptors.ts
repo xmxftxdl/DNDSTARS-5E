@@ -25,7 +25,7 @@ export interface Dnd5eCombatSpellOptions {
   metamagic?: Dnd5eSpellMetamagicPayload
   empowered?: boolean
   draconicResistance?: boolean
-  repellingBlast?: boolean
+  repellingBlast?: boolean; graspOfHadar?: boolean
   /** UI intent only. The Host still revalidates Sculpt Spells and every protected target. */
   sculptSpell?: boolean
   /** Hotbar casts resolve immediately after a legal map target/area is selected. */

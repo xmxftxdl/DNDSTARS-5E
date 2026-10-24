@@ -419,6 +419,7 @@ export interface Character {
     /** 反魅惑演奏持续至吟游诗人下一回合结束；2 表示发动回合与下个回合。 */
     countercharmRoundsRemaining?: number
     sneakAttackTurnKey?: string
+    graspOfHadarTurnKey?: string
     colossusSlayerTurnKey?: string
     divineStrikeTurnKey?: string
     foeSlayerTurnKey?: string

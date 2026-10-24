@@ -166,7 +166,7 @@ export function buildSpellTargetingSubmission(
     damageMaximizationFeatureId: targeting.damageMaximizationFeatureId,
     empowered: targeting.empowered || undefined,
     draconicResistance: targeting.draconicResistance || undefined,
-    repellingBlast: targeting.repellingBlast || undefined,
+    repellingBlast: targeting.repellingBlast || undefined, graspOfHadar: targeting.graspOfHadar || undefined,
     sculptedTargetIds: targeting.sculptedTargetIds.length > 0
       ? [...targeting.sculptedTargetIds]
       : undefined,
