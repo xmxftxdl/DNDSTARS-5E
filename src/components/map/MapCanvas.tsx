@@ -1330,8 +1330,9 @@ export default function MapCanvas({
     return () => window.removeEventListener('keydown', onKey)
   }, [measureMode, pending])
 
-  const relativePoint = (stage: Konva.Stage | null): Point | null => {
+  const relativePoint = (stage: Konva.Stage | null, event?: MouseEvent): Point | null => {
     if (!stage) return null
+    if (event) stage.setPointersPositions(event)
     const p = stage.getRelativePointerPosition()
     return p ? { x: p.x, y: p.y } : null
   }
@@ -1486,7 +1487,6 @@ export default function MapCanvas({
   }, [])
 
   useEffect(() => {
-    if (geometryEditMode) return
     cancelPendingGeometryClickCommits()
     geometryDragStartRef.current = null
     geometryViewportPanStartRef.current = null
@@ -1496,9 +1496,30 @@ export default function MapCanvas({
       setGeometryViewportPanActive(false)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [cancelPendingGeometryClickCommits, geometryEditMode])
+  }, [cancelPendingGeometryClickCommits, geometryEditMode, geometryTool, map.id])
 
   useEffect(() => () => cancelPendingGeometryClickCommits(), [cancelPendingGeometryClickCommits])
+
+  useEffect(() => {
+    if (!geometryEditMode) return
+    const cancelInterruptedDraw = () => {
+      // Normal canvas mouse-up commits and clears this ref before bubbling to
+      // window. A release outside the canvas or focus loss must not leave an
+      // old start point active when the pointer returns.
+      if (!geometryDragStartRef.current) return
+      geometryDragStartRef.current = null
+      setGeometryDraft(null)
+      setGeometryDragActive(false)
+    }
+    window.addEventListener('mouseup', cancelInterruptedDraw)
+    window.addEventListener('blur', cancelInterruptedDraw)
+    window.addEventListener('pointercancel', cancelInterruptedDraw)
+    return () => {
+      window.removeEventListener('mouseup', cancelInterruptedDraw)
+      window.removeEventListener('blur', cancelInterruptedDraw)
+      window.removeEventListener('pointercancel', cancelInterruptedDraw)
+    }
+  }, [geometryEditMode])
 
   const geometryEntityFromDrag = (start: Point, current: Point): MapGeometryEntity | null => {
     const drag = geometryDragStartRef.current
@@ -1667,13 +1688,13 @@ export default function MapCanvas({
       map.gridOffsetY ?? 0,
     )
 
-  const handleGeometryMouseDown = (stage: Konva.Stage | null): boolean => {
+  const handleGeometryMouseDown = (stage: Konva.Stage | null, event: MouseEvent): boolean => {
     if (!geometryEditMode) return false
     if (geometryTool === 'select' || geometryTool === 'delete') {
       if (geometryTool === 'select') onGeometryEntitySelect?.(null)
       return true
     }
-    const rawPoint = relativePoint(stage)
+    const rawPoint = relativePoint(stage, event)
     if (geometryTool === 'elevation' && geometryTerrainEditingLocked) return true
     const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const point = rawPoint
@@ -1716,10 +1737,10 @@ export default function MapCanvas({
     return true
   }
 
-  const handleGeometryMouseMove = (stage: Konva.Stage | null): boolean => {
+  const handleGeometryMouseMove = (stage: Konva.Stage | null, event: MouseEvent): boolean => {
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
-    const rawPoint = relativePoint(stage)
+    const rawPoint = relativePoint(stage, event)
     const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
     const point = rawPoint
       ? geometryTool === 'door' || geometryTool === 'window' || gridPaintTool ? rawPoint : snapGeometryPoint(rawPoint)
@@ -1738,11 +1759,18 @@ export default function MapCanvas({
     return true
   }
 
-  const handleGeometryMouseUp = (stage: Konva.Stage | null): boolean => {
+  const handleGeometryMouseUp = (stage: Konva.Stage | null, event: MouseEvent): boolean => {
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
-    const releasePoint = relativePoint(stage) ?? drag.point
-    const draft = geometryDraft ?? geometryEntityFromDrag(drag.point, drag.point)
+    const releasePoint = relativePoint(stage, event) ?? drag.point
+    const gridPaintTool = geometryTool === 'elevation' || geometryTool === 'difficult-terrain'
+    const endPoint = geometryTool === 'door' || geometryTool === 'window' || gridPaintTool
+      ? releasePoint : snapGeometryPoint(releasePoint)
+    // The preview is React state and can lag behind the latest native event.
+    // Commit this gesture's start and release coordinates, including the final
+    // painted cell, rather than reusing a preview from an earlier frame.
+    handleGeometryMouseMove(stage, event)
+    const draft = geometryEntityFromDrag(drag.point, endPoint)
     geometryDragStartRef.current = null
     setGeometryDragActive(false)
     if (geometryTool === 'door' || geometryTool === 'window') stage?.draggable(true)
@@ -2665,7 +2693,7 @@ export default function MapCanvas({
           }
           if (geometryEditMode && e.evt.button === 0) {
             if (!isMapTokenNode(e.target)) {
-              const handled = handleGeometryMouseDown(stage)
+              const handled = handleGeometryMouseDown(stage, e.evt)
               if (handled) e.cancelBubble = true
             }
             return
@@ -2747,7 +2775,7 @@ export default function MapCanvas({
             })
             return
           }
-          if (geometryEditMode && handleGeometryMouseMove(e.target.getStage())) return
+          if (geometryEditMode && handleGeometryMouseMove(e.target.getStage(), e.evt)) return
           if (fogEditMode && handleFogMouseMove(e.target.getStage())) return
           if (deleteSelectMode && deleteDrag) {
             const p = relativePoint(e.target.getStage())
@@ -2811,7 +2839,7 @@ export default function MapCanvas({
             }
             return
           }
-          if (geometryEditMode && handleGeometryMouseUp(e.target.getStage())) {
+          if (geometryEditMode && handleGeometryMouseUp(e.target.getStage(), e.evt)) {
             e.cancelBubble = true
             return
           }

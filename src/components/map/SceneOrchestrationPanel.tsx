@@ -41,6 +41,9 @@ interface SceneOrchestrationPanelProps {
   map: BattleMap
   combatActive: boolean
   open: boolean
+  embedded?: boolean
+  travelOnly?: boolean
+  onOpenMapTravel?: () => void
   focusedInteractionPointId?: string | null
   onOpenChange: (open: boolean) => void
   drawing?: SceneDrawTarget | null
@@ -107,6 +110,9 @@ export default function SceneOrchestrationPanel({
   map,
   combatActive,
   open,
+  embedded = false,
+  travelOnly = false,
+  onOpenMapTravel,
   focusedInteractionPointId,
   onOpenChange,
   drawing,
@@ -139,7 +145,7 @@ export default function SceneOrchestrationPanel({
   const [selectedTriggerId, setSelectedTriggerId] = useState<string | null>(null)
   const [preview, setPreview] = useState(false)
   const [manualTokenId, setManualTokenId] = useState('')
-  const [actionKind, setActionKind] = useState<ActionKind>('whisper')
+  const [actionKind, setActionKind] = useState<ActionKind>(travelOnly ? 'teleport' : 'whisper')
   const [primary, setPrimary] = useState('')
   const [secondary, setSecondary] = useState('')
   const [doorState, setDoorState] = useState<'open' | 'closed' | 'locked'>('open')
@@ -161,7 +167,8 @@ export default function SceneOrchestrationPanel({
   const actionBuilderRef = useRef<HTMLDivElement>(null)
 
   const scene = shared.scenes.find((candidate) => candidate.mapId === map.id)
-  const selectedTrigger = scene?.triggers.find((trigger) => trigger.id === selectedTriggerId) ?? scene?.triggers[0]
+  const editableTriggers = scene?.triggers.filter((trigger) => !travelOnly || trigger.actions.length === 0 || trigger.actions.some((action) => action.kind === 'teleport')) ?? []
+  const selectedTrigger = editableTriggers.find((trigger) => trigger.id === selectedTriggerId) ?? editableTriggers[0]
   const geometry = geometryMaps.find((candidate) => candidate.mapId === map.id)
   const monsterResults = useMemo(() => monsterQuery.trim() ? searchEnemyPool(monsterQuery).slice(0, 8) : [], [monsterQuery])
   const reversibleHistory = [...shared.runtime.history].reverse().find((entry) => entry.reversible && !entry.undoneAt)
@@ -209,30 +216,31 @@ export default function SceneOrchestrationPanel({
   return (
     <>
       {open && (
-        <aside data-testid="scene-orchestration-panel" className="absolute bottom-4 right-4 top-28 z-[118] flex w-[min(440px,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-violet-300/20 bg-void-950/96 shadow-2xl backdrop-blur-xl">
+        <aside data-testid={travelOnly ? "map-travel-editor" : "scene-orchestration-panel"} className={embedded ? "flex min-w-0 flex-col rounded-xl border border-violet-300/20 bg-void-950/96" : "absolute bottom-4 right-4 top-28 z-[118] flex w-[min(440px,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-violet-300/20 bg-void-950/96 shadow-2xl backdrop-blur-xl"}>
           <header className="flex items-start gap-3 border-b border-white/8 p-4">
-            <div className="min-w-0 flex-1"><h2 className="font-bold text-violet-100">场景编排</h2><p className="mt-1 text-[11px] text-slate-500">DM 权威 · 区域图层可直接选择和移动，编辑不会触发动作</p></div>
+            <div className="min-w-0 flex-1"><h2 className="font-bold text-violet-100">{travelOnly ? "地图跳转" : "场景编排"}</h2><p className="mt-1 text-[11px] text-slate-500">{travelOnly ? "圈定入口，选择目标地图，再拖动紫色出口调整落点。编辑时不会触发传送。" : "区域图层可直接选择和移动，编辑不会触发动作"}</p></div>
             <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-white/5"><X className="h-4 w-4" /></button>
           </header>
 
-          <div className="shrink-0 px-4 pt-3">
+          {!travelOnly && <div className="shrink-0 px-4 pt-3">
             <SceneGlobalAudioSettings />
             <SceneAudioLibraryManager />
-          </div>
+            {onOpenMapTravel && <button type="button" onClick={onOpenMapTravel} className="mt-3 text-xs text-violet-200">地图跳转已移至：墙体与几何 → 地图跳转</button>}
+          </div>}
 
           {!scene ? (
             <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
               <MapPinned className="h-10 w-10 text-violet-300" />
-              <h3 className="mt-4 font-bold text-slate-100">把“{map.name}”升级为场景</h3>
-              <p className="mt-2 text-xs leading-6 text-slate-500">建立后可绘制触发区，串联讲义、检定、门、光照、迷雾、遭遇、音效、传送和任务。</p>
-              <button type="button" onClick={() => { const id = ensureScene(map.id, map.name, { x: map.width / 2, y: map.height / 2 }); setSelectedTriggerId(useSceneOrchestrationStore.getState().shared.scenes.find((entry) => entry.id === id)?.triggers[0]?.id ?? null) }} className="mt-5 rounded-xl bg-violet-500 px-5 py-3 text-sm font-bold text-white">建立场景</button>
+              <h3 className="mt-4 font-bold text-slate-100">{travelOnly ? `为“${map.name}”设置地图跳转` : `把“${map.name}”升级为场景`}</h3>
+              <p className="mt-2 text-xs leading-6 text-slate-500">{travelOnly ? "建立入口后，玩家进入指定区域即可前往目标地图的出口位置。" : "建立后可绘制触发区，串联讲义、检定、门、光照、迷雾、遭遇、音效和任务。"}</p>
+              <button type="button" onClick={() => { const id = ensureScene(map.id, map.name, { x: map.width / 2, y: map.height / 2 }); setSelectedTriggerId(useSceneOrchestrationStore.getState().shared.scenes.find((entry) => entry.id === id)?.triggers[0]?.id ?? null) }} className="mt-5 rounded-xl bg-violet-500 px-5 py-3 text-sm font-bold text-white">{travelOnly ? "开始设置跳转" : "建立场景"}</button>
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <nav className="sticky top-0 z-20 mb-3 grid grid-cols-3 gap-1 rounded-xl border border-white/8 bg-void-950/95 p-1.5 shadow-lg backdrop-blur-xl">
+              {!travelOnly && <><nav className="sticky top-0 z-20 mb-3 grid grid-cols-3 gap-1 rounded-xl border border-white/8 bg-void-950/95 p-1.5 shadow-lg backdrop-blur-xl">
                 <button type="button" onClick={() => sceneSettingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-lg px-2 py-2 text-[11px] font-semibold text-slate-400 hover:bg-white/5 hover:text-slate-100">环境</button>
                 <button type="button" onClick={() => interactionPointsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-lg px-2 py-2 text-[11px] font-semibold text-amber-200/75 hover:bg-amber-500/10 hover:text-amber-100">互动点</button>
-                <button type="button" data-testid="scene-trigger-editor-shortcut" onClick={() => triggerEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-lg bg-violet-500/12 px-2 py-2 text-[11px] font-semibold text-violet-200 hover:bg-violet-500/20">入口 / 出口</button>
+                <button type="button" data-testid="scene-trigger-editor-shortcut" onClick={() => triggerEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="rounded-lg bg-violet-500/12 px-2 py-2 text-[11px] font-semibold text-violet-200 hover:bg-violet-500/20">触发区域</button>
               </nav>
 
               <section ref={sceneSettingsRef} className="scroll-mt-14 space-y-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
@@ -387,9 +395,10 @@ export default function SceneOrchestrationPanel({
                 />
               </div>
 
+              </>}
               <section ref={triggerEditorRef} className="mt-4 scroll-mt-14">
-                <div className="flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">入口 / 出口与触发区域</h3><button type="button" onClick={() => { const id = addTrigger(scene.id, { kind: 'circle', x: map.width / 2, y: map.height / 2, radius: Math.max(30, map.gridSize) }); setSelectedTriggerId(id) }} className="flex items-center gap-1 text-xs text-violet-300"><Plus className="h-3.5 w-3.5" />添加入口</button></div>
-                <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{scene.triggers.map((trigger) => <button key={trigger.id} type="button" onClick={() => setSelectedTriggerId(trigger.id)} className={`shrink-0 rounded-lg border px-3 py-2 text-xs ${selectedTrigger?.id === trigger.id ? 'border-violet-300/40 bg-violet-500/15 text-violet-100' : 'border-white/8 text-slate-500'}`}>{trigger.enabled ? '●' : '○'} {trigger.name}</button>)}</div>
+                <div className="flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">{travelOnly ? "入口 / 出口" : "触发区域"}</h3><button type="button" onClick={() => { const id = addTrigger(scene.id, { kind: 'circle', x: map.width / 2, y: map.height / 2, radius: Math.max(30, map.gridSize) }); setSelectedTriggerId(id) }} className="flex items-center gap-1 text-xs text-violet-300"><Plus className="h-3.5 w-3.5" />{travelOnly ? "添加入口" : "添加触发区"}</button></div>
+                <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{editableTriggers.map((trigger) => <button key={trigger.id} type="button" onClick={() => setSelectedTriggerId(trigger.id)} className={`shrink-0 rounded-lg border px-3 py-2 text-xs ${selectedTrigger?.id === trigger.id ? 'border-violet-300/40 bg-violet-500/15 text-violet-100' : 'border-white/8 text-slate-500'}`}>{trigger.enabled ? '●' : '○'} {trigger.name}</button>)}</div>
               </section>
 
               {selectedTrigger && <section className="mt-3 rounded-xl border border-white/8 bg-black/15 p-3">
@@ -399,10 +408,10 @@ export default function SceneOrchestrationPanel({
                 <p className="mt-2 text-[10px] leading-4 text-cyan-200/55">关闭绘制工具时，可直接在地图上拖动此入口区域；尺寸不变并自动限制在地图内。</p>
                 <div className="mt-3 flex gap-2"><button type="button" onClick={() => onBeginDraw({ sceneId: scene.id, triggerId: selectedTrigger.id, kind: 'circle' })} className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs ${drawing?.kind === 'circle' && drawing.triggerId === selectedTrigger.id ? 'border-cyan-300 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-slate-300'}`}><Circle className="h-3.5 w-3.5" />绘制圆形</button><button type="button" onClick={() => onBeginDraw({ sceneId: scene.id, triggerId: selectedTrigger.id, kind: 'rect' })} className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs ${drawing?.kind === 'rect' && drawing.triggerId === selectedTrigger.id ? 'border-cyan-300 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-slate-300'}`}><Square className="h-3.5 w-3.5" />绘制矩形</button>{drawing && drawing.kind !== 'interaction-point' && <button type="button" onClick={onCancelDraw} className="rounded-lg border border-white/10 px-2 text-slate-400"><X className="h-3.5 w-3.5" /></button>}</div>
 
-                <div className="mt-4 border-t border-white/8 pt-3"><div className="flex items-center justify-between gap-2"><h4 className="text-xs font-bold text-slate-300">动作序列</h4><div className="flex items-center gap-2"><button type="button" data-testid="scene-configure-teleport" onClick={() => { setActionKind('teleport'); requestAnimationFrame(() => actionBuilderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })) }} className="rounded-lg border border-violet-300/20 bg-violet-500/10 px-2 py-1.5 text-[11px] font-semibold text-violet-100">+ 设置传送出口</button><button type="button" onClick={() => setPreview((value) => !value)} className="flex items-center gap-1 text-[11px] text-cyan-300"><Eye className="h-3.5 w-3.5" />{preview ? '关闭预览' : '预览'}</button></div></div>{selectedTrigger.actions.length === 0 ? <p className="mt-3 text-center text-xs text-slate-600">尚未添加动作</p> : <ol className="mt-2 space-y-1">{selectedTrigger.actions.map((action, index) => <li key={action.id} className="flex items-center gap-2 rounded-lg border border-white/6 bg-white/[0.02] px-2 py-2 text-xs"><span className="w-5 text-center text-slate-600">{index + 1}</span><span className="min-w-0 flex-1 truncate text-slate-300">{sceneActionSummary(action)}</span>{action.kind === 'teleport' && <label className="flex shrink-0 items-center gap-1 text-[11px] text-violet-100"><input aria-label={`持续传送门：${index + 1}`} type="checkbox" checked={action.isPortal === true} onChange={event => updateAction(scene.id, selectedTrigger.id, action.id, { isPortal: event.target.checked })} />传送门</label>}{action.kind === 'teleport' && action.isPortal && <label className="flex shrink-0 items-center gap-1 text-[11px] text-violet-100">高度（尺）<input aria-label={`传送门入口高度：${index + 1}`} type="number" value={action.portalElevationFeet ?? 0} onChange={event => { const height = Number(event.target.value); if (Number.isFinite(height)) updateAction(scene.id, selectedTrigger.id, action.id, { portalElevationFeet: height }) }} className="w-16 rounded bg-void-950 px-1 py-1" /></label>}<button type="button" onClick={() => removeAction(scene.id, selectedTrigger.id, action.id)} className="text-slate-600 hover:text-red-300"><X className="h-3.5 w-3.5" /></button></li>)}</ol>}{preview && <div className="mt-2 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.05] p-2 text-[11px] leading-5 text-cyan-100/80">触发后将按上方顺序执行；暂停模式下动作进入队列，可逐步执行。消息、讲义、日志、检定与已开始的战斗不可撤销。</div>}</div>
+                <div className="mt-4 border-t border-white/8 pt-3"><div className="flex items-center justify-between gap-2"><h4 className="text-xs font-bold text-slate-300">动作序列</h4><div className="flex items-center gap-2"><button type="button" hidden={!travelOnly} data-testid="scene-configure-teleport" onClick={() => { setActionKind('teleport'); requestAnimationFrame(() => actionBuilderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })) }} className="rounded-lg border border-violet-300/20 bg-violet-500/10 px-2 py-1.5 text-[11px] font-semibold text-violet-100">+ 设置传送出口</button><button type="button" onClick={() => setPreview((value) => !value)} className="flex items-center gap-1 text-[11px] text-cyan-300"><Eye className="h-3.5 w-3.5" />{preview ? '关闭预览' : '预览'}</button></div></div>{selectedTrigger.actions.length === 0 ? <p className="mt-3 text-center text-xs text-slate-600">尚未添加动作</p> : <ol className="mt-2 space-y-1">{selectedTrigger.actions.map((action, index) => <li key={action.id} className="flex items-center gap-2 rounded-lg border border-white/6 bg-white/[0.02] px-2 py-2 text-xs"><span className="w-5 text-center text-slate-600">{index + 1}</span><span className="min-w-0 flex-1 truncate text-slate-300">{sceneActionSummary(action)}</span>{action.kind === 'teleport' && <label className="flex shrink-0 items-center gap-1 text-[11px] text-violet-100"><input aria-label={`持续传送门：${index + 1}`} type="checkbox" checked={action.isPortal === true} onChange={event => updateAction(scene.id, selectedTrigger.id, action.id, { isPortal: event.target.checked })} />传送门</label>}{action.kind === 'teleport' && action.isPortal && <label className="flex shrink-0 items-center gap-1 text-[11px] text-violet-100">高度（尺）<input aria-label={`传送门入口高度：${index + 1}`} type="number" value={action.portalElevationFeet ?? 0} onChange={event => { const height = Number(event.target.value); if (Number.isFinite(height)) updateAction(scene.id, selectedTrigger.id, action.id, { portalElevationFeet: height }) }} className="w-16 rounded bg-void-950 px-1 py-1" /></label>}<button type="button" onClick={() => removeAction(scene.id, selectedTrigger.id, action.id)} className="text-slate-600 hover:text-red-300"><X className="h-3.5 w-3.5" /></button></li>)}</ol>}{preview && <div className="mt-2 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.05] p-2 text-[11px] leading-5 text-cyan-100/80">触发后将按上方顺序执行；暂停模式下动作进入队列，可逐步执行。消息、讲义、日志、检定与已开始的战斗不可撤销。</div>}</div>
 
                 <div ref={actionBuilderRef} className="scroll-mt-14">
-                  <ActionBuilder
+                  <ActionBuilder travelOnly={travelOnly}
                     kind={actionKind} setKind={setActionKind} primary={primary} setPrimary={setPrimary} secondary={secondary} setSecondary={setSecondary}
                     handouts={journal.handouts.filter((handout) => scene.boundHandoutIds.length === 0 || scene.boundHandoutIds.includes(handout.id))}
                     doors={geometry?.doors ?? []} doorState={doorState} setDoorState={setDoorState} ambientLight={ambientLight} setAmbientLight={setAmbientLight}
@@ -427,6 +436,7 @@ export default function SceneOrchestrationPanel({
 }
 
 interface ActionBuilderProps {
+  travelOnly?: boolean
   kind: ActionKind; setKind: (value: ActionKind) => void
   primary: string; setPrimary: (value: string) => void; secondary: string; setSecondary: (value: string) => void
   handouts: Array<{ id: string; title: string }>
@@ -444,7 +454,7 @@ interface ActionBuilderProps {
 
 function ActionBuilder(props: ActionBuilderProps) {
   const input = fieldClass()
-  return <div className="mt-4 rounded-xl border border-violet-300/12 bg-violet-500/[0.035] p-3"><div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-violet-200/60">新增触发动作</div><div className="flex items-center gap-2"><select aria-label="触发动作类型" value={props.kind} onChange={(event) => { props.setKind(event.target.value as ActionKind); props.setPrimary(''); props.setSecondary('') }} className={`${input} flex-1`}>{Object.entries(ACTION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" onClick={props.onAdd} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-500 px-3 py-2 text-xs font-bold text-white"><Plus className="h-3.5 w-3.5" />{props.kind === 'teleport' ? '添加出口' : '加入'}</button></div><div className="mt-2 space-y-2">
+  return <div className="mt-4 rounded-xl border border-violet-300/12 bg-violet-500/[0.035] p-3"><div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-violet-200/60">新增触发动作</div><div className="flex items-center gap-2"><select aria-label="触发动作类型" value={props.kind} onChange={(event) => { props.setKind(event.target.value as ActionKind); props.setPrimary(''); props.setSecondary('') }} className={`${input} flex-1`}>{Object.entries(ACTION_LABELS).filter(([value]) => props.travelOnly ? value === 'teleport' : value !== 'teleport').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" onClick={props.onAdd} className="flex shrink-0 items-center gap-1 rounded-lg bg-violet-500 px-3 py-2 text-xs font-bold text-white"><Plus className="h-3.5 w-3.5" />{props.kind === 'teleport' ? '添加出口' : '加入'}</button></div><div className="mt-2 space-y-2">
     {props.kind === 'reveal-handout' && <><select value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} className={input}><option value="">选择已绑定讲义…</option>{props.handouts.map((handout) => <option key={handout.id} value={handout.id}>{handout.title}</option>)}</select><select value={props.secondary || 'all'} onChange={(event) => props.setSecondary(event.target.value)} className={input}><option value="all">展示给全体</option><option value="triggering-player">只展示给触发玩家</option></select></>}
     {props.kind === 'whisper' && <textarea rows={2} value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} placeholder="只发送给触发 Token 所属玩家" className={input} />}
     {props.kind === 'door' && <div className="grid grid-cols-2 gap-2"><select value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} className={input}><option value="">选择门…</option>{props.doors.map((door) => <option key={door.id} value={door.id}>{door.label}</option>)}</select><select value={props.doorState} onChange={(event) => props.setDoorState(event.target.value as typeof props.doorState)} className={input}><option value="open">开启</option><option value="closed">关闭</option><option value="locked">上锁</option></select></div>}
@@ -452,7 +462,7 @@ function ActionBuilder(props: ActionBuilderProps) {
     {props.kind === 'fog' && <select value={props.fogOperation} onChange={(event) => props.setFogOperation(event.target.value as typeof props.fogOperation)} className={input}><option value="clear">清除全部迷雾</option><option value="fill">完全遮蔽地图</option></select>}
     {props.kind === 'sound' && <select value={props.cue} onChange={(event) => props.setCue(event.target.value as typeof props.cue)} className={input}>{Object.entries(AUDIO_LABELS).filter(([value]) => value !== 'none').map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}
     {props.kind === 'audio' && <><select value={props.audioOperation} onChange={(event) => props.setAudioOperation(event.target.value as 'play' | 'stop')} className={input}><option value="play">播放同步音频</option><option value="stop">停止当前同步音频</option></select>{props.audioOperation === 'play' && <><select value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} className={input}><option value="">选择房间音频…</option>{props.audioAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}</select><label className="flex items-center gap-2 text-[11px] text-slate-400"><span>音量</span><input type="range" min={0} max={1} step={0.05} value={props.audioVolume} onChange={(event) => props.setAudioVolume(Number(event.target.value))} className="min-w-0 flex-1" /><span>{Math.round(props.audioVolume * 100)}%</span><input type="checkbox" checked={props.audioLoop} onChange={(event) => props.setAudioLoop(event.target.checked)} />循环</label></>}</>}
-    {props.kind === 'teleport' && <div data-testid="scene-teleport-action-fields" className="space-y-2 rounded-lg border border-violet-300/15 bg-violet-500/[0.06] p-2.5"><label className="flex items-center gap-2 text-[11px] text-violet-100"><input type="checkbox" checked={props.secondary === 'portal'} onChange={event => props.setSecondary(event.target.checked ? 'portal' : '')} />此处是持续存在的传送门（可供侦测）</label><label className="block text-[11px] font-semibold text-violet-100">目标地图 / 楼层<select aria-label="目标地图/楼层" value={props.targetMapId} onChange={(event) => props.setTargetMapId(event.target.value)} className={`mt-1.5 ${input}`}><option value="">选择目标地图/楼层…</option>{props.maps.map((map) => <option key={map.id} value={map.id}>{map.name}{map.id === props.currentMapId ? '（当前地图）' : ''}</option>)}</select></label><div className="grid grid-cols-2 gap-2"><label className="text-[10px] text-slate-500">初始出口 X<input aria-label="初始出口 X" type="number" value={props.targetX} onChange={(event) => props.setTargetX(Number(event.target.value) || 0)} className={`mt-1 ${input}`} /></label><label className="text-[10px] text-slate-500">初始出口 Y<input aria-label="初始出口 Y" type="number" value={props.targetY} onChange={(event) => props.setTargetY(Number(event.target.value) || 0)} className={`mt-1 ${input}`} /></label></div><p className="text-[10px] leading-4 text-violet-200/55">点击“添加出口”后，切换到目标地图并打开场景编排，可直接拖动紫色“出口”标记调整落点。</p></div>}
+    {props.kind === 'teleport' && <div data-testid="scene-teleport-action-fields" className="space-y-2 rounded-lg border border-violet-300/15 bg-violet-500/[0.06] p-2.5"><label className="flex items-center gap-2 text-[11px] text-violet-100"><input type="checkbox" checked={props.secondary === 'portal'} onChange={event => props.setSecondary(event.target.checked ? 'portal' : '')} />此处是持续存在的传送门（可供侦测）</label><label className="block text-[11px] font-semibold text-violet-100">目标地图 / 楼层<select aria-label="目标地图/楼层" value={props.targetMapId} onChange={(event) => props.setTargetMapId(event.target.value)} className={`mt-1.5 ${input}`}><option value="">选择目标地图/楼层…</option>{props.maps.map((map) => <option key={map.id} value={map.id}>{map.name}{map.id === props.currentMapId ? '（当前地图）' : ''}</option>)}</select></label><div className="grid grid-cols-2 gap-2"><label className="text-[10px] text-slate-500">初始出口 X<input aria-label="初始出口 X" type="number" value={props.targetX} onChange={(event) => props.setTargetX(Number(event.target.value) || 0)} className={`mt-1 ${input}`} /></label><label className="text-[10px] text-slate-500">初始出口 Y<input aria-label="初始出口 Y" type="number" value={props.targetY} onChange={(event) => props.setTargetY(Number(event.target.value) || 0)} className={`mt-1 ${input}`} /></label></div><p className="text-[10px] leading-4 text-violet-200/55">点击“添加出口”后，切换到目标地图，打开“墙体与几何 → 地图跳转”，可直接拖动紫色“出口”标记调整落点。</p></div>}
     {(props.kind === 'task' || props.kind === 'journal') && <><input value={props.primary} onChange={(event) => props.setPrimary(event.target.value)} placeholder={props.kind === 'task' ? '任务标题' : '日志标题'} className={input} /><textarea rows={2} value={props.secondary} onChange={(event) => props.setSecondary(event.target.value)} placeholder="内容" className={input} /></>}
     {props.kind === 'encounter' && <><input value={props.monsterQuery} onChange={(event) => props.setMonsterQuery(event.target.value)} placeholder="搜索 SRD 怪物中英文名称" className={input} />{props.monsterResults.length > 0 && <div className="max-h-28 overflow-auto rounded-lg border border-white/8 bg-void-950 p-1">{props.monsterResults.map((monster) => <button key={monster.id} type="button" onClick={() => { if (!props.encounterEntries.some((entry) => entry.monsterId === monster.id)) props.setEncounterEntries([...props.encounterEntries, { monsterId: monster.id, name: monster.name, quantity: 1 }]); props.setMonsterQuery('') }} className="block w-full rounded px-2 py-1.5 text-left text-xs text-slate-300 hover:bg-white/5">{monster.name} · CR {monster.challengeRating ?? '—'}</button>)}</div>}<div className="space-y-1">{props.encounterEntries.map((entry) => <div key={entry.monsterId} className="flex items-center gap-2 text-xs text-slate-300"><span className="min-w-0 flex-1 truncate">{entry.name}</span><input type="number" min={1} max={50} value={entry.quantity} onChange={(event) => props.setEncounterEntries(props.encounterEntries.map((candidate) => candidate.monsterId === entry.monsterId ? { ...candidate, quantity: Math.max(1, Math.min(50, Number(event.target.value) || 1)) } : candidate))} className="w-16 rounded border border-white/10 bg-black/20 px-2 py-1" /><button type="button" onClick={() => props.setEncounterEntries(props.encounterEntries.filter((candidate) => candidate.monsterId !== entry.monsterId))}><X className="h-3.5 w-3.5" /></button></div>)}</div><label className="flex items-center gap-2 text-[11px] text-slate-400"><input type="checkbox" checked={props.startInitiative} onChange={(event) => props.setStartInitiative(event.target.checked)} />投放后立即开始先攻</label></>}
   </div></div>

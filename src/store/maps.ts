@@ -3026,7 +3026,7 @@ interface MapState {
   }) => Promise<string>
   updateMap: (id: string, patch: Partial<BattleMap>) => void
   removeMap: (id: string) => void
-  addToken: (mapId: string, type: Token['type']) => void
+  addToken: (mapId: string, type: Token['type'], details?: { label: string; portraitImageId?: string; tokenPortraitImageId?: string }) => string | null
   addEnemyFromPool: (mapId: string, template: EnemyTemplate, options?: EnemyPlacementOptions) => string | null
   addEncounterFromPool: (
     mapId: string,
@@ -3257,9 +3257,9 @@ export const useMapStore = create<MapState>()(
         publishMapsState(get())
       },
 
-      addToken: (mapId, type) => {
+      addToken: (mapId, type, details) => {
         const map = get().maps.find((m) => m.id === mapId)
-        if (!map) return
+        if (!map) return null
         const preset = TOKEN_PRESETS[type]
         const defaultHp = type === 'enemy' ? 20 : type === 'npc' ? 12 : type === 'obstacle' ? 10 : undefined
         const tokenSize = defaultTokenSizeForMap(map)
@@ -3273,7 +3273,9 @@ export const useMapStore = create<MapState>()(
         const spawn = snapTokenToGridCenter(spawnX, spawnY, { size: tokenSize, creatureSize }, map)
         const token: Token = {
           id: uid(),
-          label: type === 'player' ? '玩家' : type === 'enemy' ? '敌人' : type === 'obstacle' ? '地图物件' : 'NPC',
+          label: details?.label.trim().slice(0, 80) || (type === 'player' ? '玩家' : type === 'enemy' ? '敌人' : type === 'obstacle' ? '地图物件' : 'NPC'),
+          portraitImageId: details?.portraitImageId,
+          tokenPortraitImageId: details?.tokenPortraitImageId,
           x: spawn.x,
           y: spawn.y,
           color: preset.color,
@@ -3292,6 +3294,7 @@ export const useMapStore = create<MapState>()(
           maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
         }))
         publishMapsState(get())
+        return token.id
       },
 
       addEnemyFromPool: (mapId, template, options) => {

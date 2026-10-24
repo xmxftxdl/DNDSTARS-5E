@@ -30,6 +30,7 @@ export const MapWorkspaceActiveEffectDetailsDialog = lazy(() => import('../prese
   (module) => ({ default: module.MapWorkspaceActiveEffectDetailsDialog }),
 ))
 export const NpcMerchantPanel = lazy(() => import('../components/map/NpcMerchantPanel'))
+export const NpcCreateDialog = lazy(() => import('../components/map/NpcCreateDialog'))
 export const MapMerchantShopDialog = lazy(() => import('../components/map/MapMerchantShopDialog'))
 export const SceneOrchestrationSystem = lazy(() => import('../components/map/SceneOrchestrationSystem'))
 export const MapDiceRoller = lazy(() => import('../components/map/MapDiceRoller'))

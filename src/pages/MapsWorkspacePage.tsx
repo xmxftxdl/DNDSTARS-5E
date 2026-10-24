@@ -202,7 +202,7 @@ import { createMapTokenOccupancy } from '../lib/mapTokenOccupancy'
 import { clearDiceTrayHistory } from '../presentation/maps/diceTrayHistory'
 import { createDiceCheckCorrelation } from '../presentation/maps/diceCheckCorrelation'
 import type { CombatInitiativeConfirmationDraft, LiveCombatInitiativeConfirmationDraft } from './maps/mapsWorkspaceDrafts'
-import { EnemyPoolPicker, MapViewportLayer, MapWorkspacePanelsLayer, MapWorkspaceCombatLogPanel, MapWorkspaceInitiativePanel, MapWorkspaceInventoryPanel, MapWorkspaceEnemyDetailPanel, MapWorkspaceCharacterDetailPanel, Dnd5eMapObjectDetailPanel, PlayerQuickCharacterSheet, MapWorkspaceSpellEffectDetailPanel, MapWorkspacePersistentAreaDetailPanel, MapWorkspaceActiveEffectDetailsDialog, NpcMerchantPanel, MapMerchantShopDialog, SceneOrchestrationSystem, MapDiceRoller, D20RollConfirmationOverlay, DmMonsterControlDock, Dnd5eLegendaryActionWindow, Dnd5eFighterCombatPanel, Dnd5eClassCombatPanel, Dnd5ePluginCombatPanel, CombatExperienceSettlementDialog, CombatInitiativeConfirmationDialog, DmCombatRecoveryDialog } from './mapsWorkspaceComposition'
+import { EnemyPoolPicker, MapViewportLayer, MapWorkspacePanelsLayer, MapWorkspaceCombatLogPanel, MapWorkspaceInitiativePanel, MapWorkspaceInventoryPanel, MapWorkspaceEnemyDetailPanel, MapWorkspaceCharacterDetailPanel, Dnd5eMapObjectDetailPanel, PlayerQuickCharacterSheet, MapWorkspaceSpellEffectDetailPanel, MapWorkspacePersistentAreaDetailPanel, MapWorkspaceActiveEffectDetailsDialog, NpcMerchantPanel, NpcCreateDialog, MapMerchantShopDialog, SceneOrchestrationSystem, MapDiceRoller, D20RollConfirmationOverlay, DmMonsterControlDock, Dnd5eLegendaryActionWindow, Dnd5eFighterCombatPanel, Dnd5eClassCombatPanel, Dnd5ePluginCombatPanel, CombatExperienceSettlementDialog, CombatInitiativeConfirmationDialog, DmCombatRecoveryDialog } from './mapsWorkspaceComposition'
 import { removeDnd5eMapTokenPreservingPossessions } from '../rulesets/dnd5e/companionCarriedObjects'
 import { loadEnemyPoolPicker, runtimeNow, browserCombatInterruptCoordinator, loadAuthorityCombatState, saveAuthorityCombatState, runtimeId, publishSingleTargetAttackPresentation, publishNamedActionPresentation, runtimeNumericId, randomDieValue, appendSharedPlayerActionRequest, clearSharedEventBacklog, clearSharedResource, getSharedResourceRevisionWatermark, loadSharedResource, mutateSharedCombatInterrupt, publishSharedEvent, saveSharedResource, saveSharedResourcesAtomically, saveSharedResourceWithResult, submitPlayerCharacterCommand, subscribeSharedEvent, subscribeSharedResourceInvalidation } from './mapsWorkspaceRuntime'
 import { readDicePoolCheckpoint, writeDicePoolCheckpoint } from '../presentation/maps/dicePoolCheckpoint'
@@ -1895,6 +1895,7 @@ export default function MapsWorkspacePage() {
   const combatLogOpen = rightCombatDockTab === 'log'
   const setCombatLogOpen = (open: boolean) => setRightCombatDockTab(open ? 'log' : null)
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
+  const [npcCreationMapId, setNpcCreationMapId] = useState<string | null>(null)
   const [dmGrantedActivityPendingId, setDmGrantedActivityPendingId] = useState<string>()
   const [selectedCharacterTokenId, setSelectedCharacterTokenId] = useState<string | null>(null)
   const [merchantInteraction, setMerchantInteraction] = useState<{
@@ -1942,6 +1943,8 @@ export default function MapsWorkspacePage() {
   const [deleteSelectMode, setDeleteSelectMode] = useState(false)
   const [showBar, setShowBar] = useState(true) // 顶部控件浮层是否显示
   const [mapToolPanel, setMapToolPanel] = useState<MapToolPanel | null>(null)
+  const [geometryEditorSection, setGeometryEditorSection] = useState<'structure' | 'travel'>('structure')
+  const [travelEditorHost, setTravelEditorHost] = useState<HTMLDivElement | null>(null)
   const [magicalFogEnabled, setMagicalFogEnabled] = useState(false)
   const magicalFogRedoCount = useMapGeometryStore(state => {
     const next = state.futureByMapId[activeMap?.id ?? '']?.at(-1)
@@ -5381,6 +5384,7 @@ export default function MapsWorkspacePage() {
     window.addEventListener('mouseup', onUp)
   }
   const isDM = mode === 'dm'
+  const mapTravelEditing = isDM && mapToolPanel === 'geometry' && geometryEditorSection === 'travel'
   const [fortressFurnishingRequest,setFortressFurnishingRequest]=useState<{preview:FortressFurnishingPreview;resolve:(value:Dnd5eFortressFurnishingPlacement[]|null)=>void}|null>(null)
   const [fortressRoomRequest,setFortressRoomRequest]=useState<{floor:number;stair:number;resolve:(rooms:Dnd5eFortressRoomBlueprint[]|null)=>void}|null>(null)
   const [portalDestinationRequest, setPortalDestinationRequest] = useState<{ resolve: (exit: TeleportationCircleExit | null) => void } | null>(null)
@@ -5672,8 +5676,8 @@ export default function MapsWorkspacePage() {
       })))
     : [], [activeMapId, activeMapScenes])
   const visibleSceneTriggerZones = useMemo(
-    () => sceneEditorVisible ? sceneTriggerZones : [],
-    [sceneEditorVisible, sceneTriggerZones],
+    () => sceneEditorVisible || mapTravelEditing ? sceneTriggerZones : [],
+    [sceneEditorVisible, mapTravelEditing, sceneTriggerZones],
   )
   const sceneInteractionPoints = useMemo(() => activeMapId
     ? activeMapScenes.flatMap((scene) => scene.interactionPoints.map((point) => ({
@@ -5684,7 +5688,7 @@ export default function MapsWorkspacePage() {
           ? point.enabled || sceneEditorVisible
           : point.enabled && point.visibleToPlayers)
     : [], [activeMapId, activeMapScenes, isDM, sceneEditorVisible])
-  const sceneTeleportDestinations = useMemo(() => activeMapId && sceneEditorVisible
+  const sceneTeleportDestinations = useMemo(() => activeMapId && (sceneEditorVisible || mapTravelEditing)
     ? orchestratedScenes.flatMap((scene) => scene.triggers.flatMap((trigger) =>
         trigger.actions.flatMap((action) => action.kind === 'teleport' && action.targetMapId === activeMapId
           ? [{
@@ -5697,7 +5701,7 @@ export default function MapsWorkspacePage() {
               y: action.y,
             }]
           : [])))
-    : [], [activeMapId, orchestratedScenes, sceneEditorVisible])
+    : [], [activeMapId, orchestratedScenes, sceneEditorVisible, mapTravelEditing])
   const applySharedCombatStateEvent = useLatestCallback((state: SharedCombatState | null) => {
     applySharedCombatState(state)
   })
@@ -49794,7 +49798,7 @@ export default function MapsWorkspacePage() {
               sceneInteractionPoints={sceneInteractionPoints}
               sceneTeleportDestinations={sceneTeleportDestinations}
               sceneOverlayEditMode={
-                isDM && sceneEditorVisible && (
+                isDM && (sceneEditorVisible || mapTravelEditing) && (
                   !sceneDrawTarget || sceneDrawTarget.kind === 'interaction-point'
                 )
               }
@@ -49958,6 +49962,23 @@ export default function MapsWorkspacePage() {
               isDm={isDM}
               combatActive={combatActive}
               editorOpen={sceneEditorVisible}
+              travelEditorOpen={mapTravelEditing}
+              travelEditorHost={travelEditorHost}
+              onCloseTravelEditor={() => { setGeometryEditorSection('structure'); setGeometryEditMode(true); setSceneDrawTarget(null) }}
+              onOpenMapTravel={() => {
+                setMapToolPanel('geometry')
+                setGeometryEditorSection('travel')
+                setSceneEditorVisible(false)
+                setSceneDrawTarget(null)
+                setGeometryEditMode(false)
+                setGeometryPreviewAsPlayer(false)
+                setFogEditMode(false)
+                setGridAdjustMode(false)
+                setMeasureMode(false)
+                setDeleteSelectMode(false)
+                setShowMoveRange(false)
+                setMapTabletopTool('none')
+              }}
               focusedInteractionPointId={sceneInteractionPointFocusId}
               drawing={sceneDrawTarget}
               onBeginDraw={(target) => {
@@ -50979,7 +51000,9 @@ export default function MapsWorkspacePage() {
               setFogEditMode(next === 'fog')
               setFogTool('pan')
               setFogPreviewAsPlayer(false)
-              setGeometryEditMode(next === 'geometry')
+              setGeometryEditMode(next === 'geometry' && geometryEditorSection === 'structure')
+              setSceneDrawTarget(null)
+              if (next === 'geometry') setSceneEditorVisible(false)
               setGeometryPreviewAsPlayer(false)
               setShowMoveRange(false)
               selectGeometryEntity(null)
@@ -51326,7 +51349,29 @@ export default function MapsWorkspacePage() {
 
               </>)}
               {mapToolPanel === 'geometry' && (<>
-                  {activeGeometry && (
+                  <div role="tablist" aria-label="墙体与几何编辑内容" className="mb-2 flex w-full gap-1">
+                    <button type="button" role="tab" aria-selected={geometryEditorSection === 'structure'}
+                      onClick={() => { setGeometryEditorSection('structure'); setSceneDrawTarget(null); setGeometryEditMode(true) }}
+                      className={`rounded-lg px-3 py-2 text-xs ${geometryEditorSection === 'structure' ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400'}`}>墙体编辑</button>
+                    <button type="button" role="tab" aria-selected={geometryEditorSection === 'travel'}
+                      onClick={() => {
+                        setGeometryEditorSection('travel')
+                        setSceneEditorVisible(false)
+                        setSceneDrawTarget(null)
+                        setGeometryEditMode(false)
+                        setGeometryPreviewAsPlayer(false)
+                        setFogEditMode(false)
+                        setGridAdjustMode(false)
+                        setMeasureMode(false)
+                        setDeleteSelectMode(false)
+                        setShowMoveRange(false)
+                        setMapTabletopTool('none')
+                        selectGeometryEntity(null)
+                      }}
+                      className={`rounded-lg px-3 py-2 text-xs ${geometryEditorSection === 'travel' ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400'}`}>地图跳转</button>
+                  </div>
+                  {geometryEditorSection === 'travel' && <div key={activeMap.id} ref={setTravelEditorHost} className="max-h-[65vh] w-[min(400px,calc(100vw-3rem))] overflow-y-auto" />}
+                  {geometryEditorSection === 'structure' && activeGeometry && (
                     <MapGeometryToolbar
                       mapId={activeMap.id}
                       geometry={activeGeometry}
@@ -51537,11 +51582,12 @@ export default function MapsWorkspacePage() {
                     添加怪物
                   </button>
                   <button
-                    onClick={() => addToken(activeMap.id, 'npc')}
+                    onClick={() => setNpcCreationMapId(activeMap.id)}
                     className="flex items-center gap-1 rounded-lg bg-amber-500/15 px-2 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/25"
+                    title="填写 NPC 名字并上传画像"
                   >
                     <User className="h-3.5 w-3.5" />
-                    NPC
+                    添加 NPC
                   </button>
                   <button
                     onClick={() => addToken(activeMap.id, 'obstacle')}
@@ -51683,6 +51729,13 @@ export default function MapsWorkspacePage() {
                 setWebIgnitionTarget({ mapId: activeMap.id, areaId })
               }} onDelete={removeDnd5ePersistentAreaWithEnvironmentalFalls} /></MapDetailPanelBoundary>}
 
+          {isDM && npcCreationMapId === activeMap.id && <Suspense fallback={null}>
+            <NpcCreateDialog key={activeMap.id} onClose={() => setNpcCreationMapId(null)} onCreate={(details) => {
+              const tokenId = addToken(activeMap.id, 'npc', details)
+              if (tokenId) setSelectedTokenId(tokenId)
+              return tokenId
+            }} />
+          </Suspense>}
           {isDM && selectedToken?.type === 'npc' && !activeAoeTargeting && !dnd5eItemAreaTargeting && (
             <Suspense fallback={null}>
               <NpcMerchantPanel
