@@ -305,7 +305,7 @@ async function requestJson<T>(path: string, init?: RequestInit, resourceName?: s
   let notFound = false
   for (const api of sharedApiCandidates()) {
     try {
-      const res = await fetchSharedCandidate(sharedSessionUrl(`${api}${path}`), {
+      const res = await fetchSharedCandidate(sharedSessionUrl(`${api}${path}${resourceName ? '?missing=null' : ''}`), {
         cache: 'no-store',
         ...init,
         headers: {
