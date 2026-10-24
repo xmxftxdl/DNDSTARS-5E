@@ -230,3 +230,13 @@ describe('Dnd5eSpellModifierIntentV1', () => {
     })
   })
 })
+
+ it('arms Grasp of Hadar only for an owned invocation and Eldritch Blast', () => {
+   const caster = character({ charClass: '邪术师', level: 5, dnd5eClassLevels: {warlock:5},
+     dnd5eClassChoices: {classes:{warlock:{selections:{'eldritch-invocations':['grasp-of-hadar'], 'spell-cantrips':['eldritch-blast']}}}} })
+   const input = {character:caster, castingClassId:'warlock' as const, spellId:'eldritch-blast', slotLevel:0, modifierIds:['grasp-of-hadar'] as Dnd5eSpellModifierIntentId[]}
+   expect(resolveDnd5eSpellModifierIntents(input)).toMatchObject({ok:true, options:{graspOfHadar:true}})
+   expect(resolveDnd5eSpellModifierIntents({...input, spellId:'fire-bolt'}).ok).toBe(false)
+   expect(resolveDnd5eSpellModifierIntents({...input,character:character()}).ok).toBe(false)
+   expect(dnd5eSpellModifierIntentIdsFromOptions({graspOfHadar:true})).toContain('grasp-of-hadar')
+ })

@@ -957,6 +957,7 @@ export interface Dnd5eCombatant {
     activityBasicActionGrants?: Record<string, Dnd5eActivityBasicActionGrantV1>
     countercharmRoundsRemaining?: number
     sneakAttackTurnKey?: string
+    graspOfHadarTurnKey?: string
     colossusSlayerTurnKey?: string
     divineStrikeTurnKey?: string
     foeSlayerTurnKey?: string
@@ -3306,6 +3307,11 @@ export interface Dnd5eSpellTargetAttackRoll {
   repellingBlastPushToElevationFeet?: number
   repellingBlastPushToGroundElevationFeet?: number
   repellingBlastFallingDamageRolls?: readonly number[]
+  graspOfHadarPullTo?: { x: number; y: number }
+  graspOfHadarPullDistanceFeet?: number
+  graspOfHadarPullToElevationFeet?: number
+  graspOfHadarPullToGroundElevationFeet?: number
+  graspOfHadarFallingDamageRolls?: readonly number[]
   effectRolls: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
   openingAttackSavingThrow?: Dnd5eOpeningAttackSavingThrowRoll
@@ -4003,7 +4009,7 @@ export type Dnd5eAction = (
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollResourceKey?: string; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; sourceActionInterruptionReaction?: Dnd5eSourceActionInterruptionReaction; disadvantageNegation?: { rollId: string; transactionId: string }; savingThrowDisadvantageNegation?: { rollId: string; transactionId: string }; bonusActionCasting?: boolean; /** Host-validated effect origin, never copied from player input. */ damagePathOrigin?: {x:number;y:number;elevationFeet:number}; actorId: string; spellcastingSavingThrows?: readonly Dnd5eSpellcastingSavingThrowRoll[]; castingClassId?: Dnd5eClassId; racialInnate?: boolean; opportunityAttackSpell?: boolean; ritual?: true; targetId: string; targetIds?: readonly string[]; blindTargetMiss?: boolean; environmentalFireTarget?: boolean; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; shieldSuccessfulSaveNegationTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; /** Host-only Slow d20; never trusted from the player payload. */ slowSpellDelayD20?: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; enlargeReduceChoice?: 'enlarge' | 'reduce'; enhanceAbilityChoice?: 'bear-endurance' | 'bull-strength' | 'cat-grace' | 'eagle-splendor' | 'fox-cunning' | 'owl-wisdom'; calmEmotionsMode?: 'suppress' | 'indifferent'; calmEmotionsIndifferenceScope?: 'caster-allies' | 'caster-enemies' | 'everyone'; sustainedEffectAttack?: Dnd5eSustainedSpellControlId; sustainedEffectAreaId?: string; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; areaAttackAdvantageReaction?: { areaId: string; sourceId: string }; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; savingThrowRerollResourceKey?: string; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; damageMaximizationFeatureId?: string; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
+  | { type: 'cast-spell'; sourceActionInterruptionReaction?: Dnd5eSourceActionInterruptionReaction; disadvantageNegation?: { rollId: string; transactionId: string }; savingThrowDisadvantageNegation?: { rollId: string; transactionId: string }; bonusActionCasting?: boolean; /** Host-validated effect origin, never copied from player input. */ damagePathOrigin?: {x:number;y:number;elevationFeet:number}; actorId: string; spellcastingSavingThrows?: readonly Dnd5eSpellcastingSavingThrowRoll[]; castingClassId?: Dnd5eClassId; racialInnate?: boolean; opportunityAttackSpell?: boolean; ritual?: true; targetId: string; targetIds?: readonly string[]; blindTargetMiss?: boolean; environmentalFireTarget?: boolean; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; teleportDestination?: Dnd5eSpellTeleportDestination; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; spellDamageMaxDieBonus?: Dnd5eSpellDamageMaxDieBonusUse; draconicResistance?: boolean; repellingBlast?: boolean; graspOfHadar?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; shieldSuccessfulSaveNegationTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; /** Host-only Slow d20; never trusted from the player payload. */ slowSpellDelayD20?: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; enlargeReduceChoice?: 'enlarge' | 'reduce'; enhanceAbilityChoice?: 'bear-endurance' | 'bull-strength' | 'cat-grace' | 'eagle-splendor' | 'fox-cunning' | 'owl-wisdom'; calmEmotionsMode?: 'suppress' | 'indifferent'; calmEmotionsIndifferenceScope?: 'caster-allies' | 'caster-enemies' | 'everyone'; sustainedEffectAttack?: Dnd5eSustainedSpellControlId; sustainedEffectAreaId?: string; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; attackPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; areaAttackAdvantageReaction?: { areaId: string; sourceId: string }; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowPostD20Adjustment?: Dnd5ePostD20AdjustmentUse; savingThrowRerollResourceKey?: string; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; damageMaximizationFeatureId?: string; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
   | { type: 'hellish-rebuke'; actorId: string; spellcastingSavingThrows?: readonly Dnd5eSpellcastingSavingThrowRoll[]; targetId: string; racialInnate?: boolean; slotLevel: number; triggerDamageAmount: number; savingThrowD20: number; savingThrowD20Second?: number; halflingLuckyD20?: number; halflingLuckyD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; rerollResourceKey?: string; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; effectRolls: readonly number[] }
   | { type: 'dragonborn-breath'; actorId: string; resolution: Dnd5eMonsterAreaActionResolutionV1 }
   | { type: 'adjudicated-spell'; sourceActionInterruptionReaction?: Dnd5eSourceActionInterruptionReaction; actorId: string; counterspellReaction?: Dnd5eCounterspellReaction; spellcastingSavingThrows?: readonly Dnd5eSpellcastingSavingThrowRoll[]; castingClassId?: Dnd5eClassId; racialInnate?: true; spellId: string; spellName: string; /** Stable request id used to keep separately dismissible cast instances distinct. */ castInstanceId?: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action' | 'reaction' | 'long'; ritual?: true; effects: readonly Dnd5eAdjudicatedSpellEffect[]; /** Targets declared by an Activity even when it produces no direct HP/condition effect. */ declaredTargetIds?: readonly string[]; /** The printed spell requires concentration even when DM adjudication determines that no ongoing effect is created. */ requiresConcentration?: boolean; concentrationRounds?: number; /** Host-owned participants for a concentration spell whose effects live in Activity/map state. */ concentrationTargetIds?: readonly string[]; spellSchool?: import('./spellbook').Dnd5eSpellbookSchoolId; sculptedTargetIds?: readonly string[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; /** Incomplete/reference spells use DM effects; voice-narrative spells spend only the selected slot here, while prepared material costs settle outside the combat action. */ settlementMode?: 'standard' | 'dm-slot-only' | 'narrative-slot-only' }
@@ -22075,7 +22081,7 @@ function resolveSpellCast(
     (itemSpellSource != null && (
       action.castingClassId != null || action.racialInnate === true || action.alternateResourceSpell != null || sustainedAttack != null ||
       metamagic != null || action.empowered === true || action.draconicResistance === true ||
-      action.repellingBlast === true || action.overchannel === true ||
+      action.repellingBlast === true || action.graspOfHadar === true || action.overchannel === true ||
       !itemSpellSource.instanceId || itemSpellSource.instanceId.length > 240 ||
       (itemSpellSource.useActionId != null && (
         !/^[a-z0-9][a-z0-9._-]*$/.test(itemSpellSource.useActionId) || itemSpellSource.useActionId.length > 160
@@ -22098,13 +22104,13 @@ function resolveSpellCast(
       metamagic != null ||
       action.empowered === true ||
       action.draconicResistance === true ||
-      action.repellingBlast === true ||
+      action.repellingBlast === true || action.graspOfHadar === true ||
       action.overchannel === true
     )) ||
     (action.alternateResourceSpell != null && (
       !alternateResourceSpell || action.castingClassId != null || action.racialInnate === true ||
       sustainedAttack != null || metamagic != null || action.empowered === true ||
-      action.draconicResistance === true || action.repellingBlast === true ||
+      action.draconicResistance === true || action.repellingBlast === true || action.graspOfHadar === true ||
       action.overchannel === true
     ))
   ) {
@@ -22279,7 +22285,7 @@ function resolveSpellCast(
       (!sustainedSavingThrow && action.targetIds != null && (
         action.targetIds.length !== 1 || action.targetId !== action.targetIds[0]
       )) ||
-      metamagic != null || action.empowered || action.draconicResistance || action.repellingBlast ||
+      metamagic != null || action.empowered || action.draconicResistance || action.repellingBlast || action.graspOfHadar ||
       action.counterspellReaction != null ||
       (!sustainedSavingThrow && (
         action.legendaryResistanceTargetIds?.length ||
@@ -22391,6 +22397,9 @@ function resolveSpellCast(
     sustainedAttack != null || metamagic?.kind === 'twinned' ||
     !actor.turn.reactionAvailable || dnd5eReactionsPrevented(actor) || dnd5eIsIncapacitated(actor)
   )) return fail(state, events, 'invalid-class-feature')
+  const graspOfHadar = action.graspOfHadar === true
+  if (graspOfHadar && (dnd5eCombatantClassLevel(actor, 'warlock') < 2 || spell.id !== 'eldritch-blast' ||
+    !actor.classSelections['eldritch-invocations']?.includes('grasp-of-hadar'))) return fail(state, events, 'invalid-class-feature')
   const repellingBlast = action.repellingBlast === true
   if (
     repellingBlast &&
@@ -25754,9 +25763,56 @@ function resolveSpellCast(
               supplied.repellingBlastPushToGroundElevationFeet,
             )) return fail(state, events, 'invalid-dice')
           }
+          {
+          const pullTo = supplied.graspOfHadarPullTo
+          const pullDistance = supplied.graspOfHadarPullDistanceFeet
+          if (!graspOfHadar && (
+            pullTo || pullDistance != null || supplied.graspOfHadarPullToElevationFeet != null ||
+            supplied.graspOfHadarPullToGroundElevationFeet != null ||
+            (supplied.graspOfHadarFallingDamageRolls?.length ?? 0) > 0
+          )) return fail(state, events, 'invalid-class-feature')
+          if ((pullTo == null) !== (pullDistance == null)) return fail(state, events, 'invalid-class-feature')
+          if (!pullTo && (
+            supplied.graspOfHadarPullToElevationFeet != null ||
+            supplied.graspOfHadarPullToGroundElevationFeet != null ||
+            (supplied.graspOfHadarFallingDamageRolls?.length ?? 0) > 0
+          )) return fail(state, events, 'invalid-class-feature')
+          if (pullTo && pullDistance != null) {
+            const from = { ...affectedTarget.position }
+            const oldDistanceSquared = (from.x - actor.position.x) ** 2 + (from.y - actor.position.y) ** 2
+            const newDistanceSquared = (pullTo.x - actor.position.x) ** 2 + (pullTo.y - actor.position.y) ** 2
+            if (
+              !Number.isFinite(pullTo.x) || !Number.isFinite(pullTo.y) ||
+              !Number.isFinite(pullDistance) || pullDistance <= 0 || pullDistance > 10 ||
+              newDistanceSquared >= oldDistanceSquared || currentActorId(state) !== actor.id ||
+              actor.classState.graspOfHadarTurnKey === turnKey ||
+              !dnd5eMonsterForcedMovementPayloadIsValid({
+                source: actor.position, target: from, movement: { to: pullTo, distanceFeet: pullDistance },
+                direction: 'toward-source', maximumDistanceFeet: 10, resisted: false,
+                gridDistance: state.gridDistance ? { ...state.gridDistance,
+                  sourceFootprintCells: state.gridDistance.footprintCellsByCombatantId?.[actor.id],
+                  targetFootprintCells: state.gridDistance.footprintCellsByCombatantId?.[affectedTarget.id] } : undefined,
+              })
+            ) return fail(state, events, 'invalid-class-feature')
+            actor.classState.graspOfHadarTurnKey = turnKey
+            affectedTarget.position = { ...pullTo }
+            events.push({ type: 'moved', actorId: affectedTarget.id, from, to: affectedTarget.position, distance: pullDistance, movementKind: 'forced', sourceActorId: actor.id })
+            if (!applyDnd5eForcedMovementElevation(
+              state,
+              affectedTarget,
+              supplied.graspOfHadarPullToElevationFeet,
+              supplied.graspOfHadarFallingDamageRolls,
+              events,
+              supplied.graspOfHadarPullToGroundElevationFeet,
+            )) return fail(state, events, 'invalid-dice')
+          }
+          }
         } else {
           if (!attackDecoy.redirected && (
             supplied.effectRolls.length > 0 || (supplied.hurlThroughHellDamageRolls?.length ?? 0) > 0 ||
+            supplied.graspOfHadarPullTo || supplied.graspOfHadarPullDistanceFeet != null ||
+            supplied.graspOfHadarPullToElevationFeet != null || supplied.graspOfHadarPullToGroundElevationFeet != null ||
+            (supplied.graspOfHadarFallingDamageRolls?.length ?? 0) > 0 ||
             supplied.repellingBlastPushTo || supplied.repellingBlastPushDistanceFeet != null ||
             supplied.repellingBlastPushToElevationFeet != null ||
             supplied.repellingBlastPushToGroundElevationFeet != null ||

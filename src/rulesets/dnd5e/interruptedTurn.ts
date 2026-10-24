@@ -1,7 +1,7 @@
 import type { TurnEconomy } from '../contracts'
 
 // Preserve usage restrictions, not expiring effects, when resuming a suspended turn.
-const interruptedUsageKeys = ['sneakAttackTurnKey', 'colossusSlayerTurnKey', 'divineStrikeTurnKey',
+const interruptedUsageKeys = ['graspOfHadarTurnKey', 'sneakAttackTurnKey', 'colossusSlayerTurnKey', 'divineStrikeTurnKey',
   'foeSlayerTurnKey', 'rageAttackMarkUsedTurnKey', 'meleeWeaponDamageRerollTurnKey',
   'hordeBreakerUsedTurnKey', 'extraActionTeleportUsedTurnKey', 'bonusActionSpellTurnKey',
   'leveledSpellTurnKey'] as const

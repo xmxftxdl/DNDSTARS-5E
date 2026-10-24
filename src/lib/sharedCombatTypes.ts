@@ -387,7 +387,7 @@ export interface Dnd5eSpellCastPayload {
   /** 龙族血脉6级“元素亲和”：消耗1术法点，获得先祖关联伤害抗性1小时。 */
   draconicResistance?: boolean
   /** 斥力魔爆：本次魔能爆每道命中的射线都请求将目标推开至多10尺。 */
-  repellingBlast?: boolean
+  repellingBlast?: boolean; graspOfHadar?: boolean
   /** 目盲/耳聋术与次级复原术的受控选择；Headless 会按法术白名单重新验证。 */
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   /** 防护能量伤害等法术的受控伤害类型选择；DM Host 会按法术白名单复核。 */

@@ -278,7 +278,7 @@ export interface PreparedDnd5eSpellCast {
   empowered: boolean
   carefulTargetIds: readonly string[]
   draconicResistance: boolean
-  repellingBlast: boolean
+  repellingBlast: boolean; graspOfHadar?: boolean
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   effectDamageType?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['effectDamageType']
   enlargeReduceChoice?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['enlargeReduceChoice']
@@ -892,14 +892,14 @@ export function prepareDnd5eSpellCast(input: {
       payload.damageMaximizationFeatureId != null ||
       payload.empowered === true ||
       payload.draconicResistance === true ||
-      payload.repellingBlast === true ||
+      payload.repellingBlast === true || payload.graspOfHadar === true ||
       payload.metamagic != null ||
       sustainedAttack != null
     )
   ) return { ok: false, reason: 'invalid-action' }
   const overchannel = payload.overchannel === true
   if (sustainedAttack && (
-    overchannel || payload.damageMaximizationFeatureId != null || payload.empowered || payload.draconicResistance || payload.repellingBlast ||
+    overchannel || payload.damageMaximizationFeatureId != null || payload.empowered || payload.draconicResistance || payload.repellingBlast || payload.graspOfHadar ||
     payload.metamagic || payload.higherSlotDamageType || payload.conditionChoice ||
     payload.effectDamageType || payload.enlargeReduceChoice || payload.enhanceAbilityChoice ||
     payload.calmEmotionsMode || payload.calmEmotionsIndifferenceScope ||
@@ -963,6 +963,8 @@ export function prepareDnd5eSpellCast(input: {
   ) return { ok: false, reason: 'invalid-action' }
   const draconicResistance = payload.draconicResistance === true
   const invocations = classSelections['eldritch-invocations'] ?? []
+  const graspOfHadar = payload.graspOfHadar === true
+  if (graspOfHadar && (definition?.id !== 'warlock' || spell.id !== 'eldritch-blast' || !invocations.includes('grasp-of-hadar'))) return { ok: false, reason: 'invalid-action' }
   const repellingBlast = payload.repellingBlast === true
   if (
     repellingBlast &&
@@ -2423,7 +2425,7 @@ export function prepareDnd5eSpellCast(input: {
       empowered,
       carefulTargetIds,
       draconicResistance,
-      repellingBlast,
+      repellingBlast, graspOfHadar,
       conditionChoice,
       effectDamageType,
       enlargeReduceChoice,
@@ -2722,7 +2724,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     spellDamageMaxDieBonus: input.spellDamageMaxDieBonus,
     bestowCurseDamageRolls: input.bestowCurseDamageRolls,
     draconicResistance: prepared.draconicResistance,
-    repellingBlast: prepared.repellingBlast,
+    repellingBlast: prepared.repellingBlast, graspOfHadar: prepared.graspOfHadar,
     conditionChoice: prepared.conditionChoice,
     effectDamageType: prepared.effectDamageType,
     enlargeReduceChoice: prepared.enlargeReduceChoice,

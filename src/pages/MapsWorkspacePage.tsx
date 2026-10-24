@@ -1,3 +1,4 @@
+import { planEldritchBlastMovement } from './maps/eldritchBlastMovement'
 import { dnd5eOptionalBonusDieSourceEligible } from '../rulesets/dnd5e/optionalBonusDieEligibility'
 import { collectDnd5eActivityRetainedSaveChoice } from './maps/dnd5eActivityRetainedSaveChoice'
 import { selectedSavingThrowAbility } from '../rulesets/dnd5e/activities/dnd5eActivityExecutor'
@@ -13085,7 +13086,7 @@ export default function MapsWorkspacePage() {
         damageMaximizationFeatureId: nextTargeting.damageMaximizationFeatureId,
         empowered: nextTargeting.empowered || undefined,
         draconicResistance: nextTargeting.draconicResistance || undefined,
-        repellingBlast: nextTargeting.repellingBlast || undefined,
+        repellingBlast: nextTargeting.repellingBlast || undefined, graspOfHadar: nextTargeting.graspOfHadar || undefined,
         sculptedTargetIds: nextTargeting.sculptedTargetIds.length > 0
           ? [...nextTargeting.sculptedTargetIds]
           : undefined,
@@ -13554,7 +13555,7 @@ export default function MapsWorkspacePage() {
         damageMaximizationFeatureId: dnd5eSpellTargeting.damageMaximizationFeatureId,
         empowered: dnd5eSpellTargeting.empowered || undefined,
         draconicResistance: dnd5eSpellTargeting.draconicResistance || undefined,
-        repellingBlast: dnd5eSpellTargeting.repellingBlast || undefined,
+        repellingBlast: dnd5eSpellTargeting.repellingBlast || undefined, graspOfHadar: dnd5eSpellTargeting.graspOfHadar || undefined,
         bonusActionCasting: dnd5eSpellTargeting.bonusActionCasting || undefined,
         metamagic: dnd5eSpellTargeting.metamagic,
       }
@@ -14714,7 +14715,7 @@ export default function MapsWorkspacePage() {
         damageMaximizationFeatureId: dnd5eSpellTargeting.damageMaximizationFeatureId,
         empowered: dnd5eSpellTargeting.empowered || undefined,
         draconicResistance: dnd5eSpellTargeting.draconicResistance || undefined,
-        repellingBlast: dnd5eSpellTargeting.repellingBlast || undefined,
+        repellingBlast: dnd5eSpellTargeting.repellingBlast || undefined, graspOfHadar: dnd5eSpellTargeting.graspOfHadar || undefined,
         bonusActionCasting: dnd5eSpellTargeting.bonusActionCasting || undefined,
         sculptedTargetIds: dnd5eSpellTargeting.sculptedTargetIds.length > 0
           ? dnd5eSpellTargeting.sculptedTargetIds
@@ -28578,13 +28579,13 @@ export default function MapsWorkspacePage() {
       const spellForcedFallPreviews = new Map<string, Dnd5eUnsupportedAirborneFallPreview>()
       const adjudicateForcedFall = async (targetToken: Token, destination: { x: number; y: number }) => {
         if (adjudicatedForcedFallTargetIds.has(targetToken.id)) return {}
-        adjudicatedForcedFallTargetIds.add(targetToken.id)
         const mappedFall = dnd5eForcedMovementFall({
           geometry: activeGeometry,
           target: targetToken, targetCombatant: spellCast.state.combatants[targetToken.id],
           to: destination,
         })
         if (mappedFall.toElevationFeet != null) {
+          adjudicatedForcedFallTargetIds.add(targetToken.id)
           spellForcedFallPreviews.set(targetToken.id, {
             combatantId: targetToken.id,
             fromElevationFeet: mappedFall.sourceElevationFeet,
@@ -28606,6 +28607,7 @@ export default function MapsWorkspacePage() {
         if (mappedFall.groundedAtSource || mappedFall.canRemainAirborne || potentialFallDistanceFeet <= 0) {
           return { toGroundElevationFeet: mappedFall.landingGroundElevationFeet }
         }
+        adjudicatedForcedFallTargetIds.add(targetToken.id)
         const falls = await showCombatDialog({
           title: '强制位移与高台坠落',
           message: `${targetToken.label} 当前海拔为 ${fromElevationFeet} 尺。这次强制位移是否使其离开支撑面并坠落到 0 尺？`,
@@ -29018,6 +29020,7 @@ export default function MapsWorkspacePage() {
         const sequencedSpellAttack = dnd5eSpellUsesSequencedAttacks(spellCast.spell)
         const attackDiceCount = spellCast.spell.id === 'eldritch-blast' ? 1 : spellCast.diceCount
         const spellAttackLabel = sequencedSpellAttack ? '射线' : '孪生法术攻击'
+        let graspOfHadarUsed = spellActorCombatant.classState.graspOfHadarTurnKey === dnd5eHeadlessTurnKey(spellCast.state, spellActorCombatant.id)
         const simulatedRepellingPositions = new Map<string, { x: number; y: number; elevationFeet?: number }>()
         let hurlThroughHellCommitted = false
         const openingAttackSaveResourceUsage: OpeningAttackSaveResourceUsage = {
@@ -29243,33 +29246,14 @@ export default function MapsWorkspacePage() {
             ? await rollSpellDice(10, 10, '坠入地狱·返回伤害', targetAttack.targetToken.label)
             : undefined
           if (targetHurlThroughHellDamageRolls) hurlThroughHellCommitted = true
-          let repellingBlastPushTo: { x: number; y: number } | undefined
-          let repellingBlastPushDistanceFeet: number | undefined
-          let repellingBlastPushToElevationFeet: number | undefined, repellingBlastPushToGroundElevationFeet: number | undefined
-          let repellingBlastFallingDamageRolls: number[] | undefined
-          if (attackHit && spellCast.repellingBlast) {
-            const currentPosition = simulatedRepellingPositions.get(targetAttack.targetToken.id) ?? {
-              x: targetAttack.targetToken.x,
-              y: targetAttack.targetToken.y,
-            }
-            const simulatedTokens = authorityMap.tokens.map((token) => {
-              const simulatedPosition = simulatedRepellingPositions.get(token.id)
-              return simulatedPosition ? { ...token, ...simulatedPosition } : token
-            })
-            const push = dnd5eRepellingBlastPushDestination(
-              { ...authorityMap, tokens: simulatedTokens },
-              spellCast.actorToken,
-              { ...targetAttack.targetToken, ...currentPosition },
-            )
-            if (push.distanceFeet > 0) {
-              repellingBlastPushTo = push.to
-              repellingBlastPushDistanceFeet = push.distanceFeet
-              const fall = await adjudicateForcedFall(targetAttack.targetToken, push.to)
-              repellingBlastPushToElevationFeet = fall.toElevationFeet; repellingBlastPushToGroundElevationFeet = fall.toGroundElevationFeet
-              repellingBlastFallingDamageRolls = fall.fallingDamageRolls
-              simulatedRepellingPositions.set(targetAttack.targetToken.id, { ...push.to, elevationFeet: fall.toElevationFeet })
-            }
-          }
+          const movement = await planEldritchBlastMovement({
+            map: authorityMap, actor: spellCast.actorToken, target: targetAttack.targetToken,
+            positions: simulatedRepellingPositions, adjudicateFall: adjudicateForcedFall,
+            push: attackHit && spellCast.repellingBlast,
+            pull: attackHit && !!spellCast.graspOfHadar && !graspOfHadarUsed &&
+              spellCast.state.initiativeOrder[spellCast.state.initiativeIndex] === spellActorCombatant.id,
+          })
+          if (movement.pulled) graspOfHadarUsed = true
           targetAttackModeResolutions.push(beamModeResolution)
           targetAttacks.push({
             disadvantageNegation,
@@ -29292,10 +29276,7 @@ export default function MapsWorkspacePage() {
             uncannyDodge: targetUncannyDodge,
             standAgainstTide: targetStandAgainstTide,
             hurlThroughHellDamageRolls: targetHurlThroughHellDamageRolls,
-            repellingBlastPushTo,
-            repellingBlastPushDistanceFeet,
-            repellingBlastPushToElevationFeet, repellingBlastPushToGroundElevationFeet,
-            repellingBlastFallingDamageRolls,
+            ...movement.fields,
             effectRolls: attackHit && !spellCast.maximizedDamage
               ? await rollSpellDice(
                   attackDiceCount * (criticalRangeHit ? 2 : 1),
@@ -30639,8 +30620,8 @@ export default function MapsWorkspacePage() {
         }
         for (const targetAttack of targetAttacks ?? []) {
           if (!spellForcedFallPreviews.has(targetAttack.targetId)) continue
-          targetAttack.repellingBlastFallingDamageRolls =
-            interrupted.fallingDamageRollsByCombatantId[targetAttack.targetId]
+          if (targetAttack.repellingBlastFallingDamageRolls?.length) targetAttack.repellingBlastFallingDamageRolls = interrupted.fallingDamageRollsByCombatantId[targetAttack.targetId]
+          if (targetAttack.graspOfHadarFallingDamageRolls?.length) targetAttack.graspOfHadarFallingDamageRolls = interrupted.fallingDamageRollsByCombatantId[targetAttack.targetId]
         }
       }
       const spellResolutionInput: Parameters<typeof resolvePreparedDnd5eSpellCast>[0] = {
@@ -36413,7 +36394,7 @@ export default function MapsWorkspacePage() {
       }
       const forcedMovementTokenIds = new Set([
         ...forcedMovements.map((movement) => movement.targetId),
-        ...(targetAttacks ?? []).flatMap((attack) => attack.repellingBlastPushTo ? [attack.targetId] : []),
+        ...(targetAttacks ?? []).flatMap((attack) => (attack.repellingBlastPushTo || attack.graspOfHadarPullTo) ? [attack.targetId] : []),
       ])
       for (const tokenId of forcedMovementTokenIds) {
         const areaSettlement = await settleDnd5ePersistentAreasForForcedMovement({
@@ -36790,7 +36771,11 @@ export default function MapsWorkspacePage() {
             dmAdjudicatedFall: !fall.groundedAtSource && (movement.fallingDamageRolls?.length ?? 0) > 0,
           })
         }),
-        ...(targetAttacks ?? []).flatMap((targetAttack) => {
+        ...(targetAttacks ?? []).flatMap((attack) => [attack, {
+          ...attack, repellingBlastPushTo: attack.graspOfHadarPullTo,
+          repellingBlastPushDistanceFeet: attack.graspOfHadarPullDistanceFeet,
+          repellingBlastFallingDamageRolls: attack.graspOfHadarFallingDamageRolls,
+        }].flatMap((targetAttack) => {
           if (!targetAttack.repellingBlastPushTo || !targetAttack.repellingBlastPushDistanceFeet) return []
           const target = authorityMap.tokens.find((token) => token.id === targetAttack.targetId)
           if (!target) return []
@@ -36816,7 +36801,7 @@ export default function MapsWorkspacePage() {
             fallingDamageRolls: targetAttack.repellingBlastFallingDamageRolls,
             dmAdjudicatedFall: !fall.groundedAtSource && (targetAttack.repellingBlastFallingDamageRolls?.length ?? 0) > 0,
           })
-        }),
+        })),
       ]
       const spellAttackEvents = spellResolutionEvents.filter(
         (
@@ -48558,7 +48543,7 @@ export default function MapsWorkspacePage() {
         metamagic: validatedOptions.metamagic,
         empowered: validatedOptions.empowered,
         draconicResistance: validatedOptions.draconicResistance,
-        repellingBlast: validatedOptions.repellingBlast,
+        repellingBlast: validatedOptions.repellingBlast, graspOfHadar: validatedOptions.graspOfHadar,
       }
       if (sendPlayerDnd5eSpellCastRequest(payload)) {
         consumeCombatSpellModifiers(castingCharacter.id)
@@ -48606,7 +48591,7 @@ export default function MapsWorkspacePage() {
       damageMaximizationFeatureId: validatedOptions.damageMaximizationFeatureId,
       empowered: validatedOptions.empowered === true,
       draconicResistance: validatedOptions.draconicResistance === true,
-      repellingBlast: validatedOptions.repellingBlast === true,
+      repellingBlast: validatedOptions.repellingBlast === true, graspOfHadar: validatedOptions.graspOfHadar === true,
       canSculpt,
       maximumSculptedTargets: canSculpt ? dnd5eSculptSpellMaximumTargets(spell) : 0,
       sculptedTargetIds: [],
