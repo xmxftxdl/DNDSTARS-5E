@@ -1,3 +1,5 @@
+import type { MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay } from './mapSceneOverlayContracts'
+export type { MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay } from './mapSceneOverlayContracts'
 import { ControlledWaterSceneLayer } from './ControlledWaterSceneLayer'
 import type { MapSurfaceMaterial } from '../../lib/mapSurfaceMaterials'
 import type { MapTraversableSolidMaterial } from '../../lib/mapSolidMaterialTraversal'
@@ -154,42 +156,6 @@ import {
   mapCanvasTokenClickAction,
   syncMapCanvasViewportDataset,
 } from './mapCanvasInteraction'
-
-export interface MoveCircle {
-  centerX: number
-  centerY: number
-  radiusPx: number
-}
-
-export interface SceneTriggerZoneOverlay {
-  sceneId: string
-  triggerId: string
-  name: string
-  enabled: boolean
-  region: SceneRegion
-}
-
-export interface SceneInteractionPointOverlay {
-  sceneId: string
-  id: string
-  name: string
-  enabled: boolean
-  visibleToPlayers: boolean
-  icon: SceneInteractionPointIcon
-  x: number
-  y: number
-  prompt: string
-}
-
-export interface SceneTeleportDestinationOverlay {
-  sceneId: string
-  triggerId: string
-  actionId: string
-  name: string
-  enabled: boolean
-  x: number
-  y: number
-}
 
 interface MapCanvasProps {
   map: BattleMap
