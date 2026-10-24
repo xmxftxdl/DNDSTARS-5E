@@ -1,3 +1,5 @@
+import { snapGeometryDrawingPoint } from './wallEndpointSnap'
+import { WallEndpointSnapMarkers } from './WallEndpointSnapMarkers'
 import type { MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay } from './mapSceneOverlayContracts'
 export type { MoveCircle, SceneTriggerZoneOverlay, SceneInteractionPointOverlay, SceneTeleportDestinationOverlay } from './mapSceneOverlayContracts'
 import { ControlledWaterSceneLayer } from './ControlledWaterSceneLayer'
@@ -1603,16 +1605,11 @@ export default function MapCanvas({
     }
   }
 
-  const snapGeometryPoint = (point: Point): Point => {
-    if (!geometrySnapToGrid) return point
-    const gridSize = Math.max(1, map.gridSize)
-    const offsetX = map.gridOffsetX ?? 0
-    const offsetY = map.gridOffsetY ?? 0
-    return {
-      x: offsetX + Math.round((point.x - offsetX) / gridSize) * gridSize,
-      y: offsetY + Math.round((point.y - offsetY) / gridSize) * gridSize,
-    }
-  }
+  const snapGeometryPoint = (point: Point): Point => snapGeometryDrawingPoint(point, {
+    geometry, tool: geometryTool, scale: stageRef.current?.scaleX() ?? view.scale,
+    snapToGrid: geometrySnapToGrid, gridSize: map.gridSize,
+    gridOffsetX: map.gridOffsetX, gridOffsetY: map.gridOffsetY,
+  })
 
   const geometryGridCellAtPoint = (point: Point): MapGeometryGridCell | null => {
     if (point.x < 0 || point.y < 0 || point.x >= map.width || point.y >= map.height) return null
@@ -3461,6 +3458,7 @@ export default function MapCanvas({
             onPointsChange={isDM ? onGeometryEntityPointsChange : undefined}
           />
           )}
+        {geometryOverlayVisible && <WallEndpointSnapMarkers draft={geometryDraft} geometry={geometry} inv={inv} />}
         <Group listening={false}>
           {visibleProjectiles.map((projectile) => (
             <CombatProjectileEffect

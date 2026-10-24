@@ -74,4 +74,12 @@ test('wall starts and release positions stay independent across rapid gestures, 
     expect(restarted[index].x).toBeCloseTo((point[0] - view.x) / view.scale, 2)
     expect(restarted[index].y).toBeCloseTo((point[1] - view.y) / view.scale, 2)
   }
+  // Endpoint snapping uses screen distance even after zoom and pan, with grid snapping off.
+  const freeEnd = [Math.round(view.x + 250 * view.scale), Math.round(view.y + 290 * view.scale)]
+  await draw([view.x + 180 * view.scale + 4, view.y + 180 * view.scale + 3], freeEnd)
+  const snapped = await page.evaluate(() => window.wallGestureCommits.at(-1)!.points)
+  expect(snapped[0]).toEqual({ x: 180, y: 180 })
+  expect(snapped[1].x).toBeCloseTo((freeEnd[0] - view.x) / view.scale, 2)
+  expect(snapped[1].y).toBeCloseTo((freeEnd[1] - view.y) / view.scale, 2)
+
 })
